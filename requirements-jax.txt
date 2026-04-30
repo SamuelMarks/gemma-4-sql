@@ -1,0 +1,6 @@
+jax
+jaxlib
+optax
+orbax-checkpoint
+flax @ git+https://github.com/google/flax.git
+bonsai @ git+https://github.com/SamuelMarks/bonsai.git@gemma4

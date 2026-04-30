@@ -1,0 +1,6 @@
+datasets
+grain; python_version >= '3.11'
+jax
+jaxlib
+keras
+maxtext @ git+https://github.com/google/maxtext.git ; python_version >= '3.12'

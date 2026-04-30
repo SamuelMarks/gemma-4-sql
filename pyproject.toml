@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling", "hatch-requirements-txt"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gemma-4-sql"
+version = "0.1.0"
+description = "A new Python project"
+readme = "README.md"
+requires-python = ">=3.9"
+dynamic = ["dependencies", "optional-dependencies"]
+
+[project.scripts]
+gemma-4-sql = "gemma_4_sql.cli:cli"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.metadata.hooks.requirements_txt]
+files = ["requirements.txt"]
+
+[tool.hatch.metadata.hooks.requirements_txt.optional-dependencies]
+dev = ["requirements-dev.txt"]
+jax = ["requirements-jax.txt"]
+keras = ["requirements-keras.txt"]
+maxtext = ["requirements-maxtext.txt"]
+duckdb = ["requirements-duckdb.txt"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "N", "C", "B"]
+extend-ignore = ["E501", "E722", "N801", "N802"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:"
+]
