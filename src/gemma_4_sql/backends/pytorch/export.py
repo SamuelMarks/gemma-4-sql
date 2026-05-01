@@ -12,9 +12,10 @@ try:
     from safetensors.torch import (
         save_file,
     )
-except ImportError:
+except Exception:
     torch = None
     save_file = None
+
 
 def export_model(model_name: str, export_path: str) -> dict[str, Any]:
     """

@@ -8,28 +8,33 @@ import argparse
 import json
 
 from gemma_4_sql.sdk import (
+    benchmark,
+    LiveDatabaseEngine,
+    SQLTokenizer,
     apply_peft,
+    build_few_shot_prompt,
     build_rag_prompt,
+    chat_turn,
     embed_in_duckdb,
     etl_posttrain,
     etl_pretrain,
     etl_sft,
     evaluate,
     export_model,
+    extract_schema_entities,
     generate,
     log_metrics,
     posttrain_model,
     pretrain_model,
+    retrieve_relevant_schema,
     run_agentic_loop,
     run_dpo,
+    serve_model,
     sft_model,
     train_from_scratch,
-    extract_schema_entities,
-    retrieve_relevant_schema,
-    LiveDatabaseEngine,
-    SQLTokenizer,
 )
 from gemma_4_sql.sdk.quantize import quantize_model
+
 
 def tokenize_cmd(args: argparse.Namespace) -> None:
     """Tokenize or detokenize text/tokens."""
@@ -47,6 +52,7 @@ def tokenize_cmd(args: argparse.Namespace) -> None:
     else:
         print("Must provide either --encode or --decode")
 
+
 def db_execute_cmd(args: argparse.Namespace) -> None:
     """Execute a SQL query against the LiveDatabaseEngine."""
     db_kwargs = {}
@@ -59,17 +65,18 @@ def db_execute_cmd(args: argparse.Namespace) -> None:
         db_type=args.db_type,
         db_kwargs=db_kwargs,
     )
-    
+
     success, results, error = engine.execute_with_feedback(args.query)
-    
+
     if success:
         print("Execution Successful!")
         print(f"Results: {results}")
     else:
         print("Execution Failed!")
         print(f"Error: {error}")
-        
+
     engine.close()
+
 
 def embed_duckdb_cmd(args: argparse.Namespace) -> None:
     """Embed Gemma as a UDF in DuckDB and execute a prompt."""
@@ -81,26 +88,27 @@ def embed_duckdb_cmd(args: argparse.Namespace) -> None:
 
     print(f"Embedding Gemma in DuckDB: model={args.model}, db_path={args.db_path}")
     conn = duckdb.connect(args.db_path)
-    
+
     if args.ddl:
         conn.execute(args.ddl)
 
     embed_in_duckdb(
-        conn=conn, 
-        model_name=args.model, 
-        backend=args.backend, 
-        db_path=args.db_path, 
-        max_retries=args.max_retries
+        conn=conn,
+        model_name=args.model,
+        backend=args.backend,
+        db_path=args.db_path,
+        max_retries=args.max_retries,
     )
-    
+
     if args.prompt:
         print(f"Executing prompt: '{args.prompt}'")
         res = conn.execute("SELECT ask_gemma(?)", [args.prompt]).fetchall()
         print(f"Result: {res[0][0]}")
     else:
         print("UDF 'ask_gemma' registered. Provide a --prompt to execute it.")
-        
+
     conn.close()
+
 
 def etl_pretrain_cmd(args: argparse.Namespace) -> None:
     """Run ETL for pretraining SQL datasets."""
@@ -115,6 +123,7 @@ def etl_pretrain_cmd(args: argparse.Namespace) -> None:
     )
     print(f"Result: {result}")
 
+
 def etl_sft_cmd(args: argparse.Namespace) -> None:
     """Run SFT ETL for SQL datasets."""
     print(f"Running SFT ETL for dataset: {args.dataset} (split: {args.split})")
@@ -127,6 +136,7 @@ def etl_sft_cmd(args: argparse.Namespace) -> None:
         tokenizer_name=args.tokenizer,
     )
     print(f"Result: {result}")
+
 
 def etl_posttrain_cmd(args: argparse.Namespace) -> None:
     """Run posttrain ETL for SQL datasets."""
@@ -141,6 +151,7 @@ def etl_posttrain_cmd(args: argparse.Namespace) -> None:
     )
     print(f"Result: {result}")
 
+
 def train_cmd(args: argparse.Namespace) -> None:
     """Train a new model from scratch."""
     print(f"Training from scratch: model={args.model}, backend={args.backend}")
@@ -152,6 +163,7 @@ def train_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
     )
     print(f"Result: {result}")
+
 
 def pretrain_cmd(args: argparse.Namespace) -> None:
     """Pretrain an existing model."""
@@ -165,6 +177,7 @@ def pretrain_cmd(args: argparse.Namespace) -> None:
     )
     print(f"Result: {result}")
 
+
 def sft_cmd(args: argparse.Namespace) -> None:
     """Supervised fine-tune an existing model."""
     print(f"SFT: model={args.model}, backend={args.backend}")
@@ -176,6 +189,7 @@ def sft_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
     )
     print(f"Result: {result}")
+
 
 def posttrain_cmd(args: argparse.Namespace) -> None:
     """Post-train an existing model."""
@@ -189,6 +203,7 @@ def posttrain_cmd(args: argparse.Namespace) -> None:
     )
     print(f"Result: {result}")
 
+
 def dpo_cmd(args: argparse.Namespace) -> None:
     """Run Direct Preference Optimization (DPO)."""
     print(f"DPO: model={args.model}, backend={args.backend}, beta={args.beta}")
@@ -199,6 +214,7 @@ def dpo_cmd(args: argparse.Namespace) -> None:
         beta=args.beta,
     )
     print(f"Result: {result}")
+
 
 def peft_cmd(args: argparse.Namespace) -> None:
     """Apply PEFT / LoRA to an existing model."""
@@ -214,15 +230,19 @@ def peft_cmd(args: argparse.Namespace) -> None:
     )
     print(f"Result: {result}")
 
+
 def quantize_cmd(args: argparse.Namespace) -> None:
     """Quantize a model."""
-    print(f"Quantizing: model={args.model}, backend={args.backend}, method={args.method}")
+    print(
+        f"Quantizing: model={args.model}, backend={args.backend}, method={args.method}"
+    )
     result = quantize_model(
         model_name=args.model,
         method=args.method,
         backend=args.backend,
     )
     print(f"Result: {result}")
+
 
 def evaluate_cmd(args: argparse.Namespace) -> None:
     """Evaluate an existing model."""
@@ -251,6 +271,7 @@ def evaluate_cmd(args: argparse.Namespace) -> None:
     )
     print(f"Result: {result}")
 
+
 def export_cmd(args: argparse.Namespace) -> None:
     """Export a trained model."""
     print(f"Exporting: model={args.model}, path={args.path}, backend={args.backend}")
@@ -259,6 +280,7 @@ def export_cmd(args: argparse.Namespace) -> None:
     )
     print(f"Result: {result}")
 
+
 def generate_cmd(args: argparse.Namespace) -> None:
     """Generate SQL from text."""
     print(
@@ -266,6 +288,7 @@ def generate_cmd(args: argparse.Namespace) -> None:
     )
     result = generate(model_name=args.model, prompt=args.prompt, backend=args.backend)
     print(f"Result: {result}")
+
 
 def agent_cmd(args: argparse.Namespace) -> None:
     """Run agentic self-correction loop."""
@@ -290,6 +313,7 @@ def agent_cmd(args: argparse.Namespace) -> None:
     )
     print(f"Result: {result}")
 
+
 def rag_cmd(args: argparse.Namespace) -> None:
     """Build a RAG-augmented prompt or extract schema context."""
     if getattr(args, "action", "build") == "extract":
@@ -306,17 +330,103 @@ def rag_cmd(args: argparse.Namespace) -> None:
         result = build_rag_prompt(prompt=args.prompt, ddl=args.ddl)
         print(f"Result:\n{result}")
 
+
 def log_metrics_cmd(args: argparse.Namespace) -> None:
     """Log training metrics."""
-    print(f"Logging: step={args.step}, metrics={args.metrics}, backend={args.backend}")
+    print(
+        f"Logging: step={args.step}, metrics={args.metrics}, "
+        f"log_dir={args.log_dir}, backend={args.backend}"
+    )
     metrics_dict = {}
     if args.metrics:
         for m in args.metrics.split(","):
             k, v = m.split("=")
             metrics_dict[k.strip()] = float(v.strip())
 
-    result = log_metrics(metrics=metrics_dict, step=args.step, backend=args.backend)
+    result = log_metrics(
+        metrics=metrics_dict, step=args.step, log_dir=args.log_dir, backend=args.backend
+    )
     print(f"Result: {result}")
+
+
+
+def serve_cmd(args: argparse.Namespace) -> None:
+    """Serve a model using continuous batching."""
+    print(
+        f"Serving: model={args.model}, port={args.port}, "
+        f"max_batch_size={args.max_batch_size}, backend={args.backend}"
+    )
+    result = serve_model(
+        model_name=args.model,
+        port=args.port,
+        max_batch_size=args.max_batch_size,
+        backend=args.backend,
+    )
+    print(f"Result: {result}")
+
+
+
+def chat_cmd(args: argparse.Namespace) -> None:
+    """Run a multi-turn conversational SQL chat turn."""
+    history = []
+    if getattr(args, "history", ""):
+        try:
+            history = json.loads(args.history)
+        except json.JSONDecodeError:
+            print("Error: --history must be a valid JSON list of dictionaries.")
+            return
+
+    print(
+        f"Chat: model={args.model}, prompt='{args.prompt}', "
+        f"history_length={len(history)}, backend={args.backend}"
+    )
+    result = chat_turn(
+        model_name=args.model,
+        history=history,
+        new_prompt=args.prompt,
+        backend=args.backend,
+    )
+    print(f"Result: {result}")
+
+
+
+def few_shot_cmd(args: argparse.Namespace) -> None:
+    """Run dynamic few-shot prompting."""
+    examples = []
+    if getattr(args, "examples", ""):
+        try:
+            examples = json.loads(args.examples)
+        except json.JSONDecodeError:
+            print("Error: --examples must be a valid JSON list of dictionaries.")
+            return
+
+    print(
+        f"Few-Shot: model={args.model}, prompt='{args.prompt}', "
+        f"num_examples={len(examples)}, backend={args.backend}"
+    )
+    result = build_few_shot_prompt(
+        model_name=args.model,
+        prompt=args.prompt,
+        examples=examples,
+        backend=args.backend,
+    )
+    print(f"Result: {result}")
+
+
+def benchmark_cmd(args: argparse.Namespace) -> None:
+    """Benchmark a model on target hardware."""
+    print(
+        f"Benchmarking: model={args.model}, hardware={args.hardware}, "
+        f"batch_size={args.batch_size}, backend={args.backend}"
+    )
+    result = benchmark(
+        model_name=args.model,
+        hardware=args.hardware,
+        batch_size=args.batch_size,
+        backend=args.backend,
+    )
+    print(f"Result: {result}")
+
 
 def cli(args: list[str] | None = None) -> None:
     """Main CLI entrypoint."""
@@ -588,6 +698,51 @@ def cli(args: list[str] | None = None) -> None:
     )
     parser_evaluate.set_defaults(func=evaluate_cmd)
 
+
+
+
+    # Few-Shot
+    parser_few_shot = subparsers.add_parser(
+        "few-shot", help="Build a dynamic few-shot prompt."
+    )
+    parser_few_shot.add_argument("--model", default="gemma-4", help="Model name.")
+    parser_few_shot.add_argument("--prompt", required=True, help="New user prompt.")
+    parser_few_shot.add_argument("--examples", default="[]", help="JSON string representing few-shot examples.")
+    parser_few_shot.add_argument(
+        "--backend",
+        default="jax",
+        help="Backend to use (jax, keras, maxtext, pytorch).",
+    )
+    parser_few_shot.set_defaults(func=few_shot_cmd)
+
+    # Chat
+    parser_chat = subparsers.add_parser(
+        "chat", help="Execute a turn in a multi-turn conversational SQL chat."
+    )
+    parser_chat.add_argument("--model", default="gemma-4", help="Model name.")
+    parser_chat.add_argument("--prompt", required=True, help="New user prompt.")
+    parser_chat.add_argument("--history", default="[]", help="JSON string representing the previous conversation history.")
+    parser_chat.add_argument(
+        "--backend",
+        default="jax",
+        help="Backend to use (jax, keras, maxtext, pytorch).",
+    )
+    parser_chat.set_defaults(func=chat_cmd)
+
+    # Serve
+    parser_serve = subparsers.add_parser(
+        "serve", help="Serve a model using continuous batching (vLLM)."
+    )
+    parser_serve.add_argument("--model", default="gemma-4", help="Model name.")
+    parser_serve.add_argument("--port", type=int, default=8000, help="Port to bind to.")
+    parser_serve.add_argument("--max-batch-size", type=int, default=256, help="Maximum batch size.")
+    parser_serve.add_argument(
+        "--backend",
+        default="pytorch",
+        help="Backend to use (jax, keras, maxtext, pytorch).",
+    )
+    parser_serve.set_defaults(func=serve_cmd)
+
     # Export
     parser_export = subparsers.add_parser(
         "export", help="Export and save a trained model."
@@ -659,8 +814,17 @@ def cli(args: list[str] | None = None) -> None:
     parser_rag = subparsers.add_parser(
         "rag", help="Build a RAG prompt or extract schema context."
     )
-    parser_rag.add_argument("--action", default="build", choices=["build", "extract", "retrieve"], help="Action to perform.")
-    parser_rag.add_argument("--prompt", default="", help="Natural language prompt (required for build and retrieve).")
+    parser_rag.add_argument(
+        "--action",
+        default="build",
+        choices=["build", "extract", "retrieve"],
+        help="Action to perform.",
+    )
+    parser_rag.add_argument(
+        "--prompt",
+        default="",
+        help="Natural language prompt (required for build and retrieve).",
+    )
     parser_rag.add_argument(
         "--ddl", required=True, help="DDL string to extract schema context from."
     )
@@ -675,6 +839,11 @@ def cli(args: list[str] | None = None) -> None:
         help="Comma separated key=value metrics (e.g. loss=0.5,acc=0.9).",
     )
     parser_log.add_argument(
+        "--log-dir",
+        default="logs",
+        help="Directory to save TensorBoard logs.",
+    )
+    parser_log.add_argument(
         "--backend",
         default="jax",
         help="Backend to use (jax, keras, maxtext, pytorch).",
@@ -682,34 +851,86 @@ def cli(args: list[str] | None = None) -> None:
     parser_log.set_defaults(func=log_metrics_cmd)
 
     # Tokenize
-    parser_tokenize = subparsers.add_parser("tokenize", help="Encode or decode text using SQLTokenizer.")
+    parser_tokenize = subparsers.add_parser(
+        "tokenize", help="Encode or decode text using SQLTokenizer."
+    )
     parser_tokenize.add_argument("--encode", type=str, help="Text to encode.")
-    parser_tokenize.add_argument("--decode", type=str, help="Comma-separated tokens to decode.")
-    parser_tokenize.add_argument("--hf-model", type=str, default=None, help="Hugging Face model name.")
-    parser_tokenize.add_argument("--vocab-size", type=int, default=256, help="Vocabulary size for fallback char-level encoding.")
+    parser_tokenize.add_argument(
+        "--decode", type=str, help="Comma-separated tokens to decode."
+    )
+    parser_tokenize.add_argument(
+        "--hf-model", type=str, default=None, help="Hugging Face model name."
+    )
+    parser_tokenize.add_argument(
+        "--vocab-size",
+        type=int,
+        default=256,
+        help="Vocabulary size for fallback char-level encoding.",
+    )
     parser_tokenize.set_defaults(func=tokenize_cmd)
 
     # Database Execution
-    parser_execute = subparsers.add_parser("execute", help="Execute SQL against a live database.")
+    parser_execute = subparsers.add_parser(
+        "execute", help="Execute SQL against a live database."
+    )
     parser_execute.add_argument("--query", required=True, help="SQL query to execute.")
-    parser_execute.add_argument("--db-path", default=":memory:", help="Path to database.")
-    parser_execute.add_argument("--db-type", default="sqlite", help="Type of database (sqlite, postgresql, snowflake, duckdb).")
-    parser_execute.add_argument("--db-kwargs", default="", help="JSON string of DB kwargs.")
-    parser_execute.add_argument("--ddl", default="", help="DDL string to initialize the schema.")
+    parser_execute.add_argument(
+        "--db-path", default=":memory:", help="Path to database."
+    )
+    parser_execute.add_argument(
+        "--db-type",
+        default="sqlite",
+        help="Type of database (sqlite, postgresql, snowflake, duckdb).",
+    )
+    parser_execute.add_argument(
+        "--db-kwargs", default="", help="JSON string of DB kwargs."
+    )
+    parser_execute.add_argument(
+        "--ddl", default="", help="DDL string to initialize the schema."
+    )
     parser_execute.set_defaults(func=db_execute_cmd)
 
     # DuckDB Embed
-    parser_embed = subparsers.add_parser("embed-duckdb", help="Embed Gemma as a UDF in DuckDB.")
+    parser_embed = subparsers.add_parser(
+        "embed-duckdb", help="Embed Gemma as a UDF in DuckDB."
+    )
     parser_embed.add_argument("--model", default="gemma-4", help="Model name.")
-    parser_embed.add_argument("--db-path", default=":memory:", help="DuckDB database path.")
-    parser_embed.add_argument("--prompt", default="", help="Prompt to execute via the UDF.")
-    parser_embed.add_argument("--ddl", default="", help="Optional DDL to setup the schema.")
+    parser_embed.add_argument(
+        "--db-path", default=":memory:", help="DuckDB database path."
+    )
+    parser_embed.add_argument(
+        "--prompt", default="", help="Prompt to execute via the UDF."
+    )
+    parser_embed.add_argument(
+        "--ddl", default="", help="Optional DDL to setup the schema."
+    )
     parser_embed.add_argument("--backend", default="jax", help="Backend to use.")
-    parser_embed.add_argument("--max-retries", type=int, default=3, help="Max self-correction attempts.")
+    parser_embed.add_argument(
+        "--max-retries", type=int, default=3, help="Max self-correction attempts."
+    )
     parser_embed.set_defaults(func=embed_duckdb_cmd)
+
+    # Benchmark
+    parser_benchmark = subparsers.add_parser(
+        "benchmark", help="Benchmark a model on target hardware."
+    )
+    parser_benchmark.add_argument("--model", default="gemma-4", help="Model name.")
+    parser_benchmark.add_argument(
+        "--hardware", default="gpu", choices=["gpu", "tpu", "cpu"], help="Target hardware."
+    )
+    parser_benchmark.add_argument(
+        "--batch-size", type=int, default=1, help="Batch size for benchmark."
+    )
+    parser_benchmark.add_argument(
+        "--backend",
+        default="jax",
+        help="Backend to use (jax, keras, maxtext, pytorch).",
+    )
+    parser_benchmark.set_defaults(func=benchmark_cmd)
 
     parsed_args = parser.parse_args(args)
     parsed_args.func(parsed_args)
+
 
 if __name__ == "__main__":
     cli()

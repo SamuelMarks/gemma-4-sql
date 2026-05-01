@@ -11,25 +11,26 @@ from gemma_4_sql.tokenization import SQLTokenizer
 try:
     import jax
     import jax.numpy as jnp
-except ImportError:
+except Exception:
     jax = None
     jnp = None
 
 try:
-    from bonsai.models.gemma4 import Gemma4ForCausalLM, Gemma4Config
+    from bonsai.models.gemma4 import Gemma4Config, Gemma4ForCausalLM
     from flax import nnx  # pragma: no cover
-except ImportError:
+except Exception:
     Gemma4ForCausalLM = None
     Gemma4Config = None
     nnx = None
 
+
 def jax_beam_search(
     model_apply_fn: Any,
-    input_ids: "jnp.ndarray",
+    input_ids: jnp.ndarray,
     beam_width: int,
     max_length: int,
     eos_token_id: int,
-) -> "jnp.ndarray":
+) -> jnp.ndarray:
     """
     JAX native beam search implementation.
     """
@@ -61,6 +62,7 @@ def jax_beam_search(
             break
 
     return beams[0][0]
+
 
 def generate_sql(
     model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50

@@ -5,6 +5,7 @@ Tests for JAX DPO logic.
 from __future__ import annotations
 
 from typing import Any
+
 import pytest
 
 from gemma_4_sql.backends.jax.dpo import dpo_loss, run_dpo

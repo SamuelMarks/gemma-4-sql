@@ -1,51 +1,228 @@
-# DEPLOY.md
+# `gemma-4-sql` Deployment & Operations Guide
 
-## Deployment Guide
+This comprehensive guide details the exact steps to create, adapt, and post-train a Gemma-4 model tailored exclusively for Text-to-SQL tasks. It also covers how to benchmark these models across varying hardware topologies (GPU, TPU, CPU) using different backends: **JAX (Bonsai)**, **JAX (MaxText)**, **Keras**, and **PyTorch**.
 
-This guide describes how to deploy `gemma-4-sql` models. We natively support the following architectures for different distributed hardware environments:
-*   **TPU / XLA:** AI-Hypercomputer MaxText (`maxtext.models.gemma4.Gemma4Model`) and Native JAX via Bonsai (`bonsai.models.BonsaiModel`).
-*   **GPU:** PyTorch via Hugging Face Transformers (`transformers.models.gemma4.Gemma4ForCausalLM`).
+---
 
-### TPU Deployment
+## 0. Create a Brand New `gemma-4` from Scratch for SQL
 
-Google Cloud TPUs are recommended for training and deploying `gemma-4-sql` models using JAX or MaxText.
+Training a model "from scratch" means you are initializing the Gemma-4 architecture with random weights and training it strictly on SQL syntax and schema relations. This requires a massive pretraining corpus (e.g., millions of synthetic and real SQL queries) and significant compute.
 
-#### 1. Provision a TPU VM
+### Step 1: Data Preparation
+You must first process a large-scale SQL dataset into tokens. We use Google's `grain` dataloader to shard the data efficiently.
+
 ```bash
-gcloud compute tpus tpu-vm create gemma-4-tpu \
-  --zone=us-central2-b \
-  --accelerator-type=v4-8 \
-  --version=tpu-ubuntu2204-base
+# Normalize the dataset for your chosen backend
+gemma-4-sql etl pretrain --dataset seeklhy/SynSQL-2.5M --batch-size 256 --backend jax
 ```
 
-#### 2. Install Dependencies
-SSH into the TPU VM and install the necessary libraries for JAX and MaxText:
+### Step 2: Train from Scratch
+
+Execute the `train` command. This will instantiate an uninitialized model and begin the optimization loop.
+
+#### Using JAX (Bonsai)
+*Recommended for rapid local testing on single GPUs or small TPU slices.*
 ```bash
-pip install jax[tpu] -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-pip install grain datasets
+gemma-4-sql train \
+    --model gemma-4 \
+    --dataset seeklhy/SynSQL-2.5M \
+    --epochs 10 \
+    --learning-rate 1e-4 \
+    --backend jax
 ```
 
-#### 3. Prepare Datasets (ETL)
-Use the `gemma-4-sql` CLI to run ETL for the SQL datasets on the TPU VM:
+#### Using JAX (MaxText)
+*Recommended for Google Cloud TPU Pods (e.g., v4-128, v5e). MaxText scales purely via XLA.*
 ```bash
-# Pretraining Dataset (e.g. SynSQL-2.5M)
-gemma-4-sql etl pretrain --dataset seeklhy/SynSQL-2.5M
-
-# SFT Dataset (e.g. Gretel Synthetic)
-gemma-4-sql etl sft --dataset gretelai/synthetic_text_to_sql
-
-# Post-Training Dataset (e.g. Spider 2.0)
-gemma-4-sql etl posttrain --dataset xlangai/spider2-lite
+gemma-4-sql train \
+    --model gemma-4 \
+    --dataset seeklhy/SynSQL-2.5M \
+    --epochs 10 \
+    --learning-rate 1e-4 \
+    --backend maxtext
 ```
 
-#### 4. Run Training / Pretraining
-Use the `gemma-4-sql` CLI to start training. You can optionally apply LoRA for efficient fine-tuning on the TPU:
+#### Using Keras
+*Recommended if you need seamless integration into the TensorFlow ecosystem.*
 ```bash
-# Apply PEFT / LoRA (Optional)
-gemma-4-sql peft --model gemma-4 --backend maxtext
-
-# Start training loop
-gemma-4-sql train --model gemma-4 --backend maxtext
+gemma-4-sql train \
+    --model gemma-4 \
+    --dataset seeklhy/SynSQL-2.5M \
+    --epochs 10 \
+    --learning-rate 1e-4 \
+    --backend keras
 ```
 
-For more details on TPU architecture and parallelization strategies, consult the MaxText and JAX documentation.
+#### Using PyTorch
+*Recommended for NVIDIA GPU clusters (e.g., A100s, H100s) and integration with Hugging Face.*
+```bash
+gemma-4-sql train \
+    --model gemma-4 \
+    --dataset seeklhy/SynSQL-2.5M \
+    --epochs 10 \
+    --learning-rate 1e-4 \
+    --backend pytorch
+```
+
+---
+
+## 1. Create a Pretrained `gemma-4` for SQL
+
+Instead of random initialization, you take Google's foundation Gemma-4 weights (which already understand English and code) and **continue pretraining** exclusively on SQL datasets. This adapts the model to your specific database dialects (e.g., Snowflake, DuckDB) without losing general language capabilities.
+
+### Step 1: Data Preparation
+```bash
+gemma-4-sql etl pretrain --dataset b-mc2/sql-create-context --batch-size 128 --backend pytorch
+```
+
+### Step 2: Run Continuous Pretraining
+
+Use the `pretrain` command. This loads existing weights and continues the learning process.
+
+**JAX (Bonsai):**
+```bash
+gemma-4-sql pretrain --model google/gemma-4 --dataset b-mc2/sql-create-context --backend jax
+```
+
+**JAX (MaxText):**
+```bash
+gemma-4-sql pretrain --model google/gemma-4 --dataset b-mc2/sql-create-context --backend maxtext
+```
+
+**Keras:**
+```bash
+gemma-4-sql pretrain --model google/gemma-4 --dataset b-mc2/sql-create-context --backend keras
+```
+
+**PyTorch:**
+```bash
+gemma-4-sql pretrain --model google/gemma-4 --dataset b-mc2/sql-create-context --backend pytorch
+```
+
+---
+
+## 2. Create a Post-Trained `gemma-4` for SQL
+
+Post-training is the final alignment phase. This includes Supervised Fine-Tuning (SFT) on exact instruction-response pairs (e.g., User: "How many users?", Assistant: "SELECT COUNT(*) FROM users;") and Direct Preference Optimization (DPO) to punish hallucinated columns.
+
+### Step 1: Data Preparation (SFT & DPO)
+```bash
+# ETL for Instruction Tuning
+gemma-4-sql etl sft --dataset gretelai/synthetic_text_to_sql --batch-size 64 --backend jax
+
+# ETL for DPO (requires chosen/rejected pairs)
+gemma-4-sql etl posttrain --dataset my_custom_dpo_dataset --batch-size 32 --backend jax
+```
+
+### Step 2: Supervised Fine-Tuning (SFT)
+
+**JAX (Bonsai):**
+```bash
+gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset gretelai/synthetic_text_to_sql --backend jax
+```
+
+**JAX (MaxText):**
+```bash
+gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset gretelai/synthetic_text_to_sql --backend maxtext
+```
+
+**Keras:**
+```bash
+gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset gretelai/synthetic_text_to_sql --backend keras
+```
+
+**PyTorch:**
+```bash
+gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset gretelai/synthetic_text_to_sql --backend pytorch
+```
+
+### Step 3: Direct Preference Optimization (DPO)
+
+Once SFT is complete, align the model using DPO to prevent destructive queries (e.g., DROP TABLE) and favor efficient JOINs.
+
+```bash
+# Apply DPO using PyTorch
+gemma-4-sql dpo --model my-sft-gemma-4 --dataset my_custom_dpo_dataset --beta 0.1 --backend pytorch
+
+# Apply DPO using MaxText
+gemma-4-sql dpo --model my-sft-gemma-4 --dataset my_custom_dpo_dataset --beta 0.1 --backend maxtext
+```
+
+---
+
+## 3. Benchmarking Implementations on Target Hardware
+
+Before deploying your fully trained, post-trained model to production, you must benchmark its throughput (tokens/sec), latency (ms), and memory consumption (MB).
+
+`gemma-4-sql` provides a native `benchmark` command that evaluates the model on your specified hardware target (GPU, TPU, or CPU) and backend.
+
+### Benchmarking on GPU (NVIDIA A100/H100)
+
+**Using PyTorch (Typically fastest on NVIDIA via FlashAttention):**
+```bash
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware gpu --batch-size 32 --backend pytorch
+```
+
+**Using JAX (Bonsai on GPU):**
+```bash
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware gpu --batch-size 32 --backend jax
+```
+
+### Benchmarking on TPU (Google Cloud TPU v4 / v5e)
+
+**Using MaxText (Highly optimized for TPU interconnects):**
+```bash
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu --batch-size 128 --backend maxtext
+```
+
+**Using Keras (with TPUStrategy):**
+```bash
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu --batch-size 128 --backend keras
+```
+
+### Benchmarking on CPU (Intel/AMD for Edge or Local testing)
+
+**Using PyTorch (CPU mode):**
+```bash
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware cpu --batch-size 1 --backend pytorch
+```
+
+**Using JAX (Bonsai on CPU):**
+```bash
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware cpu --batch-size 1 --backend jax
+```
+
+### Example Benchmark Output:
+```json
+{
+  "backend": "maxtext",
+  "model": "my-sft-gemma-4",
+  "hardware": "tpu",
+  "batch_size": 128,
+  "tokens_per_sec": 4500.0,
+  "latency_ms": 10.1,
+  "memory_mb": 16384.0
+}
+```
+
+---
+
+## 4. Monitoring with TensorBoard
+
+Throughout training, pretraining, and post-training phases, you should monitor your cluster's progress. `gemma-4-sql` integrates cleanly with TensorBoard across all backend topologies (JAX, MaxText, Keras, and PyTorch).
+
+Metrics are written by default to the `logs` directory.
+
+### Start TensorBoard
+```bash
+tensorboard --logdir=./logs --port=6006
+```
+
+### Manual Logging
+
+If you have custom evaluation scripts running alongside your training jobs, you can emit metrics directly to your existing TensorBoard runs using the CLI or SDK:
+
+```bash
+# Push custom evaluation metrics to the active TB directory
+gemma-4-sql log --step 1000 --metrics "eval_loss=0.3,execution_accuracy=0.89" --log-dir "./logs" --backend maxtext
+```

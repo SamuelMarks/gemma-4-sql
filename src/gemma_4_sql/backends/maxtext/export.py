@@ -12,10 +12,11 @@ try:
     import jax
     import jax.numpy as jnp
     import orbax.checkpoint as ocp  # pragma: no cover
-except ImportError:
+except Exception:
     jax = None
     jnp = None
     ocp = None
+
 
 def export_model(model_name: str, export_path: str) -> dict[str, Any]:
     """

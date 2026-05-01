@@ -11,17 +11,18 @@ from gemma_4_sql.tokenization import SQLTokenizer
 try:
     import keras
     import tensorflow as tf  # pragma: no cover
-except ImportError:
+except Exception:
     keras = None
     tf = None
 
+
 def keras_beam_search(
     model: Any,
-    input_ids: "tf.Tensor",
+    input_ids: tf.Tensor,
     beam_width: int,
     max_length: int,
     eos_token_id: int,
-) -> "tf.Tensor":
+) -> tf.Tensor:
     """
     Keras/TF native beam search implementation.
     """
@@ -53,6 +54,7 @@ def keras_beam_search(
             break
 
     return beams[0][0]
+
 
 def generate_sql(
     model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50
@@ -87,7 +89,7 @@ def generate_sql(
             class MockKerasModel:
                 """Mock model."""
 
-                def __call__(self, x: "tf.Tensor") -> "tf.Tensor":
+                def __call__(self, x: tf.Tensor) -> tf.Tensor:
                     """Mock call."""
                     idx = (x[0, -1].numpy() + 1) % tokenizer.vocab_size
                     indices = [[0, idx]]

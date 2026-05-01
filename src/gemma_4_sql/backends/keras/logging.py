@@ -1,26 +1,43 @@
 """
-Keras-specific logging and metrics integration.
+Keras-specific logging and metrics.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-def log_metrics(metrics: dict[str, float], step: int) -> dict[str, Any]:
+try:
+    import tensorflow as tf
+except Exception:  # pragma: no cover
+    tf = None
+
+
+def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> dict[str, Any]:
     """
-    Logs metrics for a Keras training run.
+    Logs metrics using Keras/TensorFlow TensorBoard tools.
 
     Args:
-        metrics: A dictionary of metric names and their float values.
+        metrics: Dictionary of metric names to values.
         step: The current training step.
+        log_dir: Directory to save the TensorBoard logs.
 
     Returns:
-        A dictionary containing logging metadata.
+        A dictionary confirming the logged metrics.
     """
+    if tf is not None and hasattr(tf, "summary"):
+        writer = tf.summary.create_file_writer(log_dir)
+        with writer.as_default():
+            for k, v in metrics.items():
+                tf.summary.scalar(k, v, step=step)
+        writer.close()
+        status = "success"
+    else:
+        status = "mocked_missing_tensorboard"
+
     return {
         "backend": "keras",
-        "action": "log_metrics",
         "step": step,
         "metrics": metrics,
-        "status": "success",
+        "status": status,
+        "log_dir": log_dir,
     }

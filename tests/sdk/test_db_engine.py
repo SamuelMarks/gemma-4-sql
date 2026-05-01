@@ -149,28 +149,32 @@ def test_live_database_engine_snowflake_success() -> None:
         engine.close()
         mock_conn.close.assert_called_once()
 
+
 def test_execute_with_feedback_sqlite() -> None:
     """Test execute_with_feedback for sqlite."""
-    engine = LiveDatabaseEngine(ddl="CREATE TABLE t (id INT); INSERT INTO t VALUES (1);")
-    
+    engine = LiveDatabaseEngine(
+        ddl="CREATE TABLE t (id INT); INSERT INTO t VALUES (1);"
+    )
+
     # Success with results
     success, res, err = engine.execute_with_feedback("SELECT * FROM t")
     assert success is True
     assert res == [(1,)]
     assert err is None
-    
+
     # Success without results
     success, res, err = engine.execute_with_feedback("INSERT INTO t VALUES (2)")
     assert success is True
     assert res == []
     assert err is None
-    
+
     # Error
     success, res, err = engine.execute_with_feedback("SELECT * FROM non_existent")
     assert success is False
     assert res == []
     assert "no such table: non_existent" in err
     engine.close()
+
 
 def test_execute_with_feedback_postgres() -> None:
     """Test execute_with_feedback for postgres."""
@@ -179,10 +183,10 @@ def test_execute_with_feedback_postgres() -> None:
     mock_psycopg2.connect.return_value = mock_conn
     mock_cursor = MagicMock()
     mock_conn.cursor.return_value = mock_cursor
-    
+
     with patch("gemma_4_sql.sdk.db_engine.psycopg2", new=mock_psycopg2):
         engine = LiveDatabaseEngine(db_type="postgresql")
-        
+
         # Success with results
         mock_cursor.description = [("id",)]
         mock_cursor.fetchall.return_value = [(1,)]
@@ -190,7 +194,7 @@ def test_execute_with_feedback_postgres() -> None:
         assert success is True
         assert res == [(1,)]
         assert err is None
-        
+
         # Error
         mock_cursor.execute.side_effect = Exception("syntax error")
         success, res, err = engine.execute_with_feedback("SELECT INVALID")
@@ -198,6 +202,7 @@ def test_execute_with_feedback_postgres() -> None:
         assert res == []
         assert "syntax error" in err
         engine.close()
+
 
 @patch("gemma_4_sql.sdk.db_engine.duckdb", new=None)
 def test_live_database_engine_duckdb_missing() -> None:
@@ -208,26 +213,28 @@ def test_live_database_engine_duckdb_missing() -> None:
     ):
         LiveDatabaseEngine(db_type="duckdb")
 
+
 def test_live_database_engine_duckdb_success() -> None:
     """Test DuckDB db_type with mock duckdb."""
     from unittest.mock import MagicMock, patch
+
     mock_duckdb = MagicMock()
     mock_conn = MagicMock()
     mock_duckdb.connect.return_value = mock_conn
     mock_cursor = MagicMock()
     mock_conn.execute.return_value = mock_cursor
     mock_cursor.fetchall.return_value = [(42,)]
-    with patch('gemma_4_sql.sdk.db_engine.duckdb', mock_duckdb):
-        engine = LiveDatabaseEngine(db_type='duckdb', ddl='CREATE TABLE d (v INT);')
-        assert engine.execute_query('SELECT * FROM d') == [(42,)]
-        mock_conn.execute.side_effect = Exception('error')
-        assert engine.execute_query('SELECT * FROM invalid') == []
+    with patch("gemma_4_sql.sdk.db_engine.duckdb", mock_duckdb):
+        engine = LiveDatabaseEngine(db_type="duckdb", ddl="CREATE TABLE d (v INT);")
+        assert engine.execute_query("SELECT * FROM d") == [(42,)]
+        mock_conn.execute.side_effect = Exception("error")
+        assert engine.execute_query("SELECT * FROM invalid") == []
         mock_conn.execute.side_effect = None
         mock_conn.execute.return_value = mock_cursor
-        success, res, err = engine.execute_with_feedback('SELECT * FROM d')
+        success, res, err = engine.execute_with_feedback("SELECT * FROM d")
         assert success is True
         assert res == [(42,)]
-        mock_conn.execute.side_effect = Exception('error')
-        success, res, err = engine.execute_with_feedback('SELECT * FROM d')
+        mock_conn.execute.side_effect = Exception("error")
+        success, res, err = engine.execute_with_feedback("SELECT * FROM d")
         assert success is False
-        assert 'error' in err
+        assert "error" in err

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 
+
 def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
     """
     Extracts table names and their corresponding column names from a DDL string.
@@ -46,6 +47,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
                 schema[table_name].append(col_match.group(1))
 
     return schema
+
 
 def retrieve_relevant_schema(
     prompt: str, schema: dict[str, list[str]], top_k_tables: int = 2
@@ -92,6 +94,7 @@ def retrieve_relevant_schema(
         context_lines.append(f"-- Table: {table} | Columns: {cols}")
 
     return "\n".join(context_lines)
+
 
 def build_rag_prompt(prompt: str, ddl: str | None = None) -> str:
     """

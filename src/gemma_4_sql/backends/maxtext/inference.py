@@ -11,22 +11,23 @@ from gemma_4_sql.tokenization import SQLTokenizer
 try:
     import jax
     import jax.numpy as jnp
-except ImportError:
+except Exception:
     jax = None
     jnp = None
 
 try:
     from maxtext.models.gemma4 import Gemma4Model
-except ImportError:
+except Exception:
     Gemma4Model = None
+
 
 def maxtext_beam_search(
     model_apply_fn: Any,
-    input_ids: "jnp.ndarray",
+    input_ids: jnp.ndarray,
     beam_width: int,
     max_length: int,
     eos_token_id: int,
-) -> "jnp.ndarray":
+) -> jnp.ndarray:
     """
     MaxText native beam search implementation.
     """
@@ -58,6 +59,7 @@ def maxtext_beam_search(
             break
 
     return beams[0][0]
+
 
 def generate_sql(
     model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50

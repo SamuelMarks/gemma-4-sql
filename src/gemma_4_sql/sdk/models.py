@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def _route_training(
     action: str,
     model_name: str,
@@ -23,24 +24,10 @@ def _route_training(
         "learning_rate": learning_rate,
     }
 
-    if backend == "jax":
-        from gemma_4_sql.backends.jax.train import train_model
+    from gemma_4_sql.sdk.registry import get_backend
 
-        return train_model(**kwargs)
-    elif backend == "keras":
-        from gemma_4_sql.backends.keras.train import train_model
+    return get_backend(backend).train_model(**kwargs)
 
-        return train_model(**kwargs)
-    elif backend == "maxtext":
-        from gemma_4_sql.backends.maxtext.train import train_model
-
-        return train_model(**kwargs)
-    elif backend == "pytorch":
-        from gemma_4_sql.backends.pytorch.train import train_model
-
-        return train_model(**kwargs)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
 
 def train_from_scratch(
     model_name: str = "gemma-4",
@@ -66,6 +53,7 @@ def train_from_scratch(
         "train_from_scratch", model_name, dataset, epochs, learning_rate, backend
     )
 
+
 def pretrain_model(
     model_name: str = "gemma-4",
     dataset: str = "dummy_dataset",
@@ -90,6 +78,7 @@ def pretrain_model(
         "pretrain", model_name, dataset, epochs, learning_rate, backend
     )
 
+
 def sft_model(
     model_name: str = "gemma-4",
     dataset: str = "dummy_dataset",
@@ -111,6 +100,7 @@ def sft_model(
         A dictionary indicating the SFT job status.
     """
     return _route_training("sft", model_name, dataset, epochs, learning_rate, backend)
+
 
 def posttrain_model(
     model_name: str = "gemma-4",

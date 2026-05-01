@@ -158,3 +158,12 @@ models/
 datasets/
 out/
 path1/
+
+# Temporary scratchpads and fix scripts
+fix_*.py
+test.py
+find_deleter.py
+*.diff
+*.patch
+b/
+bar/

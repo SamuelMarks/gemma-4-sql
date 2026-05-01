@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def _route_backend(
     dataset_name: str,
     split: str,
@@ -42,20 +43,9 @@ def _route_backend(
         "duckdb_table": duckdb_table,
     }
 
-    if backend == "jax":
-        from gemma_4_sql.backends.jax.etl import build_dataloader
-        return build_dataloader(**kwargs)
-    elif backend == "keras":
-        from gemma_4_sql.backends.keras.etl import build_dataloader
-        return build_dataloader(**kwargs)
-    elif backend == "maxtext":
-        from gemma_4_sql.backends.maxtext.etl import build_dataloader
-        return build_dataloader(**kwargs)
-    elif backend == "pytorch":
-        from gemma_4_sql.backends.pytorch.etl import build_dataloader
-        return build_dataloader(**kwargs)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
+    from gemma_4_sql.sdk.registry import get_backend
+    return get_backend(backend).build_dataloader(**kwargs)
+
 
 def etl_pretrain(
     dataset_name: str = "seeklhy/SynSQL-2.5M",
@@ -84,8 +74,16 @@ def etl_pretrain(
         A dictionary containing metadata and dataset representation.
     """
     return _route_backend(
-        dataset_name, split, batch_size, backend, distributed, tokenizer_name, duckdb_path, duckdb_table
+        dataset_name,
+        split,
+        batch_size,
+        backend,
+        distributed,
+        tokenizer_name,
+        duckdb_path,
+        duckdb_table,
     )
+
 
 def etl_sft(
     dataset_name: str = "gretelai/synthetic_text_to_sql",
@@ -114,8 +112,16 @@ def etl_sft(
         A dictionary containing metadata and dataset representation.
     """
     return _route_backend(
-        dataset_name, split, batch_size, backend, distributed, tokenizer_name, duckdb_path, duckdb_table
+        dataset_name,
+        split,
+        batch_size,
+        backend,
+        distributed,
+        tokenizer_name,
+        duckdb_path,
+        duckdb_table,
     )
+
 
 def etl_posttrain(
     dataset_name: str = "xlangai/spider2-lite",
@@ -144,5 +150,12 @@ def etl_posttrain(
         A dictionary containing metadata and dataset representation.
     """
     return _route_backend(
-        dataset_name, split, batch_size, backend, distributed, tokenizer_name, duckdb_path, duckdb_table
+        dataset_name,
+        split,
+        batch_size,
+        backend,
+        distributed,
+        tokenizer_name,
+        duckdb_path,
+        duckdb_table,
     )

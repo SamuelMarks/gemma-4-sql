@@ -11,10 +11,11 @@ try:
     import jax
     import jax.numpy as jnp
     import orbax.checkpoint as ocp  # pragma: no cover
-except ImportError:
+except Exception:
     jax = None
     jnp = None
     ocp = None
+
 
 def export_model(model_name: str, export_path: str) -> dict[str, Any]:
     """
@@ -32,12 +33,15 @@ def export_model(model_name: str, export_path: str) -> dict[str, Any]:
     if jax is not None and jnp is not None and ocp is not None:
         try:
             from bonsai.models.gemma4 import (
-                Gemma4ForCausalLM,
                 Gemma4Config,
+                Gemma4ForCausalLM,
             )
             from flax import nnx  # pragma: no cover
-  # pragma: no cover
-            model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))  # pragma: no cover
+
+            # pragma: no cover
+            model = Gemma4ForCausalLM(
+                Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0)
+            )  # pragma: no cover
             weights = nnx.state(model)  # pragma: no cover
         except (ImportError, Exception):
             weights = {"w": jnp.zeros((10, 10))}

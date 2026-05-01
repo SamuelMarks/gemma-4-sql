@@ -5,6 +5,7 @@ Tests for MaxText DPO logic.
 from __future__ import annotations
 
 from typing import Any
+
 import pytest
 
 from gemma_4_sql.backends.maxtext.dpo import dpo_loss, run_dpo
@@ -63,8 +64,8 @@ def test_run_dpo_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_run_dpo_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test MaxText DPO."""
-    import gemma_4_sql.backends.maxtext.dpo as maxtext_dpo
     import gemma_4_sql.backends.jax.dpo as jax_dpo
+    import gemma_4_sql.backends.maxtext.dpo as maxtext_dpo
 
     monkeypatch.setattr(maxtext_dpo, "jnp", MockJnp())
     monkeypatch.setattr(jax_dpo, "jnp", MockJnp())

@@ -8,7 +8,7 @@ from typing import Any
 
 try:
     import jax.numpy as jnp
-except ImportError:
+except Exception:
     jnp = None
 
 

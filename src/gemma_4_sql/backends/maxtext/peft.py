@@ -8,8 +8,9 @@ from typing import Any
 
 try:
     import jax
-except ImportError:
+except Exception:
     jax = None
+
 
 def apply_lora(
     model_name: str,

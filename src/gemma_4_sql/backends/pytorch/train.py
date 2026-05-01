@@ -12,15 +12,16 @@ try:
     import torch
     import torch.nn as nn
     import torch.optim as optim  # pragma: no cover
-except ImportError:
+except Exception:
     torch = None
     nn = None
     optim = None
 
 try:
     from transformers.models.gemma4 import Gemma4ForCausalLM
-except ImportError:
+except Exception:
     Gemma4ForCausalLM = None
+
 
 def train_model(
     action: str,

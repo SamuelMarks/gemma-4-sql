@@ -14,6 +14,7 @@ try:
 except ImportError:
     duckdb = None
 
+
 def embed_in_duckdb(
     conn: Any,
     model_name: str,
@@ -23,9 +24,9 @@ def embed_in_duckdb(
 ) -> None:
     """
     Registers a scalar function in DuckDB to ask natural language questions.
-    
-    The function 'ask_gemma' will take a natural language string, use the 
-    Gemma 4 model to generate the appropriate SQL, and return the execution 
+
+    The function 'ask_gemma' will take a natural language string, use the
+    Gemma 4 model to generate the appropriate SQL, and return the execution
     results as a JSON string.
 
     Args:
@@ -46,7 +47,7 @@ def embed_in_duckdb(
         tables = conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
         ).fetchall()
-        
+
         ddl_parts = []
         for (t,) in tables:
             cols = conn.execute(
@@ -54,9 +55,9 @@ def embed_in_duckdb(
             ).fetchall()
             col_defs = ", ".join(f"{c[0]} {c[1]}" for c in cols)
             ddl_parts.append(f"CREATE TABLE {t} ({col_defs});")
-        
+
         ddl = "\n".join(ddl_parts)
-        
+
         res = run_agentic_loop(
             model_name=model_name,
             prompt=prompt,
@@ -66,13 +67,15 @@ def embed_in_duckdb(
             db_type="duckdb",
             max_retries=max_retries,
         )
-        
+
         # Return the results as a formatted JSON string
-        return json.dumps({
-            "generated_sql": res.get("final_sql", ""),
-            "results": res.get("results", []),
-            "success": res.get("success", False),
-        })
+        return json.dumps(
+            {
+                "generated_sql": res.get("final_sql", ""),
+                "results": res.get("results", []),
+                "success": res.get("success", False),
+            }
+        )
 
     # Register the UDF with DuckDB
     conn.create_function("ask_gemma", ask_gemma, [str], str)

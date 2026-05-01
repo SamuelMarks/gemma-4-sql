@@ -9,6 +9,7 @@ from typing import Any
 from gemma_4_sql.backends.pytorch.inference import generate_sql
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 
+
 def run_agentic_loop(
     model_name: str,
     prompt: str,

@@ -8,8 +8,9 @@ from typing import Any
 
 try:
     import tensorflow as tf
-except ImportError:
+except Exception:
     tf = None
+
 
 def dpo_loss(
     policy_chosen_logps: Any,
@@ -47,6 +48,7 @@ def dpo_loss(
         tf.reduce_mean(chosen_rewards),
         tf.reduce_mean(rejected_rewards),
     )
+
 
 def run_dpo(model_name: str, dataset: str, beta: float = 0.1) -> dict[str, Any]:
     """

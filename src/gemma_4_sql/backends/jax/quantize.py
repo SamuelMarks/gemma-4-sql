@@ -8,7 +8,7 @@ from typing import Any
 
 try:
     import jax
-except ImportError:  # pragma: no cover
+except Exception:  # pragma: no cover
     jax = None  # pragma: no cover
 
 

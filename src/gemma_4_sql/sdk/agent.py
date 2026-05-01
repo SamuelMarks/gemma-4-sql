@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def run_agentic_loop(
     model_name: str,
     prompt: str,
@@ -42,27 +43,5 @@ def run_agentic_loop(
         "max_retries": max_retries,
     }
 
-    if backend == "jax":
-        from gemma_4_sql.backends.jax.agent import (
-            run_agentic_loop as jax_agent,
-        )
-
-        return jax_agent(**kwargs)
-    elif backend == "keras":
-        from gemma_4_sql.backends.keras.agent import (
-            run_agentic_loop as keras_agent,
-        )
-
-        return keras_agent(**kwargs)
-    elif backend == "maxtext":
-        from gemma_4_sql.backends.maxtext.agent import run_agentic_loop as maxtext_agent
-
-        return maxtext_agent(**kwargs)
-    elif backend == "pytorch":
-        from gemma_4_sql.backends.pytorch.agent import (
-            run_agentic_loop as pytorch_agent,
-        )
-
-        return pytorch_agent(**kwargs)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
+    from gemma_4_sql.sdk.registry import get_backend
+    return get_backend(backend).run_agentic_loop(**kwargs)

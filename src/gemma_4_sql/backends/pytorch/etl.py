@@ -10,21 +10,22 @@ from gemma_4_sql.tokenization import SQLTokenizer
 
 try:
     import datasets
-except ImportError:
+except Exception:
     datasets = None
 
 try:
     import torch
     from torch.utils.data import DataLoader, Dataset
-except ImportError:
+except Exception:
     torch = None
     DataLoader = None
     Dataset = None
 
 try:
     import duckdb
-except ImportError:
+except Exception:
     duckdb = None
+
 
 def build_dataloader(
     dataset_name: str,
@@ -52,7 +53,11 @@ def build_dataloader(
             raise ImportError("duckdb is required for DuckDB support.")
         conn = duckdb.connect(duckdb_path, read_only=True)
         try:
-            hf_dataset = conn.execute(f"SELECT * FROM {duckdb_table}").fetchdf().to_dict(orient="records")
+            hf_dataset = (
+                conn.execute(f"SELECT * FROM {duckdb_table}")
+                .fetchdf()
+                .to_dict(orient="records")
+            )
         finally:
             conn.close()
     else:

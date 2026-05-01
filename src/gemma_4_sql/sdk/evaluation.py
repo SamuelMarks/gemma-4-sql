@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def evaluate(
     model_name: str,
     dataset_name: str,
@@ -35,6 +36,8 @@ def evaluate(
         Evaluation results dictionary.
     """
     kwargs = {
+        "model_name": model_name,
+        "dataset_name": dataset_name,
         "db_path": db_path,
         "ddl": ddl,
         "db_type": db_type,
@@ -43,21 +46,5 @@ def evaluate(
         "mock_truths": mock_truths,
     }
 
-    if backend == "jax":
-        from gemma_4_sql.backends.jax.evaluate import evaluate_model
-
-        return evaluate_model(model_name, dataset_name, **kwargs)
-    elif backend == "keras":
-        from gemma_4_sql.backends.keras.evaluate import evaluate_model
-
-        return evaluate_model(model_name, dataset_name, **kwargs)
-    elif backend == "maxtext":
-        from gemma_4_sql.backends.maxtext.evaluate import evaluate_model
-
-        return evaluate_model(model_name, dataset_name, **kwargs)
-    elif backend == "pytorch":
-        from gemma_4_sql.backends.pytorch.evaluate import evaluate_model
-
-        return evaluate_model(model_name, dataset_name, **kwargs)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
+    from gemma_4_sql.sdk.registry import get_backend
+    return get_backend(backend).evaluate_model(**kwargs)

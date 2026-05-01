@@ -74,12 +74,14 @@ class MockGemma4Config:
     def gemma4_e2b():
         return "mock_config"
 
+
 class MockGemma4ForCausalLM:
     def __init__(self, config, rngs):
         self.config = config
 
     def __call__(self, inputs):
         return MockJnpTensor((1,))
+
 
 class MockNNXOptimizer:
     def __init__(self, model, optax_optimizer):
@@ -88,6 +90,7 @@ class MockNNXOptimizer:
 
     def update(self, grads):
         pass
+
 
 class MockNNX:
     class Rngs:
@@ -107,6 +110,7 @@ class MockNNX:
         return wrapper
 
     Optimizer = MockNNXOptimizer
+
 
 @pytest.fixture
 def mock_jax_env(monkeypatch):

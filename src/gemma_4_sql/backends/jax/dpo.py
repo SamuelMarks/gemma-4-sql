@@ -7,11 +7,12 @@ from __future__ import annotations
 from typing import Any
 
 try:
-    import jax.numpy as jnp
     import jax.nn as jnn  # pragma: no cover
-except ImportError:
+    import jax.numpy as jnp  # pragma: no cover
+except Exception:
     jnp = None
     jnn = None
+
 
 def dpo_loss(
     policy_chosen_logps: Any,
@@ -45,6 +46,7 @@ def dpo_loss(
     rejected_rewards = beta * (policy_rejected_logps - ref_rejected_logps)
 
     return jnp.mean(loss), jnp.mean(chosen_rewards), jnp.mean(rejected_rewards)
+
 
 def run_dpo(model_name: str, dataset: str, beta: float = 0.1) -> dict[str, Any]:
     """

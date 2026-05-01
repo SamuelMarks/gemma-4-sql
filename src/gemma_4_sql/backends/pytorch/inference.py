@@ -10,21 +10,22 @@ from gemma_4_sql.tokenization import SQLTokenizer
 
 try:
     import torch
-except ImportError:
+except Exception:
     torch = None
 
 try:
     from transformers.models.gemma4 import Gemma4ForCausalLM
-except ImportError:
+except Exception:
     Gemma4ForCausalLM = None
+
 
 def pytorch_beam_search(
     model: Any,
-    input_ids: "torch.Tensor",
+    input_ids: torch.Tensor,
     beam_width: int,
     max_length: int,
     eos_token_id: int,
-) -> "torch.Tensor":
+) -> torch.Tensor:
     """
     PyTorch native beam search implementation.
     """
@@ -55,6 +56,7 @@ def pytorch_beam_search(
             break
 
     return beams[0][0]
+
 
 def generate_sql(
     model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50

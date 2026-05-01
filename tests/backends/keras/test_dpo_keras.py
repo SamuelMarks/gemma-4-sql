@@ -5,6 +5,7 @@ Tests for Keras DPO logic.
 from __future__ import annotations
 
 from typing import Any
+
 import pytest
 
 from gemma_4_sql.backends.keras.dpo import dpo_loss, run_dpo

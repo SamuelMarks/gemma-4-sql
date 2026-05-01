@@ -9,9 +9,10 @@ from typing import Any
 try:
     import torch
     import torch.nn.functional as F
-except ImportError:
+except Exception:
     torch = None
     F = None
+
 
 def dpo_loss(
     policy_chosen_logps: Any,
@@ -45,6 +46,7 @@ def dpo_loss(
     rejected_rewards = beta * (policy_rejected_logps - ref_rejected_logps).detach()
 
     return loss.mean(), chosen_rewards.mean(), rejected_rewards.mean()
+
 
 def run_dpo(model_name: str, dataset: str, beta: float = 0.1) -> dict[str, Any]:
     """

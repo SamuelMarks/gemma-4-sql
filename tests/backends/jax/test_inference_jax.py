@@ -79,6 +79,7 @@ class MockGemma4Config:
     def gemma4_e2b():
         return "mock_config"
 
+
 class MockGemma4ForCausalLM:
     def __init__(self, config, rngs):
         self.config = config
@@ -88,10 +89,12 @@ class MockGemma4ForCausalLM:
         logits[100] = 10.0
         return MockArray([logits])
 
+
 class MockNNX:
     class Rngs:
         def __init__(self, seed):
             self.seed = seed
+
 
 @pytest.fixture
 def mock_jax_env(monkeypatch: pytest.MonkeyPatch) -> None:

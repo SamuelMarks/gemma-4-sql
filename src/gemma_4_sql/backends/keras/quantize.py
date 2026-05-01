@@ -8,7 +8,7 @@ from typing import Any
 
 try:
     import tensorflow as tf
-except ImportError:
+except Exception:
     tf = None
 
 

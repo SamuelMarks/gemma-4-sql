@@ -11,9 +11,10 @@ from gemma_4_sql.backends.keras.etl import build_dataloader
 try:
     import keras
     import tensorflow as tf  # pragma: no cover
-except ImportError:
+except Exception:
     keras = None
     tf = None
+
 
 class KerasSQLModel:
     """Mock Keras architecture for Text-to-SQL if real model isn't available."""
@@ -30,6 +31,7 @@ class KerasSQLModel:
                 (x.shape[0], x.shape[1], self.vocab_size)
             )
         return None
+
 
 def train_model(
     action: str,

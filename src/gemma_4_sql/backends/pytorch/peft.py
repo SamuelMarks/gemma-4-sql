@@ -8,8 +8,9 @@ from typing import Any
 
 try:
     import peft
-except ImportError:
+except Exception:
     peft = None
+
 
 def apply_lora(
     model_name: str,

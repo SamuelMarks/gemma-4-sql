@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def apply_peft(
     model_name: str,
     target_modules: list[str] | None = None,
@@ -39,21 +40,5 @@ def apply_peft(
         "lora_dropout": lora_dropout,
     }
 
-    if backend == "jax":
-        from gemma_4_sql.backends.jax.peft import apply_lora
-
-        return apply_lora(**kwargs)
-    elif backend == "keras":
-        from gemma_4_sql.backends.keras.peft import apply_lora
-
-        return apply_lora(**kwargs)
-    elif backend == "maxtext":
-        from gemma_4_sql.backends.maxtext.peft import apply_lora
-
-        return apply_lora(**kwargs)
-    elif backend == "pytorch":
-        from gemma_4_sql.backends.pytorch.peft import apply_lora
-
-        return apply_lora(**kwargs)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
+    from gemma_4_sql.sdk.registry import get_backend
+    return get_backend(backend).apply_lora(model_name, target_modules, lora_r, lora_alpha, lora_dropout)

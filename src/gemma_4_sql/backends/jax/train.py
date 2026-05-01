@@ -12,18 +12,19 @@ try:
     import jax
     import jax.numpy as jnp
     import optax  # pragma: no cover
-except ImportError:
+except Exception:
     jax = None
     jnp = None
     optax = None
 
 try:
-    from bonsai.models.gemma4 import Gemma4ForCausalLM, Gemma4Config
+    from bonsai.models.gemma4 import Gemma4Config, Gemma4ForCausalLM
     from flax import nnx  # pragma: no cover
-except ImportError:
+except Exception:
     Gemma4ForCausalLM = None
     Gemma4Config = None
     nnx = None
+
 
 def train_model(
     action: str,
@@ -66,7 +67,11 @@ def train_model(
                 return jnp.mean(loss)
 
             @nnx.jit
-            def train_step(model: Gemma4ForCausalLM, optimizer: nnx.Optimizer, batch: dict[str, Any]) -> Any:
+            def train_step(
+                model: Gemma4ForCausalLM,
+                optimizer: nnx.Optimizer,
+                batch: dict[str, Any],
+            ) -> Any:
                 """Train step."""
                 loss, grads = nnx.value_and_grad(loss_fn)(model, batch)
                 optimizer.update(grads)

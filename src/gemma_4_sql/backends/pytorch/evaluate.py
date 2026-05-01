@@ -11,9 +11,11 @@ from gemma_4_sql.backends.pytorch.inference import generate_sql
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.tokenization import SQLTokenizer
 
+
 def normalize_sql(sql: str) -> str:
     """Normalizes SQL by stripping whitespace and lowercasing."""
     return " ".join(sql.strip().lower().split())
+
 
 def compute_metrics(
     engine: LiveDatabaseEngine, preds: list[str], truths: list[str]
@@ -40,6 +42,7 @@ def compute_metrics(
         "valid_sql": valid_sqls / total,
         "execution_accuracy": exec_matches / total,
     }
+
 
 def evaluate_model(
     model_name: str,

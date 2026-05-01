@@ -12,15 +12,16 @@ try:
     import jax
     import jax.numpy as jnp
     import optax  # pragma: no cover
-except ImportError:
+except Exception:
     jax = None
     jnp = None
     optax = None
 
 try:
     from maxtext.models.gemma4 import Gemma4Model
-except ImportError:
+except Exception:
     Gemma4Model = None
+
 
 def train_model(
     action: str,

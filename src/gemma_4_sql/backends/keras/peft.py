@@ -8,8 +8,9 @@ from typing import Any
 
 try:
     import keras
-except ImportError:
+except Exception:
     keras = None
+
 
 def apply_lora(
     model_name: str,

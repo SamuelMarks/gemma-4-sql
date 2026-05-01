@@ -8,8 +8,9 @@ from typing import Any
 
 try:
     import optax
-except ImportError:
+except Exception:
     optax = None
+
 
 def apply_lora(
     model_name: str,

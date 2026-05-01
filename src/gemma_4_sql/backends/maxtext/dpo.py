@@ -10,8 +10,9 @@ from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
 
 try:
     import jax.numpy as jnp
-except ImportError:
+except Exception:
     jnp = None
+
 
 def dpo_loss(
     policy_chosen_logps: Any,
@@ -40,6 +41,7 @@ def dpo_loss(
         ref_rejected_logps,
         beta,
     )
+
 
 def run_dpo(model_name: str, dataset: str, beta: float = 0.1) -> dict[str, Any]:
     """

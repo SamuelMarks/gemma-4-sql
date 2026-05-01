@@ -9,8 +9,9 @@ from typing import Any
 
 try:
     import keras
-except ImportError:
+except Exception:
     keras = None
+
 
 def export_model(model_name: str, export_path: str) -> dict[str, Any]:
     """

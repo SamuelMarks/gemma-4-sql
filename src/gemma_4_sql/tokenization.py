@@ -11,6 +11,7 @@ try:
 except ImportError:
     AutoTokenizer = None
 
+
 class SQLTokenizer:
     """
     A tokenizer for SQL datasets.

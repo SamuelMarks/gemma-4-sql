@@ -8,7 +8,7 @@ from typing import Any
 
 try:
     import torch
-except ImportError:
+except Exception:
     torch = None
 
 

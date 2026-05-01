@@ -1,3 +1,13 @@
+
+import pytest
+@pytest.fixture(autouse=True)
+def clean_sys_modules():
+    import sys
+    keys = list(sys.modules.keys())
+    yield
+    for k in list(sys.modules.keys()):
+        if k not in keys and "gemma_4_sql" in k:
+            del sys.modules[k]
 """Tests for JAX ETL module."""
 
 import sys
@@ -25,8 +35,9 @@ def test_jax_etl_mocked() -> None:
 
 def test_jax_etl_import_error() -> None:
     """Test JAX ETL ImportError fallback."""
-    if "gemma_4_sql.backends.jax.etl" in sys.modules:
-        del sys.modules["gemma_4_sql.backends.jax.etl"]
+    import sys
+    old_mod = sys.modules.get("gemma_4_sql.backends.jax.etl")
+    # removed deletion
 
     with mock.patch.dict(
         sys.modules, {"datasets": None, "grain": None, "grain.python": None}
@@ -35,6 +46,8 @@ def test_jax_etl_import_error() -> None:
 
         res = etl_jax.build_dataloader("test", "train", 10)
         assert res["status"] == "mocked"
+    
+    # removed restore
 
 
 def test_jax_etl_loaded() -> None:

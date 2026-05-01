@@ -6,7 +6,8 @@ from gemma_4_sql.sdk.models import train_from_scratch
 
 
 def test_train_from_scratch_pytorch(monkeypatch):
-    import gemma_4_sql.backends.pytorch.train as pt_train
+    from gemma_4_sql.sdk.registry import get_backend
+    pt_train = get_backend("pytorch")
 
     monkeypatch.setattr(pt_train, "train_model", lambda **kw: {"status": "mock"})
     res = train_from_scratch(model_name="mock", dataset="mock", backend="pytorch")

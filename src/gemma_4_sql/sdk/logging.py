@@ -6,37 +6,21 @@ from __future__ import annotations
 
 from typing import Any
 
+
 def log_metrics(
-    metrics: dict[str, float], step: int, backend: str = "jax"
+    metrics: dict[str, float], step: int, log_dir: str = "logs", backend: str = "jax"
 ) -> dict[str, Any]:
     """
-    Logs training or evaluation metrics.
+    Logs training or evaluation metrics to TensorBoard.
 
     Args:
         metrics: A dictionary of metric names and their float values.
         step: The current training or evaluation step.
-        backend: The backend framework ('jax', 'keras', or 'maxtext').
+        log_dir: The directory to save the TensorBoard logs.
+        backend: The backend framework ('jax', 'keras', 'maxtext', 'pytorch').
 
     Returns:
         Logging results dictionary.
     """
-    if backend == "jax":
-        from gemma_4_sql.backends.jax.logging import log_metrics as jax_log
-
-        return jax_log(metrics, step)
-    elif backend == "keras":
-        from gemma_4_sql.backends.keras.logging import log_metrics as keras_log
-
-        return keras_log(metrics, step)
-    elif backend == "maxtext":
-        from gemma_4_sql.backends.maxtext.logging import log_metrics as maxtext_log
-
-        return maxtext_log(metrics, step)
-    elif backend == "pytorch":
-        from gemma_4_sql.backends.pytorch.logging import (
-            log_metrics as pytorch_log,
-        )
-
-        return pytorch_log(metrics, step)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
+    from gemma_4_sql.sdk.registry import get_backend
+    return get_backend(backend).log_metrics(metrics, step, log_dir)

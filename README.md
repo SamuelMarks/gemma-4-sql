@@ -8,6 +8,15 @@ gemma-4-sql
 
 Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch; Keras ; JAX / Bonsai; JAX / MaxText.
 
+**Documentation:**
+- [Extending / Custom Backends](EXTENDING.md)
+- [Deployment & CI/CD](DEPLOY.md)
+- [DuckDB Support](DUCKDB_SUPPORT.md)
+- [SQL Dataset Analysis](SQL_DATASET_ANALYSIS.md)
+- [Architecture Details](ARCHITECTURE.md)
+- [Usage Guide](USAGE.md)
+
+
 `gemma-4-sql` is a specialized SDK and CLI tool designed for orchestrating Text-to-SQL training pipelines. It provides an end-to-end framework capable of ingesting diverse Text-to-SQL datasets, transforming them using Google's `grain` library into consistent multidimensional formats, and preparing them for modern AI-Hypercomputer workloads.
 
 We explicitly integrate with and support the following Gemma 4 model architectures across different ecosystems:
@@ -89,8 +98,8 @@ You can use the pipeline either via the Python SDK or the Command Line Interface
 # Pretraining Dataset (Defaults to seeklhy/SynSQL-2.5M)
 gemma-4-sql etl pretrain --dataset seeklhy/SynSQL-2.5M --batch-size 32
 
-# SFT Dataset (Defaults to gretelai/synthetic_text_to_sql)
-gemma-4-sql etl sft --dataset gretelai/synthetic_text_to_sql --batch-size 16
+# SFT Dataset from a local file (Filename input)
+gemma-4-sql etl sft --dataset ./data/my_local_dataset.json --batch-size 16
 
 # Post-Training Dataset (Defaults to xlangai/spider2-lite)
 gemma-4-sql etl posttrain --dataset xlangai/spider2-lite --batch-size 8
@@ -203,7 +212,62 @@ gemma-4-sql export --model gemma-4 --path ./release/gemma-4-sql-v1 --backend max
 **Inference (`generate`)**:
 Run a one-off text-to-SQL generation.
 ```bash
+# Standard generation
 gemma-4-sql generate --model gemma-4 --prompt "How many active users are there?" --backend pytorch
+
+# Filename input (via shell substitution) and Filename output (via redirection)
+gemma-4-sql generate --model gemma-4 --prompt "$(cat my_prompt.txt)" --backend pytorch > generated_query.sql
+```
+
+**Multi-Turn Chat (`chat`)**:
+Run a multi-turn conversational SQL interaction, persisting context history between messages.
+```bash
+# Execute a chat turn with existing history
+gemma-4-sql chat --model gemma-4 \
+    --prompt "And what about 2025?" \
+    --history '[{"role": "user", "content": "Show sales for 2024"}, {"role": "assistant", "content": "SELECT * FROM sales WHERE year = 2024"}]' \
+    --backend jax
+```
+
+#### Using the Chat Python SDK
+```python
+from gemma_4_sql.sdk.chat import chat_turn
+
+history = [
+    {"role": "user", "content": "Show sales for 2024"}, 
+    {"role": "assistant", "content": "SELECT * FROM sales WHERE year = 2024"}
+]
+
+result = chat_turn(
+    model_name="gemma-4",
+    history=history,
+    new_prompt="And what about 2025?",
+    backend="jax"
+)
+print(f"Assistant Response: {result.get('response')}")
+```
+
+**Model Serving (`serve`)**:
+Serve a trained model using continuous batching for high-throughput inference (e.g., via vLLM or native JAX/MaxText servers).
+```bash
+# Serve the model on port 8000
+gemma-4-sql serve --model gemma-4 \
+    --port 8000 \
+    --max-batch-size 256 \
+    --backend pytorch
+```
+
+#### Using the Serve Python SDK
+```python
+from gemma_4_sql.sdk.serve import serve_model
+
+result = serve_model(
+    model_name="gemma-4",
+    port=8000,
+    max_batch_size=256,
+    backend="jax"
+)
+print(f"Server Status: {result.get('status')}")
 ```
 
 ### Tokenization (`tokenize`)
@@ -226,6 +290,12 @@ The `LiveDatabaseEngine` powers the model evaluation and self-correction agent. 
 ```bash
 # Execute a basic query against an in-memory SQLite DB
 gemma-4-sql execute --query "SELECT 1" --db-type sqlite
+
+# Connect to a live database using a Database connection string
+gemma-4-sql execute \
+  --db-type duckdb \
+  --db-path "my_database.duckdb" \
+  --query "SELECT * FROM users;"
 
 # Initialize a schema and run a query against DuckDB
 gemma-4-sql execute \
@@ -283,6 +353,35 @@ context = retrieve_relevant_schema(prompt=prompt, schema=schema)
 # 3. Build a fully augmented prompt
 augmented_prompt = build_rag_prompt(prompt=prompt, ddl=ddl)
 print(augmented_prompt)
+```
+
+### Dynamic Few-Shot Prompting (`few-shot`)
+
+Beyond providing schema context, you can dynamically build prompts that include examples of input-output pairs to guide the model's generation pattern.
+
+#### Using the CLI
+```bash
+gemma-4-sql few-shot --model gemma-4 \
+    --prompt "Show the total sales for 2024" \
+    --examples '[{"input": "Show sales for 2023", "output": "SELECT SUM(amount) FROM sales WHERE year = 2023;"}]' \
+    --backend jax
+```
+
+#### Using the Few-Shot Python SDK
+```python
+from gemma_4_sql.sdk.few_shot import build_few_shot_prompt
+
+examples = [
+    {"input": "Show sales for 2023", "output": "SELECT SUM(amount) FROM sales WHERE year = 2023;"}
+]
+
+result = build_few_shot_prompt(
+    model_name="gemma-4",
+    prompt="Show the total sales for 2024",
+    examples=examples,
+    backend="jax"
+)
+print(f"Few-Shot Prompt:\n{result.get('few_shot_prompt')}")
 ```
 
 ### Agentic Loop (Self-Correction)

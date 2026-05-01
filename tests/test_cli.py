@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+
 """
 Tests for the CLI module.
 """
@@ -234,8 +235,9 @@ def test_cli_log_metrics(capsys: CaptureFixture[str]) -> None:
     args = ["log", "--step", "100", "--metrics", "loss=0.5,acc=0.9", "--backend", "jax"]
     cli(args)
     captured = capsys.readouterr()
-    assert "Logging: step=100, metrics=loss=0.5,acc=0.9, backend=jax" in captured.out
-    assert "status': 'success'" in captured.out
+    assert "Logging: step=100, metrics=loss=0.5,acc=0.9, log_dir=logs, backend=jax" in captured.out
+    assert "status': 'mocked" in captured.out
+
 
 def test_cli_tokenize_encode(capsys: CaptureFixture[str]) -> None:
     """Test the CLI tokenize command (encode)."""
@@ -245,6 +247,7 @@ def test_cli_tokenize_encode(capsys: CaptureFixture[str]) -> None:
     assert "Encoded:" in captured.out
     assert "[83, 69, 76, 69, 67, 84, 32, 42]" in captured.out
 
+
 def test_cli_tokenize_decode(capsys: CaptureFixture[str]) -> None:
     """Test the CLI tokenize command (decode)."""
     args = ["tokenize", "--decode", "83, 69, 76, 69, 67, 84, 32, 42"]
@@ -253,12 +256,16 @@ def test_cli_tokenize_decode(capsys: CaptureFixture[str]) -> None:
     assert "Decoded:" in captured.out
     assert "SELECT *" in captured.out
 
+
 def test_cli_tokenize_decode_error(capsys: CaptureFixture[str]) -> None:
     """Test the CLI tokenize command (decode error)."""
     args = ["tokenize", "--decode", "invalid, data"]
     cli(args)
     captured = capsys.readouterr()
-    assert "Error: --decode requires a comma-separated list of integers." in captured.out
+    assert (
+        "Error: --decode requires a comma-separated list of integers." in captured.out
+    )
+
 
 def test_cli_tokenize_none(capsys: CaptureFixture[str]) -> None:
     """Test the CLI tokenize command (neither encode nor decode)."""
@@ -266,6 +273,7 @@ def test_cli_tokenize_none(capsys: CaptureFixture[str]) -> None:
     cli(args)
     captured = capsys.readouterr()
     assert "Must provide either --encode or --decode" in captured.out
+
 
 def test_cli_execute_success(capsys: CaptureFixture[str]) -> None:
     """Test the CLI execute command (success)."""
@@ -275,59 +283,88 @@ def test_cli_execute_success(capsys: CaptureFixture[str]) -> None:
     assert "Execution Successful!" in captured.out
     assert "[(1,)]" in captured.out
 
+
 def test_cli_execute_fail(capsys: CaptureFixture[str]) -> None:
     """Test the CLI execute command (failure)."""
-    args = ["execute", "--query", "SELECT * FROM non_existent_table", "--db-type", "sqlite"]
+    args = [
+        "execute",
+        "--query",
+        "SELECT * FROM non_existent_table",
+        "--db-type",
+        "sqlite",
+    ]
     cli(args)
     captured = capsys.readouterr()
     assert "Execution Failed!" in captured.out
     assert "no such table: non_existent_table" in captured.out
 
+
 def test_cli_execute_kwargs(capsys: CaptureFixture[str]) -> None:
     """Test the CLI execute command (with kwargs)."""
-    args = ["execute", "--query", "SELECT 1 as num", "--db-type", "sqlite", "--db-kwargs", '{"timeout": 10}']
+    args = [
+        "execute",
+        "--query",
+        "SELECT 1 as num",
+        "--db-type",
+        "sqlite",
+        "--db-kwargs",
+        '{"timeout": 10}',
+    ]
     cli(args)
     captured = capsys.readouterr()
     assert "Execution Successful!" in captured.out
 
+
 def test_cli_embed_duckdb_prompt(capsys: CaptureFixture[str]) -> None:
     """Test the CLI embed-duckdb command with a prompt."""
-    import sys
+
     mock_duckdb = MagicMock()
     mock_conn = MagicMock()
     mock_duckdb.connect.return_value = mock_conn
     mock_conn.execute.return_value.fetchall.return_value = [("Success!",)]
-    
+
     with patch.dict("sys.modules", {"duckdb": mock_duckdb}):
         with patch("gemma_4_sql.cli.embed_in_duckdb"):
-            args = ["embed-duckdb", "--prompt", "Find users", "--ddl", "CREATE TABLE a (id int);"]
+            args = [
+                "embed-duckdb",
+                "--prompt",
+                "Find users",
+                "--ddl",
+                "CREATE TABLE a (id int);",
+            ]
             cli(args)
             captured = capsys.readouterr()
             assert "Embedding Gemma in DuckDB:" in captured.out
             assert "Result: Success!" in captured.out
 
+
 def test_cli_embed_duckdb_no_prompt(capsys: CaptureFixture[str]) -> None:
     """Test the CLI embed-duckdb command without a prompt."""
-    import sys
+
     mock_duckdb = MagicMock()
     mock_conn = MagicMock()
     mock_duckdb.connect.return_value = mock_conn
-    
+
     with patch.dict("sys.modules", {"duckdb": mock_duckdb}):
         with patch("gemma_4_sql.cli.embed_in_duckdb"):
             args = ["embed-duckdb"]
             cli(args)
             captured = capsys.readouterr()
-            assert "UDF 'ask_gemma' registered. Provide a --prompt to execute it." in captured.out
+            assert (
+                "UDF 'ask_gemma' registered. Provide a --prompt to execute it."
+                in captured.out
+            )
+
 
 def test_cli_embed_duckdb_missing(capsys: CaptureFixture[str]) -> None:
     """Test the CLI embed-duckdb command when duckdb is missing."""
-    import sys
+
     with patch.dict("sys.modules", {"duckdb": None}):
         args = ["embed-duckdb"]
         cli(args)
         captured = capsys.readouterr()
         assert "duckdb is required." in captured.out
+
 
 def test_cli_rag_extract(capsys: CaptureFixture[str]) -> None:
     """Test the CLI rag command (extract action)."""
@@ -336,9 +373,59 @@ def test_cli_rag_extract(capsys: CaptureFixture[str]) -> None:
     captured = capsys.readouterr()
     assert "Extracting schema entities..." in captured.out
 
+
 def test_cli_rag_retrieve(capsys: CaptureFixture[str]) -> None:
     """Test the CLI rag command (retrieve action)."""
-    args = ["rag", "--action", "retrieve", "--prompt", "test", "--ddl", "CREATE TABLE t (id INT);"]
+    args = [
+        "rag",
+        "--action",
+        "retrieve",
+        "--prompt",
+        "test",
+        "--ddl",
+        "CREATE TABLE t (id INT);",
+    ]
     cli(args)
     captured = capsys.readouterr()
     assert "Retrieving relevant schema..." in captured.out
+
+
+def test_cli_serve(capsys: CaptureFixture[str]) -> None:
+    """Test the CLI serve command."""
+    args = ["serve", "--model", "my-model", "--port", "9000", "--max-batch-size", "128", "--backend", "jax"]
+    cli(args)
+    captured = capsys.readouterr()
+    assert "Serving: model=my-model, port=9000" in captured.out
+    assert "'backend': 'jax'" in captured.out
+
+
+def test_cli_chat(capsys: CaptureFixture[str]) -> None:
+    """Test the CLI chat command."""
+    args = ["chat", "--prompt", "hello", "--history", '[{"role": "user", "content": "hi"}]', "--backend", "jax"]
+    cli(args)
+    captured = capsys.readouterr()
+    assert "Chat: model=" in captured.out
+    assert "'backend': 'jax'" in captured.out
+
+def test_cli_chat_invalid_history(capsys: CaptureFixture[str]) -> None:
+    """Test the CLI chat command with invalid history json."""
+    args = ["chat", "--prompt", "hello", "--history", "invalid_json"]
+    cli(args)
+    captured = capsys.readouterr()
+    assert "Error: --history must be a valid JSON list" in captured.out
+
+
+def test_cli_few_shot(capsys: CaptureFixture[str]) -> None:
+    """Test the CLI few-shot command."""
+    args = ["few-shot", "--prompt", "hello", "--examples", '[{"input": "in", "output": "out"}]', "--backend", "jax"]
+    cli(args)
+    captured = capsys.readouterr()
+    assert "Few-Shot: model=" in captured.out
+    assert "'backend': 'jax'" in captured.out
+
+def test_cli_few_shot_invalid_examples(capsys: CaptureFixture[str]) -> None:
+    """Test the CLI few-shot command with invalid examples json."""
+    args = ["few-shot", "--prompt", "hello", "--examples", "invalid_json"]
+    cli(args)
+    captured = capsys.readouterr()
+    assert "Error: --examples must be a valid JSON list" in captured.out

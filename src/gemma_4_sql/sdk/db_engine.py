@@ -22,6 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     duckdb = None  # pragma: no cover
 
+
 class LiveDatabaseEngine:
     """
     Executes SQL queries against an underlying database engine
@@ -116,7 +117,7 @@ class LiveDatabaseEngine:
             if self.db_type == "duckdb":
                 results = self.conn.execute(query).fetchall()
                 return True, results, None
-                
+
             cursor = self.conn.cursor()
             cursor.execute(query)
             if cursor.description is not None:
@@ -142,7 +143,7 @@ class LiveDatabaseEngine:
         try:
             if self.db_type == "duckdb":
                 return self.conn.execute(query).fetchall()
-                
+
             cursor = self.conn.cursor()
             cursor.execute(query)
             if cursor.description is not None:
