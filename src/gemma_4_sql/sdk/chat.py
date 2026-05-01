@@ -12,7 +12,7 @@ def chat_turn(
     history: list[dict[str, str]],
     new_prompt: str,
     backend: str = "jax",
-    **kwargs: Any
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """
     Executes a single turn in a multi-turn SQL conversation.
@@ -28,4 +28,5 @@ def chat_turn(
         A dictionary containing the response and the updated history.
     """
     from gemma_4_sql.sdk.registry import get_backend
+
     return get_backend(backend).chat_turn(model_name, history, new_prompt, **kwargs)

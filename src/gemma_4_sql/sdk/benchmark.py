@@ -26,4 +26,5 @@ def benchmark(
         Benchmarking metrics.
     """
     from gemma_4_sql.sdk.registry import get_backend
+
     return get_backend(backend).benchmark_model(model_name, hardware, batch_size)

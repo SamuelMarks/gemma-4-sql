@@ -1,6 +1,7 @@
 """Tests for MaxText logging."""
 
 from unittest.mock import MagicMock
+
 from gemma_4_sql.backends.maxtext import logging as maxtext_logging
 
 

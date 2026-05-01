@@ -22,4 +22,5 @@ def export_model(
         Export results dictionary.
     """
     from gemma_4_sql.sdk.registry import get_backend
+
     return get_backend(backend).export_model(model_name, export_path)

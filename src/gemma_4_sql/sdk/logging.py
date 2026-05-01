@@ -23,4 +23,5 @@ def log_metrics(
         Logging results dictionary.
     """
     from gemma_4_sql.sdk.registry import get_backend
+
     return get_backend(backend).log_metrics(metrics, step, log_dir)

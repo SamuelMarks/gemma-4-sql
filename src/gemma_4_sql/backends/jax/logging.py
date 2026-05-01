@@ -12,7 +12,9 @@ except Exception:  # pragma: no cover
     SummaryWriter = None
 
 
-def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> dict[str, Any]:
+def log_metrics(
+    metrics: dict[str, float], step: int, log_dir: str = "logs"
+) -> dict[str, Any]:
     """
     Logs metrics for a JAX training run using TensorBoard.
 

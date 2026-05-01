@@ -15,7 +15,7 @@ def reload_mod(mod_name, mocks, run_func=None):
             pass
 
 
-def test_mock_even_more3():
+def test_mock_even_more3():  # noqa: C901
     def run_dpo(mod):
         try:
             mod.dpo_loss({}, {})

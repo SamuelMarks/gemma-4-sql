@@ -1,6 +1,7 @@
 """Tests for JAX logging."""
 
 from unittest.mock import MagicMock
+
 from gemma_4_sql.backends.jax import logging as jax_logging
 
 

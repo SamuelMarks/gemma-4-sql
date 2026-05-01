@@ -2,12 +2,14 @@
 Tests for duckdb support in ETL.
 """
 
+import importlib
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-import importlib
-import sys
+from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
+
 
 @pytest.fixture(autouse=True)
 def sync_backends():
@@ -18,8 +20,6 @@ def sync_backends():
             importlib.reload(etl_mod)
         if mod:
             importlib.reload(mod)
-
-from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
 
 
 @patch("gemma_4_sql.backends.jax.etl.datasets", new=MagicMock())

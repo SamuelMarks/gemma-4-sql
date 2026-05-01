@@ -1,6 +1,7 @@
 """Tests for PyTorch logging."""
 
 from unittest.mock import MagicMock
+
 from gemma_4_sql.backends.pytorch import logging as pytorch_logging
 
 

@@ -10,9 +10,11 @@ def test_build_few_shot_prompt_jax():
     assert res["model"] == "foo"
     assert "Input: in" in res["few_shot_prompt"]
 
+
 def test_build_few_shot_prompt_jax_missing():
     with mock.patch.dict(sys.modules, {"jax": None}):
         import importlib
+
         importlib.reload(fs)
         res = fs.build_few_shot_prompt("foo", "prompt", [])
         assert res["status"] == "mocked_missing_jax"

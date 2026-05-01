@@ -1,17 +1,21 @@
+import sys
+from unittest import mock
 
 import pytest
+
+
 @pytest.fixture(autouse=True)
 def clean_sys_modules():
     import sys
+
     keys = list(sys.modules.keys())
     yield
     for k in list(sys.modules.keys()):
         if k not in keys and "gemma_4_sql" in k:
             del sys.modules[k]
-"""Tests for MaxText ETL module."""
 
-import sys
-from unittest import mock
+
+"""Tests for MaxText ETL module."""
 
 
 def test_maxtext_etl_mocked() -> None:

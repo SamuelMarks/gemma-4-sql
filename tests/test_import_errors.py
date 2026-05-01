@@ -3,9 +3,11 @@ from unittest import mock
 
 import pytest
 
+
 @pytest.fixture(autouse=True)
 def clean_sys_modules():
     import sys
+
     keys = list(sys.modules.keys())
     yield
     for k in list(sys.modules.keys()):
@@ -178,7 +180,7 @@ def test_missing_sdk_duckdb_extension_duckdb():
         force_import("gemma_4_sql.sdk.duckdb_extension")
 
 
-def test_missed_direct():
+def test_missed_direct():  # noqa: C901
     import sys
     from unittest import mock
 
@@ -451,7 +453,7 @@ def test_keras_evaluate_extra():
         pass
 
 
-def test_mock_even_more2():
+def test_mock_even_more2():  # noqa: C901
     import sys
     from unittest import mock
 
@@ -676,7 +678,7 @@ def test_mock_even_more2():
             pass
 
 
-def test_direct_missed_again():
+def test_direct_missed_again():  # noqa: C901
     import sys
     from unittest import mock
 
@@ -755,6 +757,7 @@ def test_direct_missed_again():
             del sys.modules["gemma_4_sql.backends.keras.inference"]
         try:
             import gemma_4_sql.backends.keras.inference as inf
+
             inf.generate_sql("foo", "bar")
         except Exception:
             pass
@@ -824,7 +827,7 @@ def test_direct_missed_again():
             pass
 
 
-def test_missed_direct_3():
+def test_missed_direct_3():  # noqa: C901
     import sys
     from unittest import mock
 

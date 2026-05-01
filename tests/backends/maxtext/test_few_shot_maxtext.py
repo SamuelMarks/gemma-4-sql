@@ -9,9 +9,14 @@ def test_build_few_shot_prompt_maxtext():
     assert res["backend"] == "maxtext"
     assert res["model"] == "foo"
 
+
 def test_build_few_shot_prompt_maxtext_missing():
-    with mock.patch.dict(sys.modules, {"maxtext.models.gemma4": None, "maxtext.models": None, "maxtext": None}):
+    with mock.patch.dict(
+        sys.modules,
+        {"maxtext.models.gemma4": None, "maxtext.models": None, "maxtext": None},
+    ):
         import importlib
+
         importlib.reload(fs)
         res = fs.build_few_shot_prompt("foo", "prompt", [])
         assert res["status"] == "mocked_missing_maxtext"

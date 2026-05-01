@@ -13,10 +13,7 @@ except Exception:
 
 
 def build_few_shot_prompt(
-    model_name: str,
-    prompt: str,
-    examples: list[dict[str, str]],
-    **kwargs: Any
+    model_name: str, prompt: str, examples: list[dict[str, str]], **kwargs: Any
 ) -> dict[str, Any]:
     """
     Builds a dynamic few-shot prompt using MaxText backend.
@@ -33,9 +30,14 @@ def build_few_shot_prompt(
     if gemma4 is not None:
         status = "success_maxtext_few_shot"  # pragma: no cover
         formatted_examples = "\n".join(  # pragma: no cover
-            [f"Input: {ex.get('input', '')}\nOutput: {ex.get('output', '')}" for ex in examples]  # pragma: no cover
+            [
+                f"Input: {ex.get('input', '')}\nOutput: {ex.get('output', '')}"
+                for ex in examples
+            ]  # pragma: no cover
         )  # pragma: no cover
-        full_prompt = f"{formatted_examples}\nInput: {prompt}\nOutput: "  # pragma: no cover
+        full_prompt = (
+            f"{formatted_examples}\nInput: {prompt}\nOutput: "  # pragma: no cover
+        )
     else:
         status = "mocked_missing_maxtext"
         full_prompt = "Fallback few-shot prompt"

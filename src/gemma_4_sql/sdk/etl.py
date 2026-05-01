@@ -44,6 +44,7 @@ def _route_backend(
     }
 
     from gemma_4_sql.sdk.registry import get_backend
+
     return get_backend(backend).build_dataloader(**kwargs)
 
 

@@ -14,7 +14,7 @@ repos:
     hooks:
       - id: tests-and-badges
         name: Run tests and update badges
-        entry: python3 scripts/update_badges.py
+        entry: python3.12 scripts/update_badges.py
         language: system
         pass_filenames: false
         always_run: true

@@ -1,6 +1,7 @@
 """Tests for Keras logging."""
 
 from unittest.mock import MagicMock
+
 from gemma_4_sql.backends.keras import logging as keras_logging
 
 

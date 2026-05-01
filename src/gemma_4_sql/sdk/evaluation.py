@@ -47,4 +47,5 @@ def evaluate(
     }
 
     from gemma_4_sql.sdk.registry import get_backend
+
     return get_backend(backend).evaluate_model(**kwargs)

@@ -13,10 +13,7 @@ except Exception:
 
 
 def build_few_shot_prompt(
-    model_name: str,
-    prompt: str,
-    examples: list[dict[str, str]],
-    **kwargs: Any
+    model_name: str, prompt: str, examples: list[dict[str, str]], **kwargs: Any
 ) -> dict[str, Any]:
     """
     Builds a dynamic few-shot prompt using PyTorch backend.
@@ -33,7 +30,10 @@ def build_few_shot_prompt(
     if torch is not None:
         status = "success_pytorch_few_shot"
         formatted_examples = "\n".join(
-            [f"Input: {ex.get('input', '')}\nOutput: {ex.get('output', '')}" for ex in examples]
+            [
+                f"Input: {ex.get('input', '')}\nOutput: {ex.get('output', '')}"
+                for ex in examples
+            ]
         )
         full_prompt = f"{formatted_examples}\nInput: {prompt}\nOutput: "
     else:

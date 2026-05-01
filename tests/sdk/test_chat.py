@@ -10,6 +10,7 @@ def test_chat_turn_routing():
         assert res["model"] == "foo"
         assert len(res["history"]) == 2
 
+
 def test_chat_turn_routing_error():
     with pytest.raises(ValueError):
         chat_turn("foo", [], "prompt", backend="unknown")

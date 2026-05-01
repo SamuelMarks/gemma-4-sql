@@ -12,9 +12,11 @@ def test_chat_turn_jax():
     assert res["history"][-1]["role"] == "assistant"
     assert "how are you?" in res["response"]
 
+
 def test_chat_turn_jax_missing():
     with mock.patch.dict(sys.modules, {"jax": None}):
         import importlib
+
         importlib.reload(chat)
         res = chat.chat_turn("foo", [], "prompt")
         assert res["status"] == "mocked_missing_jax"

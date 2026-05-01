@@ -4,21 +4,41 @@ This guide covers the primary workflows for using `gemma-4-sql` via the Command 
 
 ## Installation
 
-Depending on the backend you plan to use, install the necessary extra packages:
+The core package now installs everything by default, including all backends (PyTorch, JAX, Keras, MaxText) and DuckDB support:
 
 ```bash
-# Core package (no backend)
+# Install everything (all backends + DuckDB)
 pip install .
 
-# With JAX support
-pip install ".[jax]"
-
-# With Keras support
-pip install ".[keras]"
-
-# With MaxText support
-pip install ".[maxtext]"
+# You can also use the default/all extras explicitly:
+pip install ".[all]"
 ```
+
+## Development
+
+To contribute to `gemma-4-sql` or modify its logic, install the development dependencies. This project uses `hatch` for package management, `ruff` for linting and formatting, `mypy` for strict type-checking, and `pytest` for testing.
+
+1. **Install Dev Dependencies:**
+   ```bash
+   pip install -e ".[dev]"
+   # Or directly: pip install -r requirements-dev.txt
+   ```
+
+2. **Run Linting & Formatting (`ruff`):**
+   ```bash
+   ruff check .
+   ruff format .
+   ```
+
+3. **Run Type Checking (`mypy`):**
+   ```bash
+   mypy src/gemma_4_sql
+   ```
+
+4. **Run Tests with Coverage (`pytest`):**
+   ```bash
+   pytest --cov=src/gemma_4_sql tests/
+   ```
 
 ---
 
@@ -289,7 +309,26 @@ print(f"Tokens/sec: {metrics['tokens_per_sec']}")
 
 ---
 
-## 10. Logging (TensorBoard Integration)
+## 10. Tokenization
+
+You can manually encode strings or decode tokens using the same tokenization logic the ETL process uses. It defaults to character-level encoding, or it can use a Hugging Face tokenizer if provided.
+
+### CLI
+
+```bash
+# Encode text
+gemma-4-sql tokenize --encode "SELECT * FROM users"
+
+# Decode tokens
+gemma-4-sql tokenize --decode "83, 69, 76, 69, 67, 84"
+
+# Use a Hugging Face model
+gemma-4-sql tokenize --encode "SELECT * FROM users" --hf-model "google/gemma-2b"
+```
+
+---
+
+## 11. Logging (TensorBoard Integration)
 
 Gemma-4-SQL provides native integration with TensorBoard across all backend topologies (`jax`, `maxtext`, `keras`, `pytorch`). You can log arbitrary metrics (loss, accuracy, execution accuracy) during training, pretraining, or evaluation.
 

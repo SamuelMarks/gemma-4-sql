@@ -12,7 +12,7 @@ def build_few_shot_prompt(
     prompt: str,
     examples: list[dict[str, str]],
     backend: str = "jax",
-    **kwargs: Any
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """
     Builds a dynamic few-shot prompt.
@@ -28,4 +28,7 @@ def build_few_shot_prompt(
         A dictionary containing the generated few-shot prompt.
     """
     from gemma_4_sql.sdk.registry import get_backend
-    return get_backend(backend).build_few_shot_prompt(model_name, prompt, examples, **kwargs)
+
+    return get_backend(backend).build_few_shot_prompt(
+        model_name, prompt, examples, **kwargs
+    )

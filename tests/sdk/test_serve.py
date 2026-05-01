@@ -9,6 +9,7 @@ def test_serve_model_routing():
         assert res["backend"] == backend
         assert res["model"] == "foo"
 
+
 def test_serve_model_routing_error():
     with pytest.raises(ValueError):
         serve_model("foo", backend="unknown")

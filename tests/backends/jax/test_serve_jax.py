@@ -12,9 +12,11 @@ def test_serve_model_jax():
     assert res["max_batch_size"] == 16
     assert res["mode"] == "continuous_batching"
 
+
 def test_serve_model_jax_missing():
     with mock.patch.dict(sys.modules, {"jax": None}):
         import importlib
+
         importlib.reload(srv)
         res = srv.serve_model("foo")
         assert res["status"] == "mocked_missing_jax"

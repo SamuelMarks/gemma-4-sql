@@ -13,10 +13,7 @@ except Exception:
 
 
 def serve_model(
-    model_name: str,
-    port: int = 8000,
-    max_batch_size: int = 256,
-    **kwargs: Any
+    model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: Any
 ) -> dict[str, Any]:
     """
     Serves a model using MaxText continuous batching.

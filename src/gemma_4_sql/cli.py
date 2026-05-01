@@ -8,10 +8,10 @@ import argparse
 import json
 
 from gemma_4_sql.sdk import (
-    benchmark,
     LiveDatabaseEngine,
     SQLTokenizer,
     apply_peft,
+    benchmark,
     build_few_shot_prompt,
     build_rag_prompt,
     chat_turn,
@@ -349,7 +349,6 @@ def log_metrics_cmd(args: argparse.Namespace) -> None:
     print(f"Result: {result}")
 
 
-
 def serve_cmd(args: argparse.Namespace) -> None:
     """Serve a model using continuous batching."""
     print(
@@ -363,7 +362,6 @@ def serve_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
     )
     print(f"Result: {result}")
-
 
 
 def chat_cmd(args: argparse.Namespace) -> None:
@@ -387,7 +385,6 @@ def chat_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
     )
     print(f"Result: {result}")
-
 
 
 def few_shot_cmd(args: argparse.Namespace) -> None:
@@ -698,16 +695,15 @@ def cli(args: list[str] | None = None) -> None:
     )
     parser_evaluate.set_defaults(func=evaluate_cmd)
 
-
-
-
     # Few-Shot
     parser_few_shot = subparsers.add_parser(
         "few-shot", help="Build a dynamic few-shot prompt."
     )
     parser_few_shot.add_argument("--model", default="gemma-4", help="Model name.")
     parser_few_shot.add_argument("--prompt", required=True, help="New user prompt.")
-    parser_few_shot.add_argument("--examples", default="[]", help="JSON string representing few-shot examples.")
+    parser_few_shot.add_argument(
+        "--examples", default="[]", help="JSON string representing few-shot examples."
+    )
     parser_few_shot.add_argument(
         "--backend",
         default="jax",
@@ -721,7 +717,11 @@ def cli(args: list[str] | None = None) -> None:
     )
     parser_chat.add_argument("--model", default="gemma-4", help="Model name.")
     parser_chat.add_argument("--prompt", required=True, help="New user prompt.")
-    parser_chat.add_argument("--history", default="[]", help="JSON string representing the previous conversation history.")
+    parser_chat.add_argument(
+        "--history",
+        default="[]",
+        help="JSON string representing the previous conversation history.",
+    )
     parser_chat.add_argument(
         "--backend",
         default="jax",
@@ -735,7 +735,9 @@ def cli(args: list[str] | None = None) -> None:
     )
     parser_serve.add_argument("--model", default="gemma-4", help="Model name.")
     parser_serve.add_argument("--port", type=int, default=8000, help="Port to bind to.")
-    parser_serve.add_argument("--max-batch-size", type=int, default=256, help="Maximum batch size.")
+    parser_serve.add_argument(
+        "--max-batch-size", type=int, default=256, help="Maximum batch size."
+    )
     parser_serve.add_argument(
         "--backend",
         default="pytorch",
@@ -916,7 +918,10 @@ def cli(args: list[str] | None = None) -> None:
     )
     parser_benchmark.add_argument("--model", default="gemma-4", help="Model name.")
     parser_benchmark.add_argument(
-        "--hardware", default="gpu", choices=["gpu", "tpu", "cpu"], help="Target hardware."
+        "--hardware",
+        default="gpu",
+        choices=["gpu", "tpu", "cpu"],
+        help="Target hardware.",
     )
     parser_benchmark.add_argument(
         "--batch-size", type=int, default=1, help="Batch size for benchmark."

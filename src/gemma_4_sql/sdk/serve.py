@@ -12,7 +12,7 @@ def serve_model(
     port: int = 8000,
     max_batch_size: int = 256,
     backend: str = "pytorch",
-    **kwargs: Any
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """
     Serves a model using continuous batching.
@@ -28,4 +28,5 @@ def serve_model(
         Serving configuration and status dictionary.
     """
     from gemma_4_sql.sdk.registry import get_backend
+
     return get_backend(backend).serve_model(model_name, port, max_batch_size, **kwargs)

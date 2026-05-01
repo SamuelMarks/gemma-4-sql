@@ -2,5 +2,14 @@ datasets
 grain; python_version >= '3.11'
 jax
 jaxlib
+optax
+orbax-checkpoint
+flax @ git+https://github.com/google/flax.git
+jax-bonsai @ git+https://github.com/SamuelMarks/bonsai.git@gemma4
 keras
 maxtext @ git+https://github.com/google/maxtext.git ; python_version >= '3.12'
+torch
+transformers
+safetensors
+peft
+duckdb

@@ -8,7 +8,7 @@ from typing import Any
 
 try:
     import torch
-    import torch.nn.functional as F
+    import torch.nn.functional as F  # noqa: N812
 except Exception:
     torch = None
     F = None

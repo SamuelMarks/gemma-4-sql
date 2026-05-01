@@ -44,4 +44,5 @@ def run_agentic_loop(
     }
 
     from gemma_4_sql.sdk.registry import get_backend
+
     return get_backend(backend).run_agentic_loop(**kwargs)

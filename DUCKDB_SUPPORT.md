@@ -9,9 +9,9 @@
 
 ## Requirements
 
-DuckDB is an optional feature. Ensure it is installed in your Python environment by adding the `[duckdb]` extra:
+DuckDB is now installed by default with the main package:
 ```bash
-pip install ".[duckdb]"
+pip install .
 ```
 
 ## 1. Pretraining, Retraining, and Posttraining

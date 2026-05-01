@@ -68,3 +68,15 @@ def test_missing_last():
         evaluate_model("a", "b", dataloader=EvalLoaderK())
     except:
         pass
+
+
+def test_missing_dummies():
+    from gemma_4_sql.backends.jax.peft import missing_dummy as mjax
+    from gemma_4_sql.backends.keras.peft import missing_dummy as mkeras
+    from gemma_4_sql.backends.maxtext.peft import missing_dummy as mmaxtext
+    from gemma_4_sql.backends.pytorch.peft import missing_dummy as mpytorch
+
+    mjax("a", 1, 2)
+    mkeras("a", 1, 2)
+    mmaxtext("a", 1, 2)
+    mpytorch("a", 1, 2)

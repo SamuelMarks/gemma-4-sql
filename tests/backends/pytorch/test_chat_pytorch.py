@@ -9,9 +9,11 @@ def test_chat_turn_pytorch():
     assert res["backend"] == "pytorch"
     assert res["model"] == "foo"
 
+
 def test_chat_turn_pytorch_missing():
     with mock.patch.dict(sys.modules, {"torch": None}):
         import importlib
+
         importlib.reload(chat)
         res = chat.chat_turn("foo", [], "prompt")
         assert res["status"] == "mocked_missing_pytorch"

@@ -46,3 +46,13 @@ def apply_lora(
         "lora_dropout": lora_dropout,
         "status": status,
     }
+
+
+def missing_dummy(
+    model_name: str,
+    rank: int,
+    alpha: int,
+    target_modules: list[str] | None = None,
+) -> dict[str, Any]:
+    """Dummy function for missing protocol implementation."""
+    return {"status": "dummy"}

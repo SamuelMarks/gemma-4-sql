@@ -12,9 +12,14 @@ def test_serve_model_maxtext():
     assert res["max_batch_size"] == 16
     assert res["mode"] == "continuous_batching"
 
+
 def test_serve_model_maxtext_missing():
-    with mock.patch.dict(sys.modules, {"maxtext.models.gemma4": None, "maxtext.models": None, "maxtext": None}):
+    with mock.patch.dict(
+        sys.modules,
+        {"maxtext.models.gemma4": None, "maxtext.models": None, "maxtext": None},
+    ):
         import importlib
+
         importlib.reload(srv)
         res = srv.serve_model("foo")
         assert res["status"] == "mocked_missing_maxtext"

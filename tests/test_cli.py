@@ -1,12 +1,12 @@
 from unittest.mock import MagicMock, patch
 
-"""
-Tests for the CLI module.
-"""
-
 from pytest import CaptureFixture
 
 from gemma_4_sql.cli import cli
+
+"""
+Tests for the CLI module.
+"""
 
 
 def test_cli_etl_pretrain(capsys: CaptureFixture[str]) -> None:
@@ -235,7 +235,10 @@ def test_cli_log_metrics(capsys: CaptureFixture[str]) -> None:
     args = ["log", "--step", "100", "--metrics", "loss=0.5,acc=0.9", "--backend", "jax"]
     cli(args)
     captured = capsys.readouterr()
-    assert "Logging: step=100, metrics=loss=0.5,acc=0.9, log_dir=logs, backend=jax" in captured.out
+    assert (
+        "Logging: step=100, metrics=loss=0.5,acc=0.9, log_dir=logs, backend=jax"
+        in captured.out
+    )
     assert "status': 'mocked" in captured.out
 
 
@@ -392,7 +395,17 @@ def test_cli_rag_retrieve(capsys: CaptureFixture[str]) -> None:
 
 def test_cli_serve(capsys: CaptureFixture[str]) -> None:
     """Test the CLI serve command."""
-    args = ["serve", "--model", "my-model", "--port", "9000", "--max-batch-size", "128", "--backend", "jax"]
+    args = [
+        "serve",
+        "--model",
+        "my-model",
+        "--port",
+        "9000",
+        "--max-batch-size",
+        "128",
+        "--backend",
+        "jax",
+    ]
     cli(args)
     captured = capsys.readouterr()
     assert "Serving: model=my-model, port=9000" in captured.out
@@ -401,11 +414,20 @@ def test_cli_serve(capsys: CaptureFixture[str]) -> None:
 
 def test_cli_chat(capsys: CaptureFixture[str]) -> None:
     """Test the CLI chat command."""
-    args = ["chat", "--prompt", "hello", "--history", '[{"role": "user", "content": "hi"}]', "--backend", "jax"]
+    args = [
+        "chat",
+        "--prompt",
+        "hello",
+        "--history",
+        '[{"role": "user", "content": "hi"}]',
+        "--backend",
+        "jax",
+    ]
     cli(args)
     captured = capsys.readouterr()
     assert "Chat: model=" in captured.out
     assert "'backend': 'jax'" in captured.out
+
 
 def test_cli_chat_invalid_history(capsys: CaptureFixture[str]) -> None:
     """Test the CLI chat command with invalid history json."""
@@ -417,11 +439,20 @@ def test_cli_chat_invalid_history(capsys: CaptureFixture[str]) -> None:
 
 def test_cli_few_shot(capsys: CaptureFixture[str]) -> None:
     """Test the CLI few-shot command."""
-    args = ["few-shot", "--prompt", "hello", "--examples", '[{"input": "in", "output": "out"}]', "--backend", "jax"]
+    args = [
+        "few-shot",
+        "--prompt",
+        "hello",
+        "--examples",
+        '[{"input": "in", "output": "out"}]',
+        "--backend",
+        "jax",
+    ]
     cli(args)
     captured = capsys.readouterr()
     assert "Few-Shot: model=" in captured.out
     assert "'backend': 'jax'" in captured.out
+
 
 def test_cli_few_shot_invalid_examples(capsys: CaptureFixture[str]) -> None:
     """Test the CLI few-shot command with invalid examples json."""

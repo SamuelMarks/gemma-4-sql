@@ -13,10 +13,7 @@ except Exception:
 
 
 def chat_turn(
-    model_name: str,
-    history: list[dict[str, str]],
-    new_prompt: str,
-    **kwargs: Any
+    model_name: str, history: list[dict[str, str]], new_prompt: str, **kwargs: Any
 ) -> dict[str, Any]:
     """
     Executes a single turn in a multi-turn SQL conversation using MaxText.

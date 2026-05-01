@@ -32,13 +32,8 @@ def apply_peft(
     if target_modules is None:
         target_modules = ["q_proj", "v_proj"]
 
-    kwargs = {
-        "model_name": model_name,
-        "target_modules": target_modules,
-        "lora_r": lora_r,
-        "lora_alpha": lora_alpha,
-        "lora_dropout": lora_dropout,
-    }
-
     from gemma_4_sql.sdk.registry import get_backend
-    return get_backend(backend).apply_lora(model_name, target_modules, lora_r, lora_alpha, lora_dropout)
+
+    return get_backend(backend).apply_lora(
+        model_name, target_modules, lora_r, lora_alpha, lora_dropout
+    )
