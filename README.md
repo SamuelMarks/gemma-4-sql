@@ -3,7 +3,7 @@ gemma-4-sql
 
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0) <!-- badges --> ![Test coverage](https://img.shields.io/badge/Test%20coverage-100%25-brightgreen) ![Doc coverage](https://img.shields.io/badge/Doc%20coverage-100%25-brightgreen) <!-- /badges -->
 
-Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch; Keras ; JAX / Bonsai; JAX / MaxText.
+Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch; Keras ; JAX; JAX / MaxText.
 
 **Documentation:**
 - [Extending / Custom Backends](EXTENDING.md)
@@ -19,12 +19,12 @@ Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: Py
 We explicitly integrate with and support the following Gemma 4 model architectures across different ecosystems:
 *   **PyTorch**: Directly imports and uses `Gemma4ForCausalLM` from **[Hugging Face Transformers](https://github.com/huggingface/transformers/tree/main/src/transformers/models/gemma4)**;
 *   **MaxText**: Directly imports and uses `Gemma4Model` from **[AI-Hypercomputer MaxText](https://github.com/AI-Hypercomputer/maxtext/blob/main/src/maxtext/models/gemma4.py)**;
-*   **JAX**: Directly imports and uses `BonsaiModel` from **[bonsai](https://github.com/jax-ml/bonsai)** (specifically at my [fork with a brand new Gemma 4 implementation](https://github.com/SamuelMarks/bonsai/tree/gemma4));
+*   **JAX**: Directly imports and uses `Gemma4Model` 
 *   **Keras**: Supports generic [Keras 3](https://keras.io) workflows.
 
 ### Feature Support Matrix
 
-| Feature | PyTorch Backend | Keras 3 Backend | JAX (Bonsai) | MaxText |
+| Feature | PyTorch Backend | Keras 3 Backend | JAX | MaxText |
 | :--- | :--- | :--- | :--- | :--- |
 | **ETL (Data Loading)** | ✅ Native `DataLoader` | ✅ Grain + `KerasTupleTransform` | ✅ Grain + `JAXFormatTransform` | ✅ Grain + `MaxTextFormatTransform` |
 | **Training (Fit/JIT)** | ✅ `Gemma4ForCausalLM` | ✅ `keras.Model.fit()` | ✅ `@nnx.jit` loop | ✅ `@jax.jit` loop |

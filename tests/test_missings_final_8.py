@@ -16,7 +16,6 @@ def force_test(mod_str, mocks):
 def test_missing_last():
     force_test("gemma_4_sql.backends.jax.dpo", {"jax.nn": None})
     force_test("gemma_4_sql.backends.jax.export", {"orbax.checkpoint": None})
-    force_test("gemma_4_sql.backends.jax.export", {"bonsai.models.gemma4": None})
     force_test("gemma_4_sql.backends.jax.inference", {"flax.nnx": None})
     force_test("gemma_4_sql.backends.jax.quantize", {"jax.numpy": None})
     force_test("gemma_4_sql.backends.jax.train", {"optax": None})

@@ -44,7 +44,6 @@ def test_mock_even_more3():  # noqa: C901
             pass
 
     reload_mod("gemma_4_sql.backends.jax.export", ["orbax.checkpoint"], run_exp)
-    reload_mod("gemma_4_sql.backends.jax.export", ["bonsai.models.gemma4"], run_exp)
 
     def run_inf(mod):
         try:

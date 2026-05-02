@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gemma-4-sql"
 version = "0.0.1"
-description = "Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch; Keras ; JAX / Bonsai; JAX / MaxText "
+description = "Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch; Keras ; JAX; JAX / MaxText "
 readme = "README.md"
 requires-python = ">=3.12"
 dynamic = ["dependencies", "optional-dependencies"]

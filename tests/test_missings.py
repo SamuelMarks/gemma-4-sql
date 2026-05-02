@@ -49,7 +49,6 @@ def test_jax_export_13_38_41():
         except Exception:
             pass
 
-    mock_all(["orbax.checkpoint", "bonsai.models.gemma4"], _test)
 
 
 def test_jax_inference_20():

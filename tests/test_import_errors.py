@@ -479,7 +479,6 @@ def test_mock_even_more2():  # noqa: C901
         except Exception:
             pass
 
-    with mock.patch.dict(sys.modules, {"bonsai.models.gemma4": None}):
         if "gemma_4_sql.backends.jax.export" in sys.modules:
             del sys.modules["gemma_4_sql.backends.jax.export"]
         try:

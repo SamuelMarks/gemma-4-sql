@@ -16,7 +16,7 @@ except Exception:
     jnp = None
 
 try:
-    from bonsai.models.gemma4 import Gemma4Config, Gemma4ForCausalLM
+    from .gemma4 import Gemma4Config, Gemma4ForCausalLM
     from flax import nnx  # pragma: no cover
 except Exception:
     Gemma4ForCausalLM = None
@@ -43,7 +43,8 @@ def jax_beam_search(
                 new_beams.append((seq, score))
                 continue
 
-            logits = model_apply_fn(seq)
+            positions = jnp.arange(seq.shape[1])[None, :]
+            logits = model_apply_fn(seq, positions)
             log_probs = jax.nn.log_softmax(logits, axis=-1)[0]
 
             top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]

@@ -40,7 +40,6 @@ def test_jax_export_13():
 
 
 def test_jax_export_38_41():
-    with mock.patch.dict(sys.modules, {"bonsai.models.gemma4": None}):
         exec_line("gemma_4_sql.backends.jax.export", "export_model", "foo", "bar")
 
 

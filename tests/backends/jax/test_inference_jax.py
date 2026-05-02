@@ -14,6 +14,11 @@ class MockArray:
     def __init__(self, data: Any):
         self.data = data if isinstance(data, list) else [data]
 
+    @property
+    def shape(self):
+        if isinstance(self.data[0], list): return (len(self.data), len(self.data[0]))
+        return (len(self.data),)
+
     def __getitem__(self, idx):
         if isinstance(idx, MockArray):
             # idx is a list of indices
@@ -21,6 +26,8 @@ class MockArray:
         if isinstance(idx, slice):
             return MockArray(self.data[idx])
         if isinstance(idx, tuple):
+            if idx[0] is None:
+                return MockArray([self.data])
             if len(idx) == 2:
                 # very simple mock
                 try:
@@ -44,6 +51,9 @@ class MockArray:
 
 class MockJNP:
     """Mock JNP."""
+
+    def arange(self, val):
+        return MockArray([0]*val)
 
     def array(self, data, dtype=None):
         return MockArray(data)
@@ -84,7 +94,7 @@ class MockGemma4ForCausalLM:
     def __init__(self, config, rngs):
         self.config = config
 
-    def __call__(self, seq):
+    def __call__(self, seq, positions=None):
         logits = [0.0] * 300
         logits[100] = 10.0
         return MockArray([logits])
@@ -121,7 +131,7 @@ def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_jax_beam_search(mock_jax_env: None) -> None:
     jnp_mock = MockJNP()
 
-    def mock_apply_fn(seq: MockArray) -> MockArray:
+    def mock_apply_fn(seq: MockArray, positions=None) -> MockArray:
         logits = [0.0] * 300
         seq_len = len(seq.data[0]) if isinstance(seq.data[0], list) else len(seq.data)
         if seq_len == 1:

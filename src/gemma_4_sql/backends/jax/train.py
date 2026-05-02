@@ -18,7 +18,7 @@ except Exception:
     optax = None
 
 try:
-    from bonsai.models.gemma4 import Gemma4Config, Gemma4ForCausalLM
+    from .gemma4 import Gemma4Config, Gemma4ForCausalLM
     from flax import nnx  # pragma: no cover
 except Exception:
     Gemma4ForCausalLM = None

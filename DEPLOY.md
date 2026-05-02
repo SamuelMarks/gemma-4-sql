@@ -1,6 +1,6 @@
 # `gemma-4-sql` Deployment & Operations Guide
 
-This comprehensive guide details the exact steps to create, adapt, and post-train a Gemma-4 model tailored exclusively for Text-to-SQL tasks. It also covers how to benchmark these models across varying hardware topologies (GPU, TPU, CPU) using different backends: **JAX (Bonsai)**, **JAX (MaxText)**, **Keras**, and **PyTorch**.
+This comprehensive guide details the exact steps to create, adapt, and post-train a Gemma-4 model tailored exclusively for Text-to-SQL tasks. It also covers how to benchmark these models across varying hardware topologies (GPU, TPU, CPU) using different backends: **JAX**, **JAX (MaxText)**, **Keras**, and **PyTorch**.
 
 ---
 
@@ -20,7 +20,7 @@ gemma-4-sql etl pretrain --dataset seeklhy/SynSQL-2.5M --batch-size 256 --backen
 
 Execute the `train` command. This will instantiate an uninitialized model and begin the optimization loop.
 
-#### Using JAX (Bonsai)
+#### Using JAX
 *Recommended for rapid local testing on single GPUs or small TPU slices.*
 ```bash
 gemma-4-sql train \
@@ -79,7 +79,7 @@ gemma-4-sql etl pretrain --dataset b-mc2/sql-create-context --batch-size 128 --b
 
 Use the `pretrain` command. This loads existing weights and continues the learning process.
 
-**JAX (Bonsai):**
+**JAX:**
 ```bash
 gemma-4-sql pretrain --model google/gemma-4 --dataset b-mc2/sql-create-context --backend jax
 ```
@@ -116,7 +116,7 @@ gemma-4-sql etl posttrain --dataset my_custom_dpo_dataset --batch-size 32 --back
 
 ### Step 2: Supervised Fine-Tuning (SFT)
 
-**JAX (Bonsai):**
+**JAX:**
 ```bash
 gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset gretelai/synthetic_text_to_sql --backend jax
 ```
@@ -163,7 +163,7 @@ Before deploying your fully trained, post-trained model to production, you must 
 gemma-4-sql benchmark --model my-sft-gemma-4 --hardware gpu --batch-size 32 --backend pytorch
 ```
 
-**Using JAX (Bonsai on GPU):**
+**Using JAX (JAX on GPU):**
 ```bash
 gemma-4-sql benchmark --model my-sft-gemma-4 --hardware gpu --batch-size 32 --backend jax
 ```
@@ -187,7 +187,7 @@ gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu --batch-size 128 --b
 gemma-4-sql benchmark --model my-sft-gemma-4 --hardware cpu --batch-size 1 --backend pytorch
 ```
 
-**Using JAX (Bonsai on CPU):**
+**Using JAX (JAX on CPU):**
 ```bash
 gemma-4-sql benchmark --model my-sft-gemma-4 --hardware cpu --batch-size 1 --backend jax
 ```

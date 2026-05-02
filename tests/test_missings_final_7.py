@@ -18,7 +18,6 @@ def exec_import(mod_name, mock_dict, func_name=None, *args, **kwargs):
 def test_missing_jax():
     exec_import("gemma_4_sql.backends.jax.dpo", {"jax.nn": None})
     exec_import("gemma_4_sql.backends.jax.export", {"orbax.checkpoint": None})
-    exec_import("gemma_4_sql.backends.jax.export", {"bonsai.models.gemma4": None})
     exec_import("gemma_4_sql.backends.jax.inference", {"flax.nnx": None})
     exec_import("gemma_4_sql.backends.jax.quantize", {"jax.numpy": None})
     exec_import("gemma_4_sql.backends.jax.train", {"optax": None})

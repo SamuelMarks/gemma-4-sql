@@ -32,7 +32,7 @@ def export_model(model_name: str, export_path: str) -> dict[str, Any]:
 
     if jax is not None and jnp is not None and ocp is not None:
         try:
-            from bonsai.models.gemma4 import (
+            from .gemma4 import (
                 Gemma4Config,
                 Gemma4ForCausalLM,
             )

@@ -42,7 +42,6 @@ def test_true_missing():
     with mock.patch.dict(sys.modules, {"orbax.checkpoint": None}):
         exec_import("gemma_4_sql.backends.jax.export", "export_model", "a", "b")
 
-    with mock.patch.dict(sys.modules, {"bonsai.models.gemma4": None}):
         exec_import("gemma_4_sql.backends.jax.export", "export_model", "a", "b")
 
     with mock.patch.dict(sys.modules, {"flax.nnx": None}):
