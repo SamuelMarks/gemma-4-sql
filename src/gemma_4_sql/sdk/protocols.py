@@ -86,15 +86,6 @@ class BackendProtocol(Protocol):
     ) -> dict[str, Any]:
         """Protocol method."""
 
-    def missing_dummy(
-        self,
-        model_name: str,
-        rank: int,
-        alpha: int,
-        target_modules: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """Protocol method."""
-
     def quantize_model(
         self, model_name: str, method: str = "int8", **kwargs: Any
     ) -> dict[str, Any]:

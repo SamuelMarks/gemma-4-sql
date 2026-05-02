@@ -181,11 +181,15 @@ def test_cli_generate(capsys: CaptureFixture[str]) -> None:
         "Find all users",
         "--backend",
         "maxtext",
+        "--beam-width",
+        "5",
+        "--max-length",
+        "100",
     ]
     cli(args)
     captured = capsys.readouterr()
     assert (
-        "Generating: model=test-model, prompt='Find all users', backend=maxtext"
+        "Generating: model=test-model, prompt='Find all users', backend=maxtext, beam_width=5, max_length=100"
         in captured.out
     )
     assert "status': 'mocked_missing_maxtext'" in captured.out

@@ -57,6 +57,9 @@ gemma-4-sql etl sft --dataset gretelai/synthetic_text_to_sql --batch-size 16 --b
 
 # Posttrain / RLHF ETL
 gemma-4-sql etl posttrain --dataset xlangai/spider2-lite --batch-size 8 --backend maxtext
+
+# ETL using DuckDB (bypassing Hugging Face datasets)
+gemma-4-sql etl pretrain --duckdb-path my_dataset.duckdb --duckdb-table pretrain_data --backend jax
 ```
 
 ### SDK
@@ -121,7 +124,37 @@ run_dpo(model_name="gemma-4", dataset="my_dpo_dataset", beta=0.1, backend="jax")
 
 ---
 
-## 3. PEFT & Quantization
+## 3. Model Exporting
+
+You can export trained models to various checkpoint formats like `safetensors`, `.keras`, or `orbax` depending on the backend used.
+
+### CLI
+
+```bash
+# Export using PyTorch to safetensors
+gemma-4-sql export --model gemma-4 --export-path ./exported/gemma-4-pt --backend pytorch
+
+# Export using JAX to orbax
+gemma-4-sql export --model gemma-4 --export-path ./exported/gemma-4-jax --backend jax
+```
+
+### SDK
+
+```python
+from gemma_4_sql.sdk.export import export_model
+
+# Export using Keras
+result = export_model(
+    model_name="gemma-4",
+    export_path="./exported/gemma-4-keras",
+    backend="keras"
+)
+print(f"Exported to: {result['path']}")
+```
+
+---
+
+## 4. PEFT & Quantization
 
 To save compute and memory footprints, you can inject LoRA adapters (PEFT) and quantize models.
 
@@ -155,7 +188,38 @@ quantized = quantize_model(model_name="gemma-4", method="int8", backend="pytorch
 
 ---
 
-## 4. Evaluation & Execution Engine
+## 5. Raw Inference (Generation)
+
+You can use the `generate` command to generate SQL directly from a prompt without full evaluation or the agentic loop.
+
+### CLI
+
+```bash
+gemma-4-sql generate \
+    --model gemma-4 \
+    --prompt "List all users who signed up today." \
+    --backend maxtext \
+    --beam-width 5 \
+    --max-length 100
+```
+
+### SDK
+
+```python
+from gemma_4_sql.sdk.inference import generate
+
+# Generate SQL from a prompt
+result = generate(
+    model_name="gemma-4",
+    prompt="List all users who signed up today.",
+    backend="pytorch"
+)
+print("Generated SQL:", result["sql"])
+```
+
+---
+
+## 6. Evaluation & Execution Engine
 
 Gemma-4-SQL provides a live database execution engine to measure Execution Accuracy (EX). It runs the generated SQL against a real database backend (SQLite, PostgreSQL, Snowflake, DuckDB) and compares the output with the ground truth result.
 
@@ -232,7 +296,7 @@ result = run_agentic_loop(
 
 ---
 
-## 6. DuckDB UDF Integration
+## 8. DuckDB UDF Integration
 
 You can natively embed Gemma inside a DuckDB runtime, turning the model into a callable SQL User-Defined Function (UDF).
 
@@ -356,3 +420,4 @@ result = log_metrics(
 )
 print(f"Status: {result['status']}")
 ```
+

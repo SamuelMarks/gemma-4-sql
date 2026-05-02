@@ -14,7 +14,7 @@ from .export import export_model
 from .few_shot import build_few_shot_prompt
 from .inference import generate_sql
 from .logging import log_metrics
-from .peft import apply_lora, missing_dummy
+from .peft import apply_lora
 from .quantize import quantize_model
 from .serve import serve_model
 from .train import train_model
@@ -31,7 +31,6 @@ __all__ = [
     "generate_sql",
     "log_metrics",
     "apply_lora",
-    "missing_dummy",
     "quantize_model",
     "serve_model",
     "train_model",

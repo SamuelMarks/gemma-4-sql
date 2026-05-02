@@ -120,6 +120,8 @@ def etl_pretrain_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
         distributed=args.distributed,
         tokenizer_name=args.tokenizer,
+        duckdb_path=args.duckdb_path,
+        duckdb_table=args.duckdb_table,
     )
     print(f"Result: {result}")
 
@@ -134,6 +136,8 @@ def etl_sft_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
         distributed=args.distributed,
         tokenizer_name=args.tokenizer,
+        duckdb_path=args.duckdb_path,
+        duckdb_table=args.duckdb_table,
     )
     print(f"Result: {result}")
 
@@ -148,6 +152,8 @@ def etl_posttrain_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
         distributed=args.distributed,
         tokenizer_name=args.tokenizer,
+        duckdb_path=args.duckdb_path,
+        duckdb_table=args.duckdb_table,
     )
     print(f"Result: {result}")
 
@@ -284,9 +290,16 @@ def export_cmd(args: argparse.Namespace) -> None:
 def generate_cmd(args: argparse.Namespace) -> None:
     """Generate SQL from text."""
     print(
-        f"Generating: model={args.model}, prompt='{args.prompt}', backend={args.backend}"
+        f"Generating: model={args.model}, prompt='{args.prompt}', backend={args.backend}, "
+        f"beam_width={args.beam_width}, max_length={args.max_length}"
     )
-    result = generate(model_name=args.model, prompt=args.prompt, backend=args.backend)
+    result = generate(
+        model_name=args.model,
+        prompt=args.prompt,
+        backend=args.backend,
+        beam_width=args.beam_width,
+        max_length=args.max_length,
+    )
     print(f"Result: {result}")
 
 
@@ -460,6 +473,12 @@ def cli(args: list[str] | None = None) -> None:
     parser_etl_pretrain.add_argument(
         "--tokenizer", default=None, help="Hugging Face tokenizer model name."
     )
+    parser_etl_pretrain.add_argument(
+        "--duckdb-path", default=None, help="Optional path to DuckDB database."
+    )
+    parser_etl_pretrain.add_argument(
+        "--duckdb-table", default=None, help="Optional DuckDB table name."
+    )
     parser_etl_pretrain.set_defaults(func=etl_pretrain_cmd)
 
     # ETL SFT
@@ -486,6 +505,12 @@ def cli(args: list[str] | None = None) -> None:
     parser_etl_sft.add_argument(
         "--tokenizer", default=None, help="Hugging Face tokenizer model name."
     )
+    parser_etl_sft.add_argument(
+        "--duckdb-path", default=None, help="Optional path to DuckDB database."
+    )
+    parser_etl_sft.add_argument(
+        "--duckdb-table", default=None, help="Optional DuckDB table name."
+    )
     parser_etl_sft.set_defaults(func=etl_sft_cmd)
 
     # ETL Posttrain
@@ -509,6 +534,12 @@ def cli(args: list[str] | None = None) -> None:
     )
     parser_etl_posttrain.add_argument(
         "--tokenizer", default=None, help="Hugging Face tokenizer model name."
+    )
+    parser_etl_posttrain.add_argument(
+        "--duckdb-path", default=None, help="Optional path to DuckDB database."
+    )
+    parser_etl_posttrain.add_argument(
+        "--duckdb-table", default=None, help="Optional DuckDB table name."
     )
     parser_etl_posttrain.set_defaults(func=etl_posttrain_cmd)
 
@@ -772,6 +803,12 @@ def cli(args: list[str] | None = None) -> None:
         "--backend",
         default="jax",
         help="Backend to use (jax, keras, maxtext, pytorch).",
+    )
+    parser_generate.add_argument(
+        "--beam-width", type=int, default=3, help="Number of beams for generation."
+    )
+    parser_generate.add_argument(
+        "--max-length", type=int, default=50, help="Maximum generation length."
     )
     parser_generate.set_defaults(func=generate_cmd)
 
