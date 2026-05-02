@@ -18,8 +18,9 @@ except Exception:
     optax = None
 
 try:
-    from .gemma4 import Gemma4Config, Gemma4ForCausalLM
     from flax import nnx  # pragma: no cover
+
+    from .gemma4 import Gemma4Config, Gemma4ForCausalLM
 except Exception:
     Gemma4ForCausalLM = None
     Gemma4Config = None

@@ -40,7 +40,7 @@ def test_jax_export_13():
 
 
 def test_jax_export_38_41():
-        exec_line("gemma_4_sql.backends.jax.export", "export_model", "foo", "bar")
+    exec_line("gemma_4_sql.backends.jax.export", "export_model", "foo", "bar")
 
 
 def test_jax_inference_20():

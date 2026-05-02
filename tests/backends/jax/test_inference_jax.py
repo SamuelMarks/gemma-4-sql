@@ -16,7 +16,8 @@ class MockArray:
 
     @property
     def shape(self):
-        if isinstance(self.data[0], list): return (len(self.data), len(self.data[0]))
+        if isinstance(self.data[0], list):
+            return (len(self.data), len(self.data[0]))
         return (len(self.data),)
 
     def __getitem__(self, idx):
@@ -53,7 +54,7 @@ class MockJNP:
     """Mock JNP."""
 
     def arange(self, val):
-        return MockArray([0]*val)
+        return MockArray([0] * val)
 
     def array(self, data, dtype=None):
         return MockArray(data)

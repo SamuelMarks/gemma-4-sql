@@ -13,13 +13,15 @@
 # limitations under the License.
 
 from .modeling import (
-    Gemma4Model,
-    Gemma4ForCausalLM,
-    ModelConfig as Gemma4Config,
-    LayerCache,
     Cache,
-    init_cache,
+    Gemma4ForCausalLM,
+    Gemma4Model,
+    LayerCache,
     forward,
+    init_cache,
+)
+from .modeling import (
+    ModelConfig as Gemma4Config,
 )
 from .params import create_gemma4_from_pretrained
 

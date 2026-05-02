@@ -1,12 +1,15 @@
 import os
-os.environ['XLA_FLAGS'] = '--xla_force_host_platform_device_count=8'
-from flax import nnx
+
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
 import unittest
+
 import jax
 from absl.testing import absltest
+from flax import nnx
 from jax.sharding import AxisType
 
-from ..modeling import ModelConfig as Gemma4Config, Gemma4ForCausalLM
+from ..modeling import Gemma4ForCausalLM
+from ..modeling import ModelConfig as Gemma4Config
 
 
 @unittest.skipIf(jax.device_count() < 8, "At least 8 devices required")
@@ -17,7 +20,9 @@ class TestSharding(absltest.TestCase):
     def setUpClass(cls):
         """Sets up the virtual mesh for sharding tests."""
         super().setUpClass()
-        cls.mesh = jax.make_mesh(((4, 2)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit))
+        cls.mesh = jax.make_mesh(
+            ((4, 2)), ("fsdp", "tp"), axis_types=(AxisType.Explicit, AxisType.Explicit)
+        )
         jax.set_mesh(cls.mesh)
         cls.config = Gemma4Config.gemma4_base(use_fsdp=True, use_tp=True)
         # decrease sizes to avoid OOM

@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 from flax import nnx
+
 from .. import Gemma4Config, Gemma4ForCausalLM
 
 
@@ -28,6 +29,7 @@ def run_model(path_root=None):
 
 if __name__ == "__main__":
     run_model()
+
 
 def test_run_model():
     run_model()

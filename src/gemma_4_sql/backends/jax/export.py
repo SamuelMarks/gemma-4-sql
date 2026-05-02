@@ -32,11 +32,12 @@ def export_model(model_name: str, export_path: str) -> dict[str, Any]:
 
     if jax is not None and jnp is not None and ocp is not None:
         try:
+            from flax import nnx  # pragma: no cover
+
             from .gemma4 import (
                 Gemma4Config,
                 Gemma4ForCausalLM,
             )
-            from flax import nnx  # pragma: no cover
 
             # pragma: no cover
             model = Gemma4ForCausalLM(

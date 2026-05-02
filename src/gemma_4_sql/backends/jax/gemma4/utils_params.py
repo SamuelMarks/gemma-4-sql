@@ -13,24 +13,26 @@
 # limitations under the License.
 
 import gc
+import logging
 import re
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 import safetensors
 from etils import epath
 from flax import nnx
-import logging
-from typing import Any, TypeAlias
 
-ModelType: TypeAlias = Any
-ModelConfigType: TypeAlias = Any
-TransformValueType: TypeAlias = None | tuple[tuple[int, ...], tuple[int, ...] | None, bool]
-TransformType: TypeAlias = Any  # Enum with values of type TransformValueType
-KeyMapType: TypeAlias = tuple[str, TransformType]
+type ModelType = Any
+type ModelConfigType = Any
+type TransformValueType = None | tuple[tuple[int, ...], tuple[int, ...] | None, bool]
+type TransformType = Any  # Enum with values of type TransformValueType
+type KeyMapType = tuple[str, TransformType]
 
 
-def map_to_jax_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapType | tuple[None, None]:
+def map_to_jax_key(
+    mapping: dict[str, KeyMapType], source_key: str
+) -> KeyMapType | tuple[None, None]:
     """Map a safetensors key to exactly one JAX key & transform, else warn/error."""
     subs = [
         (re.sub(pat, repl, source_key), transform)
@@ -76,7 +78,9 @@ def assign_weights(
             if not reshape_first and reshape is not None:
                 tensor = tensor.reshape(reshape)
         if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
+            raise ValueError(
+                f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}"
+            )
         # Only apply sharding if sharding_dict is provided
         if sharding_dict is not None:
             state_dict[key] = jax.device_put(tensor, sharding_dict[key])
@@ -88,7 +92,11 @@ def assign_weights(
 
 
 def assign_weights_from_eval_shape(
-    keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType
+    keys: list[str],
+    tensor: jnp.ndarray,
+    state_dict: dict,
+    st_key: str,
+    transform: TransformType,
 ):
     """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
     Assumes that the state_dict values are of type ShapeDtypeStruct.
@@ -104,10 +112,15 @@ def assign_weights_from_eval_shape(
             if not reshape_first and reshape is not None:
                 tensor = tensor.reshape(reshape)
         if tensor.shape != state_dict[key].shape:
-            raise ValueError(f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}")
+            raise ValueError(
+                f"Shape mismatch for {st_key}: {tensor.shape} vs {state_dict[key].shape}"
+            )
 
         tensor = tensor.astype(state_dict[key].dtype)
-        if hasattr(state_dict[key], "sharding") and state_dict[key].sharding is not None:
+        if (
+            hasattr(state_dict[key], "sharding")
+            and state_dict[key].sharding is not None
+        ):
             tensor = jax.device_put(tensor, state_dict[key].sharding.spec)
         state_dict[key] = tensor
     else:
@@ -115,7 +128,11 @@ def assign_weights_from_eval_shape(
 
 
 def create_model_from_safe_tensors(
-    file_dir: str, model_cls: ModelType, cfg: ModelConfigType, key_mapping: dict, mesh: jax.sharding.Mesh | None = None
+    file_dir: str,
+    model_cls: ModelType,
+    cfg: ModelConfigType,
+    key_mapping: dict,
+    mesh: jax.sharding.Mesh | None = None,
 ) -> ModelType:
     """
     Load tensors from the safetensors file and create a model (memory-optimized).
@@ -143,7 +160,9 @@ def create_model_from_safe_tensors(
                     continue
                 keys = [stoi(k) for k in jax_key.split(".")]
                 try:
-                    assign_weights_from_eval_shape(keys, tensor, state_dict, torch_key, transform.value)
+                    assign_weights_from_eval_shape(
+                        keys, tensor, state_dict, torch_key, transform.value
+                    )
                 except Exception as e:
                     full_jax_key = ".".join([str(k) for k in keys])
                     conversion_errors.append(
@@ -153,6 +172,8 @@ def create_model_from_safe_tensors(
 
     if conversion_errors:
         full_error_log = "\n".join(conversion_errors)
-        raise RuntimeError(f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}")
+        raise RuntimeError(
+            f"Encountered {len(conversion_errors)} weight conversion errors. Log:\n{full_error_log}"
+        )
 
     return nnx.merge(graph_def, state_dict)

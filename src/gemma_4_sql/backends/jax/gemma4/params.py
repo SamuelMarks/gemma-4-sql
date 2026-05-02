@@ -1,4 +1,3 @@
-import re
 # Copyright 2026 The JAX Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +18,7 @@ Parameter helpers for gemma4.
 Provides parameter matching and checkpoint utilities.
 """
 
+import re
 from enum import Enum
 
 import jax
@@ -28,7 +28,7 @@ from etils import epath
 from flax import nnx
 
 from . import modeling as model_lib
-from .utils_params import stoi, map_to_jax_key, assign_weights_from_eval_shape
+from .utils_params import assign_weights_from_eval_shape, map_to_jax_key, stoi
 
 
 def _get_key_and_transform_mapping():
@@ -53,13 +53,22 @@ def _get_key_and_transform_mapping():
 
     # Mapping st_keys -> (nnx_keys, (permute_rule, reshape_rule, reshape_first)).
     return {
-        r"^model\.embed_tokens\.weight$": (r"model\.embed_tokens\.embedding", Transform.EMBED),
-        r"^model\.embed_tokens_per_layer\.weight$": (r"model\.embed_tokens_per_layer\.embedding", Transform.EMBED),
+        r"^model\.embed_tokens\.weight$": (
+            r"model\.embed_tokens\.embedding",
+            Transform.EMBED,
+        ),
+        r"^model\.embed_tokens_per_layer\.weight$": (
+            r"model\.embed_tokens_per_layer\.embedding",
+            Transform.EMBED,
+        ),
         r"^model\.per_layer_model_projection\.weight$": (
             r"model\.per_layer_model_projection\.kernel",
             Transform.LINEAR,
         ),
-        r"^model\.per_layer_projection_norm\.weight$": (r"model\.per_layer_projection_norm\.scale", Transform.DEFAULT),
+        r"^model\.per_layer_projection_norm\.weight$": (
+            r"model\.per_layer_projection_norm\.scale",
+            Transform.DEFAULT,
+        ),
         r"^model\.layers\.(\d+)\.per_layer_input_gate\.weight$": (
             r"model\.layers\.\1\.per_layer_input_gate\.kernel",
             Transform.LINEAR,
@@ -120,7 +129,10 @@ def _get_key_and_transform_mapping():
             r"model\.layers\.\1\.mlp\.gate_proj\.kernel",
             Transform.LINEAR,
         ),
-        r"^model\.layers\.(\d+)\.mlp\.up_proj\.weight$": (r"model\.layers\.\1\.mlp\.up_proj\.kernel", Transform.LINEAR),
+        r"^model\.layers\.(\d+)\.mlp\.up_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.up_proj\.kernel",
+            Transform.LINEAR,
+        ),
         r"^model\.layers\.(\d+)\.mlp\.down_proj\.weight$": (
             r"model\.layers\.\1\.mlp\.down_proj\.kernel",
             Transform.LINEAR,
@@ -173,7 +185,10 @@ def _get_key_and_transform_mapping():
             r"model\.layers\.\1\.mlp\.per_expert_scale",
             Transform.DEFAULT,
         ),
-        r"^model\.layers\.(\d+)\.layer_scalar\.weight$": (r"model\.layers\.\1\.layer_scalar", Transform.DEFAULT),
+        r"^model\.layers\.(\d+)\.layer_scalar\.weight$": (
+            r"model\.layers\.\1\.layer_scalar",
+            Transform.DEFAULT,
+        ),
         r"^model\.norm\.weight$": (r"model\.norm\.scale", Transform.DEFAULT),
         r"^lm_head\.weight$": (r"lm_head\.kernel", Transform.LINEAR),
         # Multimodal Text-Projectors
@@ -232,7 +247,11 @@ def _get_key_and_transform_mapping():
         ),
         r"^audio_tower\.layers\.(\d+)\.lconv1d\.depthwise_conv1d\.weight$": (
             r"audio_tower\.layers\.\1\.lconv1d\.depthwise_conv1d\.conv\.kernel",
-            ((2, 1, 0), None, False),  # Conv1d PyTorch (out_c, in_c/group, K) -> Flax (K, in_c, out_c/group)
+            (
+                (2, 1, 0),
+                None,
+                False,
+            ),  # Conv1d PyTorch (out_c, in_c/group, K) -> Flax (K, in_c, out_c/group)
         ),
         r"^audio_tower\.layers\.(\d+)\.lconv1d\.(pre_layer_norm|conv_norm)\.weight$": (
             r"audio_tower\.layers\.\1\.lconv1d\.\2\.scale",
@@ -314,7 +333,7 @@ def _get_key_and_transform_mapping():
     }
 
 
-def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig):
+def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig):  # noqa: C901
     """
     Load safetensor weights from a file, then convert & merge into a flax.nnx model.
 
@@ -349,7 +368,9 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig):
                         expert_tensors[l_idx] = {}
                     if proj_type not in expert_tensors[l_idx]:
                         expert_tensors[l_idx][proj_type] = {}
-                    expert_tensors[l_idx][proj_type][e_idx] = jnp.array(sf.get_tensor(torch_key))
+                    expert_tensors[l_idx][proj_type][e_idx] = jnp.array(
+                        sf.get_tensor(torch_key)
+                    )
                     continue
 
                 tensor = jnp.array(sf.get_tensor(torch_key))
@@ -358,7 +379,9 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig):
                     continue
                 keys = [stoi(k) for k in jax_key.split(r"\.")]
                 try:
-                    assign_weights_from_eval_shape(keys, tensor, jax_state, torch_key, transform.value)
+                    assign_weights_from_eval_shape(
+                        keys, tensor, jax_state, torch_key, transform.value
+                    )
                 except KeyError as e:
                     print(f"Key error: {keys} at {e}")
                 except ValueError as e:
@@ -376,14 +399,21 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig):
             jax_key, transform = map_to_jax_key(mapping, st_key)
             if jax_key is not None:
                 keys = [stoi(k) for k in jax_key.split(r"\.")]
-                assign_weights_from_eval_shape(keys, stacked, jax_state, st_key, transform.value)
+                assign_weights_from_eval_shape(
+                    keys, stacked, jax_state, st_key, transform.value
+                )
 
     # Convert remaining ShapeDtypeStruct into arrays
     if isinstance(jax_state["model"]["embed_scale"], jax.ShapeDtypeStruct):
-        jax_state["model"]["embed_scale"] = jnp.array(cfg.hidden_size**0.5, dtype=jnp.bfloat16).astype(jnp.float32)
+        jax_state["model"]["embed_scale"] = jnp.array(
+            cfg.hidden_size**0.5, dtype=jnp.bfloat16
+        ).astype(jnp.float32)
 
     if cfg.vision_config:
-        if isinstance(jax_state["vision_tower"]["embeddings"]["position_ids"], jax.ShapeDtypeStruct):
+        if isinstance(
+            jax_state["vision_tower"]["embeddings"]["position_ids"],
+            jax.ShapeDtypeStruct,
+        ):
             jax_state["vision_tower"]["embeddings"]["position_ids"] = jnp.expand_dims(
                 jnp.arange(gemma4.vision_tower.embeddings.num_patches), 0
             )

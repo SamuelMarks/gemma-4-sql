@@ -1,16 +1,19 @@
 import jax.numpy as jnp
 from flax import nnx
+
+from ..modeling import (
+    AttentionType,
+    Gemma4Attention,
+    Gemma4DecoderLayer,
+    Gemma4ForCausalLM,
+    Gemma4MLP,
+    Gemma4Model,
+    Gemma4MoE,
+    Gemma4RMSNorm,
+    init_cache,
+)
 from ..modeling import (
     ModelConfig as Gemma4Config,
-    Gemma4RMSNorm,
-    Gemma4MLP,
-    Gemma4MoE,
-    Gemma4Attention,
-    AttentionType,
-    Gemma4DecoderLayer,
-    Gemma4Model,
-    Gemma4ForCausalLM,
-    init_cache,
 )
 
 
@@ -57,17 +60,23 @@ def test_moe():
 def test_moe_per_expert_scale():
     """MoE must have a per_expert_scale param of shape (num_experts,) initialized to ones."""
     rngs = nnx.Rngs(0)
-    config = Gemma4Config(hidden_size=16, intermediate_size=32, num_experts=4, num_experts_per_tok=2)
+    config = Gemma4Config(
+        hidden_size=16, intermediate_size=32, num_experts=4, num_experts_per_tok=2
+    )
     moe = Gemma4MoE(config, rngs=rngs)
     scale = moe.per_expert_scale[...]
     assert scale.shape == (4,), f"Expected shape (4,), got {scale.shape}"
-    assert jnp.allclose(scale, jnp.ones(4)), "per_expert_scale must be initialized to ones"
+    assert jnp.allclose(scale, jnp.ones(4)), (
+        "per_expert_scale must be initialized to ones"
+    )
     # Verify it influences the output: perturbing the scale changes the result.
     x = jnp.ones((1, 2, 16))
     out_default = moe(x, original_x=x)
     moe.per_expert_scale[...] = jnp.array([2.0, 2.0, 2.0, 2.0])
     out_scaled = moe(x, original_x=x)
-    assert not jnp.allclose(out_default, out_scaled), "per_expert_scale must affect output"
+    assert not jnp.allclose(out_default, out_scaled), (
+        "per_expert_scale must affect output"
+    )
 
 
 def test_attention():
@@ -95,7 +104,9 @@ def test_attention():
 
 def test_rope_timescales():
     """Global attention must use rope_theta=1,000,000; local must use 10,000."""
-    config = Gemma4Config(hidden_size=16, num_attention_heads=4, num_key_value_heads=2, head_dim=8)
+    config = Gemma4Config(
+        hidden_size=16, num_attention_heads=4, num_key_value_heads=2, head_dim=8
+    )
     assert config.global_rope_max_timescale == 1_000_000
     assert config.rope_max_timescale == 10_000
     rngs = nnx.Rngs(0)
@@ -108,7 +119,9 @@ def test_rope_timescales():
 def test_v_norm_no_scale():
     """v_norm must have no learned scale parameter (with_scale=False)."""
     rngs = nnx.Rngs(0)
-    config = Gemma4Config(hidden_size=16, num_attention_heads=4, num_key_value_heads=2, head_dim=8)
+    config = Gemma4Config(
+        hidden_size=16, num_attention_heads=4, num_key_value_heads=2, head_dim=8
+    )
     attn = Gemma4Attention(config, AttentionType.LOCAL_SLIDING, rngs=rngs)
     assert attn.v_norm.scale is None, "v_norm must not have a learned scale"
     assert attn.q_norm.scale is not None, "q_norm must have a learned scale"
@@ -262,8 +275,12 @@ def test_config_preset():
     """Tests configuration presets."""
     config = Gemma4Config.gemma4_base()
     assert config.vocab_size == 256000
-    assert config.sliding_window_size == 512, "Default sliding_window_size must be 512 to match the reference"
-    assert config.final_logit_softcapping is None, "Default final_logit_softcapping must be None"
+    assert config.sliding_window_size == 512, (
+        "Default sliding_window_size must be 512 to match the reference"
+    )
+    assert config.final_logit_softcapping is None, (
+        "Default final_logit_softcapping must be None"
+    )
 
     config_e2b = Gemma4Config.gemma4_e2b()
     assert config_e2b.num_hidden_layers == 35
@@ -285,15 +302,27 @@ def test_config_preset():
 
 def test_multimodal_projector_pooling():
     """Projector must use position-based weighted averaging, not simple avg_pool."""
-    from ..modeling import VisionConfig, Gemma4MultiModalProjector
+    from ..modeling import Gemma4MultiModalProjector, VisionConfig
 
     rngs = nnx.Rngs(0)
     # 4 patches per side, 2 output tokens per side → kernel_size=2
-    v_config = VisionConfig(hidden_size=4, image_size=8, patch_size=2, num_hidden_layers=1, num_attention_heads=1)
-    text_config = Gemma4Config(
-        hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4
+    v_config = VisionConfig(
+        hidden_size=4,
+        image_size=8,
+        patch_size=2,
+        num_hidden_layers=1,
+        num_attention_heads=1,
     )
-    projector = Gemma4MultiModalProjector(text_config, v_config, mm_tokens_per_image=4, rngs=rngs)
+    text_config = Gemma4Config(
+        hidden_size=8,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=4,
+    )
+    projector = Gemma4MultiModalProjector(
+        text_config, v_config, mm_tokens_per_image=4, rngs=rngs
+    )
 
     # 4x4=16 patches, hidden=4
     patches = jnp.arange(16 * 4, dtype=jnp.float32).reshape(1, 16, 4)
@@ -314,10 +343,13 @@ def test_multimodal_projector_pooling():
 def test_siglip_mlp_gelu_approximate():
     """SiglipMLP must use tanh-approximate GELU (gelu_pytorch_tanh), not exact GELU."""
     import jax
-    from ..modeling import VisionConfig, SiglipMLP
+
+    from ..modeling import SiglipMLP, VisionConfig
 
     rngs = nnx.Rngs(0)
-    v_config = VisionConfig(hidden_size=8, intermediate_size=16, num_hidden_layers=1, num_attention_heads=2)
+    v_config = VisionConfig(
+        hidden_size=8, intermediate_size=16, num_hidden_layers=1, num_attention_heads=2
+    )
     mlp = SiglipMLP(v_config, rngs=rngs)
 
     # Exact vs approximate GELU differ on non-trivial inputs; verify the MLP uses approximate.
@@ -330,21 +362,35 @@ def test_siglip_mlp_gelu_approximate():
     mid_exact = jax.nn.gelu(x, approximate=False)
     mid_approx = jax.nn.gelu(x, approximate=True)
     # They differ on these inputs
-    assert not jnp.allclose(mid_exact, mid_approx, atol=1e-5), "Test inputs must distinguish exact vs approximate GELU"
+    assert not jnp.allclose(mid_exact, mid_approx, atol=1e-5), (
+        "Test inputs must distinguish exact vs approximate GELU"
+    )
 
 
 def test_vision_encoder_uses_rmsnorm():
     """Vision encoder layers must use Gemma4RMSNorm, not LayerNorm."""
-    from ..modeling import VisionConfig, SiglipEncoderLayer, SiglipVisionTransformer
+    from ..modeling import SiglipEncoderLayer, SiglipVisionTransformer, VisionConfig
 
     rngs = nnx.Rngs(0)
-    v_config = VisionConfig(hidden_size=16, image_size=32, patch_size=16, num_hidden_layers=1, num_attention_heads=2)
+    v_config = VisionConfig(
+        hidden_size=16,
+        image_size=32,
+        patch_size=16,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+    )
     layer = SiglipEncoderLayer(v_config, rngs=rngs)
-    assert isinstance(layer.layer_norm1, Gemma4RMSNorm), "layer_norm1 must be Gemma4RMSNorm"
-    assert isinstance(layer.layer_norm2, Gemma4RMSNorm), "layer_norm2 must be Gemma4RMSNorm"
+    assert isinstance(layer.layer_norm1, Gemma4RMSNorm), (
+        "layer_norm1 must be Gemma4RMSNorm"
+    )
+    assert isinstance(layer.layer_norm2, Gemma4RMSNorm), (
+        "layer_norm2 must be Gemma4RMSNorm"
+    )
 
     vit = SiglipVisionTransformer(v_config, rngs=rngs)
-    assert isinstance(vit.post_layernorm, Gemma4RMSNorm), "post_layernorm must be Gemma4RMSNorm"
+    assert isinstance(vit.post_layernorm, Gemma4RMSNorm), (
+        "post_layernorm must be Gemma4RMSNorm"
+    )
 
     # Forward pass still works
     import jax
@@ -392,7 +438,12 @@ def test_multimodal():
     # Mask to place 4 image tokens at positions 1, 2, 3, 4
     image_token_mask = jnp.array([[False, True, True, True, True, False]])
 
-    out = model(input_ids, positions, pixel_values=pixel_values, image_token_mask=image_token_mask)
+    out = model(
+        input_ids,
+        positions,
+        pixel_values=pixel_values,
+        image_token_mask=image_token_mask,
+    )
     assert out.shape == (1, 6, 100)
 
 
@@ -468,9 +519,10 @@ if __name__ == "__main__":
 
 def test_semantic_variables_split():
     """Tests that ConstVar and StatVar correctly split in nnx.split()."""
-    from ..modeling import ConstVar, StatVar, Gemma4ClippableLinear
-    from flax import nnx
     import jax.numpy as jnp
+    from flax import nnx
+
+    from ..modeling import ConstVar, Gemma4ClippableLinear, StatVar
 
     # Create a simple mock module containing these vars
     class MockModule(nnx.Module):

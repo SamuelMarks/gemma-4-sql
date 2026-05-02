@@ -18,21 +18,19 @@ Gemma 4 model implementation in JAX/Flax NNX.
 
 from __future__ import annotations
 
+import inspect
+import math
 from dataclasses import dataclass
 from enum import Enum
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from jax.sharding import PartitionSpec
-from typing import TypeAlias
-import math
-from jaxtyping import Array
 from jax import P
+from jax.sharding import PartitionSpec
+from jaxtyping import Array
 
 from .rope import RoPE, apply_rope
-
-
-import inspect
 
 _linear_sig = inspect.signature(nnx.Linear.__init__)
 _LINEAR_SUPPORTS_METADATA = "kernel_metadata" in _linear_sig.parameters or any(
@@ -91,7 +89,10 @@ class Gemma4RMSNorm(nnx.Module):
         self.dtype = dtype
 
         if self.with_scale:
-            self.scale = nnx.Param(jax.nn.initializers.zeros(rngs.params(), dim, dtype=dtype), out_sharding=shd)
+            self.scale = nnx.Param(
+                jax.nn.initializers.zeros(rngs.params(), dim, dtype=dtype),
+                out_sharding=shd,
+            )
         else:
             self.scale = None
 
@@ -99,7 +100,9 @@ class Gemma4RMSNorm(nnx.Module):
     def __call__(self, x: Array) -> Array:
         """Applies RMS normalization."""
         xf32 = x.astype(jnp.float32)
-        normed = xf32 * jax.lax.rsqrt(jnp.square(xf32).mean(-1, keepdims=True) + self.eps)
+        normed = xf32 * jax.lax.rsqrt(
+            jnp.square(xf32).mean(-1, keepdims=True) + self.eps
+        )
 
         if self.with_scale:
             scale_val = jnp.asarray(self.scale[...], dtype=jnp.float32)
@@ -159,8 +162,13 @@ class SiglipVisionEmbeddings(nnx.Module):
 
         import functools
 
-        ki = functools.partial(jax.nn.initializers.lecun_normal(), out_sharding=config.shd_cfg.emb_patch_kernel)
-        bi = functools.partial(jax.nn.initializers.zeros, out_sharding=config.shd_cfg.emb_patch_bias)
+        ki = functools.partial(
+            jax.nn.initializers.lecun_normal(),
+            out_sharding=config.shd_cfg.emb_patch_kernel,
+        )
+        bi = functools.partial(
+            jax.nn.initializers.zeros, out_sharding=config.shd_cfg.emb_patch_bias
+        )
         self.patch_embedding = nnx.Conv(
             config.num_channels,
             config.hidden_size,
@@ -199,15 +207,22 @@ class SiglipAttention(nnx.Module):
         hs, shd = config.hidden_size, config.shd_cfg
         km = {"out_sharding": shd.attn_kernel}
         bm = {"out_sharding": shd.attn_bias}
-        self.q_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
-        self.k_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
-        self.v_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
-        self.out_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
+        self.q_proj = _make_linear(
+            hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs
+        )
+        self.k_proj = _make_linear(
+            hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs
+        )
+        self.v_proj = _make_linear(
+            hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs
+        )
+        self.out_proj = _make_linear(
+            hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs
+        )
 
     def __call__(self, x: Array) -> Array:
         """Applies multi-head attention."""
         b, t, _ = x.shape
-        shd = self.config.shd_cfg.activation
 
         q = self.q_proj(x).reshape((b, t, self.num_heads, self.head_dim))
         k = self.k_proj(x).reshape((b, t, self.num_heads, self.head_dim))
@@ -265,8 +280,12 @@ class SiglipEncoderLayer(nnx.Module):
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs):
         self.config = config
         shd = config.shd_cfg.layer_norm
-        self.layer_norm1 = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, shd=shd, rngs=rngs)
-        self.layer_norm2 = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, shd=shd, rngs=rngs)
+        self.layer_norm1 = Gemma4RMSNorm(
+            config.hidden_size, eps=config.layer_norm_eps, shd=shd, rngs=rngs
+        )
+        self.layer_norm2 = Gemma4RMSNorm(
+            config.hidden_size, eps=config.layer_norm_eps, shd=shd, rngs=rngs
+        )
         self.self_attn = SiglipAttention(config, rngs=rngs)
         self.mlp = SiglipMLP(config, rngs=rngs)
 
@@ -304,7 +323,14 @@ class StatVar(nnx.Variable):
 class Gemma4ClippableLinear(nnx.Module):
     """Linear layer with optional input/output clipping."""
 
-    def __init__(self, in_features: int, out_features: int, use_clipped_linears: bool = True, *, rngs: nnx.Rngs):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        use_clipped_linears: bool = True,
+        *,
+        rngs: nnx.Rngs,
+    ):
         self.use_clipped_linears = use_clipped_linears
         self.linear = nnx.Linear(in_features, out_features, use_bias=False, rngs=rngs)
 
@@ -330,13 +356,20 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
     def __init__(self, config: AudioConfig):
         self.hidden_size = config.hidden_size
         self.context_size = (
-            config.attention_chunk_size + config.attention_context_left - 1 + config.attention_context_right
+            config.attention_chunk_size
+            + config.attention_context_left
+            - 1
+            + config.attention_context_right
         )
         min_timescale = 1.0
         max_timescale = 10000.0
         num_timescales = self.hidden_size // 2
-        log_timescale_increment = math.log(max_timescale / min_timescale) / max(num_timescales - 1, 1)
-        inv_timescales = min_timescale * jnp.exp(jnp.arange(num_timescales) * -log_timescale_increment)
+        log_timescale_increment = math.log(max_timescale / min_timescale) / max(
+            num_timescales - 1, 1
+        )
+        inv_timescales = min_timescale * jnp.exp(
+            jnp.arange(num_timescales) * -log_timescale_increment
+        )
         self.inv_timescales = ConstVar(inv_timescales[None, None, :])
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -344,7 +377,9 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
         position_ids = jnp.arange(self.context_size // 2, -1, -1, dtype=x.dtype)
         position_ids = position_ids[..., None]
         scaled_time = position_ids * self.inv_timescales[...]
-        pos_embed = jnp.concatenate([jnp.sin(scaled_time), jnp.cos(scaled_time)], axis=-1)
+        pos_embed = jnp.concatenate(
+            [jnp.sin(scaled_time), jnp.cos(scaled_time)], axis=-1
+        )
         return pos_embed.astype(x.dtype)
 
 
@@ -360,17 +395,27 @@ class Gemma4AudioAttention(nnx.Module):
         self.chunk_size = config.attention_chunk_size
         self.max_past_horizon = config.attention_context_left - 1
         self.max_future_horizon = config.attention_context_right
-        self.context_size = self.chunk_size + self.max_past_horizon + self.max_future_horizon
+        self.context_size = (
+            self.chunk_size + self.max_past_horizon + self.max_future_horizon
+        )
         self.softcap = config.attention_logit_cap
         self.invalid_logits_value = config.attention_invalid_logits_value
 
         hs = config.hidden_size
-        self.q_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, config.use_clipped_linears, rngs=rngs)
-        self.k_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, config.use_clipped_linears, rngs=rngs)
-        self.v_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, config.use_clipped_linears, rngs=rngs)
+        self.q_proj = Gemma4ClippableLinear(
+            hs, self.num_heads * self.head_dim, config.use_clipped_linears, rngs=rngs
+        )
+        self.k_proj = Gemma4ClippableLinear(
+            hs, self.num_heads * self.head_dim, config.use_clipped_linears, rngs=rngs
+        )
+        self.v_proj = Gemma4ClippableLinear(
+            hs, self.num_heads * self.head_dim, config.use_clipped_linears, rngs=rngs
+        )
         self.post = Gemma4ClippableLinear(hs, hs, config.use_clipped_linears, rngs=rngs)
 
-        self.relative_k_proj = nnx.Linear(hs, self.num_heads * self.head_dim, use_bias=False, rngs=rngs)
+        self.relative_k_proj = nnx.Linear(
+            hs, self.num_heads * self.head_dim, use_bias=False, rngs=rngs
+        )
         self.per_dim_scale = nnx.Param(jnp.zeros((self.head_dim,)))
 
     def _convert_to_block(self, x: jax.Array) -> jax.Array:
@@ -384,13 +429,25 @@ class Gemma4AudioAttention(nnx.Module):
     def _extract_block_context(self, x: jax.Array) -> jax.Array:
         """Extracts the left context block for block-wise attention."""
         batch_size, seq_len, num_heads, head_dim = x.shape
-        x = jnp.pad(x, ((0, 0), (self.max_past_horizon, self.max_future_horizon + self.chunk_size - 1), (0, 0), (0, 0)))
+        x = jnp.pad(
+            x,
+            (
+                (0, 0),
+                (self.max_past_horizon, self.max_future_horizon + self.chunk_size - 1),
+                (0, 0),
+                (0, 0),
+            ),
+        )
         num_blocks = (seq_len + self.chunk_size - 1) // self.chunk_size
         blocks = []
         for i in range(num_blocks):
             start = i * self.chunk_size
             blocks.append(
-                jax.lax.dynamic_slice(x, (0, start, 0, 0), (batch_size, self.context_size, num_heads, head_dim))
+                jax.lax.dynamic_slice(
+                    x,
+                    (0, start, 0, 0),
+                    (batch_size, self.context_size, num_heads, head_dim),
+                )
             )
         x = jnp.stack(blocks, axis=1)
         return x
@@ -398,12 +455,27 @@ class Gemma4AudioAttention(nnx.Module):
     def _rel_shift(self, x: jax.Array) -> jax.Array:
         """Performs relative shift on attention scores."""
         batch_size, num_heads, num_blocks, block_size, position_length = x.shape
-        x = jnp.pad(x, ((0, 0), (0, 0), (0, 0), (0, 0), (0, self.context_size + 1 - position_length)))
-        x = x.reshape((batch_size, num_heads, num_blocks, block_size * (self.context_size + 1)))
+        x = jnp.pad(
+            x,
+            (
+                (0, 0),
+                (0, 0),
+                (0, 0),
+                (0, 0),
+                (0, self.context_size + 1 - position_length),
+            ),
+        )
+        x = x.reshape(
+            (batch_size, num_heads, num_blocks, block_size * (self.context_size + 1))
+        )
         x = x[..., : block_size * self.context_size]
-        return x.reshape((batch_size, num_heads, num_blocks, block_size, self.context_size))
+        return x.reshape(
+            (batch_size, num_heads, num_blocks, block_size, self.context_size)
+        )
 
-    def __call__(self, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None) -> jax.Array:
+    def __call__(
+        self, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None
+    ) -> jax.Array:
         """Computes the multi-head attention for audio inputs."""
         batch_size, seq_len, _ = x.shape
         q = self.q_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
@@ -418,7 +490,11 @@ class Gemma4AudioAttention(nnx.Module):
         v_context = self._extract_block_context(v)
 
         num_blocks = q_block.shape[1]
-        rel_k = self.relative_k_proj(pos_emb).reshape((-1, self.num_heads, self.head_dim)).astype(q.dtype)
+        rel_k = (
+            self.relative_k_proj(pos_emb)
+            .reshape((-1, self.num_heads, self.head_dim))
+            .astype(q.dtype)
+        )
 
         queries = jnp.transpose(q_block, (0, 3, 1, 2, 4))
         keys = jnp.transpose(k_context, (0, 3, 1, 4, 2))
@@ -427,7 +503,9 @@ class Gemma4AudioAttention(nnx.Module):
         queries_flat = queries.reshape((batch_size, self.num_heads, -1, self.head_dim))
         rel_k_t = jnp.transpose(rel_k, (1, 2, 0))
         matrix_bd = jnp.matmul(queries_flat, rel_k_t)
-        matrix_bd = matrix_bd.reshape((batch_size, self.num_heads, num_blocks, self.chunk_size, -1))
+        matrix_bd = matrix_bd.reshape(
+            (batch_size, self.num_heads, num_blocks, self.chunk_size, -1)
+        )
         matrix_bd = self._rel_shift(matrix_bd)
 
         attn_weights = matrix_ac + matrix_bd
@@ -451,7 +529,9 @@ class Gemma4AudioAttention(nnx.Module):
 class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):
     """A single convolutional projection layer for audio subsampling."""
 
-    def __init__(self, in_channels: int, out_channels: int, norm_eps: float, *, rngs: nnx.Rngs):
+    def __init__(
+        self, in_channels: int, out_channels: int, norm_eps: float, *, rngs: nnx.Rngs
+    ):
         self.conv = nnx.Conv(
             in_features=in_channels,
             out_features=out_channels,
@@ -461,9 +541,13 @@ class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):
             use_bias=False,
             rngs=rngs,
         )
-        self.norm = nnx.LayerNorm(out_channels, epsilon=norm_eps, use_bias=False, rngs=rngs)
+        self.norm = nnx.LayerNorm(
+            out_channels, epsilon=norm_eps, use_bias=False, rngs=rngs
+        )
 
-    def __call__(self, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
+    def __call__(
+        self, x: jax.Array, mask: jax.Array | None = None
+    ) -> tuple[jax.Array, jax.Array | None]:
         """Applies the subsample convolution projection layer."""
         if mask is not None:
             x = x * mask[:, None, :, None]
@@ -485,12 +569,20 @@ class Gemma4AudioSubSampleConvProjection(nnx.Module):
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs):
         c0, c1 = config.subsampling_conv_channels
-        self.layer0 = Gemma4AudioSubSampleConvProjectionLayer(1, c0, config.rms_norm_eps, rngs=rngs)
-        self.layer1 = Gemma4AudioSubSampleConvProjectionLayer(c0, c1, config.rms_norm_eps, rngs=rngs)
+        self.layer0 = Gemma4AudioSubSampleConvProjectionLayer(
+            1, c0, config.rms_norm_eps, rngs=rngs
+        )
+        self.layer1 = Gemma4AudioSubSampleConvProjectionLayer(
+            c0, c1, config.rms_norm_eps, rngs=rngs
+        )
         proj_input_dim = (c0 // 4) * c1
-        self.input_proj_linear = nnx.Linear(proj_input_dim, config.hidden_size, use_bias=False, rngs=rngs)
+        self.input_proj_linear = nnx.Linear(
+            proj_input_dim, config.hidden_size, use_bias=False, rngs=rngs
+        )
 
-    def __call__(self, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
+    def __call__(
+        self, x: jax.Array, mask: jax.Array | None = None
+    ) -> tuple[jax.Array, jax.Array | None]:
         """Applies the full subsample convolution projection."""
         x = jnp.expand_dims(x, 1)  # Add channel dim
         x, mask = self.layer0(x, mask)
@@ -506,13 +598,23 @@ class Gemma4AudioFeedForward(nnx.Module):
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs):
         self.ffw_layer_1 = Gemma4ClippableLinear(
-            config.hidden_size, config.hidden_size * 4, config.use_clipped_linears, rngs=rngs
+            config.hidden_size,
+            config.hidden_size * 4,
+            config.use_clipped_linears,
+            rngs=rngs,
         )
         self.ffw_layer_2 = Gemma4ClippableLinear(
-            config.hidden_size * 4, config.hidden_size, config.use_clipped_linears, rngs=rngs
+            config.hidden_size * 4,
+            config.hidden_size,
+            config.use_clipped_linears,
+            rngs=rngs,
         )
-        self.pre_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
-        self.post_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
+        self.pre_layer_norm = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs
+        )
+        self.post_layer_norm = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs
+        )
         self.gradient_clipping = config.gradient_clipping
         self.post_layer_scale = config.residual_weight
 
@@ -533,7 +635,15 @@ class Gemma4AudioFeedForward(nnx.Module):
 class Gemma4AudioCausalConv1d(nnx.Module):
     """Causal 1D convolution layer for audio processing."""
 
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, groups: int, *, rngs: nnx.Rngs):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        groups: int,
+        *,
+        rngs: nnx.Rngs,
+    ):
         self.kernel_size = kernel_size
         self.left_pad = kernel_size - 1
         self.conv = nnx.Conv(
@@ -548,7 +658,9 @@ class Gemma4AudioCausalConv1d(nnx.Module):
 
     def __call__(self, x: jax.Array) -> jax.Array:
         """Applies causal 1D convolution."""
-        x = jnp.pad(x, ((0, 0), (self.left_pad, 0), (0, 0)))  # Pad time dimension (batch, time, channels)
+        x = jnp.pad(
+            x, ((0, 0), (self.left_pad, 0), (0, 0))
+        )  # Pad time dimension (batch, time, channels)
         return self.conv(x)
 
 
@@ -557,10 +669,16 @@ class Gemma4AudioLightConv1d(nnx.Module):
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs):
         self.linear_start = Gemma4ClippableLinear(
-            config.hidden_size, config.hidden_size * 2, config.use_clipped_linears, rngs=rngs
+            config.hidden_size,
+            config.hidden_size * 2,
+            config.use_clipped_linears,
+            rngs=rngs,
         )
         self.linear_end = Gemma4ClippableLinear(
-            config.hidden_size, config.hidden_size, config.use_clipped_linears, rngs=rngs
+            config.hidden_size,
+            config.hidden_size,
+            config.use_clipped_linears,
+            rngs=rngs,
         )
         self.depthwise_conv1d = Gemma4AudioCausalConv1d(
             in_channels=config.hidden_size,
@@ -569,8 +687,12 @@ class Gemma4AudioLightConv1d(nnx.Module):
             groups=config.hidden_size,
             rngs=rngs,
         )
-        self.pre_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
-        self.conv_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
+        self.pre_layer_norm = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs
+        )
+        self.conv_norm = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs
+        )
         self.gradient_clipping = config.gradient_clipping
 
     def __call__(self, x: jax.Array) -> jax.Array:
@@ -600,12 +722,20 @@ class Gemma4AudioLayer(nnx.Module):
         self.feed_forward2 = Gemma4AudioFeedForward(config, rngs=rngs)
         self.self_attn = Gemma4AudioAttention(config, rngs=rngs)
         self.lconv1d = Gemma4AudioLightConv1d(config, rngs=rngs)
-        self.norm_pre_attn = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
-        self.norm_post_attn = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
-        self.norm_out = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
+        self.norm_pre_attn = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs
+        )
+        self.norm_post_attn = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs
+        )
+        self.norm_out = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs
+        )
         self.gradient_clipping = config.gradient_clipping
 
-    def __call__(self, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None) -> jax.Array:
+    def __call__(
+        self, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None
+    ) -> jax.Array:
         """Applies a single audio transformer layer."""
         x = self.feed_forward1(x)
         residual = x
@@ -632,10 +762,19 @@ class Gemma4AudioModel(nnx.Module):
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs):
         self.config = config
-        self.subsample_conv_projection = Gemma4AudioSubSampleConvProjection(config, rngs=rngs)
+        self.subsample_conv_projection = Gemma4AudioSubSampleConvProjection(
+            config, rngs=rngs
+        )
         self.rel_pos_enc = Gemma4AudioRelPositionalEncoding(config)
-        self.layers = nnx.List([Gemma4AudioLayer(config, rngs=rngs) for _ in range(config.num_hidden_layers)])
-        self.output_proj = nnx.Linear(config.hidden_size, config.output_proj_dims, rngs=rngs)
+        self.layers = nnx.List(
+            [
+                Gemma4AudioLayer(config, rngs=rngs)
+                for _ in range(config.num_hidden_layers)
+            ]
+        )
+        self.output_proj = nnx.Linear(
+            config.hidden_size, config.output_proj_dims, rngs=rngs
+        )
 
     def _convert_4d_mask_to_blocked_5d(self, mask_4d: jax.Array) -> jax.Array:
         """Converts a 4D attention mask to a 5D blocked format."""
@@ -650,7 +789,10 @@ class Gemma4AudioModel(nnx.Module):
 
         mask_4d = jnp.pad(mask_4d, ((0, 0), (0, pad_amount), (0, 0), (0, pad_amount)))
         mask_5d = mask_4d.reshape(batch_size, 1, num_blocks, chunk_size, padded_seq_len)
-        mask_5d = jnp.pad(mask_5d, ((0, 0), (0, 0), (0, 0), (0, 0), (max_past_horizon, max_future_horizon)))
+        mask_5d = jnp.pad(
+            mask_5d,
+            ((0, 0), (0, 0), (0, 0), (0, 0), (max_past_horizon, max_future_horizon)),
+        )
 
         # Emulate gather
         block_starts = jnp.arange(num_blocks) * chunk_size
@@ -658,12 +800,20 @@ class Gemma4AudioModel(nnx.Module):
         kv_indices = block_starts[:, None] + offsets[None, :]
         kv_indices = jnp.broadcast_to(
             kv_indices[None, None, :, None, :],
-            (batch_size, 1, num_blocks, chunk_size, chunk_size + max_past_horizon + max_future_horizon),
+            (
+                batch_size,
+                1,
+                num_blocks,
+                chunk_size,
+                chunk_size + max_past_horizon + max_future_horizon,
+            ),
         )
 
         return jnp.take_along_axis(mask_5d, kv_indices, axis=-1)
 
-    def __call__(self, input_features: jax.Array, attention_mask: jax.Array | None = None) -> jax.Array:
+    def __call__(
+        self, input_features: jax.Array, attention_mask: jax.Array | None = None
+    ) -> jax.Array:
         """Forward pass for the Gemma 4 Audio model."""
         x, mask = self.subsample_conv_projection(input_features, attention_mask)
         pos_emb = self.rel_pos_enc(x)
@@ -684,9 +834,20 @@ class Gemma4AudioModel(nnx.Module):
 class Gemma4MultimodalEmbedder(nnx.Module):
     """Embeds multimodal soft tokens (e.g., from audio) into language model space."""
 
-    def __init__(self, multimodal_hidden_size: int, text_hidden_size: int, eps: float, *, rngs: nnx.Rngs):
-        self.embedding_projection = nnx.Linear(multimodal_hidden_size, text_hidden_size, use_bias=False, rngs=rngs)
-        self.embedding_pre_projection_norm = Gemma4RMSNorm(multimodal_hidden_size, eps=eps, with_scale=False, rngs=rngs)
+    def __init__(
+        self,
+        multimodal_hidden_size: int,
+        text_hidden_size: int,
+        eps: float,
+        *,
+        rngs: nnx.Rngs,
+    ):
+        self.embedding_projection = nnx.Linear(
+            multimodal_hidden_size, text_hidden_size, use_bias=False, rngs=rngs
+        )
+        self.embedding_pre_projection_norm = Gemma4RMSNorm(
+            multimodal_hidden_size, eps=eps, with_scale=False, rngs=rngs
+        )
 
     def __call__(self, inputs_embeds: jax.Array) -> jax.Array:
         """Embeds multimodal inputs."""
@@ -704,9 +865,16 @@ class SiglipVisionTransformer(nnx.Module):
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs):
         self.config = config
         self.embeddings = SiglipVisionEmbeddings(config, rngs=rngs)
-        self.layers = nnx.List([SiglipEncoderLayer(config, rngs=rngs) for _ in range(config.num_hidden_layers)])
+        self.layers = nnx.List(
+            [
+                SiglipEncoderLayer(config, rngs=rngs)
+                for _ in range(config.num_hidden_layers)
+            ]
+        )
         shd = config.shd_cfg.layer_norm
-        self.post_layernorm = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, shd=shd, rngs=rngs)
+        self.post_layernorm = Gemma4RMSNorm(
+            config.hidden_size, eps=config.layer_norm_eps, shd=shd, rngs=rngs
+        )
 
     def __call__(self, pixel_values: Array) -> Array:
         """Applies the vision transformer to pixel values."""
@@ -732,7 +900,12 @@ class Gemma4MultiModalProjector(nnx.Module):
     """
 
     def __init__(
-        self, text_config: ModelConfig, vision_config: VisionConfig, mm_tokens_per_image: int, *, rngs: nnx.Rngs
+        self,
+        text_config: ModelConfig,
+        vision_config: VisionConfig,
+        mm_tokens_per_image: int,
+        *,
+        rngs: nnx.Rngs,
     ):
         self.text_config = text_config
         self.vision_config = vision_config
@@ -744,7 +917,9 @@ class Gemma4MultiModalProjector(nnx.Module):
         self.num_output_tokens = self.tokens_per_side * self.tokens_per_side
 
         self.mm_input_projection_weight = nnx.Param(jnp.zeros((vhs, ths)), rngs=rngs)
-        self.mm_soft_emb_norm = Gemma4RMSNorm(vhs, eps=vision_config.layer_norm_eps, dtype=text_config.dtype, rngs=rngs)
+        self.mm_soft_emb_norm = Gemma4RMSNorm(
+            vhs, eps=vision_config.layer_norm_eps, dtype=text_config.dtype, rngs=rngs
+        )
 
     def _avg_pool_by_positions(self, x: Array) -> Array:
         """Pools patch tokens into a fixed grid using position-based averaging.
@@ -771,7 +946,9 @@ class Gemma4MultiModalProjector(nnx.Module):
         kernel_idxs = (row // k) * self.tokens_per_side + (col // k)
 
         # One-hot weights: (num_patches, num_output_tokens) / k^2
-        weights = jax.nn.one_hot(kernel_idxs, length, dtype=jnp.float32) / k_sq  # (P, L)
+        weights = (
+            jax.nn.one_hot(kernel_idxs, length, dtype=jnp.float32) / k_sq
+        )  # (P, L)
         # (B, L, P) @ (B, P, D) → (B, L, D)
         pooled = jnp.matmul(weights.T[None], x.astype(jnp.float32))
         return pooled
@@ -793,7 +970,9 @@ class Gemma4MultiModalProjector(nnx.Module):
         return jnp.matmul(pooled, self.mm_input_projection_weight[...])
 
 
-def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array) -> Array:
+def batched_merge_modalities(
+    img_emb: Array, text_emb: Array, token_mask: Array
+) -> Array:
     """Merges image and text embeddings based on a token mask.
 
     Args:
@@ -900,7 +1079,7 @@ class LayerCache(nnx.Module):
         self.size = max_seq_len
 
 
-Cache: TypeAlias = list[LayerCache]
+type Cache = list[LayerCache]
 
 
 def init_cache(config: ModelConfig, batch_size: int, max_seq_len: int) -> Cache:
@@ -924,11 +1103,19 @@ def init_cache(config: ModelConfig, batch_size: int, max_seq_len: int) -> Cache:
                 if config.num_global_key_value_heads is not None
                 else config.num_key_value_heads
             )
-            hd = config.global_head_dim if config.global_head_dim is not None else config.head_dim
+            hd = (
+                config.global_head_dim
+                if config.global_head_dim is not None
+                else config.head_dim
+            )
         else:
             num_kv = config.num_key_value_heads
             hd = config.head_dim
-        caches.append(LayerCache(batch_size, cache_size, num_kv, hd, config.dtype, config.shd_cfg.cache))
+        caches.append(
+            LayerCache(
+                batch_size, cache_size, num_kv, hd, config.dtype, config.shd_cfg.cache
+            )
+        )
     return caches
 
 
@@ -1129,9 +1316,12 @@ class Gemma4MLP(nnx.Module):
         intermediate_size: int,
         *,
         dtype: jnp.dtype,
-        shd: ShardConfig = ShardConfig.no_sharding(),
+        shd: ShardConfig | None = None,
         rngs: nnx.Rngs,
     ):
+        if shd is None:
+            shd = ShardConfig.no_sharding()
+
         self.gate_proj = _make_linear(
             hidden_size,
             intermediate_size,
@@ -1173,23 +1363,29 @@ class Gemma4RoutedExperts(nnx.Module):
 
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
         self.config = config
-        E = config.num_experts
-        H = config.hidden_size
-        I = config.moe_intermediate_size if config.moe_intermediate_size is not None else config.intermediate_size
+        e = config.num_experts
+        h = config.hidden_size
+        i_dim = (
+            config.moe_intermediate_size
+            if config.moe_intermediate_size is not None
+            else config.intermediate_size
+        )
         self.dtype = config.dtype
         shd = config.shd_cfg
 
         import functools
 
         ki1 = functools.partial(
-            jax.nn.initializers.normal(stddev=config.hidden_size**-0.5), out_sharding=shd.moe_fc1_kernel
+            jax.nn.initializers.normal(stddev=config.hidden_size**-0.5),
+            out_sharding=shd.moe_fc1_kernel,
         )
         ki2 = functools.partial(
-            jax.nn.initializers.normal(stddev=config.hidden_size**-0.5), out_sharding=shd.moe_fc2_kernel
+            jax.nn.initializers.normal(stddev=config.hidden_size**-0.5),
+            out_sharding=shd.moe_fc2_kernel,
         )
-        self.gate_proj_kernel = nnx.Param(ki1(rngs.params(), (E, H, I)))
-        self.up_proj_kernel = nnx.Param(ki1(rngs.params(), (E, H, I)))
-        self.down_proj_kernel = nnx.Param(ki2(rngs.params(), (E, I, H)))
+        self.gate_proj_kernel = nnx.Param(ki1(rngs.params(), (e, h, i_dim)))
+        self.up_proj_kernel = nnx.Param(ki1(rngs.params(), (e, h, i_dim)))
+        self.down_proj_kernel = nnx.Param(ki2(rngs.params(), (e, i_dim, h)))
 
     def __call__(self, x: Array, topk_indices: Array, topk_weights: Array) -> Array:
         """Applies the selected experts efficiently.
@@ -1202,21 +1398,25 @@ class Gemma4RoutedExperts(nnx.Module):
         Returns:
             Output from the routed experts (B, T, H)
         """
-        B, T, H = x.shape
-        K = topk_indices.shape[-1]
+        b, t, h = x.shape
+        k = topk_indices.shape[-1]
 
         # Flatten batch and sequence to simplify routing
-        x_flat = x.reshape(B * T, H)
-        idx_flat = topk_indices.reshape(B * T, K)
-        w_flat = topk_weights.reshape(B * T, K)
+        x_flat = x.reshape(b * t, h)
+        idx_flat = topk_indices.reshape(b * t, k)
+        w_flat = topk_weights.reshape(b * t, k)
 
         # (B*T, K, 1, H)
         x_expanded = jnp.expand_dims(jnp.expand_dims(x_flat, 1), 1)
 
         # Fetch weights for the selected experts
-        gate_w = jnp.take(self.gate_proj_kernel[...], idx_flat, axis=0)  # (B*T, K, H, I)
+        gate_w = jnp.take(
+            self.gate_proj_kernel[...], idx_flat, axis=0
+        )  # (B*T, K, H, I)
         up_w = jnp.take(self.up_proj_kernel[...], idx_flat, axis=0)  # (B*T, K, H, I)
-        down_w = jnp.take(self.down_proj_kernel[...], idx_flat, axis=0)  # (B*T, K, I, H)
+        down_w = jnp.take(
+            self.down_proj_kernel[...], idx_flat, axis=0
+        )  # (B*T, K, I, H)
 
         # Compute activations
         gate_out = jnp.matmul(x_expanded, gate_w)  # (B*T, K, 1, I)
@@ -1232,7 +1432,7 @@ class Gemma4RoutedExperts(nnx.Module):
         # Sum across experts
         out = jnp.sum(out, axis=1)  # (B*T, H)
 
-        return out.reshape((B, T, H)).astype(self.dtype)
+        return out.reshape((b, t, h)).astype(self.dtype)
 
 
 class Gemma4MoE(nnx.Module):
@@ -1260,14 +1460,22 @@ class Gemma4MoE(nnx.Module):
 
         # Shared expert (just a wider MLP)
         shared_dim = config.intermediate_size * config.num_shared_experts
-        self.shared_experts = Gemma4MLP(config.hidden_size, shared_dim, dtype=config.dtype, shd=shd, rngs=rngs)
+        self.shared_experts = Gemma4MLP(
+            config.hidden_size, shared_dim, dtype=config.dtype, shd=shd, rngs=rngs
+        )
 
         # Routing and gating
         self.pre_forward_scale_2 = nnx.Param(
-            jnp.ones((config.hidden_size,), dtype=config.weight_dtype), out_sharding=shd.norm
+            jnp.ones((config.hidden_size,), dtype=config.weight_dtype),
+            out_sharding=shd.norm,
         )
         self.gate_norm = Gemma4RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            with_scale=False,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
         gate_dtype = jnp.float32 if config.float32_gate_logits else config.dtype
         self.gate = _make_linear(
@@ -1280,20 +1488,34 @@ class Gemma4MoE(nnx.Module):
             rngs=rngs,
         )
         # Per-expert learned scale applied after top-k renormalization.
-        self.per_expert_scale = nnx.Param(jnp.ones((config.num_experts,), dtype=config.weight_dtype))
+        self.per_expert_scale = nnx.Param(
+            jnp.ones((config.num_experts,), dtype=config.weight_dtype)
+        )
 
         # Routed experts utilizing a monolithic weight tensor
         self.routed_experts = Gemma4RoutedExperts(config, rngs=rngs)
 
         # Normalizations
         self.pre_feedforward_layernorm_2 = Gemma4RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
         self.post_feedforward_layernorm_1 = Gemma4RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
         self.post_feedforward_layernorm_2 = Gemma4RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
 
     @jax.named_scope("gemma4_moe")
@@ -1309,7 +1531,9 @@ class Gemma4MoE(nnx.Module):
         # Gating logic
         unscaled_norm = self.gate_norm(original_x)
         root_size = self.config.hidden_size**-0.5
-        router_scale = jnp.asarray(self.pre_forward_scale_2[...], dtype=unscaled_norm.dtype)
+        router_scale = jnp.asarray(
+            self.pre_forward_scale_2[...], dtype=unscaled_norm.dtype
+        )
         gate_inputs = unscaled_norm * root_size * router_scale
 
         # Compute routing weights
@@ -1317,7 +1541,9 @@ class Gemma4MoE(nnx.Module):
         routing_weights = jax.nn.softmax(router_logits, axis=-1)
 
         # Top-K selection and renormalization
-        topk_weights, topk_indices = jax.lax.top_k(routing_weights, k=self.config.num_experts_per_tok)
+        topk_weights, topk_indices = jax.lax.top_k(
+            routing_weights, k=self.config.num_experts_per_tok
+        )
         topk_weights = topk_weights / jnp.sum(topk_weights, axis=-1, keepdims=True)
 
         # Apply per-expert learned scale
@@ -1355,7 +1581,11 @@ class Gemma4Attention(nnx.Module):
                 if config.num_global_key_value_heads is not None
                 else config.num_key_value_heads
             )
-            self.head_dim = config.global_head_dim if config.global_head_dim is not None else config.head_dim
+            self.head_dim = (
+                config.global_head_dim
+                if config.global_head_dim is not None
+                else config.head_dim
+            )
             self.share_kv = config.share_kv_projections
         else:
             self.num_kv_heads = config.num_key_value_heads
@@ -1402,11 +1632,28 @@ class Gemma4Attention(nnx.Module):
             rngs=rngs,
         )
 
-        self.q_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)
-        self.k_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)
+        self.q_norm = Gemma4RMSNorm(
+            self.head_dim,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
+        )
+        self.k_norm = Gemma4RMSNorm(
+            self.head_dim,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
+        )
         # v_norm has no learned scale — matches the reference implementation.
         self.v_norm = Gemma4RMSNorm(
-            self.head_dim, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            self.head_dim,
+            eps=config.rms_norm_eps,
+            with_scale=False,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
 
         if attention_type == AttentionType.GLOBAL:
@@ -1432,7 +1679,7 @@ class Gemma4Attention(nnx.Module):
         )
 
     @jax.named_scope("gemma4_attention")
-    def __call__(
+    def __call__(  # noqa: C901
         self,
         x: Array,
         positions: Array,
@@ -1453,11 +1700,15 @@ class Gemma4Attention(nnx.Module):
         batch_size, seq_len, _ = x.shape
 
         q = self.q_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
-        k = self.k_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
+        k = self.k_proj(x).reshape(
+            (batch_size, seq_len, self.num_kv_heads, self.head_dim)
+        )
         if self.share_kv:
             v = k
         else:
-            v = self.v_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
+            v = self.v_proj(x).reshape(
+                (batch_size, seq_len, self.num_kv_heads, self.head_dim)
+            )
 
         # Apply normalization per head
         q = self.q_norm(q)
@@ -1471,8 +1722,12 @@ class Gemma4Attention(nnx.Module):
 
         if cache is not None:
             slice_indices = (0, cache.cur_ind[...], 0, 0)
-            cache.k_cache[...] = jax.lax.dynamic_update_slice(cache.k_cache[...], k, slice_indices)
-            cache.v_cache[...] = jax.lax.dynamic_update_slice(cache.v_cache[...], v, slice_indices)
+            cache.k_cache[...] = jax.lax.dynamic_update_slice(
+                cache.k_cache[...], k, slice_indices
+            )
+            cache.v_cache[...] = jax.lax.dynamic_update_slice(
+                cache.v_cache[...], v, slice_indices
+            )
             k = cache.k_cache[...]
             v = cache.v_cache[...]
 
@@ -1535,32 +1790,56 @@ class Gemma4Attention(nnx.Module):
 class Gemma4DecoderLayer(nnx.Module):
     """A single decoder layer combining Attention, MoE, and Normalization."""
 
-    def __init__(self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs):
+    def __init__(
+        self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs
+    ):
         self.config = config
         shd = config.shd_cfg
 
         self.pre_self_attention_norm = Gemma4RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
         self.self_attention = Gemma4Attention(config, attention_type, rngs=rngs)
 
         # In Gemma4, post_attn_norm is optional, let's include it for completeness
         # based on maxtext config `use_post_attn_norm` (default might be False, but we add it to mirror maxtext)
         self.post_self_attention_norm = Gemma4RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
 
         self.pre_ffw_norm = Gemma4RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
 
         if config.num_experts > 1:
             self.mlp = Gemma4MoE(config, rngs=rngs)
         else:
-            self.mlp = Gemma4MLP(config.hidden_size, config.intermediate_size, dtype=config.dtype, shd=shd, rngs=rngs)
+            self.mlp = Gemma4MLP(
+                config.hidden_size,
+                config.intermediate_size,
+                dtype=config.dtype,
+                shd=shd,
+                rngs=rngs,
+            )
 
         self.post_ffw_norm = Gemma4RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
 
         if config.hidden_size_per_layer_input:
@@ -1581,10 +1860,16 @@ class Gemma4DecoderLayer(nnx.Module):
                 rngs=rngs,
             )
             self.post_per_layer_input_norm = Gemma4RMSNorm(
-                config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+                config.hidden_size,
+                eps=config.rms_norm_eps,
+                dtype=config.dtype,
+                shd=shd.norm,
+                rngs=rngs,
             )
 
-        self.layer_scalar = nnx.Param(jnp.ones((1,), dtype=config.weight_dtype), out_sharding=None)
+        self.layer_scalar = nnx.Param(
+            jnp.ones((1,), dtype=config.weight_dtype), out_sharding=None
+        )
 
     @jax.named_scope("gemma4_decoder_layer")
     def __call__(
@@ -1651,7 +1936,10 @@ class Gemma4Model(nnx.Module):
         shd = config.shd_cfg
 
         self.embed_tokens = _make_embed(
-            config.vocab_size, config.hidden_size, embedding_metadata={"out_sharding": shd.emb_kernel}, rngs=rngs
+            config.vocab_size,
+            config.hidden_size,
+            embedding_metadata={"out_sharding": shd.emb_kernel},
+            rngs=rngs,
         )
 
         # Scaling embedding by sqrt(hidden_size) as standard in Gemma
@@ -1680,7 +1968,11 @@ class Gemma4Model(nnx.Module):
             )
             self.per_layer_model_projection_scale = config.hidden_size**-0.5
             self.per_layer_projection_norm = Gemma4RMSNorm(
-                config.hidden_size_per_layer_input, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+                config.hidden_size_per_layer_input,
+                eps=config.rms_norm_eps,
+                dtype=config.dtype,
+                shd=shd.norm,
+                rngs=rngs,
             )
 
         self.layers = nnx.List()
@@ -1689,20 +1981,41 @@ class Gemma4Model(nnx.Module):
             self.layers.append(Gemma4DecoderLayer(config, attn_type, rngs=rngs))
 
         self.norm = Gemma4RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs
+            config.hidden_size,
+            eps=config.rms_norm_eps,
+            dtype=config.dtype,
+            shd=shd.norm,
+            rngs=rngs,
         )
 
     def get_per_layer_inputs(self, input_ids: Array) -> Array:
         """Compute the token-identity component of Per-Layer Embeddings (PLE)."""
-        ple = self.embed_tokens_per_layer(input_ids) * (self.config.hidden_size_per_layer_input**0.5)
+        ple = self.embed_tokens_per_layer(input_ids) * (
+            self.config.hidden_size_per_layer_input**0.5
+        )
         batch_size, seq_len, _ = ple.shape
-        return ple.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
+        return ple.reshape(
+            batch_size,
+            seq_len,
+            self.config.num_hidden_layers,
+            self.config.hidden_size_per_layer_input,
+        )
 
-    def project_per_layer_inputs(self, inputs_embeds: Array, per_layer_inputs: Array | None = None) -> Array:
+    def project_per_layer_inputs(
+        self, inputs_embeds: Array, per_layer_inputs: Array | None = None
+    ) -> Array:
         """Projects `inputs_embeds` and combines with token-identity `per_layer_inputs`."""
         batch_size, seq_len, _ = inputs_embeds.shape
-        proj = self.per_layer_model_projection(inputs_embeds) * self.per_layer_model_projection_scale
-        proj = proj.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
+        proj = (
+            self.per_layer_model_projection(inputs_embeds)
+            * self.per_layer_model_projection_scale
+        )
+        proj = proj.reshape(
+            batch_size,
+            seq_len,
+            self.config.num_hidden_layers,
+            self.config.hidden_size_per_layer_input,
+        )
         proj = self.per_layer_projection_norm(proj)
         if per_layer_inputs is not None:
             proj = (proj + per_layer_inputs) * self.per_layer_input_scale
@@ -1738,8 +2051,12 @@ class Gemma4Model(nnx.Module):
 
         for i, layer in enumerate(self.layers):
             layer_cache = cache[i] if cache is not None else None
-            layer_ple = per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
-            x = layer(x, positions, layer_cache, attention_mask, per_layer_input=layer_ple)
+            layer_ple = (
+                per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
+            )
+            x = layer(
+                x, positions, layer_cache, attention_mask, per_layer_input=layer_ple
+            )
 
         return self.norm(x)
 
@@ -1754,6 +2071,7 @@ class Gemma4ForCausalLM(nnx.Module):
         Note that access to the model is restricted and you need to be authorized to access it.
         """
         from huggingface_hub import snapshot_download
+
         from . import params
 
         if config is None:
@@ -1768,10 +2086,14 @@ class Gemma4ForCausalLM(nnx.Module):
                 "google/gemma-4-31B-it": ModelConfig.gemma4_31b,
             }
             if model_name not in config_map:
-                raise ValueError(f"Model name '{model_name}' is unknown, please provide config argument")
+                raise ValueError(
+                    f"Model name '{model_name}' is unknown, please provide config argument"
+                )
             config = config_map[model_name]()
 
-        model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
+        model_ckpt_path = snapshot_download(
+            repo_id=model_name, allow_patterns="*.safetensors"
+        )
         return params.create_gemma4_from_pretrained(model_ckpt_path, config)
 
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs):
@@ -1788,17 +2110,32 @@ class Gemma4ForCausalLM(nnx.Module):
             bias_metadata={"out_sharding": shd.fc2_bias},
             rngs=rngs,
         )
-        self.vision_tower = SiglipVisionTransformer(config.vision_config, rngs=rngs) if config.vision_config else None
-        self.multi_modal_projector = (
-            Gemma4MultiModalProjector(config, config.vision_config, config.mm_tokens_per_image, rngs=rngs)
+        self.vision_tower = (
+            SiglipVisionTransformer(config.vision_config, rngs=rngs)
             if config.vision_config
             else None
         )
-        self.audio_tower = Gemma4AudioModel(config.audio_config, rngs=rngs) if config.audio_config else None
+        self.multi_modal_projector = (
+            Gemma4MultiModalProjector(
+                config, config.vision_config, config.mm_tokens_per_image, rngs=rngs
+            )
+            if config.vision_config
+            else None
+        )
+        self.audio_tower = (
+            Gemma4AudioModel(config.audio_config, rngs=rngs)
+            if config.audio_config
+            else None
+        )
         if config.audio_config:
-            multimodal_hidden_size = getattr(config.audio_config, "output_proj_dims", config.audio_config.hidden_size)
+            multimodal_hidden_size = getattr(
+                config.audio_config, "output_proj_dims", config.audio_config.hidden_size
+            )
             self.embed_audio = Gemma4MultimodalEmbedder(
-                multimodal_hidden_size, config.hidden_size, config.audio_config.rms_norm_eps, rngs=rngs
+                multimodal_hidden_size,
+                config.hidden_size,
+                config.audio_config.rms_norm_eps,
+                rngs=rngs,
             )
         else:
             self.embed_audio = None
@@ -1843,13 +2180,17 @@ class Gemma4ForCausalLM(nnx.Module):
                 vision_outputs = self.vision_tower(pixel_values)
                 image_features = self.multi_modal_projector(vision_outputs)
                 if image_token_mask is not None:
-                    inputs_embeds = batched_merge_modalities(image_features, inputs_embeds, image_token_mask)
+                    inputs_embeds = batched_merge_modalities(
+                        image_features, inputs_embeds, image_token_mask
+                    )
 
             if has_audio:
                 audio_outputs = self.audio_tower(input_features, input_features_mask)
                 audio_features = self.embed_audio(audio_outputs)
                 if audio_token_mask is not None:
-                    inputs_embeds = batched_merge_modalities(audio_features, inputs_embeds, audio_token_mask)
+                    inputs_embeds = batched_merge_modalities(
+                        audio_features, inputs_embeds, audio_token_mask
+                    )
 
             # Forward layers
             hidden_states = inputs_embeds
@@ -1859,14 +2200,26 @@ class Gemma4ForCausalLM(nnx.Module):
                 # Here we just use the raw input_ids (where image placeholders usually reside)
                 # and project the merged inputs_embeds
                 per_layer_inputs_id = self.model.get_per_layer_inputs(input_ids)
-                per_layer_inputs = self.model.project_per_layer_inputs(hidden_states, per_layer_inputs_id)
+                per_layer_inputs = self.model.project_per_layer_inputs(
+                    hidden_states, per_layer_inputs_id
+                )
             else:
                 per_layer_inputs = None
 
             for i, layer in enumerate(self.model.layers):
                 layer_cache = cache[i] if cache is not None else None
-                layer_ple = per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
-                hidden_states = layer(hidden_states, positions, layer_cache, attention_mask, per_layer_input=layer_ple)
+                layer_ple = (
+                    per_layer_inputs[:, :, i, :]
+                    if per_layer_inputs is not None
+                    else None
+                )
+                hidden_states = layer(
+                    hidden_states,
+                    positions,
+                    layer_cache,
+                    attention_mask,
+                    per_layer_input=layer_ple,
+                )
             hidden_states = self.model.norm(hidden_states)
         else:
             hidden_states = self.model(input_ids, positions, cache, attention_mask)

@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
 from jaxtyping import Array
-from functools import partial
 
 
 def segment_ids_to_positions(segment_ids: Array) -> Array:
@@ -38,9 +39,9 @@ def default_rope_params(
     return rotational_frequency, attention_factor
 
 
-rope_functions = dict(
-    default=default_rope_params,
-)
+rope_functions = {
+    "default": default_rope_params,
+}
 
 
 def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
@@ -48,7 +49,9 @@ def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
     x1, x2 = x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :]
     # [B, T, head_dim] -> [B, h, T, head_dim]
     sin, cos = sin[:, :, None, :], cos[:, :, None, :]
-    return jnp.concatenate([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1).astype(x.dtype)
+    return jnp.concatenate([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1).astype(
+        x.dtype
+    )
 
 
 class RoPE(nnx.Module):
@@ -59,6 +62,14 @@ class RoPE(nnx.Module):
     def __call__(self, positions: Array) -> tuple[Array, Array]:
         rotational_frequency, attention_factor = self.rope_fn(positions)
         # Use high-precision einsum to prevent catastrophic bfloat16 rounding (ex: 257→256), as sin(257) differs from sin(256).
-        sinusoid_inp = jnp.einsum("BT,k->BTk", positions, rotational_frequency, precision=jax.lax.Precision.HIGHEST)
-        sin, cos = jnp.sin(sinusoid_inp) * attention_factor, jnp.cos(sinusoid_inp) * attention_factor
+        sinusoid_inp = jnp.einsum(
+            "BT,k->BTk",
+            positions,
+            rotational_frequency,
+            precision=jax.lax.Precision.HIGHEST,
+        )
+        sin, cos = (
+            jnp.sin(sinusoid_inp) * attention_factor,
+            jnp.cos(sinusoid_inp) * attention_factor,
+        )
         return sin, cos
