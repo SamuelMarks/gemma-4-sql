@@ -25,7 +25,7 @@ def compute_metrics(
     valid_sqls = 0
     exec_matches = 0
 
-    for p, t in zip(preds, truths):
+    for p, t in zip(preds, truths, strict=False):
         if normalize_sql(p) == normalize_sql(t):
             exact_matches += 1
 
