@@ -1,28 +1,32 @@
-"""
-Tests for Keras quantization logic.
-"""
+"""Tests for Keras quantization logic."""
 
 from __future__ import annotations
 
-import pytest
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.keras.quantize import quantize_model
+
+if TYPE_CHECKING:
+    import pytest
 
 
 def test_quantize_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test Keras quantize when missing."""
-    import gemma_4_sql.backends.keras.quantize as keras_quantize
-
+    keras_quantize = __import__("gemma_4_sql.backends.keras.quantize", fromlist=[""])
     monkeypatch.setattr(keras_quantize, "tf", None)
-
     res = quantize_model("model", "int8")
-    assert res["status"] == "mocked_missing_keras"
-    assert res["memory_reduction_factor"] == 0.0
+    if not res["status"] == "mocked_missing_keras":
+        raise AssertionError
+    if not res["memory_reduction_factor"] == 0.0:
+        raise AssertionError
 
 
 def test_quantize_keras() -> None:
     """Test Keras quantize."""
     res = quantize_model("model", "awq")
-    assert res["backend"] == "keras"
-    assert res["method"] == "awq"
-    assert res["status"] in ["quantized_awq", "mocked_missing_keras"]
+    if not res["backend"] == "keras":
+        raise AssertionError
+    if not res["method"] == "awq":
+        raise AssertionError
+    if res["status"] not in ["quantized_awq", "mocked_missing_keras"]:
+        raise AssertionError

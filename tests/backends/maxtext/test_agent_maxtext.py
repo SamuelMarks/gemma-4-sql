@@ -1,50 +1,84 @@
-"""
-Tests for MaxText Agentic Loop.
-"""
+"""Tests for MaxText Agentic Loop."""
 
-from typing import Any
+import typing
 
 import pytest
-
 from gemma_4_sql.backends.maxtext.agent import run_agentic_loop
 
 
 class MockLiveDatabaseEngine:
     """Mock LiveDatabaseEngine that fails once then succeeds."""
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self: typing.Any, **_kwargs: object) -> None:
+        """Initialize function __init__.
+
+        Args:
+        ----
+        kwargs: Description of kwargs.
+
+        """
         self.call_count = 0
 
-    def execute_with_feedback(self, query: str) -> tuple[bool, list[Any], str]:
+    def execute_with_feedback(self: typing.Any, _query: str) -> tuple[bool, list[object], str]:
+        """Initialize function execute_with_feedback.
+
+        Args:
+        ----
+        query: Description of query.
+
+        """
         self.call_count += 1
         if self.call_count == 1:
-            return False, [], "Syntax error"
-        return True, [(1,)], ""
+            return (False, [], "Syntax error")
+        return (True, [(1,)], "")
 
-    def close(self) -> None:
-        pass
+    def close(self: typing.Any) -> None:
+        """Initialize function close."""
 
 
-@pytest.fixture
-def mock_engine(monkeypatch: pytest.MonkeyPatch) -> None:
-    import gemma_4_sql.backends.maxtext.agent as maxtext_agent
+@pytest.fixture()
+def _mock_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Initialize function mock_engine.
 
+    Args:
+    ----
+    monkeypatch: Description of monkeypatch.
+
+    """
+    maxtext_agent = __import__("gemma_4_sql.backends.maxtext.agent", fromlist=[""])
     monkeypatch.setattr(maxtext_agent, "LiveDatabaseEngine", MockLiveDatabaseEngine)
 
-    def mock_generate_sql(model_name: str, prompt: str) -> dict[str, Any]:
+    def mock_generate_sql(_model_name: str, _prompt: str) -> dict[str, object]:
+        """Initialize function mock_generate_sql.
+
+        Args:
+        ----
+        model_name: Description of model_name.
+        prompt: Description of prompt.
+
+        """
         return {"sql": "SELECT * FROM t"}
 
     monkeypatch.setattr(maxtext_agent, "generate_sql", mock_generate_sql)
 
 
-def test_run_agentic_loop(mock_engine: None) -> None:
+@pytest.mark.usefixtures("_mock_engine")
+def test_run_agentic_loop() -> None:
     """Test MaxText agentic loop."""
     res = run_agentic_loop(model_name="m", prompt="p", max_retries=3)
-    assert res["status"] == "completed"
-    assert res["attempts"] == 2
-    assert res["success"] is True
-    assert len(res["history"]) == 2
-    assert res["history"][0]["success"] is False
-    assert res["history"][0]["error"] == "Syntax error"
-    assert res["history"][1]["success"] is True
-    assert "Syntax error" in res["history"][1]["prompt"]
+    if not res["status"] == "completed":
+        raise AssertionError
+    if not res["attempts"] == int("2"):
+        raise AssertionError
+    if res["success"] is not True:
+        raise AssertionError
+    if not len(res["history"]) == int("2"):  # type: ignore[arg-type]
+        raise AssertionError
+    if res["history"][0]["success"] is not False:  # type: ignore[index]
+        raise AssertionError
+    if not res["history"][0]["error"] == "Syntax error":  # type: ignore[index]
+        raise AssertionError
+    if res["history"][1]["success"] is not True:  # type: ignore[index]
+        raise AssertionError
+    if "Syntax error" not in res["history"][1]["prompt"]:  # type: ignore[index]
+        raise AssertionError

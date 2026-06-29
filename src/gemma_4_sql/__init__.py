@@ -1,6 +1,4 @@
-"""
-Main package for gemma-4-sql.
-"""
+"""Run main package for gemma-4-sql."""
 
 from __future__ import annotations
 
@@ -10,11 +8,4 @@ from gemma_4_sql.sdk.logging import log_metrics
 from gemma_4_sql.sdk.rag import extract_schema_entities, retrieve_relevant_schema
 from gemma_4_sql.tokenization import SQLTokenizer
 
-__all__ = [
-    "SQLTokenizer",
-    "LiveDatabaseEngine",
-    "embed_in_duckdb",
-    "log_metrics",
-    "extract_schema_entities",
-    "retrieve_relevant_schema",
-]
+__all__ = ["LiveDatabaseEngine", "SQLTokenizer", "embed_in_duckdb", "extract_schema_entities", "log_metrics", "retrieve_relevant_schema"]

@@ -1,129 +1,74 @@
-"""
-MaxText-specific Grain ETL pipeline.
-"""
+"""MaxText-specific Grain ETL pipeline."""
 
 from __future__ import annotations
 
-from typing import Any
+import typing
 
 from gemma_4_sql.tokenization import SQLTokenizer
 
 try:
     import datasets
-except Exception:
+except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     datasets = None
-
 try:
     import grain.python as grain
-except Exception:
+except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     grain = None
-
 try:
     import duckdb
-except Exception:
+except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     duckdb = None
 
 
-def build_dataloader(
-    dataset_name: str,
-    split: str,
-    batch_size: int = 32,
-    distributed: bool = False,
-    tokenizer_name: str | None = None,
-    duckdb_path: str | None = None,
-    duckdb_table: str | None = None,
-) -> dict[str, Any]:
-    """Builds a MaxText-specific Grain dataloader."""
+def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: object) -> dict[str, object]:
+    """Build a MaxText-specific Grain dataloader."""
+    duckdb_path = kwargs.get("duckdb_path")
+    duckdb_table = kwargs.get("duckdb_table")
     if datasets is None or grain is None:
-        return {
-            "dataset": dataset_name,
-            "split": split,
-            "status": "mocked",
-            "batch_size": batch_size,
-            "backend": "maxtext",
-            "distributed": distributed,
-            "mock_samples": [{"query": "SELECT * FROM users", "nl": "Get all users"}],
-        }
-
+        return {"dataset": dataset_name, "split": split, "status": "mocked", "batch_size": batch_size, "backend": "maxtext", "distributed": distributed, "mock_samples": [{"query": "SELECT * FROM users", "nl": "Get all users"}]}
     if duckdb_path and duckdb_table:
         if duckdb is None:
-            raise ImportError("duckdb is required for DuckDB support.")
+            msg = "duckdb is required for DuckDB support."
+            raise ImportError(msg)
         conn = duckdb.connect(duckdb_path, read_only=True)
         try:
-            hf_dataset = (
-                conn.execute(f"SELECT * FROM {duckdb_table}")
-                .fetchdf()
-                .to_dict(orient="records")
-            )
+            hf_dataset = conn.execute("SELECT * FROM ?", (duckdb_table,)).fetchdf().to_dict(orient="records")
         finally:
             conn.close()
     else:
         hf_dataset = datasets.load_dataset(dataset_name, split=split)
 
-    class HFDataSource(grain.RandomAccessDataSource):
+    class HFDataSource(grain.RandomAccessDataSource):  # type: ignore[misc]
         """Data source wrapping a Hugging Face dataset."""
 
-        def __init__(self, hf_ds: Any):
+        def __init__(self: typing.Any, hf_ds: object) -> None:
             """Initialize with dataset."""
             self._ds = hf_ds
 
-        def __len__(self) -> int:
+        def __len__(self: typing.Any) -> int:
             """Return dataset length."""
             return len(self._ds)
 
-        def __getitem__(self, idx: int) -> Any:
+        def __getitem__(self: typing.Any, idx: int) -> object:
             """Get dataset item by index."""
             return self._ds[idx]
 
-    class MaxTextFormatTransform(grain.MapTransform):
+    class MaxTextFormatTransform(grain.MapTransform):  # type: ignore[misc]
         """Transforms data into MaxText expected format."""
 
-        def __init__(self, tokenizer: SQLTokenizer):
+        def __init__(self: typing.Any, tokenizer: SQLTokenizer) -> None:
             """Initialize the transform with a tokenizer."""
             self.tokenizer = tokenizer
 
-        def map(self, element: dict[str, Any]) -> dict[str, Any]:
+        def map(self: typing.Any, element: dict[str, object]) -> dict[str, object]:
             """Map an element."""
             prompt = element.get("sql_prompt", element.get("question", ""))
             target = element.get("sql", element.get("query", ""))
-            # MaxText Seq2Seq models often expect inputs, targets, segment_ids, positions
-            return {
-                "inputs": self.tokenizer.encode(prompt),
-                "targets": self.tokenizer.encode(target),
-                "segment_ids": [1],  # Mocking
-                "positions": [0],  # Mocking
-            }
+            return {"inputs": self.tokenizer.encode(prompt), "targets": self.tokenizer.encode(target), "segment_ids": [1], "positions": [0]}
 
     source = HFDataSource(hf_dataset)
     tokenizer = SQLTokenizer(model_name=tokenizer_name)
-
-    if distributed:
-        shard_options = getattr(grain, "JAXDistributedSharding", lambda: None)()
-    else:
-        shard_options = getattr(grain, "NoSharding", lambda: None)()
-
-    sampler = grain.IndexSampler(
-        num_records=len(source),
-        shard_options=shard_options,
-        shuffle=False,
-        num_epochs=1,
-    )
-
-    dataloader = grain.DataLoader(
-        data_source=source,
-        sampler=sampler,
-        operations=[
-            MaxTextFormatTransform(tokenizer=tokenizer),
-            grain.Batch(batch_size=batch_size),
-        ],
-    )
-
-    return {
-        "dataset": dataset_name,
-        "split": split,
-        "status": "loaded",
-        "batch_size": batch_size,
-        "backend": "maxtext",
-        "distributed": distributed,
-        "loader": dataloader,
-    }
+    shard_options = getattr(grain, "JAXDistributedSharding", lambda: None)() if distributed else getattr(grain, "NoSharding", lambda: None)()
+    sampler = grain.IndexSampler(num_records=len(source), shard_options=shard_options, shuffle=False, num_epochs=1)
+    dataloader = grain.DataLoader(data_source=source, sampler=sampler, operations=[MaxTextFormatTransform(tokenizer=tokenizer), grain.Batch(batch_size=batch_size)])
+    return {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "maxtext", "distributed": distributed, "loader": dataloader}

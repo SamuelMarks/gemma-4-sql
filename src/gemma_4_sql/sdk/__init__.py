@@ -1,10 +1,9 @@
-"""
-SDK module for gemma-4-sql.
-"""
+"""SDK module for gemma-4-sql."""
 
 from __future__ import annotations
 
-from ..tokenization import SQLTokenizer
+from gemma_4_sql.tokenization import SQLTokenizer
+
 from .agent import run_agentic_loop
 from .benchmark import benchmark
 from .chat import chat_turn
@@ -24,29 +23,29 @@ from .rag import build_rag_prompt, extract_schema_entities, retrieve_relevant_sc
 from .serve import serve_model
 
 __all__ = [
-    "SQLTokenizer",
     "LiveDatabaseEngine",
+    "SQLTokenizer",
+    "apply_peft",
     "benchmark",
-    "run_agentic_loop",
-    "run_dpo",
+    "build_few_shot_prompt",
+    "build_rag_prompt",
+    "chat_turn",
     "embed_in_duckdb",
+    "etl_posttrain",
     "etl_pretrain",
     "etl_sft",
-    "etl_posttrain",
     "evaluate",
     "export_model",
+    "extract_schema_entities",
     "generate",
     "log_metrics",
-    "train_from_scratch",
-    "pretrain_model",
-    "sft_model",
     "posttrain_model",
-    "apply_peft",
+    "pretrain_model",
     "quantize_model",
-    "build_rag_prompt",
-    "extract_schema_entities",
     "retrieve_relevant_schema",
+    "run_agentic_loop",
+    "run_dpo",
     "serve_model",
-    "chat_turn",
-    "build_few_shot_prompt",
+    "sft_model",
+    "train_from_scratch",
 ]

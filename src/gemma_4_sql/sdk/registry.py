@@ -1,34 +1,37 @@
-"""
-Backend registry.
-"""
+"""Backend registry for gemma-4-sql."""
 
 from __future__ import annotations
 
 import importlib.metadata
-import sys
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from .protocols import BackendProtocol
+if TYPE_CHECKING:
+    from .protocols import BackendProtocol
 
-_ENTRY_POINTS: dict[str, importlib.metadata.EntryPoint] | None = None
+ENTRY_POINTS: dict[str, importlib.metadata.EntryPoint] = {}
 
 
 def get_backend(name: str) -> BackendProtocol:
-    """
-    Get backend by name.
-    """
-    global _ENTRY_POINTS
-    if _ENTRY_POINTS is None:
-        _ENTRY_POINTS = {}
-        if sys.version_info >= (3, 10):  # noqa: UP036
-            eps = importlib.metadata.entry_points(group="gemma_4_sql.backends")
-        else:
-            eps = importlib.metadata.entry_points().get("gemma_4_sql.backends", [])
+    """Get backend by name.
 
+    Args:
+    ----
+        name: The name of the backend to load (e.g., 'jax', 'keras', 'maxtext', 'pytorch').
+
+    Returns:
+    -------
+        The loaded BackendProtocol implementation.
+
+    Raises:
+    ------
+        ValueError: If the specified backend name is not found in the entry points.
+
+    """
+    if not ENTRY_POINTS:
+        eps = importlib.metadata.entry_points(group="gemma_4_sql.backends")
         for ep in eps:
-            _ENTRY_POINTS[ep.name] = ep
-
-    if name not in _ENTRY_POINTS:
-        raise ValueError(f"Unknown backend: {name}")
-
-    return cast(BackendProtocol, _ENTRY_POINTS[name].load())
+            ENTRY_POINTS[ep.name] = ep
+    if name not in ENTRY_POINTS:
+        msg = f"Unknown backend: {name}"
+        raise ValueError(msg)
+    return cast("BackendProtocol", ENTRY_POINTS[name].load())

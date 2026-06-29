@@ -1,30 +1,26 @@
-"""
-Keras-specific model quantization logic.
-"""
+"""Keras-specific model quantization logic."""
 
 from __future__ import annotations
 
-from typing import Any
-
 try:
     import tensorflow as tf
-except Exception:
+except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     tf = None
 
 
-def quantize_model(
-    model_name: str, method: str = "int8", **kwargs: Any
-) -> dict[str, Any]:
-    """
-    Quantizes a Keras model.
+def quantize_model(model_name: str, method: str = "int8", **_kwargs: object) -> dict[str, object]:
+    """Quantize a Keras model.
 
     Args:
+    ----
         model_name: The name of the model to quantize.
         method: The quantization method ('int8', 'awq', 'gptq', 'gguf').
         **kwargs: Additional quantization parameters.
 
     Returns:
+    -------
         A dictionary containing quantization status and metadata.
+
     """
     if tf is not None:
         status = f"quantized_{method}"
@@ -32,11 +28,4 @@ def quantize_model(
     else:
         status = "mocked_missing_keras"
         memory_reduction = 0.0
-
-    return {
-        "backend": "keras",
-        "model": model_name,
-        "method": method,
-        "status": status,
-        "memory_reduction_factor": memory_reduction,
-    }
+    return {"backend": "keras", "model": model_name, "method": method, "status": status, "memory_reduction_factor": memory_reduction}

@@ -1,6 +1,4 @@
-"""
-PyTorch backend approach.
-"""
+"""PyTorch backend approach."""
 
 from __future__ import annotations
 
@@ -19,25 +17,9 @@ from .quantize import quantize_model
 from .serve import serve_model
 from .train import train_model
 
-__all__ = [
-    "run_agentic_loop",
-    "benchmark_model",
-    "chat_turn",
-    "run_dpo",
-    "build_dataloader",
-    "evaluate_model",
-    "export_model",
-    "build_few_shot_prompt",
-    "generate_sql",
-    "log_metrics",
-    "apply_lora",
-    "quantize_model",
-    "serve_model",
-    "train_model",
-    "get_trainer",
-]
+__all__ = ["apply_lora", "benchmark_model", "build_dataloader", "build_few_shot_prompt", "chat_turn", "evaluate_model", "export_model", "generate_sql", "get_trainer", "log_metrics", "quantize_model", "run_agentic_loop", "run_dpo", "serve_model", "train_model"]
 
 
 def get_trainer() -> str:
-    """Returns the PyTorch trainer identifier."""
+    """Return the PyTorch trainer identifier."""
     return "pytorch_trainer"

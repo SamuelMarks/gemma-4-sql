@@ -1,16 +1,15 @@
-"""
-Tests for PyTorch-specific ETL pipeline (full implementation).
-"""
+"""Tests for PyTorch-specific ETL pipeline (full implementation)."""
 
 import sys
+import typing
 
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def clean_sys_modules():
-    import sys
-
+def _clean_sys_modules() -> object:
+    """Initialize function clean_sys_modules."""
+    sys = __import__("sys")
     keys = list(sys.modules.keys())
     yield
     for k in list(sys.modules.keys()):
@@ -19,63 +18,133 @@ def clean_sys_modules():
 
 
 class MockDataset:
-    def __init__(self, data):
+    """Initialize class MockDataset."""
+
+    def __init__(self: typing.Any, data: object) -> None:
+        """Initialize function __init__.
+
+        Args:
+        ----
+        data: Description of data.
+
+        """
         self.data = data
 
-    def __len__(self):
+    def __len__(self: typing.Any) -> object:
+        """Initialize function __len__."""
         return len(self.data)
 
-    def __getitem__(self, idx):
+    def __getitem__(self: typing.Any, idx: object) -> object:
+        """Initialize function __getitem__.
+
+        Args:
+        ----
+        idx: Description of idx.
+
+        """
         return self.data[idx]
 
 
 class MockDatasets:
-    def load_dataset(self, name, split):
-        return MockDataset(
-            [
-                {"question": "What is 1?", "query": "SELECT 1"},
-                {"question": "What is 2?", "query": "SELECT 2"},
-            ]
-        )
+    """Initialize class MockDatasets."""
+
+    def load_dataset(self: typing.Any, _name: object, _split: object) -> object:
+        """Initialize function load_dataset.
+
+        Args:
+        ----
+        name: Description of name.
+        split: Description of split.
+
+        """
+        return MockDataset([{"question": "What is 1?", "query": "SELECT 1"}, {"question": "What is 2?", "query": "SELECT 2"}])
 
 
 class MockTensor:
-    def __init__(self, data, dtype=None):
+    """Initialize class MockTensor."""
+
+    def __init__(self: typing.Any, data: object, dtype: object = None) -> None:
+        """Initialize function __init__.
+
+        Args:
+        ----
+        data: Description of data.
+        dtype: Description of dtype.
+
+        """
         self.data = data
         self.dtype = dtype
 
-    def __repr__(self):
+    def __repr__(self: typing.Any) -> object:  # type: ignore[override]
+        """Initialize function __repr__."""
         return f"MockTensor({self.data})"
 
-    def __len__(self):
+    def __len__(self: typing.Any) -> object:
+        """Initialize function __len__."""
         return len(self.data)
 
 
 class MockNNUtilsRNN:
+    """Initialize class MockNNUtilsRNN."""
+
     @staticmethod
-    def pad_sequence(sequences, batch_first=False):
+    def pad_sequence(sequences: object, *, _batch_first: object = False) -> object:
+        """Initialize function pad_sequence.
+
+        Args:
+        ----
+        sequences: Description of sequences.
+        batch_first: Description of batch_first.
+
+        """
         return sequences
 
 
 class MockNNUtils:
+    """Initialize class MockNNUtils."""
+
     rnn = MockNNUtilsRNN()
 
 
 class MockNN:
+    """Initialize class MockNN."""
+
     utils = MockNNUtils()
 
 
 class MockTorch:
+    """Initialize class MockTorch."""
+
     long = "long"
     nn = MockNN()
 
     @staticmethod
-    def tensor(data, dtype=None):
+    def tensor(data: object, dtype: object = None) -> object:
+        """Initialize function tensor.
+
+        Args:
+        ----
+        data: Description of data.
+        dtype: Description of dtype.
+
+        """
         return MockTensor(data, dtype)
 
 
 class MockDataLoader:
-    def __init__(self, dataset, batch_size, shuffle, collate_fn):
+    """Initialize class MockDataLoader."""
+
+    def __init__(self: typing.Any, dataset: object, batch_size: object, shuffle: object, collate_fn: object) -> None:
+        """Initialize function __init__.
+
+        Args:
+        ----
+        dataset: Description of dataset.
+        batch_size: Description of batch_size.
+        shuffle: Description of shuffle.
+        collate_fn: Description of collate_fn.
+
+        """
         self.dataset = dataset
         self.batch_size = batch_size
         self.shuffle = shuffle
@@ -83,48 +152,44 @@ class MockDataLoader:
 
 
 class MockDatasetClass:
-    pass
+    """Initialize class MockDatasetClass."""
 
 
-@pytest.fixture
-def mock_pytorch_env(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture()
+def _mock_pytorch_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fixture to mock datasets and torch."""
     monkeypatch.setitem(sys.modules, "datasets", MockDatasets())
     monkeypatch.setitem(sys.modules, "torch", MockTorch())
-    monkeypatch.setitem(
-        sys.modules,
-        "torch.utils.data",
-        type("mock", (), {"DataLoader": MockDataLoader, "Dataset": MockDatasetClass}),
-    )
-
-    # Reload the module so it picks up the mocked sys.modules
+    monkeypatch.setitem(sys.modules, "torch.utils.data", type("mock", (), {"DataLoader": MockDataLoader, "Dataset": MockDatasetClass}))
     if "gemma_4_sql.backends.pytorch.etl" in sys.modules:
         del sys.modules["gemma_4_sql.backends.pytorch.etl"]
 
 
-def test_build_dataloader_pytorch_loaded(mock_pytorch_env: None) -> None:
+@pytest.mark.usefixtures("_mock_pytorch_env")
+def test_build_dataloader_pytorch_loaded() -> None:
     """Test PyTorch build_dataloader when libraries are present."""
-    from gemma_4_sql.backends.pytorch.etl import build_dataloader
-
-    res = build_dataloader("dummy/data", "train", 16, False)
-    assert res["backend"] == "pytorch"
-    assert res["status"] == "loaded"
-    assert res["batch_size"] == 16
-    assert hasattr(res["loader"], "collate_fn")
-
-    # Test __getitem__ of PyTorchDataset
+    build_dataloader = __import__("gemma_4_sql.backends.pytorch.etl", fromlist=["build_dataloader"]).build_dataloader
+    res = build_dataloader("dummy/data", "train", 16, distributed=False)
+    if not res["backend"] == "pytorch":
+        raise AssertionError
+    if not res["status"] == "loaded":
+        raise AssertionError
+    if not res["batch_size"] == int("16"):
+        raise AssertionError
+    if not hasattr(res["loader"], "collate_fn"):
+        raise AssertionError
     dataset = res["loader"].dataset
-    assert len(dataset) == 2
+    if not len(dataset) == int("2"):
+        raise AssertionError
     item = dataset[0]
-    assert "inputs" in item
-    assert "targets" in item
-
-    # Test collate function manually
-    batch = [
-        {"inputs": MockTensor([1, 2]), "targets": MockTensor([3, 4])},
-        {"inputs": MockTensor([5, 6, 7]), "targets": MockTensor([8])},
-    ]
+    if "inputs" not in item:
+        raise AssertionError
+    if "targets" not in item:
+        raise AssertionError
+    batch = [{"inputs": MockTensor([1, 2]), "targets": MockTensor([3, 4])}, {"inputs": MockTensor([5, 6, 7]), "targets": MockTensor([8])}]
     collate_fn = res["loader"].collate_fn
     collated = collate_fn(batch)
-    assert len(collated["inputs"]) == 2
-    assert len(collated["targets"]) == 2
+    if not len(collated["inputs"]) == int("2"):
+        raise AssertionError
+    if not len(collated["targets"]) == int("2"):
+        raise AssertionError

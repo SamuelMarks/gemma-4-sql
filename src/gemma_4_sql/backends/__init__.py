@@ -1,5 +1,3 @@
-"""
-Backend definitions.
-"""
+"""Backend definitions."""
 
 from __future__ import annotations

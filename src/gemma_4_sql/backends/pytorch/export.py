@@ -1,62 +1,44 @@
-"""
-PyTorch-specific model export pipeline.
-"""
+"""PyTorch-specific model export pipeline."""
 
 from __future__ import annotations
 
-import os
-from typing import Any
+from pathlib import Path
 
 try:
     import torch
-    from safetensors.torch import (
-        save_file,
-    )
-except Exception:
+    from safetensors.torch import save_file
+except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     torch = None
     save_file = None
 
 
-def export_model(model_name: str, export_path: str) -> dict[str, Any]:
-    """
-    Exports a Text-to-SQL model using the PyTorch backend.
+def export_model(model_name: str, export_path: str) -> dict[str, object]:
+    """Export a Text-to-SQL model using the PyTorch backend.
 
     Args:
+    ----
         model_name: The name of the model to export.
         export_path: The destination path for the checkpoint.
 
     Returns:
+    -------
         A dictionary containing export metadata.
-    """
-    os.makedirs(export_path, exist_ok=True)
 
+    """
+    Path(export_path).mkdir(parents=True, exist_ok=True)
     if torch is not None and save_file is not None:
         try:
-            from transformers.models.gemma4 import (
-                Gemma4ForCausalLM,
-            )
-
-            model = Gemma4ForCausalLM.from_pretrained(model_name)  # pragma: no cover
-            tensors = model.state_dict()  # pragma: no cover
-        except (ImportError, Exception):
+            gemma4_for_causal_lm_cls = __import__("transformers.models.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
+            model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
+            tensors = model.state_dict()
+        except (ImportError, ValueError):
             tensors = {"weights": torch.zeros((10, 10))}
-
-        file_path = os.path.join(export_path, "model.safetensors")
+        file_path = Path(export_path) / "model.safetensors"
         save_file(tensors, file_path)
         status = "exported_with_safetensors"
     else:
-        file_path = os.path.join(
-            export_path, f"mock_pytorch_model_{model_name}.safetensors"
-        )
-        with open(file_path, "w", encoding="utf-8") as f:
+        file_path = Path(export_path) / f"mock_pytorch_model_{model_name}.safetensors"
+        with Path.open(file_path, "w", encoding="utf-8") as f:
             f.write(f"Mock PyTorch weights for {model_name}")
         status = "mock_exported"
-
-    return {
-        "backend": "pytorch",
-        "model": model_name,
-        "export_path": export_path,
-        "file_path": file_path,
-        "status": status,
-        "format": "safetensors",
-    }
+    return {"backend": "pytorch", "model": model_name, "export_path": export_path, "file_path": file_path, "status": status, "format": "safetensors"}

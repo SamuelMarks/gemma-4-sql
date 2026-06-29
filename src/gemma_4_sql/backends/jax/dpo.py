@@ -1,30 +1,20 @@
-"""
-JAX-specific DPO (Direct Preference Optimization) logic.
-"""
+"""JAX-specific DPO (Direct Preference Optimization) logic."""
 
 from __future__ import annotations
 
-from typing import Any
-
 try:
-    import jax.nn as jnn  # pragma: no cover
-    import jax.numpy as jnp  # pragma: no cover
-except Exception:
+    import jax.nn as jnn
+    import jax.numpy as jnp
+except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     jnp = None
     jnn = None
 
 
-def dpo_loss(
-    policy_chosen_logps: Any,
-    policy_rejected_logps: Any,
-    ref_chosen_logps: Any,
-    ref_rejected_logps: Any,
-    beta: float = 0.1,
-) -> tuple[Any, Any, Any]:
-    """
-    Computes the DPO loss for JAX.
+def dpo_loss(policy_chosen_logps: object, policy_rejected_logps: object, ref_chosen_logps: object, ref_rejected_logps: object, beta: float = 0.1) -> tuple[object, object, object]:
+    """Compute the DPO loss for JAX.
 
     Args:
+    ----
         policy_chosen_logps: Log probabilities of chosen responses from policy model.
         policy_rejected_logps: Log probabilities of rejected responses from policy model.
         ref_chosen_logps: Log probabilities of chosen responses from reference model.
@@ -32,33 +22,34 @@ def dpo_loss(
         beta: Temperature parameter for the DPO loss.
 
     Returns:
+    -------
         A tuple of (loss, chosen_rewards, rejected_rewards).
+
     """
     if jnp is None or jnn is None:
-        return 0.0, 0.0, 0.0
-
-    pi_logratios = policy_chosen_logps - policy_rejected_logps
-    ref_logratios = ref_chosen_logps - ref_rejected_logps
+        return (0.0, 0.0, 0.0)
+    pi_logratios = policy_chosen_logps - policy_rejected_logps  # type: ignore[operator]
+    ref_logratios = ref_chosen_logps - ref_rejected_logps  # type: ignore[operator]
     logits = pi_logratios - ref_logratios
-
     loss = -jnn.log_sigmoid(beta * logits)
-    chosen_rewards = beta * (policy_chosen_logps - ref_chosen_logps)
-    rejected_rewards = beta * (policy_rejected_logps - ref_rejected_logps)
+    chosen_rewards = beta * (policy_chosen_logps - ref_chosen_logps)  # type: ignore[operator]
+    rejected_rewards = beta * (policy_rejected_logps - ref_rejected_logps)  # type: ignore[operator]
+    return (jnp.mean(loss), jnp.mean(chosen_rewards), jnp.mean(rejected_rewards))
 
-    return jnp.mean(loss), jnp.mean(chosen_rewards), jnp.mean(rejected_rewards)
 
-
-def run_dpo(model_name: str, dataset: str, beta: float = 0.1) -> dict[str, Any]:
-    """
-    Runs a mocked DPO training loop for JAX.
+def run_dpo(model_name: str, dataset: str, beta: float = 0.1) -> dict[str, object]:
+    """Run a mocked DPO training loop for JAX.
 
     Args:
+    ----
         model_name: The name of the model.
         dataset: The dataset name.
         beta: The beta temperature parameter.
 
     Returns:
+    -------
         A dict with the execution status and metrics.
+
     """
     if jnp is not None:
         status = "completed"
@@ -66,18 +57,9 @@ def run_dpo(model_name: str, dataset: str, beta: float = 0.1) -> dict[str, Any]:
         pi_re = jnp.array([-0.1, -0.2])
         ref_ch = jnp.array([0.05, 0.1])
         ref_re = jnp.array([-0.05, -0.1])
-        loss, _, _ = dpo_loss(pi_ch, pi_re, ref_ch, ref_re, beta)
-        final_loss = loss.item()
+        (loss, _, _) = dpo_loss(pi_ch, pi_re, ref_ch, ref_re, beta)
+        final_loss = loss.item()  # type: ignore[attr-defined]
     else:
         status = "mocked_missing_jax"
         final_loss = 0.0
-
-    return {
-        "backend": "jax",
-        "action": "dpo",
-        "model": model_name,
-        "dataset": dataset,
-        "beta": beta,
-        "status": status,
-        "final_loss": final_loss,
-    }
+    return {"backend": "jax", "action": "dpo", "model": model_name, "dataset": dataset, "beta": beta, "status": status, "final_loss": final_loss}
