@@ -3,6 +3,7 @@
 import typing
 
 import pytest
+
 from gemma_4_sql.backends.maxtext.agent import run_agentic_loop
 
 
@@ -36,7 +37,7 @@ class MockLiveDatabaseEngine:
         """Initialize function close."""
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function mock_engine.
 

@@ -4,6 +4,7 @@ import sys
 import typing
 
 import pytest
+
 from gemma_4_sql.tokenization import SQLTokenizer
 
 
@@ -47,7 +48,7 @@ class MockAutoTokenizer:
         return MockHFTokenizer()
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_transformers(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock the transformers library."""
     mock_transformers_module = type("transformers", (), {"AutoTokenizer": MockAutoTokenizer})

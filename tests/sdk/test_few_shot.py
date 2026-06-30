@@ -1,6 +1,7 @@
 """Module docstring."""
 
 import pytest
+
 from gemma_4_sql.sdk.few_shot import build_few_shot_prompt
 
 

@@ -3,6 +3,7 @@
 import typing
 
 import pytest
+
 from gemma_4_sql.backends.keras.evaluate import evaluate_model
 
 

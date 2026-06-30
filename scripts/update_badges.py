@@ -1,6 +1,7 @@
 """Module docstring."""
 
 import io
+import platform
 import re
 import sys
 from contextlib import redirect_stdout, suppress
@@ -29,8 +30,6 @@ def get_color(pct: int) -> str:
 
 def main() -> None:
     """Docstring for main."""
-    import platform
-
     min_ver = 12
     if int(platform.python_version_tuple()[1]) < min_ver:
         sys.exit(0)

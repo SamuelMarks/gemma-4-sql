@@ -2,8 +2,9 @@
 
 import typing
 
-import gemma_4_sql.backends.pytorch.train as tr
 import pytest
+
+import gemma_4_sql.backends.pytorch.train as tr
 from gemma_4_sql.backends.pytorch.train import train_model
 
 
@@ -197,7 +198,7 @@ class MockGemma4ForCausalLM:
         return MockModel()
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_torch_env(monkeypatch: object) -> object:  # type: ignore[return]
     """Initialize function mock_torch_env.
 

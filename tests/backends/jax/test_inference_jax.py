@@ -1,7 +1,8 @@
 """Tests for JAX inference logic."""
 
-import gemma_4_sql.backends.jax.inference as inf
 import pytest
+
+import gemma_4_sql.backends.jax.inference as inf
 from gemma_4_sql.backends.jax.inference import generate_sql, jax_beam_search
 
 
@@ -186,7 +187,7 @@ class MockNNX:
             self.seed = seed
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_jax_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function mock_jax_env.
 

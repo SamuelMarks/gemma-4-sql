@@ -1,7 +1,8 @@
 """Module docstring."""
 
-import gemma_4_sql.backends.maxtext.etl as etl_maxtext
 import pytest
+
+import gemma_4_sql.backends.maxtext.etl as etl_maxtext
 
 
 class MockDatasets:

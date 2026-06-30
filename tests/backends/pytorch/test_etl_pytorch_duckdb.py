@@ -1,7 +1,8 @@
 """Module docstring."""
 
-import gemma_4_sql.backends.pytorch.etl as etl_pytorch
 import pytest
+
+import gemma_4_sql.backends.pytorch.etl as etl_pytorch
 
 
 class MockDatasets:

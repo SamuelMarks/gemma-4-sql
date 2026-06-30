@@ -3,6 +3,7 @@
 import typing
 
 import pytest
+
 from gemma_4_sql.backends.jax.evaluate import evaluate_model
 
 

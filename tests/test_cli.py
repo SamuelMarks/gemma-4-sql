@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from gemma_4_sql.cli import cli
 
 "\n\nTests for the CLI module.\n"

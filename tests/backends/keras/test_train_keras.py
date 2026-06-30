@@ -2,8 +2,9 @@
 
 import typing
 
-import gemma_4_sql.backends.keras.train as tr
 import pytest
+
+import gemma_4_sql.backends.keras.train as tr
 from gemma_4_sql.backends.keras.train import train_model
 
 
@@ -142,7 +143,7 @@ class MockKeras:
     losses = MockLosses()
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_keras_env(monkeypatch: object) -> object:  # type: ignore[return]
     """Initialize function mock_keras_env.
 

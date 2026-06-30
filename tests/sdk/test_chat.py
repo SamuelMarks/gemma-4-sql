@@ -1,6 +1,7 @@
 """Module docstring."""
 
 import pytest
+
 from gemma_4_sql.sdk.chat import chat_turn
 
 

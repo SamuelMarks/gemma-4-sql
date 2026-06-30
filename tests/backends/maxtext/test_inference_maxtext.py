@@ -1,7 +1,8 @@
 """Tests for MaxText inference logic."""
 
-import gemma_4_sql.backends.maxtext.inference as inf
 import pytest
+
+import gemma_4_sql.backends.maxtext.inference as inf
 from gemma_4_sql.backends.maxtext.inference import generate_sql, maxtext_beam_search
 
 
@@ -141,7 +142,7 @@ class MockGemma4Model:
         return MockArray([logits])
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_maxtext_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function mock_maxtext_env.
 

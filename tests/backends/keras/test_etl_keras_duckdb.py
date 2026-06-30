@@ -1,7 +1,8 @@
 """Module docstring."""
 
-import gemma_4_sql.backends.keras.etl as etl_keras
 import pytest
+
+import gemma_4_sql.backends.keras.etl as etl_keras
 
 
 class MockDatasets:

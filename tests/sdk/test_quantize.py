@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from gemma_4_sql.sdk.quantize import quantize_model
 
 

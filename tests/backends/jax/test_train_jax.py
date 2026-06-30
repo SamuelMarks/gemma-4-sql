@@ -2,8 +2,9 @@
 
 import typing
 
-import gemma_4_sql.backends.jax.train as tr
 import pytest
+
+import gemma_4_sql.backends.jax.train as tr
 from gemma_4_sql.backends.jax.train import train_model
 
 
@@ -287,7 +288,7 @@ class MockNNX:
     Optimizer = MockNNXOptimizer
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_jax_env(monkeypatch: object) -> object:  # type: ignore[return]
     """Initialize function mock_jax_env.
 

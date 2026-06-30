@@ -1,6 +1,7 @@
 """Module docstring."""
 
 import pytest
+
 from gemma_4_sql.sdk.serve import serve_model
 
 

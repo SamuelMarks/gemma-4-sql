@@ -1,6 +1,7 @@
 """Tests for SDK Logging module."""
 
 import pytest
+
 from gemma_4_sql.sdk.logging import log_metrics
 
 

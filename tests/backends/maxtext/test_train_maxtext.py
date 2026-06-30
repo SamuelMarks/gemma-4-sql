@@ -2,8 +2,9 @@
 
 import typing
 
-import gemma_4_sql.backends.maxtext.train as tr
 import pytest
+
+import gemma_4_sql.backends.maxtext.train as tr
 from gemma_4_sql.backends.maxtext.train import train_model
 
 
@@ -209,7 +210,7 @@ class MockGemma4Model:
         return MockJnpTensor((1,))
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_maxtext_env(monkeypatch: object) -> object:  # type: ignore[return]
     """Initialize function mock_maxtext_env.
 

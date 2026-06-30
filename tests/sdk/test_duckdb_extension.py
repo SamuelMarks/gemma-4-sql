@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from gemma_4_sql.sdk.duckdb_extension import embed_in_duckdb
 
 

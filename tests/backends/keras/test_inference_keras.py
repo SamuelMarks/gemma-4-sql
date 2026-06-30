@@ -2,8 +2,9 @@
 
 import typing
 
-import gemma_4_sql.backends.keras.inference as inf
 import pytest
+
+import gemma_4_sql.backends.keras.inference as inf
 from gemma_4_sql.backends.keras.inference import generate_sql, keras_beam_search
 
 
@@ -185,7 +186,7 @@ class MockKerasModel:
         return MockTensor([logits])
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_keras_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function mock_keras_env.
 

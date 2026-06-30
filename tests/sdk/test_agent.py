@@ -1,6 +1,7 @@
 """Tests for SDK Agent module."""
 
 import pytest
+
 from gemma_4_sql.sdk.agent import run_agentic_loop
 
 

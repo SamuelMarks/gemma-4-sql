@@ -1,6 +1,7 @@
 """Tests for missing models.py coverage."""
 
 import pytest
+
 from gemma_4_sql.sdk.models import train_from_scratch
 
 

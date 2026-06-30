@@ -2,8 +2,9 @@
 
 import typing
 
-import gemma_4_sql.backends.pytorch.inference as inf
 import pytest
+
+import gemma_4_sql.backends.pytorch.inference as inf
 from gemma_4_sql.backends.pytorch.inference import generate_sql, pytorch_beam_search
 
 
@@ -177,7 +178,7 @@ class MockGemma4ForCausalLM:
         return MockTensor([logits])
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function mock_torch_env.
 

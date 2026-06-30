@@ -119,9 +119,9 @@ class MockTorch:
     nn = MockNN()
 
     @staticmethod
-    def tensor(self: object, *args: object, **kwargs: object) -> object:
+    def tensor(_cls: object, *args: object, **kwargs: object) -> object:
         """Initialize function tensor."""
-        return MockTensor(kwargs.get("data") if "data" in kwargs else (args[0] if args else getattr(self, "data", self)))
+        return MockTensor(kwargs.get("data") if "data" in kwargs else (args[0] if args else getattr(_cls, "data", _cls)))
 
 
 class MockDataLoader:
@@ -148,7 +148,7 @@ class MockDatasetClass:
     """Initialize class MockDatasetClass."""
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_pytorch_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fixture to mock datasets and torch."""
     monkeypatch.setitem(sys.modules, "datasets", MockDatasets())

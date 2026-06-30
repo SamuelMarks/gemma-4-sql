@@ -3,6 +3,7 @@
 import sys
 
 import pytest
+
 from gemma_4_sql.sdk.inference import generate
 
 
@@ -65,7 +66,7 @@ class MockJAX:
         int32 = 1
 
 
-@pytest.fixture()
+@pytest.fixture
 def _mock_jax_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function mock_jax_env.
 
