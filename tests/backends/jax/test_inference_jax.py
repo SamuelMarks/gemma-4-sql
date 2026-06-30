@@ -1,7 +1,5 @@
 """Tests for JAX inference logic."""
 
-import typing
-
 import gemma_4_sql.backends.jax.inference as inf
 import pytest
 from gemma_4_sql.backends.jax.inference import generate_sql, jax_beam_search
@@ -10,7 +8,7 @@ from gemma_4_sql.backends.jax.inference import generate_sql, jax_beam_search
 class MockArray:
     """Mock JAX Array."""
 
-    def __init__(self: typing.Any, data: object) -> None:
+    def __init__(self: object, data: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -21,43 +19,33 @@ class MockArray:
         self.data = data if isinstance(data, list) else [data]
 
     @property
-    def shape(self: typing.Any) -> object:
+    def shape(self: object) -> object:
         """Initialize function shape."""
         if isinstance(self.data[0], list):
             return (len(self.data), len(self.data[0]))
         return (len(self.data),)
 
-    def __getitem__(self: typing.Any, idx: object) -> object:
-        """Initialize function __getitem__.
-
-        Args:
-        ----
-        idx: Description of idx.
-
-        """
+    def __getitem__(self: object, idx: object) -> object:
+        """Magic method docstring."""
         if isinstance(idx, MockArray):
-            return MockArray([self.data[i] for i in idx.data])
-        if isinstance(idx, slice):
+            return MockArray([self.data[i] for i in getattr(idx, "data", [])])
+        try:
+            expected_len = 2
+            if isinstance(idx, tuple) and len(idx) == expected_len:
+                return self.data[idx[0]][idx[1]]
             return MockArray(self.data[idx])
-        if isinstance(idx, tuple):
-            if idx[0] is None:
-                return MockArray([self.data])
-            if len(idx) == int("2"):
-                try:
-                    return self.data[idx[0]][idx[1]]
-                except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-                    return self.data[idx[0]]
-        return MockArray(self.data[idx])
+        except (ValueError, TypeError, AttributeError, IndexError, KeyError):
+            return MockArray(self.data)
 
-    def tolist(self: typing.Any) -> object:
+    def tolist(self: object) -> object:
         """Initialize function tolist."""
         return self.data
 
-    def item(self: typing.Any) -> object:
+    def item(self: object) -> object:
         """Initialize function item."""
         return self.data[0] if isinstance(self.data, list) else self.data
 
-    def reshape(self: typing.Any, *shape: object) -> object:
+    def reshape(self: object, *shape: object) -> object:
         """Initialize function reshape.
 
         Args:
@@ -74,7 +62,7 @@ class MockArray:
 class MockJNP:
     """Mock JNP."""
 
-    def arange(self: typing.Any, val: object) -> object:
+    def arange(self: object, val: object) -> object:
         """Initialize function arange.
 
         Args:
@@ -84,7 +72,7 @@ class MockJNP:
         """
         return MockArray([0] * val)
 
-    def array(self: typing.Any, data: object, _dtype: object = None) -> object:
+    def array(self: object, data: object, _dtype: object = None, **_kwargs: object) -> object:
         """Initialize function array.
 
         Args:
@@ -97,7 +85,7 @@ class MockJNP:
 
     int32 = 1
 
-    def concatenate(self: typing.Any, arrays: object, axis: object = 0) -> object:
+    def concatenate(self: object, arrays: object, axis: object = 0) -> object:
         """Initialize function concatenate.
 
         Args:
@@ -111,7 +99,7 @@ class MockJNP:
             return MockArray(res)
         return MockArray([a.data for a in arrays])  # type: ignore[attr-defined]
 
-    def argsort(self: typing.Any, array: object) -> object:
+    def argsort(self: object, array: object) -> object:
         """Initialize function argsort.
 
         Args:
@@ -126,7 +114,7 @@ class MockJNP:
 class MockNN:
     """Initialize class MockNN."""
 
-    def log_softmax(self: typing.Any, x: object, _axis: object = -1) -> object:
+    def log_softmax(self: object, x: object, _axis: object = -1, **_kwargs: object) -> object:
         """Initialize function log_softmax.
 
         Args:
@@ -156,7 +144,7 @@ class MockGemma4Config:
 class MockGemma4ForCausalLM:
     """Initialize class MockGemma4ForCausalLM."""
 
-    def __init__(self: typing.Any, config: object, _rngs: object) -> None:
+    def __init__(self: object, config: object, _rngs: object = None, **_kwargs: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -167,7 +155,7 @@ class MockGemma4ForCausalLM:
         """
         self.config = config
 
-    def __call__(self: typing.Any, _seq: object, _positions: object = None) -> object:
+    def __call__(self: object, _seq: object, _positions: object = None) -> object:
         """Initialize function __call__.
 
         Args:
@@ -187,7 +175,7 @@ class MockNNX:
     class Rngs:
         """Initialize class Rngs."""
 
-        def __init__(self: typing.Any, seed: object) -> None:
+        def __init__(self: object, seed: object) -> None:
             """Initialize function __init__.
 
             Args:

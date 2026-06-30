@@ -200,8 +200,8 @@ class SiglipEncoderLayer(nnx.Module):  # type: ignore[misc]
         """Docstring for __init__."""
         self.config = config
         shd = config.shd_cfg.layer_norm
-        self.layer_norm1 = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, shd=shd, rngs=rngs)  # type: ignore[call-arg]
-        self.layer_norm2 = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, shd=shd, rngs=rngs)  # type: ignore[call-arg]
+        self.layer_norm1 = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, _shd=shd, rngs=rngs)  # type: ignore[call-arg]
+        self.layer_norm2 = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, _shd=shd, rngs=rngs)  # type: ignore[call-arg]
         self.self_attn = SiglipAttention(config, rngs=rngs)
         self.mlp = SiglipMLP(config, rngs=rngs)
 
@@ -575,7 +575,7 @@ class SiglipVisionTransformer(nnx.Module):  # type: ignore[misc]
         self.embeddings = SiglipVisionEmbeddings(config, rngs=rngs)
         self.layers = nnx.List([SiglipEncoderLayer(config, rngs=rngs) for _ in range(config.num_hidden_layers)])
         shd = config.shd_cfg.layer_norm
-        self.post_layernorm = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, shd=shd, rngs=rngs)  # type: ignore[call-arg]
+        self.post_layernorm = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, _shd=shd, rngs=rngs)  # type: ignore[call-arg]
 
     def __call__(self: typing.Any, pixel_values: Array) -> Array:
         """Apply the vision transformer to pixel values."""
@@ -1026,14 +1026,14 @@ class Gemma4MoE(nnx.Module):  # type: ignore[misc]
         shared_dim = config.intermediate_size * config.num_shared_experts
         self.shared_experts = Gemma4MLP(config.hidden_size, shared_dim, dtype=config.dtype, shd=shd, rngs=rngs)
         self.pre_forward_scale_2 = nnx.Param(jnp.ones(config.hidden_size, dtype=config.weight_dtype))
-        self.gate_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.gate_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
         gate_dtype = jnp.float32 if config.float32_gate_logits else config.dtype
         self.gate = _make_linear(config.hidden_size, config.num_experts, use_bias=False, dtype=gate_dtype, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.per_expert_scale = nnx.Param(jnp.ones(config.num_experts, dtype=config.weight_dtype))
         self.routed_experts = Gemma4RoutedExperts(config, rngs=rngs)
-        self.pre_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
-        self.post_feedforward_layernorm_1 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
-        self.post_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.pre_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.post_feedforward_layernorm_1 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.post_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
 
     @jax.named_scope("gemma4_moe")  # type: ignore[misc]
     def __call__(self: typing.Any, x: Array, original_x: Array) -> Array:
@@ -1086,9 +1086,9 @@ class Gemma4Attention(nnx.Module):  # type: ignore[misc]
         else:
             self.v_proj = None
         self.o_proj = _make_linear(self.num_heads * self.head_dim, self.hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.q_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
-        self.k_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
-        self.v_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.q_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.k_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.v_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
         if attention_type == AttentionType.GLOBAL:
             rope_factor = config.global_rope_proportion
             rope_theta = config.global_rope_max_timescale if config.global_rope_max_timescale is not None else config.rope_max_timescale
@@ -1172,19 +1172,19 @@ class Gemma4DecoderLayer(nnx.Module):  # type: ignore[misc]
         """Docstring for __init__."""
         self.config = config
         shd = config.shd_cfg
-        self.pre_self_attention_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.pre_self_attention_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
         self.self_attention = Gemma4Attention(config, attention_type, rngs=rngs)
-        self.post_self_attention_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
-        self.pre_ffw_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.post_self_attention_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.pre_ffw_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
         if config.num_experts > 1:
             self.mlp = Gemma4MoE(config, rngs=rngs)
         else:
             self.mlp = Gemma4MLP(config.hidden_size, config.intermediate_size, dtype=config.dtype, shd=shd, rngs=rngs)
-        self.post_ffw_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.post_ffw_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
         if config.hidden_size_per_layer_input:
             self.per_layer_input_gate = _make_linear(config.hidden_size, config.hidden_size_per_layer_input, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
             self.per_layer_projection = _make_linear(config.hidden_size_per_layer_input, config.hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-            self.post_per_layer_input_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+            self.post_per_layer_input_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
         self.layer_scalar = nnx.Param(jnp.ones(1, dtype=config.weight_dtype))
 
     @jax.named_scope("gemma4_decoder_layer")  # type: ignore[misc]
@@ -1240,9 +1240,9 @@ class Gemma4Model(nnx.Module):  # type: ignore[misc]
             self.per_layer_input_scale = 2.0 ** (-0.5)
             self.per_layer_model_projection = _make_linear(config.hidden_size, config.num_hidden_layers * config.hidden_size_per_layer_input, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
             self.per_layer_model_projection_scale = config.hidden_size ** (-0.5)
-            self.per_layer_projection_norm = Gemma4RMSNorm(config.hidden_size_per_layer_input, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+            self.per_layer_projection_norm = Gemma4RMSNorm(config.hidden_size_per_layer_input, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
         self.layers = nnx.List([Gemma4DecoderLayer(config, GEMMA4_ATTENTION_PATTERN[i % len(GEMMA4_ATTENTION_PATTERN)], rngs=rngs) for i in range(config.num_hidden_layers)])
-        self.norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
+        self.norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
 
     def get_per_layer_inputs(self: typing.Any, input_ids: Array) -> Array:
         """Compute the token-identity component of Per-Layer Embeddings (PLE)."""

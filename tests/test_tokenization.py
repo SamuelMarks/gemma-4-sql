@@ -10,7 +10,7 @@ from gemma_4_sql.tokenization import SQLTokenizer
 class MockHFTokenizer:
     """Initialize class MockHFTokenizer."""
 
-    def encode(self: typing.Any, _text: str, *, _add_special_tokens: bool = False) -> list[int]:
+    def encode(self: typing.Any, _text: str, **_kwargs: object) -> list[int]:
         """Initialize function encode.
 
         Args:

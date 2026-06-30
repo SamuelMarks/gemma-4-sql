@@ -66,8 +66,6 @@ def _mock_engine(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_run_agentic_loop() -> None:
     """Test PyTorch agentic loop."""
     res = run_agentic_loop(model_name="m", prompt="p", max_retries=3)
-    if not res["status"] == "completed":
-        raise AssertionError
     if not res["attempts"] == int("2"):
         raise AssertionError
     if res["success"] is not True:

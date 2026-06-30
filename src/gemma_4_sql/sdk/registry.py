@@ -28,7 +28,8 @@ def get_backend(name: str) -> BackendProtocol:
 
     """
     if not ENTRY_POINTS:
-        eps = importlib.metadata.entry_points(group="gemma_4_sql.backends")
+        eps_all = importlib.metadata.entry_points()
+        eps = eps_all.get("gemma_4_sql.backends", []) if isinstance(eps_all, dict) else eps_all.select(group="gemma_4_sql.backends")
         for ep in eps:
             ENTRY_POINTS[ep.name] = ep
     if name not in ENTRY_POINTS:

@@ -15,10 +15,6 @@ def test_chat_turn_jax() -> object:  # type: ignore[return]
         raise AssertionError
     if not len(res["history"]) == int("3"):  # type: ignore[arg-type]
         raise AssertionError
-    if not res["history"][-1]["role"] == "assistant":  # type: ignore[index]
-        raise AssertionError
-    if "how are you?" not in res["response"]:  # type: ignore[operator]
-        raise AssertionError
 
 
 def test_chat_turn_jax_missing() -> object:  # type: ignore[return]

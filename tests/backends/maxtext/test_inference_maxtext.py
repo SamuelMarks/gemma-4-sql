@@ -1,7 +1,5 @@
 """Tests for MaxText inference logic."""
 
-import typing
-
 import gemma_4_sql.backends.maxtext.inference as inf
 import pytest
 from gemma_4_sql.backends.maxtext.inference import generate_sql, maxtext_beam_search
@@ -10,7 +8,7 @@ from gemma_4_sql.backends.maxtext.inference import generate_sql, maxtext_beam_se
 class MockArray:
     """Mock JAX Array for MaxText."""
 
-    def __init__(self: typing.Any, data: object) -> None:
+    def __init__(self: object, data: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -20,34 +18,27 @@ class MockArray:
         """
         self.data = data if isinstance(data, list) else [data]
 
-    def __getitem__(self: typing.Any, idx: object) -> object:
-        """Initialize function __getitem__.
-
-        Args:
-        ----
-        idx: Description of idx.
-
-        """
+    def __getitem__(self: object, idx: object) -> object:
+        """Magic method docstring."""
         if isinstance(idx, MockArray):
-            return MockArray([self.data[i] for i in idx.data])
-        if isinstance(idx, slice):
-            return MockArray(self.data[idx])
-        if isinstance(idx, tuple) and len(idx) == int("2"):
-            try:
+            return MockArray([self.data[i] for i in getattr(idx, "data", [])])
+        try:
+            expected_len = 2
+            if isinstance(idx, tuple) and len(idx) == expected_len:
                 return self.data[idx[0]][idx[1]]
-            except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-                return self.data[idx[0]]
-        return MockArray(self.data[idx])
+            return MockArray(self.data[idx])
+        except (ValueError, TypeError, AttributeError, IndexError, KeyError):
+            return MockArray(self.data)
 
-    def tolist(self: typing.Any) -> object:
+    def tolist(self: object) -> object:
         """Initialize function tolist."""
         return self.data
 
-    def item(self: typing.Any) -> object:
+    def item(self: object) -> object:
         """Initialize function item."""
         return self.data[0] if isinstance(self.data, list) else self.data
 
-    def reshape(self: typing.Any, *shape: object) -> object:
+    def reshape(self: object, *shape: object) -> object:
         """Initialize function reshape.
 
         Args:
@@ -64,7 +55,7 @@ class MockArray:
 class MockJNP:
     """Mock JNP."""
 
-    def array(self: typing.Any, data: object, _dtype: object = None) -> object:
+    def array(self: object, data: object, _dtype: object = None, **_kwargs: object) -> object:
         """Initialize function array.
 
         Args:
@@ -77,7 +68,7 @@ class MockJNP:
 
     int32 = 1
 
-    def concatenate(self: typing.Any, arrays: object, axis: object = 0) -> object:
+    def concatenate(self: object, arrays: object, axis: object = 0) -> object:
         """Initialize function concatenate.
 
         Args:
@@ -91,7 +82,7 @@ class MockJNP:
             return MockArray(res)
         return MockArray([a.data for a in arrays])  # type: ignore[attr-defined]
 
-    def argsort(self: typing.Any, array: object) -> object:
+    def argsort(self: object, array: object) -> object:
         """Initialize function argsort.
 
         Args:
@@ -106,7 +97,7 @@ class MockJNP:
 class MockNN:
     """Initialize class MockNN."""
 
-    def log_softmax(self: typing.Any, x: object, _axis: object = -1) -> object:
+    def log_softmax(self: object, x: object, _axis: object = -1, **_kwargs: object) -> object:
         """Initialize function log_softmax.
 
         Args:
@@ -127,7 +118,7 @@ class MockJAX:
 class MockGemma4Model:
     """Mock Gemma 4 Model."""
 
-    def __init__(self: typing.Any, name: object) -> None:
+    def __init__(self: object, name: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -137,7 +128,7 @@ class MockGemma4Model:
         """
         self.name = name
 
-    def apply(self: typing.Any, _seq: object) -> object:
+    def apply(self: object, _seq: object) -> object:
         """Initialize function apply.
 
         Args:

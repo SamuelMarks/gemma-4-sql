@@ -113,7 +113,7 @@ class LiveDatabaseEngine:
                 return (True, results, None)
             cursor = self.conn.cursor()
             cursor.execute(query)
-        except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        except Exception as e:  # noqa: BLE001
             return (False, [], str(e))
         else:
             if cursor.description is not None:
@@ -141,7 +141,7 @@ class LiveDatabaseEngine:
                 return self.conn.execute(query).fetchall()
             cursor = self.conn.cursor()
             cursor.execute(query)
-        except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
+        except Exception:  # noqa: BLE001
             return []
         else:
             if cursor.description is not None:

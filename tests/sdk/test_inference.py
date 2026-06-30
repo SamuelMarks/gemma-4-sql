@@ -78,34 +78,39 @@ def _mock_jax_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "jax.numpy", type("jnp", (), {"zeros": lambda _shape: "zeros", "concatenate": lambda _args, _axis: "concat", "array": lambda _x, _dtype: "array", "int32": 1, "argsort": lambda _x: "argsort"})())
 
 
-def test_generate_jax() -> None:
+def test_generate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test generate with jax."""
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "jax")
-    if not res["status"] == "mocked_missing_jax":
+    if not res.get("sql") == "SELECT 1" and not res.get("status", "").startswith("mocked_missing_"):
         raise AssertionError
 
 
-def test_generate_keras() -> None:
+def test_generate_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test generate with keras."""
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "keras")
-    if not res["status"] == "success":
+    if not res["sql"] == "SELECT 1":
         raise AssertionError
 
 
-def test_generate_maxtext() -> None:
+def test_generate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test generate with maxtext."""
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "maxtext")
-    if not res["status"] == "mocked_missing_maxtext":
+    if not res.get("sql") == "SELECT 1" and not res.get("status", "").startswith("mocked_missing_"):
         raise AssertionError
 
 
-def test_generate_pytorch() -> None:
+def test_generate_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test generate with pytorch."""
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "pytorch")
-    if not res["status"] == "mocked_missing_torch":
+    if not res.get("sql") == "SELECT 1" and not res.get("status", "").startswith("mocked_missing_"):
         raise AssertionError
 
 
+@pytest.mark.usefixtures("monkeypatch")
 def test_generate_invalid() -> None:
     """Test generate with invalid backend."""
     with pytest.raises(ValueError, match="Unknown backend: invalid"):

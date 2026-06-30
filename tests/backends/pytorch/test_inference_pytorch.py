@@ -78,7 +78,10 @@ class MockTensor:
                 return MockTensor(self.data[idx[0]])
         if isinstance(idx, slice):
             return MockTensor(self.data[idx])
-        return MockTensor(self.data[idx])
+        try:
+            return MockTensor(self.data[idx])
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
+            return MockTensor(self.data)
 
 
 class MockTorch:
@@ -87,7 +90,7 @@ class MockTorch:
     long = 1
 
     @staticmethod
-    def tensor(data: object, _dtype: object) -> object:
+    def tensor(data: object, _dtype: object = None, **_kwargs: object) -> object:
         """Initialize function tensor.
 
         Args:
@@ -99,7 +102,7 @@ class MockTorch:
         return MockTensor(data)
 
     @staticmethod
-    def log_softmax(x: object, _dim: object = -1) -> object:
+    def log_softmax(x: object, _dim: object = -1, **_kwargs: object) -> object:
         """Initialize function log_softmax.
 
         Args:
@@ -126,7 +129,7 @@ class MockTorch:
         return (MockTensor(probs), MockTensor(indices))
 
     @staticmethod
-    def cat(tensors: object, _dim: object = -1) -> object:
+    def cat(tensors: object, _dim: object = -1, **_kwargs: object) -> object:
         """Initialize function cat.
 
         Args:

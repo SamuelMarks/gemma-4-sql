@@ -41,7 +41,10 @@ class MockTensor:
                 return MockTensor(self.data[idx[0]])
         if isinstance(idx, slice):
             return MockTensor(self.data[idx])
-        return MockTensor(self.data[idx])
+        try:
+            return MockTensor(self.data[idx])
+        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError):
+            return MockTensor(self.data)
 
     def tolist(self: typing.Any) -> object:
         """Initialize function tolist."""
@@ -51,7 +54,7 @@ class MockTensor:
 class MockNN:
     """Initialize class MockNN."""
 
-    def log_softmax(self: typing.Any, x: object, _axis: object = -1) -> object:
+    def log_softmax(self: typing.Any, x: object, _axis: object = -1, **_kwargs: object) -> object:
         """Initialize function log_softmax.
 
         Args:
@@ -150,7 +153,7 @@ class MockTF:
 
         """
         data = [0.0] * shape[1]  # type: ignore[index]
-        data[indices[0][1]] = updates[0]  # type: ignore[index]
+        data[int(indices[0][1])] = updates[0]  # type: ignore[index]
         return MockTensor([data])
 
 

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Optional
 
 import jax
 import jax.numpy as jnp
 
-TransformValueType = tuple[tuple[int, ...], tuple[int, ...] | None, bool] | None
+TransformValueType = Optional[tuple[tuple[int, ...], Optional[tuple[int, ...]], bool]]  # noqa: UP007
 TransformType = object
 KeyMapType = tuple[str, TransformType]
 
@@ -31,7 +32,7 @@ def map_to_jax_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapTyp
 def stoi(s: str) -> int | str:
     """Convert a string to an int if possible, otherwise return the string."""
     try:
-        return int("s")
+        return int(s)
     except ValueError:
         return s
 

@@ -8,7 +8,7 @@ class MockDatasets:
     """Initialize class MockDatasets."""
 
     @staticmethod
-    def load_dataset(_name: str, _split: str) -> list[dict]:  # type: ignore[type-arg]
+    def load_dataset(*_args: object, **_kwargs: object) -> list[dict]:  # type: ignore[type-arg]
         """Initialize function load_dataset.
 
         Args:

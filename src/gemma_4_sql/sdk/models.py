@@ -43,7 +43,7 @@ def train_from_scratch(model_name: str = "gemma-4", dataset: str = "dummy_datase
         A dictionary indicating the training job status.
 
     """
-    return _route_training("train_from_scratch", model_name, dataset, epochs, learning_rate, backend)  # type: ignore[call-arg]
+    return _route_training("train_from_scratch", model_name, dataset, epochs, learning_rate, backend=backend)
 
 
 def pretrain_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "maxtext") -> dict[str, object]:
@@ -62,7 +62,7 @@ def pretrain_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", 
         A dictionary indicating the pretraining job status.
 
     """
-    return _route_training("pretrain", model_name, dataset, epochs, learning_rate, backend)  # type: ignore[call-arg]
+    return _route_training("pretrain", model_name, dataset, epochs, learning_rate, backend=backend)
 
 
 def sft_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "jax") -> dict[str, object]:
@@ -81,7 +81,7 @@ def sft_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epoch
         A dictionary indicating the SFT job status.
 
     """
-    return _route_training("sft", model_name, dataset, epochs, learning_rate, backend)  # type: ignore[call-arg]
+    return _route_training("sft", model_name, dataset, epochs, learning_rate, backend=backend)
 
 
 def posttrain_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "keras") -> dict[str, object]:
@@ -100,4 +100,4 @@ def posttrain_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset",
         A dictionary indicating the post-training job status.
 
     """
-    return _route_training("posttrain", model_name, dataset, epochs, learning_rate, backend)  # type: ignore[call-arg]
+    return _route_training("posttrain", model_name, dataset, epochs, learning_rate, backend=backend)

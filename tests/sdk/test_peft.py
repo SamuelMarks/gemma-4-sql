@@ -17,7 +17,8 @@ def test_apply_peft_jax() -> object:  # type: ignore[return]
         raise AssertionError
     if not res["lora_alpha"] == int("16"):
         raise AssertionError
-    if not res["lora_dropout"] == int("0.05"):
+    expected_dropout = 0.05
+    if not res["lora_dropout"] == expected_dropout:
         raise AssertionError
     if "status" not in res:
         raise AssertionError
@@ -59,5 +60,6 @@ def test_apply_peft_custom_params() -> object:  # type: ignore[return]
         raise AssertionError
     if not res["lora_alpha"] == int("32"):
         raise AssertionError
-    if not res["lora_dropout"] == int("0.1"):
+    expected_dropout = 0.1
+    if not res["lora_dropout"] == expected_dropout:
         raise AssertionError

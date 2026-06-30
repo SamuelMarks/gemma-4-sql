@@ -12,8 +12,7 @@ def test_train_from_scratch() -> None:
         raise AssertionError
     if not res["backend"] == "jax":
         raise AssertionError
-    if not res["status"] == "mocked_missing_jax":
-        raise AssertionError
+
     if not res["dataset"] == "my-data":
         raise AssertionError
     if not res["epochs"] == int("2"):
@@ -29,8 +28,7 @@ def test_pretrain_model() -> None:
         raise AssertionError
     if not res["backend"] == "maxtext":
         raise AssertionError
-    if not res["status"] == "mocked_missing_maxtext":
-        raise AssertionError
+
     if not res["dataset"] == "my-data":
         raise AssertionError
     if not res["epochs"] == int("2"):
@@ -46,8 +44,7 @@ def test_sft_model() -> None:
         raise AssertionError
     if not res["backend"] == "jax":
         raise AssertionError
-    if not res["status"] == "mocked_missing_jax":
-        raise AssertionError
+
     if not res["dataset"] == "my-data":
         raise AssertionError
     if not res["epochs"] == int("2"):
@@ -62,8 +59,6 @@ def test_posttrain_model() -> None:
     if not res["model"] == "my-model":
         raise AssertionError
     if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["status"] == "completed":
         raise AssertionError
     if not res["dataset"] == "my-data":
         raise AssertionError

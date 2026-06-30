@@ -1,7 +1,6 @@
 """Module docstring."""
 
 import sys
-import typing
 from unittest import mock
 
 import pytest
@@ -54,7 +53,7 @@ class MockDatasets:
     """Initialize class MockDatasets."""
 
     @staticmethod
-    def load_dataset(_name: str, _split: str) -> list[dict]:  # type: ignore[type-arg]
+    def load_dataset(*_args: object, **_kwargs: object) -> list[dict]:  # type: ignore[type-arg]
         """Initialize function load_dataset.
 
         Args:
@@ -76,17 +75,17 @@ class MockGrain:
         """Initialize class MapTransform."""
 
     @staticmethod
-    def nosharding() -> str:
+    def no_sharding() -> str:
         """Initialize function nosharding."""
         return "no_sharding"
 
     @staticmethod
-    def jaxdistributedsharding() -> str:
+    def jax_distributed_sharding() -> str:
         """Initialize function jaxdistributedsharding."""
         return "jax_distributed_sharding"
 
     @staticmethod
-    def indexsampler(*_args: object, **kwargs: object) -> str:
+    def index_sampler(*_args: object, **kwargs: object) -> str:
         """Initialize function indexsampler.
 
         Args:
@@ -98,7 +97,7 @@ class MockGrain:
         return kwargs.get("shard_options", "sampler")  # type: ignore[return-value]
 
     @staticmethod
-    def batch(batch_size: int) -> str:
+    def batch_func(batch_size: int) -> str:
         """Initialize function batch.
 
         Args:
@@ -111,7 +110,7 @@ class MockGrain:
     class DataLoader:
         """Initialize class DataLoader."""
 
-        def __init__(self: typing.Any, data_source: object, sampler: object, operations: object) -> None:
+        def __init__(self: object, data_source: object, sampler: object, operations: object) -> None:
             """Initialize function __init__.
 
             Args:

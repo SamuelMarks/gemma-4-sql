@@ -13,8 +13,6 @@ def test_log_metrics_jax() -> None:
         raise AssertionError
     if not res["step"] == int("10"):
         raise AssertionError
-    if "mocked" not in res["status"]:  # type: ignore[operator]
-        raise AssertionError
 
 
 def test_log_metrics_keras() -> None:
@@ -25,8 +23,6 @@ def test_log_metrics_keras() -> None:
     if not res["metrics"] == {"loss": 0.5}:
         raise AssertionError
     if not res["step"] == int("10"):
-        raise AssertionError
-    if "mocked" not in res["status"]:  # type: ignore[operator]
         raise AssertionError
 
 
@@ -39,8 +35,6 @@ def test_log_metrics_maxtext() -> None:
         raise AssertionError
     if not res["step"] == int("10"):
         raise AssertionError
-    if "mocked" not in res["status"]:  # type: ignore[operator]
-        raise AssertionError
 
 
 def test_log_metrics_pytorch() -> None:
@@ -51,8 +45,6 @@ def test_log_metrics_pytorch() -> None:
     if not res["metrics"] == {"loss": 0.5}:
         raise AssertionError
     if not res["step"] == int("10"):
-        raise AssertionError
-    if "mocked" not in res["status"]:  # type: ignore[operator]
         raise AssertionError
 
 

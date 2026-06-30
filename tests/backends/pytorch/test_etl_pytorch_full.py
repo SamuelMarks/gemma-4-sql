@@ -48,7 +48,7 @@ class MockDataset:
 class MockDatasets:
     """Initialize class MockDatasets."""
 
-    def load_dataset(self: typing.Any, _name: object, _split: object) -> object:
+    def load_dataset(*_args: object, **_kwargs: object) -> object:
         """Initialize function load_dataset.
 
         Args:
@@ -88,7 +88,7 @@ class MockNNUtilsRNN:
     """Initialize class MockNNUtilsRNN."""
 
     @staticmethod
-    def pad_sequence(sequences: object, *, _batch_first: object = False) -> object:
+    def pad_sequence(sequences: object, *, _batch_first: object = False, **_kwargs: object) -> object:
         """Initialize function pad_sequence.
 
         Args:
@@ -119,16 +119,9 @@ class MockTorch:
     nn = MockNN()
 
     @staticmethod
-    def tensor(data: object, dtype: object = None) -> object:
-        """Initialize function tensor.
-
-        Args:
-        ----
-        data: Description of data.
-        dtype: Description of dtype.
-
-        """
-        return MockTensor(data, dtype)
+    def tensor(self: object, *args: object, **kwargs: object) -> object:
+        """Initialize function tensor."""
+        return MockTensor(kwargs.get("data") if "data" in kwargs else (args[0] if args else getattr(self, "data", self)))
 
 
 class MockDataLoader:
