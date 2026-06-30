@@ -86,7 +86,7 @@ class MockGemma4Config:
 class MockGemma4ForCausalLM:
     """Initialize class MockGemma4ForCausalLM."""
 
-    def __init__(self: typing.Any, config: object, _rngs: object) -> None:
+    def __init__(self: typing.Any, config: object, rngs: object = None) -> None:
         """Initialize function __init__."""
         self.config = config
 
@@ -128,7 +128,7 @@ class MockNNX:
 
         def wrapper(*_args: object, **_kwargs: object) -> object:
             """Initialize function wrapper."""
-            _ = fn(*args, **kwargs)  # type: ignore[operator]
+            _ = fn(*_args, **_kwargs)  # type: ignore[operator]
             return (MockArray(), "grads")
 
         return wrapper
@@ -212,3 +212,82 @@ def test_run_dpo_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = run_dpo("model", "data")
     if not res["backend"] == "jax":
         raise AssertionError
+
+def test_run_dpo_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tr, "jax", "mock")
+    monkeypatch.setattr(tr, "jnp", MockJnp())
+    monkeypatch.setattr(tr, "jnn", MockJnn())
+    monkeypatch.setattr(tr, "optax", MockOptax())
+    monkeypatch.setattr(tr, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
+    monkeypatch.setattr(tr, "Gemma4Config", MockGemma4Config)
+    monkeypatch.setattr(tr, "nnx", MockNNX())
+    
+    def mock_build_dataloader(*args, **kwargs):
+        class MockLoader:
+            def __iter__(self):
+                yield {"chosen_inputs": MockArray(), "chosen_labels": MockArray(), "rejected_inputs": MockArray(), "rejected_labels": MockArray()}
+            def __len__(self):
+                return 1
+        return {"loader": MockLoader()}
+        
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
+    
+    res = run_dpo("model", "data")
+    assert res["status"] == "completed"
+    
+def test_run_dpo_jax_no_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tr, "jax", "mock")
+    monkeypatch.setattr(tr, "jnp", MockJnp())
+    monkeypatch.setattr(tr, "jnn", MockJnn())
+    monkeypatch.setattr(tr, "optax", MockOptax())
+    monkeypatch.setattr(tr, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
+    monkeypatch.setattr(tr, "Gemma4Config", MockGemma4Config)
+    monkeypatch.setattr(tr, "nnx", MockNNX())
+    
+    def mock_build_dataloader(*args, **kwargs):
+        return {"loader": None}
+        
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
+    
+    res = run_dpo("model", "data")
+    assert res["status"] == "completed"
+    
+def test_run_dpo_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tr, "jax", "mock")
+    monkeypatch.setattr(tr, "jnp", MockJnp())
+    monkeypatch.setattr(tr, "jnn", MockJnn())
+    monkeypatch.setattr(tr, "optax", MockOptax())
+    monkeypatch.setattr(tr, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
+    monkeypatch.setattr(tr, "Gemma4Config", MockGemma4Config)
+    monkeypatch.setattr(tr, "nnx", MockNNX())
+    
+    def mock_build_dataloader(*args, **kwargs):
+        raise ValueError("simulated error")
+        
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
+    
+    res = run_dpo("model", "data")
+    assert "failed: simulated error" in res["status"]
+
+def test_dpo_loss_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tr, "jnp", MockJnp())
+    monkeypatch.setattr(tr, "jnn", MockJnn())
+    a, b, c = dpo_loss(MockArray(), MockArray(), MockArray(), MockArray())
+    assert isinstance(a, MockArray)
+
+def test_dpo_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import importlib
+    
+    # Mock jax import failure
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(tr)
+    
+    # Mock flax.nnx import failure
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "flax", None)
+    importlib.reload(tr)
+    
+    # Restore original to not break other tests
+    monkeypatch.undo()
+    importlib.reload(tr)

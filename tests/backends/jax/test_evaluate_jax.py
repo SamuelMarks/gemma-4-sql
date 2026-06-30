@@ -83,3 +83,62 @@ def test_evaluate_model_jax_fallback(monkeypatch: object) -> None:
     monkeypatch.setattr(evaluate, "build_dataloader", lambda *_args, **_kwargs: {})  # type: ignore[attr-defined]
     monkeypatch.setattr(evaluate, "generate_sql", lambda *_a, **_k: {"sql": "SELECT 1"})
     evaluate.evaluate_model("model1", "data1")
+
+def test_evaluate_model_jax_dataloader_tolist(monkeypatch: pytest.MonkeyPatch) -> None:
+    evaluate = __import__("gemma_4_sql.backends.jax", fromlist=["evaluate"]).evaluate
+    
+    class MockArray:
+        def __init__(self, data):
+            self.data = data
+        def tolist(self):
+            return self.data
+            
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
+        class MockLoader:
+            def __iter__(self):
+                yield {"inputs": [MockArray([101, 102])], "targets": [MockArray([101, 103])]}
+        return {"loader": MockLoader(), "status": "loaded"}
+        
+    monkeypatch.setattr(evaluate, "build_dataloader", mock_build_dataloader)
+    monkeypatch.setattr(evaluate, "generate_sql", lambda *_a, **_k: {"sql": "SELECT 1"})
+    
+    res = evaluate.evaluate_model("model1", "data1")
+    assert res["status"] == "completed"
+
+def test_evaluate_model_jax_dataloader_tolist_inputs_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    evaluate = __import__("gemma_4_sql.backends.jax", fromlist=["evaluate"]).evaluate
+    
+    class MockArray:
+        def __init__(self, data):
+            self.data = data
+        def tolist(self):
+            return self.data
+            
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
+        class MockLoader:
+            def __iter__(self):
+                # Target does NOT have tolist
+                yield {"inputs": [MockArray([101, 102])], "targets": [[101, 103]]}
+        return {"loader": MockLoader(), "status": "loaded"}
+        
+    monkeypatch.setattr(evaluate, "build_dataloader", mock_build_dataloader)
+    monkeypatch.setattr(evaluate, "generate_sql", lambda *_a, **_k: {"sql": "SELECT 1"})
+    
+    res = evaluate.evaluate_model("model1", "data1")
+    assert res["status"] == "completed"
+
+def test_evaluate_model_jax_dataloader_max_items(monkeypatch: pytest.MonkeyPatch) -> None:
+    evaluate = __import__("gemma_4_sql.backends.jax", fromlist=["evaluate"]).evaluate
+            
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
+        class MockLoader:
+            def __iter__(self):
+                for _ in range(15):
+                    yield {"inputs": [[101, 102]], "targets": [[101, 103]]}
+        return {"loader": MockLoader(), "status": "loaded"}
+        
+    monkeypatch.setattr(evaluate, "build_dataloader", mock_build_dataloader)
+    monkeypatch.setattr(evaluate, "generate_sql", lambda *_a, **_k: {"sql": "SELECT 1"})
+    
+    res = evaluate.evaluate_model("model1", "data1")
+    assert res["status"] == "completed"

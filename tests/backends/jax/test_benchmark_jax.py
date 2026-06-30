@@ -82,3 +82,33 @@ def test_benchmark_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = bm.benchmark_model("model", "gpu", 1)
     if "failed" not in res["status"]:
         raise AssertionError
+
+def test_benchmark_model_jax_real_no_block_until_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    class MockJaxNoBlock:
+        pass
+        
+    monkeypatch.setattr(bm, "jax", MockJaxNoBlock())
+    monkeypatch.setattr(bm, "jnp", MockJnp())
+    monkeypatch.setattr(bm, "nnx", MockNNX())
+    monkeypatch.setattr(bm, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
+    monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
+
+    res = bm.benchmark_model("model", "gpu", 1, num_runs=2)
+    assert res["status"] == "success"
+
+def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+    import importlib
+    
+    # Mock jax import failure
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(bm)
+    
+    # Mock flax.nnx import failure
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "flax", None)
+    importlib.reload(bm)
+    
+    # Restore original to not break other tests
+    monkeypatch.undo()
+    importlib.reload(bm)
