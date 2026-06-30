@@ -26,16 +26,16 @@ def test_keras_etl_mocked() -> None:
     original_datasets = getattr(etl_keras, "datasets", None)
     original_grain = getattr(etl_keras, "grain", None)
     try:
-        etl_keras.datasets = None  # type: ignore[attr-defined]
-        etl_keras.grain = None  # type: ignore[attr-defined]
+        etl_keras.datasets = None
+        etl_keras.grain = None
         res = etl_keras.build_dataloader("test", "train", 10)
         if not res["status"] == "mocked":
             raise AssertionError
         if not res["backend"] == "keras":
             raise AssertionError
     finally:
-        etl_keras.datasets = original_datasets  # type: ignore[attr-defined]
-        etl_keras.grain = original_grain  # type: ignore[attr-defined]
+        etl_keras.datasets = original_datasets
+        etl_keras.grain = original_grain
 
 
 def test_keras_etl_import_error() -> None:
@@ -75,18 +75,19 @@ class MockGrain:
         """Initialize class MapTransform."""
 
     @staticmethod
-    def NoSharding() -> str:  # noqa: N802
+    def no_sharding() -> str:
         """Initialize function nosharding."""
         return "no_sharding"
 
     @staticmethod
-    def JAXDistributedSharding() -> str:  # noqa: N802
+    def jax_distributed_sharding() -> str:
         """Initialize function jaxdistributedsharding."""
         return "jax_distributed_sharding"
 
     @staticmethod
-    def IndexSampler(  # noqa: N802
-        *_args: object, **kwargs: object
+    def index_sampler(
+        *_args: object,
+        **kwargs: object,
     ) -> str:
         """Initialize function indexsampler.
 
@@ -99,7 +100,7 @@ class MockGrain:
         return kwargs.get("shard_options", "sampler")  # type: ignore[return-value]
 
     @staticmethod
-    def Batch(  # noqa: N802
+    def batch(
         batch_size: int,
     ) -> str:
         """Initialize function batch.
@@ -129,14 +130,20 @@ class MockGrain:
             self.operations = operations
 
 
+MockGrain.NoSharding = staticmethod(MockGrain.no_sharding)  # type: ignore[attr-defined]
+MockGrain.JAXDistributedSharding = staticmethod(MockGrain.jax_distributed_sharding)  # type: ignore[attr-defined]
+MockGrain.IndexSampler = staticmethod(MockGrain.index_sampler)  # type: ignore[attr-defined]
+MockGrain.Batch = staticmethod(MockGrain.batch)  # type: ignore[attr-defined]
+
+
 def test_keras_etl_loaded() -> None:
     """Test Keras ETL when libraries are present."""
     etl_keras = __import__("gemma_4_sql.backends.keras.etl", fromlist=[""])
     original_datasets = getattr(etl_keras, "datasets", None)
     original_grain = getattr(etl_keras, "grain", None)
     try:
-        etl_keras.datasets = MockDatasets()  # type: ignore[attr-defined]
-        etl_keras.grain = MockGrain()  # type: ignore[attr-defined]
+        etl_keras.datasets = MockDatasets()
+        etl_keras.grain = MockGrain()
         res = etl_keras.build_dataloader("test", "train", 10, distributed=False)
         if not res["status"] == "loaded":
             raise AssertionError
@@ -160,5 +167,5 @@ def test_keras_etl_loaded() -> None:
         if not transform.map({"question": "Q1", "query": "A1"}) == ([ord("Q"), ord("1")], [ord("A"), ord("1")]):
             raise AssertionError
     finally:
-        etl_keras.datasets = original_datasets  # type: ignore[attr-defined]
-        etl_keras.grain = original_grain  # type: ignore[attr-defined]
+        etl_keras.datasets = original_datasets
+        etl_keras.grain = original_grain

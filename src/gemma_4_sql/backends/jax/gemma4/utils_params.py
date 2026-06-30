@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
 
 import jax
 import jax.numpy as jnp
 
-TransformValueType = Optional[tuple[tuple[int, ...], Optional[tuple[int, ...]], bool]]  # noqa: UP007
+TransformValueType = tuple[tuple[int, ...], tuple[int, ...] | None, bool] | None
 TransformType = object
 KeyMapType = tuple[str, TransformType]
 

@@ -26,16 +26,16 @@ def test_maxtext_etl_mocked() -> None:
     original_datasets = getattr(etl_maxtext, "datasets", None)
     original_grain = getattr(etl_maxtext, "grain", None)
     try:
-        etl_maxtext.datasets = None  # type: ignore[attr-defined]
-        etl_maxtext.grain = None  # type: ignore[attr-defined]
+        etl_maxtext.datasets = None
+        etl_maxtext.grain = None
         res = etl_maxtext.build_dataloader("test", "train", 10)
         if not res["status"] == "mocked":
             raise AssertionError
         if not res["backend"] == "maxtext":
             raise AssertionError
     finally:
-        etl_maxtext.datasets = original_datasets  # type: ignore[attr-defined]
-        etl_maxtext.grain = original_grain  # type: ignore[attr-defined]
+        etl_maxtext.datasets = original_datasets
+        etl_maxtext.grain = original_grain
 
 
 def test_maxtext_etl_import_error() -> None:
@@ -75,18 +75,19 @@ class MockGrain:
         """Initialize class MapTransform."""
 
     @staticmethod
-    def NoSharding() -> str:  # noqa: N802
+    def no_sharding() -> str:
         """Initialize function nosharding."""
         return "no_sharding"
 
     @staticmethod
-    def JAXDistributedSharding() -> str:  # noqa: N802
+    def jax_distributed_sharding() -> str:
         """Initialize function jaxdistributedsharding."""
         return "jax_distributed_sharding"
 
     @staticmethod
-    def IndexSampler(  # noqa: N802
-        *_args: object, **kwargs: object
+    def index_sampler(
+        *_args: object,
+        **kwargs: object,
     ) -> str:
         """Initialize function indexsampler.
 
@@ -99,7 +100,7 @@ class MockGrain:
         return kwargs.get("shard_options", "sampler")  # type: ignore[return-value]
 
     @staticmethod
-    def Batch(  # noqa: N802
+    def batch(
         batch_size: int,
     ) -> str:
         """Initialize function batch.
@@ -129,6 +130,18 @@ class MockGrain:
             self.operations = operations
 
 
+MockGrain.NoSharding = staticmethod(MockGrain.no_sharding)
+MockGrain.JAXDistributedSharding = staticmethod(MockGrain.jax_distributed_sharding)
+MockGrain.IndexSampler = staticmethod(MockGrain.index_sampler)
+MockGrain.Batch = staticmethod(MockGrain.batch)
+
+
+MockGrain.NoSharding = staticmethod(MockGrain.no_sharding)
+MockGrain.JAXDistributedSharding = staticmethod(MockGrain.jax_distributed_sharding)
+MockGrain.IndexSampler = staticmethod(MockGrain.index_sampler)
+MockGrain.Batch = staticmethod(MockGrain.batch)
+
+
 def _check_res(res: dict, status: str, *, distributed: bool, sampler: str) -> None:  # type: ignore[type-arg]
     if res["status"] != status:
         raise AssertionError
@@ -144,13 +157,13 @@ def test_maxtext_etl_loaded() -> None:
     original_datasets = getattr(etl, "datasets", None)
     original_grain = getattr(etl, "grain", None)
     try:
-        etl.datasets = MockDatasets()  # type: ignore[attr-defined]
-        etl.grain = MockGrain()  # type: ignore[attr-defined]
+        etl.datasets = MockDatasets()
+        etl.grain = MockGrain()
         res = etl.build_dataloader("test", "train", 10, distributed=False)
         _check_res(res, "loaded", distributed=False, sampler="no_sharding")
     finally:
-        etl.datasets = original_datasets  # type: ignore[attr-defined]
-        etl.grain = original_grain  # type: ignore[attr-defined]
+        etl.datasets = original_datasets
+        etl.grain = original_grain
 
 
 def test_maxtext_etl_dist() -> None:
@@ -159,10 +172,10 @@ def test_maxtext_etl_dist() -> None:
     original_datasets = getattr(etl, "datasets", None)
     original_grain = getattr(etl, "grain", None)
     try:
-        etl.datasets = MockDatasets()  # type: ignore[attr-defined]
-        etl.grain = MockGrain()  # type: ignore[attr-defined]
+        etl.datasets = MockDatasets()
+        etl.grain = MockGrain()
         res_dist_ = etl.build_dataloader("test", "train", 10, distributed=True)
         _check_res(res_dist_, "loaded", distributed=True, sampler="jax_distributed_sharding")
     finally:
-        etl.datasets = original_datasets  # type: ignore[attr-defined]
-        etl.grain = original_grain  # type: ignore[attr-defined]
+        etl.datasets = original_datasets
+        etl.grain = original_grain
