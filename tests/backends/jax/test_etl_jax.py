@@ -40,6 +40,8 @@ def test_jax_etl_mocked() -> None:
 def test_jax_etl_import_error() -> None:
     """Test JAX ETL ImportError fallback."""
     with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
+        if "gemma_4_sql.backends.jax.etl" in sys.modules:
+            del sys.modules["gemma_4_sql.backends.jax.etl"]
         etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
         res = etl_jax.build_dataloader("test", "train", 10)
         if not res["status"] == "mocked":

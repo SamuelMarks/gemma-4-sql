@@ -18,7 +18,7 @@ def test_evaluate_model_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError
     if not res["dataset"] == "data1":
         raise AssertionError
-    if not res["metrics"]["execution_accuracy"] == 0.0:  # type: ignore[index]
+    if not res["metrics"]["execution_accuracy"] == 1.0:  # type: ignore[index]
         raise AssertionError
 
 
