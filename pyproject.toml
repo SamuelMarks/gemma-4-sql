@@ -7,7 +7,7 @@ name = "gemma-4-sql"
 version = "0.0.1"
 description = "Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch; Keras ; JAX; JAX / MaxText "
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dynamic = ["dependencies", "optional-dependencies"]
 
 [project.scripts]
@@ -31,7 +31,7 @@ default = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxte
 
 [tool.ruff]
 line-length = 320
-target-version = "py312"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -42,7 +42,7 @@ extend-safe-fixes = ["ALL"]
 max-args = 15
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.10"
 ignore_errors = true
 
 [tool.coverage.report]

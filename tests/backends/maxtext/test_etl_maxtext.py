@@ -75,17 +75,19 @@ class MockGrain:
         """Initialize class MapTransform."""
 
     @staticmethod
-    def no_sharding() -> str:
+    def NoSharding() -> str:  # noqa: N802
         """Initialize function nosharding."""
         return "no_sharding"
 
     @staticmethod
-    def jax_distributed_sharding() -> str:
+    def JAXDistributedSharding() -> str:  # noqa: N802
         """Initialize function jaxdistributedsharding."""
         return "jax_distributed_sharding"
 
     @staticmethod
-    def index_sampler(*_args: object, **kwargs: object) -> str:
+    def IndexSampler(  # noqa: N802
+        *_args: object, **kwargs: object
+    ) -> str:
         """Initialize function indexsampler.
 
         Args:
@@ -97,7 +99,9 @@ class MockGrain:
         return kwargs.get("shard_options", "sampler")  # type: ignore[return-value]
 
     @staticmethod
-    def batch_func(batch_size: int) -> str:
+    def Batch(  # noqa: N802
+        batch_size: int,
+    ) -> str:
         """Initialize function batch.
 
         Args:
