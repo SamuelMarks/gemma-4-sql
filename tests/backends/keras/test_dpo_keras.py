@@ -4,119 +4,150 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from gemma_4_sql.backends.keras.dpo import dpo_loss, run_dpo
+import gemma_4_sql.backends.keras.dpo as kr_dpo
+from gemma_4_sql.backends.keras.dpo import run_dpo
 
 if TYPE_CHECKING:
     import pytest
 
 
 class MockTensor:
-    """Initialize class MockTensor."""
-
     def __sub__(self: object, other: object) -> MockTensor:
-        """Initialize function __sub__.
-
-        Args:
-        ----
-        other: Description of other.
-
-        """
         return MockTensor()
 
     def __mul__(self: object, other: object) -> MockTensor:
-        """Initialize function __mul__.
-
-        Args:
-        ----
-        other: Description of other.
-
-        """
         return MockTensor()
 
     def __rmul__(self: object, other: object) -> MockTensor:
-        """Initialize function __rmul__.
-
-        Args:
-        ----
-        other: Description of other.
-
-        """
         return MockTensor()
 
     def __neg__(self: object) -> MockTensor:
-        """Initialize function __neg__."""
         return MockTensor()
 
     def numpy(self: object) -> float:
-        """Initialize function numpy."""
         return 0.42
 
 
 class MockMath:
-    """Initialize class MockMath."""
-
     def log_sigmoid(self: object, _x: object) -> MockTensor:
-        """Initialize function log_sigmoid.
-
-        Args:
-        ----
-        x: Description of x.
-
-        """
         return MockTensor()
+
+
+class MockGradientTape:
+    def __enter__(self) -> object:
+        return self
+
+    def __exit__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def gradient(self, *args: object, **kwargs: object) -> list:
+        return ["grads"]
 
 
 class MockTf:
-    """Initialize class MockTf."""
-
     float32 = "float32"
+    int32 = "int32"
 
     def __init__(self: object) -> None:
-        """Initialize function __init__."""
         self.math = MockMath()
 
     def constant(self: object, *_args: object, **_kwargs: object) -> MockTensor:
-        """Initialize function constant.
-
-        Args:
-        ----
-        x: Description of x.
-        dtype: Description of dtype.
-
-        """
         return MockTensor()
 
-    def reduce_mean(self: object, _x: object) -> MockTensor:
-        """Initialize function reduce_mean.
-
-        Args:
-        ----
-        x: Description of x.
-
-        """
+    def reduce_mean(self: object, _x: object, **kwargs: object) -> MockTensor:
         return MockTensor()
+
+    def zeros(self, *args: object, **kwargs: object) -> MockTensor:
+        return MockTensor()
+
+    def function(self, fn: object) -> object:
+        return fn
+
+    def GradientTape(self) -> MockGradientTape:
+        return MockGradientTape()
+
+
+class MockKeras:
+    @staticmethod
+    def Input(*args: object, **kwargs: object) -> object:
+        return "inputs"
+
+    class layers:
+        @staticmethod
+        def Embedding(*args: object, **kwargs: object) -> object:
+            return lambda x: "x"
+
+        @staticmethod
+        def Dense(*args: object, **kwargs: object) -> object:
+            return lambda x: "x"
+
+    class Model:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.trainable_variables = ["vars"]
+
+        def __call__(self, *args: object, **kwargs: object) -> MockTensor:
+            return MockTensor()
+
+    class optimizers:
+        class AdamW:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            def apply_gradients(self, *args: object, **kwargs: object) -> None:
+                pass
 
 
 def test_run_dpo_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test Keras DPO when missing."""
-    keras_dpo = __import__("gemma_4_sql.backends.keras.dpo", fromlist=[""])
-    monkeypatch.setattr(keras_dpo, "tf", None)
+    monkeypatch.setattr(kr_dpo, "tf", None)
     res = run_dpo("model", "data")
     if not res["status"] == "mocked_missing_keras":
         raise AssertionError
-    (loss, ch_r, re_r) = dpo_loss(None, None, None, None)
-    if not loss == 0.0:
-        raise AssertionError
-    if not ch_r == 0.0:
-        raise AssertionError
-    if not re_r == 0.0:
-        raise AssertionError
 
 
-def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_dpo_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test Keras DPO."""
-    keras_dpo = __import__("gemma_4_sql.backends.keras.dpo", fromlist=[""])
-    monkeypatch.setattr(keras_dpo, "tf", MockTf())
+    monkeypatch.setattr(kr_dpo, "tf", MockTf())
+    monkeypatch.setattr(kr_dpo, "keras", MockKeras)
+
+    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+        return {"loader": [{"chosen_inputs": MockTensor(), "rejected_inputs": MockTensor()}]}
+
+    monkeypatch.setattr(kr_dpo, "build_dataloader", mock_build_dataloader)
+
     res = run_dpo("model", "data")
     if not res["backend"] == "keras":
+        raise AssertionError
+    if not res["status"] == "completed":
+        raise AssertionError
+
+
+def test_run_dpo_keras_no_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(kr_dpo, "tf", MockTf())
+    monkeypatch.setattr(kr_dpo, "keras", MockKeras)
+
+    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+        return {"loader": None}
+
+    monkeypatch.setattr(kr_dpo, "build_dataloader", mock_build_dataloader)
+
+    res = run_dpo("model", "data")
+    if not res["backend"] == "keras":
+        raise AssertionError
+    if not res["status"] == "completed":
+        raise AssertionError
+
+
+def test_run_dpo_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(kr_dpo, "tf", MockTf())
+    monkeypatch.setattr(kr_dpo, "keras", MockKeras)
+
+    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+        msg = "err"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(kr_dpo, "build_dataloader", mock_build_dataloader)
+
+    res = run_dpo("model", "data")
+    if "failed" not in str(res["status"]):
         raise AssertionError

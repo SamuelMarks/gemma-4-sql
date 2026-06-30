@@ -155,7 +155,7 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
     expert_tensors: dict[int, dict[str, dict[int, jax.Array]]] = {}
     for f in files:
         with safetensors.safe_open(f, framework="numpy") as sf:
-            for torch_key in sf:
+            for torch_key in sf.keys():  # noqa: SIM118
                 match = moe_pattern.match(torch_key)
                 if match:
                     _process_moe_tensor(match, sf, torch_key, expert_tensors)
@@ -170,9 +170,11 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
             (jax_key, transform) = map_to_jax_key(mapping, st_key)
             if jax_key is not None:
                 keys = [stoi(k) for k in jax_key.split("\\.")]
-                assign_weights_from_eval_shape(keys, stacked, jax_state, st_key, transform.value)
+                assign_weights_from_eval_shape(keys, stacked, jax_state, st_key, transform)
     if "embed_scale" in jax_state["model"] and isinstance(jax_state["model"]["embed_scale"], getattr(jax, "ShapeDtypeStruct", type(None))):
         jax_state["model"]["embed_scale"] = jnp.array(cfg.hidden_size**0.5, dtype=jnp.bfloat16).astype(jnp.float32)
     if cfg.vision_config and isinstance(jax_state["vision_tower"]["embeddings"]["position_ids"], jax.ShapeDtypeStruct):
         jax_state["vision_tower"]["embeddings"]["position_ids"] = jnp.expand_dims(jnp.arange(gemma4.vision_tower.embeddings.num_patches), 0)
-    return nnx.merge(graph_def, nnx.State(jax_state) if hasattr(nnx, "State") else jax_state)
+    if hasattr(nnx, "State"):
+        return nnx.merge(graph_def, abs_state)
+    return nnx.merge(graph_def, jax_state)

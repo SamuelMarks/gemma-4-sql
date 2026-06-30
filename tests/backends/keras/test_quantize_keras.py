@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import gemma_4_sql.backends.keras.quantize as kr_quantize
 from gemma_4_sql.backends.keras.quantize import quantize_model
 
 if TYPE_CHECKING:
@@ -12,8 +13,7 @@ if TYPE_CHECKING:
 
 def test_quantize_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test Keras quantize when missing."""
-    keras_quantize = __import__("gemma_4_sql.backends.keras.quantize", fromlist=[""])
-    monkeypatch.setattr(keras_quantize, "tf", None)
+    monkeypatch.setattr(kr_quantize, "keras", None)
     res = quantize_model("model", "int8")
     if not res["status"] == "mocked_missing_keras":
         raise AssertionError
@@ -21,12 +21,24 @@ def test_quantize_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError
 
 
-def test_quantize_keras() -> None:
+def test_quantize_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test Keras quantize."""
-    res = quantize_model("model", "awq")
+    monkeypatch.setattr(kr_quantize, "keras", object())
+
+    res = quantize_model("model", "int8")
     if not res["backend"] == "keras":
         raise AssertionError
-    if not res["method"] == "awq":
+    if not res["status"] == "quantized_int8":
         raise AssertionError
-    if res["status"] not in ["quantized_awq", "mocked_missing_keras"]:
+
+    res = quantize_model("model", "int4")
+    if not res["status"] == "quantized_int4":
+        raise AssertionError
+
+    res = quantize_model("model", "awq")
+    if not res["status"] == "quantized_awq":
+        raise AssertionError
+
+    res = quantize_model("model", "unknown")
+    if "unsupported" not in str(res["status"]):
         raise AssertionError

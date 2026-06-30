@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
+
+try:
+    from sentence_transformers import SentenceTransformer
+    from sklearn.metrics.pairwise import cosine_similarity
+except (ImportError, ValueError, AttributeError, OSError):
+    SentenceTransformer = None
+    cosine_similarity = None
 
 
 def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
@@ -33,22 +43,8 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
     return schema
 
 
-def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_tables: int = 2) -> str:
-    """Retrieve the most relevant tables and columns based on a natural language prompt.
-
-    This simulates a RAG retrieval step using basic keyword matching.
-
-    Args:
-    ----
-        prompt: The natural language prompt.
-        schema: The parsed database schema.
-        top_k_tables: The maximum number of tables to include in the context.
-
-    Returns:
-    -------
-        A formatted string describing the relevant schema parts.
-
-    """
+def _keyword_search(prompt: str, schema: dict[str, list[str]], top_k_tables: int) -> list[str]:
+    """Fallback keyword search."""
     prompt_words = set(re.findall("\\b\\w+\\b", prompt.lower()))
     table_scores = {}
     for table, columns in schema.items():
@@ -63,6 +59,59 @@ def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_ta
     relevant_tables = [t[0] for t in sorted_tables[:top_k_tables] if t[1] > 0]
     if not relevant_tables:
         relevant_tables = list(schema.keys())[:top_k_tables]
+    return relevant_tables
+
+
+def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_tables: int = 2) -> str:
+    """Retrieve the most relevant tables and columns based on a natural language prompt.
+
+    This uses semantic vector embeddings (via sentence-transformers) if available,
+    falling back to keyword matching otherwise.
+
+    Args:
+    ----
+        prompt: The natural language prompt.
+        schema: The parsed database schema.
+        top_k_tables: The maximum number of tables to include in the context.
+
+    Returns:
+    -------
+        A formatted string describing the relevant schema parts.
+
+    """
+    table_names = list(schema.keys())
+    if not table_names:
+        return ""
+
+    relevant_tables = []
+
+    if SentenceTransformer is not None and cosine_similarity is not None:
+        try:
+            # Simple RAG vector embedding retrieval
+            # For a real implementation, you'd cache the model and table embeddings
+            model = SentenceTransformer("all-MiniLM-L6-v2")
+
+            # Embed the tables (table name + columns)
+            table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]
+
+            prompt_embedding = model.encode([prompt])
+            table_embeddings = model.encode(table_docs)
+
+            similarities = cosine_similarity(prompt_embedding, table_embeddings)[0]  # type: ignore[operator]
+
+            # Get top_k indices
+            top_indices = similarities.argsort()[-top_k_tables:][::-1]
+            relevant_tables = [table_names[i] for i in top_indices if similarities[i] > 0.1]
+
+            if not relevant_tables:
+                relevant_tables = table_names[:top_k_tables]
+        except Exception as e:
+            logger.warning("Failed to use semantic search: %s. Falling back to keyword search.", e)
+            relevant_tables = _keyword_search(prompt, schema, top_k_tables)
+    else:
+        # Fallback keyword matching
+        relevant_tables = _keyword_search(prompt, schema, top_k_tables)
+
     context_lines = ["-- Relevant Schema Context:"]
     for table in relevant_tables:
         cols = ", ".join(schema[table])

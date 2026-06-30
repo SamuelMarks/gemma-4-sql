@@ -27,9 +27,11 @@ def test_assign_weights_shape_mismatch() -> object:  # type: ignore[return]
         assign_weights_from_eval_shape(["model"], tensor, state, "src", None)
     state2 = {"model": jnp.zeros((8, 8))}
     with pytest.raises(ValueError, match=r".*"):
-        assign_weights(["model"], tensor, state2, "src", 8)
-    assign_weights(["model", "layer"], tensor, state, "src", None, None)  # type: ignore[call-arg]
-    if not jnp.array_equal(state["model"]["layer"], tensor):
+        assign_weights(["model"], tensor, state2, "src", None)
+
+    state3 = {"model": {"layer": jnp.zeros((3, 3))}}
+    assign_weights(["model", "layer"], tensor, state3, "src", None)
+    if not jnp.array_equal(state3["model"]["layer"], tensor):
         raise AssertionError
 
 
@@ -38,7 +40,7 @@ def test_assign_weights_sharding() -> object:  # type: ignore[return]
     state = {"model": jnp.zeros((8, 8))}
     tensor = jnp.ones((8, 8))
     sharding = {"model": jax.sharding.NamedSharding(jax.sharding.Mesh(jax.devices(), ("x",)), jax.sharding.PartitionSpec("x"))}
-    assign_weights(["model"], tensor, state, "src", sharding)
+    assign_weights(["model"], tensor, state, "src", None, sharding_dict=sharding)
 
 
 def test_segment_ids_to_positions() -> object:  # type: ignore[return]

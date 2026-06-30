@@ -1,5 +1,6 @@
 """Global pytest fixtures for gemma-4-sql tests."""
 
+import json
 import sys
 
 import pytest
@@ -23,14 +24,20 @@ class MockConn:
         """Mock execute."""
         return self
 
+    def fetchall(self: object) -> list:
+        return [[json.dumps({"success": True, "generated_sql": "SELECT COUNT(*) FROM test", "results": [[1]]})]]
+
     def fetchdf(self: object) -> object:
         """Mock fetchdf."""
 
         class MockDF:
-            def to_dict(self: object, _orient: str) -> list[dict[str, str]]:
-                return [{"query": "SELECT 1", "nl": "Get 1"}]
+            def to_dict(self: object, orient: str = "records") -> list[dict[str, str]]:
+                return [{"query": "SELECT 1", "nl": "Get 1", "sql": "SELECT 1", "sql_prompt": "Get 1"}]
 
         return MockDF()
+
+    def create_function(self, name, func, args, ret) -> None:
+        pass
 
     def close(self: object) -> None:
         """Mock close."""

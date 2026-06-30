@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import sqlite3
 import typing
+
+logger = logging.getLogger(__name__)
 
 try:
     import psycopg2
@@ -26,7 +30,7 @@ class LiveDatabaseEngine:
     Supports SQLite, PostgreSQL, Snowflake, and DuckDB.
     """
 
-    def __init__(self: typing.Any, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", db_kwargs: dict[str, object] | None = None) -> None:
+    def __init__(self: typing.Any, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", db_kwargs: dict[str, object] | None = None, read_only: bool = True) -> None:
         """Initialize the LiveDatabaseEngine.
 
         Args:
@@ -35,14 +39,22 @@ class LiveDatabaseEngine:
             ddl: Optional SQL Data Definition Language string to initialize the schema.
             db_type: The type of database backend ('sqlite', 'postgresql', 'snowflake', 'duckdb').
             db_kwargs: Additional keyword arguments for the database connection.
+            read_only: If True, prevents execution of mutating statements (INSERT, UPDATE, DELETE, DROP).
 
         """
         self.db_path = db_path
         self.db_type = db_type.lower()
         self.db_kwargs = db_kwargs or {}
+        self.read_only = read_only
         self.conn = self.connect()
         if ddl:
-            self.setup_schema(ddl)
+            # We temporarily bypass read-only to setup schema
+            old_ro = self.read_only
+            self.read_only = False
+            try:
+                self.setup_schema(ddl)
+            finally:
+                self.read_only = old_ro
 
     def connect(self: typing.Any) -> object:
         """Connect to database.
@@ -70,9 +82,28 @@ class LiveDatabaseEngine:
             if duckdb is None:
                 msg = "duckdb is required for DuckDB support. Install with `pip install duckdb`."
                 raise ImportError(msg)
-            return duckdb.connect(self.db_path, **self.db_kwargs)
+
+            # DuckDB natively supports read_only flag
+            kwargs = self.db_kwargs.copy()
+            if self.read_only and self.db_path != ":memory:":
+                kwargs["read_only"] = True
+            return duckdb.connect(self.db_path, **kwargs)
+
         msg = f"Unsupported db_type: {self.db_type}"
         raise ValueError(msg)
+
+    def _validate_safety(self: typing.Any, query: str) -> None:
+        """Ensure the query is safe to execute if read_only is True."""
+        if not self.read_only:
+            return
+
+        # Basic heuristic sandbox protection against mutating statements
+        dangerous_patterns = [r"\bDROP\b", r"\bDELETE\b", r"\bUPDATE\b", r"\bINSERT\b", r"\bALTER\b", r"\bTRUNCATE\b", r"\bGRANT\b", r"\bREVOKE\b"]
+        upper_query = query.upper()
+        for pattern in dangerous_patterns:
+            if re.search(pattern, upper_query):
+                msg = f"Safety Violation: Mutating statements ({pattern}) are not allowed in read-only mode."
+                raise PermissionError(msg)
 
     def setup_schema(self: typing.Any, ddl: str) -> None:
         """Execute DDL statements to construct the database schema.
@@ -82,6 +113,7 @@ class LiveDatabaseEngine:
             ddl: The SQL Data Definition Language string.
 
         """
+        self._validate_safety(ddl)
         if self.db_type == "sqlite":
             with self.conn:
                 self.conn.executescript(ddl)
@@ -108,12 +140,13 @@ class LiveDatabaseEngine:
 
         """
         try:
+            self._validate_safety(query)
             if self.db_type == "duckdb":
                 results = self.conn.execute(query).fetchall()
                 return (True, results, None)
             cursor = self.conn.cursor()
             cursor.execute(query)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return (False, [], str(e))
         else:
             if cursor.description is not None:
@@ -137,11 +170,13 @@ class LiveDatabaseEngine:
 
         """
         try:
+            self._validate_safety(query)
             if self.db_type == "duckdb":
                 return self.conn.execute(query).fetchall()
             cursor = self.conn.cursor()
             cursor.execute(query)
-        except Exception:  # noqa: BLE001
+        except Exception as e:
+            logger.debug("Query execution failed: %s", e)
             return []
         else:
             if cursor.description is not None:

@@ -39,6 +39,7 @@ def run_agentic_loop(model_name: str, prompt: str, db_path: str = ":memory:", dd
             gen_res = generate_sql(model_name, current_prompt)
             sql = gen_res.get("sql", "")
             (is_success, _, error_msg) = engine.execute_with_feedback(sql)  # type: ignore[arg-type]
+            error_msg = error_msg[:500] + "... (truncated)" if error_msg and len(error_msg) > 500 else error_msg
             history.append({"attempt": attempts, "prompt": current_prompt, "sql": sql, "success": is_success, "error": error_msg})
             if is_success:
                 success = True

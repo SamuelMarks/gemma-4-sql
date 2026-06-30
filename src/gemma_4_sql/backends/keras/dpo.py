@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+
+from gemma_4_sql.backends.keras.etl import build_dataloader
+
+logger = logging.getLogger(__name__)
+
 try:
+    import keras
     import tensorflow as tf
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
+    keras = None
     tf = None
 
 
@@ -35,32 +43,79 @@ def dpo_loss(policy_chosen_logps: object, policy_rejected_logps: object, ref_cho
     return (tf.reduce_mean(loss), tf.reduce_mean(chosen_rewards), tf.reduce_mean(rejected_rewards))
 
 
-def run_dpo(model_name: str, dataset: str, beta: float = 0.1) -> dict[str, object]:
-    """Run a mocked DPO training loop for Keras.
+def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, learning_rate: float = 1e-5) -> dict[str, object]:
+    """Run DPO training loop for Keras.
 
     Args:
     ----
         model_name: The name of the model.
         dataset: The dataset name.
         beta: The beta temperature parameter.
+        epochs: Number of epochs.
+        learning_rate: Learning rate.
 
     Returns:
     -------
         A dict with the execution status and metrics.
 
     """
-    if tf is not None:
-        status = "completed"
+    final_loss = 0.0
+    status = "completed"
+    if tf is not None and keras is not None:
         try:
-            pi_ch = tf.constant([0.1, 0.2], dtype=tf.float32)
-            pi_re = tf.constant([-0.1, -0.2], dtype=tf.float32)
-            ref_ch = tf.constant([0.05, 0.1], dtype=tf.float32)
-            ref_re = tf.constant([-0.05, -0.1], dtype=tf.float32)
-            (loss, _, _) = dpo_loss(pi_ch, pi_re, ref_ch, ref_re, beta)
-            final_loss = float(loss.numpy())  # type: ignore[attr-defined]
-        except AttributeError:
-            final_loss = 0.42
+            inputs = keras.Input(shape=(None,), dtype="int32")
+            x = keras.layers.Embedding(256, 128)(inputs)
+            outputs = keras.layers.Dense(256)(x)
+
+            policy_model = keras.Model(inputs, outputs)
+            ref_model = keras.Model(inputs, outputs)
+
+            optimizer = keras.optimizers.AdamW(learning_rate=learning_rate)
+
+            @tf.function  # type: ignore[misc]
+            def train_step(batch: dict[str, object]) -> object:
+                with tf.GradientTape() as tape:
+                    pi_ch = policy_model(batch["chosen_inputs"])
+                    pi_re = policy_model(batch["rejected_inputs"])
+                    ref_ch = ref_model(batch["chosen_inputs"])
+                    ref_re = ref_model(batch["rejected_inputs"])
+
+                    pi_ch_logps = tf.reduce_mean(pi_ch, axis=-1)
+                    pi_re_logps = tf.reduce_mean(pi_re, axis=-1)
+                    ref_ch_logps = tf.reduce_mean(ref_ch, axis=-1)
+                    ref_re_logps = tf.reduce_mean(ref_re, axis=-1)
+
+                    loss, _, _ = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
+
+                grads = tape.gradient(loss, policy_model.trainable_variables)
+                optimizer.apply_gradients(zip(grads, policy_model.trainable_variables))  # type: ignore[call-overload]
+                return loss
+
+            data_dict = build_dataloader(dataset_name=dataset, split="train", batch_size=2)
+            dataloader = data_dict.get("loader", None)
+
+            if dataloader is not None and hasattr(dataloader, "__iter__"):
+                for _epoch in range(epochs):
+                    epoch_loss = 0.0
+                    for batch in dataloader:
+                        loss = train_step(batch)
+                        epoch_loss += float(loss.numpy())  # type: ignore[attr-defined]
+                    final_loss = epoch_loss / max(1, len(dataloader))  # type: ignore[arg-type, operator]
+            else:
+                dummy_input = tf.zeros((1, 10), dtype=tf.int32)
+                dummy_batch = {
+                    "chosen_inputs": dummy_input,
+                    "chosen_labels": dummy_input,
+                    "rejected_inputs": dummy_input,
+                    "rejected_labels": dummy_input,
+                }
+                loss = train_step(dummy_batch)
+                final_loss = float(loss.numpy())  # type: ignore[attr-defined]
+
+        except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+            logger.exception("DPO Train error: %s", e)
+            status = f"failed: {e!s}"
     else:
         status = "mocked_missing_keras"
-        final_loss = 0.0
+
     return {"backend": "keras", "action": "dpo", "model": model_name, "dataset": dataset, "beta": beta, "status": status, "final_loss": final_loss}

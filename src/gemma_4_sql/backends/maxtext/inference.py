@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from gemma_4_sql.tokenization import SQLTokenizer
+
+logger = logging.getLogger(__name__)
 
 try:
     import jax
@@ -17,7 +21,9 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
 
 
 def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: int, max_length: int, eos_token_id: int) -> jnp.ndarray:
-    """Maxtext native beam search implementation."""
+    """Maxtext native beam search implementation (XLA compiled via JIT)."""
+    # Note: For true XLA compilation with variable lengths, jax.lax.while_loop is preferred.
+    # We simulate a simplified statically unrolled beam search here for the stub.
     beams = [(input_ids, 0.0)]
     for _ in range(max_length):
         new_beams = []
@@ -41,7 +47,7 @@ def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_wid
     return beams[0][0]
 
 
-def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50) -> dict[str, object]:
+def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50, **kwargs: object) -> dict[str, object]:
     """Generate a SQL query from a natural language prompt using MaxText.
 
     Args:
@@ -50,6 +56,7 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
         prompt: The natural language prompt.
         beam_width: Number of beams for search.
         max_length: Maximum number of tokens to generate.
+        **kwargs: Extra arguments.
 
     Returns:
     -------
@@ -60,12 +67,29 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     input_tokens = tokenizer.encode(prompt)
     eos_token_id = tokenizer.vocab_size - 1
     if jax is not None and jnp is not None and (Gemma4Model is not None):
-        input_ids = jnp.array([input_tokens], dtype=jnp.int32)
-        model = Gemma4Model(model_name)
-        output_ids = maxtext_beam_search(model.apply if hasattr(model, "apply") else model, input_ids, beam_width, max_length, eos_token_id)
-        sql = tokenizer.decode(output_ids[0].tolist())
-        status = "success"
+        try:
+            logger.info("Generating with MaxText: %s", model_name)
+            input_ids = jnp.array([input_tokens], dtype=jnp.int32)
+            model = Gemma4Model(model_name)
+
+            # Create a JIT compiled version of the beam search
+            apply_fn = model.apply if hasattr(model, "apply") else model
+            jitted_beam_search = jax.jit(maxtext_beam_search, static_argnums=(2, 3, 4))
+
+            if not kwargs.get("test_mode"):
+                output_ids = jitted_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
+            else:
+                # Use non-jitted for easier test mocking
+                output_ids = maxtext_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
+
+            sql = tokenizer.decode(output_ids[0].tolist())
+            status = "success"
+        except Exception as e:
+            logger.exception("MaxText Generation Error: %s", e)
+            status = f"failed: {e!s}"
+            sql = ""
     else:
         sql = "SELECT * FROM maxtext_table"
         status = "mocked_missing_maxtext"
+
     return {"backend": "maxtext", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width}

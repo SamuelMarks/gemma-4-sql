@@ -115,6 +115,10 @@ class MockJAX:
 
     nn = MockNN()
 
+    @staticmethod
+    def jit(fn: object, *args: object, **kwargs: object) -> object:
+        return fn
+
 
 class MockGemma4Model:
     """Mock Gemma 4 Model."""

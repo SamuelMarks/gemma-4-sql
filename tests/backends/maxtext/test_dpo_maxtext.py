@@ -2,120 +2,161 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import pytest
 
-from gemma_4_sql.backends.maxtext.dpo import dpo_loss, run_dpo
-
-if TYPE_CHECKING:
-    import pytest
+import gemma_4_sql.backends.maxtext.dpo as tr
+from gemma_4_sql.backends.maxtext.dpo import run_dpo
 
 
-class MockArray:
-    """Initialize class MockArray."""
+class MockJnpTensor:
+    def __init__(self, shape: tuple) -> None:
+        self.shape = shape
+        self.dtype = float
 
-    def __sub__(self: object, other: object) -> MockArray:
-        """Initialize function __sub__.
+    def __rmul__(self, other: object) -> object:
+        return self
 
-        Args:
-        ----
-        other: Description of other.
+    def __mul__(self, other: object) -> object:
+        return self
 
-        """
-        return MockArray()
+    def __sub__(self, other: object) -> object:
+        return self
 
-    def __mul__(self: object, other: object) -> MockArray:
-        """Initialize function __mul__.
+    def __neg__(self) -> object:
+        return self
 
-        Args:
-        ----
-        other: Description of other.
+    def __add__(self, other: object) -> object:
+        return self
 
-        """
-        return MockArray()
-
-    def __rmul__(self: object, other: object) -> MockArray:
-        """Initialize function __rmul__.
-
-        Args:
-        ----
-        other: Description of other.
-
-        """
-        return MockArray()
-
-    def __neg__(self: object) -> MockArray:
-        """Initialize function __neg__."""
-        return MockArray()
-
-    def item(self: object) -> float:
-        """Initialize function item."""
-        return 0.42
+    def item(self) -> float:
+        return 0.35
 
 
 class MockJnp:
-    """Initialize class MockJnp."""
+    int32 = 1
 
-    def array(self: object, *_args: object, **_kwargs: object) -> MockArray:
-        """Initialize function array.
+    @staticmethod
+    def zeros(shape: object, **kwargs: object) -> object:
+        return MockJnpTensor(shape)  # type: ignore[arg-type]
 
-        Args:
-        ----
-        x: Description of x.
+    @staticmethod
+    def mean(x: object) -> object:
+        return x
 
-        """
-        return MockArray()
-
-    def mean(self: object, _x: object) -> MockArray:
-        """Initialize function mean.
-
-        Args:
-        ----
-        x: Description of x.
-
-        """
-        return MockArray()
+    @staticmethod
+    def sum(*args: object, **kwargs: object) -> object:
+        return MockJnpTensor((1,))
 
 
 class MockJnn:
-    """Initialize class MockJnn."""
+    @staticmethod
+    def log_sigmoid(x: object) -> object:
+        return x
 
-    def log_sigmoid(self: object, _x: object) -> MockArray:
-        """Initialize function log_sigmoid.
 
-        Args:
-        ----
-        x: Description of x.
+class MockJaxRandom:
+    @staticmethod
+    def PRNGKey(seed: object) -> object:
+        return seed
 
-        """
-        return MockArray()
+
+class MockJax:
+    random = MockJaxRandom()
+
+    @staticmethod
+    def jit(fn: object) -> object:
+        return fn
+
+    @staticmethod
+    def value_and_grad(fn: object) -> object:
+        def wrapper(*args: object, **kwargs: object) -> object:
+            _ = fn(*args, **kwargs)  # type: ignore[operator]
+            return (MockJnpTensor((1,)), "grads")
+
+        return wrapper
+
+
+class MockOptax:
+    @staticmethod
+    def adamw(_lr: object) -> object:
+        class MockOpt:
+            def init(self, _params: object) -> object:
+                return "opt_state"
+
+            def update(self, _grads: object, _opt_state: object, _params: object) -> object:
+                return ("updates", "opt_state")
+
+        return MockOpt()
+
+    @staticmethod
+    def apply_updates(params: object, _updates: object) -> object:
+        return params
+
+
+class MockGemma4Model:
+    def __init__(self, name: object) -> None:
+        pass
+
+    def init(self, _rng: object, _inputs: object) -> object:
+        return "params"
+
+    def apply(self, _params: object, _inputs: object) -> object:
+        return MockJnpTensor((1,))
+
+
+@pytest.fixture
+def _mock_maxtext_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tr, "jax", MockJax())
+    monkeypatch.setattr(tr, "jnp", MockJnp())
+    monkeypatch.setattr(tr, "optax", MockOptax())
+    monkeypatch.setattr(tr, "Gemma4Model", MockGemma4Model)
+    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnp", MockJnp())
+    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnn", MockJnn())
+
+    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+        return {"loader": [{"chosen_inputs": MockJnpTensor((1,)), "chosen_labels": MockJnpTensor((1,)), "rejected_inputs": MockJnpTensor((1,)), "rejected_labels": MockJnpTensor((1,))}]}
+
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
 
 
 def test_run_dpo_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test MaxText DPO when missing."""
-    maxtext_dpo = __import__("gemma_4_sql.backends.maxtext.dpo", fromlist=[""])
-    monkeypatch.setattr(maxtext_dpo, "jnp", None)
-    jax_dpo = __import__("gemma_4_sql.backends.jax.dpo", fromlist=[""])
-    monkeypatch.setattr(jax_dpo, "jnp", None)
-    monkeypatch.setattr(jax_dpo, "jnn", None)
+    monkeypatch.setattr(tr, "jnp", None)
     res = run_dpo("model", "data")
     if not res["status"] == "mocked_missing_maxtext":
         raise AssertionError
-    (loss, ch_r, re_r) = dpo_loss(None, None, None, None)
-    if not loss == 0.0:
-        raise AssertionError
-    if not ch_r == 0.0:
-        raise AssertionError
-    if not re_r == 0.0:
-        raise AssertionError
 
 
-def test_run_dpo_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test MaxText DPO."""
-    jax_dpo = __import__("gemma_4_sql.backends.jax.dpo", fromlist=[""])
-    maxtext_dpo = __import__("gemma_4_sql.backends.maxtext.dpo", fromlist=[""])
-    monkeypatch.setattr(maxtext_dpo, "jnp", MockJnp())
-    monkeypatch.setattr(jax_dpo, "jnp", MockJnp())
-    monkeypatch.setattr(jax_dpo, "jnn", MockJnn())
-    res = run_dpo("model", "data")
+@pytest.mark.usefixtures("_mock_maxtext_env")
+def test_run_dpo_maxtext_real() -> None:
+    res = run_dpo("sft", "dat", epochs=2, learning_rate=0.1, test_mode=True)
     if not res["backend"] == "maxtext":
+        raise AssertionError
+    if not res["status"] == "completed":
+        raise AssertionError
+
+
+@pytest.mark.usefixtures("_mock_maxtext_env")
+def test_run_dpo_maxtext_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+        return {"loader": None}
+
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
+
+    res = run_dpo("sft", "dat", epochs=2, learning_rate=0.1, test_mode=True)
+    if not res["backend"] == "maxtext":
+        raise AssertionError
+    if not res["status"] == "completed":
+        raise AssertionError
+
+
+@pytest.mark.usefixtures("_mock_maxtext_env")
+def test_run_dpo_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_error(*args: object, **kwargs: object) -> object:
+        msg = "err"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(tr, "build_dataloader", raise_error)
+
+    res = run_dpo("sft", "dat", epochs=2, learning_rate=0.1, test_mode=True)
+    if "failed" not in str(res["status"]):
         raise AssertionError

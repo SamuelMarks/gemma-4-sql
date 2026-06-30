@@ -18,7 +18,7 @@ def compute_metrics(engine: LiveDatabaseEngine, preds: list[str], truths: list[s
     exact_matches = 0
     valid_sqls = 0
     exec_matches = 0
-    for p, t in zip(preds, truths, strict=False):
+    for p, t in zip(preds, truths):
         if normalize_sql(p) == normalize_sql(t):
             exact_matches += 1
         (success, _, _) = engine.execute_with_feedback(p)

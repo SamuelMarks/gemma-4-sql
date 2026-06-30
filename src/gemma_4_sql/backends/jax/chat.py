@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from gemma_4_sql.backends.jax.inference import generate_sql
+
 try:
     import jax
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     jax = None
 
 
-def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, **_kwargs: object) -> dict[str, object]:
+def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, **kwargs: object) -> dict[str, object]:
     """Execute a single turn in a multi-turn SQL conversation using JAX.
 
     Args:
@@ -24,11 +26,20 @@ def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, *
 
     """
     if jax is not None:
+        # Build prompt from history
+        full_prompt = ""
+        for turn in history:
+            full_prompt += f"{turn['role']}: {turn['content']}\n"
+        full_prompt += f"user: {new_prompt}\nassistant: "
+
+        # Use actual generation logic
+        result = generate_sql(model_name, full_prompt, **kwargs)
+        response = str(result.get("sql", "SELECT * FROM fallback"))
         status = "success_jax_chat"
-        response = "SELECT * FROM table WHERE prompt = ?", (new_prompt,)
     else:
         status = "mocked_missing_jax"
         response = "SELECT * FROM fallback_chat"
+
     updated_history = list(history)
     updated_history.append({"role": "user", "content": new_prompt})
     updated_history.append({"role": "assistant", "content": response})

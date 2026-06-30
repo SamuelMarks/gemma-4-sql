@@ -12,7 +12,7 @@ from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 def test_live_database_engine_memory() -> None:
     """Test engine with in-memory DB and DDL."""
     ddl = "CREATE TABLE users (id INT, name TEXT); INSERT INTO users VALUES (1, 'Alice');"
-    engine = LiveDatabaseEngine(ddl=ddl)
+    engine = LiveDatabaseEngine(ddl=ddl, read_only=False)
     results = engine.execute_query("SELECT * FROM users")
     if not results == [(1, "Alice")]:
         raise AssertionError
@@ -32,7 +32,7 @@ def test_live_database_engine_file() -> None:
         db_path = f.name
     try:
         ddl = "CREATE TABLE dummy (val INT); INSERT INTO dummy VALUES (42);"
-        engine = LiveDatabaseEngine(db_path=db_path, ddl=ddl)
+        engine = LiveDatabaseEngine(db_path=db_path, ddl=ddl, read_only=False)
         err_results = engine.execute_query("SELECT * FROM non_existent_table")
         if not err_results == []:
             raise AssertionError
@@ -114,7 +114,7 @@ def test_live_database_engine_snowflake_success() -> None:
 
 def test_execute_with_feedback_sqlite() -> None:
     """Test execute_with_feedback for sqlite."""
-    engine = LiveDatabaseEngine(ddl="CREATE TABLE t (id INT); INSERT INTO t VALUES (1);")
+    engine = LiveDatabaseEngine(ddl="CREATE TABLE t (id INT); INSERT INTO t VALUES (1);", read_only=False)
     (success, res, err) = engine.execute_with_feedback("SELECT * FROM t")
     if success is not True:
         raise AssertionError

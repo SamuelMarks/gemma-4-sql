@@ -1,22 +1,75 @@
 """Tests for JAX PEFT."""
 
+import typing
+
+import pytest
+
 import gemma_4_sql.backends.jax.peft as pt
 
 
-def test_apply_lora_jax_mocked() -> object:  # type: ignore[return]
-    """Initialize function test_apply_lora_jax_mocked."""
+class MockOptax:
+    """Mock optax."""
+
+
+class MockJax:
+    """Mock jax."""
+
+
+class MockGemma4Config:
+    @staticmethod
+    def gemma4_e2b() -> object:
+        return "config"
+
+
+class MockGemma4ForCausalLM:
+    def __init__(self: typing.Any, config: object, rngs: object) -> None:
+        pass
+
+
+class MockNNX:
+    class Param:
+        pass
+
+    class Rngs:
+        def __init__(self: typing.Any, seed: int) -> None:
+            pass
+
+    @staticmethod
+    def split(model: object, *_args: object, **_kwargs: object) -> tuple:
+        return (model, {}, {})
+
+
+def test_apply_lora_jax_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pt, "optax", None)
     res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
-    if not res["backend"] == "jax":
+    if not res["status"] == "mocked_missing_optax":
         raise AssertionError
 
 
-def test_apply_lora_jax_real(monkeypatch: object) -> object:  # type: ignore[return]
-    """Initialize function test_apply_lora_jax_real.
+def test_apply_lora_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pt, "optax", MockOptax())
+    monkeypatch.setattr(pt, "jax", MockJax())
+    monkeypatch.setattr(pt, "nnx", MockNNX())
+    monkeypatch.setattr(pt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
+    monkeypatch.setattr(pt, "Gemma4Config", MockGemma4Config)
 
-    Args:
-    ----
-    monkeypatch: Description of monkeypatch.
+    res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
+    if not res["status"] == "completed":
+        raise AssertionError
 
-    """
-    monkeypatch.setattr(pt, "optax", True)  # type: ignore[attr-defined]
-    pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
+
+def test_apply_lora_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pt, "optax", MockOptax())
+    monkeypatch.setattr(pt, "jax", MockJax())
+    monkeypatch.setattr(pt, "nnx", MockNNX())
+    monkeypatch.setattr(pt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
+    monkeypatch.setattr(pt, "Gemma4Config", MockGemma4Config)
+
+    def mock_split(*_args: object, **_kwargs: object) -> tuple:
+        msg = "split error"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(MockNNX, "split", mock_split)
+    res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
+    if "failed" not in str(res["status"]):
+        raise AssertionError

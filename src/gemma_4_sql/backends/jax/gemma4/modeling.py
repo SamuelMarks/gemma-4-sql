@@ -1301,7 +1301,8 @@ class Gemma4ForCausalLM(nnx.Module):  # type: ignore[misc]
         """
         snapshot_download = __import__("huggingface_hub", fromlist=["snapshot_download"]).snapshot_download
 
-        params = __import__(".", fromlist=["params"]).params
+        from . import params
+
         if config is None:
             config_map = {
                 "google/gemma-4-E2B": ModelConfig.gemma4_e2b,
