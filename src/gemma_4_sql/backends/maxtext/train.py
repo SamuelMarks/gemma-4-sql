@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +28,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     maxtext_train = None
 
 
-def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float, **kwargs: object) -> dict[str, object]:
+def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float, **kwargs: JSONValue) -> JSONDict:
     """Train a Text-to-SQL model using the MaxText backend.
 
     Args:
@@ -65,14 +69,14 @@ def train_model(action: str, model_name: str, dataset: str, epochs: int, learnin
             optimizer = optax.adamw(learning_rate)
             opt_state = optimizer.init(params)
 
-            def loss_fn(params: object, batch: dict[str, object]) -> object:
+            def loss_fn(params: object, batch: JSONDict) -> object:
                 logits = model.apply(params, batch["inputs"])
                 targets = batch["targets"]
                 loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
                 return jnp.mean(loss)  # type: ignore[attr-defined]
 
             @jax.jit  # type: ignore[misc]
-            def train_step(params: object, opt_state: object, batch: dict[str, object]) -> object:
+            def train_step(params: object, opt_state: object, batch: JSONDict) -> object:
                 (loss, grads) = jax.value_and_grad(loss_fn)(params, batch)
                 (updates, opt_state) = optimizer.update(grads, opt_state, params)
                 params = optax.apply_updates(params, updates)

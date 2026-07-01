@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def run_dpo(model_name: str, dataset: str, backend: str = "pytorch", beta: float = 0.1) -> dict[str, object]:
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
+
+
+def run_dpo(model_name: str, dataset: str, backend: str = "pytorch", beta: float = 0.1) -> JSONDict:
     """Run Direct Preference Optimization (DPO).
 
     Args:

@@ -1,7 +1,6 @@
 """Tests for PyTorch-specific ETL pipeline (full implementation)."""
 
 import sys
-import typing
 
 import pytest
 
@@ -20,7 +19,7 @@ def _clean_sys_modules() -> object:
 class MockDataset:
     """Initialize class MockDataset."""
 
-    def __init__(self: typing.Any, data: object) -> None:
+    def __init__(self, data: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -30,11 +29,11 @@ class MockDataset:
         """
         self.data = data
 
-    def __len__(self: typing.Any) -> object:
+    def __len__(self) -> object:
         """Initialize function __len__."""
         return len(self.data)
 
-    def __getitem__(self: typing.Any, idx: object) -> object:
+    def __getitem__(self, idx: object) -> object:
         """Initialize function __getitem__.
 
         Args:
@@ -63,7 +62,7 @@ class MockDatasets:
 class MockTensor:
     """Initialize class MockTensor."""
 
-    def __init__(self: typing.Any, data: object, dtype: object = None) -> None:
+    def __init__(self, data: object, dtype: object = None) -> None:
         """Initialize function __init__.
 
         Args:
@@ -75,11 +74,11 @@ class MockTensor:
         self.data = data
         self.dtype = dtype
 
-    def __repr__(self: typing.Any) -> object:  # type: ignore[override]
+    def __repr__(self) -> object:  # type: ignore[override]
         """Initialize function __repr__."""
         return f"MockTensor({self.data})"
 
-    def __len__(self: typing.Any) -> object:
+    def __len__(self) -> object:
         """Initialize function __len__."""
         return len(self.data)
 
@@ -127,7 +126,7 @@ class MockTorch:
 class MockDataLoader:
     """Initialize class MockDataLoader."""
 
-    def __init__(self: typing.Any, dataset: object, batch_size: object, shuffle: object, collate_fn: object, sampler: object = None, **kwargs: object) -> None:
+    def __init__(self, dataset: object, batch_size: object, shuffle: object, collate_fn: object, sampler: object = None, **kwargs: object) -> None:
         """Initialize function __init__.
 
         Args:

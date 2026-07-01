@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
 
 try:
     import jax
@@ -14,7 +18,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     ocp = None
 
 
-def export_model(model_name: str, export_path: str) -> dict[str, object]:
+def export_model(model_name: str, export_path: str) -> JSONDict:
     """Export a Text-to-SQL model using the JAX backend.
 
     Args:

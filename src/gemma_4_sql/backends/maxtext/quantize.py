@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +23,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     Gemma4Model = None
 
 
-def quantize_model(model_name: str, method: str = "int8", **_kwargs: object) -> dict[str, object]:
+def quantize_model(model_name: str, method: str = "int8", **_kwargs: JSONValue) -> JSONDict:
     """Quantize a MaxText model.
 
     Args:

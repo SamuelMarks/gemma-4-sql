@@ -1,6 +1,5 @@
 """Module docstring."""
 
-import typing
 from unittest import mock
 
 from gemma_4_sql.backends.maxtext.evaluate import evaluate_model
@@ -12,7 +11,7 @@ def test_maxtext_evaluate_no_tolist_and_break() -> object:  # type: ignore[retur
     class DummyLoader:
         """Initialize class DummyLoader."""
 
-        def __iter__(self: typing.Any) -> object:
+        def __iter__(self) -> object:
             """Initialize function __iter__."""
             for _ in range(15):
                 yield {"inputs": [[1, 2, 3]], "targets": [[4, 5, 6]]}

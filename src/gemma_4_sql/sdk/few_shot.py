@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def build_few_shot_prompt(model_name: str, prompt: str, examples: list[dict[str, str]], backend: str = "jax", **kwargs: object) -> dict[str, object]:
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
+
+def build_few_shot_prompt(model_name: str, prompt: str, examples: list[dict[str, str]], backend: str = "jax", **kwargs: JSONValue) -> JSONDict:
     """Build a dynamic few-shot prompt.
 
     Args:

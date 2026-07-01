@@ -6,6 +6,9 @@ import typing
 
 from gemma_4_sql.backends.keras.etl import build_dataloader
 
+if typing.TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
+
 try:
     import keras
     import tensorflow as tf  # pragma: no cover
@@ -17,19 +20,19 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
 class KerasSQLModel:
     """Mock Keras architecture for Text-to-SQL if real model isn't available."""
 
-    def __init__(self: typing.Any, vocab_size: int = 256, d_model: int = 128) -> None:
+    def __init__(self, vocab_size: int = 256, d_model: int = 128) -> None:
         """Init."""
         self.vocab_size = vocab_size
         self.d_model = d_model
 
-    def __call__(self: typing.Any, x: object) -> object:
+    def __call__(self, x: object) -> object:
         """Execute dummy forward pass."""
         if tf is not None:
             return tf.zeros((x.shape[0], x.shape[1], self.vocab_size))  # type: ignore[attr-defined]
         return None  # pragma: no cover
 
 
-def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float) -> dict[str, object]:
+def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float) -> JSONDict:
     """Train a Text-to-SQL model using the Keras backend.
 
     Args:

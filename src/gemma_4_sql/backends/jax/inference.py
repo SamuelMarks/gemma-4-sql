@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from gemma_4_sql.tokenization import SQLTokenizer
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
 
 try:
     import jax
@@ -60,7 +65,7 @@ def jax_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: 
     return beams[0][0], beams[0][1]
 
 
-def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50) -> dict[str, object]:
+def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50) -> JSONDict:
     """Generate a SQL query from a natural language prompt using JAX.
 
     Args:

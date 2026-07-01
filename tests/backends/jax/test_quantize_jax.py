@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import typing
 from typing import TYPE_CHECKING
 
 import gemma_4_sql.backends.jax.quantize as qt
@@ -15,13 +14,13 @@ if TYPE_CHECKING:
 class MockArray:
     """Initialize class MockArray."""
 
-    def __init__(self: typing.Any, ndim: int = 2) -> None:
+    def __init__(self, ndim: int = 2) -> None:
         self.ndim = ndim
 
-    def __truediv__(self: typing.Any, other: object) -> object:
+    def __truediv__(self, other: object) -> object:
         return MockArray()
 
-    def astype(self: typing.Any, _dtype: object) -> object:
+    def astype(self, _dtype: object) -> object:
         return MockArray()
 
 
@@ -30,13 +29,13 @@ class MockJnp:
 
     int8 = "int8"
 
-    def max(self: typing.Any, _x: object) -> float:
+    def max(self, _x: object) -> float:
         return 1.0
 
-    def abs(self: typing.Any, _x: object) -> object:
+    def abs(self, _x: object) -> object:
         return MockArray()
 
-    def round(self: typing.Any, _x: object) -> object:
+    def round(self, _x: object) -> object:
         return MockArray()
 
 
@@ -47,17 +46,17 @@ class MockGemma4Config:
 
 
 class MockGemma4ForCausalLM:
-    def __init__(self: typing.Any, config: object, rngs: object) -> None:
+    def __init__(self, config: object, rngs: object) -> None:
         pass
 
 
 class MockNNX:
     class Param:
-        def __init__(self: typing.Any, value: object) -> None:
+        def __init__(self, value: object) -> None:
             self.value = value
 
     class Rngs:
-        def __init__(self: typing.Any, seed: int) -> None:
+        def __init__(self, seed: int) -> None:
             pass
 
     class graph:

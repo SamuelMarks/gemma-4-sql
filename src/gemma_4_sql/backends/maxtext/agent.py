@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.maxtext.inference import generate_sql
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
-async def _process_single_prompt(model_name: str, prompt: str, engine: LiveDatabaseEngine, max_retries: int, min_confidence: float) -> dict[str, object]:
+
+async def _process_single_prompt(model_name: str, prompt: str, engine: LiveDatabaseEngine, max_retries: int, min_confidence: float) -> JSONDict:
     current_prompt = prompt
     attempts = 0
     success = False
     final_sql = ""
-    history: list[dict[str, object]] = []
+    history: list[JSONDict] = []
 
     while attempts < max_retries:
         attempts += 1
@@ -40,7 +44,7 @@ async def _process_single_prompt(model_name: str, prompt: str, engine: LiveDatab
     return {"backend": "maxtext", "model": model_name, "initial_prompt": prompt, "final_sql": final_sql, "success": success, "attempts": attempts, "history": history, "status": "completed"}
 
 
-def run_agentic_loop(model_name: str, prompt: str | list[str], db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", **kwargs: object) -> dict[str, object] | list[dict[str, object]]:
+def run_agentic_loop(model_name: str, prompt: str | list[str], db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", **kwargs: JSONValue) -> JSONDict | list[JSONDict]:
     """Run an agentic self-correction loop using the MaxText backend.
 
     Args:
@@ -64,7 +68,7 @@ def run_agentic_loop(model_name: str, prompt: str | list[str], db_path: str = ":
 
     prompts = prompt if isinstance(prompt, list) else [prompt]
 
-    async def _run_all() -> list[dict[str, object]]:
+    async def _run_all() -> list[JSONDict]:
         tasks = [_process_single_prompt(model_name, p, engine, max_retries, min_confidence) for p in prompts]
         return await asyncio.gather(*tasks)
 

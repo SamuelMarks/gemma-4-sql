@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from fastapi import Request  # pragma: no cover
 
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -24,7 +26,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     uvicorn = None
 
 
-def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: object) -> dict[str, object]:
+def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
     """Serve a model using JAX continuous batching.
 
     Args:

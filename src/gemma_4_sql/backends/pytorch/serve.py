@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +26,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     uvicorn = None
 
 
-def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: object) -> dict[str, object]:
+def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
     """Serve a model using vLLM for continuous batching.
 
     Args:

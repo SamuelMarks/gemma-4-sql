@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 import math
-import typing
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -19,20 +18,22 @@ from .rope import RoPE, apply_rope
 if TYPE_CHECKING:
     from jaxtyping import Array  # pragma: no cover
 
+    from gemma_4_sql.type_hints import JSONValue
+
 _linear_sig = inspect.signature(nnx.Linear.__init__)
 _LINEAR_SUPPORTS_METADATA = "kernel_metadata" in _linear_sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in _linear_sig.parameters.values())
 _embed_sig = inspect.signature(nnx.Embed.__init__)
 _EMBED_SUPPORTS_METADATA = "embedding_metadata" in _embed_sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in _embed_sig.parameters.values())
 
 
-def _make_linear(*args: object, **kwargs: object) -> object:
+def _make_linear(*args: object, **kwargs: JSONValue) -> object:
     """Docstring for _make_linear."""
     kwargs.pop("kernel_metadata", None)
     kwargs.pop("bias_metadata", None)
     return nnx.Linear(*args, **kwargs)
 
 
-def _make_embed(*args: object, **kwargs: object) -> object:
+def _make_embed(*args: object, **kwargs: JSONValue) -> object:
     """Docstring for _make_embed."""
     kwargs.pop("embedding_metadata", None)
     return nnx.Embed(*args, **kwargs)
@@ -53,7 +54,7 @@ class Gemma4RMSNorm(nnx.Module):  # type: ignore[misc]
 
     """
 
-    def __init__(self: typing.Any, dim: int, eps: float = 1e-06, *, with_scale: bool = True, dtype: jnp.dtype = jnp.float32, _shd: PartitionSpec | None = None, rngs: nnx.Rngs) -> None:
+    def __init__(self, dim: int, eps: float = 1e-06, *, with_scale: bool = True, dtype: jnp.dtype = jnp.float32, _shd: PartitionSpec | None = None, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.eps = eps
         self.with_scale = with_scale
@@ -64,7 +65,7 @@ class Gemma4RMSNorm(nnx.Module):  # type: ignore[misc]
             self.scale = None
 
     @jax.named_scope("gemma4_rms_norm")  # type: ignore[misc]
-    def __call__(self: typing.Any, x: Array) -> Array:
+    def __call__(self, x: Array) -> Array:
         """Apply RMS normalization."""
         xf32 = x.astype(jnp.float32)
         normed = xf32 * jax.lax.rsqrt(jnp.square(xf32).mean(-1, keepdims=True) + self.eps)
@@ -119,7 +120,7 @@ class VisionConfig:
 class SiglipVisionEmbeddings(nnx.Module):  # type: ignore[misc]
     """Embeddings for the SigLIP vision model."""
 
-    def __init__(self: typing.Any, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         self.num_patches = (config.image_size // config.patch_size) ** 2
@@ -130,7 +131,7 @@ class SiglipVisionEmbeddings(nnx.Module):  # type: ignore[misc]
         self.position_embedding = _make_embed(self.num_patches, config.hidden_size, embedding_metadata={}, rngs=rngs)
         self.position_ids = jnp.expand_dims(jnp.arange(self.num_patches), 0)
 
-    def __call__(self: typing.Any, pixel_values: Array) -> Array:
+    def __call__(self, pixel_values: Array) -> Array:
         """Apply patch and position embeddings to pixel values."""
         patch_embeds = self.patch_embedding(pixel_values)
         (b, h, w, c) = patch_embeds.shape
@@ -141,7 +142,7 @@ class SiglipVisionEmbeddings(nnx.Module):  # type: ignore[misc]
 class SiglipAttention(nnx.Module):  # type: ignore[misc]
     """Attention block for SigLIP."""
 
-    def __init__(self: typing.Any, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         self.num_heads = config.num_attention_heads
@@ -154,7 +155,7 @@ class SiglipAttention(nnx.Module):  # type: ignore[misc]
         self.v_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
         self.proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
 
-    def __call__(self: typing.Any, x: Array) -> Array:
+    def __call__(self, x: Array) -> Array:
         """Apply multi-head attention."""
         (b, t, _) = x.shape
         q = self.q_proj(x).reshape((b, t, self.num_heads, self.head_dim))
@@ -177,13 +178,13 @@ class SiglipMLP(nnx.Module):  # type: ignore[misc]
     `gelu_pytorch_tanh` activation used in the HuggingFace reference.
     """
 
-    def __init__(self: typing.Any, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         self.fc1 = _make_linear(config.hidden_size, config.intermediate_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.fc2 = _make_linear(config.intermediate_size, config.hidden_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
 
-    def __call__(self: typing.Any, x: Array) -> Array:
+    def __call__(self, x: Array) -> Array:
         """Apply the MLP with tanh-approximate GELU activation."""
         x = self.fc1(x)
         x = jax.nn.gelu(x, approximate=True)
@@ -196,7 +197,7 @@ class SiglipEncoderLayer(nnx.Module):  # type: ignore[misc]
     Uses Gemma4RMSNorm (matching the HuggingFace reference) rather than LayerNorm.
     """
 
-    def __init__(self: typing.Any, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         shd = config.shd_cfg.layer_norm
@@ -205,7 +206,7 @@ class SiglipEncoderLayer(nnx.Module):  # type: ignore[misc]
         self.self_attn = SiglipAttention(config, rngs=rngs)
         self.mlp = SiglipMLP(config, rngs=rngs)
 
-    def __call__(self: typing.Any, x: Array) -> Array:
+    def __call__(self, x: Array) -> Array:
         """Process the encoder layer."""
         hidden = self.layer_norm1(x)
         hidden = self.self_attn(hidden)
@@ -235,7 +236,7 @@ class StatVar(nnx.Variable):  # type: ignore[misc]
 class Gemma4ClippableLinear(nnx.Module):  # type: ignore[misc]
     """Linear layer with optional input/output clipping."""
 
-    def __init__(self: typing.Any, in_features: int, features: int, *, use_clipped_linears: bool = True, rngs: nnx.Rngs) -> None:
+    def __init__(self, in_features: int, features: int, *, use_clipped_linears: bool = True, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.use_clipped_linears = use_clipped_linears
         self.linear = nnx.Linear(in_features, features, use_bias=False, rngs=rngs)
@@ -245,7 +246,7 @@ class Gemma4ClippableLinear(nnx.Module):  # type: ignore[misc]
             self.output_min = StatVar(jnp.array(-jnp.inf))
             self.output_max = StatVar(jnp.array(jnp.inf))
 
-    def __call__(self: typing.Any, x: jax.Array) -> jax.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         """Apply a linear transformation, conditionally clipping the output."""
         if self.use_clipped_linears:
             x = jnp.clip(x, self.input_min[...], self.input_max[...])
@@ -258,7 +259,7 @@ class Gemma4ClippableLinear(nnx.Module):  # type: ignore[misc]
 class Gemma4AudioRelPositionalEncoding(nnx.Module):  # type: ignore[misc]
     """Sinusoidal relative positional encoding for the audio encoder."""
 
-    def __init__(self: typing.Any, config: AudioConfig) -> None:
+    def __init__(self, config: AudioConfig) -> None:
         """Docstring for __init__."""
         self.hidden_size = config.hidden_size
         self.context_size = config.attention_chunk_size + config.attention_context_left - 1 + config.attention_context_right
@@ -269,7 +270,7 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):  # type: ignore[misc]
         inv_timescales = min_timescale * jnp.exp(jnp.arange(num_timescales) * -log_timescale_increment)
         self.inv_timescales = ConstVar(inv_timescales[None, None, :])
 
-    def __call__(self: typing.Any, x: jax.Array) -> jax.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         """Apply relative positional encoding."""
         position_ids = jnp.arange(self.context_size // 2, -1, -1, dtype=x.dtype)
         position_ids = position_ids[..., None]
@@ -281,7 +282,7 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):  # type: ignore[misc]
 class Gemma4AudioAttention(nnx.Module):  # type: ignore[misc]
     """Chunked local attention with relative position bias for audio."""
 
-    def __init__(self: typing.Any, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         self.num_heads = config.num_attention_heads
@@ -302,7 +303,7 @@ class Gemma4AudioAttention(nnx.Module):  # type: ignore[misc]
         self.relative_k_proj = nnx.Linear(hs, self.num_heads * self.head_dim, use_bias=False, rngs=rngs)
         self.per_dim_scale = nnx.Param(jnp.zeros(self.head_dim))
 
-    def _convert_to_block(self: typing.Any, x: jax.Array) -> jax.Array:
+    def _convert_to_block(self, x: jax.Array) -> jax.Array:
         """Reshapes the input into chunks/blocks for block-wise attention."""
         (batch_size, seq_len, num_heads, head_dim) = x.shape
         num_blocks = (seq_len + self.chunk_size - 1) // self.chunk_size
@@ -310,7 +311,7 @@ class Gemma4AudioAttention(nnx.Module):  # type: ignore[misc]
         x = jnp.pad(x, ((0, 0), (0, pad_len), (0, 0), (0, 0)))
         return x.reshape(batch_size, num_blocks, self.chunk_size, num_heads, head_dim)
 
-    def _extract_block_context(self: typing.Any, x: jax.Array) -> jax.Array:
+    def _extract_block_context(self, x: jax.Array) -> jax.Array:
         """Extract the left context block for block-wise attention."""
         (batch_size, seq_len, num_heads, head_dim) = x.shape
         x = jnp.pad(x, ((0, 0), (self.max_past_horizon, self.max_future_horizon + self.chunk_size - 1), (0, 0), (0, 0)))
@@ -321,7 +322,7 @@ class Gemma4AudioAttention(nnx.Module):  # type: ignore[misc]
             blocks.append(jax.lax.dynamic_slice(x, (0, start, 0, 0), (batch_size, self.context_size, num_heads, head_dim)))
         return jnp.stack(blocks, axis=1)
 
-    def _rel_shift(self: typing.Any, x: jax.Array) -> jax.Array:
+    def _rel_shift(self, x: jax.Array) -> jax.Array:
         """Perform relative shift on attention scores."""
         (batch_size, num_heads, num_blocks, block_size, position_length) = x.shape
         x = jnp.pad(x, ((0, 0), (0, 0), (0, 0), (0, 0), (0, self.context_size + 1 - position_length)))
@@ -329,7 +330,7 @@ class Gemma4AudioAttention(nnx.Module):  # type: ignore[misc]
         x = x[..., : block_size * self.context_size]
         return x.reshape((batch_size, num_heads, num_blocks, block_size, self.context_size))
 
-    def __call__(self: typing.Any, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None) -> jax.Array:
+    def __call__(self, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None) -> jax.Array:
         """Compute the multi-head attention for audio inputs."""
         (batch_size, seq_len, _) = x.shape
         q = self.q_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
@@ -367,12 +368,12 @@ class Gemma4AudioAttention(nnx.Module):  # type: ignore[misc]
 class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):  # type: ignore[misc]
     """A single convolutional projection layer for audio subsampling."""
 
-    def __init__(self: typing.Any, in_channels: int, channels: int, norm_eps: float, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, in_channels: int, channels: int, norm_eps: float, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.conv = nnx.Conv(in_channels, channels, kernel_size=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)), use_bias=False, rngs=rngs)
         self.norm = nnx.LayerNorm(channels, epsilon=norm_eps, use_bias=False, rngs=rngs)
 
-    def __call__(self: typing.Any, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
+    def __call__(self, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
         """Apply the subsample convolution projection layer."""
         if mask is not None:
             x = x * mask[:, None, :, None]
@@ -389,7 +390,7 @@ class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):  # type: ignore[misc]
 class Gemma4AudioSubSampleConvProjection(nnx.Module):  # type: ignore[misc]
     """Full convolutional projection module for audio subsampling."""
 
-    def __init__(self: typing.Any, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         (c0, c1) = config.subsampling_conv_channels
         self.layer0 = Gemma4AudioSubSampleConvProjectionLayer(1, c0, config.rms_norm_eps, rngs=rngs)
@@ -397,7 +398,7 @@ class Gemma4AudioSubSampleConvProjection(nnx.Module):  # type: ignore[misc]
         proj_input_dim = c0 // 4 * c1
         self.input_proj_linear = nnx.Linear(proj_input_dim, config.hidden_size, use_bias=False, rngs=rngs)
 
-    def __call__(self: typing.Any, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
+    def __call__(self, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
         """Apply the full subsample convolution projection."""
         x = jnp.expand_dims(x, 1)
         (x, mask) = self.layer0(x, mask)
@@ -410,7 +411,7 @@ class Gemma4AudioSubSampleConvProjection(nnx.Module):  # type: ignore[misc]
 class Gemma4AudioFeedForward(nnx.Module):  # type: ignore[misc]
     """Feed forward network used in the audio tower."""
 
-    def __init__(self: typing.Any, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.ffw_layer_1 = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 4, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
         self.ffw_layer_2 = Gemma4ClippableLinear(config.hidden_size * 4, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
@@ -419,7 +420,7 @@ class Gemma4AudioFeedForward(nnx.Module):  # type: ignore[misc]
         self.gradient_clipping = config.gradient_clipping
         self.post_layer_scale = config.residual_weight
 
-    def __call__(self: typing.Any, x: jax.Array) -> jax.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         """Apply the feed forward network."""
         residual = x
         x = jnp.clip(x, -self.gradient_clipping, self.gradient_clipping)
@@ -436,13 +437,13 @@ class Gemma4AudioFeedForward(nnx.Module):  # type: ignore[misc]
 class Gemma4AudioCausalConv1d(nnx.Module):  # type: ignore[misc]
     """Causal 1D convolution layer for audio processing."""
 
-    def __init__(self: typing.Any, in_channels: int, channels: int, kernel_size: int, groups: int, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, in_channels: int, channels: int, kernel_size: int, groups: int, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.kernel_size = kernel_size
         self.left_pad = kernel_size - 1
         self.conv = nnx.Conv(in_channels, channels, kernel_size=kernel_size, feature_group_count=groups, use_bias=False, padding=0, rngs=rngs)
 
-    def __call__(self: typing.Any, x: jax.Array) -> jax.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         """Apply causal 1D convolution."""
         x = jnp.pad(x, ((0, 0), (self.left_pad, 0), (0, 0)))
         return self.conv(x)
@@ -451,7 +452,7 @@ class Gemma4AudioCausalConv1d(nnx.Module):  # type: ignore[misc]
 class Gemma4AudioLightConv1d(nnx.Module):  # type: ignore[misc]
     """Lightweight 1D convolution module for audio."""
 
-    def __init__(self: typing.Any, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.linear_start = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 2, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
         self.linear_end = Gemma4ClippableLinear(config.hidden_size, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
@@ -460,7 +461,7 @@ class Gemma4AudioLightConv1d(nnx.Module):  # type: ignore[misc]
         self.conv_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
         self.gradient_clipping = config.gradient_clipping
 
-    def __call__(self: typing.Any, x: jax.Array) -> jax.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         """Apply lightweight 1D convolution."""
         residual = x
         x = self.pre_layer_norm(x)
@@ -478,7 +479,7 @@ class Gemma4AudioLightConv1d(nnx.Module):  # type: ignore[misc]
 class Gemma4AudioLayer(nnx.Module):  # type: ignore[misc]
     """A single layer of the audio transformer model."""
 
-    def __init__(self: typing.Any, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.feed_forward1 = Gemma4AudioFeedForward(config, rngs=rngs)
         self.feed_forward2 = Gemma4AudioFeedForward(config, rngs=rngs)
@@ -489,7 +490,7 @@ class Gemma4AudioLayer(nnx.Module):  # type: ignore[misc]
         self.norm_out = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
         self.gradient_clipping = config.gradient_clipping
 
-    def __call__(self: typing.Any, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None) -> jax.Array:
+    def __call__(self, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None) -> jax.Array:
         """Apply a single audio transformer layer."""
         x = self.feed_forward1(x)
         residual = x
@@ -508,7 +509,7 @@ class Gemma4AudioLayer(nnx.Module):  # type: ignore[misc]
 class Gemma4AudioModel(nnx.Module):  # type: ignore[misc]
     """An audio encoder based on the Universal Speech Model architecture."""
 
-    def __init__(self: typing.Any, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         self.subsample_conv_projection = Gemma4AudioSubSampleConvProjection(config, rngs=rngs)
@@ -516,7 +517,7 @@ class Gemma4AudioModel(nnx.Module):  # type: ignore[misc]
         self.layers = nnx.List([Gemma4AudioLayer(config, rngs=rngs) for _ in range(config.num_hidden_layers)])
         self.output_proj = nnx.Linear(config.hidden_size, config.output_proj_dims, rngs=rngs)
 
-    def _convert_4d_mask_to_blocked_5d(self: typing.Any, mask_4d: jax.Array) -> jax.Array:
+    def _convert_4d_mask_to_blocked_5d(self, mask_4d: jax.Array) -> jax.Array:
         """Convert a 4D attention mask to a 5D blocked format."""
         (batch_size, _, seq_len, _) = mask_4d.shape
         chunk_size = self.config.attention_chunk_size
@@ -534,7 +535,7 @@ class Gemma4AudioModel(nnx.Module):  # type: ignore[misc]
         kv_indices = jnp.broadcast_to(kv_indices[None, None, :, None, :], (batch_size, 1, num_blocks, chunk_size, chunk_size + max_past_horizon + max_future_horizon))
         return jnp.take_along_axis(mask_5d, kv_indices, axis=-1)
 
-    def __call__(self: typing.Any, input_features: jax.Array, attention_mask: jax.Array | None = None) -> jax.Array:
+    def __call__(self, input_features: jax.Array, attention_mask: jax.Array | None = None) -> jax.Array:
         """Forward pass for the Gemma 4 Audio model."""
         (x, mask) = self.subsample_conv_projection(input_features, attention_mask)
         pos_emb = self.rel_pos_enc(x)
@@ -551,12 +552,12 @@ class Gemma4AudioModel(nnx.Module):  # type: ignore[misc]
 class Gemma4MultimodalEmbedder(nnx.Module):  # type: ignore[misc]
     """Embeds multimodal soft tokens (e.g., from audio) into language model space."""
 
-    def __init__(self: typing.Any, multimodal_hidden_size: int, text_hidden_size: int, eps: float, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, multimodal_hidden_size: int, text_hidden_size: int, eps: float, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.embedding_projection = nnx.Linear(multimodal_hidden_size, text_hidden_size, use_bias=False, rngs=rngs)
         self.embedding_pre_projection_norm = Gemma4RMSNorm(multimodal_hidden_size, eps=eps, with_scale=False, rngs=rngs)
 
-    def __call__(self: typing.Any, inputs_embeds: jax.Array) -> jax.Array:
+    def __call__(self, inputs_embeds: jax.Array) -> jax.Array:
         """Embeds multimodal inputs."""
         embs_normed = self.embedding_pre_projection_norm(inputs_embeds)
         return self.embedding_projection(embs_normed)
@@ -569,7 +570,7 @@ class SiglipVisionTransformer(nnx.Module):  # type: ignore[misc]
     than LayerNorm.
     """
 
-    def __init__(self: typing.Any, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         self.embeddings = SiglipVisionEmbeddings(config, rngs=rngs)
@@ -577,7 +578,7 @@ class SiglipVisionTransformer(nnx.Module):  # type: ignore[misc]
         shd = config.shd_cfg.layer_norm
         self.post_layernorm = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, _shd=shd, rngs=rngs)  # type: ignore[call-arg]
 
-    def __call__(self: typing.Any, pixel_values: Array) -> Array:
+    def __call__(self, pixel_values: Array) -> Array:
         """Apply the vision transformer to pixel values."""
         x = self.embeddings(pixel_values)
         for layer in self.layers:
@@ -602,7 +603,7 @@ class Gemma4MultiModalProjector(nnx.Module):  # type: ignore[misc]
 
     """
 
-    def __init__(self: typing.Any, text_config: ModelConfig, vision_config: VisionConfig, mm_tokens_per_image: int, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, text_config: ModelConfig, vision_config: VisionConfig, mm_tokens_per_image: int, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         _ = mm_tokens_per_image
         self.text_config = text_config
@@ -615,7 +616,7 @@ class Gemma4MultiModalProjector(nnx.Module):  # type: ignore[misc]
         self.mm_input_projection_weight = nnx.Param(jnp.zeros((vhs, ths)), rngs=rngs)
         self.mm_soft_emb_norm = Gemma4RMSNorm(vhs, eps=vision_config.layer_norm_eps, dtype=text_config.dtype, rngs=rngs)
 
-    def _avg_pool_by_positions(self: typing.Any, x: Array) -> Array:
+    def _avg_pool_by_positions(self, x: Array) -> Array:
         """Pools patch tokens into a fixed grid using position-based averaging.
 
         Each patch is assigned to a kernel bin via floor(position / kernel_size).
@@ -642,7 +643,7 @@ class Gemma4MultiModalProjector(nnx.Module):  # type: ignore[misc]
         weights = jax.nn.one_hot(kernel_idxs, length, dtype=jnp.float32) / k_sq
         return jnp.matmul(weights.T[None], x.astype(jnp.float32))
 
-    def __call__(self: typing.Any, vision_outputs: Array) -> Array:
+    def __call__(self, vision_outputs: Array) -> Array:
         """Projects and pools the vision outputs.
 
         Args:
@@ -757,7 +758,7 @@ class LayerCache(nnx.Module):  # type: ignore[misc]
 
     """
 
-    def __init__(self: typing.Any, batch_size: int, max_seq_len: int, num_kv_heads: int, head_dim: int, dtype: jnp.dtype, _shd: PartitionSpec | None = None) -> None:
+    def __init__(self, batch_size: int, max_seq_len: int, num_kv_heads: int, head_dim: int, dtype: jnp.dtype, _shd: PartitionSpec | None = None) -> None:
         """Docstring for __init__."""
         cache_shape = (batch_size, max_seq_len, num_kv_heads, head_dim)
         self.k_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))
@@ -887,7 +888,7 @@ class ModelConfig:
     audio_token_id: int | None = None
 
     @classmethod
-    def gemma4_base(cls: typing.Any, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
+    def gemma4_base(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
         """Preset configuration for a base Gemma 4 model."""
         kwargs = {}
         if use_fsdp or use_tp:
@@ -895,7 +896,7 @@ class ModelConfig:
         return cls(**kwargs)
 
     @classmethod
-    def gemma4_e2b(cls: typing.Any, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
+    def gemma4_e2b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
         """Preset configuration for Gemma 4 E2B."""
         kwargs = {}
         if use_fsdp or use_tp:
@@ -903,7 +904,7 @@ class ModelConfig:
         return cls(num_hidden_layers=35, hidden_size=1024, intermediate_size=4096, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
 
     @classmethod
-    def gemma4_e4b(cls: typing.Any, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
+    def gemma4_e4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
         """Preset configuration for Gemma 4 E4B."""
         kwargs = {}
         if use_fsdp or use_tp:
@@ -911,7 +912,7 @@ class ModelConfig:
         return cls(num_hidden_layers=42, hidden_size=2560, intermediate_size=10240, num_attention_heads=10, num_key_value_heads=1, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
 
     @classmethod
-    def gemma4_26b_a4b(cls: typing.Any, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
+    def gemma4_26b_a4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
         """Preset configuration for Gemma 4 26B A4B (MoE)."""
         kwargs = {}
         if use_fsdp or use_tp:
@@ -919,7 +920,7 @@ class ModelConfig:
         return cls(num_hidden_layers=30, hidden_size=2816, intermediate_size=2112, moe_intermediate_size=704, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=128, num_experts_per_tok=2, vocab_size=262144, **kwargs)
 
     @classmethod
-    def gemma4_31b(cls: typing.Any, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
+    def gemma4_31b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
         """Preset configuration for Gemma 4 31B."""
         kwargs = {}
         if use_fsdp or use_tp:
@@ -930,7 +931,7 @@ class ModelConfig:
 class Gemma4MLP(nnx.Module):  # type: ignore[misc]
     """Standard SwiGLU MLP used for both shared and routed experts."""
 
-    def __init__(self: typing.Any, hidden_size: int, intermediate_size: int, *, dtype: jnp.dtype, shd: ShardConfig | None = None, rngs: nnx.Rngs) -> None:
+    def __init__(self, hidden_size: int, intermediate_size: int, *, dtype: jnp.dtype, shd: ShardConfig | None = None, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         if shd is None:
             shd = ShardConfig.no_sharding()  # type: ignore[assignment]
@@ -940,7 +941,7 @@ class Gemma4MLP(nnx.Module):  # type: ignore[misc]
         self.dtype = dtype
 
     @jax.named_scope("gemma4_mlp")  # type: ignore[misc]
-    def __call__(self: typing.Any, x: Array) -> Array:
+    def __call__(self, x: Array) -> Array:
         """Apply SwiGLU MLP transformation."""
         gate = self.gate_proj(x)
         up = self.up_proj(x)
@@ -952,7 +953,7 @@ class Gemma4MLP(nnx.Module):  # type: ignore[misc]
 class Gemma4RoutedExperts(nnx.Module):  # type: ignore[misc]
     """Monolithic MoE expert module vectorizing all routed experts."""
 
-    def __init__(self: typing.Any, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         e = config.num_experts
@@ -966,7 +967,7 @@ class Gemma4RoutedExperts(nnx.Module):  # type: ignore[misc]
         self.up_proj_kernel = nnx.Param(ki1(rngs.params(), (e, h, i_dim)))
         self.down_proj_kernel = nnx.Param(ki2(rngs.params(), (e, i_dim, h)))
 
-    def __call__(self: typing.Any, x: Array, topk_indices: Array, topk_weights: Array) -> Array:
+    def __call__(self, x: Array, topk_indices: Array, topk_weights: Array) -> Array:
         """Apply the selected experts efficiently.
 
         Args:
@@ -1018,7 +1019,7 @@ class Gemma4MoE(nnx.Module):  # type: ignore[misc]
 
     """
 
-    def __init__(self: typing.Any, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         self.dtype = config.dtype
@@ -1036,7 +1037,7 @@ class Gemma4MoE(nnx.Module):  # type: ignore[misc]
         self.post_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
 
     @jax.named_scope("gemma4_moe")  # type: ignore[misc]
-    def __call__(self: typing.Any, x: Array, original_x: Array) -> Array:
+    def __call__(self, x: Array, original_x: Array) -> Array:
         """Apply Mixture of Experts with shared and routed execution paths."""
         shared_out = self.shared_experts(x)
         shared_out = self.post_feedforward_layernorm_1(shared_out)
@@ -1063,7 +1064,7 @@ class Gemma4Attention(nnx.Module):  # type: ignore[misc]
     Incorporates Q/K/V normalization and RoPE.
     """
 
-    def __init__(self: typing.Any, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         self.attention_type = attention_type
@@ -1098,7 +1099,7 @@ class Gemma4Attention(nnx.Module):  # type: ignore[misc]
         self.rope = RoPE(rope_type="default", head_dim=self.head_dim, rope_theta=rope_theta, factor=rope_factor)
 
     @jax.named_scope("gemma4_attention")  # type: ignore[misc]
-    def __call__(self: typing.Any, x: Array, positions: Array, cache: LayerCache | None = None, attention_mask: Array | None = None) -> Array:
+    def __call__(self, x: Array, positions: Array, cache: LayerCache | None = None, attention_mask: Array | None = None) -> Array:
         """Apply attention over the input sequences.
 
         Args:
@@ -1168,7 +1169,7 @@ class Gemma4Attention(nnx.Module):  # type: ignore[misc]
 class Gemma4DecoderLayer(nnx.Module):  # type: ignore[misc]
     """A single decoder layer combining Attention, MoE, and Normalization."""
 
-    def __init__(self: typing.Any, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         shd = config.shd_cfg
@@ -1188,7 +1189,7 @@ class Gemma4DecoderLayer(nnx.Module):  # type: ignore[misc]
         self.layer_scalar = nnx.Param(jnp.ones(1, dtype=config.weight_dtype))
 
     @jax.named_scope("gemma4_decoder_layer")  # type: ignore[misc]
-    def __call__(self: typing.Any, x: Array, positions: Array, cache: LayerCache | None = None, attention_mask: Array | None = None, per_layer_input: Array | None = None) -> Array:
+    def __call__(self, x: Array, positions: Array, cache: LayerCache | None = None, attention_mask: Array | None = None, per_layer_input: Array | None = None) -> Array:
         """Process a single layer of attention and MLP/MoE.
 
         Args:
@@ -1227,7 +1228,7 @@ class Gemma4DecoderLayer(nnx.Module):  # type: ignore[misc]
 class Gemma4Model(nnx.Module):  # type: ignore[misc]
     """The base Gemma 4 trunk consisting of embeddings and a stack of decoder layers."""
 
-    def __init__(self: typing.Any, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         shd = config.shd_cfg
@@ -1244,13 +1245,13 @@ class Gemma4Model(nnx.Module):  # type: ignore[misc]
         self.layers = nnx.List([Gemma4DecoderLayer(config, GEMMA4_ATTENTION_PATTERN[i % len(GEMMA4_ATTENTION_PATTERN)], rngs=rngs) for i in range(config.num_hidden_layers)])
         self.norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)  # type: ignore[call-arg]
 
-    def get_per_layer_inputs(self: typing.Any, input_ids: Array) -> Array:
+    def get_per_layer_inputs(self, input_ids: Array) -> Array:
         """Compute the token-identity component of Per-Layer Embeddings (PLE)."""
         ple = self.embed_tokens_per_layer(input_ids) * self.config.hidden_size_per_layer_input**0.5
         (batch_size, seq_len, _) = ple.shape
         return ple.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
 
-    def project_per_layer_inputs(self: typing.Any, inputs_embeds: Array, per_layer_inputs: Array | None = None) -> Array:
+    def project_per_layer_inputs(self, inputs_embeds: Array, per_layer_inputs: Array | None = None) -> Array:
         """Projects `inputs_embeds` and combines with token-identity `per_layer_inputs`."""
         (batch_size, seq_len, _) = inputs_embeds.shape
         proj = self.per_layer_model_projection(inputs_embeds) * self.per_layer_model_projection_scale
@@ -1261,7 +1262,7 @@ class Gemma4Model(nnx.Module):  # type: ignore[misc]
         return proj
 
     @jax.named_scope("gemma4_model")  # type: ignore[misc]
-    def __call__(self: typing.Any, input_ids: Array, positions: Array, cache: Cache | None = None, attention_mask: Array | None = None, per_layer_inputs: Array | None = None) -> Array:
+    def __call__(self, input_ids: Array, positions: Array, cache: Cache | None = None, attention_mask: Array | None = None, per_layer_inputs: Array | None = None) -> Array:
         """Apply embeddings and runs the forward pass through all decoder layers.
 
         Args:
@@ -1293,7 +1294,7 @@ class Gemma4ForCausalLM(nnx.Module):  # type: ignore[misc]
     """Gemma 4 model with a language modeling head."""
 
     @classmethod
-    def from_pretrained(cls: typing.Any, model_name: str, config: ModelConfig | None = None) -> object:
+    def from_pretrained(cls, model_name: str, config: ModelConfig | None = None) -> object:
         """model_name the *model id* of a pretrained model hosted inside a model repo on huggingface.co.
 
         For example, "google/gemma-4-E2B-it".
@@ -1321,7 +1322,7 @@ class Gemma4ForCausalLM(nnx.Module):  # type: ignore[misc]
         model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
         return params.create_gemma4_from_pretrained(model_ckpt_path, config)
 
-    def __init__(self: typing.Any, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
         self.model = Gemma4Model(config, rngs=rngs)
@@ -1336,7 +1337,7 @@ class Gemma4ForCausalLM(nnx.Module):  # type: ignore[misc]
             self.embed_audio = None
 
     @jax.named_scope("gemma4_causal_lm")  # type: ignore[misc]
-    def __call__(self: typing.Any, input_ids: Array, positions: Array, cache: Cache | None = None, attention_mask: Array | None = None, pixel_values: Array | None = None, **kwargs: object) -> Array:
+    def __call__(self, input_ids: Array, positions: Array, cache: Cache | None = None, attention_mask: Array | None = None, pixel_values: Array | None = None, **kwargs: JSONValue) -> Array:
         """Compute logits for the given sequence, optionally applying soft-capping.
 
         Args:
@@ -1393,7 +1394,7 @@ class Gemma4ForCausalLM(nnx.Module):  # type: ignore[misc]
 
 
 @nnx.jit  # type: ignore[misc]
-def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array, pixel_values: Array | None = None, **kwargs: object) -> tuple[Array, Cache]:
+def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array, pixel_values: Array | None = None, **kwargs: JSONValue) -> tuple[Array, Cache]:
     """Execute a standard forward pass returning logits and updated cache."""
     image_token_mask = kwargs.get("image_token_mask")
     input_features = kwargs.get("input_features")

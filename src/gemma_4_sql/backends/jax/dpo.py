@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from gemma_4_sql.backends.jax.etl import build_dataloader
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
 
 try:
     import jax
@@ -51,7 +56,7 @@ def dpo_loss(policy_chosen_logps: object, policy_rejected_logps: object, ref_cho
     return (jnp.mean(loss), jnp.mean(chosen_rewards), jnp.mean(rejected_rewards))
 
 
-def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, learning_rate: float = 1e-5) -> dict[str, object]:
+def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, learning_rate: float = 1e-5) -> JSONDict:
     """Run a DPO training loop for JAX.
 
     Args:
@@ -81,7 +86,7 @@ def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, l
                 logits = model(inputs)  # type: ignore[operator]
                 return jnp.sum(logits * labels, axis=-1)
 
-            def dpo_step_loss(policy_model: object, ref_model: object, batch: dict[str, object]) -> object:
+            def dpo_step_loss(policy_model: object, ref_model: object, batch: JSONDict) -> object:
                 """Compute DPO loss for a step."""
                 pi_ch_logps = compute_logps(policy_model, batch["chosen_inputs"], batch["chosen_labels"])
                 pi_re_logps = compute_logps(policy_model, batch["rejected_inputs"], batch["rejected_labels"])
@@ -91,7 +96,7 @@ def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, l
                 return loss
 
             @nnx.jit  # type: ignore[misc]
-            def train_step(policy_model: object, ref_model: object, optimizer: nnx.Optimizer, batch: dict[str, object]) -> object:
+            def train_step(policy_model: object, ref_model: object, optimizer: nnx.Optimizer, batch: JSONDict) -> object:
                 """Execute a single JAX-compiled DPO training step."""
                 loss, grads = nnx.value_and_grad(dpo_step_loss)(policy_model, ref_model, batch)
                 optimizer.update(grads)

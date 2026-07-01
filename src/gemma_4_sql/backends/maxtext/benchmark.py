@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +24,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     Gemma4Model = None  # pragma: no cover
 
 
-def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: object) -> dict[str, object]:
+def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: JSONValue) -> JSONDict:
     """Benchmark a model using the MaxText backend.
 
     Args:

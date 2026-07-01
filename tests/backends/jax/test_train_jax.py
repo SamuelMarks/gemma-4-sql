@@ -1,7 +1,5 @@
 """Tests for JAX training pipeline."""
 
-import typing
-
 import pytest
 
 import gemma_4_sql.backends.jax.train as tr
@@ -11,7 +9,7 @@ from gemma_4_sql.backends.jax.train import train_model
 class MockJnpTensor:
     """Initialize class MockJnpTensor."""
 
-    def __init__(self: typing.Any, shape: object) -> None:
+    def __init__(self, shape: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -21,7 +19,7 @@ class MockJnpTensor:
         """
         self.shape = shape
 
-    def item(self: typing.Any) -> object:
+    def item(self) -> object:
         """Initialize function item."""
         return 0.35
 
@@ -164,7 +162,7 @@ class MockOptax:
         class MockOpt:
             """Initialize class MockOpt."""
 
-            def init(self: typing.Any, _params: object) -> object:
+            def init(self, _params: object) -> object:
                 """Initialize function init.
 
                 Args:
@@ -174,7 +172,7 @@ class MockOptax:
                 """
                 return "opt_state"
 
-            def update(self: typing.Any, _grads: object, _opt_state: object, _params: object) -> object:
+            def update(self, _grads: object, _opt_state: object, _params: object) -> object:
                 """Initialize function update.
 
                 Args:
@@ -225,7 +223,7 @@ class MockGemma4Config:
 class MockGemma4ForCausalLM:
     """Initialize class MockGemma4ForCausalLM."""
 
-    def __init__(self: typing.Any, config: object, **_kwargs: object) -> None:
+    def __init__(self, config: object, **_kwargs: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -236,7 +234,7 @@ class MockGemma4ForCausalLM:
         """
         self.config = config
 
-    def __call__(self: typing.Any, inputs: object) -> object:
+    def __call__(self, inputs: object) -> object:
         """Initialize function __call__.
 
         Args:
@@ -250,7 +248,7 @@ class MockGemma4ForCausalLM:
 class MockNNXOptimizer:
     """Initialize class MockNNXOptimizer."""
 
-    def __init__(self: typing.Any, model: object, optax_optimizer: object) -> None:
+    def __init__(self, model: object, optax_optimizer: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -262,7 +260,7 @@ class MockNNXOptimizer:
         self.model = model
         self.optax_optimizer = optax_optimizer
 
-    def update(self: typing.Any, grads: object) -> object:
+    def update(self, grads: object) -> object:
         """Initialize function update.
 
         Args:
@@ -278,7 +276,7 @@ class MockNNX:
     class Rngs:
         """Initialize class Rngs."""
 
-        def __init__(self: typing.Any, seed: object) -> None:
+        def __init__(self, seed: object) -> None:
             """Initialize function __init__.
 
             Args:

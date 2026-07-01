@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def apply_peft(model_name: str, target_modules: list[str] | None = None, lora_r: int = 8, lora_alpha: int = 16, lora_dropout: float = 0.05, **kwargs: object) -> dict[str, object]:
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
+
+def apply_peft(model_name: str, target_modules: list[str] | None = None, lora_r: int = 8, lora_alpha: int = 16, lora_dropout: float = 0.05, **kwargs: JSONValue) -> JSONDict:
     """Apply Parameter-Efficient Fine-Tuning (PEFT / LoRA) to a model.
 
     Args:

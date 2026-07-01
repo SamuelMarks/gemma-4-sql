@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.keras.etl import build_dataloader
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +47,7 @@ def dpo_loss(policy_chosen_logps: object, policy_rejected_logps: object, ref_cho
     return (tf.reduce_mean(loss), tf.reduce_mean(chosen_rewards), tf.reduce_mean(rejected_rewards))
 
 
-def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, learning_rate: float = 1e-5) -> dict[str, object]:
+def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, learning_rate: float = 1e-5) -> JSONDict:
     """Run DPO training loop for Keras.
 
     Args:
@@ -73,7 +77,7 @@ def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, l
             optimizer = keras.optimizers.AdamW(learning_rate=learning_rate)
 
             @tf.function  # type: ignore[misc]
-            def train_step(batch: dict[str, object]) -> object:
+            def train_step(batch: JSONDict) -> object:
                 with tf.GradientTape() as tape:
                     pi_ch = policy_model(batch["chosen_inputs"])
                     pi_re = policy_model(batch["rejected_inputs"])

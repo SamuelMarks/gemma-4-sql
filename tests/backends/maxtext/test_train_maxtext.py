@@ -1,7 +1,5 @@
 """Tests for MaxText training pipeline."""
 
-import typing
-
 import pytest
 
 import gemma_4_sql.backends.maxtext.train as tr
@@ -11,7 +9,7 @@ from gemma_4_sql.backends.maxtext.train import train_model
 class MockJnpTensor:
     """Initialize class MockJnpTensor."""
 
-    def __init__(self: typing.Any, shape: object) -> None:
+    def __init__(self, shape: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -21,7 +19,7 @@ class MockJnpTensor:
         """
         self.shape = shape
 
-    def item(self: typing.Any) -> object:
+    def item(self) -> object:
         """Initialize function item."""
         return 0.35
 
@@ -126,7 +124,7 @@ class MockOptax:
         class MockOpt:
             """Initialize class MockOpt."""
 
-            def init(self: typing.Any, _params: object) -> object:
+            def init(self, _params: object) -> object:
                 """Initialize function init.
 
                 Args:
@@ -136,7 +134,7 @@ class MockOptax:
                 """
                 return "opt_state"
 
-            def update(self: typing.Any, _grads: object, _opt_state: object, _params: object) -> object:
+            def update(self, _grads: object, _opt_state: object, _params: object) -> object:
                 """Initialize function update.
 
                 Args:
@@ -178,7 +176,7 @@ class MockOptax:
 class MockGemma4Model:
     """Initialize class MockGemma4Model."""
 
-    def __init__(self: typing.Any, name: object) -> None:
+    def __init__(self, name: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -187,7 +185,7 @@ class MockGemma4Model:
 
         """
 
-    def init(self: typing.Any, _rng: object, _inputs: object) -> object:
+    def init(self, _rng: object, _inputs: object) -> object:
         """Initialize function init.
 
         Args:
@@ -198,7 +196,7 @@ class MockGemma4Model:
         """
         return "params"
 
-    def apply(self: typing.Any, _params: object, _inputs: object) -> object:
+    def apply(self, _params: object, _inputs: object) -> object:
         """Initialize function apply.
 
         Args:

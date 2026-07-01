@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
 
 try:
     import torch
@@ -17,7 +22,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     Gemma4ForCausalLM = None
 
 
-def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float, distributed_strategy: str = "none") -> dict[str, object]:
+def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float, distributed_strategy: str = "none") -> JSONDict:
     """Train a Text-to-SQL model using the PyTorch backend.
 
     Args:

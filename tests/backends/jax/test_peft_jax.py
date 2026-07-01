@@ -1,7 +1,5 @@
 """Tests for JAX PEFT."""
 
-import typing
-
 import pytest
 
 import gemma_4_sql.backends.jax.peft as pt
@@ -22,7 +20,7 @@ class MockGemma4Config:
 
 
 class MockGemma4ForCausalLM:
-    def __init__(self: typing.Any, config: object, rngs: object) -> None:
+    def __init__(self, config: object, rngs: object) -> None:
         pass
 
 
@@ -31,7 +29,7 @@ class MockNNX:
         pass
 
     class Rngs:
-        def __init__(self: typing.Any, seed: int) -> None:
+        def __init__(self, seed: int) -> None:
             pass
 
     @staticmethod

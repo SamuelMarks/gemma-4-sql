@@ -6,6 +6,9 @@ import typing
 
 from gemma_4_sql.tokenization import SQLTokenizer
 
+if typing.TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
 try:
     import datasets
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
@@ -22,7 +25,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     mx = None
 
 
-def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: object) -> dict[str, object]:
+def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: JSONValue) -> JSONDict:
     """Build an MLX-specific dataloader."""
     duckdb_path = kwargs.get("duckdb_path")
     duckdb_table = kwargs.get("duckdb_table")
@@ -51,7 +54,7 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
             self.tok = tok
             self.bs = bs
 
-        def __iter__(self) -> typing.Iterator[dict[str, object]]:
+        def __iter__(self) -> typing.Iterator[JSONDict]:
             batch_inputs = []
             batch_targets = []
             for item in self.ds:

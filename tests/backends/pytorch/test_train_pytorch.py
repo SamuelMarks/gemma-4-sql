@@ -1,7 +1,5 @@
 """Tests for PyTorch training pipeline."""
 
-import typing
-
 import pytest
 
 import gemma_4_sql.backends.pytorch.train as tr
@@ -11,7 +9,7 @@ from gemma_4_sql.backends.pytorch.train import train_model
 class MockTensor:
     """Initialize class MockTensor."""
 
-    def __init__(self: typing.Any, shape: object, _dtype: object = None, device: object = None) -> None:
+    def __init__(self, shape: object, _dtype: object = None, device: object = None) -> None:
         """Initialize function __init__.
 
         Args:
@@ -24,7 +22,7 @@ class MockTensor:
         self.shape = shape
         self.device = device
 
-    def to(self: typing.Any, _device: object) -> object:
+    def to(self, _device: object) -> object:
         """Initialize function to.
 
         Args:
@@ -34,7 +32,7 @@ class MockTensor:
         """
         return self
 
-    def view(self: typing.Any, *_args: object) -> object:
+    def view(self, *_args: object) -> object:
         """Initialize function view.
 
         Args:
@@ -44,7 +42,7 @@ class MockTensor:
         """
         return self
 
-    def size(self: typing.Any, *_args: object) -> object:
+    def size(self, *_args: object) -> object:
         """Initialize function size.
 
         Args:
@@ -54,10 +52,10 @@ class MockTensor:
         """
         return 1
 
-    def backward(self: typing.Any) -> object:
+    def backward(self) -> object:
         """Initialize function backward."""
 
-    def item(self: typing.Any) -> object:
+    def item(self) -> object:
         """Initialize function item."""
         return 0.1
 
@@ -141,10 +139,10 @@ class MockOptim:
         class MockOptimizer:
             """Initialize class MockOptimizer."""
 
-            def zero_grad(self: typing.Any) -> object:
+            def zero_grad(self) -> object:
                 """Initialize function zero_grad."""
 
-            def step(self: typing.Any) -> object:
+            def step(self) -> object:
                 """Initialize function step."""
 
         return MockOptimizer()
@@ -154,7 +152,7 @@ class MockGemma4ForCausalLM:
     """Initialize class MockGemma4ForCausalLM."""
 
     @classmethod
-    def from_pretrained(cls: typing.Any, *_args: object, **_kwargs: object) -> object:
+    def from_pretrained(cls, *_args: object, **_kwargs: object) -> object:
         """Initialize function from_pretrained.
 
         Args:
@@ -167,7 +165,7 @@ class MockGemma4ForCausalLM:
         class MockModel:
             """Initialize class MockModel."""
 
-            def __call__(self: typing.Any, *_args: object, **_kwargs: object) -> object:
+            def __call__(self, *_args: object, **_kwargs: object) -> object:
                 """Initialize function __call__.
 
                 Args:
@@ -178,7 +176,7 @@ class MockGemma4ForCausalLM:
                 """
                 return MockTensor((1,))
 
-            def to(self: typing.Any, _device: object) -> object:
+            def to(self, _device: object) -> object:
                 """Initialize function to.
 
                 Args:
@@ -188,10 +186,10 @@ class MockGemma4ForCausalLM:
                 """
                 return self
 
-            def train(self: typing.Any) -> object:
+            def train(self) -> object:
                 """Initialize function train."""
 
-            def parameters(self: typing.Any) -> object:
+            def parameters(self) -> object:
                 """Initialize function parameters."""
                 return []
 

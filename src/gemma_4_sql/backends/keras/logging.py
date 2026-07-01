@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
+
 try:
     import tensorflow as tf
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     tf = None
 
 
-def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> dict[str, object]:
+def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> JSONDict:
     """Log metrics using Keras/TensorFlow TensorBoard tools.
 
     Args:

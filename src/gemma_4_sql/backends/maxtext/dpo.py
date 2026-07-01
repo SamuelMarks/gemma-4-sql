@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +46,7 @@ def dpo_loss(policy_chosen_logps: object, policy_rejected_logps: object, ref_cho
     return jax_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta)
 
 
-def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, learning_rate: float = 1e-5, **kwargs: object) -> dict[str, object]:
+def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, learning_rate: float = 1e-5, **kwargs: JSONValue) -> JSONDict:
     """Run DPO training loop for MaxText.
 
     Args:
@@ -85,7 +89,7 @@ def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, l
                 logits = model.apply(params, inputs)  # type: ignore[attr-defined]
                 return jnp.sum(logits * labels, axis=-1)  # type: ignore[attr-defined]
 
-            def dpo_step_loss(policy_params: object, ref_params: object, batch: dict[str, object]) -> object:
+            def dpo_step_loss(policy_params: object, ref_params: object, batch: JSONDict) -> object:
                 pi_ch_logps = compute_logps(policy_model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])
                 pi_re_logps = compute_logps(policy_model, policy_params, batch["rejected_inputs"], batch["rejected_labels"])
                 ref_ch_logps = compute_logps(ref_model, ref_params, batch["chosen_inputs"], batch["chosen_labels"])
@@ -94,7 +98,7 @@ def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, l
                 return loss
 
             @jax.jit  # type: ignore[misc]
-            def train_step(policy_params: object, ref_params: object, opt_state: object, batch: dict[str, object]) -> object:
+            def train_step(policy_params: object, ref_params: object, opt_state: object, batch: JSONDict) -> object:
                 loss, grads = jax.value_and_grad(dpo_step_loss)(policy_params, ref_params, batch)
                 updates, opt_state = optimizer.update(grads, opt_state, policy_params)
                 policy_params = optax.apply_updates(policy_params, updates)

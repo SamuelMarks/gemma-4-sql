@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.mlx.inference import generate_sql
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +20,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     AutoTokenizer = None
 
 
-def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, **kwargs: object) -> dict[str, object]:
+def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, **kwargs: JSONValue) -> JSONDict:
     """Execute a single turn in a multi-turn SQL conversation using MLX.
 
     Args:

@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int = 3, max_length: int = 50, show_confidence: bool = False) -> dict[str, object]:
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
+
+
+def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int = 3, max_length: int = 50, show_confidence: bool = False) -> JSONDict:
     """Generate a SQL query from a natural language prompt using Beam Search.
 
     Args:

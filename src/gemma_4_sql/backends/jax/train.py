@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from gemma_4_sql.backends.jax.etl import build_dataloader
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
 
 try:
     import jax
@@ -22,7 +27,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     nnx = None
 
 
-def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float) -> dict[str, object]:
+def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float) -> JSONDict:
     """Train a Text-to-SQL model using the JAX backend.
 
     Args:
@@ -58,7 +63,7 @@ def train_model(action: str, model_name: str, dataset: str, epochs: int, learnin
             )
             optimizer = nnx.Optimizer(model, optax.adamw(schedule))
 
-            def loss_fn(model: Gemma4ForCausalLM, batch: dict[str, object]) -> object:
+            def loss_fn(model: Gemma4ForCausalLM, batch: JSONDict) -> object:
                 """Compute the cross-entropy loss for the model on a given batch."""
                 logits = model(batch["inputs"])
                 targets = batch["targets"]
@@ -66,7 +71,7 @@ def train_model(action: str, model_name: str, dataset: str, epochs: int, learnin
                 return jnp.mean(loss)
 
             @nnx.jit  # type: ignore[misc]
-            def train_step(model: Gemma4ForCausalLM, optimizer: nnx.Optimizer, batch: dict[str, object]) -> object:
+            def train_step(model: Gemma4ForCausalLM, optimizer: nnx.Optimizer, batch: JSONDict) -> object:
                 """Execute a single JAX-compiled training step."""
                 (loss, grads) = nnx.value_and_grad(loss_fn)(model, batch)
                 optimizer.update(grads)

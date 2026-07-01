@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
 try:
     import jax
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     jax = None
 
 
-def build_few_shot_prompt(model_name: str, prompt: str, examples: list[dict[str, str]], **_kwargs: object) -> dict[str, object]:
+def build_few_shot_prompt(model_name: str, prompt: str, examples: list[dict[str, str]], **_kwargs: JSONValue) -> JSONDict:
     """Build a dynamic few-shot prompt using JAX backend.
 
     Args:

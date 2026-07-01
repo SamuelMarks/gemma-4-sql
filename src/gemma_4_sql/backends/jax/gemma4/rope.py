@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import typing
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -67,7 +66,7 @@ def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
 class RoPE(nnx.Module):  # type: ignore[misc]
     """Initialize class RoPE."""
 
-    def __init__(self: typing.Any, *, rope_type: str, **rope_kwargs: object) -> None:
+    def __init__(self, *, rope_type: str, **rope_kwargs: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -79,7 +78,7 @@ class RoPE(nnx.Module):  # type: ignore[misc]
         self.rope_kwargs = rope_kwargs
         self.rope_fn = partial(rope_functions[rope_type], **rope_kwargs)
 
-    def __call__(self: typing.Any, positions: Array) -> tuple[Array, Array]:
+    def __call__(self, positions: Array) -> tuple[Array, Array]:
         """Initialize function __call__.
 
         Args:

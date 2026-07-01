@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def _route_training(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float, **kwargs: object) -> dict[str, object]:
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
+
+def _route_training(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float, **kwargs: JSONValue) -> JSONDict:
     """Route training request to the appropriate backend.
 
     Args:
@@ -29,7 +34,7 @@ def _route_training(action: str, model_name: str, dataset: str, epochs: int, lea
     return get_backend(backend).train_model(**train_kwargs)
 
 
-def train_from_scratch(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "jax", distributed_strategy: str = "none") -> dict[str, object]:
+def train_from_scratch(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "jax", distributed_strategy: str = "none") -> JSONDict:
     """Train a model from scratch.
 
     Args:
@@ -49,7 +54,7 @@ def train_from_scratch(model_name: str = "gemma-4", dataset: str = "dummy_datase
     return _route_training("train_from_scratch", model_name, dataset, epochs, learning_rate, backend=backend, distributed_strategy=distributed_strategy)
 
 
-def pretrain_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "maxtext", distributed_strategy: str = "none") -> dict[str, object]:
+def pretrain_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "maxtext", distributed_strategy: str = "none") -> JSONDict:
     """Pretrains an existing model.
 
     Args:
@@ -69,7 +74,7 @@ def pretrain_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", 
     return _route_training("pretrain", model_name, dataset, epochs, learning_rate, backend=backend, distributed_strategy=distributed_strategy)
 
 
-def sft_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "jax", distributed_strategy: str = "none") -> dict[str, object]:
+def sft_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "jax", distributed_strategy: str = "none") -> JSONDict:
     """Supervised fine-tunes (SFT) an existing model.
 
     Args:
@@ -89,7 +94,7 @@ def sft_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epoch
     return _route_training("sft", model_name, dataset, epochs, learning_rate, backend=backend, distributed_strategy=distributed_strategy)
 
 
-def posttrain_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "keras", distributed_strategy: str = "none") -> dict[str, object]:
+def posttrain_model(model_name: str = "gemma-4", dataset: str = "dummy_dataset", epochs: int = 1, learning_rate: float = 0.0001, backend: str = "keras", distributed_strategy: str = "none") -> JSONDict:
     """Post-trains an existing model (e.g., RLHF, DPO).
 
     Args:

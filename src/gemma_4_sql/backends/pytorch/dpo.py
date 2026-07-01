@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +50,7 @@ def dpo_loss(policy_chosen_logps: object, policy_rejected_logps: object, ref_cho
     return (loss.mean(), chosen_rewards.mean(), rejected_rewards.mean())
 
 
-def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, learning_rate: float = 1e-5) -> dict[str, object]:
+def run_dpo(model_name: str, dataset: str, beta: float = 0.1, epochs: int = 1, learning_rate: float = 1e-5) -> JSONDict:
     """Run a DPO training loop for PyTorch.
 
     Args:

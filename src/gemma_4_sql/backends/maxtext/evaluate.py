@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
 from gemma_4_sql.backends.maxtext.inference import generate_sql
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.tokenization import SQLTokenizer
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 
 def normalize_sql(sql: str) -> str:
@@ -79,7 +83,7 @@ def compute_metrics(engine: LiveDatabaseEngine, preds: list[str], truths: list[s
     return asyncio.run(compute_metrics_async(engine, preds, truths))
 
 
-def evaluate_model(model_name: str, dataset_name: str, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", **kwargs: object) -> dict[str, object]:
+def evaluate_model(model_name: str, dataset_name: str, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", **kwargs: JSONValue) -> JSONDict:
     """Evaluate a Text-to-SQL model using the MaxText backend.
 
     Args:

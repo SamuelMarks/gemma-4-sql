@@ -5,10 +5,13 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
 import jax
 import jax.numpy as jnp
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONValue
 
 TransformValueType = Union[tuple[tuple[int, ...], Union[tuple[int, ...], None], bool], None]
 TransformType = object
@@ -43,7 +46,7 @@ def stoi(s: str) -> int | str:
         return s
 
 
-def assign_weights(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType, **kwargs: object) -> object:  # type: ignore[return, type-arg]
+def assign_weights(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType, **kwargs: JSONValue) -> object:  # type: ignore[return, type-arg]
     """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
 
     Assumes that the state_dict values are of type Array.

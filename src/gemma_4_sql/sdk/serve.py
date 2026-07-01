@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, backend: str = "pytorch", **kwargs: object) -> dict[str, object]:
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
+
+def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, backend: str = "pytorch", **kwargs: JSONValue) -> JSONDict:
     """Serve a model using continuous batching.
 
     Args:

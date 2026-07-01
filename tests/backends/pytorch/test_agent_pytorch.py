@@ -1,7 +1,5 @@
 """Tests for PyTorch Agentic Loop."""
 
-import typing
-
 import pytest
 
 from gemma_4_sql.backends.pytorch.agent import run_agentic_loop
@@ -10,7 +8,7 @@ from gemma_4_sql.backends.pytorch.agent import run_agentic_loop
 class MockLiveDatabaseEngine:
     """Mock LiveDatabaseEngine that fails once then succeeds."""
 
-    def __init__(self: typing.Any, **_kwargs: object) -> None:
+    def __init__(self, **_kwargs: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -20,13 +18,13 @@ class MockLiveDatabaseEngine:
         """
         self.call_count = 0
 
-    async def execute_with_feedback_async(self: typing.Any, _query: str) -> tuple[bool, list[object], str]:
+    async def execute_with_feedback_async(self, _query: str) -> tuple[bool, list[object], str]:
         self.call_count += 1
         if self.call_count == 1:
             return (False, [], "Syntax error")
         return (True, [(1,)], "")
 
-    def execute_with_feedback(self: typing.Any, _query: str) -> tuple[bool, list[object], str]:
+    def execute_with_feedback(self, _query: str) -> tuple[bool, list[object], str]:
         """Initialize function execute_with_feedback.
 
         Args:
@@ -39,7 +37,7 @@ class MockLiveDatabaseEngine:
             return (False, [], "Syntax error")
         return (True, [(1,)], "")
 
-    def close(self: typing.Any) -> None:
+    def close(self) -> None:
         """Initialize function close."""
 
 

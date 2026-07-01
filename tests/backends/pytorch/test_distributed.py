@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import typing
-
 import pytest
 
 import gemma_4_sql.backends.pytorch.export as ex
@@ -12,23 +10,23 @@ from gemma_4_sql.backends.pytorch import etl
 
 
 class MockTensor:
-    def __init__(self: typing.Any, shape: object, _dtype: object = None, device: object = None) -> None:
+    def __init__(self, shape: object, _dtype: object = None, device: object = None) -> None:
         self.shape = shape
         self.device = device
 
-    def to(self: typing.Any, _device: object) -> object:
+    def to(self, _device: object) -> object:
         return self
 
-    def view(self: typing.Any, *_args: object) -> object:
+    def view(self, *_args: object) -> object:
         return self
 
-    def size(self: typing.Any, *_args: object) -> object:
+    def size(self, *_args: object) -> object:
         return 1
 
-    def backward(self: typing.Any) -> object:
+    def backward(self) -> object:
         pass
 
-    def item(self: typing.Any) -> object:
+    def item(self) -> object:
         return 0.1
 
 
@@ -115,10 +113,10 @@ class MockOptim:
     @staticmethod
     def AdamW(*_args: object, **_kwargs: object) -> object:
         class MockOptimizer:
-            def zero_grad(self: typing.Any) -> object:
+            def zero_grad(self) -> object:
                 pass
 
-            def step(self: typing.Any) -> object:
+            def step(self) -> object:
                 pass
 
         return MockOptimizer()
@@ -126,25 +124,25 @@ class MockOptim:
 
 class MockGemma4ForCausalLM:
     @classmethod
-    def from_pretrained(cls: typing.Any, *_args: object, **_kwargs: object) -> object:
+    def from_pretrained(cls, *_args: object, **_kwargs: object) -> object:
         class MockModel:
-            def __call__(self: typing.Any, *_args: object, **_kwargs: object) -> object:
+            def __call__(self, *_args: object, **_kwargs: object) -> object:
                 return MockTensor((1,))
 
-            def to(self: typing.Any, _device: object) -> object:
+            def to(self, _device: object) -> object:
                 return self
 
-            def train(self: typing.Any) -> object:
+            def train(self) -> object:
                 pass
 
-            def parameters(self: typing.Any) -> object:
+            def parameters(self) -> object:
                 return []
 
         return MockModel()
 
 
 @pytest.fixture
-def mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
     monkeypatch.setattr(tr, "torch", MockTorch())

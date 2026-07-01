@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def quantize_model(model_name: str, method: str = "int8", backend: str = "pytorch", **kwargs: object) -> dict[str, object]:
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
+
+def quantize_model(model_name: str, method: str = "int8", backend: str = "pytorch", **kwargs: JSONValue) -> JSONDict:
     """Quantize a model using the specified method and backend.
 
     Args:

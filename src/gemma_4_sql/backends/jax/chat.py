@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from gemma_4_sql.backends.jax.inference import generate_sql
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 try:
     import jax
@@ -10,7 +15,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     jax = None
 
 
-def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, **kwargs: object) -> dict[str, object]:
+def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, **kwargs: JSONValue) -> JSONDict:
     """Execute a single turn in a multi-turn SQL conversation using JAX.
 
     Args:

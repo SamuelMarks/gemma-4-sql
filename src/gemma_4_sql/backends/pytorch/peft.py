@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +23,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     AutoModelForCausalLM = None
 
 
-def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alpha: int, lora_dropout: float) -> dict[str, object]:
+def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alpha: int, lora_dropout: float) -> JSONDict:
     """Apply LoRA to a model using the PyTorch backend.
 
     Args:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import typing
-
 try:
     from transformers import AutoTokenizer
 except ImportError:
@@ -18,7 +16,7 @@ class SQLTokenizer:
     encoding scheme.
     """
 
-    def __init__(self: typing.Any, vocab_size: int = 256, model_name: str | None = None) -> None:
+    def __init__(self, vocab_size: int = 256, model_name: str | None = None) -> None:
         """Initialize the tokenizer.
 
         Args:
@@ -33,7 +31,7 @@ class SQLTokenizer:
         if self.model_name and AutoTokenizer is not None:
             self.hf_tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 
-    def encode(self: typing.Any, text: str) -> list[int]:
+    def encode(self, text: str) -> list[int]:
         """Encode a string into a list of token IDs.
 
         Args:
@@ -49,7 +47,7 @@ class SQLTokenizer:
             return self.hf_tokenizer.encode(text, add_special_tokens=False)
         return [ord(c) % self.vocab_size for c in text]
 
-    def decode(self: typing.Any, tokens: list[int]) -> str:
+    def decode(self, tokens: list[int]) -> str:
         """Decode a list of token IDs back into a string.
 
         Args:

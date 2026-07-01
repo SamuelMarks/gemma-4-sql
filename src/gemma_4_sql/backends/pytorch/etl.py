@@ -6,6 +6,9 @@ import typing
 
 from gemma_4_sql.tokenization import SQLTokenizer
 
+if typing.TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
 try:
     import datasets
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
@@ -23,7 +26,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     duckdb = None
 
 
-def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: object) -> dict[str, object]:
+def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: JSONValue) -> JSONDict:
     """Build a PyTorch-specific dataloader."""
     duckdb_path = kwargs.get("duckdb_path")
     duckdb_table = kwargs.get("duckdb_table")
@@ -45,16 +48,16 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
     class PyTorchDataset(Dataset):  # type: ignore[misc]
         """PyTorch Dataset wrapping Hugging Face."""
 
-        def __init__(self: typing.Any, hf_ds: object, tok: SQLTokenizer) -> None:
+        def __init__(self, hf_ds: object, tok: SQLTokenizer) -> None:
             """Initialize with dataset and tokenizer."""
             self._ds = hf_ds
             self._tok = tok
 
-        def __len__(self: typing.Any) -> int:
+        def __len__(self) -> int:
             """Return dataset length."""
             return len(self._ds)
 
-        def __getitem__(self: typing.Any, idx: int) -> dict[str, object]:
+        def __getitem__(self, idx: int) -> JSONDict:
             """Get and format dataset item."""
             element = self._ds[idx]
             prompt = element.get("sql_prompt", element.get("question", ""))
@@ -63,7 +66,7 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
 
     pt_dataset = PyTorchDataset(hf_dataset, tokenizer)
 
-    def collate_fn(batch: list[dict[str, object]]) -> dict[str, object]:
+    def collate_fn(batch: list[JSONDict]) -> JSONDict:
         """Collate batches."""
         inputs = [item["inputs"] for item in batch]
         targets = [item["targets"] for item in batch]

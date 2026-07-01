@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import typing
 from typing import TYPE_CHECKING
 
 import gemma_4_sql.backends.jax.dpo as tr
@@ -86,11 +85,11 @@ class MockGemma4Config:
 class MockGemma4ForCausalLM:
     """Initialize class MockGemma4ForCausalLM."""
 
-    def __init__(self: typing.Any, config: object, rngs: object = None) -> None:
+    def __init__(self, config: object, rngs: object = None) -> None:
         """Initialize function __init__."""
         self.config = config
 
-    def __call__(self: typing.Any, _inputs: object) -> object:
+    def __call__(self, _inputs: object) -> object:
         """Initialize function __call__."""
         return MockArray()
 
@@ -98,12 +97,12 @@ class MockGemma4ForCausalLM:
 class MockNNXOptimizer:
     """Initialize class MockNNXOptimizer."""
 
-    def __init__(self: typing.Any, model: object, optax_optimizer: object) -> None:
+    def __init__(self, model: object, optax_optimizer: object) -> None:
         """Initialize function __init__."""
         self.model = model
         self.optax_optimizer = optax_optimizer
 
-    def update(self: typing.Any, grads: object) -> object:
+    def update(self, grads: object) -> object:
         """Initialize function update."""
 
 
@@ -113,7 +112,7 @@ class MockNNX:
     class Rngs:
         """Initialize class Rngs."""
 
-        def __init__(self: typing.Any, seed: object) -> None:
+        def __init__(self, seed: object) -> None:
             """Initialize function __init__."""
             self.seed = seed
 

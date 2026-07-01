@@ -8,6 +8,9 @@ import re
 import sqlite3
 import typing
 
+if typing.TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONPrimitive
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -39,7 +42,7 @@ class LiveDatabaseEngine:
     Supports SQLite, PostgreSQL, Snowflake, and DuckDB.
     """
 
-    def __init__(self: typing.Any, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", db_kwargs: dict[str, object] | None = None, read_only: bool = True) -> None:
+    def __init__(self, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", db_kwargs: JSONDict | None = None, read_only: bool = True) -> None:
         """Initialize the LiveDatabaseEngine.
 
         Args:
@@ -65,7 +68,7 @@ class LiveDatabaseEngine:
             finally:
                 self.read_only = old_ro
 
-    def connect(self: typing.Any) -> object:
+    def connect(self) -> object:
         """Connect to database.
 
         Returns
@@ -101,7 +104,7 @@ class LiveDatabaseEngine:
         msg = f"Unsupported db_type: {self.db_type}"
         raise ValueError(msg)
 
-    async def connect_async(self: typing.Any) -> object:
+    async def connect_async(self) -> object:
         """Asynchronously connect to database.
 
         Returns
@@ -129,7 +132,7 @@ class LiveDatabaseEngine:
         msg = f"Async operations not natively supported for db_type: {self.db_type}"
         raise ValueError(msg)
 
-    def _validate_safety(self: typing.Any, query: str) -> None:
+    def _validate_safety(self, query: str) -> None:
         """Ensure the query is safe to execute if read_only is True."""
         if not self.read_only:
             return
@@ -142,7 +145,7 @@ class LiveDatabaseEngine:
                 msg = f"Safety Violation: Mutating statements ({pattern}) are not allowed in read-only mode."
                 raise PermissionError(msg)
 
-    def setup_schema(self: typing.Any, ddl: str) -> None:
+    def setup_schema(self, ddl: str) -> None:
         """Execute DDL statements to construct the database schema.
 
         Args:
@@ -164,7 +167,7 @@ class LiveDatabaseEngine:
             finally:
                 cursor.close()
 
-    def execute_with_feedback(self: typing.Any, query: str) -> tuple[bool, list[tuple[object, ...]], str | None]:
+    def execute_with_feedback(self, query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute a query and returns execution success status, results, and error message.
 
         Args:
@@ -193,7 +196,7 @@ class LiveDatabaseEngine:
             if self.db_type != "duckdb" and "cursor" in locals():
                 cursor.close()
 
-    async def execute_with_feedback_async(self: typing.Any, query: str) -> tuple[bool, list[tuple[object, ...]], str | None]:
+    async def execute_with_feedback_async(self, query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Asynchronously execute a query and returns execution success status, results, and error message.
 
         Args:
@@ -234,7 +237,7 @@ class LiveDatabaseEngine:
         except Exception as e:
             return (False, [], str(e))
 
-    def execute_query(self: typing.Any, query: str) -> list[tuple[object, ...]]:
+    def execute_query(self, query: str) -> list[tuple[JSONPrimitive, ...]]:
         """Execute a query and returns the fetched results.
 
         Args:
@@ -264,7 +267,7 @@ class LiveDatabaseEngine:
             if self.db_type != "duckdb" and "cursor" in locals():
                 cursor.close()
 
-    async def execute_query_async(self: typing.Any, query: str) -> list[tuple[object, ...]]:
+    async def execute_query_async(self, query: str) -> list[tuple[JSONPrimitive, ...]]:
         """Asynchronously execute a query and returns the fetched results.
 
         Args:
@@ -304,7 +307,7 @@ class LiveDatabaseEngine:
             logger.debug("Async Query execution failed: %s", e)
             return []  # pragma: no cover
 
-    def compare_queries(self: typing.Any, predicted_sql: str, ground_truth_sql: str) -> bool:
+    def compare_queries(self, predicted_sql: str, ground_truth_sql: str) -> bool:
         """Compare the execution results of two queries.
 
         Args:
@@ -321,7 +324,7 @@ class LiveDatabaseEngine:
         truth_results = self.execute_query(ground_truth_sql)
         return pred_results == truth_results  # type: ignore[no-any-return]
 
-    async def compare_queries_async(self: typing.Any, predicted_sql: str, ground_truth_sql: str) -> bool:
+    async def compare_queries_async(self, predicted_sql: str, ground_truth_sql: str) -> bool:
         """Asynchronously compare the execution results of two queries.
 
         Args:
@@ -337,6 +340,6 @@ class LiveDatabaseEngine:
         pred_results, truth_results = await asyncio.gather(self.execute_query_async(predicted_sql), self.execute_query_async(ground_truth_sql))
         return pred_results == truth_results  # type: ignore[no-any-return]
 
-    def close(self: typing.Any) -> None:
+    def close(self) -> None:
         """Close the database connection."""
         self.conn.close()

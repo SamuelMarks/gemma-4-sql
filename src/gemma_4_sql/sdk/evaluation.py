@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 
-def evaluate(model_name: str, dataset_name: str, backend: str = "jax", db_path: str = ":memory:", ddl: str | None = None, **kwargs: object) -> dict[str, object]:
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
+
+def evaluate(model_name: str, dataset_name: str, backend: str = "jax", db_path: str = ":memory:", ddl: str | None = None, **kwargs: JSONValue) -> JSONDict:
     """Evaluate a Text-to-SQL model.
 
     Args:

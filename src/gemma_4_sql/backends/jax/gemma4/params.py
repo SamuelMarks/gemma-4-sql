@@ -11,6 +11,8 @@ import safetensors.flax as safetensors
 from etils import epath
 from flax import nnx
 
+from gemma_4_sql.type_hints import JSONDict
+
 from . import modeling as model_lib
 from .utils_params import assign_weights_from_eval_shape, map_to_jax_key, stoi
 
@@ -119,7 +121,7 @@ def _process_moe_tensor(match: re.Match[str], sf: object, torch_key: str, expert
     expert_tensors[l_idx][proj_type][e_idx] = jnp.array(sf.get_tensor(torch_key))  # type: ignore[attr-defined]
 
 
-def _process_standard_tensor(sf: object, torch_key: str, jax_state: dict[str, object], mapping: dict[str, tuple]) -> None:  # type: ignore[type-arg]
+def _process_standard_tensor(sf: object, torch_key: str, jax_state: JSONDict, mapping: dict[str, tuple]) -> None:  # type: ignore[type-arg]
     """Process a standard tensor."""
     tensor = jnp.array(sf.get_tensor(torch_key))  # type: ignore[attr-defined]
     (jax_key, transform) = map_to_jax_key(mapping, torch_key)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import typing
 from typing import TYPE_CHECKING
 
 import gemma_4_sql.backends.pytorch.quantize as pt_quantize
@@ -17,7 +16,7 @@ class MockTorch:
 
 
 class MockBitsAndBytesConfig:
-    def __init__(self: typing.Any, *args: object, **kwargs: object) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
         pass
 
 

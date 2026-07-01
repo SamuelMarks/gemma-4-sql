@@ -1,7 +1,6 @@
 """Tests for the Tokenization module."""
 
 import sys
-import typing
 
 import pytest
 
@@ -11,7 +10,7 @@ from gemma_4_sql.tokenization import SQLTokenizer
 class MockHFTokenizer:
     """Initialize class MockHFTokenizer."""
 
-    def encode(self: typing.Any, _text: str, **_kwargs: object) -> list[int]:
+    def encode(self, _text: str, **_kwargs: object) -> list[int]:
         """Initialize function encode.
 
         Args:
@@ -22,7 +21,7 @@ class MockHFTokenizer:
         """
         return [99, 100]
 
-    def decode(self: typing.Any, _tokens: list[int]) -> str:
+    def decode(self, _tokens: list[int]) -> str:
         """Initialize function decode.
 
         Args:
@@ -37,7 +36,7 @@ class MockAutoTokenizer:
     """Initialize class MockAutoTokenizer."""
 
     @classmethod
-    def from_pretrained(cls: typing.Any, _model_name: str) -> MockHFTokenizer:
+    def from_pretrained(cls, _model_name: str) -> MockHFTokenizer:
         """Initialize function from_pretrained.
 
         Args:

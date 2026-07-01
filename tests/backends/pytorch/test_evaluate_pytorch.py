@@ -1,7 +1,5 @@
 """Tests for PyTorch-specific model evaluation."""
 
-import typing
-
 import pytest
 
 from gemma_4_sql.backends.pytorch.evaluate import evaluate_model
@@ -54,7 +52,7 @@ def test_evaluate_model_with_dataloader(monkeypatch: object) -> None:
         class MockLoader:
             """Initialize class MockLoader."""
 
-            def __iter__(self: typing.Any) -> object:
+            def __iter__(self) -> object:
                 """Initialize function __iter__."""
                 for _ in range(11):
                     yield {"inputs": [[101, 102]], "targets": [[101, 103]]}

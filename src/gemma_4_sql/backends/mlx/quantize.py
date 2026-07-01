@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +19,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     AutoModelForCausalLM = None
 
 
-def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> dict[str, object]:
+def quantize_model(model_name: str, method: str = "int8", **kwargs: JSONValue) -> JSONDict:
     """Quantize a MLX model.
 
     Args:

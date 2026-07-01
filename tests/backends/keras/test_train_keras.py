@@ -1,7 +1,5 @@
 """Tests for Keras training pipeline."""
 
-import typing
-
 import pytest
 
 import gemma_4_sql.backends.keras.train as tr
@@ -11,7 +9,7 @@ from gemma_4_sql.backends.keras.train import train_model
 class MockTfTensor:
     """Initialize class MockTfTensor."""
 
-    def __init__(self: typing.Any, shape: object) -> None:
+    def __init__(self, shape: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -43,7 +41,7 @@ class MockTf:
 class MockHistory:
     """Initialize class MockHistory."""
 
-    def __init__(self: typing.Any) -> None:
+    def __init__(self) -> None:
         """Initialize function __init__."""
         self.history = {"loss": [0.5, 0.1]}
 
@@ -51,7 +49,7 @@ class MockHistory:
 class MockModel:
     """Initialize class MockModel."""
 
-    def compile(self: typing.Any, *args: object, **kwargs: object) -> object:
+    def compile(self, *args: object, **kwargs: object) -> object:
         """Initialize function compile.
 
         Args:
@@ -61,7 +59,7 @@ class MockModel:
 
         """
 
-    def fit(self: typing.Any, *_args: object, **_kwargs: object) -> object:
+    def fit(self, *_args: object, **_kwargs: object) -> object:
         """Initialize function fit.
 
         Args:

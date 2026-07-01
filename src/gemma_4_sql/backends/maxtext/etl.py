@@ -6,6 +6,9 @@ import typing
 
 from gemma_4_sql.tokenization import SQLTokenizer
 
+if typing.TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
 try:
     import datasets
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
@@ -20,7 +23,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     duckdb = None
 
 
-def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: object) -> dict[str, object]:
+def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: JSONValue) -> JSONDict:
     """Build a MaxText-specific Grain dataloader."""
     duckdb_path = kwargs.get("duckdb_path")
     duckdb_table = kwargs.get("duckdb_table")
@@ -41,26 +44,26 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
     class HFDataSource(grain.RandomAccessDataSource):  # type: ignore[misc]
         """Data source wrapping a Hugging Face dataset."""
 
-        def __init__(self: typing.Any, hf_ds: object) -> None:
+        def __init__(self, hf_ds: object) -> None:
             """Initialize with dataset."""
             self._ds = hf_ds
 
-        def __len__(self: typing.Any) -> int:
+        def __len__(self) -> int:
             """Return dataset length."""
             return len(self._ds)
 
-        def __getitem__(self: typing.Any, idx: int) -> object:
+        def __getitem__(self, idx: int) -> object:
             """Get dataset item by index."""
             return self._ds[idx]
 
     class MaxTextFormatTransform(grain.MapTransform):  # type: ignore[misc]
         """Transforms data into MaxText expected format."""
 
-        def __init__(self: typing.Any, tokenizer: SQLTokenizer) -> None:
+        def __init__(self, tokenizer: SQLTokenizer) -> None:
             """Initialize the transform with a tokenizer."""
             self.tokenizer = tokenizer
 
-        def map(self: typing.Any, element: dict[str, object]) -> dict[str, object]:
+        def map(self, element: JSONDict) -> JSONDict:
             """Map an element."""
             prompt = element.get("sql_prompt", element.get("question", ""))
             target = element.get("sql", element.get("query", ""))

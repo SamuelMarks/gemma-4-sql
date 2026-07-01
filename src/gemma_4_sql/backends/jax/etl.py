@@ -6,6 +6,9 @@ import typing
 
 from gemma_4_sql.tokenization import SQLTokenizer
 
+if typing.TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
+
 try:
     import datasets
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
@@ -20,7 +23,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     duckdb = None
 
 
-def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: object) -> dict[str, object]:
+def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: JSONValue) -> JSONDict:
     """Build a JAX-specific Grain dataloader.
 
     Args:
@@ -58,7 +61,7 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
     class HFDataSource(grain.RandomAccessDataSource):  # type: ignore[misc]
         """Data source wrapping a Hugging Face dataset."""
 
-        def __init__(self: typing.Any, hf_ds: object) -> None:
+        def __init__(self, hf_ds: object) -> None:
             """Initialize with dataset.
 
             Args:
@@ -68,7 +71,7 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
             """
             self._ds = hf_ds
 
-        def __len__(self: typing.Any) -> int:
+        def __len__(self) -> int:
             """Return dataset length.
 
             Returns
@@ -78,7 +81,7 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
             """
             return len(self._ds)
 
-        def __getitem__(self: typing.Any, idx: int) -> object:
+        def __getitem__(self, idx: int) -> object:
             """Get dataset item by index.
 
             Args:
@@ -95,7 +98,7 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
     class JAXFormatTransform(grain.MapTransform):  # type: ignore[misc]
         """Transforms data into numpy/JAX compatible formats."""
 
-        def __init__(self: typing.Any, tokenizer: SQLTokenizer) -> None:
+        def __init__(self, tokenizer: SQLTokenizer) -> None:
             """Initialize the transform with a tokenizer.
 
             Args:
@@ -105,7 +108,7 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
             """
             self.tokenizer = tokenizer
 
-        def map(self: typing.Any, element: dict[str, object]) -> dict[str, object]:
+        def map(self, element: JSONDict) -> JSONDict:
             """Map an element to a formatted input/target dictionary.
 
             Args:
