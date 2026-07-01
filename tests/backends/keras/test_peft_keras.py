@@ -91,7 +91,7 @@ def test_apply_lora_keras_real_import(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
     monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": MockKerasModel}))
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "keras_nlp.models" and "GemmaCausalLM" in fromlist:
             return sys.modules["keras_nlp.models"]
         import builtins
@@ -110,8 +110,11 @@ def test_apply_lora_keras_mock_fallback(monkeypatch: pytest.MonkeyPatch) -> None
             return "input"
 
         class layers:
-            Embedding = lambda *args, **kwargs: lambda x: "x"
-            Dense = lambda *args, **kwargs: lambda x: "x"
+            def Embedding(*args, **kwargs):
+                return lambda x: "x"
+
+            def Dense(*args, **kwargs):
+                return lambda x: "x"
 
         class Model:
             def __init__(self, *args, **kwargs):
@@ -122,7 +125,7 @@ def test_apply_lora_keras_mock_fallback(monkeypatch: pytest.MonkeyPatch) -> None
 
     orig_import = builtins.__import__
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "keras_nlp.models":
             msg = "mock"
             raise ImportError(msg)

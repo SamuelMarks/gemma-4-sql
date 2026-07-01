@@ -179,68 +179,88 @@ def test_jax_etl_dist() -> None:
         etl.datasets = original_datasets
         etl.grain = original_grain
 
-import gemma_4_sql.backends.jax.etl as jax_etl
+
+def _dummy():
+    pass
+
+
+import gemma_4_sql.backends.jax.etl as jax_etl  # noqa: E402
+
 
 def test_jax_etl_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(jax_etl, "datasets", "mock")
     monkeypatch.setattr(jax_etl, "grain", "mock")
-    
+
     class MockDatasets:
         def load_dataset(self, name, split):
             return [{"question": "q", "query": "a"}]
-    
+
     class MockGrain:
         class RandomAccessDataSource:
             pass
+
         class MapTransform:
             pass
+
         class IndexSampler:
             def __init__(self, **kwargs):
                 pass
+
         class DataLoader:
             def __init__(self, **kwargs):
                 self.data_source = kwargs.get("data_source")
+
         def Batch(self, **kwargs):
             return "batch"
+
         def NoSharding(self):
             return "no_sharding"
+
         def JAXDistributedSharding(self):
             return "jax_sharding"
-            
+
     monkeypatch.setattr(jax_etl, "datasets", MockDatasets())
     monkeypatch.setattr(jax_etl, "grain", MockGrain())
-    
+
     res = jax_etl.build_dataloader("ds", "split", batch_size=2)
     assert res["status"] == "loaded"
-    
+
+
 def test_jax_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(jax_etl, "datasets", "mock")
     monkeypatch.setattr(jax_etl, "grain", "mock")
     monkeypatch.setattr(jax_etl, "duckdb", None)
-    
+
     with pytest.raises(ImportError, match="duckdb is required"):
         jax_etl.build_dataloader("ds", "split", duckdb_path="path", duckdb_table="table")
+
 
 def test_jax_etl_duckdb_real(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockDatasets:
         def load_dataset(self, name, split):
             return [{"question": "q", "query": "a"}]
-    
+
     class MockGrain:
         class RandomAccessDataSource:
             pass
+
         class MapTransform:
             pass
+
         class IndexSampler:
             def __init__(self, **kwargs):
                 pass
+
         class DataLoader:
             def __init__(self, **kwargs):
                 self.data_source = kwargs.get("data_source")
+
         def Batch(self, **kwargs):
             return "batch"
+
         def NoSharding(self):
             return "no_sharding"
+
         def JAXDistributedSharding(self):
             return "jax_sharding"
 
@@ -253,51 +273,61 @@ def test_jax_etl_duckdb_real(monkeypatch: pytest.MonkeyPatch) -> None:
                             class MockDF:
                                 def to_dict(self, orient):
                                     return [{"question": "db_q", "query": "db_a"}]
+
                             return MockDF()
+
                     return MockCursor()
+
                 def close(self):
                     pass
+
             return MockConn()
 
     monkeypatch.setattr(jax_etl, "datasets", MockDatasets())
     monkeypatch.setattr(jax_etl, "grain", MockGrain())
     monkeypatch.setattr(jax_etl, "duckdb", MockDuckDB())
-    
+
     res = jax_etl.build_dataloader("ds", "split", duckdb_path="path", duckdb_table="table", distributed=True)
     assert res["status"] == "loaded"
+
 
 def test_jax_etl_transforms(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockDatasets:
         def load_dataset(self, name, split):
             return [{"question": "q", "query": "a"}, {"sql_prompt": "sp", "sql": "s"}]
-            
+
     class MockGrain:
         class RandomAccessDataSource:
             pass
+
         class MapTransform:
             pass
+
         class IndexSampler:
             def __init__(self, **kwargs):
                 pass
+
         class DataLoader:
             def __init__(self, **kwargs):
                 self.ops = kwargs.get("operations")
                 self.ds = kwargs.get("data_source")
+
         def Batch(self, **kwargs):
             return "batch"
+
         def NoSharding(self):
             return "no_sharding"
-            
+
     monkeypatch.setattr(jax_etl, "datasets", MockDatasets())
     monkeypatch.setattr(jax_etl, "grain", MockGrain())
-    
+
     res = jax_etl.build_dataloader("ds", "split")
     loader = res["loader"]
-    
+
     ds = loader.ds
     assert len(ds) == 2
     assert ds[0]["question"] == "q"
-    
+
     transform = loader.ops[0]
     out1 = transform.map(ds[0])
     out2 = transform.map(ds[1])
@@ -305,13 +335,13 @@ def test_jax_etl_transforms(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_etl_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    import sys
     import importlib
-    
+    import sys
+
     # Mock duckdb import failure
     monkeypatch.setitem(sys.modules, "duckdb", None)
     importlib.reload(jax_etl)
-    
+
     # Restore original to not break other tests
     monkeypatch.undo()
     importlib.reload(jax_etl)

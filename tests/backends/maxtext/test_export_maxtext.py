@@ -18,10 +18,13 @@ def test_export_model_success(monkeypatch: pytest.MonkeyPatch, tmp_path):
 
     class MockJax:
         class random:
-            PRNGKey = lambda x: x
+            def PRNGKey(x):
+                return x
 
     class MockJnp:
-        zeros = lambda *args, **kwargs: 1
+        def zeros(*args, **kwargs):
+            return 1
+
         int32 = 1
 
     class MockOcp:
@@ -60,7 +63,7 @@ def test_export_model_success(monkeypatch: pytest.MonkeyPatch, tmp_path):
 
     orig_import = builtins.__import__
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "maxtext.models.gemma4" and "Gemma4Model" in fromlist:
             return type("M", (), {"Gemma4Model": MockGemma4Model})
         return orig_import(name, globals, locals, fromlist, level)
@@ -76,10 +79,13 @@ def test_export_model_error(monkeypatch: pytest.MonkeyPatch, tmp_path):
 
     class MockJax:
         class random:
-            PRNGKey = lambda x: x
+            def PRNGKey(x):
+                return x
 
     class MockJnp:
-        zeros = lambda *args, **kwargs: 1
+        def zeros(*args, **kwargs):
+            return 1
+
         int32 = 1
 
     class MockOcp:
@@ -111,7 +117,7 @@ def test_export_model_error(monkeypatch: pytest.MonkeyPatch, tmp_path):
 
     orig_import = builtins.__import__
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "maxtext.models.gemma4" and "Gemma4Model" in fromlist:
             msg = "err"
             raise ValueError(msg)

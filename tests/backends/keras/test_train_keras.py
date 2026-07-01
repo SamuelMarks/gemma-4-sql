@@ -288,10 +288,12 @@ def test_train_keras_real_import(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class MockKeras:
         class optimizers:
-            AdamW = lambda *args, **kwargs: "opt"
+            def AdamW(*args, **kwargs):
+                return "opt"
 
         class losses:
-            SparseCategoricalCrossentropy = lambda *args, **kwargs: "loss"
+            def SparseCategoricalCrossentropy(*args, **kwargs):
+                return "loss"
 
     monkeypatch.setattr(mdl, "keras", MockKeras())
     monkeypatch.setattr(mdl, "tf", type("MockTf", (), {"zeros": lambda *args, **kwargs: None, "int32": "int32"}))
@@ -302,7 +304,7 @@ def test_train_keras_real_import(monkeypatch: pytest.MonkeyPatch) -> None:
 
     orig_import = builtins.__import__
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "keras_nlp.models" and "GemmaCausalLM" in fromlist:
             return sys.modules["keras_nlp.models"]
         return orig_import(name, globals, locals, fromlist, level)
@@ -334,10 +336,12 @@ def test_train_keras_real_import_with_loader_iter(monkeypatch: pytest.MonkeyPatc
 
     class MockKeras:
         class optimizers:
-            AdamW = lambda *args, **kwargs: "opt"
+            def AdamW(*args, **kwargs):
+                return "opt"
 
         class losses:
-            SparseCategoricalCrossentropy = lambda *args, **kwargs: "loss"
+            def SparseCategoricalCrossentropy(*args, **kwargs):
+                return "loss"
 
     monkeypatch.setattr(mdl, "keras", MockKeras())
     monkeypatch.setattr(mdl, "tf", type("MockTf", (), {"zeros": lambda *args, **kwargs: None, "int32": "int32"}))
@@ -348,7 +352,7 @@ def test_train_keras_real_import_with_loader_iter(monkeypatch: pytest.MonkeyPatc
 
     orig_import = builtins.__import__
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "keras_nlp.models" and "GemmaCausalLM" in fromlist:
             return sys.modules["keras_nlp.models"]
         return orig_import(name, globals, locals, fromlist, level)

@@ -1,6 +1,0 @@
-@@ -273,4 +273,4 @@
-         return {"loader": None}
- 
-     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)  # type: ignore[attr-defined]
--    train_model("sft", "mod", "dat", 2, 0.1)
-+    print(train_model("sft", "mod", "dat", 2, 0.1))

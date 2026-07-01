@@ -5,7 +5,8 @@ def test_export_model_success(monkeypatch: pytest.MonkeyPatch, tmp_path):
     import gemma_4_sql.backends.pytorch.export as m_export
 
     class MockTorch:
-        zeros = lambda *args, **kwargs: 1
+        def zeros(*args, **kwargs):
+            return 1
 
     monkeypatch.setattr(m_export, "torch", MockTorch())
     monkeypatch.setattr(m_export, "save_file", lambda *args, **kwargs: None)
@@ -22,7 +23,7 @@ def test_export_model_success(monkeypatch: pytest.MonkeyPatch, tmp_path):
 
     orig_import = builtins.__import__
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "transformers.models.gemma4" and "Gemma4ForCausalLM" in fromlist:
             return type("M", (), {"Gemma4ForCausalLM": MockGemma4ForCausalLM})
         return orig_import(name, globals, locals, fromlist, level)
@@ -37,7 +38,8 @@ def test_export_model_error(monkeypatch: pytest.MonkeyPatch, tmp_path):
     import gemma_4_sql.backends.pytorch.export as m_export
 
     class MockTorch:
-        zeros = lambda *args, **kwargs: 1
+        def zeros(*args, **kwargs):
+            return 1
 
     monkeypatch.setattr(m_export, "torch", MockTorch())
     monkeypatch.setattr(m_export, "save_file", lambda *args, **kwargs: None)
@@ -46,7 +48,7 @@ def test_export_model_error(monkeypatch: pytest.MonkeyPatch, tmp_path):
 
     orig_import = builtins.__import__
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "transformers.models.gemma4" and "Gemma4ForCausalLM" in fromlist:
             msg = "err"
             raise ValueError(msg)

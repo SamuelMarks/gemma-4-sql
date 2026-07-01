@@ -66,15 +66,26 @@ def test_benchmark_test_mode(monkeypatch: pytest.MonkeyPatch):
     import gemma_4_sql.backends.pytorch.benchmark as m_benchmark
 
     class MockTorch:
-        zeros = lambda *args, **kwargs: type("T", (), {"to": lambda self, d: self})()
+        def zeros(*args, **kwargs):
+            return type("T", (), {"to": lambda self, d: self})()
+
         long = 1
-        no_grad = lambda: type("CM", (), {"__enter__": lambda self: None, "__exit__": lambda self, *a: None})()
+
+        def no_grad():
+            return type("CM", (), {"__enter__": lambda self: None, "__exit__": lambda self, *a: None})()
 
         class cuda:
-            is_available = lambda: True
-            synchronize = lambda: None
-            max_memory_allocated = lambda: 1024 * 1024 * 10
-            reset_peak_memory_stats = lambda: None
+            def is_available():
+                return True
+
+            def synchronize():
+                return None
+
+            def max_memory_allocated():
+                return 1024 * 1024 * 10
+
+            def reset_peak_memory_stats():
+                return None
 
     monkeypatch.setattr(m_benchmark, "torch", MockTorch)
     monkeypatch.setattr(m_benchmark, "AutoModelForCausalLM", object())
@@ -108,7 +119,8 @@ def test_chat_error(monkeypatch: pytest.MonkeyPatch):
             return "tmpl"
 
     class MockTokenizer:
-        from_pretrained = lambda *args, **kwargs: MockTokenizerObj()
+        def from_pretrained(*args, **kwargs):
+            return MockTokenizerObj()
 
     monkeypatch.setattr(m_chat, "AutoTokenizer", MockTokenizer)
 

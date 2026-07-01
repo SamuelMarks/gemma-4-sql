@@ -13,8 +13,11 @@ class MockKeras:
         return "input"
 
     class layers:
-        Embedding = lambda *args, **kwargs: lambda x: "x"
-        Dense = lambda *args, **kwargs: lambda x: "x"
+        def Embedding(*args, **kwargs):
+            return lambda x: "x"
+
+        def Dense(*args, **kwargs):
+            return lambda x: "x"
 
 
 def test_export_keras_real(monkeypatch):

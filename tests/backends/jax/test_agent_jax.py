@@ -82,24 +82,27 @@ def test_run_agentic_loop() -> None:
     if "Syntax error" not in res["history"][1]["prompt"]:  # type: ignore[index]
         raise AssertionError
 
+
 def test_run_agentic_loop_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     jax_agent = __import__("gemma_4_sql.backends.jax.agent", fromlist=[""])
-    
+
     class MockLiveDatabaseEngineFail:
         def __init__(self, **_kwargs: object) -> None:
             pass
+
         def execute_with_feedback(self, _query: str) -> tuple[bool, list[object], str]:
             return (False, [], "Syntax error that never fixes")
+
         def close(self) -> None:
             pass
-            
+
     monkeypatch.setattr(jax_agent, "LiveDatabaseEngine", MockLiveDatabaseEngineFail)
-    
+
     def mock_generate_sql(_model_name: str, _prompt: str) -> dict[str, object]:
         return {"sql": "SELECT * FROM t"}
-    
+
     monkeypatch.setattr(jax_agent, "generate_sql", mock_generate_sql)
-    
+
     res = run_agentic_loop(model_name="m", prompt="p", max_retries=2)
     assert res["attempts"] == 2
     assert res["success"] is False

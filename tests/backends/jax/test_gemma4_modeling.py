@@ -5,7 +5,7 @@ from flax import nnx
 orig_jit = jax.jit
 jax.jit = lambda f, *args, **kwargs: f
 
-from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM, modeling
+from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM, modeling  # noqa: E402
 
 
 def test_modeling_coverage():

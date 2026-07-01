@@ -319,7 +319,9 @@ def test_train_model_real(monkeypatch: pytest.MonkeyPatch):
         class Tensor:
             pass
 
-        zeros = lambda *args, **kwargs: type("T", (), {"view": lambda self, *a: self, "size": lambda self, *a: 1})()
+        def zeros(*args, **kwargs):
+            return type("T", (), {"view": lambda self, *a: self, "size": lambda self, *a: 1})()
+
         long = 1
 
     class MockOptim:

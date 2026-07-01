@@ -93,11 +93,15 @@ def test_evaluate_model_with_dataloader_tuple(monkeypatch: pytest.MonkeyPatch) -
             def __init__(self, *args: object, **kwargs: object) -> None:
                 pass
 
-        Input = lambda *args, **kwargs: None
+        def Input(*args, **kwargs):
+            return None
 
         class layers:
-            Embedding = lambda *args, **kwargs: lambda x: "x"
-            Dense = lambda *args, **kwargs: lambda x: "x"
+            def Embedding(*args, **kwargs):
+                return lambda x: "x"
+
+            def Dense(*args, **kwargs):
+                return lambda x: "x"
 
     class MockTfTensor:
         def __init__(self, data):

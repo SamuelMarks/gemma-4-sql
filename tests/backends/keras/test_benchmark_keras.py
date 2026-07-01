@@ -61,7 +61,8 @@ def test_benchmark_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_benchmark_keras_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockKeras:
-        Input = lambda *args, **kwargs: None
+        def Input(*args, **kwargs):
+            return None
 
         class layers:
             class Embedding:
@@ -78,7 +79,8 @@ def test_benchmark_keras_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> N
                 def __call__(self, x: object) -> object:
                     return x
 
-        Model = lambda *args, **kwargs: lambda x: x
+        def Model(*args, **kwargs):
+            return lambda x: x
 
     monkeypatch.setattr(bm, "tf", MockTf())
     monkeypatch.setattr(bm, "keras", MockKeras())
@@ -89,7 +91,8 @@ def test_benchmark_keras_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_benchmark_keras_real_mem(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockKeras:
-        Input = lambda *args, **kwargs: None
+        def Input(*args, **kwargs):
+            return None
 
         class layers:
             class Embedding:
@@ -106,7 +109,8 @@ def test_benchmark_keras_real_mem(monkeypatch: pytest.MonkeyPatch) -> None:
                 def __call__(self, x: object) -> object:
                     return x
 
-        Model = lambda *args, **kwargs: lambda x: x
+        def Model(*args, **kwargs):
+            return lambda x: x
 
     mock_tf = MockTf()
     mock_tf.config = type("MockConfig", (), {"experimental": type("MockExp", (), {"get_memory_info": lambda x: {"current": 1024 * 1024}})})()

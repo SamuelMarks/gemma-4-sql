@@ -356,7 +356,7 @@ def test_train_imports_success(monkeypatch: pytest.MonkeyPatch):
 
     orig_import = builtins.__import__
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "maxtext.models.gemma4" and "Gemma4Model" in fromlist:
             return type("M", (), {"Gemma4Model": "mocked_gemma4"})
         return orig_import(name, globals, locals, fromlist, level)

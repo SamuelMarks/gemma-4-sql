@@ -70,7 +70,7 @@ def test_export_jax_real_with_flax(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
     original_import = __builtins__["__import__"]
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "flax" and "nnx" in fromlist:
 
             class Module:

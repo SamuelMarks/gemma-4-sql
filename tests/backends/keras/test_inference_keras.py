@@ -98,7 +98,7 @@ def test_inference_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
     monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": MockKerasModel}))
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
         if name == "keras_nlp.models" and "GemmaCausalLM" in fromlist:
             return sys.modules["keras_nlp.models"]
         import builtins

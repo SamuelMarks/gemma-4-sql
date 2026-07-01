@@ -3,6 +3,8 @@
 import sys
 from unittest import mock
 
+import pytest
+
 import gemma_4_sql.backends.maxtext.few_shot as fs
 
 
@@ -23,9 +25,6 @@ def test_build_few_shot_prompt_maxtext_missing() -> object:  # type: ignore[retu
         res = fs.build_few_shot_prompt("foo", "prompt", [])
         if not res["status"] == "mocked_missing_maxtext":
             raise AssertionError
-
-
-import pytest
 
 
 def test_few_shot_success(monkeypatch: pytest.MonkeyPatch):

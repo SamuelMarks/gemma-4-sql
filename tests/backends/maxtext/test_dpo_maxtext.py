@@ -178,12 +178,18 @@ def test_dpo_distributed_initialize(monkeypatch: pytest.MonkeyPatch):
     import gemma_4_sql.backends.maxtext.dpo as tr
 
     class MockJax:
-        jit = lambda x: x
-        value_and_grad = lambda x, **kw: lambda *a, **kw: (type("L", (), {"item": lambda self: 1.0})(), 1)
+        def jit(x):
+            return x
+
+        def value_and_grad(x, **kw):
+            return lambda *a, **kw: (type("L", (), {"item": lambda self: 1.0})(), 1)
 
         class random:
-            PRNGKey = lambda x: x
-            split = lambda x: (x, x)
+            def PRNGKey(x):
+                return x
+
+            def split(x):
+                return (x, x)
 
         class distributed:
             @staticmethod
@@ -191,14 +197,23 @@ def test_dpo_distributed_initialize(monkeypatch: pytest.MonkeyPatch):
                 pass
 
     class MockOptax:
-        apply_updates = lambda *args, **kwargs: None
-        adamw = lambda *args, **kwargs: type("Opt", (), {"init": lambda self, x: None, "update": lambda *a, **kw: (None, None)})()
+        def apply_updates(*args, **kwargs):
+            return None
+
+        def adamw(*args, **kwargs):
+            return type("Opt", (), {"init": lambda self, x: None, "update": lambda *a, **kw: (None, None)})()
 
     class MockJnp:
-        ones = lambda *args, **kwargs: 1
-        zeros = lambda *args, **kwargs: 1
+        def ones(*args, **kwargs):
+            return 1
+
+        def zeros(*args, **kwargs):
+            return 1
+
         int32 = 1
-        mean = lambda *args, **kwargs: 1
+
+        def mean(*args, **kwargs):
+            return 1
 
     monkeypatch.setattr(tr, "jax", MockJax)
     monkeypatch.setattr(tr, "optax", MockOptax)
@@ -212,12 +227,18 @@ def test_dpo_distributed_initialize_fail(monkeypatch: pytest.MonkeyPatch):
     import gemma_4_sql.backends.maxtext.dpo as tr
 
     class MockJax:
-        jit = lambda x: x
-        value_and_grad = lambda x, **kw: lambda *a, **kw: (type("L", (), {"item": lambda self: 1.0})(), 1)
+        def jit(x):
+            return x
+
+        def value_and_grad(x, **kw):
+            return lambda *a, **kw: (type("L", (), {"item": lambda self: 1.0})(), 1)
 
         class random:
-            PRNGKey = lambda x: x
-            split = lambda x: (x, x)
+            def PRNGKey(x):
+                return x
+
+            def split(x):
+                return (x, x)
 
         class distributed:
             @staticmethod
@@ -226,14 +247,23 @@ def test_dpo_distributed_initialize_fail(monkeypatch: pytest.MonkeyPatch):
                 raise RuntimeError(msg)
 
     class MockOptax:
-        apply_updates = lambda *args, **kwargs: None
-        adamw = lambda *args, **kwargs: type("Opt", (), {"init": lambda self, x: None, "update": lambda *a, **kw: (None, None)})()
+        def apply_updates(*args, **kwargs):
+            return None
+
+        def adamw(*args, **kwargs):
+            return type("Opt", (), {"init": lambda self, x: None, "update": lambda *a, **kw: (None, None)})()
 
     class MockJnp:
-        ones = lambda *args, **kwargs: 1
-        zeros = lambda *args, **kwargs: 1
+        def ones(*args, **kwargs):
+            return 1
+
+        def zeros(*args, **kwargs):
+            return 1
+
         int32 = 1
-        mean = lambda *args, **kwargs: 1
+
+        def mean(*args, **kwargs):
+            return 1
 
     monkeypatch.setattr(tr, "jax", MockJax)
     monkeypatch.setattr(tr, "optax", MockOptax)
