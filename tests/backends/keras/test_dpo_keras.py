@@ -44,6 +44,17 @@ class MockGradientTape:
         return ["grads"]
 
 
+def mock_dpo_loss(*args, **kwargs):
+    return MockTensor(), MockTensor(), MockTensor()
+
+
+def test_dpo_loss():
+    import gemma_4_sql.backends.keras.dpo as mdl
+
+    mdl.tf = MockTf()
+    mdl.dpo_loss(MockTensor(), MockTensor(), MockTensor(), MockTensor())
+
+
 class MockTf:
     float32 = "float32"
     int32 = "int32"
@@ -151,3 +162,19 @@ def test_run_dpo_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = run_dpo("model", "data")
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_dpo_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.dpo as mdl
+
+    monkeypatch.setitem(sys.modules, "keras", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+
+    monkeypatch.setitem(sys.modules, "tensorflow", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    importlib.reload(mdl)

@@ -11,7 +11,7 @@ import jax.numpy as jnp
 from flax import nnx
 
 if TYPE_CHECKING:
-    from jaxtyping import Array
+    from jaxtyping import Array  # pragma: no cover
 
 
 def segment_ids_to_positions(segment_ids: Array) -> Array:

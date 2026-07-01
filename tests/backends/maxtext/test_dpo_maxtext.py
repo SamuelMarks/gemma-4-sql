@@ -160,3 +160,84 @@ def test_run_dpo_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = run_dpo("sft", "dat", epochs=2, learning_rate=0.1, test_mode=True)
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_dpo_imports_fail(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.maxtext.dpo as m_dpo
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(m_dpo)
+    monkeypatch.undo()
+    importlib.reload(m_dpo)
+
+
+def test_dpo_distributed_initialize(monkeypatch: pytest.MonkeyPatch):
+    import gemma_4_sql.backends.maxtext.dpo as tr
+
+    class MockJax:
+        jit = lambda x: x
+        value_and_grad = lambda x, **kw: lambda *a, **kw: (type("L", (), {"item": lambda self: 1.0})(), 1)
+
+        class random:
+            PRNGKey = lambda x: x
+            split = lambda x: (x, x)
+
+        class distributed:
+            @staticmethod
+            def initialize():
+                pass
+
+    class MockOptax:
+        apply_updates = lambda *args, **kwargs: None
+        adamw = lambda *args, **kwargs: type("Opt", (), {"init": lambda self, x: None, "update": lambda *a, **kw: (None, None)})()
+
+    class MockJnp:
+        ones = lambda *args, **kwargs: 1
+        zeros = lambda *args, **kwargs: 1
+        int32 = 1
+        mean = lambda *args, **kwargs: 1
+
+    monkeypatch.setattr(tr, "jax", MockJax)
+    monkeypatch.setattr(tr, "optax", MockOptax)
+    monkeypatch.setattr(tr, "jnp", MockJnp)
+    monkeypatch.setattr(tr, "Gemma4Model", lambda *args, **kwargs: type("M", (), {"init": lambda *args: None, "apply": lambda *args, **kwargs: None})())
+    res = tr.run_dpo("sft", "d", 1, 0.1, 0.1, test_mode=False)
+    assert res["status"] == "completed"
+
+
+def test_dpo_distributed_initialize_fail(monkeypatch: pytest.MonkeyPatch):
+    import gemma_4_sql.backends.maxtext.dpo as tr
+
+    class MockJax:
+        jit = lambda x: x
+        value_and_grad = lambda x, **kw: lambda *a, **kw: (type("L", (), {"item": lambda self: 1.0})(), 1)
+
+        class random:
+            PRNGKey = lambda x: x
+            split = lambda x: (x, x)
+
+        class distributed:
+            @staticmethod
+            def initialize():
+                msg = "err"
+                raise RuntimeError(msg)
+
+    class MockOptax:
+        apply_updates = lambda *args, **kwargs: None
+        adamw = lambda *args, **kwargs: type("Opt", (), {"init": lambda self, x: None, "update": lambda *a, **kw: (None, None)})()
+
+    class MockJnp:
+        ones = lambda *args, **kwargs: 1
+        zeros = lambda *args, **kwargs: 1
+        int32 = 1
+        mean = lambda *args, **kwargs: 1
+
+    monkeypatch.setattr(tr, "jax", MockJax)
+    monkeypatch.setattr(tr, "optax", MockOptax)
+    monkeypatch.setattr(tr, "jnp", MockJnp)
+    monkeypatch.setattr(tr, "Gemma4Model", lambda *args, **kwargs: type("M", (), {"init": lambda *args: None, "apply": lambda *args, **kwargs: None})())
+    res = tr.run_dpo("sft", "d", 1, 0.1, 0.1, test_mode=False)
+    assert res["status"] == "completed"

@@ -32,13 +32,13 @@ class MockJnp:
     int32 = 1
 
     @staticmethod
-    def zeros(shape: object, _dtype: object = None) -> object:
+    def zeros(shape: object, **_kwargs: object) -> object:
         """Initialize function zeros.
 
         Args:
         ----
         shape: Description of shape.
-        dtype: Description of dtype.
+        kwargs: Description of kwargs.
 
         """
         return MockJnpTensor(shape)
@@ -69,10 +69,43 @@ class MockJaxRandom:
         return seed
 
 
+class MockJaxSharding:
+    """Initialize class MockJaxSharding."""
+
+    class Mesh:
+        """Initialize class Mesh."""
+
+        def __init__(self, devices: object, axis_names: object) -> None:
+            self.devices = devices
+            self.axis_names = axis_names
+
+    class NamedSharding:
+        """Initialize class NamedSharding."""
+
+        def __init__(self, mesh: object, spec: object) -> None:
+            self.mesh = mesh
+            self.spec = spec
+
+    class PartitionSpec:
+        """Initialize class PartitionSpec."""
+
+        def __init__(self, *args: object) -> None:
+            self.args = args
+
+
 class MockJax:
     """Initialize class MockJax."""
 
     random = MockJaxRandom()
+    sharding = MockJaxSharding()
+
+    @staticmethod
+    def devices() -> list[str]:
+        return ["cpu"]
+
+    @staticmethod
+    def device_put(x: object, _sharding: object) -> object:
+        return x
 
     @staticmethod
     def jit(fn: object) -> object:
@@ -112,6 +145,11 @@ class MockJax:
 
 class MockOptax:
     """Initialize class MockOptax."""
+
+    @staticmethod
+    def warmup_cosine_decay_schedule(**_kwargs: object) -> object:
+        """Initialize function warmup_cosine_decay_schedule."""
+        return "schedule"
 
     @staticmethod
     def adamw(_lr: object) -> object:
@@ -187,18 +225,18 @@ class MockGemma4Config:
 class MockGemma4ForCausalLM:
     """Initialize class MockGemma4ForCausalLM."""
 
-    def __init__(self: typing.Any, config: object, _rngs: object) -> None:
+    def __init__(self: typing.Any, config: object, **_kwargs: object) -> None:
         """Initialize function __init__.
 
         Args:
         ----
         config: Description of config.
-        rngs: Description of rngs.
+        _kwargs: Description of kwargs.
 
         """
         self.config = config
 
-    def __call__(self: typing.Any, _inputs: object) -> object:
+    def __call__(self: typing.Any, inputs: object) -> object:
         """Initialize function __call__.
 
         Args:
@@ -393,3 +431,20 @@ def test_train_model_jax_no_loader_fallback(monkeypatch: object) -> object:  # t
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)  # type: ignore[attr-defined]
     train_model("sft", "mod", "dat", 2, 0.1)
+
+
+def test_train_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.jax.train as mdl
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(mdl)
+
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "flax", None)
+    importlib.reload(mdl)
+
+    monkeypatch.undo()
+    importlib.reload(mdl)

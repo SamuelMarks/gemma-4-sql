@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from fastapi import Request
+    from fastapi import Request  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 

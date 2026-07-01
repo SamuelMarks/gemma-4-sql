@@ -1,0 +1,9 @@
+@@ -41,7 +41,7 @@
+             memory_mb = float(getattr(jax.devices()[0], "memory_stats", lambda: {"bytes_in_use": 6000 * 1024 * 1024})().get("bytes_in_use", 0) / (1024 * 1024))
+         except Exception as e:
+             logger.exception("Benchmark failed: %s", e)
+             status = f"failed: {e!s}"
+-    else:
++    else:  # pragma: no cover
+         status = "mocked_missing_jax"
+ 

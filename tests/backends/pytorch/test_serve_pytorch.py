@@ -127,3 +127,20 @@ async def test_generate_endpoint() -> None:
     request.is_disconnected.return_value = True
     result2 = await generate_func(request)
     assert "error" in result2.content
+
+
+def test_serve_imports_success(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.pytorch.serve as m_serve
+
+    monkeypatch.setitem(sys.modules, "uvicorn", type("M", (), {})())
+    monkeypatch.setitem(sys.modules, "fastapi", type("M", (), {"FastAPI": None, "Request": None})())
+    monkeypatch.setitem(sys.modules, "fastapi.responses", type("M", (), {"JSONResponse": None})())
+    monkeypatch.setitem(sys.modules, "vllm", type("M", (), {"AsyncEngineArgs": None, "AsyncLLMEngine": None})())
+    monkeypatch.setitem(sys.modules, "vllm.utils", type("M", (), {"random_uuid": None})())
+
+    importlib.reload(m_serve)
+    monkeypatch.undo()
+    importlib.reload(m_serve)

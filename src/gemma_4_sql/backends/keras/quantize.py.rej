@@ -1,0 +1,9 @@
+@@ -8,7 +8,7 @@
+ 
+ try:
+     import keras
+-    import tensorflow as tf
++    import tensorflow as tf  # pragma: no cover
+ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
+     keras = None
+     tf = None

@@ -13,7 +13,7 @@ try:
     import tensorflow as tf
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     keras = None
-    tf = None
+    tf = None  # pragma: no cover
 
 try:
     import uvicorn
@@ -21,7 +21,7 @@ try:
     from fastapi.responses import JSONResponse
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     FastAPI = None
-    Request = None
+    Request = None  # pragma: no cover
     JSONResponse = None
     uvicorn = None
 

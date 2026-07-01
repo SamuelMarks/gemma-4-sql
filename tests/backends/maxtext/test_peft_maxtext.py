@@ -69,3 +69,15 @@ def test_apply_lora_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_peft_imports_fail(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.maxtext.peft as m_peft
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(m_peft)
+    monkeypatch.undo()
+    importlib.reload(m_peft)

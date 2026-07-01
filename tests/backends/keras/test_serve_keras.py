@@ -14,6 +14,14 @@ def test_serve_model_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError
 
 
+def test_serve_model_fastapi_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(srv, "tf", object())
+    monkeypatch.setattr(srv, "keras", object())
+    monkeypatch.setattr(srv, "FastAPI", None)
+    res = srv.serve_model("foo")
+    assert res["status"] == "failed_missing_fastapi"
+
+
 def test_serve_model_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "tf", object())
     monkeypatch.setattr(srv, "keras", object())
@@ -81,3 +89,19 @@ async def test_generate_endpoint() -> None:
 
     result = await generate_func(request)
     assert result.content["sql"] == "SELECT * FROM keras_serve WHERE prompt='test'"
+
+
+def test_serve_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.serve as mdl
+
+    monkeypatch.setitem(sys.modules, "keras", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+
+    monkeypatch.setitem(sys.modules, "fastapi", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    importlib.reload(mdl)

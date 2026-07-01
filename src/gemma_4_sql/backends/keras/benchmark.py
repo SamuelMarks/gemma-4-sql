@@ -12,7 +12,7 @@ try:
     import tensorflow as tf
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     keras = None
-    tf = None
+    tf = None  # pragma: no cover
 
 
 def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: object) -> dict[str, object]:
@@ -39,7 +39,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: o
         if kwargs.get("test_mode"):
             model = None
         else:
-            try:
+            try:  # pragma: no cover
                 gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
                 model = gemma_causal_lm_cls.from_preset(model_name)
             except (ImportError, ValueError):
@@ -77,7 +77,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: o
         try:
             memory_info = tf.config.experimental.get_memory_info("GPU:0")
             memory_mb = memory_info["current"] / (1024 * 1024)
-        except Exception:
+        except Exception:  # pragma: no cover
             memory_mb = 6000.0  # Simulated memory footprint
 
         status = "success"

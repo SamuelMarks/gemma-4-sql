@@ -42,3 +42,33 @@ def test_quantize_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     res = quantize_model("model", "unknown")
     if "unsupported" not in str(res["status"]):
         raise AssertionError
+
+
+def test_quantize_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.quantize as mdl
+
+    monkeypatch.setitem(sys.modules, "keras", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    importlib.reload(mdl)
+
+
+def test_quantize_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(kr_quantize, "keras", type("MockKeras", (), {}))
+    res = kr_quantize.quantize_model("model", "awq")
+    assert res["status"] == "quantized_awq"
+
+
+def test_quantize_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(kr_quantize, "keras", type("MockKeras", (), {}))
+
+    def raise_err(*args: object, **kwargs: object) -> None:
+        msg = "err"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(kr_quantize.logger, "warning", raise_err)
+    res = kr_quantize.quantize_model("model", "unsupported")
+    assert "failed" in res["status"]

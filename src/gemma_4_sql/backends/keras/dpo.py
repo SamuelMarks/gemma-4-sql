@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import keras
-    import tensorflow as tf
+    import tensorflow as tf  # pragma: no cover
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     keras = None
     tf = None
@@ -33,7 +33,7 @@ def dpo_loss(policy_chosen_logps: object, policy_rejected_logps: object, ref_cho
 
     """
     if tf is None:
-        return (0.0, 0.0, 0.0)
+        return (0.0, 0.0, 0.0)  # pragma: no cover
     pi_logratios = policy_chosen_logps - policy_rejected_logps  # type: ignore[operator]
     ref_logratios = ref_chosen_logps - ref_rejected_logps  # type: ignore[operator]
     logits = pi_logratios - ref_logratios

@@ -73,3 +73,20 @@ def test_apply_lora_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_peft_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.jax.peft as mdl
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(mdl)
+
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "flax", None)
+    importlib.reload(mdl)
+
+    monkeypatch.undo()
+    importlib.reload(mdl)

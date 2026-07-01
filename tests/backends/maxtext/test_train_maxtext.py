@@ -32,7 +32,7 @@ class MockJnp:
     int32 = 1
 
     @staticmethod
-    def zeros(shape: object, _dtype: object = None) -> object:
+    def zeros(shape: object, **kwargs: object) -> object:
         """Initialize function zeros.
 
         Args:
@@ -58,7 +58,7 @@ class MockJaxRandom:
     """Initialize class MockJaxRandom."""
 
     @staticmethod
-    def prngkey(seed: object) -> object:
+    def PRNGKey(seed: object) -> object:
         """Initialize function prngkey.
 
         Args:
@@ -313,3 +313,55 @@ def test_train_model_maxtext_no_loader_fallback(monkeypatch: object) -> object: 
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)  # type: ignore[attr-defined]
     train_model("sft", "mod", "dat", 2, 0.1)
+
+
+def test_train_imports_fail(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.maxtext.train as m_train
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(m_train)
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "maxtext.train", None)
+    importlib.reload(m_train)
+    monkeypatch.undo()
+    importlib.reload(m_train)
+
+
+@pytest.mark.usefixtures("_mock_maxtext_env")
+def test_train_model_maxtext_integration(monkeypatch: pytest.MonkeyPatch):
+    import gemma_4_sql.backends.maxtext.train as m_train
+
+    class MockMaxTextTrain:
+        @staticmethod
+        def main(*args, **kwargs):
+            pass
+
+    monkeypatch.setattr(m_train, "maxtext_train", MockMaxTextTrain())
+    res = m_train.train_model("sft", "mod", "dat", 2, 0.1, test_mode=False)
+    assert res["status"] == "completed"
+
+
+def test_train_imports_success(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.maxtext.train as m_train
+
+    monkeypatch.setitem(sys.modules, "maxtext.train", type("M", (), {})())
+    monkeypatch.setitem(sys.modules, "maxtext", type("M", (), {})())
+    import builtins
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "maxtext.models.gemma4" and "Gemma4Model" in fromlist:
+            return type("M", (), {"Gemma4Model": "mocked_gemma4"})
+        return orig_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+    importlib.reload(m_train)
+    monkeypatch.undo()
+    importlib.reload(m_train)

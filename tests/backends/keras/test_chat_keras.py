@@ -43,3 +43,19 @@ def test_chat_turn_keras_error(monkeypatch: pytest.MonkeyPatch) -> object:  # ty
     res = chat.chat_turn("foo", [{"role": "user", "content": "hi"}], "how are you?")
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_chat_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.chat as mdl
+
+    monkeypatch.setitem(sys.modules, "keras", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+
+    monkeypatch.setitem(sys.modules, "tensorflow", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    importlib.reload(mdl)

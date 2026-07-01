@@ -17,7 +17,7 @@ from jax.sharding import PartitionSpec
 from .rope import RoPE, apply_rope
 
 if TYPE_CHECKING:
-    from jaxtyping import Array
+    from jaxtyping import Array  # pragma: no cover
 
 _linear_sig = inspect.signature(nnx.Linear.__init__)
 _LINEAR_SUPPORTS_METADATA = "kernel_metadata" in _linear_sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in _linear_sig.parameters.values())
@@ -295,10 +295,10 @@ class Gemma4AudioAttention(nnx.Module):  # type: ignore[misc]
         self.softcap = config.attention_logit_cap
         self.invalid_logits_value = config.attention_invalid_logits_value
         hs = config.hidden_size
-        self.q_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
-        self.k_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
-        self.v_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
-        self.post = Gemma4ClippableLinear(hs, hs, config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
+        self.q_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
+        self.k_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
+        self.v_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
+        self.post = Gemma4ClippableLinear(hs, hs, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
         self.relative_k_proj = nnx.Linear(hs, self.num_heads * self.head_dim, use_bias=False, rngs=rngs)
         self.per_dim_scale = nnx.Param(jnp.zeros(self.head_dim))
 
@@ -369,7 +369,7 @@ class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):  # type: ignore[misc]
 
     def __init__(self: typing.Any, in_channels: int, channels: int, norm_eps: float, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
-        self.conv = nnx.Conv(in_features=in_channels, features=channels, kernel_size=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)), use_bias=False, rngs=rngs)
+        self.conv = nnx.Conv(in_channels, channels, kernel_size=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)), use_bias=False, rngs=rngs)
         self.norm = nnx.LayerNorm(channels, epsilon=norm_eps, use_bias=False, rngs=rngs)
 
     def __call__(self: typing.Any, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
@@ -412,8 +412,8 @@ class Gemma4AudioFeedForward(nnx.Module):  # type: ignore[misc]
 
     def __init__(self: typing.Any, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
-        self.ffw_layer_1 = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 4, config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
-        self.ffw_layer_2 = Gemma4ClippableLinear(config.hidden_size * 4, config.hidden_size, config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
+        self.ffw_layer_1 = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 4, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
+        self.ffw_layer_2 = Gemma4ClippableLinear(config.hidden_size * 4, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
         self.pre_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
         self.post_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
         self.gradient_clipping = config.gradient_clipping
@@ -440,7 +440,7 @@ class Gemma4AudioCausalConv1d(nnx.Module):  # type: ignore[misc]
         """Docstring for __init__."""
         self.kernel_size = kernel_size
         self.left_pad = kernel_size - 1
-        self.conv = nnx.Conv(in_features=in_channels, features=channels, kernel_size=kernel_size, feature_group_count=groups, use_bias=False, padding=0, rngs=rngs)
+        self.conv = nnx.Conv(in_channels, channels, kernel_size=kernel_size, feature_group_count=groups, use_bias=False, padding=0, rngs=rngs)
 
     def __call__(self: typing.Any, x: jax.Array) -> jax.Array:
         """Apply causal 1D convolution."""
@@ -453,8 +453,8 @@ class Gemma4AudioLightConv1d(nnx.Module):  # type: ignore[misc]
 
     def __init__(self: typing.Any, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
-        self.linear_start = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 2, config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
-        self.linear_end = Gemma4ClippableLinear(config.hidden_size, config.hidden_size, config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
+        self.linear_start = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 2, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
+        self.linear_end = Gemma4ClippableLinear(config.hidden_size, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs)  # type: ignore[misc]
         self.depthwise_conv1d = Gemma4AudioCausalConv1d(in_channels=config.hidden_size, channels=config.hidden_size, kernel_size=config.conv_kernel_size, groups=config.hidden_size, rngs=rngs)
         self.pre_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
         self.conv_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
@@ -608,8 +608,8 @@ class Gemma4MultiModalProjector(nnx.Module):  # type: ignore[misc]
         self.text_config = text_config
         self.vision_config = vision_config
         (vhs, ths) = (vision_config.hidden_size, text_config.hidden_size)
-        self.patches_per_img = int("vision_config.image_size // vision_config.patch_size")
-        self.tokens_per_side = int("mm_tokens_per_image ** 0.5")
+        self.patches_per_img = vision_config.image_size // vision_config.patch_size
+        self.tokens_per_side = int(mm_tokens_per_image**0.5)
         self.kernel_size = self.patches_per_img // self.tokens_per_side
         self.num_output_tokens = self.tokens_per_side * self.tokens_per_side
         self.mm_input_projection_weight = nnx.Param(jnp.zeros((vhs, ths)), rngs=rngs)
@@ -891,7 +891,7 @@ class ModelConfig:
         """Preset configuration for a base Gemma 4 model."""
         kwargs = {}
         if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp, use_tp)  # type: ignore[misc]
+            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)  # type: ignore[misc]
         return cls(**kwargs)
 
     @classmethod
@@ -899,7 +899,7 @@ class ModelConfig:
         """Preset configuration for Gemma 4 E2B."""
         kwargs = {}
         if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp, use_tp)  # type: ignore[misc]
+            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)  # type: ignore[misc]
         return cls(num_hidden_layers=35, hidden_size=1024, intermediate_size=4096, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
 
     @classmethod
@@ -907,7 +907,7 @@ class ModelConfig:
         """Preset configuration for Gemma 4 E4B."""
         kwargs = {}
         if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp, use_tp)  # type: ignore[misc]
+            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)  # type: ignore[misc]
         return cls(num_hidden_layers=42, hidden_size=2560, intermediate_size=10240, num_attention_heads=10, num_key_value_heads=1, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
 
     @classmethod
@@ -915,7 +915,7 @@ class ModelConfig:
         """Preset configuration for Gemma 4 26B A4B (MoE)."""
         kwargs = {}
         if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp, use_tp)  # type: ignore[misc]
+            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)  # type: ignore[misc]
         return cls(num_hidden_layers=30, hidden_size=2816, intermediate_size=2112, moe_intermediate_size=704, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=128, num_experts_per_tok=2, vocab_size=262144, **kwargs)
 
     @classmethod
@@ -923,7 +923,7 @@ class ModelConfig:
         """Preset configuration for Gemma 4 31B."""
         kwargs = {}
         if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp, use_tp)  # type: ignore[misc]
+            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)  # type: ignore[misc]
         return cls(num_hidden_layers=60, hidden_size=5376, intermediate_size=21504, num_attention_heads=32, num_key_value_heads=16, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
 
 

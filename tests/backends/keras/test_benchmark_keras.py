@@ -57,3 +57,61 @@ def test_benchmark_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = bm.benchmark_model("model", "gpu", 1, test_mode=True)
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_benchmark_keras_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    class MockKeras:
+        Input = lambda *args, **kwargs: None
+
+        class layers:
+            class Embedding:
+                def __init__(self, *args: object, **kwargs: object) -> None:
+                    pass
+
+                def __call__(self, x: object) -> object:
+                    return x
+
+            class Dense:
+                def __init__(self, *args: object, **kwargs: object) -> None:
+                    pass
+
+                def __call__(self, x: object) -> object:
+                    return x
+
+        Model = lambda *args, **kwargs: lambda x: x
+
+    monkeypatch.setattr(bm, "tf", MockTf())
+    monkeypatch.setattr(bm, "keras", MockKeras())
+    res = bm.benchmark_model("model", "gpu", 1)
+    if res["status"] != "success":
+        raise AssertionError
+
+
+def test_benchmark_keras_real_mem(monkeypatch: pytest.MonkeyPatch) -> None:
+    class MockKeras:
+        Input = lambda *args, **kwargs: None
+
+        class layers:
+            class Embedding:
+                def __init__(self, *args: object, **kwargs: object) -> None:
+                    pass
+
+                def __call__(self, x: object) -> object:
+                    return x
+
+            class Dense:
+                def __init__(self, *args: object, **kwargs: object) -> None:
+                    pass
+
+                def __call__(self, x: object) -> object:
+                    return x
+
+        Model = lambda *args, **kwargs: lambda x: x
+
+    mock_tf = MockTf()
+    mock_tf.config = type("MockConfig", (), {"experimental": type("MockExp", (), {"get_memory_info": lambda x: {"current": 1024 * 1024}})})()
+    monkeypatch.setattr(bm, "tf", mock_tf)
+    monkeypatch.setattr(bm, "keras", MockKeras())
+    res = bm.benchmark_model("model", "gpu", 1)
+    if res["status"] != "success":
+        raise AssertionError

@@ -80,3 +80,57 @@ def test_benchmark_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = benchmark_model("model", "gpu", 1, test_mode=True)
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_benchmark_maxtext_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(bm, "jax", type("MockJax", (), {"random": type("MockRng", (), {"PRNGKey": lambda x: x}), "jit": lambda x: x, "distributed": type("MockDist", (), {"initialize": lambda: None})}))
+    monkeypatch.setattr(bm, "jnp", type("MockJnp", (), {"int32": "int32", "zeros": lambda *args, **kwargs: args}))
+
+    class MockModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def init(self, *args, **kwargs):
+            return "params"
+
+        def apply(self, *args, **kwargs):
+            return "out"
+
+    monkeypatch.setattr(bm, "Gemma4Model", MockModel)
+    res = bm.benchmark_model("model", "tpu", 1)
+    assert res["status"] == "success"
+
+
+def test_benchmark_maxtext_real_no_test_mode_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_err():
+        msg = "err"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(bm, "jax", type("MockJax", (), {"random": type("MockRng", (), {"PRNGKey": lambda x: x}), "jit": lambda x: x, "distributed": type("MockDist", (), {"initialize": raise_err})}))
+    monkeypatch.setattr(bm, "jnp", type("MockJnp", (), {"int32": "int32", "zeros": lambda *args, **kwargs: args}))
+
+    class MockModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def init(self, *args, **kwargs):
+            return "params"
+
+        def apply(self, *args, **kwargs):
+            return "out"
+
+    monkeypatch.setattr(bm, "Gemma4Model", MockModel)
+    res = bm.benchmark_model("model", "tpu", 1)
+    assert res["status"] == "success"
+
+
+def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.maxtext.benchmark as m_benchmark
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(m_benchmark)
+    monkeypatch.undo()
+    importlib.reload(m_benchmark)

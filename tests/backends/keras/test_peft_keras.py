@@ -60,3 +60,73 @@ def test_apply_lora_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_peft_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.peft as mdl
+
+    monkeypatch.setitem(sys.modules, "keras", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    importlib.reload(mdl)
+
+
+def test_apply_lora_keras_real_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    import gemma_4_sql.backends.keras.peft as mdl
+
+    class MockKerasModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        @classmethod
+        def from_preset(cls, *args, **kwargs):
+            return cls()
+
+    monkeypatch.setattr(mdl, "keras", type("MockKeras", (), {}))
+    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
+    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": MockKerasModel}))
+
+    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "keras_nlp.models" and "GemmaCausalLM" in fromlist:
+            return sys.modules["keras_nlp.models"]
+        import builtins
+
+        return builtins.__import__(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+    res = mdl.apply_lora("model", ["q_proj"], 8, 16, 0.05)
+
+
+def test_apply_lora_keras_mock_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gemma_4_sql.backends.keras.peft as mdl
+
+    class MockKeras:
+        def Input(self, *args, **kwargs):
+            return "input"
+
+        class layers:
+            Embedding = lambda *args, **kwargs: lambda x: "x"
+            Dense = lambda *args, **kwargs: lambda x: "x"
+
+        class Model:
+            def __init__(self, *args, **kwargs):
+                pass
+
+    monkeypatch.setattr(mdl, "keras", MockKeras())
+    import builtins
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "keras_nlp.models":
+            msg = "mock"
+            raise ImportError(msg)
+        return orig_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+    res = mdl.apply_lora("model", ["q_proj"], 8, 16, 0.05)

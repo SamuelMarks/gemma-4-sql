@@ -40,3 +40,32 @@ def test_keras_etl_duckdb_missing() -> object:  # type: ignore[return]
         etl_keras.duckdb = original_duckdb  # type: ignore[attr-defined]
         etl_keras.datasets = original_datasets  # type: ignore[attr-defined]
         etl_keras.grain = original_grain  # type: ignore[attr-defined]
+
+
+def test_keras_etl_duckdb_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    class MockDuckDBConn:
+        def execute(self, *args: object, **kwargs: object) -> object:
+            class MockResult:
+                def fetchdf(self) -> object:
+                    class MockDF:
+                        def to_dict(self, orient: str) -> object:
+                            return [{"question": "Q1", "query": "A1"}]
+
+                    return MockDF()
+
+            return MockResult()
+
+        def close(self) -> None:
+            pass
+
+    class MockDuckDB:
+        def connect(self, *args: object, **kwargs: object) -> object:
+            return MockDuckDBConn()
+
+    monkeypatch.setattr(etl_keras, "duckdb", MockDuckDB())
+    monkeypatch.setattr(etl_keras, "datasets", MockDatasets())
+    monkeypatch.setattr(
+        etl_keras, "grain", type("MockGrain", (), {"JAXDistributedSharding": lambda: None, "NoSharding": lambda: None, "IndexSampler": lambda *args, **kwargs: None, "DataLoader": lambda *args, **kwargs: "loader", "RandomAccessDataSource": object, "MapTransform": object, "Batch": lambda **kwargs: "batch"})
+    )
+    res = etl_keras.build_dataloader("ds", "train", duckdb_path=":memory:", duckdb_table="t")
+    assert res["status"] == "loaded"

@@ -250,3 +250,125 @@ def test_train_model_keras_no_loader_fallback(monkeypatch: object) -> object:  #
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)  # type: ignore[attr-defined]
     train_model("sft", "mod", "dat", 2, 0.1)
+
+
+def test_train_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.train as mdl
+
+    monkeypatch.setitem(sys.modules, "keras", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "tensorflow", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    importlib.reload(mdl)
+
+
+def test_train_keras_real_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    import gemma_4_sql.backends.keras.train as mdl
+
+    class MockKerasModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        @classmethod
+        def from_preset(cls, *args, **kwargs):
+            return cls()
+
+        def compile(self, *args, **kwargs):
+            pass
+
+        def fit(self, *args, **kwargs):
+            return type("MockHistory", (), {"history": {"loss": [0.5]}})()
+
+    class MockKeras:
+        class optimizers:
+            AdamW = lambda *args, **kwargs: "opt"
+
+        class losses:
+            SparseCategoricalCrossentropy = lambda *args, **kwargs: "loss"
+
+    monkeypatch.setattr(mdl, "keras", MockKeras())
+    monkeypatch.setattr(mdl, "tf", type("MockTf", (), {"zeros": lambda *args, **kwargs: None, "int32": "int32"}))
+    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
+    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": MockKerasModel}))
+
+    import builtins
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "keras_nlp.models" and "GemmaCausalLM" in fromlist:
+            return sys.modules["keras_nlp.models"]
+        return orig_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+    monkeypatch.setattr(mdl, "build_dataloader", lambda *args, **kwargs: {"loader": None})
+    res = mdl.train_model("sft", "model", "ds", 1, 0.1)
+    assert res["status"] == "completed"
+
+
+def test_train_keras_real_import_with_loader_iter(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    import gemma_4_sql.backends.keras.train as mdl
+
+    class MockKerasModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        @classmethod
+        def from_preset(cls, *args, **kwargs):
+            return cls()
+
+        def compile(self, *args, **kwargs):
+            pass
+
+        def fit(self, *args, **kwargs):
+            return type("MockHistory", (), {"history": {"loss": [0.5]}})()
+
+    class MockKeras:
+        class optimizers:
+            AdamW = lambda *args, **kwargs: "opt"
+
+        class losses:
+            SparseCategoricalCrossentropy = lambda *args, **kwargs: "loss"
+
+    monkeypatch.setattr(mdl, "keras", MockKeras())
+    monkeypatch.setattr(mdl, "tf", type("MockTf", (), {"zeros": lambda *args, **kwargs: None, "int32": "int32"}))
+    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
+    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": MockKerasModel}))
+
+    import builtins
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "keras_nlp.models" and "GemmaCausalLM" in fromlist:
+            return sys.modules["keras_nlp.models"]
+        return orig_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+
+    class MockIterableLoader(list):
+        def __init__(self, data):
+            super().__init__(data)
+
+    monkeypatch.setattr(mdl, "build_dataloader", lambda *args, **kwargs: {"loader": MockIterableLoader([1, 2])})
+    res = mdl.train_model("sft", "model", "ds", 1, 0.1)
+    assert res["status"] == "completed"
+
+
+def test_keras_sql_model_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    class MockTensor:
+        shape = (2, 3)
+
+    monkeypatch.setattr(tr, "tf", type("MockTf", (), {"zeros": lambda shape: shape}))
+    model = tr.KerasSQLModel()
+    res = model(MockTensor())
+    assert res == (2, 3, 256)

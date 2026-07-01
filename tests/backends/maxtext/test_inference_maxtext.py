@@ -223,3 +223,72 @@ def test_maxtext_beam_search() -> None:
     result = maxtext_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
     if not result.tolist() == [[1, 5, 299]]:
         raise AssertionError
+
+
+def test_inference_imports_fail(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.maxtext.inference as m_inf
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(m_inf)
+    monkeypatch.undo()
+    importlib.reload(m_inf)
+
+
+def test_inference_no_jit(monkeypatch: pytest.MonkeyPatch):
+    import gemma_4_sql.backends.maxtext.inference as m_inf
+
+    monkeypatch.setattr(m_inf, "jax", type("M", (), {"jit": lambda x, **kwargs: x, "random": type("R", (), {"PRNGKey": lambda x: x})}))
+    monkeypatch.setattr(m_inf, "jnp", type("M", (), {"array": lambda x, **kwargs: x, "int32": 1}))
+    monkeypatch.setattr(m_inf, "Gemma4Model", lambda *args, **kwargs: type("M", (), {"init": lambda *args: None, "apply": lambda *args, **kwargs: None})())
+
+    class MockTokenizer:
+        vocab_size = 10
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def encode(self, x):
+            return [1]
+
+        def decode(self, x):
+            return "decoded"
+
+    monkeypatch.setattr(m_inf, "SQLTokenizer", MockTokenizer)
+    monkeypatch.setattr(m_inf, "maxtext_beam_search", lambda *args, **kwargs: [type("M", (), {"tolist": lambda self: [1]})()])
+
+    res = m_inf.generate_sql("m", "prompt", test_mode=True, use_jit=False)
+    assert res["status"] == "success"
+
+
+def test_inference_error(monkeypatch: pytest.MonkeyPatch):
+    import gemma_4_sql.backends.maxtext.inference as m_inf
+
+    monkeypatch.setattr(m_inf, "jax", type("M", (), {"jit": lambda x, **kwargs: x, "random": type("R", (), {"PRNGKey": lambda x: x})}))
+    monkeypatch.setattr(m_inf, "jnp", type("M", (), {"array": lambda x, **kwargs: x, "int32": 1}))
+    monkeypatch.setattr(m_inf, "Gemma4Model", lambda *args, **kwargs: type("M", (), {"init": lambda *args: None, "apply": lambda *args, **kwargs: None})())
+
+    def raise_err(*args, **kwargs):
+        msg = "err"
+        raise ValueError(msg)
+
+    class MockTokenizer:
+        vocab_size = 10
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def encode(self, x):
+            return [1]
+
+        def decode(self, x):
+            msg = "err"
+            raise ValueError(msg)
+
+    monkeypatch.setattr(m_inf, "SQLTokenizer", MockTokenizer)
+    monkeypatch.setattr(m_inf, "maxtext_beam_search", lambda *args, **kwargs: [type("M", (), {"tolist": lambda self: [1]})()])
+
+    res = m_inf.generate_sql("m", "prompt", test_mode=True, use_jit=False)
+    assert "failed" in res["status"]

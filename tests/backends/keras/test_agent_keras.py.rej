@@ -1,0 +1,18 @@
+@@ -37,3 +37,17 @@
+ 
+     res = ag.run_agentic_loop("model", "prompt")
+     assert "failed" in res["status"]
++
++def test_agent_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
++    import sys
++    import importlib
++    import gemma_4_sql.backends.keras.agent as mdl
++    
++    monkeypatch.setitem(sys.modules, "keras", None)
++    importlib.reload(mdl)
++    monkeypatch.undo()
++    
++    monkeypatch.setitem(sys.modules, "tensorflow", None)
++    importlib.reload(mdl)
++    monkeypatch.undo()
++    importlib.reload(mdl)

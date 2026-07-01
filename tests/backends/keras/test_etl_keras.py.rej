@@ -1,0 +1,12 @@
+@@ -104,3 +104,11 @@
+     from gemma_4_sql.backends.keras import etl as _kr_etl
+ 
+     assert _kr_etl.build_dataloader("ds") is not None
++
++def test_build_dataloader_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
++    import sys
++    import importlib
++    import gemma_4_sql.backends.keras.etl as mdl
++    monkeypatch.setitem(sys.modules, "tensorflow", None)
++    importlib.reload(mdl)
++    monkeypatch.undo()

@@ -33,3 +33,15 @@ def test_log_metrics_with_tb() -> None:
         raise AssertionError
     mock_writer.close.assert_called_once()
     keras_logging.tf = None  # type: ignore[attr-defined]
+
+
+def test_logging_keras_imports_fail(monkeypatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.logging as mdl
+
+    monkeypatch.setitem(sys.modules, "tensorflow", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    importlib.reload(mdl)

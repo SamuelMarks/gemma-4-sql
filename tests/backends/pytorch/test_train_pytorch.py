@@ -301,3 +301,79 @@ def test_train_model_pytorch_no_loader_fallback(monkeypatch: object) -> object: 
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)  # type: ignore[attr-defined]
     train_model("sft", "mod", "dat", 2, 0.1)
+
+
+def test_train_model_real(monkeypatch: pytest.MonkeyPatch):
+    import gemma_4_sql.backends.pytorch.train as m_train
+
+    class MockTorch:
+        @staticmethod
+        def device(*args, **kwargs):
+            return "cpu"
+
+        class cuda:
+            @staticmethod
+            def is_available():
+                return False
+
+        class Tensor:
+            pass
+
+        zeros = lambda *args, **kwargs: type("T", (), {"view": lambda self, *a: self, "size": lambda self, *a: 1})()
+        long = 1
+
+    class MockOptim:
+        class AdamW:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def zero_grad(self):
+                pass
+
+            def step(self):
+                pass
+
+    class MockNN:
+        class CrossEntropyLoss:
+            def __call__(self, *args, **kwargs):
+                return type("Loss", (), {"backward": lambda self: None, "item": lambda self: 0.35})()
+
+    monkeypatch.setattr(m_train, "torch", MockTorch)
+    monkeypatch.setattr(m_train, "optim", MockOptim)
+    monkeypatch.setattr(m_train, "nn", MockNN)
+
+    class MockModelObj:
+        def to(self, *args, **kwargs):
+            return self
+
+        def parameters(self):
+            return [1]
+
+        def train(self):
+            pass
+
+        def __call__(self, *args, **kwargs):
+            return type("Out", (), {"view": lambda *a: self, "size": lambda *a: 1, "logits": type("L", (), {"view": lambda self, *a: self, "size": lambda self, *a: 1})()})()
+
+        def view(self, *args, **kwargs):
+            return self
+
+        def size(self, *args, **kwargs):
+            return 1
+
+    class MockModel:
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs):
+            return MockModelObj()
+
+    monkeypatch.setattr(m_train, "Gemma4ForCausalLM", MockModel)
+
+    # Test without loader
+    monkeypatch.setattr(m_train, "build_dataloader", lambda *args, **kwargs: {})
+    res = m_train.train_model("sft", "m", "ds", 1, 0.1)
+    assert res["status"] == "completed"
+
+    # Test with loader
+    monkeypatch.setattr(m_train, "build_dataloader", lambda *args, **kwargs: {"loader": [{"inputs": MockModelObj(), "targets": MockModelObj()}]})
+    res = m_train.train_model("sft", "m", "ds", 1, 0.1)
+    assert res["status"] == "completed"

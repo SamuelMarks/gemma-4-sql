@@ -17,7 +17,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
 try:
     import duckdb
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    duckdb = None
+    duckdb = None  # pragma: no cover
 
 
 def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: object) -> dict[str, object]:

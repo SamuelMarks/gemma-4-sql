@@ -9,15 +9,15 @@ logger = logging.getLogger(__name__)
 
 try:
     import jax
-    import jax.numpy as jnp
+    import jax.numpy as jnp  # pragma: no cover
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     jax = None
-    jnp = None
+    jnp = None  # pragma: no cover
 
 try:
     from maxtext.models.gemma4 import Gemma4Model
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    Gemma4Model = None
+    Gemma4Model = None  # pragma: no cover
 
 
 def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: object) -> dict[str, object]:

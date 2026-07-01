@@ -169,3 +169,23 @@ def test_keras_etl_loaded() -> None:
     finally:
         etl_keras.datasets = original_datasets
         etl_keras.grain = original_grain
+
+
+def test_etl_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.etl as mdl
+
+    monkeypatch.setitem(sys.modules, "keras", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+
+    monkeypatch.setitem(sys.modules, "duckdb", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+
+    monkeypatch.setitem(sys.modules, "tensorflow", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    importlib.reload(mdl)

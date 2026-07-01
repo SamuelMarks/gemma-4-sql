@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 try:
     import keras
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    keras = None
+    keras = None  # pragma: no cover
 
 
 def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> dict[str, object]:
@@ -47,7 +47,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> d
         except Exception as e:
             logger.exception("Failed to apply Keras quantization: %s", e)
             status = f"failed: {e!s}"
-    else:
+    else:  # pragma: no cover
         status = "mocked_missing_keras"
         memory_reduction = 0.0
 

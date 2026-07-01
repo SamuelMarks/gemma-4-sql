@@ -116,3 +116,20 @@ def test_quantize_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = quantize_model("model", "int8")
     if "failed: err" not in res["status"]:
         raise AssertionError
+
+
+def test_quantize_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.jax.quantize as mdl
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(mdl)
+
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "flax", None)
+    importlib.reload(mdl)
+
+    monkeypatch.undo()
+    importlib.reload(mdl)

@@ -85,3 +85,18 @@ def test_apply_lora_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_peft_imports_success(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.pytorch.peft as m_peft
+
+    monkeypatch.setitem(sys.modules, "torch", type("M", (), {})())
+    monkeypatch.setitem(sys.modules, "peft", type("M", (), {"LoraConfig": None, "get_peft_model": None})())
+    monkeypatch.setitem(sys.modules, "transformers", type("M", (), {"AutoModelForCausalLM": None})())
+
+    importlib.reload(m_peft)
+    monkeypatch.undo()
+    importlib.reload(m_peft)

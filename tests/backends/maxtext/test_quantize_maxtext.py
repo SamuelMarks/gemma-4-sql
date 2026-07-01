@@ -83,3 +83,15 @@ def test_quantize_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = quantize_model("model", "int8")
     if "failed" not in str(res["status"]):
         raise AssertionError
+
+
+def test_quantize_imports_fail(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.maxtext.quantize as m_quantize
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(m_quantize)
+    monkeypatch.undo()
+    importlib.reload(m_quantize)

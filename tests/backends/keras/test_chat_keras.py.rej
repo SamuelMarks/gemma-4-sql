@@ -1,0 +1,18 @@
+@@ -37,3 +37,17 @@
+ 
+     res = ch.chat_turn("model", [{"role": "user", "content": "hello"}])
+     assert "failed" in res["status"]
++
++def test_chat_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
++    import sys
++    import importlib
++    import gemma_4_sql.backends.keras.chat as mdl
++    
++    monkeypatch.setitem(sys.modules, "keras", None)
++    importlib.reload(mdl)
++    monkeypatch.undo()
++    
++    monkeypatch.setitem(sys.modules, "tensorflow", None)
++    importlib.reload(mdl)
++    monkeypatch.undo()
++    importlib.reload(mdl)

@@ -12,7 +12,8 @@ def test_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.duckdb", None, raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.grain", MagicMock(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.datasets", MagicMock(), raising=False)
-    res = etl_pretrain(backend="jax", duckdb_path=":memory:", duckdb_table="users")
+    with pytest.raises(ImportError):
+        etl_pretrain(backend="jax", duckdb_path=":memory:", duckdb_table="users")
 
 
 def test_etl_duckdb_success(monkeypatch: pytest.MonkeyPatch) -> None:

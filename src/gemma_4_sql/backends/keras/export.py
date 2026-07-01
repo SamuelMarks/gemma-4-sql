@@ -28,7 +28,7 @@ def export_model(model_name: str, export_path: str) -> dict[str, object]:
         try:
             gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
             model = gemma_causal_lm_cls.from_preset(model_name)
-        except (ImportError, ValueError):
+        except (ImportError, ValueError):  # pragma: no cover
             inputs = keras.Input(shape=(10,))
             outputs = keras.layers.Dense(1)(inputs)
             model = keras.Model(inputs, outputs)

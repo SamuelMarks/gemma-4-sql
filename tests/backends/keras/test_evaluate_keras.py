@@ -83,3 +83,53 @@ def test_evaluate_model_keras_fallback(monkeypatch: object) -> None:
     monkeypatch.setattr(evaluate, "build_dataloader", lambda *_args, **_kwargs: {})  # type: ignore[attr-defined]
     monkeypatch.setattr(evaluate, "generate_sql", lambda *_a, **_k: {"sql": "SELECT 1"})
     evaluate.evaluate_model("model1", "data1")
+
+
+def test_evaluate_model_with_dataloader_tuple(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gemma_4_sql.backends.keras.evaluate as ke
+
+    class MockKeras:
+        class Model:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+        Input = lambda *args, **kwargs: None
+
+        class layers:
+            Embedding = lambda *args, **kwargs: lambda x: "x"
+            Dense = lambda *args, **kwargs: lambda x: "x"
+
+    class MockTfTensor:
+        def __init__(self, data):
+            self.data = data
+
+        def numpy(self):
+            data = self.data
+
+            class MockNumpy:
+                def tolist(self):
+                    return data
+
+            return MockNumpy()
+
+        def __getitem__(self, idx):
+            return self.data[idx]
+
+        def __len__(self):
+            return len(self.data)
+
+    class MockTokenizer:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def decode(self, *args, **kwargs):
+            return "SELECT 1"
+
+    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+        return {"loader": [([MockTfTensor([1, 2, 3])], [MockTfTensor([4, 5, 6])])]}
+
+    monkeypatch.setattr(ke, "build_dataloader", mock_build_dataloader)
+    monkeypatch.setattr(ke, "generate_sql", lambda *args, **kwargs: {"sql": "SELECT 1"})
+    monkeypatch.setattr(ke, "SQLTokenizer", MockTokenizer)
+    res = ke.evaluate_model("model", "ds", db_path=":memory:")
+    assert res["status"] == "completed"

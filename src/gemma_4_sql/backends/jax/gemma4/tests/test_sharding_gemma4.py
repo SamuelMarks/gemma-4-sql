@@ -23,8 +23,7 @@ class TestSharding(absltest.TestCase):  # type: ignore[misc]
         config = Gemma4Config(vocab_size=100, hidden_size=16, intermediate_size=32, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=8, num_experts=2, shd_cfg=shd)  # type: ignore[arg-type]
         rngs = nnx.Rngs(0)
         model = Gemma4ForCausalLM(config, rngs=rngs)
-        if model.model.embed_tokens is None:
-            raise AssertionError
+        assert model.model.embed_tokens is not None
 
 
 if __name__ == "__main__":

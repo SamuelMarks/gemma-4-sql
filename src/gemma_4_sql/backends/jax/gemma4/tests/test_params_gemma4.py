@@ -12,24 +12,19 @@ from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights_from_eva
 def test_stoi() -> object:  # type: ignore[return]
     """Initialize function test_stoi."""
     expected_val = 123
-    if not stoi("123") == expected_val:
-        raise AssertionError
-    if not stoi("abc") == "abc":
-        raise AssertionError
+    assert stoi("123") == expected_val
+    assert stoi("abc") == "abc"
 
 
 def test_map_to_jax_key() -> object:  # type: ignore[return]
     """Initialize function test_map_to_jax_key."""
     mapping = _get_key_and_transform_mapping()
     (jax_key, _transform) = map_to_jax_key(mapping, "model.embed_tokens.weight")
-    if not jax_key == "model\\.embed_tokens\\.embedding":
-        raise AssertionError
+    assert jax_key == "model\\.embed_tokens\\.embedding"
     (jax_key, _transform) = map_to_jax_key(mapping, "invalid.key")
-    if jax_key is not None:
-        raise AssertionError
+    assert jax_key is None
     (jax_key, _transform) = map_to_jax_key(mapping, "model.layers.5.per_layer_projection.weight")
-    if not jax_key == "model\\.layers\\.5\\.per_layer_projection\\.kernel":
-        raise AssertionError
+    assert jax_key == "model\\.layers\\.5\\.per_layer_projection\\.kernel"
 
 
 def test_assign_weights_from_eval_shape() -> object:  # type: ignore[return]
@@ -37,13 +32,11 @@ def test_assign_weights_from_eval_shape() -> object:  # type: ignore[return]
     state = {"model": {"layer": {"scale": jax.ShapeDtypeStruct((2, 2), jnp.float32)}}}
     tensor = jnp.ones((2, 2))
     assign_weights_from_eval_shape(["model", "layer", "scale"], tensor, state, "src", None)
-    if not jnp.array_equal(state["model"]["layer"]["scale"], tensor):
-        raise AssertionError
+    assert jnp.array_equal(state["model"]["layer"]["scale"], tensor)
     state = {"kernel": jax.ShapeDtypeStruct((2, 3), jnp.float32)}
     tensor = jnp.ones((3, 2))
     assign_weights_from_eval_shape(["kernel"], tensor, state, "src", ((1, 0), None, False))
-    if not state["kernel"].shape == (2, 3):
-        raise AssertionError
+    assert state["kernel"].shape == (2, 3)
 
 
 def test_create_gemma4_from_pretrained(tmp_path: object) -> object:  # type: ignore[return]
@@ -66,7 +59,6 @@ def test_create_gemma4_from_pretrained(tmp_path: object) -> object:  # type: ign
     tmp_path / "model.safetensors"  # type: ignore[operator]
     st_np.save_file(tensors, str(tmp_path) + "/model.safetensors")
     model = create_gemma4_from_pretrained(str(tmp_path), cfg)
-    if not model is not None:
-        raise AssertionError
+    assert model is not None
     with pytest.raises(ValueError, match=r".*"):
         create_gemma4_from_pretrained(str(tmp_path / "empty"), cfg)  # type: ignore[operator]

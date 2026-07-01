@@ -81,3 +81,19 @@ def test_run_agentic_loop() -> None:
         raise AssertionError
     if "Syntax error" not in res["history"][1]["prompt"]:  # type: ignore[index]
         raise AssertionError
+
+
+def test_agent_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.agent as mdl
+
+    monkeypatch.setitem(sys.modules, "keras", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+
+    monkeypatch.setitem(sys.modules, "tensorflow", None)
+    importlib.reload(mdl)
+    monkeypatch.undo()
+    importlib.reload(mdl)

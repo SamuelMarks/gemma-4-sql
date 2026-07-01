@@ -81,3 +81,25 @@ async def test_generate_endpoint() -> None:
 
     result = await generate_func(request)
     assert result.content["sql"] == "SELECT * FROM maxtext_serve WHERE prompt='test'"
+
+
+def test_serve_imports_fail(monkeypatch: pytest.MonkeyPatch):
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.maxtext.serve as m_serve
+
+    monkeypatch.setitem(sys.modules, "fastapi", None)
+    importlib.reload(m_serve)
+    monkeypatch.undo()
+    importlib.reload(m_serve)
+
+
+def test_serve_fastapi_missing(monkeypatch: pytest.MonkeyPatch):
+    import gemma_4_sql.backends.maxtext.serve as m_serve
+
+    monkeypatch.setattr(m_serve, "FastAPI", None)
+    monkeypatch.setattr(m_serve, "jax", object())
+    monkeypatch.setattr(m_serve, "gemma4", object())
+    res = m_serve.serve_model("m")
+    assert res["status"] == "failed_missing_fastapi"

@@ -68,3 +68,20 @@ async def test_generate_endpoint() -> None:
     result = await generate_func(request)
     if not result["sql"] == "SELECT * FROM generated WHERE prompt='test'":
         raise AssertionError
+
+
+def test_serve_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.jax.serve as mdl
+
+    monkeypatch.setitem(sys.modules, "jax", None)
+    importlib.reload(mdl)
+
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "fastapi", None)
+    importlib.reload(mdl)
+
+    monkeypatch.undo()
+    importlib.reload(mdl)

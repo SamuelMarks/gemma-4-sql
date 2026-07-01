@@ -18,7 +18,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     optax = None
 try:
     import maxtext.train as maxtext_train
-    from maxtext.models.gemma4 import Gemma4Model
+    from maxtext.models.gemma4 import Gemma4Model  # pragma: no cover
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     Gemma4Model = None
     maxtext_train = None

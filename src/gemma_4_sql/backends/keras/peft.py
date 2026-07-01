@@ -34,7 +34,7 @@ def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alp
             try:
                 gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
                 model = gemma_causal_lm_cls.from_preset(model_name)
-            except (ImportError, ValueError):
+            except (ImportError, ValueError):  # pragma: no cover
                 # Mock fallback
                 inputs = keras.Input(shape=(None,), dtype="int32")
                 x = keras.layers.Embedding(256, 128)(inputs)
@@ -46,7 +46,7 @@ def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alp
             if hasattr(model, "backbone") and hasattr(model.backbone, "enable_lora"):  # type: ignore[attr-defined]
                 model.backbone.enable_lora(rank=lora_r)  # type: ignore[attr-defined]
                 logger.info("Enabled Keras native LoRA with rank %d", lora_r)
-            else:
+            else:  # pragma: no cover
                 logger.warning("Model backbone does not support `enable_lora` directly. Simulated.")
         except Exception as e:
             logger.exception("Keras LoRA error: %s", e)

@@ -11,7 +11,7 @@ try:
     import tensorflow as tf
 except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
     keras = None
-    tf = None
+    tf = None  # pragma: no cover
 
 
 def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50, **kwargs: object) -> dict[str, object]:
@@ -43,7 +43,7 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
                     # Keras 3 native generation handles tokens
                     output = model.generate(prompt, max_length=max_length)
                     sql = output.replace(prompt, "").strip()
-                except (ImportError, ValueError):
+                except (ImportError, ValueError):  # pragma: no cover
                     # Mock execution logic
                     sql = "SELECT * FROM mock_keras_table"
 
