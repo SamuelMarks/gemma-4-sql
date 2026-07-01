@@ -71,5 +71,14 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
         targets_padded = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True)
         return {"inputs": inputs_padded, "targets": targets_padded}
 
-    dataloader = DataLoader(pt_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+    sampler = None
+    if distributed:
+        from torch.utils.data.distributed import DistributedSampler
+
+        try:
+            sampler = DistributedSampler(pt_dataset)
+        except (RuntimeError, ValueError):
+            sampler = None
+
+    dataloader = DataLoader(pt_dataset, batch_size=batch_size, shuffle=(sampler is None), sampler=sampler, collate_fn=collate_fn)
     return {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "pytorch", "distributed": distributed, "loader": dataloader}

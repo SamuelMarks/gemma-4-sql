@@ -12,3 +12,5 @@ transformers
 safetensors
 peft
 duckdb
+aiosqlite
+asyncpg

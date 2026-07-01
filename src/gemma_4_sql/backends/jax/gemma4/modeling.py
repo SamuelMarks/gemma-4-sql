@@ -1392,7 +1392,7 @@ class Gemma4ForCausalLM(nnx.Module):  # type: ignore[misc]
         return logits.astype(jnp.float32)
 
 
-@jax.jit  # type: ignore[misc]
+@nnx.jit  # type: ignore[misc]
 def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array, pixel_values: Array | None = None, **kwargs: object) -> tuple[Array, Cache]:
     """Execute a standard forward pass returning logits and updated cache."""
     image_token_mask = kwargs.get("image_token_mask")

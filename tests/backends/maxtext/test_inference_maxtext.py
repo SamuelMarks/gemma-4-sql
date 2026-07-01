@@ -19,6 +19,12 @@ class MockArray:
         """
         self.data = data if isinstance(data, list) else [data]
 
+    @property
+    def shape(self) -> tuple[int, ...]:
+        if isinstance(self.data, list) and len(self.data) > 0 and isinstance(self.data[0], list):
+            return (len(self.data), len(self.data[0]))
+        return (len(self.data),)
+
     def __getitem__(self: object, idx: object) -> object:
         """Magic method docstring."""
         if isinstance(idx, MockArray):
@@ -220,7 +226,7 @@ def test_maxtext_beam_search() -> None:
         return MockArray([logits])
 
     input_ids = jnp_mock.array([[1]])
-    result = maxtext_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
+    result, _score = maxtext_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
     if not result.tolist() == [[1, 5, 299]]:
         raise AssertionError
 
@@ -257,7 +263,19 @@ def test_inference_no_jit(monkeypatch: pytest.MonkeyPatch):
             return "decoded"
 
     monkeypatch.setattr(m_inf, "SQLTokenizer", MockTokenizer)
-    monkeypatch.setattr(m_inf, "maxtext_beam_search", lambda *args, **kwargs: [type("M", (), {"tolist": lambda self: [1]})()])
+
+    class MockResult:
+        def tolist(self):
+            return [1]
+
+        @property
+        def shape(self):
+            return (1, 1)
+
+        def __len__(self):
+            return 1
+
+    monkeypatch.setattr(m_inf, "maxtext_beam_search", lambda *args, **kwargs: ([MockResult()], 0.95))
 
     res = m_inf.generate_sql("m", "prompt", test_mode=True, use_jit=False)
     assert res["status"] == "success"

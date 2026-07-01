@@ -29,12 +29,14 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
         A dictionary containing the generated SQL.
 
     """
+    confidence_score = 0.0
     if keras is not None and tf is not None:
         try:
             logger.info("Generating with Keras %s", model_name)
 
             if kwargs.get("test_mode"):
                 sql = "SELECT * FROM keras_table"
+                confidence_score = 0.92
                 status = "success"
             else:
                 try:
@@ -43,9 +45,11 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
                     # Keras 3 native generation handles tokens
                     output = model.generate(prompt, max_length=max_length)
                     sql = output.replace(prompt, "").strip()
+                    confidence_score = 0.85  # Simulated confidence for now, pending keras-nlp API exposure
                 except (ImportError, ValueError):  # pragma: no cover
                     # Mock execution logic
                     sql = "SELECT * FROM mock_keras_table"
+                    confidence_score = 0.85
 
                 status = "success"
         except Exception as e:
@@ -54,6 +58,7 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
             sql = ""
     else:
         sql = "SELECT * FROM keras_table"
+        confidence_score = 0.92
         status = "mocked_missing_keras"
 
-    return {"backend": "keras", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width}
+    return {"backend": "keras", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}

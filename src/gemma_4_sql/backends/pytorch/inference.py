@@ -34,6 +34,7 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
         A dictionary containing the generated SQL.
 
     """
+    confidence_score = 0.0
     if torch is not None and AutoModelForCausalLM is not None and AutoTokenizer is not None:
         try:
             # Note: in a real implementation we might pass the actual model and tokenizer instances
@@ -44,14 +45,21 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
             if kwargs.get("test_mode"):
                 tokenizer = SQLTokenizer(model_name=None)
                 sql = "SELECT * FROM pytorch_table"
+                confidence_score = 0.95
             else:
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
                 model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
                 inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
-                outputs = model.generate(**inputs, max_new_tokens=max_length, num_beams=beam_width, early_stopping=True)
-                generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+                outputs = model.generate(**inputs, max_new_tokens=max_length, num_beams=beam_width, early_stopping=True, output_scores=True, return_dict_in_generate=True)
+                sequences = outputs.sequences
+                generated_text = tokenizer.decode(sequences[0], skip_special_tokens=True)
                 sql = generated_text[len(prompt) :].strip()
+
+                if hasattr(outputs, "sequences_scores"):
+                    confidence_score = float(outputs.sequences_scores[0].item())
+                else:
+                    confidence_score = 0.8  # Fallback
 
             status = "success"
         except Exception as e:
@@ -60,6 +68,7 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
             status = f"failed: {e!s}"
     else:
         sql = "SELECT * FROM pytorch_table"
+        confidence_score = 0.95
         status = "mocked_missing_torch"
 
-    return {"backend": "pytorch", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width}
+    return {"backend": "pytorch", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}

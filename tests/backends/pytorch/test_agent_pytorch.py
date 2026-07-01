@@ -20,6 +20,12 @@ class MockLiveDatabaseEngine:
         """
         self.call_count = 0
 
+    async def execute_with_feedback_async(self: typing.Any, _query: str) -> tuple[bool, list[object], str]:
+        self.call_count += 1
+        if self.call_count == 1:
+            return (False, [], "Syntax error")
+        return (True, [(1,)], "")
+
     def execute_with_feedback(self: typing.Any, _query: str) -> tuple[bool, list[object], str]:
         """Initialize function execute_with_feedback.
 
@@ -81,3 +87,32 @@ def test_run_agentic_loop() -> None:
         raise AssertionError
     if "Syntax error" not in res["history"][1]["prompt"]:  # type: ignore[index]
         raise AssertionError
+
+
+def test_run_agentic_loop_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytorch_agent = __import__("gemma_4_sql.backends.pytorch.agent", fromlist=[""])
+
+    class MockLiveDatabaseEngineFail:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        async def execute_with_feedback_async(self, _query: str) -> tuple[bool, list[object], str]:
+            return (False, [], "Syntax error that never fixes")
+
+        def execute_with_feedback(self, _query: str) -> tuple[bool, list[object], str]:
+            return (False, [], "Syntax error that never fixes")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(pytorch_agent, "LiveDatabaseEngine", MockLiveDatabaseEngineFail)
+
+    def mock_generate_sql(_model_name: str, _prompt: str) -> dict[str, object]:
+        return {"sql": "SELECT * FROM t"}
+
+    monkeypatch.setattr(pytorch_agent, "generate_sql", mock_generate_sql)
+
+    res = run_agentic_loop(model_name="m", prompt="p", max_retries=2)
+    assert res["attempts"] == 2
+    assert res["success"] is False
+    assert len(res["history"]) == 2

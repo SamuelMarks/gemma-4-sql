@@ -127,7 +127,7 @@ class MockTorch:
 class MockDataLoader:
     """Initialize class MockDataLoader."""
 
-    def __init__(self: typing.Any, dataset: object, batch_size: object, shuffle: object, collate_fn: object) -> None:
+    def __init__(self: typing.Any, dataset: object, batch_size: object, shuffle: object, collate_fn: object, sampler: object = None, **kwargs: object) -> None:
         """Initialize function __init__.
 
         Args:
@@ -136,6 +136,8 @@ class MockDataLoader:
         batch_size: Description of batch_size.
         shuffle: Description of shuffle.
         collate_fn: Description of collate_fn.
+        sampler: Description of sampler.
+        kwargs: Description of kwargs.
 
         """
         self.dataset = dataset

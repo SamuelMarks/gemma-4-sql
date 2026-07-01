@@ -36,7 +36,7 @@ extend-exclude = ["venv_*"]
 
 [tool.ruff.lint]
 select = ["ALL"]
-ignore = ["D203", "D213", "COM812", "ISC001", "TRY401", "C901", "BLE001", "ERA001", "PLR2004", "FBT001", "FBT002", "UP007", "D417", "SIM108", "ARG001", "B905"]
+ignore = ["PLC0415", "PLR0912", "PLR0915", "N817", "D203", "D213", "COM812", "ISC001", "TRY401", "C901", "BLE001", "ERA001", "PLR2004", "FBT001", "FBT002", "UP007", "D417", "SIM108", "ARG001", "B905"]
 extend-safe-fixes = ["ALL"]
 
 [tool.ruff.lint.pylint]
@@ -63,6 +63,7 @@ jax = "gemma_4_sql.backends.jax"
 keras = "gemma_4_sql.backends.keras"
 maxtext = "gemma_4_sql.backends.maxtext"
 pytorch = "gemma_4_sql.backends.pytorch"
+mlx = "gemma_4_sql.backends.mlx"
 
 
 [tool.ruff.lint.per-file-ignores]

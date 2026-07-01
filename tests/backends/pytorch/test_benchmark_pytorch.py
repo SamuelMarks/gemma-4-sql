@@ -134,8 +134,14 @@ def test_evaluate_real_full(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(m_eval, "generate_sql", lambda *args, **kwargs: {"sql": "SELECT 1"})
 
     class MockEngine:
+        async def execute_with_feedback_async(self, p):
+            return (True, None, None)
+
         def execute_with_feedback(self, p):
             return (True, None, None)
+
+        async def compare_queries_async(self, p, t):
+            return True
 
         def compare_queries(self, p, t):
             return True
@@ -155,8 +161,14 @@ def test_evaluate_mock_preds(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(m_eval, "generate_sql", lambda *args, **kwargs: {"sql": "SELECT 1"})
 
     class MockEngine:
+        async def execute_with_feedback_async(self, p):
+            return (True, None, None)
+
         def execute_with_feedback(self, p):
             return (True, None, None)
+
+        async def compare_queries_async(self, p, t):
+            return True
 
         def compare_queries(self, p, t):
             return True
@@ -175,8 +187,14 @@ def test_evaluate_dataloader(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(m_eval, "generate_sql", lambda *args, **kwargs: {"sql": "SELECT 1"})
 
     class MockEngine:
+        async def execute_with_feedback_async(self, p):
+            return (True, None, None)
+
         def execute_with_feedback(self, p):
             return (True, None, None)
+
+        async def compare_queries_async(self, p, t):
+            return True
 
         def compare_queries(self, p, t):
             return True

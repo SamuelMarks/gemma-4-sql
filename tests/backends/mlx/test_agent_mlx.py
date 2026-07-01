@@ -1,10 +1,10 @@
-"""Tests for JAX Agentic Loop."""
+"""Tests for MLX Agentic Loop."""
 
 import typing
 
 import pytest
 
-from gemma_4_sql.backends.jax.agent import run_agentic_loop
+from gemma_4_sql.backends.mlx.agent import run_agentic_loop
 
 
 class MockLiveDatabaseEngine:
@@ -52,8 +52,8 @@ def _mock_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch: Description of monkeypatch.
 
     """
-    jax_agent = __import__("gemma_4_sql.backends.jax.agent", fromlist=[""])
-    monkeypatch.setattr(jax_agent, "LiveDatabaseEngine", MockLiveDatabaseEngine)
+    mlx_agent = __import__("gemma_4_sql.backends.mlx.agent", fromlist=[""])
+    monkeypatch.setattr(mlx_agent, "LiveDatabaseEngine", MockLiveDatabaseEngine)
 
     def mock_generate_sql(_model_name: str, _prompt: str) -> dict[str, object]:
         """Initialize function mock_generate_sql.
@@ -66,12 +66,12 @@ def _mock_engine(monkeypatch: pytest.MonkeyPatch) -> None:
         """
         return {"sql": "SELECT * FROM t"}
 
-    monkeypatch.setattr(jax_agent, "generate_sql", mock_generate_sql)
+    monkeypatch.setattr(mlx_agent, "generate_sql", mock_generate_sql)
 
 
 @pytest.mark.usefixtures("_mock_engine")
 def test_run_agentic_loop() -> None:
-    """Test JAX agentic loop."""
+    """Test MLX agentic loop."""
     res = run_agentic_loop(model_name="m", prompt="p", max_retries=3)
     if not res["attempts"] == int("2"):
         raise AssertionError
@@ -90,7 +90,7 @@ def test_run_agentic_loop() -> None:
 
 
 def test_run_agentic_loop_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    jax_agent = __import__("gemma_4_sql.backends.jax.agent", fromlist=[""])
+    mlx_agent = __import__("gemma_4_sql.backends.mlx.agent", fromlist=[""])
 
     class MockLiveDatabaseEngineFail:
         def __init__(self, **_kwargs: object) -> None:
@@ -105,12 +105,12 @@ def test_run_agentic_loop_failure(monkeypatch: pytest.MonkeyPatch) -> None:
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr(jax_agent, "LiveDatabaseEngine", MockLiveDatabaseEngineFail)
+    monkeypatch.setattr(mlx_agent, "LiveDatabaseEngine", MockLiveDatabaseEngineFail)
 
     def mock_generate_sql(_model_name: str, _prompt: str) -> dict[str, object]:
         return {"sql": "SELECT * FROM t"}
 
-    monkeypatch.setattr(jax_agent, "generate_sql", mock_generate_sql)
+    monkeypatch.setattr(mlx_agent, "generate_sql", mock_generate_sql)
 
     res = run_agentic_loop(model_name="m", prompt="p", max_retries=2)
     assert res["attempts"] == 2

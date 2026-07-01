@@ -264,7 +264,7 @@ def test_jax_beam_search() -> None:
         return MockArray([logits])
 
     input_ids = jnp_mock.array([[1]])
-    result = jax_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
+    result, _score = jax_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
     if not result.tolist() == [[1, 5, 299]]:
         raise AssertionError
 

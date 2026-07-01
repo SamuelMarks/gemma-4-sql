@@ -9,12 +9,13 @@ from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
 
 def test_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test ETL duckdb missing."""
-    __import__("gemma_4_sql.backends.jax.etl")
-    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.duckdb", None)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.grain", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.datasets", MagicMock(), raising=False)
+    import gemma_4_sql.backends.jax.etl as jax_etl
+
+    monkeypatch.setattr(jax_etl, "duckdb", None)
+    monkeypatch.setattr(jax_etl, "grain", __import__("unittest.mock").mock.MagicMock())
+    monkeypatch.setattr(jax_etl, "datasets", __import__("unittest.mock").mock.MagicMock())
     with pytest.raises(ImportError):
-        etl_pretrain(backend="jax", duckdb_path=":memory:", duckdb_table="users")
+        jax_etl.build_dataloader("dummy", "train", duckdb_path=":memory:", duckdb_table="users")
 
 
 def test_etl_duckdb_success(monkeypatch: pytest.MonkeyPatch) -> None:

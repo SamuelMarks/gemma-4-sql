@@ -4,3 +4,4 @@ interrogate
 ruff
 mypy
 pre-commit
+pytest-asyncio

@@ -1,10 +1,10 @@
-"""JAX-specific agentic self-correction loop."""
+"""MLX-specific agentic self-correction loop."""
 
 from __future__ import annotations
 
 import asyncio
 
-from gemma_4_sql.backends.jax.inference import generate_sql
+from gemma_4_sql.backends.mlx.inference import generate_sql
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 
 
@@ -37,11 +37,11 @@ async def _process_single_prompt(model_name: str, prompt: str, engine: LiveDatab
         current_prompt = f"{prompt}\nPrevious attempt failed with error: {error_msg}\nPlease fix the SQL query."
         final_sql = sql  # type: ignore[assignment]
 
-    return {"backend": "jax", "model": model_name, "initial_prompt": prompt, "final_sql": final_sql, "success": success, "attempts": attempts, "history": history, "status": "completed"}
+    return {"backend": "mlx", "model": model_name, "initial_prompt": prompt, "final_sql": final_sql, "success": success, "attempts": attempts, "history": history, "status": "completed"}
 
 
 def run_agentic_loop(model_name: str, prompt: str | list[str], db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", **kwargs: object) -> dict[str, object] | list[dict[str, object]]:
-    """Run an agentic self-correction loop using the JAX backend.
+    """Run an agentic self-correction loop using the MLX backend.
 
     Args:
     ----

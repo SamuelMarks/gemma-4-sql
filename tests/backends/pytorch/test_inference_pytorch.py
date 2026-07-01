@@ -79,7 +79,11 @@ def test_inference_real(monkeypatch: pytest.MonkeyPatch):
         device = "cpu"
 
         def generate(self, *args, **kwargs):
-            return [[1, 2]]
+            class MockOutputs:
+                sequences = [[1, 2]]
+                sequences_scores = [type("T", (), {"item": lambda self: 0.99})()]
+
+            return MockOutputs()
 
     class MockModel:
         @classmethod

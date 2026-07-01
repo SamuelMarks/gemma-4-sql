@@ -64,6 +64,16 @@ gemma-4-sql train \
     --backend pytorch
 ```
 
+**Distributed PyTorch (DDP / FSDP):**
+For multi-GPU or multi-node PyTorch training, use `torchrun` along with the `--distributed-strategy` flag.
+```bash
+torchrun --nproc_per_node=8 -m gemma_4_sql.cli train \
+    --model gemma-4 \
+    --dataset seeklhy/SynSQL-2.5M \
+    --backend pytorch \
+    --distributed-strategy fsdp
+```
+
 ---
 
 ## 1. Create a Pretrained `gemma-4` for SQL

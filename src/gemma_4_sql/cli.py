@@ -97,22 +97,22 @@ def etl_posttrain_cmd(args: argparse.Namespace) -> None:
 
 def train_cmd(args: argparse.Namespace) -> None:
     """Train a new model from scratch."""
-    train_from_scratch(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend)
+    train_from_scratch(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend, distributed_strategy=getattr(args, "distributed_strategy", "none"))
 
 
 def pretrain_cmd(args: argparse.Namespace) -> None:
     """Pretrain an existing model."""
-    pretrain_model(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend)
+    pretrain_model(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend, distributed_strategy=getattr(args, "distributed_strategy", "none"))
 
 
 def sft_cmd(args: argparse.Namespace) -> None:
     """Supervised fine-tune an existing model."""
-    sft_model(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend)
+    sft_model(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend, distributed_strategy=getattr(args, "distributed_strategy", "none"))
 
 
 def posttrain_cmd(args: argparse.Namespace) -> None:
     """Post-train an existing model."""
-    posttrain_model(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend)
+    posttrain_model(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend, distributed_strategy=getattr(args, "distributed_strategy", "none"))
 
 
 def dpo_cmd(args: argparse.Namespace) -> None:
@@ -149,7 +149,7 @@ def export_cmd(args: argparse.Namespace) -> None:
 
 def generate_cmd(args: argparse.Namespace) -> None:
     """Generate SQL from text."""
-    generate(model_name=args.model, prompt=args.prompt, backend=args.backend, beam_width=args.beam_width, max_length=args.max_length)
+    generate(model_name=args.model, prompt=args.prompt, backend=args.backend, beam_width=args.beam_width, max_length=args.max_length, show_confidence=getattr(args, "show_confidence", False))
 
 
 def agent_cmd(args: argparse.Namespace) -> None:
@@ -158,7 +158,7 @@ def agent_cmd(args: argparse.Namespace) -> None:
     if args.db_kwargs:
         json = __import__("json")
         db_kwargs = json.loads(args.db_kwargs)
-    run_agentic_loop(model_name=args.model, prompt=args.prompt, backend=args.backend, db_path=args.db_path, ddl=args.ddl, db_type=args.db_type, db_kwargs=db_kwargs, max_retries=args.max_retries)
+    run_agentic_loop(model_name=args.model, prompt=args.prompt, backend=args.backend, db_path=args.db_path, ddl=args.ddl, db_type=args.db_type, db_kwargs=db_kwargs, max_retries=args.max_retries, min_confidence=getattr(args, "min_confidence", 0.0))
 
 
 def rag_cmd(args: argparse.Namespace) -> None:
@@ -256,6 +256,7 @@ def _add_training_parsers(subparsers: object) -> None:
     parser_train.add_argument("--epochs", type=int, default=1, help="Number of training epochs.")
     parser_train.add_argument("--learning-rate", type=float, default=0.0001, help="Learning rate.")
     parser_train.add_argument("--backend", default="jax", help="Backend to use (jax, keras, maxtext, pytorch).")
+    parser_train.add_argument("--distributed-strategy", default="none", choices=["none", "ddp", "fsdp"], help="Distributed strategy for PyTorch.")
     parser_train.set_defaults(func=train_cmd)
     parser_pretrain = subparsers.add_parser("pretrain", help="Pretrain an existing model.")  # type: ignore[attr-defined]
     parser_pretrain.add_argument("--model", default="gemma-4", help="Model name.")
@@ -263,6 +264,7 @@ def _add_training_parsers(subparsers: object) -> None:
     parser_pretrain.add_argument("--epochs", type=int, default=1, help="Number of training epochs.")
     parser_pretrain.add_argument("--learning-rate", type=float, default=0.0001, help="Learning rate.")
     parser_pretrain.add_argument("--backend", default="maxtext", help="Backend to use (jax, keras, maxtext, pytorch).")
+    parser_pretrain.add_argument("--distributed-strategy", default="none", choices=["none", "ddp", "fsdp"], help="Distributed strategy for PyTorch.")
     parser_pretrain.set_defaults(func=pretrain_cmd)
     parser_sft = subparsers.add_parser("sft", help="Supervised fine-tune an existing model.")  # type: ignore[attr-defined]
     parser_sft.add_argument("--model", default="gemma-4", help="Model name.")
@@ -270,6 +272,7 @@ def _add_training_parsers(subparsers: object) -> None:
     parser_sft.add_argument("--epochs", type=int, default=1, help="Number of training epochs.")
     parser_sft.add_argument("--learning-rate", type=float, default=0.0001, help="Learning rate.")
     parser_sft.add_argument("--backend", default="jax", help="Backend to use (jax, keras, maxtext, pytorch).")
+    parser_sft.add_argument("--distributed-strategy", default="none", choices=["none", "ddp", "fsdp"], help="Distributed strategy for PyTorch.")
     parser_sft.set_defaults(func=sft_cmd)
     parser_posttrain = subparsers.add_parser("posttrain", help="Post-train an existing model (e.g. RLHF/DPO).")  # type: ignore[attr-defined]
     parser_posttrain.add_argument("--model", default="gemma-4", help="Model name.")
@@ -277,6 +280,7 @@ def _add_training_parsers(subparsers: object) -> None:
     parser_posttrain.add_argument("--epochs", type=int, default=1, help="Number of training epochs.")
     parser_posttrain.add_argument("--learning-rate", type=float, default=0.0001, help="Learning rate.")
     parser_posttrain.add_argument("--backend", default="keras", help="Backend to use (jax, keras, maxtext, pytorch).")
+    parser_posttrain.add_argument("--distributed-strategy", default="none", choices=["none", "ddp", "fsdp"], help="Distributed strategy for PyTorch.")
     parser_posttrain.set_defaults(func=posttrain_cmd)
     parser_dpo = subparsers.add_parser("dpo", help="Run Direct Preference Optimization (DPO).")  # type: ignore[attr-defined]
     parser_dpo.add_argument("--model", default="gemma-4", help="Model name.")
@@ -343,6 +347,7 @@ def _add_inference_parsers(subparsers: object) -> None:
     parser_generate.add_argument("--backend", default="jax", help="Backend to use (jax, keras, maxtext, pytorch).")
     parser_generate.add_argument("--beam-width", type=int, default=3, help="Number of beams for generation.")
     parser_generate.add_argument("--max-length", type=int, default=50, help="Maximum generation length.")
+    parser_generate.add_argument("--show-confidence", action="store_true", help="Display the model's confidence score alongside the query.")
     parser_generate.set_defaults(func=generate_cmd)
     parser_agent = subparsers.add_parser("agent", help="Run agentic self-correction loop.")  # type: ignore[attr-defined]
     parser_agent.add_argument("--model", default="gemma-4", help="Model name.")
@@ -352,6 +357,7 @@ def _add_inference_parsers(subparsers: object) -> None:
     parser_agent.add_argument("--db-kwargs", default="", help="JSON string of DB kwargs (e.g. user, password).")
     parser_agent.add_argument("--ddl", default="", help="DDL string to setup the evaluation schema.")
     parser_agent.add_argument("--max-retries", type=int, default=3, help="Maximum number of self-correction attempts.")
+    parser_agent.add_argument("--min-confidence", type=float, default=0.0, help="Minimum generation confidence score required.")
     parser_agent.add_argument("--backend", default="jax", help="Backend to use (jax, keras, maxtext, pytorch).")
     parser_agent.set_defaults(func=agent_cmd)
     parser_rag = subparsers.add_parser("rag", help="Build a RAG prompt or extract schema context.")  # type: ignore[attr-defined]

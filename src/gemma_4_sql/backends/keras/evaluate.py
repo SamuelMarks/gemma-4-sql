@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from gemma_4_sql.backends.keras.etl import build_dataloader
 from gemma_4_sql.backends.keras.inference import generate_sql
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
@@ -23,8 +25,8 @@ def normalize_sql(sql: str) -> str:
     return " ".join(sql.strip().lower().split())
 
 
-def compute_metrics(engine: LiveDatabaseEngine, preds: list[str], truths: list[str]) -> dict[str, float]:
-    """Compute exact match, valid SQL, and execution accuracy.
+async def compute_metrics_async(engine: LiveDatabaseEngine, preds: list[str], truths: list[str]) -> dict[str, float]:
+    """Compute exact match, valid SQL, and execution accuracy asynchronously.
 
     Args:
     ----
@@ -41,16 +43,40 @@ def compute_metrics(engine: LiveDatabaseEngine, preds: list[str], truths: list[s
     exact_matches = 0
     valid_sqls = 0
     exec_matches = 0
-    for p, t in zip(preds, truths):
-        if normalize_sql(p) == normalize_sql(t):
-            exact_matches += 1
-        (success, _, _) = engine.execute_with_feedback(p)
-        if success:
-            valid_sqls += 1
-        if engine.compare_queries(p, t):
-            exec_matches += 1
+
+    async def process_pair(p: str, t: str) -> tuple[int, int, int]:
+        em = 1 if normalize_sql(p) == normalize_sql(t) else 0
+        (success, _, _) = await engine.execute_with_feedback_async(p)
+        vs = 1 if success else 0
+        ex = 1 if await engine.compare_queries_async(p, t) else 0
+        return em, vs, ex
+
+    results = await asyncio.gather(*[process_pair(p, t) for p, t in zip(preds, truths)])
+    for em, vs, ex in results:
+        exact_matches += em
+        valid_sqls += vs
+        exec_matches += ex
+
     total = len(preds) if preds else 1
     return {"exact_match": exact_matches / total, "valid_sql": valid_sqls / total, "execution_accuracy": exec_matches / total}
+
+
+def compute_metrics(engine: LiveDatabaseEngine, preds: list[str], truths: list[str]) -> dict[str, float]:
+    """Compute exact match, valid SQL, and execution accuracy.
+
+    Args:
+    ----
+        engine: The LiveDatabaseEngine instance for query execution.
+        preds: A list of predicted SQL query strings.
+        truths: A list of ground truth SQL query strings.
+
+    Returns:
+    -------
+        A dictionary containing the computed metrics:
+        'exact_match', 'valid_sql', and 'execution_accuracy'.
+
+    """
+    return asyncio.run(compute_metrics_async(engine, preds, truths))
 
 
 def evaluate_model(model_name: str, dataset_name: str, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", **kwargs: object) -> dict[str, object]:
@@ -77,6 +103,7 @@ def evaluate_model(model_name: str, dataset_name: str, db_path: str = ":memory:"
     mock_predictions = kwargs.get("mock_predictions")
     mock_truths = kwargs.get("mock_truths")
     engine = LiveDatabaseEngine(db_path=db_path, ddl=ddl, db_type=db_type, db_kwargs=db_kwargs)
+    confidence_scores = []
     if mock_predictions is not None and mock_truths is not None:
         preds = mock_predictions
         truths = mock_truths
@@ -90,16 +117,13 @@ def evaluate_model(model_name: str, dataset_name: str, db_path: str = ":memory:"
             for i, batch in enumerate(dataloader):
                 if i >= int("10"):
                     break
-                if isinstance(batch, tuple) and len(batch) >= int("2"):
-                    (inputs, targets) = (batch[0], batch[1])
-                else:
-                    (inputs, targets) = (batch["inputs"], batch["targets"])
-                input_ids = inputs[0].numpy().tolist() if hasattr(inputs[0], "numpy") else inputs[0]
-                target_ids = targets[0].numpy().tolist() if hasattr(targets[0], "numpy") else targets[0]
+                input_ids = batch["inputs"][0].tolist() if hasattr(batch["inputs"][0], "tolist") else batch["inputs"][0]
+                target_ids = batch["targets"][0].tolist() if hasattr(batch["targets"][0], "tolist") else batch["targets"][0]
                 prompt_text = tokenizer.decode(input_ids)
                 truth_text = tokenizer.decode(target_ids)
                 gen_res = generate_sql(model_name, prompt_text)
                 preds.append(gen_res.get("sql", ""))  # type: ignore[arg-type]
+                confidence_scores.append(float(gen_res.get("confidence_score", 0.0)))  # type: ignore[arg-type]
                 truths.append(truth_text)  # type: ignore[arg-type]
         else:
             simulated_prompts = ["Get all users", "Find user with id 1"]
@@ -107,6 +131,9 @@ def evaluate_model(model_name: str, dataset_name: str, db_path: str = ":memory:"
             for prompt in simulated_prompts:
                 gen_res = generate_sql(model_name, prompt)
                 preds.append(gen_res.get("sql", "SELECT 1"))  # type: ignore[arg-type]
-    metrics = compute_metrics(engine, preds, truths)
+                confidence_scores.append(float(gen_res.get("confidence_score", 0.0)))  # type: ignore[arg-type]
+    metrics = asyncio.run(compute_metrics_async(engine, preds, truths))
+    if confidence_scores:
+        metrics["mean_confidence"] = sum(confidence_scores) / len(confidence_scores)
     engine.close()
     return {"backend": "keras", "model": model_name, "dataset": dataset_name, "status": "completed", "metrics": metrics}

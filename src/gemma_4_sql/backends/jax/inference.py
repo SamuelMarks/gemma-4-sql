@@ -20,7 +20,7 @@ except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSErro
     nnx = None
 
 
-def jax_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: int, max_length: int, eos_token_id: int) -> jnp.ndarray:
+def jax_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: int, max_length: int, eos_token_id: int) -> tuple[jnp.ndarray, float]:
     """JAX native beam search implementation.
 
     Args:
@@ -57,7 +57,7 @@ def jax_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: 
         beams = new_beams[:beam_width]
         if all(seq[0, -1] == eos_token_id for (seq, _) in beams):
             break
-    return beams[0][0]
+    return beams[0][0], beams[0][1]
 
 
 def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50) -> dict[str, object]:
@@ -78,13 +78,17 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     tokenizer = SQLTokenizer(model_name=None)
     input_tokens = tokenizer.encode(prompt)
     eos_token_id = tokenizer.vocab_size - 1
+    confidence_score = 0.0
     if jax is not None and jnp is not None and (Gemma4ForCausalLM is not None):
         input_ids = jnp.array([input_tokens], dtype=jnp.int32)
         model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))  # type: ignore[arg-type]
-        output_ids = jax_beam_search(model, input_ids, beam_width, max_length, eos_token_id)
+        output_ids, logprob_sum = jax_beam_search(model, input_ids, beam_width, max_length, eos_token_id)
         sql = tokenizer.decode(output_ids[0].tolist())
+        out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
+        confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))
         status = "success"
     else:
         sql = "SELECT * FROM jax_table"
+        confidence_score = 0.95
         status = "mocked_missing_jax"
-    return {"backend": "jax", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width}
+    return {"backend": "jax", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}

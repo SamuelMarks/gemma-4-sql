@@ -15,7 +15,7 @@ class BackendProtocol(Protocol):
     def generate_sql(self: typing.Any, model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50) -> dict[str, object]:
         """Protocol method."""
 
-    def run_agentic_loop(self: typing.Any, model_name: str, prompt: str, db_path: str, db_type: str = "sqlite", ddl: str | None = None, **kwargs: object) -> dict[str, object]:  # type: ignore[return]
+    def run_agentic_loop(self: typing.Any, model_name: str, prompt: str | list[str], db_path: str, db_type: str = "sqlite", ddl: str | None = None, **kwargs: object) -> dict[str, object] | list[dict[str, object]]:  # type: ignore[return]
         """Protocol method."""
         _ = ddl
         _ = db_type

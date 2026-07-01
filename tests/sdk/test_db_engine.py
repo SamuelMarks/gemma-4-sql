@@ -26,6 +26,50 @@ def test_live_database_engine_memory() -> None:
     engine.close()
 
 
+@pytest.mark.asyncio()
+async def test_live_database_engine_memory_async(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test async engine with in-memory DB."""
+
+    class MockAsyncCursor:
+        description = [("id",), ("name",)]
+
+        async def fetchall(self):
+            return [(1, "Alice")]
+
+        async def close(self):
+            pass
+
+    class MockAsyncConn:
+        async def execute(self, query):
+            return MockAsyncCursor()
+
+        async def close(self):
+            pass
+
+    class MockAiosqlite:
+        async def connect(self, *args, **kwargs):
+            return MockAsyncConn()
+
+    from gemma_4_sql.sdk import db_engine
+
+    monkeypatch.setattr(db_engine, "aiosqlite", MockAiosqlite())
+
+    ddl = "CREATE TABLE users (id INT, name TEXT); INSERT INTO users VALUES (1, 'Alice');"
+    engine = LiveDatabaseEngine(ddl=ddl, read_only=False)
+
+    results = await engine.execute_query_async("SELECT * FROM users")
+    assert results == [(1, "Alice")]
+
+    is_same = await engine.compare_queries_async("SELECT id FROM users", "SELECT id FROM users")
+    assert is_same is True
+
+    (success, res, _err) = await engine.execute_with_feedback_async("SELECT * FROM users")
+    assert success is True
+    assert res == [(1, "Alice")]
+
+    engine.close()
+
+
 def test_live_database_engine_file() -> None:
     """Test engine with file DB."""
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
@@ -52,6 +96,17 @@ def test_live_database_engine_postgres_missing() -> None:
     """Test PostgreSQL db_type when psycopg2 is missing."""
     with pytest.raises(ImportError, match="psycopg2 is required for PostgreSQL support"):
         LiveDatabaseEngine(db_type="postgresql")
+
+
+@patch("gemma_4_sql.sdk.db_engine.asyncpg", new=None)
+@pytest.mark.asyncio()
+async def test_live_database_engine_asyncpg_missing() -> None:
+    """Test PostgreSQL db_type when asyncpg is missing."""
+    mock_psycopg2 = MagicMock()
+    with patch("gemma_4_sql.sdk.db_engine.psycopg2", new=mock_psycopg2):
+        engine = LiveDatabaseEngine(db_type="postgresql")
+        with pytest.raises(ImportError, match="asyncpg is required for async PostgreSQL support"):
+            await engine.connect_async()
 
 
 @patch("gemma_4_sql.sdk.db_engine.snowflake", new=None)

@@ -1,11 +1,11 @@
-"""PyTorch-specific model evaluation pipeline."""
+"""MLX-specific model evaluation pipeline."""
 
 from __future__ import annotations
 
 import asyncio
 
-from gemma_4_sql.backends.pytorch.etl import build_dataloader
-from gemma_4_sql.backends.pytorch.inference import generate_sql
+from gemma_4_sql.backends.mlx.etl import build_dataloader
+from gemma_4_sql.backends.mlx.inference import generate_sql
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.tokenization import SQLTokenizer
 
@@ -80,7 +80,7 @@ def compute_metrics(engine: LiveDatabaseEngine, preds: list[str], truths: list[s
 
 
 def evaluate_model(model_name: str, dataset_name: str, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", **kwargs: object) -> dict[str, object]:
-    """Evaluate a Text-to-SQL model using the PyTorch backend.
+    """Evaluate a Text-to-SQL model using the MLX backend.
 
     Args:
     ----
@@ -96,7 +96,7 @@ def evaluate_model(model_name: str, dataset_name: str, db_path: str = ":memory:"
 
     Returns:
     -------
-        A dictionary containing PyTorch evaluation metrics.
+        A dictionary containing MLX evaluation metrics.
 
     """
     db_kwargs = kwargs.get("db_kwargs")
@@ -132,8 +132,8 @@ def evaluate_model(model_name: str, dataset_name: str, db_path: str = ":memory:"
                 gen_res = generate_sql(model_name, prompt)
                 preds.append(gen_res.get("sql", "SELECT 1"))  # type: ignore[arg-type]
                 confidence_scores.append(float(gen_res.get("confidence_score", 0.0)))  # type: ignore[arg-type]
-    metrics = asyncio.run(compute_metrics_async(engine, preds, truths))
+    metrics = compute_metrics(engine, preds, truths)
     if confidence_scores:
         metrics["mean_confidence"] = sum(confidence_scores) / len(confidence_scores)
     engine.close()
-    return {"backend": "pytorch", "model": model_name, "dataset": dataset_name, "status": "completed", "metrics": metrics}
+    return {"backend": "mlx", "model": model_name, "dataset": dataset_name, "status": "completed", "metrics": metrics}
