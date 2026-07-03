@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 import io
 import platform
@@ -36,33 +36,26 @@ def main() -> None:
     cov_stdout = io.StringIO()
     with redirect_stdout(cov_stdout):
         cov_res = pytest.main(["--cov=src/gemma_4_sql"])
-
     if cov_res != 0:
         sys.exit(cov_res)
-
     cov_out_str = cov_stdout.getvalue()
     cov_match = re.search("TOTAL\\s+.*\\s+(\\d+)%", cov_out_str)
     cov_pct = int(cov_match.group(1)) if cov_match else 0
-
     doc_stdout = io.StringIO()
     with redirect_stdout(doc_stdout), suppress(SystemExit):
         interrogate_main(["-v", "src"])
-
     doc_out_str = doc_stdout.getvalue()
     doc_match = re.search("actual: (\\d+\\.?\\d*)%", doc_out_str)
     doc_pct = int(float(doc_match.group(1))) if doc_match else 0
-
     readme_path = Path("README.md")
     content = readme_path.read_text(encoding="utf-8")
     cov_badge = f"![Test coverage](https://img.shields.io/badge/Test%20coverage-{cov_pct}%25-{get_color(cov_pct)})"
     doc_badge = f"![Doc coverage](https://img.shields.io/badge/Doc%20coverage-{doc_pct}%25-{get_color(doc_pct)})"
     badges = f"<!-- badges --> {cov_badge} {doc_badge} <!-- /badges -->"
     new_content = re.sub("<!-- badges -->.*<!-- /badges -->", badges, content, flags=re.DOTALL)
-
     if content != new_content:
         readme_path.write_text(new_content, encoding="utf-8")
         sys.exit(1)
-
     sys.exit(0)
 
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 import re
 
+MIN_SIMILARITY = 0.1
 logger = logging.getLogger(__name__)
-
 try:
     from sentence_transformers import SentenceTransformer
     from sklearn.metrics.pairwise import cosine_similarity
@@ -62,6 +62,25 @@ def _keyword_search(prompt: str, schema: dict[str, list[str]], top_k_tables: int
     return relevant_tables
 
 
+def _semantic_search(prompt: str, schema: dict[str, list[str]], table_names: list[str], top_k_tables: int) -> list[str]:
+    """Execute semantic vector embedding retrieval."""
+    try:
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]
+        prompt_embedding = model.encode([prompt])
+        table_embeddings = model.encode(table_docs)
+        similarities = cosine_similarity(prompt_embedding, table_embeddings)[0]
+        top_indices = similarities.argsort()[-top_k_tables:][::-1]
+        relevant_tables = [table_names[i] for i in top_indices if similarities[i] > MIN_SIMILARITY]
+        if not relevant_tables:
+            relevant_tables = table_names[:top_k_tables]
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+        logger.warning("Failed to use semantic search: %s. Falling back to keyword search.", e)
+        return _keyword_search(prompt, schema, top_k_tables)
+    else:
+        return relevant_tables
+
+
 def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_tables: int = 2) -> str:
     """Retrieve the most relevant tables and columns based on a natural language prompt.
 
@@ -82,36 +101,7 @@ def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_ta
     table_names = list(schema.keys())
     if not table_names:
         return ""
-
-    relevant_tables = []
-
-    if SentenceTransformer is not None and cosine_similarity is not None:
-        try:
-            # Simple RAG vector embedding retrieval
-            # For a real implementation, you'd cache the model and table embeddings
-            model = SentenceTransformer("all-MiniLM-L6-v2")
-
-            # Embed the tables (table name + columns)
-            table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]
-
-            prompt_embedding = model.encode([prompt])
-            table_embeddings = model.encode(table_docs)
-
-            similarities = cosine_similarity(prompt_embedding, table_embeddings)[0]  # type: ignore[operator]
-
-            # Get top_k indices
-            top_indices = similarities.argsort()[-top_k_tables:][::-1]
-            relevant_tables = [table_names[i] for i in top_indices if similarities[i] > 0.1]
-
-            if not relevant_tables:
-                relevant_tables = table_names[:top_k_tables]
-        except Exception as e:
-            logger.warning("Failed to use semantic search: %s. Falling back to keyword search.", e)
-            relevant_tables = _keyword_search(prompt, schema, top_k_tables)
-    else:
-        # Fallback keyword matching
-        relevant_tables = _keyword_search(prompt, schema, top_k_tables)
-
+    relevant_tables = _semantic_search(prompt, schema, table_names, top_k_tables) if SentenceTransformer is not None and cosine_similarity is not None else _keyword_search(prompt, schema, top_k_tables)
     context_lines = ["-- Relevant Schema Context:"]
     for table in relevant_tables:
         cols = ", ".join(schema[table])

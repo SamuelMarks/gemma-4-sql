@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing
 from typing import TYPE_CHECKING
 
 import gemma_4_sql.backends.pytorch.dpo as pt_dpo
@@ -26,32 +27,34 @@ class MockTensor:
         """Initialize function __rmul__."""
         return MockTensor()
 
-    def __neg__(self: object) -> MockTensor:
+    def __neg__(self: typing.Any) -> MockTensor:
         """Initialize function __neg__."""
         return MockTensor()
 
-    def item(self: object) -> float:
+    def item(self: typing.Any) -> float:
         """Initialize function item."""
         return 0.42
 
-    def mean(self: object, *args: object, **kwargs: object) -> MockTensor:
+    def mean(self: object, *_args: object, **_kwargs: object) -> MockTensor:
         """Initialize function mean."""
         return MockTensor()
 
-    def detach(self: object) -> MockTensor:
+    def detach(self: typing.Any) -> MockTensor:
         """Initialize function detach."""
         return MockTensor()
 
-    def backward(self: object) -> None:
-        pass
+    def backward(self: typing.Any) -> None:
+        """Execute function."""
 
 
 class MockNoGrad:
+    """Provide class docstring."""
+
     def __enter__(self) -> None:
-        pass
+        """Execute function."""
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
-        pass
+        """Execute function."""
 
 
 class MockTorch:
@@ -62,9 +65,11 @@ class MockTorch:
         return MockTensor()
 
     def zeros(self: object, *_args: object, **_kwargs: object) -> MockTensor:
+        """Execute function."""
         return MockTensor()
 
-    def no_grad(self: object) -> MockNoGrad:
+    def no_grad(self: typing.Any) -> MockNoGrad:
+        """Execute function."""
         return MockNoGrad()
 
 
@@ -77,28 +82,39 @@ class MockF:
 
 
 class MockNN:
+    """Provide class docstring."""
+
     class Module:
+        """Provide class docstring."""
+
         def __init__(self) -> None:
-            pass
+            """Execute function."""
 
     class Linear:
-        def __init__(self, in_features: int, out_features: int) -> None:
-            pass
+        """Provide class docstring."""
 
-        def __call__(self, x: object) -> MockTensor:
+        def __init__(self, in_features: int, out_features: int) -> None:
+            """Execute function."""
+
+        def __call__(self, _x: object) -> MockTensor:
+            """Execute function."""
             return MockTensor()
 
 
 class MockOptim:
+    """Provide class docstring."""
+
     class AdamW:
+        """Provide class docstring."""
+
         def __init__(self, params: object, lr: float) -> None:
-            pass
+            """Execute function."""
 
         def zero_grad(self) -> None:
-            pass
+            """Execute function."""
 
         def step(self) -> None:
-            pass
+            """Execute function."""
 
 
 def test_run_dpo_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,7 +123,6 @@ def test_run_dpo_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_dpo, "nn", None)
     monkeypatch.setattr(pt_dpo, "optim", None)
     monkeypatch.setattr(pt_dpo, "functional", None)
-
     res = run_dpo("model", "data")
     if not res["status"] == "mocked_missing_torch":
         raise AssertionError
@@ -127,20 +142,17 @@ def test_run_dpo_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_dpo, "optim", MockOptim())
     monkeypatch.setattr(pt_dpo, "functional", MockF())
 
-    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
+        """Execute function."""
         return {"loader": [{"chosen_inputs": MockTensor(), "rejected_inputs": MockTensor()}]}
 
     monkeypatch.setattr(pt_dpo, "build_dataloader", mock_build_dataloader)
 
-    # Need to patch DummyModel.parameters() because nn.Module is mocked.
-    # Actually, Python's dynamic nature might just fail if we don't mock the class correctly
-    # Let's intercept the class definition.
-    def mock_parameters(self) -> list:
+    def mock_parameters(_self: object) -> list:
+        """Execute function."""
         return []
 
-    # We can inject parameters method to nn.Module mock
     MockNN.Module.parameters = mock_parameters
-
     res = run_dpo("model", "data")
     if not res["backend"] == "pytorch":
         raise AssertionError
@@ -155,12 +167,12 @@ def test_run_dpo_pytorch_no_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_dpo, "optim", MockOptim())
     monkeypatch.setattr(pt_dpo, "functional", MockF())
 
-    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
+        """Execute function."""
         return {"loader": None}
 
     monkeypatch.setattr(pt_dpo, "build_dataloader", mock_build_dataloader)
-    MockNN.Module.parameters = lambda self: []
-
+    MockNN.Module.parameters = lambda _self: []
     res = run_dpo("model", "data")
     if not res["backend"] == "pytorch":
         raise AssertionError
@@ -175,12 +187,12 @@ def test_run_dpo_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_dpo, "optim", MockOptim())
     monkeypatch.setattr(pt_dpo, "functional", MockF())
 
-    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
     monkeypatch.setattr(pt_dpo, "build_dataloader", mock_build_dataloader)
-
     res = run_dpo("model", "data")
     if "failed" not in str(res["status"]):
         raise AssertionError

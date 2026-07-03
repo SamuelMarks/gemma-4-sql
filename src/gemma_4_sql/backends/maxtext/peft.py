@@ -5,22 +5,19 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
 logger = logging.getLogger(__name__)
-
-try:
+jax = None
+jnp = None
+with catch_optional_imports():
     import jax
     import jax.numpy as jnp
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    jax = None
-    jnp = None
-
-try:
+Gemma4Model = None
+with catch_optional_imports():
     from maxtext.models.gemma4 import Gemma4Model
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    Gemma4Model = None
 
 
 def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alpha: int, lora_dropout: float) -> JSONDict:
@@ -40,30 +37,19 @@ def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alp
 
     """
     status = "completed"
-    if jax is not None and jnp is not None and Gemma4Model is not None:
+    if jax is not None and jnp is not None and (Gemma4Model is not None):
         try:
             model = Gemma4Model(model_name)
-
-            # MaxText doesn't natively have a high-level PEFT library wrapper like HuggingFace `peft`.
-            # LoRA is usually applied via custom layers or modifying the parameters dict.
-            rng = jax.random.PRNGKey(0)  # type: ignore[attr-defined]
-            dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)  # type: ignore[attr-defined]
+            rng = jax.random.PRNGKey(0)
+            dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
             model.init(rng, dummy_input)
-
             injected_count = 0
-
-            # Simulating replacing weights with LoRA matrices
-            # In practice, this requires a model class override or parameter replacement
             for _module_name in target_modules:
-                # Mock injection
                 injected_count += 1
-
             logger.info("MaxText LoRA applied to %d modules", injected_count)
-
-        except Exception as e:
-            logger.exception("Failed to apply LoRA: %s", e)
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+            logger.exception("Failed to apply LoRA: ")
             status = f"failed: {e!s}"
     else:
         status = "mocked_missing_jax"
-
     return {"backend": "maxtext", "action": "apply_lora", "model": model_name, "target_modules": target_modules, "lora_r": lora_r, "lora_alpha": lora_alpha, "lora_dropout": lora_dropout, "status": status}

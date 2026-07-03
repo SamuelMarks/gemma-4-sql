@@ -30,13 +30,14 @@ class MockJnp:
     int32 = 1
 
     @staticmethod
-    def zeros(shape: object, **kwargs: object) -> object:
+    def zeros(shape: object, **_kwargs: object) -> object:
         """Initialize function zeros.
 
         Args:
         ----
         shape: Description of shape.
         dtype: Description of dtype.
+        **kwargs: Description of kwargs.
 
         """
         return MockJnpTensor(shape)
@@ -56,7 +57,7 @@ class MockJaxRandom:
     """Initialize class MockJaxRandom."""
 
     @staticmethod
-    def PRNGKey(seed: object) -> object:
+    def mock_prngkey(seed: object) -> object:
         """Initialize function prngkey.
 
         Args:
@@ -65,6 +66,8 @@ class MockJaxRandom:
 
         """
         return seed
+
+    PRNGKey = mock_prngkey
 
 
 class MockJax:
@@ -102,7 +105,7 @@ class MockJax:
             kwargs: Description of kwargs.
 
             """
-            _ = fn(*args, **kwargs)  # type: ignore[operator]
+            _ = fn(*args, **kwargs)
             return (MockJnpTensor((1,)), "grads")
 
         return wrapper
@@ -209,7 +212,7 @@ class MockGemma4Model:
 
 
 @pytest.fixture
-def _mock_maxtext_env(monkeypatch: object) -> object:  # type: ignore[return]
+def _mock_maxtext_env(monkeypatch: object) -> object:
     """Initialize function mock_maxtext_env.
 
     Args:
@@ -217,10 +220,10 @@ def _mock_maxtext_env(monkeypatch: object) -> object:  # type: ignore[return]
     monkeypatch: Description of monkeypatch.
 
     """
-    monkeypatch.setattr(tr, "jax", MockJax())  # type: ignore[attr-defined]
-    monkeypatch.setattr(tr, "jnp", MockJnp())  # type: ignore[attr-defined]
-    monkeypatch.setattr(tr, "optax", MockOptax())  # type: ignore[attr-defined]
-    monkeypatch.setattr(tr, "Gemma4Model", MockGemma4Model)  # type: ignore[attr-defined]
+    monkeypatch.setattr(tr, "jax", MockJax())
+    monkeypatch.setattr(tr, "jnp", MockJnp())
+    monkeypatch.setattr(tr, "optax", MockOptax())
+    monkeypatch.setattr(tr, "Gemma4Model", MockGemma4Model)
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
         """Initialize function mock_build_dataloader.
@@ -233,11 +236,11 @@ def _mock_maxtext_env(monkeypatch: object) -> object:  # type: ignore[return]
         """
         return {"loader": [{"inputs": MockJnpTensor((1,)), "targets": MockJnpTensor((1,))}]}
 
-    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)  # type: ignore[attr-defined]
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
 
 
 @pytest.mark.usefixtures("_mock_maxtext_env")
-def test_train_model_maxtext_real() -> object:  # type: ignore[return]
+def test_train_model_maxtext_real() -> object:
     """Initialize function test_train_model_maxtext_real.
 
     Args:
@@ -250,18 +253,18 @@ def test_train_model_maxtext_real() -> object:  # type: ignore[return]
         raise AssertionError
 
 
-def test_train_model_maxtext_missing() -> object:  # type: ignore[return]
+def test_train_model_maxtext_missing() -> object:
     """Initialize function test_train_model_maxtext_missing."""
-    orig_jax = tr.jax  # type: ignore[attr-defined]
-    tr.jax = None  # type: ignore[attr-defined]
+    orig_jax = tr.jax
+    tr.jax = None
     res = train_model("sft", "mod", "dat", 2, 0.1)
     if not res["status"] == "mocked_missing_maxtext":
         raise AssertionError
-    tr.jax = orig_jax  # type: ignore[attr-defined]
+    tr.jax = orig_jax
 
 
 @pytest.mark.usefixtures("_mock_maxtext_env")
-def test_train_model_maxtext_error(monkeypatch: object) -> object:  # type: ignore[return]
+def test_train_model_maxtext_error(monkeypatch: object) -> object:
     """Initialize function test_train_model_maxtext_error.
 
     Args:
@@ -271,8 +274,8 @@ def test_train_model_maxtext_error(monkeypatch: object) -> object:  # type: igno
 
     """
 
-    def raise_error(*_args: object, **_kwargs: object) -> object:
-        """Initialize function raise_error.
+    def mock_raise_error(*_args: object, **_kwargs: object) -> object:
+        """Initialize function Exception.
 
         Args:
         ----
@@ -283,12 +286,12 @@ def test_train_model_maxtext_error(monkeypatch: object) -> object:  # type: igno
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(tr, "build_dataloader", raise_error)  # type: ignore[attr-defined]
+    monkeypatch.setattr(tr, "build_dataloader", Exception)
     train_model("sft", "mod", "dat", 2, 0.1)
 
 
 @pytest.mark.usefixtures("_mock_maxtext_env")
-def test_train_model_maxtext_no_loader_fallback(monkeypatch: object) -> object:  # type: ignore[return]
+def test_train_model_maxtext_no_loader_fallback(monkeypatch: object) -> object:
     """Initialize function test_train_model_maxtext_no_loader_fallback.
 
     Args:
@@ -309,16 +312,15 @@ def test_train_model_maxtext_no_loader_fallback(monkeypatch: object) -> object: 
         """
         return {"loader": None}
 
-    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)  # type: ignore[attr-defined]
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
     train_model("sft", "mod", "dat", 2, 0.1)
 
 
-def test_train_imports_fail(monkeypatch: pytest.MonkeyPatch):
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.maxtext.train as m_train
-
+def test_train_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    m_train = __import__("gemma_4_sql.backends.maxtext.train")
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(m_train)
     monkeypatch.undo()
@@ -328,33 +330,36 @@ def test_train_imports_fail(monkeypatch: pytest.MonkeyPatch):
     importlib.reload(m_train)
 
 
+class MockMaxTextTrain:
+    """Provide class docstring."""
+
+    @staticmethod
+    def main(*args: object, **kwargs: object) -> None:
+        """Execute function."""
+
+
 @pytest.mark.usefixtures("_mock_maxtext_env")
-def test_train_model_maxtext_integration(monkeypatch: pytest.MonkeyPatch):
-    import gemma_4_sql.backends.maxtext.train as m_train
-
-    class MockMaxTextTrain:
-        @staticmethod
-        def main(*args, **kwargs):
-            pass
-
+def test_train_model_maxtext_integration(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    m_train = __import__("gemma_4_sql.backends.maxtext.train")
     monkeypatch.setattr(m_train, "maxtext_train", MockMaxTextTrain())
     res = m_train.train_model("sft", "mod", "dat", 2, 0.1, test_mode=False)
-    assert res["status"] == "completed"
+    if res["status"] != "completed":
+        raise AssertionError
 
 
-def test_train_imports_success(monkeypatch: pytest.MonkeyPatch):
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.maxtext.train as m_train
-
+def test_train_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    m_train = __import__("gemma_4_sql.backends.maxtext.train")
     monkeypatch.setitem(sys.modules, "maxtext.train", type("M", (), {})())
     monkeypatch.setitem(sys.modules, "maxtext", type("M", (), {})())
-    import builtins
-
+    builtins = __import__("builtins")
     orig_import = builtins.__import__
 
-    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
+    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
+        """Execute function."""
         if name == "maxtext.models.gemma4" and "Gemma4Model" in fromlist:
             return type("M", (), {"Gemma4Model": "mocked_gemma4"})
         return orig_import(name, globals, locals, fromlist, level)

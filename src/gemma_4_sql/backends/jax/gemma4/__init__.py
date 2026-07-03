@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 from __future__ import annotations
 

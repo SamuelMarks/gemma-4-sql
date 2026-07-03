@@ -74,7 +74,7 @@ class MockTensor:
         self.data = data
         self.dtype = dtype
 
-    def __repr__(self) -> object:  # type: ignore[override]
+    def __repr__(self) -> object:
         """Initialize function __repr__."""
         return f"MockTensor({self.data})"
 
@@ -120,13 +120,13 @@ class MockTorch:
     @staticmethod
     def tensor(_cls: object, *args: object, **kwargs: object) -> object:
         """Initialize function tensor."""
-        return MockTensor(kwargs.get("data") if "data" in kwargs else (args[0] if args else getattr(_cls, "data", _cls)))
+        return MockTensor(kwargs.get("data") if "data" in kwargs else args[0] if args else getattr(_cls, "data", _cls))
 
 
 class MockDataLoader:
     """Initialize class MockDataLoader."""
 
-    def __init__(self, dataset: object, batch_size: object, shuffle: object, collate_fn: object, sampler: object = None, **kwargs: object) -> None:
+    def __init__(self, dataset: object, batch_size: object, shuffle: object, collate_fn: object, _sampler: object = None, **_kwargs: object) -> None:
         """Initialize function __init__.
 
         Args:

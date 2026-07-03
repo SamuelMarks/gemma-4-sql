@@ -96,9 +96,9 @@ class MockJNP:
 
         """
         if axis == -1:
-            res = [arrays[0].data[i] + arrays[1].data[i] for i in range(len(arrays[0].data))]  # type: ignore[index]
+            res = [arrays[0].data[i] + arrays[1].data[i] for i in range(len(arrays[0].data))]
             return MockArray(res)
-        return MockArray([a.data for a in arrays])  # type: ignore[attr-defined]
+        return MockArray([a.data for a in arrays])
 
     def argsort(self: object, array: object) -> object:
         """Initialize function argsort.
@@ -108,7 +108,7 @@ class MockJNP:
         array: Description of array.
 
         """
-        d = array.data  # type: ignore[attr-defined]
+        d = array.data
         return MockArray(sorted(range(len(d)), key=lambda x: d[x]))
 
 
@@ -264,23 +264,20 @@ def test_jax_beam_search() -> None:
         return MockArray([logits])
 
     input_ids = jnp_mock.array([[1]])
-    result, _score = jax_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
+    (result, _score) = jax_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
     if not result.tolist() == [[1, 5, 299]]:
         raise AssertionError
 
 
 def test_inference_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.jax.inference as mdl
-
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    mdl = __import__("gemma_4_sql.backends.jax.inference")
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(mdl)
-
     monkeypatch.undo()
     monkeypatch.setitem(sys.modules, "flax", None)
     importlib.reload(mdl)
-
     monkeypatch.undo()
     importlib.reload(mdl)

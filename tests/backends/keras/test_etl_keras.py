@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 import sys
 from unittest import mock
@@ -53,7 +53,7 @@ class MockDatasets:
     """Initialize class MockDatasets."""
 
     @staticmethod
-    def load_dataset(*_args: object, **_kwargs: object) -> list[dict]:  # type: ignore[type-arg]
+    def load_dataset(*_args: object, **_kwargs: object) -> list[dict]:
         """Initialize function load_dataset.
 
         Args:
@@ -85,10 +85,7 @@ class MockGrain:
         return "jax_distributed_sharding"
 
     @staticmethod
-    def index_sampler(
-        *_args: object,
-        **kwargs: object,
-    ) -> str:
+    def index_sampler(*_args: object, **kwargs: object) -> str:
         """Initialize function indexsampler.
 
         Args:
@@ -97,12 +94,10 @@ class MockGrain:
         kwargs: Description of kwargs.
 
         """
-        return kwargs.get("shard_options", "sampler")  # type: ignore[return-value]
+        return kwargs.get("shard_options", "sampler")
 
     @staticmethod
-    def batch(
-        batch_size: int,
-    ) -> str:
+    def batch(batch_size: int) -> str:
         """Initialize function batch.
 
         Args:
@@ -130,10 +125,10 @@ class MockGrain:
             self.operations = operations
 
 
-MockGrain.NoSharding = staticmethod(MockGrain.no_sharding)  # type: ignore[attr-defined]
-MockGrain.JAXDistributedSharding = staticmethod(MockGrain.jax_distributed_sharding)  # type: ignore[attr-defined]
-MockGrain.IndexSampler = staticmethod(MockGrain.index_sampler)  # type: ignore[attr-defined]
-MockGrain.Batch = staticmethod(MockGrain.batch)  # type: ignore[attr-defined]
+MockGrain.NoSharding = staticmethod(MockGrain.no_sharding)
+MockGrain.JAXDistributedSharding = staticmethod(MockGrain.jax_distributed_sharding)
+MockGrain.IndexSampler = staticmethod(MockGrain.index_sampler)
+MockGrain.Batch = staticmethod(MockGrain.batch)
 
 
 def test_keras_etl_loaded() -> None:
@@ -172,19 +167,16 @@ def test_keras_etl_loaded() -> None:
 
 
 def test_etl_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.keras.etl as mdl
-
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    mdl = __import__("gemma_4_sql.backends.keras.etl")
     monkeypatch.setitem(sys.modules, "keras", None)
     importlib.reload(mdl)
     monkeypatch.undo()
-
     monkeypatch.setitem(sys.modules, "duckdb", None)
     importlib.reload(mdl)
     monkeypatch.undo()
-
     monkeypatch.setitem(sys.modules, "tensorflow", None)
     importlib.reload(mdl)
     monkeypatch.undo()

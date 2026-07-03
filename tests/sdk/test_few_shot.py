@@ -1,21 +1,15 @@
-"""Module docstring."""
-
-import pytest
+"""Provide module docstring."""
 
 from gemma_4_sql.sdk.few_shot import build_few_shot_prompt
 
 
-def test_few_shot_routing() -> object:  # type: ignore[return]
+def test_few_shot_routing() -> None:
     """Initialize function test_few_shot_routing."""
-    for backend in ["jax", "keras", "maxtext", "pytorch"]:
-        res = build_few_shot_prompt("foo", "prompt", [], backend=backend)
-        if not res["backend"] == backend:
+    for backend in ["jax", "keras", "maxtext", "pytorch", "unknown"]:
+        res = build_few_shot_prompt("foo", "prompt", [{"input": "a", "output": "b"}], backend=backend)
+        if res["backend"] != backend:
             raise AssertionError
-        if not res["model"] == "foo":
+        if res["model"] != "foo":
             raise AssertionError
-
-
-def test_few_shot_routing_error() -> object:  # type: ignore[return]
-    """Initialize function test_few_shot_routing_error."""
-    with pytest.raises(ValueError, match=r".*"):
-        build_few_shot_prompt("foo", "prompt", [], backend="unknown")
+        if res["status"] != f"success_{backend}_few_shot":
+            raise AssertionError

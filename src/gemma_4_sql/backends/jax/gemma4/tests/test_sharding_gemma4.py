@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 from absl.testing import absltest
 from flax import nnx
@@ -7,18 +7,18 @@ from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM, ShardCon
 from gemma_4_sql.backends.jax.gemma4.modeling import ModelConfig as Gemma4Config
 
 
-class TestSharding(absltest.TestCase):  # type: ignore[misc]
+class TestSharding(absltest.TestCase):
     """Initialize class TestSharding."""
 
     @classmethod
-    def setUpClass(cls) -> object:  # type: ignore[return]
+    def setUpClass(cls) -> object:
         """Set up the virtual mesh for sharding tests."""
         super().setUpClass()
 
-    def test_model_sharding(self) -> object:  # type: ignore[return]
+    def test_model_sharding(self) -> object:
         """Test that model sharding config works correctly."""
         shd = ShardConfig.no_sharding()
-        config = Gemma4Config(vocab_size=100, hidden_size=16, intermediate_size=32, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=8, num_experts=2, shd_cfg=shd)  # type: ignore[arg-type]
+        config = Gemma4Config(vocab_size=100, hidden_size=16, intermediate_size=32, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=8, num_experts=2, shd_cfg=shd)
         rngs = nnx.Rngs(0)
         model = Gemma4ForCausalLM(config, rngs=rngs)
         if model.model.embed_tokens is None:

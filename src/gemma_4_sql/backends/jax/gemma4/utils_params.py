@@ -1,24 +1,22 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 from __future__ import annotations
 
 import logging
 import os
 import re
-from typing import TYPE_CHECKING, Union
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONValue
-
-TransformValueType = Union[tuple[tuple[int, ...], Union[tuple[int, ...], None], bool], None]
+TransformValueType = tuple[tuple[int, ...], tuple[int, ...] | None, bool] | None
 TransformType = object
 KeyMapType = tuple[str, TransformType]
-
 logger = logging.getLogger(__name__)
-
 try:
     from safetensors import safe_open
 except ImportError:
@@ -46,115 +44,102 @@ def stoi(s: str) -> int | str:
         return s
 
 
-def assign_weights(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType, **kwargs: JSONValue) -> object:  # type: ignore[return, type-arg]
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
+def _apply_transform(tensor: jnp.ndarray, transform: TransformType) -> jnp.ndarray:
+    """Apply transformation to tensor."""
+    if transform is None:
+        return tensor
+    (permute, reshape, reshape_first) = transform
+    if reshape_first and reshape is not None:
+        tensor = tensor.reshape(reshape)
+    if permute:
+        tensor = tensor.transpose(permute)
+    if not reshape_first and reshape is not None:
+        tensor = tensor.reshape(reshape)
+    return tensor
 
-    Assumes that the state_dict values are of type Array.
-    """
+
+def assign_weights(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType, **kwargs: JSONValue) -> object:
+    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
     sharding_dict = kwargs.get("sharding_dict")
     (key, *rest) = keys
     if not rest:
-        if transform is not None:
-            (permute, reshape, reshape_first) = transform  # type: ignore[misc]
-            if reshape_first and reshape is not None:  # type: ignore[has-type]
-                tensor = tensor.reshape(reshape)  # type: ignore[has-type]
-            if permute:  # type: ignore[has-type]
-                tensor = tensor.transpose(permute)  # type: ignore[has-type]
-            if not reshape_first and reshape is not None:  # type: ignore[has-type]
-                tensor = tensor.reshape(reshape)  # type: ignore[has-type]
+        tensor = _apply_transform(tensor, transform)
         if tensor.shape != (state_dict[key].value.shape if hasattr(state_dict[key], "value") else getattr(state_dict[key], "shape", ())):
             msg = f"Shape mismatch for {st_key}: {tensor.shape} vs {(state_dict[key].value.shape if hasattr(state_dict[key], 'value') else getattr(state_dict[key], 'shape', ()))}"
             raise ValueError(msg)
-        val = jax.device_put(tensor, sharding_dict[key]) if sharding_dict is not None else jax.device_put(tensor)  # type: ignore[index]
+        val = jax.device_put(tensor, sharding_dict[key]) if sharding_dict is not None else jax.device_put(tensor)
         if hasattr(state_dict[key], "value"):
             state_dict[key].value = val
         else:
             state_dict[key] = val
     else:
-        next_sharding = sharding_dict[key] if sharding_dict is not None else None  # type: ignore[index]
-        assign_weights(rest, tensor, state_dict[key], st_key, transform, sharding_dict=next_sharding)  # type: ignore[call-arg]
+        next_sharding = sharding_dict[key] if sharding_dict is not None else None
+        assign_weights(rest, tensor, state_dict[key], st_key, transform, sharding_dict=next_sharding)
 
 
-def assign_weights_from_eval_shape(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType) -> object:  # type: ignore[return, type-arg]
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
-
-    Assumes that the state_dict values are of type ShapeDtypeStruct.
-    """
+def assign_weights_from_eval_shape(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType) -> object:
+    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
     (key, *rest) = keys
     if not rest:
-        if transform is not None:
-            (permute, reshape, reshape_first) = transform  # type: ignore[misc]
-            if reshape_first and reshape is not None:  # type: ignore[has-type]
-                tensor = tensor.reshape(reshape)  # type: ignore[has-type]
-            if permute:  # type: ignore[has-type]
-                tensor = tensor.transpose(permute)  # type: ignore[has-type]
-            if not reshape_first and reshape is not None:  # type: ignore[has-type]
-                tensor = tensor.reshape(reshape)  # type: ignore[has-type]
-        if tensor.shape != (state_dict[key].value.shape if hasattr(state_dict[key], "value") else getattr(state_dict[key], "shape", ())):
-            msg = f"Shape mismatch for {st_key}: {tensor.shape} vs {(state_dict[key].value.shape if hasattr(state_dict[key], 'value') else getattr(state_dict[key], 'shape', ()))}"
+        tensor = _apply_transform(tensor, transform)
+        val_obj = state_dict[key]
+        expected_shape = val_obj.value.shape if hasattr(val_obj, "value") else getattr(val_obj, "shape", ())
+        if tensor.shape != expected_shape:
+            msg = f"Shape mismatch for {st_key}: {tensor.shape} vs {expected_shape}"
             raise ValueError(msg)
-        tensor = tensor.astype(state_dict[key].value.dtype if hasattr(state_dict[key], "value") else getattr(state_dict[key], "dtype", None))
-        if hasattr(getattr(state_dict[key], "value", state_dict[key]), "sharding") and getattr(state_dict[key], "value", state_dict[key]).sharding is not None:
-            tensor = jax.device_put(tensor, getattr(state_dict[key], "value", state_dict[key]).sharding.spec)
-        if hasattr(state_dict[key], "value"):
-            state_dict[key].value = tensor
+        expected_dtype = val_obj.value.dtype if hasattr(val_obj, "value") else getattr(val_obj, "dtype", None)
+        tensor = tensor.astype(expected_dtype)
+        target = getattr(val_obj, "value", val_obj)
+        if hasattr(target, "sharding") and target.sharding is not None:
+            tensor = jax.device_put(tensor, target.sharding.spec)
+        if hasattr(val_obj, "value"):
+            val_obj.value = tensor
         else:
             state_dict[key] = tensor
     else:
         assign_weights_from_eval_shape(rest, tensor, state_dict[key], st_key, transform)
 
 
-def create_model_from_safe_tensors(file_dir: str, model_cls: object, cfg: object, key_mapping: dict, mesh: jax.sharding.Mesh | None = None) -> object:  # type: ignore[type-arg]
+def _load_weights_from_safetensors_file(filepath: str, state: dict[str, object], key_mapping: dict[str, KeyMapType]) -> None:
+    """Load weights from a single safetensors file."""
+    try:
+        with safe_open(filepath, framework="jax") as f:
+            for st_key in f:
+                tensor = f.get_tensor(st_key)
+                (mapped_key, transform) = map_to_jax_key(key_mapping, st_key)
+                if mapped_key is None:
+                    continue
+                keys = mapped_key.split(".")
+                try:
+                    assign_weights(keys, tensor, state, st_key, transform)
+                except KeyError:
+                    logger.debug("Key %s not in state", mapped_key)
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
+        logger.exception("Failed to load %s", filepath)
+
+
+def create_model_from_safe_tensors(file_dir: str, model_cls: object, cfg: object, key_mapping: dict) -> object:
     """Load tensors from the safetensors file and create a model (memory-optimized).
 
     This loads arrays one by one to avoid memory spikes, avoiding reading
     all parameters into host memory at once.
     """
-    # Create the model using an init context to get the evaluative structure or dummy initialization
-    from flax import nnx
-
-    # Normally we would do `eval_shape` or rely on `model_cls` creating uninitialized arrays
-    model = model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None  # type: ignore[operator]
-
-    if safe_open is None or not os.path.isdir(file_dir):
+    nnx = __import__("flax", fromlist=["nnx"]).nnx
+    model = model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
+    if safe_open is None or not Path(file_dir).is_dir():
         logger.warning("safetensors not available or file_dir invalid. Returning uninitialized model.")
         return model
-
-    # Iteratively load weights directly into device memory
     try:
-        # In actual codebase, state dict is retrieved from nnx model
-        _, state, _ = nnx.split(model, ...)  # type: ignore[misc]
-    except Exception:
+        (_, state, _) = nnx.split(model, ...)
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
         state = {}
-
     for root, _, files in os.walk(file_dir):
         for file in files:
             if file.endswith(".safetensors"):
-                filepath = os.path.join(root, file)
-                try:
-                    with safe_open(filepath, framework="jax") as f:
-                        for st_key in f:
-                            tensor = f.get_tensor(st_key)
-
-                            # Map key and transform
-                            mapped_key, transform = map_to_jax_key(key_mapping, st_key)
-                            if mapped_key is None:
-                                continue
-
-                            keys = mapped_key.split(".")
-
-                            # Assign directly avoiding huge allocations
-                            try:
-                                assign_weights(keys, tensor, state, st_key, transform)  # type: ignore[arg-type]
-                            except KeyError:
-                                logger.debug("Key %s not in state", mapped_key)
-                except Exception as e:
-                    logger.exception("Failed to load %s: %s", filepath, e)
-
-    # We update the model with loaded state
+                filepath = str(Path(root) / file)
+                _load_weights_from_safetensors_file(filepath, state, key_mapping)
     try:
-        nnx.update(model, state)  # type: ignore[misc]
-    except Exception:
-        pass
-
+        nnx.update(model, state)
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
+        logger.exception("Failed to update model with loaded state: ")
     return model

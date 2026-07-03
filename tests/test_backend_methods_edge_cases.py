@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 import pytest
 

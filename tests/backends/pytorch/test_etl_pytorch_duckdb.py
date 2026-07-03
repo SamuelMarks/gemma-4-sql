@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 import pytest
 
@@ -9,7 +9,7 @@ class MockDatasets:
     """Initialize class MockDatasets."""
 
     @staticmethod
-    def load_dataset(*_args: object, **_kwargs: object) -> list[dict]:  # type: ignore[type-arg]
+    def load_dataset(*_args: object, **_kwargs: object) -> list[dict]:
         """Initialize function load_dataset.
 
         Args:
@@ -33,7 +33,7 @@ class MockTorch:
     """Initialize class MockTorch."""
 
 
-def test_pytorch_etl_duckdb_missing() -> object:  # type: ignore[return]
+def test_pytorch_etl_duckdb_missing() -> object:
     """Initialize function test_pytorch_etl_duckdb_missing."""
     original_duckdb = getattr(etl_pytorch, "duckdb", None)
     original_datasets = getattr(etl_pytorch, "datasets", None)
@@ -41,16 +41,16 @@ def test_pytorch_etl_duckdb_missing() -> object:  # type: ignore[return]
     original_ds = getattr(etl_pytorch, "Dataset", None)
     original_torch = getattr(etl_pytorch, "torch", None)
     try:
-        etl_pytorch.duckdb = None  # type: ignore[attr-defined]
-        etl_pytorch.datasets = MockDatasets()  # type: ignore[attr-defined]
-        etl_pytorch.DataLoader = MockDataLoader()  # type: ignore[attr-defined]
-        etl_pytorch.Dataset = MockDataset()  # type: ignore[attr-defined]
-        etl_pytorch.torch = MockTorch()  # type: ignore[attr-defined]
-        with pytest.raises(Exception):  # noqa: B017
+        etl_pytorch.duckdb = None
+        etl_pytorch.datasets = MockDatasets()
+        etl_pytorch.DataLoader = MockDataLoader()
+        etl_pytorch.Dataset = MockDataset()
+        etl_pytorch.torch = MockTorch()
+        with pytest.raises(Exception, match=r".*"):
             etl_pytorch.build_dataloader("dummy", "train", 10, duckdb_path=":memory:", duckdb_table="tbl")
     finally:
-        etl_pytorch.duckdb = original_duckdb  # type: ignore[attr-defined]
-        etl_pytorch.datasets = original_datasets  # type: ignore[attr-defined]
-        etl_pytorch.DataLoader = original_dl  # type: ignore[attr-defined]
-        etl_pytorch.Dataset = original_ds  # type: ignore[attr-defined]
-        etl_pytorch.torch = original_torch  # type: ignore[attr-defined]
+        etl_pytorch.duckdb = original_duckdb
+        etl_pytorch.datasets = original_datasets
+        etl_pytorch.DataLoader = original_dl
+        etl_pytorch.Dataset = original_ds
+        etl_pytorch.torch = original_torch

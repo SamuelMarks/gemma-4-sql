@@ -5,29 +5,24 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.tokenization import SQLTokenizer
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
-
 logger = logging.getLogger(__name__)
-
-try:
+jax = None
+jnp = None
+with catch_optional_imports():
     import jax
     import jax.numpy as jnp
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    jax = None
-    jnp = None
-try:
+Gemma4Model = None
+with catch_optional_imports():
     from maxtext.models.gemma4 import Gemma4Model
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    Gemma4Model = None
 
 
 def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: int, max_length: int, eos_token_id: int) -> tuple[jnp.ndarray, float]:
     """Maxtext native beam search implementation (XLA compiled via JIT)."""
-    # Note: For true XLA compilation with variable lengths, jax.lax.while_loop is preferred.
-    # We simulate a simplified statically unrolled beam search here for the stub.
     beams = [(input_ids, 0.0)]
     for _ in range(max_length):
         new_beams = []
@@ -35,7 +30,7 @@ def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_wid
             if seq[0, -1] == eos_token_id:
                 new_beams.append((seq, score))
                 continue
-            logits = model_apply_fn(seq)  # type: ignore[operator]
+            logits = model_apply_fn(seq)
             log_probs = jax.nn.log_softmax(logits, axis=-1)[0]
             top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]
             top_probs = log_probs[top_indices]
@@ -48,7 +43,7 @@ def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_wid
         beams = new_beams[:beam_width]
         if all(seq[0, -1] == eos_token_id for (seq, _) in beams):
             break
-    return beams[0][0], beams[0][1]
+    return (beams[0][0], beams[0][1])
 
 
 def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50, **kwargs: JSONValue) -> JSONDict:
@@ -76,28 +71,22 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
             logger.info("Generating with MaxText: %s", model_name)
             input_ids = jnp.array([input_tokens], dtype=jnp.int32)
             model = Gemma4Model(model_name)
-
-            # Create a JIT compiled version of the beam search
             apply_fn = model.apply if hasattr(model, "apply") else model
             jitted_beam_search = jax.jit(maxtext_beam_search, static_argnums=(2, 3, 4))
-
             if not kwargs.get("test_mode"):
-                output_ids, logprob_sum = jitted_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
+                (output_ids, logprob_sum) = jitted_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
             else:
-                # Use non-jitted for easier test mocking
-                output_ids, logprob_sum = maxtext_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
-
+                (output_ids, logprob_sum) = maxtext_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
             sql = tokenizer.decode(output_ids[0].tolist())
             out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
             confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))
             status = "success"
-        except Exception as e:
-            logger.exception("MaxText Generation Error: %s", e)
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+            logger.exception("MaxText Generation Error: ")
             status = f"failed: {e!s}"
             sql = ""
     else:
         sql = "SELECT * FROM maxtext_table"
         confidence_score = 0.95
         status = "mocked_missing_maxtext"
-
     return {"backend": "maxtext", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}

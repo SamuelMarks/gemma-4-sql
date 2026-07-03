@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-try:
-    from transformers import AutoTokenizer
-except ImportError:
-    AutoTokenizer = None
+from gemma_4_sql.backends.lazy_loader import LazyLoader
+
+AutoTokenizer = LazyLoader("transformers").get_module()
 
 
 class SQLTokenizer:
@@ -32,33 +31,13 @@ class SQLTokenizer:
             self.hf_tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 
     def encode(self, text: str) -> list[int]:
-        """Encode a string into a list of token IDs.
-
-        Args:
-        ----
-            text: The input string.
-
-        Returns:
-        -------
-            A list of integer token IDs.
-
-        """
+        """Encode a string into a list of token IDs."""
         if self.hf_tokenizer is not None:
             return self.hf_tokenizer.encode(text, add_special_tokens=False)
         return [ord(c) % self.vocab_size for c in text]
 
     def decode(self, tokens: list[int]) -> str:
-        """Decode a list of token IDs back into a string.
-
-        Args:
-        ----
-            tokens: The list of token IDs.
-
-        Returns:
-        -------
-            The decoded string.
-
-        """
+        """Decode a list of token IDs back into a string."""
         if self.hf_tokenizer is not None:
-            return self.hf_tokenizer.decode(tokens)  # type: ignore[no-any-return]
+            return self.hf_tokenizer.decode(tokens)
         return "".join(chr(t) for t in tokens)

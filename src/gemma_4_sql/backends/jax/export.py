@@ -5,17 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
-try:
+jax = None
+jnp = None
+ocp = None
+with catch_optional_imports():
     import jax
     import jax.numpy as jnp
     import orbax.checkpoint as ocp
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    jax = None
-    jnp = None
-    ocp = None
 
 
 def export_model(model_name: str, export_path: str) -> JSONDict:
@@ -35,7 +35,6 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     if jax is not None and jnp is not None and (ocp is not None):
         try:
             nnx = __import__("flax", fromlist=["nnx"]).nnx
-
             gemma4_config_cls = __import__("gemma_4_sql.backends.jax.gemma4", fromlist=["Gemma4Config"]).Gemma4Config
             gemma4_for_causal_lm_cls = __import__("gemma_4_sql.backends.jax.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
             model = gemma4_for_causal_lm_cls(gemma4_config_cls.gemma4_e2b(), rngs=nnx.Rngs(0))

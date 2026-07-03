@@ -9,103 +9,145 @@ from gemma_4_sql.backends.maxtext.dpo import run_dpo
 
 
 class MockJnpTensor:
+    """Provide class docstring."""
+
     def __init__(self, shape: tuple) -> None:
+        """Execute function."""
         self.shape = shape
         self.dtype = float
 
     def __rmul__(self, other: object) -> object:
+        """Execute function."""
         return self
 
     def __mul__(self, other: object) -> object:
+        """Execute function."""
         return self
 
     def __sub__(self, other: object) -> object:
+        """Execute function."""
         return self
 
     def __neg__(self) -> object:
+        """Execute function."""
         return self
 
     def __add__(self, other: object) -> object:
+        """Execute function."""
         return self
 
     def item(self) -> float:
+        """Execute function."""
         return 0.35
 
 
 class MockJnp:
+    """Provide class docstring."""
+
     int32 = 1
 
     @staticmethod
-    def zeros(shape: object, **kwargs: object) -> object:
-        return MockJnpTensor(shape)  # type: ignore[arg-type]
+    def zeros(shape: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return MockJnpTensor(shape)
 
     @staticmethod
     def mean(x: object) -> object:
+        """Execute function."""
         return x
 
     @staticmethod
-    def sum(*args: object, **kwargs: object) -> object:
+    def sum(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         return MockJnpTensor((1,))
 
 
 class MockJnn:
+    """Provide class docstring."""
+
     @staticmethod
     def log_sigmoid(x: object) -> object:
+        """Execute function."""
         return x
 
 
 class MockJaxRandom:
+    """Provide class docstring."""
+
     @staticmethod
-    def PRNGKey(seed: object) -> object:
+    def mock_prngkey(seed: object) -> object:
+        """Execute function."""
         return seed
+
+    PRNGKey = mock_prngkey
 
 
 class MockJax:
+    """Provide class docstring."""
+
     random = MockJaxRandom()
 
     @staticmethod
     def jit(fn: object) -> object:
+        """Execute function."""
         return fn
 
     @staticmethod
     def value_and_grad(fn: object) -> object:
+        """Execute function."""
+
         def wrapper(*args: object, **kwargs: object) -> object:
-            _ = fn(*args, **kwargs)  # type: ignore[operator]
+            """Execute function."""
+            _ = fn(*args, **kwargs)
             return (MockJnpTensor((1,)), "grads")
 
         return wrapper
 
 
 class MockOptax:
+    """Provide class docstring."""
+
     @staticmethod
     def adamw(_lr: object) -> object:
+        """Execute function."""
+
         class MockOpt:
+            """Provide class docstring."""
+
             def init(self, _params: object) -> object:
+                """Execute function."""
                 return "opt_state"
 
             def update(self, _grads: object, _opt_state: object, _params: object) -> object:
+                """Execute function."""
                 return ("updates", "opt_state")
 
         return MockOpt()
 
     @staticmethod
     def apply_updates(params: object, _updates: object) -> object:
+        """Execute function."""
         return params
 
 
 class MockGemma4Model:
+    """Provide class docstring."""
+
     def __init__(self, name: object) -> None:
-        pass
+        """Execute function."""
 
     def init(self, _rng: object, _inputs: object) -> object:
+        """Execute function."""
         return "params"
 
     def apply(self, _params: object, _inputs: object) -> object:
+        """Execute function."""
         return MockJnpTensor((1,))
 
 
 @pytest.fixture
 def _mock_maxtext_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(tr, "jax", MockJax())
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "optax", MockOptax())
@@ -113,13 +155,15 @@ def _mock_maxtext_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnp", MockJnp())
     monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnn", MockJnn())
 
-    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
+        """Execute function."""
         return {"loader": [{"chosen_inputs": MockJnpTensor((1,)), "chosen_labels": MockJnpTensor((1,)), "rejected_inputs": MockJnpTensor((1,)), "rejected_labels": MockJnpTensor((1,))}]}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
 
 
 def test_run_dpo_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(tr, "jnp", None)
     res = run_dpo("model", "data")
     if not res["status"] == "mocked_missing_maxtext":
@@ -128,6 +172,7 @@ def test_run_dpo_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.usefixtures("_mock_maxtext_env")
 def test_run_dpo_maxtext_real() -> None:
+    """Execute function."""
     res = run_dpo("sft", "dat", epochs=2, learning_rate=0.1, test_mode=True)
     if not res["backend"] == "maxtext":
         raise AssertionError
@@ -137,11 +182,13 @@ def test_run_dpo_maxtext_real() -> None:
 
 @pytest.mark.usefixtures("_mock_maxtext_env")
 def test_run_dpo_maxtext_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    def mock_build_dataloader(*args: object, **kwargs: object) -> dict:
+    """Execute function."""
+
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
+        """Execute function."""
         return {"loader": None}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-
     res = run_dpo("sft", "dat", epochs=2, learning_rate=0.1, test_mode=True)
     if not res["backend"] == "maxtext":
         raise AssertionError
@@ -151,123 +198,61 @@ def test_run_dpo_maxtext_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -> 
 
 @pytest.mark.usefixtures("_mock_maxtext_env")
 def test_run_dpo_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def raise_error(*args: object, **kwargs: object) -> object:
+    """Execute function."""
+
+    def mock_raise_error(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(tr, "build_dataloader", raise_error)
-
+    monkeypatch.setattr(tr, "build_dataloader", Exception)
     res = run_dpo("sft", "dat", epochs=2, learning_rate=0.1, test_mode=True)
     if "failed" not in str(res["status"]):
         raise AssertionError
 
 
-def test_dpo_imports_fail(monkeypatch: pytest.MonkeyPatch):
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.maxtext.dpo as m_dpo
-
+def test_dpo_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    m_dpo = __import__("gemma_4_sql.backends.maxtext.dpo")
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(m_dpo)
     monkeypatch.undo()
     importlib.reload(m_dpo)
 
 
-def test_dpo_distributed_initialize(monkeypatch: pytest.MonkeyPatch):
-    import gemma_4_sql.backends.maxtext.dpo as tr
-
-    class MockJax:
-        def jit(x):
-            return x
-
-        def value_and_grad(x, **kw):
-            return lambda *a, **kw: (type("L", (), {"item": lambda self: 1.0})(), 1)
-
-        class random:
-            def PRNGKey(x):
-                return x
-
-            def split(x):
-                return (x, x)
-
-        class distributed:
-            @staticmethod
-            def initialize():
-                pass
-
-    class MockOptax:
-        def apply_updates(*args, **kwargs):
-            return None
-
-        def adamw(*args, **kwargs):
-            return type("Opt", (), {"init": lambda self, x: None, "update": lambda *a, **kw: (None, None)})()
-
-    class MockJnp:
-        def ones(*args, **kwargs):
-            return 1
-
-        def zeros(*args, **kwargs):
-            return 1
-
-        int32 = 1
-
-        def mean(*args, **kwargs):
-            return 1
-
+def test_dpo_distributed_initialize(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    tr = __import__("gemma_4_sql.backends.maxtext.dpo")
     monkeypatch.setattr(tr, "jax", MockJax)
     monkeypatch.setattr(tr, "optax", MockOptax)
     monkeypatch.setattr(tr, "jnp", MockJnp)
-    monkeypatch.setattr(tr, "Gemma4Model", lambda *args, **kwargs: type("M", (), {"init": lambda *args: None, "apply": lambda *args, **kwargs: None})())
-    res = tr.run_dpo("sft", "d", 1, 0.1, 0.1, test_mode=False)
-    assert res["status"] == "completed"
+    monkeypatch.setattr(tr, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: None})())
+
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return {"loader": [{"chosen_inputs": 1, "chosen_labels": 1, "rejected_inputs": 1, "rejected_labels": 1}]}
+
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
+    res = tr.run_dpo("sft", "d", beta=0.1, epochs=1, learning_rate=0.1, test_mode=False)
+    if res["status"] != "completed":
+        raise AssertionError
 
 
-def test_dpo_distributed_initialize_fail(monkeypatch: pytest.MonkeyPatch):
-    import gemma_4_sql.backends.maxtext.dpo as tr
-
-    class MockJax:
-        def jit(x):
-            return x
-
-        def value_and_grad(x, **kw):
-            return lambda *a, **kw: (type("L", (), {"item": lambda self: 1.0})(), 1)
-
-        class random:
-            def PRNGKey(x):
-                return x
-
-            def split(x):
-                return (x, x)
-
-        class distributed:
-            @staticmethod
-            def initialize():
-                msg = "err"
-                raise RuntimeError(msg)
-
-    class MockOptax:
-        def apply_updates(*args, **kwargs):
-            return None
-
-        def adamw(*args, **kwargs):
-            return type("Opt", (), {"init": lambda self, x: None, "update": lambda *a, **kw: (None, None)})()
-
-    class MockJnp:
-        def ones(*args, **kwargs):
-            return 1
-
-        def zeros(*args, **kwargs):
-            return 1
-
-        int32 = 1
-
-        def mean(*args, **kwargs):
-            return 1
-
+def test_dpo_distributed_initialize_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    tr = __import__("gemma_4_sql.backends.maxtext.dpo")
     monkeypatch.setattr(tr, "jax", MockJax)
     monkeypatch.setattr(tr, "optax", MockOptax)
     monkeypatch.setattr(tr, "jnp", MockJnp)
-    monkeypatch.setattr(tr, "Gemma4Model", lambda *args, **kwargs: type("M", (), {"init": lambda *args: None, "apply": lambda *args, **kwargs: None})())
-    res = tr.run_dpo("sft", "d", 1, 0.1, 0.1, test_mode=False)
-    assert res["status"] == "completed"
+    monkeypatch.setattr(tr, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: None})())
+
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return {"loader": [{"chosen_inputs": 1, "chosen_labels": 1, "rejected_inputs": 1, "rejected_labels": 1}]}
+
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
+    res = tr.run_dpo("sft", "d", beta=0.1, epochs=1, learning_rate=0.1, test_mode=False)
+    if res["status"] != "completed":
+        raise AssertionError

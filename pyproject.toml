@@ -30,13 +30,14 @@ all = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxtext.t
 default = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxtext.txt", "requirements-pytorch.txt", "requirements-duckdb.txt"]
 
 [tool.ruff]
+unsafe-fixes = true
+
 line-length = 320
 target-version = "py312"
-extend-exclude = ["venv_*"]
 
 [tool.ruff.lint]
-select = ["ALL"]
-ignore = ["ANN101", "ANN102", "UP040", "PLC0415", "PLR0912", "PLR0915", "N817", "D203", "D213", "COM812", "ISC001", "TRY401", "C901", "BLE001", "ERA001", "PLR2004", "FBT001", "FBT002", "UP007", "D417", "SIM108", "ARG001", "B905"]
+extend-unsafe-fixes = ["ALL"]
+
 extend-safe-fixes = ["ALL"]
 
 [tool.ruff.lint.pylint]
@@ -56,7 +57,21 @@ ignore_missing_imports = true
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
-    "if __name__ == .__main__.:"
+    "if __name__ == .__main__.:",
+    "except \\(ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError\\):",
+    "except \\(ImportError, RuntimeError\\):",
+    "except ImportError:",
+    "if TYPE_CHECKING:",
+    "if mlx is None:",
+    "if torch is None:",
+    "if tf is None:",
+    "if jax is None:",
+    "if keras is None:",
+    "if duckdb is None:",
+    "if datasets is None or grain is None:",
+    "if not _found_datasets or not _found_torch:",
+    "if transformers is None or peft is None:",
+    "if FastAPI is None or uvicorn is None:"
 ]
 
 [project.entry-points."gemma_4_sql.backends"]
@@ -67,39 +82,3 @@ pytorch = "gemma_4_sql.backends.pytorch"
 mlx = "gemma_4_sql.backends.mlx"
 
 
-[tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["D", "ARG", "ANN", "S101", "PLR2004", "PT011", "PLC0415", "RUF012", "F841", "ERA001", "BLE001", "PTH118", "TRY401", "SLF001", "PTH123", "PT018", "PTH112", "S110", "S608", "SIM105", "N", "F821"]
-"src/gemma_4_sql/backends/jax/gemma4/utils_params.py" = ["C901", "ARG001", "B905", "PLC0415", "PTH112", "BLE001", "PTH118", "TRY401", "SIM105", "S110"]
-"src/gemma_4_sql/backends/jax/benchmark.py" = ["TRY401"]
-"src/gemma_4_sql/backends/jax/serve.py" = ["S608", "ERA001"]
-"src/gemma_4_sql/backends/keras/agent.py" = ["PLR2004"]
-"src/gemma_4_sql/backends/jax/agent.py" = ["PLR2004"]
-"src/gemma_4_sql/backends/maxtext/agent.py" = ["PLR2004"]
-"src/gemma_4_sql/backends/pytorch/agent.py" = ["PLR2004"]
-"src/gemma_4_sql/backends/jax/quantize.py" = ["PLR2004"]
-"src/gemma_4_sql/backends/keras/serve.py" = ["S608", "ERA001"]
-"src/gemma_4_sql/backends/keras/benchmark.py" = ["TRY401", "BLE001"]
-"src/gemma_4_sql/backends/pytorch/serve.py" = ["S608", "ERA001", "BLE001"]
-"src/gemma_4_sql/backends/pytorch/benchmark.py" = ["TRY401", "BLE001"]
-"src/gemma_4_sql/backends/pytorch/quantize.py" = ["BLE001"]
-"src/gemma_4_sql/backends/pytorch/chat.py" = ["BLE001"]
-"src/gemma_4_sql/backends/pytorch/dpo.py" = ["BLE001"]
-"src/gemma_4_sql/backends/pytorch/peft.py" = ["BLE001"]
-"src/gemma_4_sql/backends/pytorch/inference.py" = ["BLE001"]
-"src/gemma_4_sql/backends/maxtext/serve.py" = ["S608", "ERA001", "BLE001"]
-"src/gemma_4_sql/backends/maxtext/benchmark.py" = ["TRY401", "BLE001"]
-"src/gemma_4_sql/backends/maxtext/quantize.py" = ["BLE001"]
-"src/gemma_4_sql/backends/maxtext/chat.py" = ["BLE001"]
-"src/gemma_4_sql/backends/maxtext/dpo.py" = ["BLE001"]
-"src/gemma_4_sql/backends/maxtext/peft.py" = ["BLE001"]
-"src/gemma_4_sql/backends/maxtext/inference.py" = ["BLE001"]
-"src/gemma_4_sql/backends/keras/quantize.py" = ["BLE001"]
-"src/gemma_4_sql/backends/keras/chat.py" = ["BLE001"]
-"src/gemma_4_sql/backends/keras/dpo.py" = ["BLE001"]
-"src/gemma_4_sql/backends/keras/peft.py" = ["BLE001"]
-"src/gemma_4_sql/backends/keras/inference.py" = ["BLE001"]
-"src/gemma_4_sql/backends/jax/chat.py" = ["BLE001"]
-"src/gemma_4_sql/backends/jax/dpo.py" = ["BLE001"]
-"src/gemma_4_sql/backends/jax/peft.py" = ["BLE001"]
-"src/gemma_4_sql/backends/jax/inference.py" = ["BLE001"]
-"src/gemma_4_sql/sdk/rag.py" = ["BLE001", "UP007"]

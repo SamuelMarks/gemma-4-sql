@@ -17,7 +17,6 @@ def test_embed_in_duckdb_missing() -> None:
 def test_embed_in_duckdb_success() -> None:
     """Test successful registration and execution."""
     importlib = __import__("importlib")
-
     mock_duckdb = MagicMock()
     with patch.dict("sys.modules", {"duckdb": mock_duckdb}):
         gemma_4_sql = __import__("gemma_4_sql.sdk.duckdb_extension")
@@ -34,16 +33,16 @@ def test_embed_in_duckdb_success() -> None:
 
             """
             mock_cursor = MagicMock()
-            if "information_schema.tables" in query:  # type: ignore[operator]
+            if "information_schema.tables" in query:
                 mock_cursor.fetchall.return_value = [("users",)]
-            elif "information_schema.columns" in query:  # type: ignore[operator]
+            elif "information_schema.columns" in query:
                 mock_cursor.fetchall.return_value = [("id", "INTEGER")]
             return mock_cursor
 
         conn.execute = mock_execute
         registered_func = None
 
-        def mock_create_function(_name: object, func: object, _args: object, _ret: object) -> object:  # type: ignore[return]
+        def mock_create_function(_name: object, func: object, _args: object, _ret: object) -> object:
             """Initialize function mock_create_function.
 
             Args:
@@ -64,7 +63,7 @@ def test_embed_in_duckdb_success() -> None:
         with patch("gemma_4_sql.sdk.duckdb_extension.run_agentic_loop") as mock_agent:
             mock_agent.return_value = {"final_sql": "SELECT * FROM users", "results": [(1,)], "success": True}
             json = __import__("json")
-            res_str = registered_func("Get users")  # type: ignore[operator]
+            res_str = registered_func("Get users")
             res_json = json.loads(res_str)
             if res_json["success"] is not True:
                 raise AssertionError
@@ -74,5 +73,5 @@ def test_embed_in_duckdb_success() -> None:
                 raise AssertionError
             mock_agent.assert_called_once()
             kwargs = mock_agent.call_args.kwargs
-            if not kwargs["ddl"] == "CREATE TABLE users (id INTEGER);":
+            if not kwargs["context"].ddl == "CREATE TABLE users (id INTEGER);":
                 raise AssertionError

@@ -197,7 +197,7 @@ class MockGemma4ForCausalLM:
 
 
 @pytest.fixture
-def _mock_torch_env(monkeypatch: object) -> object:  # type: ignore[return]
+def _mock_torch_env(monkeypatch: object) -> object:
     """Initialize function mock_torch_env.
 
     Args:
@@ -205,10 +205,10 @@ def _mock_torch_env(monkeypatch: object) -> object:  # type: ignore[return]
     monkeypatch: Description of monkeypatch.
 
     """
-    monkeypatch.setattr(tr, "torch", MockTorch())  # type: ignore[attr-defined]
-    monkeypatch.setattr(tr, "nn", MockNN())  # type: ignore[attr-defined]
-    monkeypatch.setattr(tr, "optim", MockOptim())  # type: ignore[attr-defined]
-    monkeypatch.setattr(tr, "Gemma4ForCausalLM", MockGemma4ForCausalLM)  # type: ignore[attr-defined]
+    monkeypatch.setattr(tr, "torch", MockTorch())
+    monkeypatch.setattr(tr, "nn", MockNN())
+    monkeypatch.setattr(tr, "optim", MockOptim())
+    monkeypatch.setattr(tr, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
         """Initialize function mock_build_dataloader.
@@ -221,11 +221,11 @@ def _mock_torch_env(monkeypatch: object) -> object:  # type: ignore[return]
         """
         return {"loader": [{"inputs": MockTensor((1,)), "targets": MockTensor((1,))}]}
 
-    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)  # type: ignore[attr-defined]
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
 
 
 @pytest.mark.usefixtures("_mock_torch_env")
-def test_train_model_pytorch_real() -> object:  # type: ignore[return]
+def test_train_model_pytorch_real() -> object:
     """Initialize function test_train_model_pytorch_real.
 
     Args:
@@ -238,18 +238,18 @@ def test_train_model_pytorch_real() -> object:  # type: ignore[return]
         raise AssertionError
 
 
-def test_train_model_pytorch_missing() -> object:  # type: ignore[return]
+def test_train_model_pytorch_missing() -> object:
     """Initialize function test_train_model_pytorch_missing."""
-    orig_torch = tr.torch  # type: ignore[attr-defined]
-    tr.torch = None  # type: ignore[attr-defined]
+    orig_torch = tr.torch
+    tr.torch = None
     res = train_model("sft", "mod", "dat", 2, 0.1)
     if not res["status"] == "mocked_missing_torch":
         raise AssertionError
-    tr.torch = orig_torch  # type: ignore[attr-defined]
+    tr.torch = orig_torch
 
 
 @pytest.mark.usefixtures("_mock_torch_env")
-def test_train_model_pytorch_error(monkeypatch: object) -> object:  # type: ignore[return]
+def test_train_model_pytorch_error(monkeypatch: object) -> object:
     """Initialize function test_train_model_pytorch_error.
 
     Args:
@@ -259,8 +259,8 @@ def test_train_model_pytorch_error(monkeypatch: object) -> object:  # type: igno
 
     """
 
-    def raise_error(*_args: object, **_kwargs: object) -> object:
-        """Initialize function raise_error.
+    def mock_raise_error(*_args: object, **_kwargs: object) -> object:
+        """Initialize function Exception.
 
         Args:
         ----
@@ -271,12 +271,12 @@ def test_train_model_pytorch_error(monkeypatch: object) -> object:  # type: igno
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(tr, "build_dataloader", raise_error)  # type: ignore[attr-defined]
+    monkeypatch.setattr(tr, "build_dataloader", Exception)
     train_model("sft", "mod", "dat", 2, 0.1)
 
 
 @pytest.mark.usefixtures("_mock_torch_env")
-def test_train_model_pytorch_no_loader_fallback(monkeypatch: object) -> object:  # type: ignore[return]
+def test_train_model_pytorch_no_loader_fallback(monkeypatch: object) -> object:
     """Initialize function test_train_model_pytorch_no_loader_fallback.
 
     Args:
@@ -297,83 +297,58 @@ def test_train_model_pytorch_no_loader_fallback(monkeypatch: object) -> object: 
         """
         return {"loader": None}
 
-    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)  # type: ignore[attr-defined]
+    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
     train_model("sft", "mod", "dat", 2, 0.1)
 
 
-def test_train_model_real(monkeypatch: pytest.MonkeyPatch):
-    import gemma_4_sql.backends.pytorch.train as m_train
+class MockModelObj:
+    """Provide class docstring."""
 
-    class MockTorch:
-        @staticmethod
-        def device(*args, **kwargs):
-            return "cpu"
+    def to(self, *_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return self
 
-        class cuda:
-            @staticmethod
-            def is_available():
-                return False
+    def parameters(self) -> object:
+        """Execute function."""
+        return [1]
 
-        class Tensor:
-            pass
+    def train(self) -> None:
+        """Execute function."""
 
-        def zeros(*args, **kwargs):
-            return type("T", (), {"view": lambda self, *a: self, "size": lambda self, *a: 1})()
+    def __call__(self, *_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return type("Out", (), {"view": lambda _self, *_a: _self, "size": lambda _self, *_a: 1, "logits": type("L", (), {"view": lambda _self, *_a: _self, "size": lambda _self, *_a: 1})()})()
 
-        long = 1
+    def view(self, *_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return self
 
-    class MockOptim:
-        class AdamW:
-            def __init__(self, *args, **kwargs):
-                pass
+    def size(self, *_args: object, **_kwargs: object) -> int:
+        """Execute function."""
+        return 1
 
-            def zero_grad(self):
-                pass
 
-            def step(self):
-                pass
+class MockModel:
+    """Provide class docstring."""
 
-    class MockNN:
-        class CrossEntropyLoss:
-            def __call__(self, *args, **kwargs):
-                return type("Loss", (), {"backward": lambda self: None, "item": lambda self: 0.35})()
+    @classmethod
+    def from_pretrained(cls, *_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return MockModelObj()
 
+
+def test_train_model_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    m_train = __import__("gemma_4_sql.backends.pytorch.train")
     monkeypatch.setattr(m_train, "torch", MockTorch)
     monkeypatch.setattr(m_train, "optim", MockOptim)
     monkeypatch.setattr(m_train, "nn", MockNN)
-
-    class MockModelObj:
-        def to(self, *args, **kwargs):
-            return self
-
-        def parameters(self):
-            return [1]
-
-        def train(self):
-            pass
-
-        def __call__(self, *args, **kwargs):
-            return type("Out", (), {"view": lambda *a: self, "size": lambda *a: 1, "logits": type("L", (), {"view": lambda self, *a: self, "size": lambda self, *a: 1})()})()
-
-        def view(self, *args, **kwargs):
-            return self
-
-        def size(self, *args, **kwargs):
-            return 1
-
-    class MockModel:
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            return MockModelObj()
-
     monkeypatch.setattr(m_train, "Gemma4ForCausalLM", MockModel)
-
-    # Test without loader
-    monkeypatch.setattr(m_train, "build_dataloader", lambda *args, **kwargs: {})
+    monkeypatch.setattr(m_train, "build_dataloader", lambda *_args, **_kwargs: {})
     res = m_train.train_model("sft", "m", "ds", 1, 0.1)
-    assert res["status"] == "completed"
-
-    # Test with loader
-    monkeypatch.setattr(m_train, "build_dataloader", lambda *args, **kwargs: {"loader": [{"inputs": MockModelObj(), "targets": MockModelObj()}]})
+    if res["status"] != "completed":
+        raise AssertionError
+    monkeypatch.setattr(m_train, "build_dataloader", lambda *_args, **_kwargs: {"loader": [{"inputs": MockModelObj(), "targets": MockModelObj()}]})
     res = m_train.train_model("sft", "m", "ds", 1, 0.1)
-    assert res["status"] == "completed"
+    if res["status"] != "completed":
+        raise AssertionError

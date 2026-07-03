@@ -1,55 +1,81 @@
+"""Provide module docstring."""
+
+import contextlib
+from typing import Never
+
 import gemma_4_sql.backends.keras.export as kexp
 
 
 class MockKeras:
+    """Provide class docstring."""
+
     class Model:
-        def __init__(self, *args, **kwargs):
-            pass
+        """Provide class docstring."""
 
-        def save(self, path):
-            pass
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            """Execute function."""
 
-    def Input(self, *args, **kwargs):
+        def save(self, path: object) -> None:
+            """Execute function."""
+
+    def mock_input(self, *_args: object, **_kwargs: object) -> str:
+        """Execute function."""
         return "input"
 
-    class layers:
-        def Embedding(*args, **kwargs):
-            return lambda x: "x"
+    Input = mock_input
 
-        def Dense(*args, **kwargs):
-            return lambda x: "x"
+    class MockLayers:
+        """Provide class docstring."""
+
+        def mock_embedding(*_args: object, **_kwargs: object) -> object:
+            """Execute function."""
+            return lambda _x: "x"
+
+        Embedding = mock_embedding
+
+        def mock_dense(*_args: object, **_kwargs: object) -> object:
+            """Execute function."""
+            return lambda _x: "x"
+
+        Dense = mock_dense
+
+    layers = MockLayers
 
 
-def test_export_keras_real(monkeypatch):
+def test_export_keras_real(monkeypatch: object) -> None:
+    """Execute function."""
     monkeypatch.setattr(kexp, "keras", MockKeras())
     res = kexp.export_model("model", "out")
-    assert res["backend"] == "keras"
+    if res["backend"] != "keras":
+        raise AssertionError
 
 
-def test_export_keras_error(monkeypatch):
+def test_export_keras_error(monkeypatch: object) -> None:
+    """Execute function."""
     monkeypatch.setattr(kexp, "keras", MockKeras())
 
-    def raise_err(*args, **kwargs):
+    def raise_err(*_args: object, **_kwargs: object) -> Never:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
     monkeypatch.setattr(MockKeras.Model, "save", raise_err)
-    try:
-        res = kexp.export_model("model", "out")
-    except ValueError:
-        pass
+    with contextlib.suppress(ValueError):
+        kexp.export_model("model", "out")
 
 
-def test_export_keras_missing(monkeypatch):
+def test_export_keras_missing(monkeypatch: object) -> None:
+    """Execute function."""
     monkeypatch.setattr(kexp, "keras", None)
     res = kexp.export_model("model", "out")
-    assert res["status"] == "mock_exported"
+    if res["status"] != "mock_exported":
+        raise AssertionError
 
 
-def test_export_keras_imports_fail(monkeypatch):
-    import importlib
-    import sys
-
+def test_export_keras_imports_fail(monkeypatch: object) -> None:
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
     monkeypatch.setitem(sys.modules, "keras", None)
     importlib.reload(kexp)
     monkeypatch.undo()

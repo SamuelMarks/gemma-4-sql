@@ -9,67 +9,53 @@ if typing.TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 
-class BackendProtocol(Protocol):
-    """Backend protocol interface."""
+class TrainingProtocol(Protocol):
+    """Training backend interface."""
 
     def train_model(self, action: str, model_name: str, dataset_name: str) -> JSONDict:
         """Protocol method."""
-
-    def generate_sql(self, model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50) -> JSONDict:
-        """Protocol method."""
-
-    def run_agentic_loop(self, model_name: str, prompt: str | list[str], db_path: str, db_type: str = "sqlite", ddl: str | None = None, **kwargs: JSONValue) -> JSONDict | list[JSONDict]:  # type: ignore[return]
-        """Protocol method."""
-        _ = ddl
-        _ = db_type
-        _ = db_path
-        _ = prompt
-        _ = model_name
-        kwargs.get("db_kwargs")
+        ...
 
     def run_dpo(self, model_name: str, dataset_name: str, beta: float) -> JSONDict:
         """Protocol method."""
+        ...
 
-    def evaluate_model(self, model_name: str, dataset_name: str, db_path: str, db_type: str = "sqlite", ddl: str | None = None, **kwargs: JSONValue) -> JSONDict:  # type: ignore[return]
+    def build_dataloader(self, dataset_name: str, split: str, batch_size: int, **kwargs: JSONValue) -> JSONDict:
         """Protocol method."""
-        _ = ddl
-        _ = db_type
-        _ = db_path
-        _ = dataset_name
-        _ = model_name
-        kwargs.get("db_kwargs")
-        kwargs.get("mock_predictions")
-        kwargs.get("mock_truths")
-
-    def build_dataloader(self, dataset_name: str, split: str, batch_size: int, tokenizer_name: str | None = None, duckdb_path: str | None = None, **kwargs: JSONValue) -> JSONDict:  # type: ignore[return]
-        """Protocol method."""
-        _ = duckdb_path
-        _ = tokenizer_name
-        _ = batch_size
-        _ = split
-        _ = dataset_name
-        kwargs.get("duckdb_table")
+        ...
 
     def export_model(self, model_name: str, output_path: str) -> JSONDict:
         """Protocol method."""
+        ...
 
     def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs") -> JSONDict:
         """Protocol method."""
+        ...
 
-    def apply_lora(self, model_name: str, target_modules: list[str], lora_r: int, lora_alpha: int, lora_dropout: float) -> JSONDict:
+    def apply_lora(self, model_name: str, target_modules: list[str], **kwargs: JSONValue) -> JSONDict:
         """Protocol method."""
+        ...
 
-    def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> JSONDict:
+    def quantize_model(self, model_name: str, method: str = "int8") -> JSONDict:
         """Protocol method."""
+        ...
 
-    def chat_turn(self, model_name: str, history: list[dict[str, str]], new_prompt: str, **kwargs: JSONValue) -> JSONDict:
-        """Protocol method."""
 
-    def build_few_shot_prompt(self, model_name: str, prompt: str, examples: list[dict[str, str]], **kwargs: JSONValue) -> JSONDict:
+class InferenceProtocol(Protocol):
+    """Inference backend interface."""
+
+    def generate_sql(self, model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50) -> JSONDict:
         """Protocol method."""
+        ...
 
     def serve_model(self, model_name: str, port: int = 8000, max_batch_size: int = 32, **kwargs: JSONValue) -> JSONDict:
         """Protocol method."""
+        ...
 
     def benchmark_model(self, model_name: str, hardware: str = "tpu-v5p", batch_size: int = 32) -> JSONDict:
         """Protocol method."""
+        ...
+
+
+class BackendProtocol(TrainingProtocol, InferenceProtocol, Protocol):
+    """Unified Backend protocol interface."""

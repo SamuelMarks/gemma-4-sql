@@ -5,9 +5,8 @@ from __future__ import annotations
 import importlib.metadata
 from typing import TYPE_CHECKING, cast
 
-if TYPE_CHECKING:  # pragma: no cover
+if TYPE_CHECKING:
     from .protocols import BackendProtocol
-
 ENTRY_POINTS: dict[str, importlib.metadata.EntryPoint] = {}
 
 

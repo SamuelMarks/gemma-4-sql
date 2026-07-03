@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from flax import nnx
 
 if TYPE_CHECKING:
-    from jaxtyping import Array  # pragma: no cover
+    from jaxtyping import Array
 
 
 def segment_ids_to_positions(segment_ids: Array) -> Array:
@@ -63,7 +63,7 @@ def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
     return jnp.concatenate([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1).astype(x.dtype)
 
 
-class RoPE(nnx.Module):  # type: ignore[misc]
+class RoPE(nnx.Module):
     """Initialize class RoPE."""
 
     def __init__(self, *, rope_type: str, **rope_kwargs: object) -> None:

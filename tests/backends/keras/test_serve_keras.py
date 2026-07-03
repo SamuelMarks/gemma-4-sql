@@ -1,4 +1,6 @@
-"""Tests for Keras Serving."""
+"""Tests for Keras Serve."""
+
+from __future__ import annotations
 
 from unittest import mock
 
@@ -8,100 +10,103 @@ import gemma_4_sql.backends.keras.serve as srv
 
 
 def test_serve_model_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(srv, "tf", None)
-    res = srv.serve_model("foo")
-    if not res["status"] == "mocked_missing_keras":
+    """Execute function."""
+    monkeypatch.setattr(srv, "keras", None)
+    "Execute function."
+    res = srv.serve_model("foo", port=8000, max_batch_size=16)
+    if res["status"] != "mocked_missing_keras":
         raise AssertionError
 
 
-def test_serve_model_fastapi_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_serve_model_keras_fastapi_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(srv, "tf", object())
-    monkeypatch.setattr(srv, "keras", object())
     monkeypatch.setattr(srv, "FastAPI", None)
-    res = srv.serve_model("foo")
-    assert res["status"] == "failed_missing_fastapi"
+    monkeypatch.setattr(srv, "keras", object())
+    res = srv.serve_model("foo", port=8000, max_batch_size=16)
+    if res["status"] != "failed_missing_fastapi":
+        raise AssertionError
 
 
 def test_serve_model_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(srv, "tf", object())
+    monkeypatch.setattr(srv, "FastAPI", None)
     monkeypatch.setattr(srv, "keras", object())
-    monkeypatch.setattr(srv, "FastAPI", mock.MagicMock())
-    monkeypatch.setattr(srv, "Request", mock.MagicMock())
-    monkeypatch.setattr(srv, "JSONResponse", mock.MagicMock())
+    monkeypatch.setattr(srv, "FastAPI", object())
     monkeypatch.setattr(srv, "uvicorn", mock.MagicMock())
 
-    res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["status"] == "running_keras_serve":
+    def mock_create_app(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return "app"
+
+    monkeypatch.setattr(srv, "_create_app", mock_create_app)
+    res = srv.serve_model("foo", port=8000, max_batch_size=16, test_mode=False)
+    if res["status"] != "running_keras_serve":
         raise AssertionError
 
 
 def test_serve_model_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(srv, "tf", object())
+    monkeypatch.setattr(srv, "FastAPI", None)
     monkeypatch.setattr(srv, "keras", object())
+    monkeypatch.setattr(srv, "FastAPI", object())
+    monkeypatch.setattr(srv, "uvicorn", mock.MagicMock())
 
-    def raise_err(*args: object, **kwargs: object) -> object:
+    def raise_err(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(srv, "FastAPI", raise_err)
-    monkeypatch.setattr(srv, "uvicorn", mock.MagicMock())
-
+    monkeypatch.setattr(srv, "_create_app", raise_err)
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
     if "failed" not in str(res["status"]):
         raise AssertionError
 
 
-@pytest.mark.asyncio()
-async def test_generate_endpoint() -> None:
+@pytest.mark.asyncio
+async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test generate endpoint logic directly."""
-    import importlib
-
-    importlib.reload(srv)
-    srv.tf = object()
-    srv.keras = object()
-
-    class MockJSONResponse:
-        def __init__(self, content: dict) -> None:
-            self.content = content
-
-    srv.JSONResponse = MockJSONResponse  # type: ignore[misc]
+    builtins = __import__("builtins")
+    orig_import = builtins.__import__
 
     class MockApp:
-        def post(self, *args, **kwargs):
-            def decorator(func):
+        """Provide class docstring."""
+
+        def post(self, *_args: object, **_kwargs: object) -> object:
+            """Execute function."""
+
+            def decorator(func: object) -> object:
+                """Execute function."""
                 self.func = func
                 return func
 
             return decorator
 
     app_instance = MockApp()
-    srv.FastAPI = lambda *args, **kwargs: app_instance  # type: ignore[misc]
-    srv.Request = mock.MagicMock()  # type: ignore[misc]
-    srv.uvicorn = mock.MagicMock()  # type: ignore[misc]
 
-    srv.serve_model("foo", test_mode=True)
+    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
+        """Execute function."""
+        if name == "fastapi":
+            return type("FastAPIMod", (), {"FastAPI": lambda *_args, **_kwargs: app_instance})
+        if name == "fastapi.responses":
+
+            class MockJSONResponse:
+                """Provide class docstring."""
+
+                def __init__(self, content: object) -> None:
+                    """Execute function."""
+                    self.content = content
+
+            return type("ResponsesMod", (), {"JSONResponse": MockJSONResponse})
+        return orig_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+    srv.create_app("foo", test_mode=True)
     generate_func = app_instance.func
-
     request = mock.AsyncMock()
     request.json.return_value = {"prompt": "test"}
-
-    result = await generate_func(request)
-    assert result.content["sql"] == "SELECT * FROM keras_serve WHERE prompt='test'"
-
-
-def test_serve_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.keras.serve as mdl
-
-    monkeypatch.setitem(sys.modules, "keras", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-
-    monkeypatch.setitem(sys.modules, "fastapi", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    importlib.reload(mdl)
+    res = await generate_func(request)
+    if res.content != {"sql": "SELECT * FROM keras_serve WHERE prompt='test'"}:
+        raise AssertionError

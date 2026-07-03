@@ -1,58 +1,42 @@
-"""Module docstring."""
+"""Tests for SDK Chat module."""
+
+from typing import Never
 
 import pytest
 
-import gemma_4_sql.sdk.chat as sdk_chat
+from gemma_4_sql.sdk.chat import chat_turn
 
 
-def test_chat_turn_routing(monkeypatch: pytest.MonkeyPatch) -> object:
-    """Initialize function test_chat_turn_routing."""
-    import builtins
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
-        if name == "gemma_4_sql.sdk.registry" and "get_backend" in fromlist:
-
-            class MockBackend:
-                def __init__(self, backend_name):
-                    self.backend_name = backend_name
-
-                def chat_turn(self, model_name, history, new_prompt, **kwargs):
-                    return {"backend": self.backend_name, "model": model_name, "history": [1, 2]}
-
-            return type("M", (), {"get_backend": MockBackend})
-        return orig_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr("builtins.__import__", mock_import)
-
+def test_chat_turn_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test chat_turn with multiple backends."""
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     for backend in ["jax", "keras", "maxtext", "pytorch"]:
-        res = sdk_chat.chat_turn("foo", [], "prompt", backend=backend)
-        if not res["backend"] == backend:
+        backend_impl = get_backend(backend)
+        monkeypatch.setattr(backend_impl, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+        res = chat_turn("foo", [{"role": "user", "content": "hi"}], "prompt", backend=backend)
+        if res["backend"] != backend:
             raise AssertionError
-        if not res["model"] == "foo":
+        if res["model"] != "foo":
             raise AssertionError
-        if not len(res["history"]) == 2:
+        if res["response"] != "SELECT 1":
+            raise AssertionError
+        if len(res["history"]) != int("3"):
             raise AssertionError
 
 
-def test_chat_turn_routing_error(monkeypatch: pytest.MonkeyPatch) -> object:
-    """Initialize function test_chat_turn_routing_error."""
-    import builtins
+def test_chat_turn_routing_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test chat_turn error handling."""
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    backend_impl = get_backend("jax")
 
-    orig_import = builtins.__import__
+    def mock_generate(*_args: object, **_kwargs: object) -> Never:
+        """Execute function."""
+        msg = "mock error"
+        raise ValueError(msg)
 
-    def mock_import(name, _globals=None, _locals=None, fromlist=(), level=0):
-        if name == "gemma_4_sql.sdk.registry" and "get_backend" in fromlist:
-
-            def raise_err(b):
-                msg = "err"
-                raise ValueError(msg)
-
-            return type("M", (), {"get_backend": raise_err})
-        return orig_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr("builtins.__import__", mock_import)
-
-    with pytest.raises(ValueError, match=r".*"):
-        sdk_chat.chat_turn("foo", [], "prompt", backend="unknown")
+    monkeypatch.setattr(backend_impl, "generate_sql", mock_generate)
+    res = chat_turn("foo", [], "prompt", backend="jax")
+    if res["response"] != "SELECT * FROM fallback_chat":
+        raise AssertionError
+    if "failed" not in res["status"]:
+        raise AssertionError

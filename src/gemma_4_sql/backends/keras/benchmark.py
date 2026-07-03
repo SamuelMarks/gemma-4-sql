@@ -6,17 +6,57 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
-
 logger = logging.getLogger(__name__)
-
-try:
+keras = None
+tf = None
+with catch_optional_imports():
     import keras
     import tensorflow as tf
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    keras = None
-    tf = None  # pragma: no cover
+
+
+def _load_keras_model(model_name: str, *, test_mode: bool = False) -> object:
+    """Load or mock a Keras model."""
+    if test_mode:
+        return None
+    try:
+        gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
+        return gemma_causal_lm_cls.from_preset(model_name)
+    except (ImportError, ValueError):
+        inputs = keras.Input(shape=(None,), dtype="int32")
+        x = keras.layers.Embedding(256, 128)(inputs)
+        outputs = keras.layers.Dense(256)(x)
+        return keras.Model(inputs, outputs)
+
+
+def _run_benchmark_pass(model: keras.Model, batch_size: int, num_runs: int) -> tuple[float, float, float]:
+    """Execute the forward pass benchmark loop."""
+    dummy_inputs = tf.zeros((batch_size, 32), dtype=tf.int32)
+
+    @tf.function
+    def forward_pass(inputs: keras.KerasTensor | tf.Tensor) -> object:
+        """Execute function."""
+        return model(inputs) if model is not None else inputs
+
+    _ = forward_pass(dummy_inputs)
+    start_time = time.time()
+    for _ in range(num_runs):
+        out = forward_pass(dummy_inputs)
+    if hasattr(out, "numpy"):
+        _ = out.numpy()
+    end_time = time.time()
+    total_time_ms = (end_time - start_time) * 1000.0
+    latency_ms = total_time_ms / max(1, num_runs)
+    tokens_per_sec = 32 * batch_size * num_runs / max(end_time - start_time, 1e-09)
+    try:
+        memory_info = tf.config.experimental.get_memory_info("GPU:0")
+        memory_mb = memory_info["current"] / (1024 * 1024)
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
+        memory_mb = 6000.0
+    return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 
 
 def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: JSONValue) -> JSONDict:
@@ -36,60 +76,16 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """
     if keras is None or tf is None:
         return {"backend": "keras", "model": model_name, "hardware": hardware, "batch_size": batch_size, "status": "mocked_missing_keras", "tokens_per_sec": 0.0, "latency_ms": 0.0, "memory_mb": 0.0}
-
     logger.info("Starting Keras benchmark for %s on %s (batch size %d)", model_name, hardware, batch_size)
-    status = "completed"
     try:
-        if kwargs.get("test_mode"):
-            model = None
-        else:
-            try:  # pragma: no cover
-                gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
-                model = gemma_causal_lm_cls.from_preset(model_name)
-            except (ImportError, ValueError):
-                inputs = keras.Input(shape=(None,), dtype="int32")
-                x = keras.layers.Embedding(256, 128)(inputs)
-                outputs = keras.layers.Dense(256)(x)
-                model = keras.Model(inputs, outputs)
-
-        dummy_inputs = tf.zeros((batch_size, 32), dtype=tf.int32)
-
-        @tf.function  # type: ignore[misc]
-        def forward_pass(inputs: object) -> object:
-            return model(inputs) if model is not None else inputs  # type: ignore[operator]
-
-        # Warmup
-        _ = forward_pass(dummy_inputs)
-
+        model = _load_keras_model(model_name, test_mode=bool(kwargs.get("test_mode")))
         num_runs = int(str(kwargs.get("num_runs", 5)))
-        start_time = time.time()
-        for _ in range(num_runs):
-            out = forward_pass(dummy_inputs)
-
-        # Keras/TF execution is eager/graph based, wait for result evaluation
-        if hasattr(out, "numpy"):
-            _ = out.numpy()  # type: ignore[attr-defined]
-
-        end_time = time.time()
-
-        total_time_ms = (end_time - start_time) * 1000.0
-        latency_ms = total_time_ms / max(1, num_runs)
-
-        tokens_per_sec = (32 * batch_size * num_runs) / max((end_time - start_time), 1e-9)
-
-        # TF memory tracking (approx)
-        try:
-            memory_info = tf.config.experimental.get_memory_info("GPU:0")
-            memory_mb = memory_info["current"] / (1024 * 1024)
-        except Exception:  # pragma: no cover
-            memory_mb = 6000.0  # Simulated memory footprint
-
+        (tokens_per_sec, latency_ms, memory_mb) = _run_benchmark_pass(model, batch_size, num_runs)
         status = "success"
-    except Exception as e:
-        logger.exception("Benchmark failed: %s", e)
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+        logger.exception("Benchmark failed: ")
         status = f"failed: {e!s}"
         latency_ms = 0.0
         tokens_per_sec = 0.0
         memory_mb = 0.0
-
     return {"backend": "keras", "model": model_name, "hardware": hardware, "batch_size": batch_size, "tokens_per_sec": float(tokens_per_sec), "latency_ms": float(latency_ms), "memory_mb": float(memory_mb), "status": status}

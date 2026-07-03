@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 import contextlib
 
@@ -9,6 +9,8 @@ import pytest
 
 import gemma_4_sql.backends.jax.gemma4.utils_params as ut
 from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, assign_weights_from_eval_shape, create_model_from_safe_tensors, map_to_jax_key, stoi
+
+EXPECTED_VAL = 123
 
 
 def test_utils() -> object:
@@ -35,7 +37,7 @@ def test_utils() -> object:
     sharding = {"a": jax.sharding.NamedSharding(jax.sharding.Mesh(np.array(jax.devices()), ("x",)), jax.sharding.PartitionSpec("x"))}
     with contextlib.suppress(ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
         assign_weights(["a"], jnp.ones((2, 2)), state2, "k", None, sharding)
-    if not stoi("123") == 123:
+    if not stoi("123") == EXPECTED_VAL:
         raise AssertionError
 
 
@@ -50,37 +52,45 @@ def test_utils_part1() -> object:
 
 
 class MockModelCls:
-    def __init__(self, cfg, rngs) -> None:
+    """Provide class docstring."""
+
+    def __init__(self, cfg: object, rngs: object) -> None:
+        """Execute function."""
         self.cfg = cfg
         self.rngs = rngs
 
 
 class MockSafeOpen:
-    def __init__(self, filepath, framework) -> None:
+    """Provide class docstring."""
+
+    def __init__(self, filepath: object, framework: object) -> None:
+        """Execute function."""
         self.filepath = filepath
         self.framework = framework
 
-    def __enter__(self):
+    def __enter__(self) -> object:
+        """Execute function."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> object:
+        """Execute function."""
 
-    def keys(self):
+    def keys(self) -> object:
+        """Execute function."""
         return ["layer1.weight", "layer2.weight"]
 
-    def get_tensor(self, key):
+    def get_tensor(self, _key: object) -> object:
+        """Execute function."""
         return jnp.ones((2, 2))
 
 
-def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """Execute function."""
     d = tmp_path / "model_dir"
     d.mkdir()
     f = d / "model.safetensors"
     f.write_text("dummy content")
-
     monkeypatch.setattr(ut, "safe_open", MockSafeOpen)
-
     mapping = {"layer1\\.weight": ("layer1.w", None), "layer2\\.weight": ("layer2.w", None)}
     model = create_model_from_safe_tensors(str(d), MockModelCls, "config", mapping)
     if not model.cfg == "config":
@@ -88,13 +98,15 @@ def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
 
 def test_create_model_from_safe_tensors_missing_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(ut, "safe_open", MockSafeOpen)
     model = create_model_from_safe_tensors("nonexistent_dir", MockModelCls, "config", {})
     if not model.cfg == "config":
         raise AssertionError
 
 
-def test_create_model_from_safe_tensors_no_safetensors(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_create_model_from_safe_tensors_no_safetensors(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """Execute function."""
     monkeypatch.setattr(ut, "safe_open", None)
     model = create_model_from_safe_tensors(str(tmp_path), MockModelCls, "config", {})
     if not model.cfg == "config":

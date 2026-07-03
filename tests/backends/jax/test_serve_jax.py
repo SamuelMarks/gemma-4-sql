@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 import sys
 from unittest import mock
@@ -13,7 +13,6 @@ def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "jax", object())
     monkeypatch.setattr(srv, "FastAPI", mock.MagicMock())
     monkeypatch.setattr(srv, "uvicorn", mock.MagicMock())
-
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
     if not res["backend"] == "jax":
         raise AssertionError
@@ -50,19 +49,33 @@ def test_serve_model_jax_missing_fastapi(monkeypatch: pytest.MonkeyPatch) -> Non
         raise AssertionError
 
 
-@pytest.mark.asyncio()
-async def test_generate_endpoint() -> None:
+@pytest.mark.asyncio
+async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test generate endpoint logic directly."""
     importlib = __import__("importlib")
     importlib.reload(srv)
-    srv.jax = object()
+    monkeypatch.setattr(srv, "jax", object())
+    mock_app = mock.MagicMock()
+    mock_app.router.routes = []
 
+    def mock_post(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+
+        def decorator(func: object) -> object:
+            """Execute function."""
+            route = mock.MagicMock()
+            route.endpoint = func
+            mock_app.router.routes.append(route)
+            return func
+
+        return decorator
+
+    mock_app.post = mock_post
+    monkeypatch.setattr(srv, "FastAPI", lambda *_args, **_kwargs: mock_app)
+    monkeypatch.setattr(srv, "uvicorn", mock.MagicMock())
     res = srv.serve_model("foo", test_mode=True)
     app = res["app"]
-
-    # Extract the function
     generate_func = app.router.routes[-1].endpoint
-
     request = mock.AsyncMock()
     request.json.return_value = {"prompt": "test"}
     result = await generate_func(request)
@@ -71,17 +84,14 @@ async def test_generate_endpoint() -> None:
 
 
 def test_serve_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.jax.serve as mdl
-
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    mdl = __import__("gemma_4_sql.backends.jax.serve")
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(mdl)
-
     monkeypatch.undo()
     monkeypatch.setitem(sys.modules, "fastapi", None)
     importlib.reload(mdl)
-
     monkeypatch.undo()
     importlib.reload(mdl)

@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
-try:
+keras = None
+with catch_optional_imports():
     import keras
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    keras = None
 
 
 def export_model(model_name: str, export_path: str) -> JSONDict:
@@ -32,7 +32,7 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
         try:
             gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
             model = gemma_causal_lm_cls.from_preset(model_name)
-        except (ImportError, ValueError):  # pragma: no cover
+        except (ImportError, ValueError):
             inputs = keras.Input(shape=(10,))
             outputs = keras.layers.Dense(1)(inputs)
             model = keras.Model(inputs, outputs)

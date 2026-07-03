@@ -5,34 +5,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import sqlite3
 import typing
 
+from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
+from gemma_4_sql.sdk.adapters.postgres_adapter import PostgresAdapter
+from gemma_4_sql.sdk.adapters.snowflake_adapter import SnowflakeAdapter
+from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
+
 if typing.TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONPrimitive
-
+    from gemma_4_sql.type_hints import JSONPrimitive
 logger = logging.getLogger(__name__)
-
-try:
-    import psycopg2
-except ImportError:  # pragma: no cover
-    psycopg2 = None
-try:
-    import snowflake.connector
-except ImportError:  # pragma: no cover
-    snowflake = None
-try:
-    import duckdb
-except ImportError:  # pragma: no cover
-    duckdb = None
-try:
-    import aiosqlite
-except ImportError:  # pragma: no cover
-    aiosqlite = None
-try:
-    import asyncpg
-except ImportError:  # pragma: no cover
-    asyncpg = None
+_ADAPTERS = {"sqlite": SQLiteAdapter, "postgresql": PostgresAdapter, "snowflake": SnowflakeAdapter, "duckdb": DuckDBAdapter}
 
 
 class LiveDatabaseEngine:
@@ -42,7 +25,7 @@ class LiveDatabaseEngine:
     Supports SQLite, PostgreSQL, Snowflake, and DuckDB.
     """
 
-    def __init__(self, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", db_kwargs: JSONDict | None = None, read_only: bool = True) -> None:
+    def __init__(self, db_path: str = ":memory:", ddl: str | None = None, db_type: str = "sqlite", **kwargs: object) -> None:
         """Initialize the LiveDatabaseEngine.
 
         Args:
@@ -50,95 +33,42 @@ class LiveDatabaseEngine:
             db_path: Path to the database or connection URI. Defaults to an in-memory DB for sqlite and duckdb.
             ddl: Optional SQL Data Definition Language string to initialize the schema.
             db_type: The type of database backend ('sqlite', 'postgresql', 'snowflake', 'duckdb').
-            db_kwargs: Additional keyword arguments for the database connection.
-            read_only: If True, prevents execution of mutating statements (INSERT, UPDATE, DELETE, DROP).
+            **kwargs: Extra parameters like db_kwargs, read_only.
 
         """
         self.db_path = db_path
         self.db_type = db_type.lower()
-        self.db_kwargs = db_kwargs or {}
-        self.read_only = read_only
-        self.conn = self.connect()
+        self.db_kwargs = kwargs.get("db_kwargs") or {}
+        self.read_only = kwargs.get("read_only", True)
+        adapter_cls = _ADAPTERS.get(self.db_type)
+        if adapter_cls is None:
+            msg = f"Unsupported db_type: {self.db_type}"
+            raise ValueError(msg)
+        self.adapter = adapter_cls(self.db_path, self.db_kwargs, read_only=self.read_only)
+        self.conn = self.adapter.conn
         if ddl:
-            # We temporarily bypass read-only to setup schema
             old_ro = self.read_only
             self.read_only = False
+            self.adapter.read_only = False
             try:
                 self.setup_schema(ddl)
             finally:
                 self.read_only = old_ro
+                self.adapter.read_only = old_ro
 
     def connect(self) -> object:
-        """Connect to database.
-
-        Returns
-        -------
-            A database connection object specific to the db_type.
-
-        """
-        if self.db_type == "sqlite":
-            return sqlite3.connect(self.db_path, **self.db_kwargs)
-        if self.db_type == "postgresql":
-            if psycopg2 is None:
-                msg = "psycopg2 is required for PostgreSQL support. Install with `pip install psycopg2-binary`."
-                raise ImportError(msg)
-            if self.db_path and self.db_path != ":memory:":
-                return psycopg2.connect(self.db_path, **self.db_kwargs)
-            return psycopg2.connect(**self.db_kwargs)
-        if self.db_type == "snowflake":
-            if snowflake is None:
-                msg = "snowflake-connector-python is required for Snowflake support."
-                raise ImportError(msg)
-            return snowflake.connector.connect(**self.db_kwargs)
-        if self.db_type == "duckdb":
-            if duckdb is None:
-                msg = "duckdb is required for DuckDB support. Install with `pip install duckdb`."
-                raise ImportError(msg)
-
-            # DuckDB natively supports read_only flag
-            kwargs = self.db_kwargs.copy()
-            if self.read_only and self.db_path != ":memory:":
-                kwargs["read_only"] = True
-            return duckdb.connect(self.db_path, **kwargs)
-
-        msg = f"Unsupported db_type: {self.db_type}"
-        raise ValueError(msg)
+        """Connect to database."""
+        return self.adapter.connect()
 
     async def connect_async(self) -> object:
-        """Asynchronously connect to database.
-
-        Returns
-        -------
-            An asynchronous database connection object.
-
-        """
-        if self.db_type == "sqlite":
-            if aiosqlite is None:
-                msg = "aiosqlite is required for async SQLite support."
-                raise ImportError(msg)
-            return await aiosqlite.connect(self.db_path, **self.db_kwargs)
-        if self.db_type == "postgresql":
-            if asyncpg is None:
-                msg = "asyncpg is required for async PostgreSQL support."
-                raise ImportError(msg)
-            if self.db_path and self.db_path != ":memory:":
-                return await asyncpg.connect(self.db_path, **self.db_kwargs)
-            return await asyncpg.connect(**self.db_kwargs)
-        if self.db_type == "duckdb":
-            # DuckDB is synchronous and doesn't natively support asyncio connections.
-            # We return the synchronous connection and wrap operations in thread pool
-            return self.conn
-
-        msg = f"Async operations not natively supported for db_type: {self.db_type}"
-        raise ValueError(msg)
+        """Asynchronously connect to database."""
+        return await self.adapter.connect_async()
 
     def _validate_safety(self, query: str) -> None:
         """Ensure the query is safe to execute if read_only is True."""
         if not self.read_only:
             return
-
-        # Basic heuristic sandbox protection against mutating statements
-        dangerous_patterns = [r"\bDROP\b", r"\bDELETE\b", r"\bUPDATE\b", r"\bINSERT\b", r"\bALTER\b", r"\bTRUNCATE\b", r"\bGRANT\b", r"\bREVOKE\b"]
+        dangerous_patterns = ["\\bDROP\\b", "\\bDELETE\\b", "\\bUPDATE\\b", "\\bINSERT\\b", "\\bALTER\\b", "\\bTRUNCATE\\b", "\\bGRANT\\b", "\\bREVOKE\\b"]
         upper_query = query.upper()
         for pattern in dangerous_patterns:
             if re.search(pattern, upper_query):
@@ -146,200 +76,47 @@ class LiveDatabaseEngine:
                 raise PermissionError(msg)
 
     def setup_schema(self, ddl: str) -> None:
-        """Execute DDL statements to construct the database schema.
-
-        Args:
-        ----
-            ddl: The SQL Data Definition Language string.
-
-        """
+        """Execute DDL statements to construct the database schema."""
         self._validate_safety(ddl)
-        if self.db_type == "sqlite":
-            with self.conn:
-                self.conn.executescript(ddl)
-        elif self.db_type == "duckdb":
-            self.conn.execute(ddl)
-        else:
-            cursor = self.conn.cursor()
-            try:
-                cursor.execute(ddl)
-                self.conn.commit()
-            finally:
-                cursor.close()
+        self.adapter.setup_schema(ddl)
 
     def execute_with_feedback(self, query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Execute a query and returns execution success status, results, and error message.
-
-        Args:
-        ----
-            query: The SQL query to execute.
-
-        Returns:
-        -------
-            A tuple of (success, results, error_message).
-
-        """
+        """Execute a query and returns execution success status, results, and error message."""
         try:
             self._validate_safety(query)
-            if self.db_type == "duckdb":
-                results = self.conn.execute(query).fetchall()
-                return (True, results, None)
-            cursor = self.conn.cursor()
-            cursor.execute(query)
-        except Exception as e:
+            return self.adapter.execute_with_feedback(query)
+        except PermissionError as e:
             return (False, [], str(e))
-        else:
-            if cursor.description is not None:
-                return (True, cursor.fetchall(), None)
-            return (True, [], None)
-        finally:
-            if self.db_type != "duckdb" and "cursor" in locals():
-                cursor.close()
 
     async def execute_with_feedback_async(self, query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Asynchronously execute a query and returns execution success status, results, and error message.
-
-        Args:
-        ----
-            query: The SQL query to execute.
-
-        Returns:
-        -------
-            A tuple of (success, results, error_message).
-
-        """
+        """Asynchronously execute a query and returns execution success status, results, and error message."""
         try:
             self._validate_safety(query)
-            if self.db_type == "duckdb":
-                loop = asyncio.get_running_loop()
-                results = await loop.run_in_executor(None, lambda: self.conn.execute(query).fetchall())
-                return (True, results, None)
-
-            async_conn = await self.connect_async()
-            try:
-                if self.db_type == "sqlite":
-                    cursor = await async_conn.execute(query)
-                    try:
-                        if cursor.description is not None:
-                            results = await cursor.fetchall()
-                            return (True, results, None)
-                        return (True, [], None)
-                    finally:
-                        await cursor.close()
-                elif self.db_type == "postgresql":
-                    # asyncpg
-                    records = await async_conn.fetch(query)
-                    results = [tuple(r.values()) for r in records]
-                    return (True, results, None)
-            finally:
-                if hasattr(async_conn, "close"):
-                    await async_conn.close()
-        except Exception as e:
+            return await self.adapter.execute_with_feedback_async(query)
+        except PermissionError as e:
             return (False, [], str(e))
 
     def execute_query(self, query: str) -> list[tuple[JSONPrimitive, ...]]:
-        """Execute a query and returns the fetched results.
-
-        Args:
-        ----
-            query: The SQL query to execute.
-
-        Returns:
-        -------
-            A list of tuples containing the result rows. Returns an empty list
-            if the query fails due to a syntax or execution error.
-
-        """
-        try:
-            self._validate_safety(query)
-            if self.db_type == "duckdb":
-                return self.conn.execute(query).fetchall()
-            cursor = self.conn.cursor()
-            cursor.execute(query)
-        except Exception as e:
-            logger.debug("Query execution failed: %s", e)
-            return []  # pragma: no cover
-        else:
-            if cursor.description is not None:
-                return cursor.fetchall()
-            return []  # pragma: no cover
-        finally:
-            if self.db_type != "duckdb" and "cursor" in locals():
-                cursor.close()
+        """Execute a query and returns the fetched results."""
+        self._validate_safety(query)
+        return self.adapter.execute_query(query)
 
     async def execute_query_async(self, query: str) -> list[tuple[JSONPrimitive, ...]]:
-        """Asynchronously execute a query and returns the fetched results.
-
-        Args:
-        ----
-            query: The SQL query to execute.
-
-        Returns:
-        -------
-            A list of tuples containing the result rows. Returns an empty list
-            if the query fails due to a syntax or execution error.
-
-        """
-        try:
-            self._validate_safety(query)
-            if self.db_type == "duckdb":
-                loop = asyncio.get_running_loop()
-                return await loop.run_in_executor(None, lambda: self.conn.execute(query).fetchall())
-
-            async_conn = await self.connect_async()
-            try:
-                if self.db_type == "sqlite":
-                    cursor = await async_conn.execute(query)
-                    try:
-                        if cursor.description is not None:
-                            return await cursor.fetchall()
-                        return []  # pragma: no cover
-                    finally:
-                        await cursor.close()
-                elif self.db_type == "postgresql":
-                    records = await async_conn.fetch(query)
-                    return [tuple(r.values()) for r in records]
-            finally:
-                if hasattr(async_conn, "close"):
-                    await async_conn.close()
-            return []  # pragma: no cover # noqa: TRY300
-        except Exception as e:
-            logger.debug("Async Query execution failed: %s", e)
-            return []  # pragma: no cover
+        """Asynchronously execute a query and returns the fetched results."""
+        self._validate_safety(query)
+        return await self.adapter.execute_query_async(query)
 
     def compare_queries(self, predicted_sql: str, ground_truth_sql: str) -> bool:
-        """Compare the execution results of two queries.
-
-        Args:
-        ----
-            predicted_sql: The SQL query generated by the model.
-            ground_truth_sql: The expected SQL query.
-
-        Returns:
-        -------
-            True if both queries return the identical result set, False otherwise.
-
-        """
+        """Compare the execution results of two queries."""
         pred_results = self.execute_query(predicted_sql)
         truth_results = self.execute_query(ground_truth_sql)
-        return pred_results == truth_results  # type: ignore[no-any-return]
+        return pred_results == truth_results
 
     async def compare_queries_async(self, predicted_sql: str, ground_truth_sql: str) -> bool:
-        """Asynchronously compare the execution results of two queries.
-
-        Args:
-        ----
-            predicted_sql: The SQL query generated by the model.
-            ground_truth_sql: The expected SQL query.
-
-        Returns:
-        -------
-            True if both queries return the identical result set, False otherwise.
-
-        """
-        pred_results, truth_results = await asyncio.gather(self.execute_query_async(predicted_sql), self.execute_query_async(ground_truth_sql))
-        return pred_results == truth_results  # type: ignore[no-any-return]
+        """Asynchronously compare the execution results of two queries."""
+        (pred_results, truth_results) = await asyncio.gather(self.execute_query_async(predicted_sql), self.execute_query_async(ground_truth_sql))
+        return pred_results == truth_results
 
     def close(self) -> None:
         """Close the database connection."""
-        self.conn.close()
+        self.adapter.close()

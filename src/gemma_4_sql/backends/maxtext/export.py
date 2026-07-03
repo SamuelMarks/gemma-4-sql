@@ -6,17 +6,17 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
-try:
+jax = None
+jnp = None
+ocp = None
+with catch_optional_imports():
     import jax
     import jax.numpy as jnp
     import orbax.checkpoint as ocp
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    jax = None
-    jnp = None
-    ocp = None
 
 
 def export_model(model_name: str, export_path: str) -> JSONDict:

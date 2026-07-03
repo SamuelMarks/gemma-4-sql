@@ -10,7 +10,7 @@ This architecture is optimized for environments spanning from local experimentat
 
 The system is composed of several key modules:
 
-### 1.1 CLI & SDK Layer (`src/gemma_4_sql/cli.py` and `sdk/`)
+### 1.1 CLI & SDK Layer (`src/gemma_4_sql/cli.py`, `cli_*.py`, and `sdk/`)
 This is the entry point. The CLI maps shell commands directly to Python SDK functions. The SDK exposes high-level orchestration abstractions:
 *   `train_from_scratch`, `pretrain`, `sft`, `posttrain`, `dpo`
 *   `evaluate`, `export`, `generate`

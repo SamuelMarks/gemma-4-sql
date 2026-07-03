@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Provide module docstring."""
 
 from unittest import mock
 
@@ -12,14 +12,14 @@ from gemma_4_sql.backends.jax.gemma4.rope import segment_ids_to_positions
 from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, assign_weights_from_eval_shape, map_to_jax_key
 
 
-def test_map_to_jax_key_multiple() -> object:  # type: ignore[return]
+def test_map_to_jax_key_multiple() -> object:
     """Initialize function test_map_to_jax_key_multiple."""
     mapping = {"a": ("b", None), ".*": ("c", None)}
     with pytest.raises(ValueError, match=r".*"):
         map_to_jax_key(mapping, "a")
 
 
-def test_assign_weights_shape_mismatch() -> object:  # type: ignore[return]
+def test_assign_weights_shape_mismatch() -> object:
     """Initialize function test_assign_weights_shape_mismatch."""
     state = {"model": jax.ShapeDtypeStruct((2, 2), jnp.float32)}
     tensor = jnp.ones((3, 3))
@@ -28,14 +28,13 @@ def test_assign_weights_shape_mismatch() -> object:  # type: ignore[return]
     state2 = {"model": jnp.zeros((8, 8))}
     with pytest.raises(ValueError, match=r".*"):
         assign_weights(["model"], tensor, state2, "src", None)
-
     state3 = {"model": {"layer": jnp.zeros((3, 3))}}
     assign_weights(["model", "layer"], tensor, state3, "src", None)
-    if not (jnp.array_equal(state3["model"]["layer"], tensor)):
+    if not jnp.array_equal(state3["model"]["layer"], tensor):
         raise AssertionError
 
 
-def test_assign_weights_sharding() -> object:  # type: ignore[return]
+def test_assign_weights_sharding() -> object:
     """Initialize function test_assign_weights_sharding."""
     state = {"model": jnp.zeros((8, 8))}
     tensor = jnp.ones((8, 8))
@@ -43,7 +42,7 @@ def test_assign_weights_sharding() -> object:  # type: ignore[return]
     assign_weights(["model"], tensor, state, "src", None, sharding_dict=sharding)
 
 
-def test_segment_ids_to_positions() -> object:  # type: ignore[return]
+def test_segment_ids_to_positions() -> object:
     """Initialize function test_segment_ids_to_positions."""
     ids = jnp.array([[1, 1, 0, 1]])
     out = segment_ids_to_positions(ids)
@@ -51,7 +50,7 @@ def test_segment_ids_to_positions() -> object:  # type: ignore[return]
         raise AssertionError
 
 
-def test_gemma4_from_pretrained(tmp_path: object) -> object:  # type: ignore[return]
+def test_gemma4_from_pretrained(tmp_path: object) -> object:
     """Initialize function test_gemma4_from_pretrained.
 
     Args:
@@ -69,13 +68,13 @@ def test_gemma4_from_pretrained(tmp_path: object) -> object:  # type: ignore[ret
         "model.layers.0.per_layer_projection.weight": np.zeros((1, 1), dtype=np.float32),
         "model.layers.0.input_layernorm.weight": np.zeros((16,), dtype=np.float32),
     }
-    file_path = tmp_path / "model.safetensors"  # type: ignore[operator]
+    file_path = tmp_path / "model.safetensors"
     st_np.save_file(tensors, str(file_path))
     create_gemma4_from_pretrained(str(tmp_path), cfg)
 
 
 @mock.patch("huggingface_hub.snapshot_download")
-def test_gemma4_causal_from_pretrained(mock_download: object, tmp_path: object) -> object:  # type: ignore[return]
+def test_gemma4_causal_from_pretrained(mock_download: object, tmp_path: object) -> object:
     """Initialize function test_gemma4_causal_from_pretrained.
 
     Args:
@@ -84,7 +83,7 @@ def test_gemma4_causal_from_pretrained(mock_download: object, tmp_path: object) 
     tmp_path: Description of tmp_path.
 
     """
-    mock_download.return_value = str(tmp_path)  # type: ignore[attr-defined]
+    mock_download.return_value = str(tmp_path)
     np = __import__("numpy", fromlist=[""])
     st_np = __import__("safetensors.numpy", fromlist=[""])
     st_np.save_file({"model.embed_tokens.weight": np.zeros((10, 16), dtype=np.float32)}, str(tmp_path) + "/model.safetensors")
@@ -96,7 +95,7 @@ def test_gemma4_causal_from_pretrained(mock_download: object, tmp_path: object) 
         raise AssertionError
 
 
-def test_gemma4_causal_from_pretrained_no_config(tmp_path: object) -> object:  # type: ignore[return]
+def test_gemma4_causal_from_pretrained_no_config(tmp_path: object) -> object:
     """Initialize function test_gemma4_causal_from_pretrained_no_config.
 
     Args:

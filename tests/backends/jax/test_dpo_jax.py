@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Never
 
 import gemma_4_sql.backends.jax.dpo as tr
 from gemma_4_sql.backends.jax.dpo import dpo_loss, run_dpo
@@ -85,7 +85,7 @@ class MockGemma4Config:
 class MockGemma4ForCausalLM:
     """Initialize class MockGemma4ForCausalLM."""
 
-    def __init__(self, config: object, rngs: object = None) -> None:
+    def __init__(self, config: object, _rngs: object = None) -> None:
         """Initialize function __init__."""
         self.config = config
 
@@ -127,7 +127,7 @@ class MockNNX:
 
         def wrapper(*_args: object, **_kwargs: object) -> object:
             """Initialize function wrapper."""
-            _ = fn(*_args, **_kwargs)  # type: ignore[operator]
+            _ = fn(*_args, **_kwargs)
             return (MockArray(), "grads")
 
         return wrapper
@@ -163,10 +163,10 @@ def test_run_dpo_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         return {"loader": [{"chosen_inputs": MockArray(), "chosen_labels": MockArray(), "rejected_inputs": MockArray(), "rejected_labels": MockArray()}]}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-
     res = run_dpo("model", "data")
     if not res["backend"] == "jax":
         raise AssertionError
@@ -183,10 +183,10 @@ def test_run_dpo_jax_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         return {"loader": None}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-
     res = run_dpo("model", "data")
     if not res["backend"] == "jax":
         raise AssertionError
@@ -202,18 +202,19 @@ def test_run_dpo_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "Gemma4Config", MockGemma4Config)
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
-    def raise_error(*_args: object, **_kwargs: object) -> object:
+    def mock_raise_error(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(tr, "build_dataloader", raise_error)
-
+    monkeypatch.setattr(tr, "build_dataloader", Exception)
     res = run_dpo("model", "data")
     if not res["backend"] == "jax":
         raise AssertionError
 
 
 def test_run_dpo_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(tr, "jax", "mock")
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
@@ -222,23 +223,30 @@ def test_run_dpo_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "Gemma4Config", MockGemma4Config)
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
-    def mock_build_dataloader(*args, **kwargs):
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+
         class MockLoader:
-            def __iter__(self):
+            """Provide class docstring."""
+
+            def __iter__(self) -> object:
+                """Execute function."""
                 yield {"chosen_inputs": MockArray(), "chosen_labels": MockArray(), "rejected_inputs": MockArray(), "rejected_labels": MockArray()}
 
-            def __len__(self):
+            def __len__(self) -> int:
+                """Execute function."""
                 return 1
 
         return {"loader": MockLoader()}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-
     res = run_dpo("model", "data")
-    assert res["status"] == "completed"
+    if res["status"] != "completed":
+        raise AssertionError
 
 
 def test_run_dpo_jax_no_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(tr, "jax", "mock")
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
@@ -247,16 +255,18 @@ def test_run_dpo_jax_no_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "Gemma4Config", MockGemma4Config)
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
-    def mock_build_dataloader(*args, **kwargs):
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         return {"loader": None}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-
     res = run_dpo("model", "data")
-    assert res["status"] == "completed"
+    if res["status"] != "completed":
+        raise AssertionError
 
 
 def test_run_dpo_jax_error_2(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(tr, "jax", "mock")
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
@@ -265,36 +275,34 @@ def test_run_dpo_jax_error_2(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "Gemma4Config", MockGemma4Config)
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
-    def mock_build_dataloader(*args, **kwargs):
+    def mock_build_dataloader(*_args: object, **_kwargs: object) -> Never:
+        """Execute function."""
         msg = "simulated error"
         raise ValueError(msg)
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-
     res = run_dpo("model", "data")
-    assert "failed: simulated error" in res["status"]
+    if "failed: simulated error" not in res["status"]:
+        raise AssertionError
 
 
 def test_dpo_loss_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
-    a, _b, _c = dpo_loss(MockArray(), MockArray(), MockArray(), MockArray())
-    assert isinstance(a, MockArray)
+    (a, _b, _c) = dpo_loss(MockArray(), MockArray(), MockArray(), MockArray())
+    if not isinstance(a, MockArray):
+        raise TypeError
 
 
 def test_dpo_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-    import sys
-
-    # Mock jax import failure
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(tr)
-
-    # Mock flax.nnx import failure
     monkeypatch.undo()
     monkeypatch.setitem(sys.modules, "flax", None)
     importlib.reload(tr)
-
-    # Restore original to not break other tests
     monkeypatch.undo()
     importlib.reload(tr)

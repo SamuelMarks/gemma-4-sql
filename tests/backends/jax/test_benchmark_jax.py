@@ -8,42 +8,59 @@ import gemma_4_sql.backends.jax.benchmark as bm
 
 
 class MockJnp:
+    """Provide class docstring."""
+
     int32 = "int32"
 
-    def zeros(self, shape, dtype):
+    def zeros(self, _shape: object, _dtype: object) -> object:
+        """Execute function."""
         return [0]
 
 
 class MockJax:
-    def block_until_ready(self, x) -> None:
-        pass
+    """Provide class docstring."""
+
+    def block_until_ready(self, x: object) -> None:
+        """Execute function."""
 
 
 class MockGemma4Config:
+    """Provide class docstring."""
+
     @staticmethod
     def gemma4_e2b() -> str:
+        """Execute function."""
         return "config"
 
 
 class MockGemma4ForCausalLM:
-    def __init__(self, config, rngs) -> None:
-        pass
+    """Provide class docstring."""
 
-    def __call__(self, inputs):
+    def __init__(self, config: object, rngs: object) -> None:
+        """Execute function."""
+
+    def __call__(self, inputs: object) -> object:
+        """Execute function."""
         return inputs
 
 
 class MockNNX:
+    """Provide class docstring."""
+
     class Rngs:
-        def __init__(self, seed) -> None:
-            pass
+        """Provide class docstring."""
+
+        def __init__(self, seed: object) -> None:
+            """Execute function."""
 
     @staticmethod
-    def jit(fn):
+    def jit(fn: object) -> object:
+        """Execute function."""
         return fn
 
 
 def test_benchmark_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(bm, "jax", None)
     res = bm.benchmark_model("model", "gpu", 1)
     if not res["status"] == "mocked_missing_jax":
@@ -51,12 +68,12 @@ def test_benchmark_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_model_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(bm, "jax", MockJax())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "nnx", MockNNX())
     monkeypatch.setattr(bm, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
     monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
-
     res = bm.benchmark_model("model", "gpu", 1, num_runs=2)
     if not res["status"] == "success":
         raise AssertionError
@@ -67,50 +84,48 @@ def test_benchmark_model_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(bm, "jax", MockJax())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "nnx", MockNNX())
     monkeypatch.setattr(bm, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
     monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
 
-    def raise_error(*args, **kwargs) -> Never:
+    def mock_raise_error(*_args: object, **_kwargs: object) -> Never:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(MockJnp, "zeros", raise_error)
-
+    monkeypatch.setattr(MockJnp, "zeros", Exception)
     res = bm.benchmark_model("model", "gpu", 1)
     if "failed" not in res["status"]:
         raise AssertionError
 
 
-def test_benchmark_model_jax_real_no_block_until_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    class MockJaxNoBlock:
-        pass
+class MockJaxNoBlock:
+    """Provide class docstring."""
 
+
+def test_benchmark_model_jax_real_no_block_until_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(bm, "jax", MockJaxNoBlock())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "nnx", MockNNX())
     monkeypatch.setattr(bm, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
     monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
-
     res = bm.benchmark_model("model", "gpu", 1, num_runs=2)
-    assert res["status"] == "success"
+    if res["status"] != "success":
+        raise AssertionError
 
 
 def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-    import sys
-
-    # Mock jax import failure
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(bm)
-
-    # Mock flax.nnx import failure
     monkeypatch.undo()
     monkeypatch.setitem(sys.modules, "flax", None)
     importlib.reload(bm)
-
-    # Restore original to not break other tests
     monkeypatch.undo()
     importlib.reload(bm)

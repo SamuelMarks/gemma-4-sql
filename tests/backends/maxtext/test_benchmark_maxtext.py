@@ -12,42 +12,58 @@ if typing.TYPE_CHECKING:
 
 
 class MockJnp:
+    """Provide class docstring."""
+
     int32 = 1
 
     @staticmethod
-    def zeros(shape: object, **kwargs: object) -> object:
+    def zeros(_shape: object, **_kwargs: object) -> object:
+        """Execute function."""
         return [0]
 
 
 class MockJaxRandom:
+    """Provide class docstring."""
+
     @staticmethod
-    def PRNGKey(seed: object) -> object:
+    def mock_prngkey(seed: object) -> object:
+        """Execute function."""
         return seed
+
+    PRNGKey = mock_prngkey
 
 
 class MockJax:
+    """Provide class docstring."""
+
     random = MockJaxRandom()
 
     @staticmethod
     def jit(fn: object) -> object:
+        """Execute function."""
         return fn
 
     def block_until_ready(self, x: object) -> None:
-        pass
+        """Execute function."""
 
 
 class MockGemma4Model:
-    def __init__(self, name: object) -> None:
-        pass
+    """Provide class docstring."""
 
-    def init(self, rng: object, inputs: object) -> object:
+    def __init__(self, name: object) -> None:
+        """Execute function."""
+
+    def init(self, _rng: object, _inputs: object) -> object:
+        """Execute function."""
         return "params"
 
-    def apply(self, params: object, inputs: object) -> object:
+    def apply(self, _params: object, inputs: object) -> object:
+        """Execute function."""
         return inputs
 
 
 def test_benchmark_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(bm, "jax", None)
     res = benchmark_model("model", "gpu", 1)
     if not res["status"] == "mocked_missing_maxtext":
@@ -55,10 +71,10 @@ def test_benchmark_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(bm, "jax", MockJax())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "Gemma4Model", MockGemma4Model)
-
     res = benchmark_model("model", "gpu", 1, num_runs=2, test_mode=True)
     if not res["status"] == "success":
         raise AssertionError
@@ -67,69 +83,68 @@ def test_benchmark_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(bm, "jax", MockJax())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "Gemma4Model", MockGemma4Model)
 
-    def raise_error(*args: object, **kwargs: object) -> object:
+    def mock_raise_error(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(MockJnp, "zeros", raise_error)
-
+    monkeypatch.setattr(MockJnp, "zeros", Exception)
     res = benchmark_model("model", "gpu", 1, test_mode=True)
     if "failed" not in str(res["status"]):
         raise AssertionError
 
 
+class MockModel:
+    """Provide class docstring."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Execute function."""
+
+    def init(self, *_args: object, **_kwargs: object) -> str:
+        """Execute function."""
+        return "params"
+
+    def apply(self, *_args: object, **_kwargs: object) -> str:
+        """Execute function."""
+        return "out"
+
+
 def test_benchmark_maxtext_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(bm, "jax", type("MockJax", (), {"random": type("MockRng", (), {"PRNGKey": lambda x: x}), "jit": lambda x: x, "distributed": type("MockDist", (), {"initialize": lambda: None})}))
-    monkeypatch.setattr(bm, "jnp", type("MockJnp", (), {"int32": "int32", "zeros": lambda *args, **kwargs: args}))
-
-    class MockModel:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def init(self, *args, **kwargs):
-            return "params"
-
-        def apply(self, *args, **kwargs):
-            return "out"
-
+    monkeypatch.setattr(bm, "jnp", type("MockJnp", (), {"int32": "int32", "zeros": lambda *args, **_kwargs: args}))
     monkeypatch.setattr(bm, "Gemma4Model", MockModel)
     res = bm.benchmark_model("model", "tpu", 1)
-    assert res["status"] == "success"
+    if res["status"] != "success":
+        raise AssertionError
 
 
 def test_benchmark_maxtext_real_no_test_mode_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    def raise_err():
+    """Execute function."""
+
+    def raise_err() -> typing.Never:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
     monkeypatch.setattr(bm, "jax", type("MockJax", (), {"random": type("MockRng", (), {"PRNGKey": lambda x: x}), "jit": lambda x: x, "distributed": type("MockDist", (), {"initialize": raise_err})}))
-    monkeypatch.setattr(bm, "jnp", type("MockJnp", (), {"int32": "int32", "zeros": lambda *args, **kwargs: args}))
-
-    class MockModel:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def init(self, *args, **kwargs):
-            return "params"
-
-        def apply(self, *args, **kwargs):
-            return "out"
-
+    monkeypatch.setattr(bm, "jnp", type("MockJnp", (), {"int32": "int32", "zeros": lambda *args, **_kwargs: args}))
     monkeypatch.setattr(bm, "Gemma4Model", MockModel)
     res = bm.benchmark_model("model", "tpu", 1)
-    assert res["status"] == "success"
+    if res["status"] != "success":
+        raise AssertionError
 
 
-def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch):
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.maxtext.benchmark as m_benchmark
-
+def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    m_benchmark = __import__("gemma_4_sql.backends.maxtext.benchmark")
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(m_benchmark)
     monkeypatch.undo()

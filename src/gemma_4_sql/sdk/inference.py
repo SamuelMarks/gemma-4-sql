@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 
 
-def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int = 3, max_length: int = 50, show_confidence: bool = False) -> JSONDict:
+def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int = 3, max_length: int = 50, **kwargs: object) -> JSONDict:
     """Generate a SQL query from a natural language prompt using Beam Search.
 
     Args:
@@ -18,7 +18,7 @@ def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int
         backend: The backend framework ('jax', 'keras', 'maxtext', or 'pytorch').
         beam_width: The number of beams to maintain during search.
         max_length: The maximum generation length.
-        show_confidence: Whether to output the confidence score.
+        **kwargs: Additional parameters like `show_confidence`.
 
     Returns:
     -------
@@ -27,6 +27,6 @@ def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     result = get_backend(backend).generate_sql(model_name, prompt, beam_width, max_length)
-    if show_confidence and "confidence_score" in result:
+    if kwargs.get("show_confidence") and "confidence_score" in result:
         pass
     return result

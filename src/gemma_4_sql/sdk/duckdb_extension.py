@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json
 
-from gemma_4_sql.sdk.agent import run_agentic_loop
+from gemma_4_sql.backends.lazy_loader import LazyLoader
+from gemma_4_sql.sdk.agent import AgentContext, run_agentic_loop
 
-try:
-    import duckdb
-except ImportError:
-    duckdb = None
+duckdb = LazyLoader("duckdb").get_module()
 
 
 def embed_in_duckdb(conn: object, model_name: str, backend: str = "jax", db_path: str = ":memory:", max_retries: int = 3) -> None:
@@ -44,14 +42,15 @@ def embed_in_duckdb(conn: object, model_name: str, backend: str = "jax", db_path
             A JSON string containing the generated SQL, execution results, and success status.
 
         """
-        tables = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='main'").fetchall()  # type: ignore[attr-defined]
+        tables = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='main'").fetchall()
         ddl_parts = []
         for (t,) in tables:
-            cols = conn.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name='{t}'".replace("{t}", t)).fetchall()  # type: ignore[attr-defined]
+            cols = conn.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name='{t}'".replace("{t}", t)).fetchall()
             col_defs = ", ".join(f"{c[0]} {c[1]}" for c in cols)
             ddl_parts.append(f"CREATE TABLE {t} ({col_defs});")
         ddl = "\n".join(ddl_parts)
-        res = run_agentic_loop(model_name=model_name, prompt=prompt, backend=backend, db_path=db_path, ddl=ddl, db_type="duckdb", max_retries=max_retries)
+        context = AgentContext(db_path=db_path, ddl=ddl, db_type="duckdb", max_retries=max_retries)
+        res = run_agentic_loop(model_name=model_name, prompt=prompt, backend=backend, context=context)
         return json.dumps({"generated_sql": res.get("final_sql", ""), "results": res.get("results", []), "success": res.get("success", False)})
 
-    conn.create_function("ask_gemma", ask_gemma, [str], str)  # type: ignore[attr-defined]
+    conn.create_function("ask_gemma", ask_gemma, [str], str)

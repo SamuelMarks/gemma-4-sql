@@ -5,22 +5,21 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
 logger = logging.getLogger(__name__)
-
-try:
+torch = None
+peft = None
+LoraConfig = None
+get_peft_model = None
+AutoModelForCausalLM = None
+with catch_optional_imports():
     import peft
     import torch
     from peft import LoraConfig, get_peft_model
     from transformers import AutoModelForCausalLM
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    torch = None
-    peft = None
-    LoraConfig = None
-    get_peft_model = None
-    AutoModelForCausalLM = None
 
 
 def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alpha: int, lora_dropout: float) -> JSONDict:
@@ -40,29 +39,16 @@ def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alp
 
     """
     status = "completed"
-    if peft is not None and torch is not None and AutoModelForCausalLM is not None:
+    if peft is not None and torch is not None and (AutoModelForCausalLM is not None):
         try:
             model = AutoModelForCausalLM.from_pretrained(model_name)
-
-            lora_config = LoraConfig(
-                r=lora_r,
-                lora_alpha=lora_alpha,
-                target_modules=target_modules,
-                lora_dropout=lora_dropout,
-                bias="none",
-                task_type="CAUSAL_LM",
-            )
-
+            lora_config = LoraConfig(r=lora_r, lora_alpha=lora_alpha, target_modules=target_modules, lora_dropout=lora_dropout, bias="none", task_type="CAUSAL_LM")
             model = get_peft_model(model, lora_config)
-
-            # Simulated check
             if hasattr(model, "print_trainable_parameters"):
                 model.print_trainable_parameters()
-
-        except Exception as e:
-            logger.exception("Failed to apply LoRA: %s", e)
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+            logger.exception("Failed to apply LoRA: ")
             status = f"failed: {e!s}"
     else:
         status = "mocked_missing_peft"
-
     return {"backend": "pytorch", "action": "apply_lora", "model": model_name, "target_modules": target_modules, "lora_r": lora_r, "lora_alpha": lora_alpha, "lora_dropout": lora_dropout, "status": status}

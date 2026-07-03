@@ -5,15 +5,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
 logger = logging.getLogger(__name__)
-
-try:
+keras = None
+with catch_optional_imports():
     import keras
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    keras = None
 
 
 def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alpha: int, lora_dropout: float) -> JSONDict:
@@ -38,22 +37,19 @@ def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alp
             try:
                 gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
                 model = gemma_causal_lm_cls.from_preset(model_name)
-            except (ImportError, ValueError):  # pragma: no cover
-                # Mock fallback
+            except (ImportError, ValueError):
                 inputs = keras.Input(shape=(None,), dtype="int32")
                 x = keras.layers.Embedding(256, 128)(inputs)
                 outputs = keras.layers.Dense(256)(x)
                 model = keras.Model(inputs, outputs)
-                model.backbone = model  # type: ignore[attr-defined]
-
-            # Keras 3 native LoRA
-            if hasattr(model, "backbone") and hasattr(model.backbone, "enable_lora"):  # type: ignore[attr-defined]
-                model.backbone.enable_lora(rank=lora_r)  # type: ignore[attr-defined]
+                model.backbone = model
+            if hasattr(model, "backbone") and hasattr(model.backbone, "enable_lora"):
+                model.backbone.enable_lora(rank=lora_r)
                 logger.info("Enabled Keras native LoRA with rank %d", lora_r)
-            else:  # pragma: no cover
+            else:
                 logger.warning("Model backbone does not support `enable_lora` directly. Simulated.")
-        except Exception as e:
-            logger.exception("Keras LoRA error: %s", e)
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+            logger.exception("Keras LoRA error: ")
             status = f"failed: {e!s}"
     else:
         status = "mocked_missing_keras"

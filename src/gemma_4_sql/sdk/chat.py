@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
+logger = logging.getLogger(__name__)
 
 
 def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, backend: str = "jax", **kwargs: JSONValue) -> JSONDict:
@@ -25,4 +27,20 @@ def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, b
 
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
-    return get_backend(backend).chat_turn(model_name, history, new_prompt, **kwargs)
+    backend_impl = get_backend(backend)
+    try:
+        full_prompt = ""
+        for turn in history:
+            full_prompt += f"{turn['role']}: {turn['content']}\n"
+        full_prompt += f"user: {new_prompt}\nassistant: "
+        result = backend_impl.generate_sql(model_name, full_prompt, **kwargs)
+        response = str(result.get("sql", "SELECT * FROM fallback"))
+        status = f"success_{backend}_chat"
+    except Exception as e:
+        logger.exception("%s chat error", backend.capitalize())
+        status = f"failed: {e!s}"
+        response = "SELECT * FROM fallback_chat"
+    updated_history = list(history)
+    updated_history.append({"role": "user", "content": new_prompt})
+    updated_history.append({"role": "assistant", "content": response})
+    return {"backend": backend, "model": model_name, "response": response, "history": updated_history, "status": status}

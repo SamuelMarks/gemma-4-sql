@@ -7,13 +7,15 @@ from gemma_4_sql.sdk.evaluation import evaluate
 
 def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test evaluate with jax."""
-    monkeypatch.setattr("gemma_4_sql.backends.jax.evaluate.generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    jax_agent = get_backend("jax")
+    monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
     res = evaluate("model1", "data1", "jax")
-    if not res["backend"] == "jax":
+    if res["backend"] != "jax":
         raise AssertionError
-    if not res["model"] == "model1":
+    if res["model"] != "model1":
         raise AssertionError
-    if not res["dataset"] == "data1":
+    if res["dataset"] != "data1":
         raise AssertionError
     if "metrics" not in res:
         raise AssertionError
@@ -21,13 +23,15 @@ def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_evaluate_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test evaluate with keras."""
-    monkeypatch.setattr("gemma_4_sql.backends.keras.evaluate.generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    keras_agent = get_backend("keras")
+    monkeypatch.setattr(keras_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
     res = evaluate("model1", "data1", "keras")
-    if not res["backend"] == "keras":
+    if res["backend"] != "keras":
         raise AssertionError
-    if not res["model"] == "model1":
+    if res["model"] != "model1":
         raise AssertionError
-    if not res["dataset"] == "data1":
+    if res["dataset"] != "data1":
         raise AssertionError
     if "metrics" not in res:
         raise AssertionError
@@ -35,13 +39,15 @@ def test_evaluate_keras(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test evaluate with maxtext."""
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.evaluate.generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    maxtext_agent = get_backend("maxtext")
+    monkeypatch.setattr(maxtext_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
     res = evaluate("model1", "data1", "maxtext")
-    if not res["backend"] == "maxtext":
+    if res["backend"] != "maxtext":
         raise AssertionError
-    if not res["model"] == "model1":
+    if res["model"] != "model1":
         raise AssertionError
-    if not res["dataset"] == "data1":
+    if res["dataset"] != "data1":
         raise AssertionError
     if "metrics" not in res:
         raise AssertionError
@@ -49,13 +55,15 @@ def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_evaluate_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test evaluate with pytorch."""
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.evaluate.generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    pytorch_agent = get_backend("pytorch")
+    monkeypatch.setattr(pytorch_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
     res = evaluate("model1", "data1", "pytorch")
-    if not res["backend"] == "pytorch":
+    if res["backend"] != "pytorch":
         raise AssertionError
-    if not res["model"] == "model1":
+    if res["model"] != "model1":
         raise AssertionError
-    if not res["dataset"] == "data1":
+    if res["dataset"] != "data1":
         raise AssertionError
     if "metrics" not in res:
         raise AssertionError

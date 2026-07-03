@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TypeAlias
+from typing import Any
 
-JSONPrimitive: TypeAlias = str | int | float | bool | None
-JSONValue: TypeAlias = JSONPrimitive | Sequence["JSONValue"] | Mapping[str, "JSONValue"]
-JSONDict: TypeAlias = dict[str, JSONValue]
+JSONPrimitive = str | int | float | bool | None
+JSONValue = JSONPrimitive | Sequence["JSONValue"] | Mapping[str, "JSONValue"]
+JSONDict = dict[str, Any]

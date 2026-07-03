@@ -1,5 +1,9 @@
+"""Provide module docstring."""
+
 import gemma_4_sql.backends.maxtext as m_init
 
 
-def test_init_get_trainer():
-    assert m_init.get_trainer() == "maxtext_trainer"
+def test_init_get_trainer() -> None:
+    """Execute function."""
+    if m_init.get_trainer() != "maxtext_trainer":
+        raise AssertionError

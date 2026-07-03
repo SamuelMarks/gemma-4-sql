@@ -12,28 +12,41 @@ if TYPE_CHECKING:
 
 
 class MockJnp:
+    """Provide class docstring."""
+
     int32 = 1
 
     @staticmethod
-    def zeros(shape: object, **kwargs: object) -> object:
+    def zeros(_shape: object, **_kwargs: object) -> object:
+        """Execute function."""
         return [0]
 
 
 class MockJaxRandom:
+    """Provide class docstring."""
+
     @staticmethod
-    def PRNGKey(seed: object) -> object:
+    def mock_prngkey(seed: object) -> object:
+        """Execute function."""
         return seed
+
+    PRNGKey = mock_prngkey
 
 
 class MockJax:
+    """Provide class docstring."""
+
     random = MockJaxRandom()
 
 
 class MockGemma4Model:
-    def __init__(self, name: object) -> None:
-        pass
+    """Provide class docstring."""
 
-    def init(self, rng: object, inputs: object) -> object:
+    def __init__(self, name: object) -> None:
+        """Execute function."""
+
+    def init(self, _rng: object, _inputs: object) -> object:
+        """Execute function."""
         return "params"
 
 
@@ -52,17 +65,14 @@ def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(maxtext_quantize, "jax", MockJax())
     monkeypatch.setattr(maxtext_quantize, "jnp", MockJnp())
     monkeypatch.setattr(maxtext_quantize, "Gemma4Model", MockGemma4Model)
-
     res = quantize_model("model", "int8")
     if not res["backend"] == "maxtext":
         raise AssertionError
     if not res["status"] == "quantized_int8":
         raise AssertionError
-
     res = quantize_model("model", "int4")
     if not res["status"] == "quantized_int4":
         raise AssertionError
-
     res = quantize_model("model", "awq")
     if not res["method"] == "awq":
         raise AssertionError
@@ -71,11 +81,13 @@ def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(maxtext_quantize, "jax", MockJax())
     monkeypatch.setattr(maxtext_quantize, "jnp", MockJnp())
     monkeypatch.setattr(maxtext_quantize, "Gemma4Model", MockGemma4Model)
 
-    def raise_err(*args: object, **kwargs: object) -> object:
+    def raise_err(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
@@ -85,12 +97,11 @@ def test_quantize_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError
 
 
-def test_quantize_imports_fail(monkeypatch: pytest.MonkeyPatch):
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.maxtext.quantize as m_quantize
-
+def test_quantize_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    m_quantize = __import__("gemma_4_sql.backends.maxtext.quantize")
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(m_quantize)
     monkeypatch.undo()

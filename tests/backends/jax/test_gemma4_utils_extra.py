@@ -1,289 +1,187 @@
+"""Provide module docstring."""
+
+import contextlib
+
 import jax.numpy as jnp
 import pytest
 
 from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, create_model_from_safe_tensors
 
 
-def test_utils_imports_fail(monkeypatch: pytest.MonkeyPatch):
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.jax.gemma4.utils_params as m_utils
-
+def test_utils_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params")
     monkeypatch.setitem(sys.modules, "safetensors", None)
     importlib.reload(m_utils)
     monkeypatch.undo()
     importlib.reload(m_utils)
 
 
-def test_assign_weights_transforms(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.usefixtures("_monkeypatch")
+def test_assign_weights_transforms() -> None:
+    """Execute function."""
     tensor = jnp.zeros((2, 4))
-
-    # reshape_first = True
     transform = ((1, 0), (4, 2), True)
     state = {"a": type("S", (), {"shape": (2, 4)})()}
     assign_weights(["a"], tensor, state, "st_key", transform)
-
-    # reshape_first = False
     transform = ((1, 0), (2, 4), False)
     state = {"a": type("S", (), {"shape": (2, 4)})()}
     assign_weights(["a"], tensor, state, "st_key", transform)
 
 
-def test_assign_weights_value_attribute(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.usefixtures("_monkeypatch")
+def test_assign_weights_value_attribute() -> None:
+    """Execute function."""
     tensor = jnp.zeros((2, 4))
     transform = None
     state = {"a": type("S", (), {"value": type("V", (), {"shape": (2, 4)})()})()}
     assign_weights(["a"], tensor, state, "st_key", transform)
-    assert hasattr(state["a"], "value")
+    if not hasattr(state["a"], "value"):
+        raise AssertionError
 
 
-def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    import gemma_4_sql.backends.jax.gemma4.utils_params as m_utils
+class MockF:
+    """Provide class docstring."""
 
-    class MockF:
-        def __enter__(self):
-            return self
+    def __enter__(self) -> object:
+        """Execute function."""
+        return self
 
-        def __exit__(self, *args):
-            pass
+    def __exit__(self, *args: object) -> object:
+        """Execute function."""
 
-        def __iter__(self):
-            yield "b"
+    def __iter__(self) -> object:
+        """Execute function."""
+        yield "b"
 
-        def get_tensor(self, k):
-            return jnp.zeros((1,))
-
-    monkeypatch.setattr(m_utils, "safe_open", lambda *args, **kwargs: MockF())
-
-    def mock_map(*args, **kwargs):
-        return "a", None
-
-    monkeypatch.setattr(m_utils, "map_to_jax_key", mock_map)
-
-    file_path = tmp_path / "model.safetensors"
-    file_path.touch()
-
-    class MockNNX:
-        class Rngs:
-            def __init__(self, *args, **kwargs):
-                pass
-
-        def split(self, *args, **kwargs):
-            return None, {"a": type("S", (), {"shape": (1,)})()}, None
-
-    class MockModelCls:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    import sys
-
-    monkeypatch.setitem(sys.modules, "flax", type("M", (), {"nnx": MockNNX()})())
-
-    res = create_model_from_safe_tensors(str(tmp_path), MockModelCls, {}, {"b": ("a", None)})
+    def get_tensor(self, _k: object) -> object:
+        """Execute function."""
+        return jnp.zeros((1,))
 
 
-def test_create_model_from_safe_tensors_key_error(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    import gemma_4_sql.backends.jax.gemma4.utils_params as m_utils
+class MockNNX:
+    """Provide class docstring."""
 
-    class MockF:
-        def __enter__(self):
-            return self
+    class Rngs:
+        """Provide class docstring."""
 
-        def __exit__(self, *args):
-            pass
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            """Execute function."""
 
-        def __iter__(self):
-            yield "b"
+    def split(self, *_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return (None, {"a": type("S", (), {"shape": (1,)})()}, None)
 
-        def get_tensor(self, k):
-            return jnp.zeros((1,))
 
-    monkeypatch.setattr(m_utils, "safe_open", lambda *args, **kwargs: MockF())
+class MockModelCls:
+    """Provide class docstring."""
 
-    def mock_map(*args, **kwargs):
-        return "a", None
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """Execute function."""
+
+
+def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """Execute function."""
+    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params")
+    monkeypatch.setattr(m_utils, "safe_open", lambda *_args, **_kwargs: MockF())
+
+    def mock_map(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return ("a", None)
 
     monkeypatch.setattr(m_utils, "map_to_jax_key", mock_map)
-
     file_path = tmp_path / "model.safetensors"
     file_path.touch()
-
-    class MockNNX:
-        class Rngs:
-            def __init__(self, *args, **kwargs):
-                pass
-
-        def split(self, *args, **kwargs):
-            return None, {}, None  # Missing 'a' causes KeyError
-
-    class MockModelCls:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    import sys
-
+    sys = __import__("sys")
     monkeypatch.setitem(sys.modules, "flax", type("M", (), {"nnx": MockNNX()})())
+    create_model_from_safe_tensors(str(tmp_path), MockModelCls, {}, {"b": ("a", None)})
 
-    res = create_model_from_safe_tensors(str(tmp_path), MockModelCls, {}, {"b": ("a", None)})
 
+def test_create_model_from_safe_tensors_key_error(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """Execute function."""
+    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params")
+    monkeypatch.setattr(m_utils, "safe_open", lambda *_args, **_kwargs: MockF())
 
-def test_create_model_from_safe_tensors_exception(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    import gemma_4_sql.backends.jax.gemma4.utils_params as m_utils
+    def mock_map(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return ("a", None)
 
-    class MockF:
-        def __enter__(self):
-            msg = "err"
-            raise ValueError(msg)
-
-        def __exit__(self, *args):
-            pass
-
-    monkeypatch.setattr(m_utils, "safe_open", lambda *args, **kwargs: MockF())
-
+    monkeypatch.setattr(m_utils, "map_to_jax_key", mock_map)
     file_path = tmp_path / "model.safetensors"
     file_path.touch()
-
-    class MockNNX:
-        class Rngs:
-            def __init__(self, *args, **kwargs):
-                pass
-
-        def split(self, *args, **kwargs):
-            return None, {}, None
-
-    class MockModelCls:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    import sys
-
+    sys = __import__("sys")
     monkeypatch.setitem(sys.modules, "flax", type("M", (), {"nnx": MockNNX()})())
+    create_model_from_safe_tensors(str(tmp_path), MockModelCls, {}, {"b": ("a", None)})
 
-    res = create_model_from_safe_tensors(str(tmp_path), MockModelCls, {}, {"b": ("a", None)})
+
+def test_create_model_from_safe_tensors_exception(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """Execute function."""
+    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params")
+    monkeypatch.setattr(m_utils, "safe_open", lambda *_args, **_kwargs: MockF())
+    file_path = tmp_path / "model.safetensors"
+    file_path.touch()
+    sys = __import__("sys")
+    monkeypatch.setitem(sys.modules, "flax", type("M", (), {"nnx": MockNNX()})())
+    create_model_from_safe_tensors(str(tmp_path), MockModelCls, {}, {"b": ("a", None)})
 
 
-def test_assign_weights_from_eval_shape_exceptions(monkeypatch: pytest.MonkeyPatch):
-    import gemma_4_sql.backends.jax.gemma4.utils_params as m_utils
-
-    # Missing key in state dict
-    try:
+@pytest.mark.usefixtures("_monkeypatch")
+def test_assign_weights_from_eval_shape_exceptions() -> None:
+    """Execute function."""
+    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params")
+    with contextlib.suppress(Exception):
         m_utils.assign_weights_from_eval_shape(["missing"], jnp.zeros((1,)), {}, "st_key", None)
-    except Exception:
-        pass
-
-    # Not a leaf node
-    try:
+    with contextlib.suppress(Exception):
         m_utils.assign_weights_from_eval_shape(["a"], jnp.zeros((1,)), {"a": {"b": 1}}, "st_key", None)
-    except Exception:
-        pass
-
-    # Shape mismatch
-    try:
+    with contextlib.suppress(Exception):
         m_utils.assign_weights_from_eval_shape(["a"], jnp.zeros((2,)), {"a": type("S", (), {"shape": (1,)})()}, "st_key", None)
-    except Exception:
-        pass
 
 
-def test_create_model_from_safe_tensors_missing_dir(monkeypatch: pytest.MonkeyPatch):
-    import gemma_4_sql.backends.jax.gemma4.utils_params as m_utils
+@pytest.mark.usefixtures("_monkeypatch")
+def test_create_model_from_safe_tensors_missing_dir() -> None:
+    """Execute function."""
+    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params")
+    m_utils.create_model_from_safe_tensors("non_existent_dir", lambda *_a, **_k: "model", {}, {})
 
-    m_utils.create_model_from_safe_tensors("non_existent_dir", lambda *a, **k: "model", {}, {})
 
-
-def test_create_model_from_safe_tensors_nnx_split_fails(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    import gemma_4_sql.backends.jax.gemma4.utils_params as m_utils
-
-    class MockNNX:
-        class Rngs:
-            def __init__(self, *args, **kwargs):
-                pass
-
-        def split(self, *args, **kwargs):
-            msg = "err"
-            raise ValueError(msg)
-
-    import sys
-
+def test_create_model_from_safe_tensors_nnx_split_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """Execute function."""
+    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params")
+    sys = __import__("sys")
     monkeypatch.setitem(sys.modules, "flax", type("M", (), {"nnx": MockNNX()})())
-
     file_path = tmp_path / "model.safetensors"
     file_path.touch()
-
-    class MockF:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def __iter__(self):
-            yield "b"
-
-        def get_tensor(self, k):
-            return jnp.zeros((1,))
-
-    monkeypatch.setattr(m_utils, "safe_open", lambda *args, **kwargs: MockF())
-
-    m_utils.create_model_from_safe_tensors(str(tmp_path), lambda *a, **k: "model", {}, {"b": (None, None)})
+    monkeypatch.setattr(m_utils, "safe_open", lambda *_args, **_kwargs: MockF())
+    m_utils.create_model_from_safe_tensors(str(tmp_path), lambda *_a, **_k: "model", {}, {"b": (None, None)})
 
 
-def test_assign_weights_from_eval_shape_transforms(monkeypatch: pytest.MonkeyPatch):
-    import gemma_4_sql.backends.jax.gemma4.utils_params as m_utils
-
+@pytest.mark.usefixtures("_monkeypatch")
+def test_assign_weights_from_eval_shape_transforms() -> None:
+    """Execute function."""
+    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params")
     tensor = jnp.zeros((2, 4))
-
-    # reshape_first = True
     transform = ((1, 0), (4, 2), True)
     state = {"a": type("S", (), {"shape": (2, 4), "dtype": jnp.float32, "sharding": type("Sh", (), {"spec": None})()})()}
     m_utils.assign_weights_from_eval_shape(["a"], tensor, state, "st_key", transform)
-
-    # reshape_first = False
     transform = ((1, 0), (2, 4), False)
     state = {"a": type("S", (), {"shape": (2, 4), "dtype": jnp.float32, "sharding": type("Sh", (), {"spec": None})()})()}
     m_utils.assign_weights_from_eval_shape(["a"], tensor, state, "st_key", transform)
 
 
-def test_create_model_from_safe_tensors_mapped_key_none(monkeypatch: pytest.MonkeyPatch, tmp_path):
-    import gemma_4_sql.backends.jax.gemma4.utils_params as m_utils
+def test_create_model_from_safe_tensors_mapped_key_none(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """Execute function."""
+    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params")
+    monkeypatch.setattr(m_utils, "safe_open", lambda *_args, **_kwargs: MockF())
 
-    class MockF:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
-        def __iter__(self):
-            yield "b"
-
-        def get_tensor(self, k):
-            return jnp.zeros((1,))
-
-    monkeypatch.setattr(m_utils, "safe_open", lambda *args, **kwargs: MockF())
-
-    def mock_map(*args, **kwargs):
-        return None, None
+    def mock_map(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return (None, None)
 
     monkeypatch.setattr(m_utils, "map_to_jax_key", mock_map)
-
     file_path = tmp_path / "model.safetensors"
     file_path.touch()
-
-    class MockNNX:
-        class Rngs:
-            def __init__(self, *args, **kwargs):
-                pass
-
-        def split(self, *args, **kwargs):
-            return None, {"a": type("S", (), {"shape": (1,)})()}, None
-
-    class MockModelCls:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    import sys
-
+    sys = __import__("sys")
     monkeypatch.setitem(sys.modules, "flax", type("M", (), {"nnx": MockNNX()})())
-
     m_utils.create_model_from_safe_tensors(str(tmp_path), MockModelCls, {}, {"b": ("a", None)})

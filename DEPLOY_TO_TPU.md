@@ -105,7 +105,7 @@ You can now dispatch native `gemma-4-sql` CLI commands using the stack's deploym
   gemma-4-sql peft --model \$MODEL_NAME --target-modules q_proj,v_proj --lora-r 16 --backend maxtext
   
   # 2. Run the SFT loop
-  gemma-4-sql sft --model \$MODEL_NAME --dataset \$DATASET_NAME --backend maxtext --output-dir /mnt/ml_data/gemma-4-sql-finetuned
+  gemma-4-sql sft --model \$MODEL_NAME --dataset \$DATASET_NAME --backend maxtext
 "
 ```
 
@@ -156,7 +156,7 @@ Start TensorBoard in the background and execute your training loop inside a prot
 
 # 4b. Execute the Training Loop explicitly via Tmux with Port Forwarding
 ./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" --detached --forward-port 6006:localhost:6006 "
-  gemma-4-sql sft --model \$MODEL_NAME --dataset \$DATASET_NAME --backend maxtext --output-dir /mnt/ml_data/gemma-4-sql-finetuned
+  gemma-4-sql sft --model \$MODEL_NAME --dataset \$DATASET_NAME --backend maxtext
 "
 ```
 
@@ -192,7 +192,7 @@ xpk workload create \
   --num-slices \"$NUM_SLICES\" \
   --env \"HF_TOKEN=$HF_TOKEN\" \
   --docker-image \"gcr.io/$GCP_PROJECT_ID/gemma-4-sql-runtime:latest\" \
-  --command \"gemma-4-sql pretrain --model $MODEL_NAME --dataset $DATASET_NAME --backend maxtext --output-dir gs://$BUCKET_NAME/checkpoints/\"
+  --command \"gemma-4-sql pretrain --model $MODEL_NAME --dataset $DATASET_NAME --backend maxtext\"
 ```
 
 ---

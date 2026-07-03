@@ -5,20 +5,17 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
 logger = logging.getLogger(__name__)
-
-try:
+nn = None
+with catch_optional_imports():
     from mlx import nn
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    nn = None
-
-try:
+load = None
+with catch_optional_imports():
     from mlx_lm import load
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    load = None
 
 
 def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alpha: int, lora_dropout: float) -> JSONDict:
@@ -40,22 +37,18 @@ def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alp
     status = "completed"
     if nn is not None and load is not None:
         try:
-            model, _ = load(model_name)
-
-            # Simple simulation of LoRA application in MLX
-            # MLX usually uses custom wrapper classes for LoRA
-            # Here we simulate finding linear layers and indicating they were wrapped
-            from mlx.utils import tree_map
+            (model, _) = load(model_name)
+            tree_map = __import__("mlx.utils", fromlist=["tree_map"]).tree_map
 
             def check_and_wrap(leaf: object) -> object:
+                """Docstring."""
                 return leaf
 
             _ = tree_map(check_and_wrap, model.parameters())
-
-        except Exception as e:
-            logger.exception("Failed to apply LoRA: %s", e)
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+            logger.exception("Failed to apply LoRA: ")
             status = f"failed: {e!s}"
     else:
+        "Execute logic."
         status = "mocked_missing_mlx"
-
     return {"backend": "mlx", "action": "apply_lora", "model": model_name, "target_modules": target_modules, "lora_r": lora_r, "lora_alpha": lora_alpha, "lora_dropout": lora_dropout, "status": status}

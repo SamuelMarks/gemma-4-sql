@@ -5,16 +5,15 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
-
 logger = logging.getLogger(__name__)
-
-try:
+load = None
+generate = None
+with catch_optional_imports():
     from mlx_lm import generate, load
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    load = None
-    generate = None
 
 
 def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50, **kwargs: JSONValue) -> JSONDict:
@@ -37,26 +36,21 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     if load is not None and generate is not None:
         try:
             logger.info("Generating with %s", model_name)
-
             if kwargs.get("test_mode"):
                 sql = "SELECT * FROM mlx_table"
                 confidence_score = 0.95
             else:
-                model, tokenizer = load(model_name)
-                # mlx_lm generator doesn't easily expose logprobs out of the box in the `generate` utility without callbacks
-                # Mocking the confidence score logic here for now
+                (model, tokenizer) = load(model_name)
                 generated_text = generate(model, tokenizer, prompt=prompt, max_tokens=max_length, verbose=False)
                 sql = generated_text.strip()
                 confidence_score = 0.85
-
             status = "success"
-        except Exception as e:
-            logger.exception("Generation failed: %s", e)
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+            logger.exception("Generation failed: ")
             sql = ""
             status = f"failed: {e!s}"
     else:
         sql = "SELECT * FROM mlx_table"
         confidence_score = 0.95
         status = "mocked_missing_mlx"
-
     return {"backend": "mlx", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}

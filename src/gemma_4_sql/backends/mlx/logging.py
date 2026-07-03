@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
-try:
+SummaryWriter = None
+with catch_optional_imports():
     from mlx.utils.tensorboard import SummaryWriter
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    SummaryWriter = None
 
 
 def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> JSONDict:

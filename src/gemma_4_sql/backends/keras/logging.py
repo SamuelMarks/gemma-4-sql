@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
-try:
+tf = None
+with catch_optional_imports():
     import tensorflow as tf
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    tf = None
 
 
 def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> JSONDict:

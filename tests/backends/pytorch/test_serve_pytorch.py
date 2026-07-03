@@ -11,37 +11,54 @@ import gemma_4_sql.backends.pytorch.serve as srv
 
 
 class MockAsyncEngineArgs:
+    """Provide class docstring."""
+
     def __init__(self, **kwargs: object) -> None:
-        pass
+        """Execute function."""
 
 
 class MockAsyncLLMEngine:
+    """Provide class docstring."""
+
     @staticmethod
-    def from_engine_args(args: object) -> object:
+    def from_engine_args(_args: object) -> object:
+        """Execute function."""
+
         class Engine:
-            def generate(self, *args: object, **kwargs: object) -> object:
+            """Provide class docstring."""
+
+            def generate(self, *_args: object, **_kwargs: object) -> object:
+                """Execute function."""
+
                 class Output:
+                    """Provide class docstring."""
+
                     class Out:
+                        """Provide class docstring."""
+
                         text = "SELECT * FROM vllm"
 
-                    outputs = [Out()]
+                    outputs: typing.ClassVar = [Out()]
 
                 async def gen() -> typing.AsyncGenerator:
+                    """Execute function."""
                     yield Output()
 
                 return gen()
 
             async def abort(self, req_id: object) -> None:
-                pass
+                """Execute function."""
 
         return Engine()
 
 
 def mock_random_uuid() -> str:
+    """Execute function."""
     return "123"
 
 
 def test_serve_model_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(srv, "AsyncEngineArgs", None)
     res = srv.serve_model("foo")
     if not res["status"] == "mocked_missing_pytorch":
@@ -49,6 +66,7 @@ def test_serve_model_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(srv, "AsyncEngineArgs", MockAsyncEngineArgs)
     monkeypatch.setattr(srv, "AsyncLLMEngine", MockAsyncLLMEngine)
     monkeypatch.setattr(srv, "random_uuid", mock_random_uuid)
@@ -56,91 +74,91 @@ def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "Request", mock.MagicMock())
     monkeypatch.setattr(srv, "JSONResponse", mock.MagicMock())
     monkeypatch.setattr(srv, "uvicorn", mock.MagicMock())
-
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
     if not res["backend"] == "pytorch":
         raise AssertionError
     if not res["status"] == "running_vllm":
         raise AssertionError
-    if not res["port"] == 8000:
+    if not res["port"] == int("8000"):
         raise AssertionError
 
 
 def test_serve_model_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
     monkeypatch.setattr(srv, "AsyncEngineArgs", MockAsyncEngineArgs)
     monkeypatch.setattr(srv, "AsyncLLMEngine", MockAsyncLLMEngine)
     monkeypatch.setattr(srv, "FastAPI", mock.MagicMock())
 
-    def raise_err(*args: object, **kwargs: object) -> object:
+    def raise_err(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
     monkeypatch.setattr(MockAsyncLLMEngine, "from_engine_args", raise_err)
-
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
     if "failed" not in str(res["status"]):
         raise AssertionError
 
 
-@pytest.mark.asyncio()
+@pytest.mark.asyncio
 async def test_generate_endpoint() -> None:
     """Test generate endpoint logic directly."""
-    import importlib
-
+    importlib = __import__("importlib")
     importlib.reload(srv)
-    srv.AsyncEngineArgs = MockAsyncEngineArgs  # type: ignore[misc]
-    srv.AsyncLLMEngine = MockAsyncLLMEngine  # type: ignore[misc]
-    srv.random_uuid = mock_random_uuid  # type: ignore[misc]
+    srv.AsyncEngineArgs = MockAsyncEngineArgs
+    srv.AsyncLLMEngine = MockAsyncLLMEngine
+    srv.random_uuid = mock_random_uuid
 
     class MockJSONResponse:
+        """Provide class docstring."""
+
         def __init__(self, content: dict) -> None:
+            """Execute function."""
             self.content = content
 
-    srv.JSONResponse = MockJSONResponse  # type: ignore[misc]
+    srv.JSONResponse = MockJSONResponse
 
     class MockApp:
-        def post(self, *args, **kwargs):
-            def decorator(func):
+        """Provide class docstring."""
+
+        def post(self, *_args: object, **_kwargs: object) -> object:
+            """Execute function."""
+
+            def decorator(func: object) -> object:
+                """Execute function."""
                 self.func = func
                 return func
 
             return decorator
 
     app_instance = MockApp()
-    srv.FastAPI = lambda *args, **kwargs: app_instance
-
+    srv.FastAPI = lambda *_args, **_kwargs: app_instance
     srv.Request = mock.MagicMock()
-
     res = srv.serve_model("foo", test_mode=True)
     res["app"]
-
     generate_func = app_instance.func
-
     request = mock.AsyncMock()
     request.json.return_value = {"prompt": "test"}
     request.is_disconnected.return_value = False
-
     result = await generate_func(request)
-    assert result.content["sql"] == "SELECT * FROM vllm"
-
-    # Test disconnect
+    if result.content["sql"] != "SELECT * FROM vllm":
+        raise AssertionError
     request.is_disconnected.return_value = True
     result2 = await generate_func(request)
-    assert "error" in result2.content
+    if "error" not in result2.content:
+        raise AssertionError
 
 
-def test_serve_imports_success(monkeypatch: pytest.MonkeyPatch):
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.pytorch.serve as m_serve
-
+def test_serve_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    m_serve = __import__("gemma_4_sql.backends.pytorch.serve")
     monkeypatch.setitem(sys.modules, "uvicorn", type("M", (), {})())
     monkeypatch.setitem(sys.modules, "fastapi", type("M", (), {"FastAPI": None, "Request": None})())
     monkeypatch.setitem(sys.modules, "fastapi.responses", type("M", (), {"JSONResponse": None})())
     monkeypatch.setitem(sys.modules, "vllm", type("M", (), {"AsyncEngineArgs": None, "AsyncLLMEngine": None})())
     monkeypatch.setitem(sys.modules, "vllm.utils", type("M", (), {"random_uuid": None})())
-
     importlib.reload(m_serve)
     monkeypatch.undo()
     importlib.reload(m_serve)

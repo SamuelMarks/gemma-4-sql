@@ -15,12 +15,15 @@ class MockArray:
     """Initialize class MockArray."""
 
     def __init__(self, ndim: int = 2) -> None:
+        """Execute function."""
         self.ndim = ndim
 
     def __truediv__(self, other: object) -> object:
+        """Execute function."""
         return MockArray()
 
     def astype(self, _dtype: object) -> object:
+        """Execute function."""
         return MockArray()
 
 
@@ -30,39 +33,59 @@ class MockJnp:
     int8 = "int8"
 
     def max(self, _x: object) -> float:
+        """Execute function."""
         return 1.0
 
     def abs(self, _x: object) -> object:
+        """Execute function."""
         return MockArray()
 
     def round(self, _x: object) -> object:
+        """Execute function."""
         return MockArray()
 
 
 class MockGemma4Config:
+    """Provide class docstring."""
+
     @staticmethod
     def gemma4_e2b() -> object:
+        """Execute function."""
         return "config"
 
 
 class MockGemma4ForCausalLM:
+    """Provide class docstring."""
+
     def __init__(self, config: object, rngs: object) -> None:
-        pass
+        """Execute function."""
 
 
 class MockNNX:
+    """Provide class docstring."""
+
     class Param:
+        """Provide class docstring."""
+
         def __init__(self, value: object) -> None:
+            """Execute function."""
             self.value = value
 
     class Rngs:
-        def __init__(self, seed: int) -> None:
-            pass
+        """Provide class docstring."""
 
-    class graph:
+        def __init__(self, seed: int) -> None:
+            """Execute function."""
+
+    class MockGraph:
+        """Provide class docstring."""
+
         @staticmethod
         def iter_graph(_model: object) -> list:
+            """Execute function."""
             return [("path", MockNNX.Param(MockArray(ndim=2))), ("path2", MockNNX.Param(MockArray(ndim=1)))]
+
+    graph = MockGraph
 
 
 def test_quantize_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,17 +105,14 @@ def test_quantize_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(qt, "nnx", MockNNX())
     monkeypatch.setattr(qt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
     monkeypatch.setattr(qt, "Gemma4Config", MockGemma4Config)
-
     res = quantize_model("model", "int8")
     if not res["status"] == "quantized_int8":
         raise AssertionError
-    if not res["memory_reduction_factor"] == 0.5:
+    if not res["memory_reduction_factor"] == float("0.5"):
         raise AssertionError
-
     res = quantize_model("model", "awq")
     if not res["status"] == "quantized_awq":
         raise AssertionError
-
     res = quantize_model("model", "gptq")
     if not res["status"] == "unsupported_method_gptq":
         raise AssertionError
@@ -106,29 +126,26 @@ def test_quantize_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(qt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
     monkeypatch.setattr(qt, "Gemma4Config", MockGemma4Config)
 
-    def raise_error(*_args: object, **_kwargs: object) -> object:
+    def mock_raise_error(*_args: object, **_kwargs: object) -> object:
+        """Execute function."""
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(MockNNX.graph, "iter_graph", raise_error)
-
+    monkeypatch.setattr(MockNNX.graph, "iter_graph", Exception)
     res = quantize_model("model", "int8")
     if "failed: err" not in res["status"]:
         raise AssertionError
 
 
 def test_quantize_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.jax.quantize as mdl
-
+    """Execute function."""
+    importlib = __import__("importlib")
+    sys = __import__("sys")
+    mdl = __import__("gemma_4_sql.backends.jax.quantize")
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(mdl)
-
     monkeypatch.undo()
     monkeypatch.setitem(sys.modules, "flax", None)
     importlib.reload(mdl)
-
     monkeypatch.undo()
     importlib.reload(mdl)

@@ -4,25 +4,23 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.tokenization import SQLTokenizer
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-
-try:
+jax = None
+jnp = None
+with catch_optional_imports():
     import jax
     import jax.numpy as jnp
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    jax = None
-    jnp = None
-try:
+Gemma4ForCausalLM = None
+Gemma4Config = None
+nnx = None
+with catch_optional_imports():
     from flax import nnx
 
     from .gemma4 import Gemma4Config, Gemma4ForCausalLM
-except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-    Gemma4ForCausalLM = None  # type: ignore[misc]
-    Gemma4Config = None
-    nnx = None
 
 
 def jax_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: int, max_length: int, eos_token_id: int) -> tuple[jnp.ndarray, float]:
@@ -49,7 +47,7 @@ def jax_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: 
                 new_beams.append((seq, score))
                 continue
             positions = jnp.arange(seq.shape[1])[None, :]
-            logits = model_apply_fn(seq, positions)  # type: ignore[operator]
+            logits = model_apply_fn(seq, positions)
             log_probs = jax.nn.log_softmax(logits, axis=-1)[0]
             top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]
             top_probs = log_probs[top_indices]
@@ -62,7 +60,7 @@ def jax_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: 
         beams = new_beams[:beam_width]
         if all(seq[0, -1] == eos_token_id for (seq, _) in beams):
             break
-    return beams[0][0], beams[0][1]
+    return (beams[0][0], beams[0][1])
 
 
 def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50) -> JSONDict:
@@ -86,8 +84,8 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     confidence_score = 0.0
     if jax is not None and jnp is not None and (Gemma4ForCausalLM is not None):
         input_ids = jnp.array([input_tokens], dtype=jnp.int32)
-        model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))  # type: ignore[arg-type]
-        output_ids, logprob_sum = jax_beam_search(model, input_ids, beam_width, max_length, eos_token_id)
+        model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
+        (output_ids, logprob_sum) = jax_beam_search(model, input_ids, beam_width, max_length, eos_token_id)
         sql = tokenizer.decode(output_ids[0].tolist())
         out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
         confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))

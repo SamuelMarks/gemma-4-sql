@@ -112,11 +112,12 @@ gemma-4-sql dpo --model gemma-4 --dataset my_dpo_dataset --beta 0.1 --backend ja
 ### SDK
 
 ```python
-from gemma_4_sql.sdk.models import pretrain_model, sft_model
+from gemma_4_sql.sdk.models import pretrain_model, sft_model, TrainingConfig
 from gemma_4_sql.sdk.dpo import run_dpo
 
 # Pretrain using MaxText
-pretrain_model(model_name="gemma-4", dataset="seeklhy/SynSQL-2.5M", backend="maxtext")
+config = TrainingConfig(model_name="gemma-4", dataset="seeklhy/SynSQL-2.5M", backend="maxtext")
+pretrain_model(config)
 
 # Run DPO using JAX
 run_dpo(model_name="gemma-4", dataset="my_dpo_dataset", beta=0.1, backend="jax")
@@ -282,15 +283,19 @@ gemma-4-sql agent --model gemma-4 \
 ### SDK
 
 ```python
-from gemma_4_sql.sdk.agent import run_agentic_loop
+from gemma_4_sql.sdk.agent import run_agentic_loop, AgentContext
+
+context = AgentContext(
+    db_type="sqlite",
+    db_path=":memory:",
+    max_retries=3
+)
 
 result = run_agentic_loop(
     model_name="gemma-4",
     prompt="Show the total sales for 2024",
     backend="jax",
-    db_type="sqlite",
-    db_path=":memory:",
-    max_retries=3
+    context=context
 )
 ```
 
