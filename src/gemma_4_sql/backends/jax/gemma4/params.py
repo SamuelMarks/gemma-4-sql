@@ -212,7 +212,7 @@ def _stack_and_assign_expert_tensors(expert_tensors: dict[int, dict[str, dict[in
 def _process_safetensors_file(f: object, moe_pattern: re.Pattern[str], expert_tensors: dict[int, dict[str, dict[int, jax.Array]]], jax_state: JSONDict, mapping: dict[str, tuple[str, object]]) -> None:
     """Process a single safetensors file."""
     with safetensors.safe_open(f, framework="numpy") as sf:
-        for torch_key in sf:
+        for torch_key in sf.keys():  # noqa: SIM118
             match = moe_pattern.match(torch_key)
             if match:
                 _process_moe_tensor(match, sf, torch_key, expert_tensors)

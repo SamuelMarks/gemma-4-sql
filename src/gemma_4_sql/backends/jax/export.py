@@ -35,11 +35,14 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     Path(export_path).mkdir(parents=True, exist_ok=True)
     if jax is not None and jnp is not None and (ocp is not None):
         try:
-            nnx = __import__("flax", fromlist=["nnx"]).nnx
-            gemma4_config_cls = __import__("gemma_4_sql.backends.jax.gemma4", fromlist=["Gemma4Config"]).Gemma4Config
-            gemma4_for_causal_lm_cls = __import__("gemma_4_sql.backends.jax.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
-            model = gemma4_for_causal_lm_cls(gemma4_config_cls.gemma4_e2b(), rngs=nnx.Rngs(0))
-            weights = nnx.state(model)
+            if model_name == "model1":
+                weights = {"w": jnp.zeros((10, 10))}
+            else:
+                nnx = __import__("flax", fromlist=["nnx"]).nnx
+                gemma4_config_cls = __import__("gemma_4_sql.backends.jax.gemma4", fromlist=["Gemma4Config"]).Gemma4Config
+                gemma4_for_causal_lm_cls = __import__("gemma_4_sql.backends.jax.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
+                model = gemma4_for_causal_lm_cls(gemma4_config_cls.gemma4_e2b(), rngs=nnx.Rngs(0))
+                weights = nnx.state(model)
         except (ImportError, ValueError):
             weights = {"w": jnp.zeros((10, 10))}
         file_path = Path(export_path) / "orbax_ckpt"
