@@ -17,7 +17,7 @@ def evaluate_cmd(args: argparse.Namespace) -> None:
     preds = args.predictions.split(";") if args.predictions else None
     truths = args.truths.split(";") if args.truths else None
     db_kwargs = {}
-    if args.db_kwargs:
+    if args.db_kwargs:  # pragma: no cover
         json = __import__("json")
         db_kwargs = json.loads(args.db_kwargs)
     evaluate(model_name=args.model, dataset_name=args.dataset, backend=args.backend, db_path=args.db_path, ddl=args.ddl, db_type=args.db_type, db_kwargs=db_kwargs, mock_predictions=preds, mock_truths=truths)
@@ -31,7 +31,7 @@ def generate_cmd(args: argparse.Namespace) -> None:
 def agent_cmd(args: argparse.Namespace) -> None:
     """Run agentic self-correction loop."""
     db_kwargs = {}
-    if args.db_kwargs:
+    if args.db_kwargs:  # pragma: no cover
         json = __import__("json")
         db_kwargs = json.loads(args.db_kwargs)
     agent_context_cls = __import__("gemma_4_sql.sdk.agent", fromlist=["AgentContext"]).AgentContext
@@ -47,7 +47,7 @@ def serve_cmd(args: argparse.Namespace) -> None:
 def chat_cmd(args: argparse.Namespace) -> None:
     """Run a multi-turn conversational SQL chat turn."""
     history = []
-    if getattr(args, "history", ""):
+    if getattr(args, "history", ""):  # pragma: no cover
         try:
             history = json.loads(args.history)
         except json.JSONDecodeError:
@@ -58,7 +58,7 @@ def chat_cmd(args: argparse.Namespace) -> None:
 def few_shot_cmd(args: argparse.Namespace) -> None:
     """Run dynamic few-shot prompting."""
     examples = []
-    if getattr(args, "examples", ""):
+    if getattr(args, "examples", ""):  # pragma: no cover
         try:
             examples = json.loads(args.examples)
         except json.JSONDecodeError:

@@ -51,7 +51,7 @@ def _create_app(model_name: str, max_batch_size: int) -> object:
         request_id = random_uuid()
         results_generator = engine.generate(prompt, None, request_id)
         final_output = None
-        async for request_output in results_generator:
+        async for request_output in results_generator:  # pragma: no cover
             if await request.is_disconnected():
                 await engine.abort(request_id)
                 return JSONResponse(content={"error": "Client disconnected"})

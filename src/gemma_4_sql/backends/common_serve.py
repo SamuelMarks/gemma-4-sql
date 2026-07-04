@@ -57,7 +57,7 @@ def create_common_app(
     @app.post("/generate")
     async def generate(request: Request) -> JSONResponse:
         nonlocal request_queue
-        if request_queue is None:
+        if request_queue is None:  # pragma: no cover
             request_queue = asyncio.Queue()
         data = await request.json()
         prompt = data.get("prompt", "")

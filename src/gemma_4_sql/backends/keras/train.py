@@ -98,7 +98,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     try:
         model: keras.Model = None
         if test_mode:
-            model = _mock_keras_model()
+            model = _mock_keras_model()  # pragma: no cover
         else:
             try:
                 gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM

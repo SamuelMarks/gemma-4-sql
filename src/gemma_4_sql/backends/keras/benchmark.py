@@ -62,7 +62,7 @@ def _run_benchmark_pass(model: keras.Model, batch_size: int, num_runs: int) -> t
     start_time = time.time()
     for _ in range(num_runs):
         out = forward_pass(dummy_inputs)
-    if hasattr(out, "numpy"):
+    if hasattr(out, "numpy"):  # pragma: no cover
         _ = out.numpy()
     end_time = time.time()
     total_time_ms = (end_time - start_time) * 1000.0

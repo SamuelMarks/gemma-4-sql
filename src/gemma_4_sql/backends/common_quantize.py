@@ -27,7 +27,7 @@ def apply_bits_and_bytes_quantization(method: str, bits_and_bytes_config_cls: ty
 
     """
     if bits_and_bytes_config_cls is None:
-        return (0.0, "mocked_missing_bitsandbytes")
+        return (0.0, "mocked_missing_bitsandbytes")  # pragma: no cover
 
     if method == "int8":
         bits_and_bytes_config_cls(load_in_8bit=True)

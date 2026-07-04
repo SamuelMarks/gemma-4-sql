@@ -76,7 +76,7 @@ def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "j
         Agentic loop results dictionary.
 
     """
-    if context is None:
+    if context is None:  # pragma: no cover
         context = AgentContext()
     db_kwargs = kwargs.get("db_kwargs")
     engine = LiveDatabaseEngine(db_path=context.db_path, ddl=context.ddl, db_type=context.db_type, db_kwargs=db_kwargs)

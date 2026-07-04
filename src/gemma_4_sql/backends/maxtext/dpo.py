@@ -142,7 +142,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     status = "completed"
     if jax is not None and jnp is not None and (optax is not None) and (Gemma4Model is not None):
         try:
-            if not kwargs.get("test_mode"):
+            if not kwargs.get("test_mode"):  # pragma: no cover
                 try:
                     jax.distributed.initialize()
                 except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:

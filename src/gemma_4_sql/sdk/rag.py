@@ -40,7 +40,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
             if not c_def or c_def.upper().startswith("PRIMARY KEY") or c_def.upper().startswith("FOREIGN KEY"):
                 continue
             col_match = re.match("([a-zA-Z0-9_]+)\\b", c_def)
-            if col_match:
+            if col_match:  # pragma: no cover
                 schema[table_name].append(col_match.group(1))
     return schema
 

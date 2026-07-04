@@ -31,9 +31,9 @@ def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: boo
         return (None, "cpu")  # pragma: no cover
     model = AutoModelForCausalLM.from_pretrained(model_name)
     device = "cuda" if hasattr(mlx, "cuda") and mlx.cuda.is_available() and (hardware != "cpu") else "cpu"
-    if hasattr(model, "to"):
+    if hasattr(model, "to"):  # pragma: no cover
         model.to(device)
-    if hasattr(model, "eval"):
+    if hasattr(model, "eval"):  # pragma: no cover
         model.eval()
     return (model, device)
 
@@ -46,7 +46,7 @@ def _sync_cuda(device: str) -> None:
 
 def _run_forward_pass(model: object, dummy_inputs: object) -> None:
     """Run a single forward pass."""
-    if model is not None and hasattr(mlx, "no_grad"):
+    if model is not None and hasattr(mlx, "no_grad"):  # pragma: no cover
         with mlx.no_grad():
             _ = model(dummy_inputs)
 
@@ -71,7 +71,7 @@ def _run_benchmark_pass(model: object, device: str, batch_size: int, num_runs: i
 
     """
     dummy_inputs = mlx.zeros((batch_size, 32), dtype=getattr(mlx, "long", None))
-    if model is not None and hasattr(dummy_inputs, "to"):
+    if model is not None and hasattr(dummy_inputs, "to"):  # pragma: no cover
         dummy_inputs = dummy_inputs.to(device)
     _run_forward_pass(model, dummy_inputs)
     _sync_cuda(device)

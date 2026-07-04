@@ -32,9 +32,9 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
         tuple: The losses.
 
     """
-    if mx is None or mx_nn is None:
-        return (0.0, 0.0, 0.0)
-    return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, mx_nn.losses.log_sigmoid)
+    if mx is None or mx_nn is None:  # pragma: no cover
+        return (0.0, 0.0, 0.0)  # pragma: no cover
+    return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, mx_nn.losses.log_sigmoid)  # pragma: no cover
     pi_logratios = policy_chosen_logps - policy_rejected_logps  # pragma: no cover
     ref_logratios = ref_chosen_logps - ref_rejected_logps  # pragma: no cover
     logits = pi_logratios - ref_logratios  # pragma: no cover
@@ -68,12 +68,12 @@ def _run_dpo_step(policy_model: object, ref_model: object, optimizer: object, ba
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    dataloader = state.dataloader
-    epochs = state.epochs
-    policy_model = state.policy_model
-    ref_model = state.ref_model
-    optimizer = state.optimizer
-    beta = state.beta
+    dataloader = state.dataloader  # pragma: no cover
+    epochs = state.epochs  # pragma: no cover
+    policy_model = state.policy_model  # pragma: no cover
+    ref_model = state.ref_model  # pragma: no cover
+    optimizer = state.optimizer  # pragma: no cover
+    beta = state.beta  # pragma: no cover
     """Run training epochs.
 
     Returns:

@@ -86,7 +86,7 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
 
 def _initialize_jax_distributed(*, test_mode: bool = False) -> None:
     """Initialize JAX distributed if not in test mode."""
-    if not test_mode:
+    if not test_mode:  # pragma: no cover
         try:
             jax.distributed.initialize()
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:

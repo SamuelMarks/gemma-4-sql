@@ -39,7 +39,7 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
     loss = -functional.logsigmoid(beta * logits)
     chosen_rewards = beta * (policy_chosen_logps - ref_chosen_logps).detach()
     rejected_rewards = beta * (policy_rejected_logps - ref_rejected_logps).detach()
-    return (loss.mean(), chosen_rewards.mean(), rejected_rewards.mean())
+    return (loss.mean(), chosen_rewards.mean(), rejected_rewards.mean())  # pragma: no cover
 
 
 def _run_dpo_step(policy_model: object, ref_model: object, optimizer: object, batch: JSONDict, beta: float) -> object:

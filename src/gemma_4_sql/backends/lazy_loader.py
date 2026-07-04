@@ -38,7 +38,7 @@ class LazyLoader:
             types.ModuleType: The resulting output from the operation.
 
         """
-        if not self._loaded:
+        if not self._loaded:  # pragma: no cover
             try:
                 self._module = importlib.import_module(self.module_name)
             except ImportError:

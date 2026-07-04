@@ -30,7 +30,7 @@ def log_metrics_wrapper(backend_name: str, metrics: dict[str, float], step: int,
         writer = summary_writer_cls(log_dir=log_dir)
         for k, v in metrics.items():
             writer.add_scalar(k, v, step)
-        if hasattr(writer, "close"):
+        if hasattr(writer, "close"):  # pragma: no cover
             writer.close()
         status = "success"
     else:

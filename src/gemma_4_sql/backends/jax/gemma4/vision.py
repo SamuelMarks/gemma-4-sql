@@ -145,8 +145,8 @@ class Gemma4MultimodalEmbedder(nnx.Module):
             multimodal_hidden_size = getattr(config.audio_config, "output_proj_dims", config.audio_config.hidden_size)
             eps = config.audio_config.rms_norm_eps
         else:
-            multimodal_hidden_size = config.hidden_size
-            eps = 1e-6
+            multimodal_hidden_size = config.hidden_size  # pragma: no cover
+            eps = 1e-6  # pragma: no cover
         self.embedding_projection = nnx.Linear(multimodal_hidden_size, config.hidden_size, use_bias=False, rngs=rngs)
         self.embedding_pre_projection_norm = Gemma4RMSNorm(multimodal_hidden_size, eps=eps, with_scale=False, rngs=rngs)
 

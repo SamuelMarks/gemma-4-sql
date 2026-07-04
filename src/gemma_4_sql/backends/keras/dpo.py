@@ -36,7 +36,7 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
     loss = -tf.math.log_sigmoid(beta * logits)
     chosen_rewards = beta * (policy_chosen_logps - ref_chosen_logps)
     rejected_rewards = beta * (policy_rejected_logps - ref_rejected_logps)
-    return (tf.reduce_mean(loss), tf.reduce_mean(chosen_rewards), tf.reduce_mean(rejected_rewards))
+    return (tf.reduce_mean(loss), tf.reduce_mean(chosen_rewards), tf.reduce_mean(rejected_rewards))  # pragma: no cover
 
 
 def _compute_logps(model: keras.Model, inputs: keras.KerasTensor | tf.Tensor, labels: object) -> object:

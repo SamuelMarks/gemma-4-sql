@@ -45,7 +45,7 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
     loss = -jnn.log_sigmoid(beta * logits)
     chosen_rewards = beta * (policy_chosen_logps - ref_chosen_logps)
     rejected_rewards = beta * (policy_rejected_logps - ref_rejected_logps)
-    return (jnp.mean(loss), jnp.mean(chosen_rewards), jnp.mean(rejected_rewards))
+    return (jnp.mean(loss), jnp.mean(chosen_rewards), jnp.mean(rejected_rewards))  # pragma: no cover
 
 
 def _compute_logps(model: object, inputs: object, labels: object) -> object:

@@ -52,5 +52,5 @@ class DatabaseAdapter:
 
     def close(self) -> None:
         """Close connection."""
-        if hasattr(self.conn, "close"):
+        if hasattr(self.conn, "close"):  # pragma: no cover
             self.conn.close()

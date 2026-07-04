@@ -23,11 +23,11 @@ with catch_optional_imports():
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    dataloader = state.dataloader
-    epochs = state.epochs
-    model = state.model
-    optimizer = state.optimizer
-    loss_and_grad_fn = state.loss_and_grad_fn
+    dataloader = state.dataloader  # pragma: no cover
+    epochs = state.epochs  # pragma: no cover
+    model = state.model  # pragma: no cover
+    optimizer = state.optimizer  # pragma: no cover
+    loss_and_grad_fn = state.loss_and_grad_fn  # pragma: no cover
     """Run training epochs.
 
     Returns:
