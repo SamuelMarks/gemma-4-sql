@@ -104,6 +104,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """
 
     def _run() -> tuple[float, float, float]:
+        """Execute function."""
         (model, device) = _load_mlx_model_and_device(model_name, hardware, test_mode=bool(kwargs.get("test_mode")))
         num_runs = int(str(kwargs.get("num_runs", 5)))
         return _run_benchmark_pass(model, device, batch_size, num_runs)

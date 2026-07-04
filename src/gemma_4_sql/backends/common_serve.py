@@ -56,6 +56,7 @@ def create_common_app(
 
     @app.post("/generate")
     async def generate(request: Request) -> JSONResponse:
+        """Execute function."""
         nonlocal request_queue
         if request_queue is None:  # pragma: no cover
             request_queue = asyncio.Queue()

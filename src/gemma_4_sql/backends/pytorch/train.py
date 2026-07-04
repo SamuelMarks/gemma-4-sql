@@ -49,6 +49,7 @@ def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object,
 
 
 def _run_training_epochs(state: TrainerState) -> float:
+    """Execute function."""
     dataloader = state.dataloader
     epochs = state.epochs
     model = state.policy_model
@@ -97,6 +98,7 @@ def _wrap_model_distributed(model: torch.nn.Module, distributed_strategy: str, d
 
 
 def _run_training_with_fallback(state: TrainerState) -> float:
+    """Execute function."""
     dataloader = state.dataloader
     epochs = state.epochs
     model = state.policy_model
@@ -128,6 +130,7 @@ def _cleanup_distributed(dist: object) -> None:
 
 
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
+    """Execute function."""
     action = getattr(config, "action", "sft")
     model_name = getattr(config, "model_name", "gemma-4")
     dataset = getattr(config, "dataset", "dummy")

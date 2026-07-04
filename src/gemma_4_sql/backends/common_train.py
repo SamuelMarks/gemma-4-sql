@@ -1,3 +1,5 @@
+"""Provide module docstring."""
+
 # Copyright 2024
 from __future__ import annotations
 

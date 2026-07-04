@@ -15,6 +15,7 @@ from gemma_4_sql.constants import DEFAULT_POSTTRAIN_DATASET, DEFAULT_PRETRAIN_DA
 
 
 def _add_etl_subparser(subparsers: argparse._SubParsersAction, name: str, help_text: str, default_dataset: str, cmd_func: object) -> None:
+    """Execute function."""
     parser = subparsers.add_parser(name, help=help_text)
     parser.add_argument("--dataset", default=default_dataset, help="Hugging Face dataset name.")
     parser.add_argument("--split", default="train", help="Dataset split.")
@@ -60,6 +61,7 @@ def _add_peft_quantize_parsers(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _add_training_subparser(subparsers: argparse._SubParsersAction, name: str, help_text: str, backend: str, cmd_func: object) -> None:
+    """Execute function."""
     parser = subparsers.add_parser(name, help=help_text)
     parser.add_argument("--model", default="gemma-4", help="Model name.")
     parser.add_argument("--dataset", default="dummy_dataset", help="Training dataset.")
@@ -107,6 +109,7 @@ def _add_evaluate_parsers(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _add_serve_export_parsers(subparsers: argparse._SubParsersAction) -> None:
+    """Execute function."""
     parser_serve = subparsers.add_parser("serve", help="Serve a model using continuous batching.")
     parser_serve.add_argument("--model", default="gemma-4", help="Model name.")
     parser_serve.add_argument("--port", type=int, default=8000, help="Port to bind to.")
@@ -122,6 +125,7 @@ def _add_serve_export_parsers(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _add_generate_agent_parsers(subparsers: argparse._SubParsersAction) -> None:
+    """Execute function."""
     parser_generate = subparsers.add_parser("generate", help="Generate SQL from text using a trained model.")
     parser_generate.add_argument("--model", default="gemma-4", help="Model name.")
     parser_generate.add_argument("--prompt", required=True, help="Natural language prompt.")
@@ -164,6 +168,7 @@ def _add_inference_parsers(subparsers: argparse._SubParsersAction) -> None:
 
 
 def _add_tokenize_execute_parsers(subparsers: argparse._SubParsersAction) -> None:
+    """Execute function."""
     parser_tokenize = subparsers.add_parser("tokenize", help="Encode or decode text using SQLTokenizer.")
     parser_tokenize.add_argument("--encode", type=str, help="Text to encode.")
     parser_tokenize.add_argument("--decode", type=str, help="Comma-separated tokens to decode.")

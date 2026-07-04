@@ -23,6 +23,7 @@ with catch_optional_imports():
 
 
 def _run_training_epochs(state: TrainerState) -> float:
+    """Execute function."""
     dataloader = state.dataloader  # pragma: no cover
     epochs = state.epochs  # pragma: no cover
     model = state.model  # pragma: no cover

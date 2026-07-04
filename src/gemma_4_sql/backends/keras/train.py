@@ -72,6 +72,7 @@ def _mock_keras_model() -> object:
 
 
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
+    """Execute function."""
     action = getattr(config, "action", "sft")
     model_name = getattr(config, "model_name", "gemma-4")
     dataset = getattr(config, "dataset", "dummy")

@@ -75,6 +75,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """
 
     def _run() -> tuple[float, float, float]:
+        """Execute function."""
         if not kwargs.get("test_mode"):
             try:
                 jax.distributed.initialize()

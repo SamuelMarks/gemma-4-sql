@@ -76,6 +76,7 @@ class Gemma4Attention(nnx.Module):
     """Multi-Head / Grouped-Query Attention for Gemma 4."""
 
     def _setup_heads(self, config: ModelConfig, attention_type: AttentionType) -> None:
+        """Execute function."""
         self.num_heads = config.num_attention_heads
         if getattr(attention_type, "name", str(attention_type).upper()) == "GLOBAL":
             self.num_kv_heads = config.num_global_key_value_heads if config.num_global_key_value_heads is not None else config.num_key_value_heads
@@ -87,6 +88,7 @@ class Gemma4Attention(nnx.Module):
             self.share_kv = False
 
     def _setup_rope(self, config: ModelConfig, attention_type: AttentionType) -> None:
+        """Execute function."""
         if getattr(attention_type, "name", str(attention_type).upper()) == "GLOBAL":
             rope_factor = config.global_rope_proportion
             rope_theta = config.global_rope_max_timescale if config.global_rope_max_timescale is not None else config.rope_max_timescale

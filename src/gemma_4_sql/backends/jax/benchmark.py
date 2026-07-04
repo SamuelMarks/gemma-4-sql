@@ -86,6 +86,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """
 
     def _run() -> tuple[float, float, float]:
+        """Execute function."""
         model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
         num_runs = int(str(kwargs.get("num_runs", 5)))
         return _run_benchmark_pass(model, batch_size, num_runs)

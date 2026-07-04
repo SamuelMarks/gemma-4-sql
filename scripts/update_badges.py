@@ -34,7 +34,15 @@ def get_color(pct: int) -> str:
 
 def main() -> None:
     """Docstring for main."""
-    cov_pct = 100
+    cov_stdout = io.StringIO()
+    import pytest
+
+    with redirect_stdout(cov_stdout), suppress(SystemExit):
+        pytest.main(["--cov=src/gemma_4_sql", "--cov-report=term", "src/", "tests/"])
+    cov_out_str = cov_stdout.getvalue()
+    cov_match = re.search(r"TOTAL\s+\d+\s+\d+\s+(\d+)%", cov_out_str)
+    cov_pct = int(cov_match.group(1)) if cov_match else 0
+
     doc_stdout = io.StringIO()
     with redirect_stdout(doc_stdout), suppress(SystemExit):
         interrogate_main(["-v", "src"])

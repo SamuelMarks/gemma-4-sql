@@ -28,7 +28,7 @@ jobs:
           ruff format --check .
       - name: Run tests
         run: |
-          pytest --cov=src/gemma_4_sql --cov-report=xml --cov-report=term tests/
+          pytest --cov=src/gemma_4_sql --cov-report=xml --cov-report=term src/ tests/
 
   test-gpu:
     runs-on: ubuntu-latest

@@ -34,6 +34,7 @@ def _create_app(model_name: str, *, test_mode: bool = False) -> object:
     """
 
     def _startup() -> None:
+        """Execute function."""
         try:
             jax.distributed.initialize()
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:

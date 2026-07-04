@@ -73,6 +73,7 @@ def _run_training_epochs(state: TrainerState) -> float:
     """
 
     def process_batch(batch: dict) -> float:
+        """Execute function."""
         batch["inputs"] = jax.device_put(batch["inputs"], state.params)
         batch["targets"] = jax.device_put(batch["targets"], state.params)
         loss = state.train_step(state.policy_model, state.optimizer, batch)

@@ -34,6 +34,7 @@ def create_app(model_name: str, *, test_mode: bool = False) -> object:
     """
 
     def _startup() -> None:
+        """Execute function."""
         logger.info("Exporting Keras model %s to SavedModel format for TF Serving...", model_name)
 
     return create_common_app(

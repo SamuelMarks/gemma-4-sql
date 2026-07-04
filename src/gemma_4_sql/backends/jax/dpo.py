@@ -98,6 +98,7 @@ def _get_train_step_fn(beta: float) -> object:
 
 
 def _run_training_epochs(state: TrainerState) -> float:
+    """Execute function."""
     dataloader = state.dataloader
     epochs = state.epochs
     policy_model = state.policy_model
@@ -121,6 +122,7 @@ def _run_training_epochs(state: TrainerState) -> float:
 
 
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
+    """Execute function."""
     model_name = getattr(config, "model_name", "model")
     dataset = getattr(config, "dataset", "dataset")
     beta = getattr(config, "beta", 0.1)

@@ -76,6 +76,7 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
     opt_state = state.opt_state
 
     def process_batch(batch: dict) -> float:
+        """Execute function."""
         nonlocal params, opt_state
         (params, opt_state, loss) = state.train_step(params, opt_state, batch)
         return float(loss.item())
@@ -94,6 +95,7 @@ def _initialize_jax_distributed(*, test_mode: bool = False) -> None:
 
 
 def _run_training_with_fallback(state: TrainerState) -> float:
+    """Execute function."""
     dataloader = state.dataloader
     epochs = state.epochs
     train_step = state.train_step
