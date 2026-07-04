@@ -82,7 +82,10 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     srv.gemma4 = object()
 
     class MockJSONResponse:
+        """Docstring."""
+
         def __init__(self, content: dict) -> None:
+            """Docstring."""
             self.body = str(content).encode()
 
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.JSONResponse", MockJSONResponse)
@@ -91,7 +94,10 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_app.router.routes = []
 
     def mock_post(*_args: object, **_kwargs: object) -> object:
+        """Docstring."""
+
         def decorator(func: object) -> object:
+            """Docstring."""
             route = mock.MagicMock()
             route.endpoint = func
             mock_app.router.routes.append(route)

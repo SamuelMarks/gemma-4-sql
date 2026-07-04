@@ -23,7 +23,12 @@ with catch_optional_imports():
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    """Execute function."""
+    """Execute function.
+
+    Returns:
+        object: Description of return.
+
+    """
     dataloader = state.dataloader  # pragma: no cover
     epochs = state.epochs  # pragma: no cover
     model = state.model  # pragma: no cover
@@ -56,7 +61,8 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     Args:
     ----
-        action: The training action (e.g. 'pretrain', 'sft').
+        config: The TrainingConfig.
+        kwargs: Additional arguments.
         model_name: The name of the model to train.
         dataset: The dataset to train on.
         epochs: Number of epochs to train.

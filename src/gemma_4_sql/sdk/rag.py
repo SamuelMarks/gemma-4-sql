@@ -46,7 +46,12 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
 
 
 def _score_table(table: str, columns: list[str], prompt_words: set[str]) -> int:
-    """Calculate the relevance score for a single table."""
+    """Calculate the relevance score for a single table.
+
+    Returns:
+        object: Description of return.
+
+    """
     score = 0
     if table.lower() in prompt_words:
         score += 5

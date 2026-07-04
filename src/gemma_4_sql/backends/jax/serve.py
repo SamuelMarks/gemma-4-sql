@@ -38,10 +38,20 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
     """
 
     def _app_factory() -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         def _generate(prompt: str) -> str:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return "SELECT * FROM generated WHERE prompt='{p}'".replace("{p}", prompt)
 
         return create_common_app(

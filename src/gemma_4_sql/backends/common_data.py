@@ -13,7 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 def _create_hf_data_source(base_ds: type) -> type:
-    """Execute function."""
+    """Execute function.
+
+    Returns:
+        object: Description of return.
+
+    """
 
     class HFDataSource(base_ds):
         """Data source wrapping a Hugging Face dataset."""
@@ -23,18 +28,33 @@ def _create_hf_data_source(base_ds: type) -> type:
             self._ds = hf_ds
 
         def __len__(self) -> int:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return len(self._ds)
 
         def __getitem__(self, idx: int) -> object:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return self._ds[idx]
 
     return HFDataSource
 
 
 def _create_base_format_transform(base_map: type) -> type:
-    """Execute function."""
+    """Execute function.
+
+    Returns:
+        object: Description of return.
+
+    """
 
     class BaseFormatTransform(base_map):
         """Transforms data into numpy/JAX/TF compatible formats."""
@@ -44,7 +64,12 @@ def _create_base_format_transform(base_map: type) -> type:
             self.tokenizer = tokenizer
 
         def map(self, element: JSONDict) -> JSONDict:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             prompt = element.get("sql_prompt", element.get("question", ""))
             target = element.get("sql", element.get("query", ""))
             return {"inputs": self.tokenizer.encode(str(prompt)), "targets": self.tokenizer.encode(str(target))}

@@ -73,7 +73,12 @@ def _run_training_epochs(state: TrainerState) -> float:
     """
 
     def process_batch(batch: dict) -> float:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         batch["inputs"] = jax.device_put(batch["inputs"], state.params)
         batch["targets"] = jax.device_put(batch["targets"], state.params)
         loss = state.train_step(state.policy_model, state.optimizer, batch)
@@ -87,7 +92,8 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     Args:
     ----
-        action: The training action (e.g. 'pretrain', 'sft').
+        config: The TrainingConfig.
+        kwargs: Additional arguments.
         model_name: The name of the model to train.
         dataset: The dataset to train on.
         epochs: Number of epochs to train.

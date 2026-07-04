@@ -250,8 +250,10 @@ def test_jax_etl_real(monkeypatch: pytest.MonkeyPatch) -> None:
         """Provide class docstring."""
 
         class Batch:
+            """Docstring."""
+
             def __init__(self, **kwargs: object) -> None:
-                pass
+                """Docstring."""
 
         class RandomAccessDataSource:
             """Provide class docstring."""
@@ -322,13 +324,28 @@ def test_jax_etl_duckdb_present(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test DuckDB dataset loading with jax_etl."""
 
     class MockDuckDB:
+        """Docstring."""
+
         def connect(self, *args: object, **kwargs: object) -> object:
+            """Docstring."""
+
             class MockConn:
+                """Docstring."""
+
                 def execute(self, *args: object, **kwargs: object) -> object:
+                    """Docstring."""
+
                     class MockResult:
+                        """Docstring."""
+
                         def fetchdf(self) -> object:
+                            """Docstring."""
+
                             class MockDF:
+                                """Docstring."""
+
                                 def to_dict(self, orient: str = "records") -> object:
+                                    """Docstring."""
                                     return [{"question": "q1", "query": "a1"}, {"sql_prompt": "q2", "sql": "a2"}]
 
                             return MockDF()
@@ -336,33 +353,42 @@ def test_jax_etl_duckdb_present(monkeypatch: pytest.MonkeyPatch) -> None:
                     return MockResult()
 
                 def close(self) -> None:
-                    pass
+                    """Docstring."""
 
             return MockConn()
 
     monkeypatch.setattr(jax_etl, "duckdb", MockDuckDB())
 
     class MockGrain:
+        """Docstring."""
+
         class RandomAccessDataSource:
-            pass
+            """Docstring."""
 
         class MapTransform:
-            pass
+            """Docstring."""
 
         class IndexSampler:
+            """Docstring."""
+
             def __init__(self, **kwargs: object) -> None:
-                pass
+                """Docstring."""
 
         class DataLoader:
+            """Docstring."""
+
             def __init__(self, **kwargs: object) -> None:
-                pass
+                """Docstring."""
 
         def NoSharding(self) -> str:
+            """Docstring."""
             return "no_sharding"
 
         class Batch:
+            """Docstring."""
+
             def __init__(self, **kwargs: object) -> None:
-                pass
+                """Docstring."""
 
     monkeypatch.setattr(jax_etl, "grain", MockGrain())
     monkeypatch.setattr(jax_etl, "datasets", "mock")
@@ -375,11 +401,13 @@ def test_jax_etl_grain_classes() -> None:
     """Test Grain inner classes."""
 
     class MockGrain:
+        """Docstring."""
+
         class RandomAccessDataSource:
-            pass
+            """Docstring."""
 
         class MapTransform:
-            pass
+            """Docstring."""
 
     HFDataSource, JAXFormatTransform = jax_etl._get_grain_classes(MockGrain)
 
@@ -389,7 +417,10 @@ def test_jax_etl_grain_classes() -> None:
     assert ds[1] == {"a": 2}
 
     class MockTokenizer:
+        """Docstring."""
+
         def encode(self, x: str) -> list[int]:
+            """Docstring."""
             return [len(x)]
 
     transform = JAXFormatTransform(MockTokenizer())

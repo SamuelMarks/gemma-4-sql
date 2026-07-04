@@ -93,7 +93,12 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """
 
     def _run() -> tuple[float, float, float]:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         model = _load_keras_model(model_name, test_mode=bool(kwargs.get("test_mode")))
         num_runs = int(str(kwargs.get("num_runs", 5)))
         return _run_benchmark_pass(model, batch_size, num_runs)

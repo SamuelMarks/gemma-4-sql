@@ -145,10 +145,13 @@ class MockNN:
             """
 
             class T:
+                """Docstring."""
+
                 def backward(self) -> None:
-                    pass
+                    """Docstring."""
 
                 def item(self) -> float:
+                    """Docstring."""
                     return 0.0
 
             return T()

@@ -1,6 +1,11 @@
 # Copyright 2024
 """Core functionality for the test_run_model module."""
 
+import pytest
+
+pytest.importorskip("jax")
+pytest.importorskip("flax")
+
 import jax.numpy as jnp
 from flax import nnx
 

@@ -87,7 +87,12 @@ def _get_train_step_fn(policy_model: object, ref_model: object, optimizer: objec
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    """Execute function."""
+    """Execute function.
+
+    Returns:
+        object: Description of return.
+
+    """
     dataloader = state.dataloader
     epochs = state.epochs
     train_step = state.train_step
@@ -111,7 +116,12 @@ def _run_training_epochs(state: TrainerState) -> float:
 
 
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
-    """Execute function."""
+    """Execute function.
+
+    Returns:
+        object: Description of return.
+
+    """
     model_name = getattr(config, "model_name", "model")
     dataset = getattr(config, "dataset", "dataset")
     beta = getattr(config, "beta", 0.1)

@@ -98,11 +98,17 @@ def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "random_uuid", mock_random_uuid)
 
     class MockFastAPI:
+        """Docstring."""
+
         def __init__(self, **_kwargs: object) -> None:
+            """Docstring."""
             self.router = mock.MagicMock()
 
         def post(self, *_args: object, **_kwargs: object) -> object:
+            """Docstring."""
+
             def decorator(func: object) -> object:
+                """Docstring."""
                 return func
 
             return decorator
@@ -130,11 +136,17 @@ def test_serve_model_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "AsyncLLMEngine", MockAsyncLLMEngine)
 
     class MockFastAPI:
+        """Docstring."""
+
         def __init__(self, **_kwargs: object) -> None:
+            """Docstring."""
             self.router = mock.MagicMock()
 
         def post(self, *_args: object, **_kwargs: object) -> object:
+            """Docstring."""
+
             def decorator(func: object) -> object:
+                """Docstring."""
                 return func
 
             return decorator

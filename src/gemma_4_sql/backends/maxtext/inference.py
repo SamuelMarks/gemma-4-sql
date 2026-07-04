@@ -24,7 +24,12 @@ with catch_optional_imports():
 
 
 def _beam_search_step(seq: jnp.ndarray, score: float, model_apply_fn: object, beam_width: int) -> list[tuple[jnp.ndarray, float]]:
-    """Helper to process a single sequence and expand it into multiple beams."""
+    """Helper to process a single sequence and expand it into multiple beams.
+
+    Returns:
+        object: Description of return.
+
+    """
     logits = model_apply_fn(seq)
     log_probs = jax.nn.log_softmax(logits, axis=-1)[0]
     top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]

@@ -147,7 +147,12 @@ def _load_weights_from_safetensors_file(filepath: str, state: dict[str, object],
 
 
 def _get_model_and_state(model_cls: object, cfg: object) -> tuple[object, dict]:
-    """Helper to instantiate the model and extract its state."""
+    """Helper to instantiate the model and extract its state.
+
+    Returns:
+        object: Description of return.
+
+    """
     nnx = __import__("flax", fromlist=["nnx"]).nnx
     model = model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
     state = {}

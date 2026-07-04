@@ -1,6 +1,11 @@
 # Copyright 2024
 """Core functionality for the test_sharding_gemma4 module."""
 
+import pytest
+
+pytest.importorskip("jax")
+pytest.importorskip("flax")
+
 from absl.testing import absltest
 from flax import nnx
 

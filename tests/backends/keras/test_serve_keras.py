@@ -111,7 +111,10 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_app.router.routes = []
 
     def mock_post(*_args: object, **_kwargs: object) -> object:
+        """Docstring."""
+
         def decorator(func: object) -> object:
+            """Docstring."""
             route = mock.MagicMock()
             route.endpoint = func
             mock_app.router.routes.append(route)
@@ -122,12 +125,16 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_app.post = mock_post
 
     def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
+        """Docstring."""
         if name == "fastapi":
             return type("FastAPIMod", (), {"FastAPI": lambda *_args, **_kwargs: mock_app})
         if name == "fastapi.responses":
 
             class MockJSONResponse:
+                """Docstring."""
+
                 def __init__(self, content: object) -> None:
+                    """Docstring."""
                     self.body = str(content).encode()
 
             return type("ResponsesMod", (), {"JSONResponse": MockJSONResponse})

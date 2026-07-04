@@ -56,7 +56,12 @@ def create_common_app(
 
     @app.post("/generate")
     async def generate(request: Request) -> JSONResponse:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         nonlocal request_queue
         if request_queue is None:  # pragma: no cover
             request_queue = asyncio.Queue()
@@ -81,7 +86,12 @@ def serve_model_wrapper(
     app_factory: Callable[[], object],
     test_mode: bool = False,
 ) -> JSONDict:
-    """Wrap serving logic to unify exception handling and result formatting."""
+    """Wrap serving logic to unify exception handling and result formatting.
+
+    Returns:
+        object: Description of return.
+
+    """
     if missing_deps:
         return {
             "backend": backend_name,

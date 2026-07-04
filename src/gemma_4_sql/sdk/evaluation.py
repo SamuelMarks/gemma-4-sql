@@ -69,7 +69,12 @@ def compute_metrics(engine: LiveDatabaseEngine, preds: list[str], truths: list[s
 
 
 def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
-    """Extract input and target IDs from a batch."""
+    """Extract input and target IDs from a batch.
+
+    Returns:
+        object: Description of return.
+
+    """
     if isinstance(batch, (tuple, list)) and len(batch) >= 2:
         input_ids = batch[0][0].tolist() if hasattr(batch[0][0], "tolist") else batch[0][0]
         target_ids = batch[1][0].tolist() if hasattr(batch[1][0], "tolist") else batch[1][0]

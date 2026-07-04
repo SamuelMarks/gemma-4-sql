@@ -108,7 +108,12 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
     opt_state = state.opt_state
 
     def process_batch(batch: dict) -> float:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         nonlocal policy_params, opt_state
         (policy_params, opt_state, loss) = state.train_step(policy_params, state.ref_params, opt_state, batch)
         return float(loss.item())
@@ -118,7 +123,12 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
 
 
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
-    """Execute function."""
+    """Execute function.
+
+    Returns:
+        object: Description of return.
+
+    """
     model_name = getattr(config, "model_name", "model")
     dataset = getattr(config, "dataset", "dataset")
     beta = getattr(config, "beta", 0.1)

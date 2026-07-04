@@ -91,11 +91,13 @@ def test_compute_metrics() -> None:
     engine = MagicMock()
 
     async def mock_execute(*args: object, **kwargs: object) -> tuple[bool, list, None]:
+        """Docstring."""
         return True, [(1,)], None
 
     engine.execute_with_feedback_async.side_effect = mock_execute
 
     async def mock_compare(*args: object, **kwargs: object) -> bool:
+        """Docstring."""
         return True
 
     engine.compare_queries_async.side_effect = mock_compare
@@ -108,6 +110,7 @@ def test_evaluate_mock_predictions() -> None:
     with patch("gemma_4_sql.sdk.evaluation.compute_metrics_async") as mock_compute:
 
         async def mock_compute_async(*args: object, **kwargs: object) -> dict:
+            """Docstring."""
             return {"exact_match": 1.0}
 
         mock_compute.side_effect = mock_compute_async

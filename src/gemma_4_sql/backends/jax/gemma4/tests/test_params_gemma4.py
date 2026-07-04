@@ -1,9 +1,13 @@
 # Copyright 2024
 """Core functionality for the test_params_gemma4 module."""
 
+import pytest
+
+pytest.importorskip("jax")
+pytest.importorskip("flax")
+
 import jax
 import jax.numpy as jnp
-import pytest
 
 from gemma_4_sql.backends.jax.gemma4.modeling import ModelConfig
 from gemma_4_sql.backends.jax.gemma4.params import _get_key_and_transform_mapping, create_gemma4_from_pretrained
