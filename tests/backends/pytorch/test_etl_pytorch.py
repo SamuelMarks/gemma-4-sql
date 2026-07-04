@@ -1,19 +1,27 @@
+# Copyright 2024
 """Provide module docstring."""
 
 import contextlib
 
 import pytest
 
+from gemma_4_sql.type_hints import ETLConfig
+
 "Tests for PyTorch-specific ETL pipeline."
 
 
 def test_build_dataloader_pytorch_mocked() -> None:
-    """Test PyTorch build_dataloader when libraries are missing via direct assignment."""
+    """Test PyTorch build_dataloader when libraries are missing via direct assignment.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     etl_mod = __import__("gemma_4_sql.backends.pytorch.etl", fromlist=[""])
     orig_torch = etl_mod.torch
     try:
         etl_mod.torch = None
-        res = etl_mod.build_dataloader("dummy/data", "train", 16, distributed=False)
+        res = etl_mod.build_dataloader(ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False))
         if not res["backend"] == "pytorch":
             raise AssertionError
         if not res["status"] == "mocked":
@@ -28,17 +36,32 @@ class MockConn:
     """Provide class docstring."""
 
     def execute(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self
 
     def fetchdf(self) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         class MockDF:
             """Provide class docstring."""
 
-            def to_dict(self, _orient: object) -> object:
-                """Execute function."""
+            def to_dict(self, orient: object = "records") -> object:
+                """Execute function.
+
+                Returns:
+                    object: Description of return.
+
+                """
                 return [{"a": 1}]
 
         return MockDF()
@@ -51,7 +74,12 @@ class MockDuckdb:
     """Provide class docstring."""
 
     def connect(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockConn()
 
 
@@ -62,13 +90,18 @@ class MockTokenizer:
         """Execute function."""
 
     def encode(self, _x: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [1]
 
 
 def test_duckdb_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    pt_etl = __import__("gemma_4_sql.backends.pytorch.etl")
+    pt_etl = __import__("gemma_4_sql.backends.pytorch.etl", fromlist=[""])
     monkeypatch.setattr(pt_etl, "duckdb", MockDuckdb())
     monkeypatch.setattr(pt_etl, "datasets", object())
     monkeypatch.setattr(pt_etl, "torch", object())
@@ -76,4 +109,4 @@ def test_duckdb_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_etl, "DataLoader", object)
     monkeypatch.setattr(pt_etl, "SQLTokenizer", MockTokenizer)
     with contextlib.suppress(TypeError):
-        pt_etl.build_dataloader("dataset", "split", duckdb_path="test.db", duckdb_table="tbl")
+        pt_etl.build_dataloader(ETLConfig(dataset_name="dataset", split="split", duckdb_path="test.db", duckdb_table="tbl"))

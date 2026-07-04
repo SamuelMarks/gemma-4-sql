@@ -1,3 +1,4 @@
+# Copyright 2024
 """JAX-specific model quantization logic."""
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 MIN_NDIM_FOR_QUANTIZATION = 2
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import JSONDict, TensorType
 logger = logging.getLogger(__name__)
 jax = None
 jnp = None
@@ -25,7 +26,7 @@ with catch_optional_imports():
     from .gemma4 import Gemma4Config, Gemma4ForCausalLM
 
 
-def quantize_int8(tensor: object) -> tuple[object, object]:
+def quantize_int8(tensor: TensorType) -> tuple[TensorType, TensorType]:
     """Quantize a tensor to int8.
 
     Args:
@@ -43,9 +44,14 @@ def quantize_int8(tensor: object) -> tuple[object, object]:
 
 
 def _apply_quantization_to_model(model: object, method: str) -> tuple[str, float, int]:
-    """Apply quantization to the model graph."""
+    """Apply quantization to the model graph.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     quantized_params = 0
-    if method in ["int8", "awq"]:
+    if method in {"int8", "awq"}:
         for _path, param in nnx.graph.iter_graph(model):
             if isinstance(param, nnx.Param) and hasattr(param.value, "ndim") and (param.value.ndim >= MIN_NDIM_FOR_QUANTIZATION):
                 (_q_tensor, _scale) = quantize_int8(param.value)

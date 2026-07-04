@@ -1,10 +1,11 @@
+# Copyright 2024
 """Provide module docstring."""
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
-from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM, modeling
+from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM, init_cache, modeling
 
 orig_jit = jax.jit
 jax.jit = lambda f, *_args, **_kwargs: f
@@ -15,7 +16,7 @@ def test_modeling_coverage() -> None:
     config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=16, num_experts=1, num_experts_per_tok=1)
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(config, rngs=rngs)
-    cache = modeling.init_cache(config, 1, 10)
+    cache = init_cache(config, 1, 10)
     input_ids = jnp.array([[1, 2]])
     positions = jnp.array([[0, 1]])
     model(input_ids, positions, cache=cache)
@@ -40,10 +41,10 @@ def test_modeling_coverage() -> None:
     model_a(input_ids, positions, input_features=input_features, input_features_mask=None, audio_token_mask=audio_token_mask)
     config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, final_logit_softcapping=1.0)
     model_s = Gemma4ForCausalLM(config, rngs=rngs)
-    cache = modeling.init_cache(config, 1, 10)
+    cache = init_cache(config, 1, 10)
     modeling.forward(model_s, cache, input_ids, positions)
     config_g = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=7, num_attention_heads=4, num_key_value_heads=2, head_dim=16, num_global_key_value_heads=1, global_head_dim=32)
-    modeling.init_cache(config_g, 1, 10)
+    init_cache(config_g, 1, 10)
     config_s = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=7, num_attention_heads=4, num_key_value_heads=2, head_dim=16, share_kv_projections=True)
     Gemma4ForCausalLM(config_s, rngs=rngs)
     jax.jit = orig_jit
@@ -67,3 +68,31 @@ def test_mlp_attention_sharding() -> None:
     gemma4_mlp_cls(hidden_size=64, intermediate_size=128, dtype=jnp.float32, shd=None, rngs=rngs)
     config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16)
     gemma4_attention_cls(config, "local", rngs=rngs)
+
+
+def test_download_and_load_pretrained_error() -> None:
+    """Execute function."""
+    import pytest
+
+    from gemma_4_sql.backends.jax.gemma4.modeling import _download_and_load_pretrained
+
+    with pytest.raises(ValueError, match="is unknown, please provide config argument"):
+        _download_and_load_pretrained("unknown_model_name")
+
+
+def test_from_pretrained() -> None:
+    """Execute function."""
+    from unittest.mock import patch
+
+    from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
+
+    config = Gemma4Config(vocab_size=10, hidden_size=16, intermediate_size=32, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=8)
+
+    with patch("gemma_4_sql.backends.jax.gemma4.modeling._download_and_load_pretrained") as mock_dl:
+        Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B", config)
+        mock_dl.assert_called_once_with("google/gemma-4-E2B", config)
+
+    with patch("huggingface_hub.snapshot_download") as mock_snap, patch("gemma_4_sql.backends.jax.gemma4.params.create_gemma4_from_pretrained") as mock_create:
+        Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B", None)
+        mock_snap.assert_called_once()
+        mock_create.assert_called_once()

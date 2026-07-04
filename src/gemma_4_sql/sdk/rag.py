@@ -1,8 +1,10 @@
+# Copyright 2024
 """RAG-based schema contextualization module."""
 
 from __future__ import annotations
 
 import logging
+import operator
 import re
 
 MIN_SIMILARITY = 0.1
@@ -43,19 +45,29 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
     return schema
 
 
+def _score_table(table: str, columns: list[str], prompt_words: set[str]) -> int:
+    """Calculate the relevance score for a single table."""
+    score = 0
+    if table.lower() in prompt_words:
+        score += 5
+    for col in columns:
+        if col.lower() in prompt_words:
+            score += 1
+    return score
+
+
 def _keyword_search(prompt: str, schema: dict[str, list[str]], top_k_tables: int) -> list[str]:
-    """Fallback keyword search."""
+    """Fallback keyword search.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     prompt_words = set(re.findall("\\b\\w+\\b", prompt.lower()))
     table_scores = {}
     for table, columns in schema.items():
-        score = 0
-        if table.lower() in prompt_words:
-            score += 5
-        for col in columns:
-            if col.lower() in prompt_words:
-                score += 1
-        table_scores[table] = score
-    sorted_tables = sorted(table_scores.items(), key=lambda item: item[1], reverse=True)
+        table_scores[table] = _score_table(table, columns, prompt_words)
+    sorted_tables = sorted(table_scores.items(), key=operator.itemgetter(1), reverse=True)
     relevant_tables = [t[0] for t in sorted_tables[:top_k_tables] if t[1] > 0]
     if not relevant_tables:
         relevant_tables = list(schema.keys())[:top_k_tables]
@@ -63,7 +75,12 @@ def _keyword_search(prompt: str, schema: dict[str, list[str]], top_k_tables: int
 
 
 def _semantic_search(prompt: str, schema: dict[str, list[str]], table_names: list[str], top_k_tables: int) -> list[str]:
-    """Execute semantic vector embedding retrieval."""
+    """Execute semantic vector embedding retrieval.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     try:
         model = SentenceTransformer("all-MiniLM-L6-v2")
         table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]

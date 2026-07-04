@@ -1,3 +1,4 @@
+# Copyright 2024
 """Training CLI commands."""
 
 from __future__ import annotations

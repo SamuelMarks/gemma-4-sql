@@ -1,3 +1,4 @@
+# Copyright 2024
 """SDK Inference module."""
 
 from __future__ import annotations
@@ -27,6 +28,5 @@ def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     result = get_backend(backend).generate_sql(model_name, prompt, beam_width, max_length)
-    if kwargs.get("show_confidence") and "confidence_score" in result:
-        pass
+    kwargs.get("show_confidence") and "confidence_score" in result
     return result

@@ -1,9 +1,11 @@
+# Copyright 2024
 """Tests for PyTorch training pipeline."""
 
 import pytest
 
 import gemma_4_sql.backends.pytorch.train as tr
 from gemma_4_sql.backends.pytorch.train import train_model
+from gemma_4_sql.type_hints import TrainingConfig
 
 
 class MockTensor:
@@ -15,7 +17,6 @@ class MockTensor:
         Args:
         ----
         shape: Description of shape.
-        dtype: Description of dtype.
         device: Description of device.
 
         """
@@ -25,9 +26,8 @@ class MockTensor:
     def to(self, _device: object) -> object:
         """Initialize function to.
 
-        Args:
-        ----
-        device: Description of device.
+        Returns:
+            object: Description of return.
 
         """
         return self
@@ -39,6 +39,10 @@ class MockTensor:
         ----
         args: Description of args.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return self
 
@@ -49,6 +53,10 @@ class MockTensor:
         ----
         args: Description of args.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return 1
 
@@ -56,7 +64,12 @@ class MockTensor:
         """Initialize function backward."""
 
     def item(self) -> object:
-        """Initialize function item."""
+        """Initialize function item.
+
+        Returns:
+            object: Description of return.
+
+        """
         return 0.1
 
 
@@ -65,7 +78,12 @@ class MockCuda:
 
     @staticmethod
     def is_available() -> object:
-        """Initialize function is_available."""
+        """Initialize function is_available.
+
+        Returns:
+            object: Description of return.
+
+        """
         return False
 
 
@@ -86,6 +104,10 @@ class MockTorch:
         dtype: Description of dtype.
         device: Description of device.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return MockTensor(shape, dtype, device)
 
@@ -97,16 +119,50 @@ class MockTorch:
         ----
         name: Description of name.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return name
 
 
 class MockNN:
+    """Mock NN."""
+
+    class CrossEntropyLoss:
+        """Mock Loss."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            """Init."""
+
+        def __call__(self, *args, **kwargs):
+            """Call.
+
+            Returns:
+                object: Description of return.
+
+            """
+
+            class T:
+                def backward(self) -> None:
+                    pass
+
+                def item(self) -> float:
+                    return 0.0
+
+            return T()
+
     """Initialize class MockNN."""
 
     @staticmethod
     def crossentropyloss() -> object:
-        """Initialize function crossentropyloss."""
+        """Initialize function crossentropyloss.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         def loss_fn(*_args: object, **_kwargs: object) -> object:
             """Initialize function loss_fn.
@@ -116,6 +172,10 @@ class MockNN:
             args: Description of args.
             kwargs: Description of kwargs.
 
+
+            Returns:
+                object: Description of return.
+
             """
             return MockTensor((1,))
 
@@ -123,6 +183,20 @@ class MockNN:
 
 
 class MockOptim:
+    """Mock Optim."""
+
+    class AdamW:
+        """Mock Adam."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            """Init."""
+
+        def step(self) -> None:
+            """Step."""
+
+        def zero_grad(self) -> None:
+            """Zero grad."""
+
     """Initialize class MockOptim."""
 
     @staticmethod
@@ -133,6 +207,10 @@ class MockOptim:
         ----
         args: Description of args.
         kwargs: Description of kwargs.
+
+
+        Returns:
+            object: Description of return.
 
         """
 
@@ -160,6 +238,10 @@ class MockGemma4ForCausalLM:
         args: Description of args.
         kwargs: Description of kwargs.
 
+
+        Returns:
+            object: Description of return.
+
         """
 
         class MockModel:
@@ -173,15 +255,18 @@ class MockGemma4ForCausalLM:
                 args: Description of args.
                 kwargs: Description of kwargs.
 
+
+                Returns:
+                    object: Description of return.
+
                 """
                 return MockTensor((1,))
 
             def to(self, _device: object) -> object:
                 """Initialize function to.
 
-                Args:
-                ----
-                device: Description of device.
+                Returns:
+                    object: Description of return.
 
                 """
                 return self
@@ -190,7 +275,12 @@ class MockGemma4ForCausalLM:
                 """Initialize function train."""
 
             def parameters(self) -> object:
-                """Initialize function parameters."""
+                """Initialize function parameters.
+
+                Returns:
+                    object: Description of return.
+
+                """
                 return []
 
         return MockModel()
@@ -218,6 +308,10 @@ def _mock_torch_env(monkeypatch: object) -> object:
         args: Description of args.
         kwargs: Description of kwargs.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return {"loader": [{"inputs": MockTensor((1,)), "targets": MockTensor((1,))}]}
 
@@ -228,21 +322,25 @@ def _mock_torch_env(monkeypatch: object) -> object:
 def test_train_model_pytorch_real() -> object:
     """Initialize function test_train_model_pytorch_real.
 
-    Args:
-    ----
-    mock_torch_env: Description of mock_torch_env.
+    Raises:
+        AssertionError: Description.
 
     """
-    res = train_model("sft", "mod", "dat", 2, 0.1)
+    res = train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
     if not res["backend"] == "pytorch":
         raise AssertionError
 
 
 def test_train_model_pytorch_missing() -> object:
-    """Initialize function test_train_model_pytorch_missing."""
+    """Initialize function test_train_model_pytorch_missing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     orig_torch = tr.torch
     tr.torch = None
-    res = train_model("sft", "mod", "dat", 2, 0.1)
+    res = train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
     if not res["status"] == "mocked_missing_torch":
         raise AssertionError
     tr.torch = orig_torch
@@ -254,7 +352,6 @@ def test_train_model_pytorch_error(monkeypatch: object) -> object:
 
     Args:
     ----
-    mock_torch_env: Description of mock_torch_env.
     monkeypatch: Description of monkeypatch.
 
     """
@@ -267,12 +364,16 @@ def test_train_model_pytorch_error(monkeypatch: object) -> object:
         args: Description of args.
         kwargs: Description of kwargs.
 
+
+        Raises:
+            ValueError: Description.
+
         """
         msg = "err"
         raise ValueError(msg)
 
     monkeypatch.setattr(tr, "build_dataloader", Exception)
-    train_model("sft", "mod", "dat", 2, 0.1)
+    train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
 
 
 @pytest.mark.usefixtures("_mock_torch_env")
@@ -281,7 +382,6 @@ def test_train_model_pytorch_no_loader_fallback(monkeypatch: object) -> object:
 
     Args:
     ----
-    mock_torch_env: Description of mock_torch_env.
     monkeypatch: Description of monkeypatch.
 
     """
@@ -294,37 +394,66 @@ def test_train_model_pytorch_no_loader_fallback(monkeypatch: object) -> object:
         args: Description of args.
         kwargs: Description of kwargs.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return {"loader": None}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    train_model("sft", "mod", "dat", 2, 0.1)
+    train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
 
 
 class MockModelObj:
     """Provide class docstring."""
 
     def to(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self
 
     def parameters(self) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [1]
 
     def train(self) -> None:
         """Execute function."""
 
     def __call__(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return type("Out", (), {"view": lambda _self, *_a: _self, "size": lambda _self, *_a: 1, "logits": type("L", (), {"view": lambda _self, *_a: _self, "size": lambda _self, *_a: 1})()})()
 
     def view(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self
 
     def size(self, *_args: object, **_kwargs: object) -> int:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return 1
 
 
@@ -333,22 +462,25 @@ class MockModel:
 
     @classmethod
     def from_pretrained(cls, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockModelObj()
 
 
 def test_train_model_real(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    m_train = __import__("gemma_4_sql.backends.pytorch.train")
+    m_train = __import__("gemma_4_sql.backends.pytorch.train", fromlist=[""])
     monkeypatch.setattr(m_train, "torch", MockTorch)
     monkeypatch.setattr(m_train, "optim", MockOptim)
     monkeypatch.setattr(m_train, "nn", MockNN)
     monkeypatch.setattr(m_train, "Gemma4ForCausalLM", MockModel)
     monkeypatch.setattr(m_train, "build_dataloader", lambda *_args, **_kwargs: {})
-    res = m_train.train_model("sft", "m", "ds", 1, 0.1)
-    if res["status"] != "completed":
-        raise AssertionError
+    res = m_train.train_model(TrainingConfig(action="sft", model_name="m", dataset="ds", epochs=1, learning_rate=0.1))
+    assert res["status"] == "completed"
     monkeypatch.setattr(m_train, "build_dataloader", lambda *_args, **_kwargs: {"loader": [{"inputs": MockModelObj(), "targets": MockModelObj()}]})
-    res = m_train.train_model("sft", "m", "ds", 1, 0.1)
-    if res["status"] != "completed":
-        raise AssertionError
+    res = m_train.train_model(TrainingConfig(action="sft", model_name="m", dataset="ds", epochs=1, learning_rate=0.1))
+    assert res["status"] == "completed"

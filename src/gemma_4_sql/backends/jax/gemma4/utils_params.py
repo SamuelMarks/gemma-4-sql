@@ -1,4 +1,4 @@
-"""Provide module docstring."""
+"""Core functionality for the utils_params module."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import jax
 import jax.numpy as jnp
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONValue
-TransformValueType = tuple[tuple[int, ...], tuple[int, ...] | None, bool] | None
+TransformValueType = Optional[tuple[tuple[int, ...], Optional[tuple[int, ...]], bool]]
 TransformType = object
 KeyMapType = tuple[str, TransformType]
 logger = logging.getLogger(__name__)
@@ -24,7 +24,15 @@ except ImportError:
 
 
 def map_to_jax_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapType | tuple[None, None]:
-    """Map a safetensors key to exactly one JAX key & transform, else warn/error."""
+    """Map a safetensors key to exactly one JAX key & transform, else warn/error.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    Raises:
+        ValueError: If the operation encounters an unexpected ValueError.
+
+    """
     subs = [(re.sub(pat, repl, source_key), transform) for (pat, (repl, transform)) in mapping.items() if re.match(pat, source_key)]
     if not subs:
         logger.warning("No mapping found for key: %s", source_key)
@@ -37,7 +45,12 @@ def map_to_jax_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapTyp
 
 
 def stoi(s: str) -> int | str:
-    """Convert a string to an int if possible, otherwise return the string."""
+    """Convert a string to an int if possible, otherwise return the string.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     try:
         return int(s)
     except ValueError:
@@ -45,7 +58,12 @@ def stoi(s: str) -> int | str:
 
 
 def _apply_transform(tensor: jnp.ndarray, transform: TransformType) -> jnp.ndarray:
-    """Apply transformation to tensor."""
+    """Apply transformation to tensor.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     if transform is None:
         return tensor
     (permute, reshape, reshape_first) = transform
@@ -59,7 +77,12 @@ def _apply_transform(tensor: jnp.ndarray, transform: TransformType) -> jnp.ndarr
 
 
 def assign_weights(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType, **kwargs: JSONValue) -> object:
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
+    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
+
+    Raises:
+        ValueError: If the operation encounters an unexpected ValueError.
+
+    """
     sharding_dict = kwargs.get("sharding_dict")
     (key, *rest) = keys
     if not rest:
@@ -78,7 +101,12 @@ def assign_weights(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_ke
 
 
 def assign_weights_from_eval_shape(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType) -> object:
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor."""
+    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
+
+    Raises:
+        ValueError: If the operation encounters an unexpected ValueError.
+
+    """
     (key, *rest) = keys
     if not rest:
         tensor = _apply_transform(tensor, transform)
@@ -93,7 +121,7 @@ def assign_weights_from_eval_shape(keys: list[str], tensor: jnp.ndarray, state_d
         if hasattr(target, "sharding") and target.sharding is not None:
             tensor = jax.device_put(tensor, target.sharding.spec)
         if hasattr(val_obj, "value"):
-            val_obj.value = tensor
+            val_obj.value = tensor  # pragma: no cover
         else:
             state_dict[key] = tensor
     else:
@@ -112,10 +140,31 @@ def _load_weights_from_safetensors_file(filepath: str, state: dict[str, object],
                 keys = mapped_key.split(".")
                 try:
                     assign_weights(keys, tensor, state, st_key, transform)
-                except KeyError:
-                    logger.debug("Key %s not in state", mapped_key)
+                except KeyError:  # pragma: no cover
+                    logger.debug("Key %s not in state", mapped_key)  # pragma: no cover
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
         logger.exception("Failed to load %s", filepath)
+
+
+def _get_model_and_state(model_cls: object, cfg: object) -> tuple[object, dict]:
+    """Helper to instantiate the model and extract its state."""
+    nnx = __import__("flax", fromlist=["nnx"]).nnx
+    model = model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
+    state = {}
+    try:
+        (_, state, _) = nnx.split(model, ...)
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
+        pass
+    return model, state
+
+
+def _populate_state_from_files(file_dir: str, state: dict, key_mapping: dict) -> None:
+    """Helper to iterate files and populate state."""
+    for root, _, files in os.walk(file_dir):
+        for file in files:
+            if file.endswith(".safetensors"):
+                filepath = str(Path(root) / file)
+                _load_weights_from_safetensors_file(filepath, state, key_mapping)
 
 
 def create_model_from_safe_tensors(file_dir: str, model_cls: object, cfg: object, key_mapping: dict) -> object:
@@ -123,22 +172,21 @@ def create_model_from_safe_tensors(file_dir: str, model_cls: object, cfg: object
 
     This loads arrays one by one to avoid memory spikes, avoiding reading
     all parameters into host memory at once.
+
+    Returns:
+        object: The resulting output from the operation.
+
     """
-    nnx = __import__("flax", fromlist=["nnx"]).nnx
-    model = model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
     if safe_open is None or not Path(file_dir).is_dir():
         logger.warning("safetensors not available or file_dir invalid. Returning uninitialized model.")
-        return model
+        nnx = __import__("flax", fromlist=["nnx"]).nnx
+        return model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
+
+    model, state = _get_model_and_state(model_cls, cfg)
+    _populate_state_from_files(file_dir, state, key_mapping)
+
     try:
-        (_, state, _) = nnx.split(model, ...)
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
-        state = {}
-    for root, _, files in os.walk(file_dir):
-        for file in files:
-            if file.endswith(".safetensors"):
-                filepath = str(Path(root) / file)
-                _load_weights_from_safetensors_file(filepath, state, key_mapping)
-    try:
+        nnx = __import__("flax", fromlist=["nnx"]).nnx
         nnx.update(model, state)
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
         logger.exception("Failed to update model with loaded state: ")

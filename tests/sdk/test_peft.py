@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for PEFT SDK module."""
 
 import pytest
@@ -6,7 +7,12 @@ from gemma_4_sql.sdk.peft import apply_peft
 
 
 def test_apply_peft_jax() -> object:
-    """Initialize function test_apply_peft_jax."""
+    """Initialize function test_apply_peft_jax.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = apply_peft(model_name="test-model", backend="jax")
     if not res["backend"] == "jax":
         raise AssertionError
@@ -26,21 +32,36 @@ def test_apply_peft_jax() -> object:
 
 
 def test_apply_peft_keras() -> object:
-    """Initialize function test_apply_peft_keras."""
+    """Initialize function test_apply_peft_keras.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = apply_peft(model_name="test-model", backend="keras")
     if not res["backend"] == "keras":
         raise AssertionError
 
 
 def test_apply_peft_maxtext() -> object:
-    """Initialize function test_apply_peft_maxtext."""
+    """Initialize function test_apply_peft_maxtext.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = apply_peft(model_name="test-model", backend="maxtext")
     if not res["backend"] == "maxtext":
         raise AssertionError
 
 
 def test_apply_peft_pytorch() -> object:
-    """Initialize function test_apply_peft_pytorch."""
+    """Initialize function test_apply_peft_pytorch.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = apply_peft(model_name="test-model", backend="pytorch")
     if not res["backend"] == "pytorch":
         raise AssertionError
@@ -53,7 +74,12 @@ def test_apply_peft_unknown_backend() -> object:
 
 
 def test_apply_peft_custom_params() -> object:
-    """Initialize function test_apply_peft_custom_params."""
+    """Initialize function test_apply_peft_custom_params.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = apply_peft(model_name="test-model", target_modules=["all"], lora_r=16, lora_alpha=32, lora_dropout=0.1, backend="jax")
     if not res["target_modules"] == ["all"]:
         raise AssertionError

@@ -65,22 +65,17 @@ gemma-4-sql etl pretrain --duckdb-path my_dataset.duckdb --duckdb-table pretrain
 ### SDK
 
 ```python
+from gemma_4_sql.type_hints import ETLConfig
 from gemma_4_sql.sdk.etl import etl_pretrain, etl_sft
 
 # Prepare pretraining dataloader for JAX
-pretrain_data = etl_pretrain(
-    dataset_name="seeklhy/SynSQL-2.5M", 
-    batch_size=64, 
-    backend="jax"
-)
+config = ETLConfig(dataset_name="seeklhy/SynSQL-2.5M", split="train", batch_size=64)
+pretrain_data = etl_pretrain(config=config, backend="jax")
 jax_loader = pretrain_data["loader"]
 
 # Prepare SFT dataloader for Keras
-sft_data = etl_sft(
-    dataset_name="gretelai/synthetic_text_to_sql", 
-    batch_size=16, 
-    backend="keras"
-)
+config = ETLConfig(dataset_name="gretelai/synthetic_text_to_sql", split="train", batch_size=16)
+sft_data = etl_sft(config=config, backend="keras")
 keras_loader = sft_data["loader"]
 ```
 
@@ -133,10 +128,10 @@ You can export trained models to various checkpoint formats like `safetensors`, 
 
 ```bash
 # Export using PyTorch to safetensors
-gemma-4-sql export --model gemma-4 --export-path ./exported/gemma-4-pt --backend pytorch
+gemma-4-sql export --model gemma-4 --path ./exported/gemma-4-pt --backend pytorch
 
 # Export using JAX to orbax
-gemma-4-sql export --model gemma-4 --export-path ./exported/gemma-4-jax --backend jax
+gemma-4-sql export --model gemma-4 --path ./exported/gemma-4-jax --backend jax
 ```
 
 ### SDK
@@ -145,11 +140,7 @@ gemma-4-sql export --model gemma-4 --export-path ./exported/gemma-4-jax --backen
 from gemma_4_sql.sdk.export import export_model
 
 # Export using Keras
-result = export_model(
-    model_name="gemma-4",
-    export_path="./exported/gemma-4-keras",
-    backend="keras"
-)
+result = export_model(model_name="gemma-4", export_path="./exported/gemma-4-keras", backend="keras")
 print(f"Exported to: {result['path']}")
 ```
 
@@ -176,12 +167,7 @@ from gemma_4_sql.sdk.peft import apply_peft
 from gemma_4_sql.sdk.quantize import quantize_model
 
 # Apply PEFT
-peft_config = apply_peft(
-    model_name="gemma-4",
-    target_modules=["q_proj", "v_proj"],
-    lora_r=16,
-    backend="jax"
-)
+peft_config = apply_peft(model_name="gemma-4", target_modules=["q_proj", "v_proj"], lora_r=16, backend="jax")
 
 # Quantize
 quantized = quantize_model(model_name="gemma-4", method="int8", backend="pytorch")
@@ -210,11 +196,7 @@ gemma-4-sql generate \
 from gemma_4_sql.sdk.inference import generate
 
 # Generate SQL from a prompt
-result = generate(
-    model_name="gemma-4",
-    prompt="List all users who signed up today.",
-    backend="pytorch"
-)
+result = generate(model_name="gemma-4", prompt="List all users who signed up today.", backend="pytorch")
 print("Generated SQL:", result["sql"])
 ```
 
@@ -248,20 +230,11 @@ from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.evaluation import evaluate
 
 # Instantiate the live engine
-engine = LiveDatabaseEngine(
-    db_type="sqlite", 
-    db_path=":memory:", 
-    ddl="CREATE TABLE t (id INT);"
-)
+engine = LiveDatabaseEngine(db_type="sqlite", db_path=":memory:", ddl="CREATE TABLE t (id INT);")
 engine.execute_query("INSERT INTO t VALUES (1);")
 
 # Run evaluation on an entire dataset
-metrics = evaluate(
-    model_name="gemma-4",
-    dataset_name="test-data",
-    db_type="duckdb",
-    backend="jax"
-)
+metrics = evaluate(model_name="gemma-4", dataset_name="test-data", db_type="duckdb", backend="jax")
 ```
 
 ---
@@ -285,18 +258,9 @@ gemma-4-sql agent --model gemma-4 \
 ```python
 from gemma_4_sql.sdk.agent import run_agentic_loop, AgentContext
 
-context = AgentContext(
-    db_type="sqlite",
-    db_path=":memory:",
-    max_retries=3
-)
+context = AgentContext(db_type="sqlite", db_path=":memory:", max_retries=3)
 
-result = run_agentic_loop(
-    model_name="gemma-4",
-    prompt="Show the total sales for 2024",
-    backend="jax",
-    context=context
-)
+result = run_agentic_loop(model_name="gemma-4", prompt="Show the total sales for 2024", backend="jax", context=context)
 ```
 
 ---
@@ -367,12 +331,7 @@ gemma-4-sql benchmark --model gemma-4 --hardware tpu --batch-size 128 --backend 
 ```python
 from gemma_4_sql.sdk.benchmark import benchmark
 
-metrics = benchmark(
-    model_name="gemma-4",
-    hardware="tpu",
-    batch_size=128,
-    backend="maxtext"
-)
+metrics = benchmark(model_name="gemma-4", hardware="tpu", batch_size=128, backend="maxtext")
 print(f"Tokens/sec: {metrics['tokens_per_sec']}")
 ```
 
@@ -417,12 +376,7 @@ gemma-4-sql log --step 200 --metrics "loss=0.3,acc=0.95" --log-dir "./runs/exper
 from gemma_4_sql.sdk.logging import log_metrics
 
 # Log metrics directly to TensorBoard via the Keras backend
-result = log_metrics(
-    metrics={"loss": 0.5, "execution_accuracy": 0.88},
-    step=100,
-    log_dir="./runs/experiment_1",
-    backend="keras"
-)
+result = log_metrics(metrics={"loss": 0.5, "execution_accuracy": 0.88}, step=100, log_dir="./runs/experiment_1", backend="keras")
 print(f"Status: {result['status']}")
 ```
 

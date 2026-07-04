@@ -1,3 +1,4 @@
+# Copyright 2024
 """SDK Chat module for Multi-Turn Conversational SQL."""
 
 from __future__ import annotations
@@ -36,11 +37,10 @@ def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, b
         result = backend_impl.generate_sql(model_name, full_prompt, **kwargs)
         response = str(result.get("sql", "SELECT * FROM fallback"))
         status = f"success_{backend}_chat"
-    except Exception as e:
+    except (RuntimeError, ValueError, KeyError) as e:
         logger.exception("%s chat error", backend.capitalize())
         status = f"failed: {e!s}"
         response = "SELECT * FROM fallback_chat"
     updated_history = list(history)
-    updated_history.append({"role": "user", "content": new_prompt})
-    updated_history.append({"role": "assistant", "content": response})
+    updated_history.extend(({"role": "user", "content": new_prompt}, {"role": "assistant", "content": response}))
     return {"backend": backend, "model": model_name, "response": response, "history": updated_history, "status": status}

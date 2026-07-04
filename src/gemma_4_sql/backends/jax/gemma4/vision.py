@@ -1,4 +1,5 @@
-"""Provide module docstring."""
+# Copyright 2024
+"""Core functionality for the vision module."""
 
 from __future__ import annotations
 
@@ -31,7 +32,12 @@ class SiglipVisionEmbeddings(nnx.Module):
         self.position_ids = jnp.expand_dims(jnp.arange(self.num_patches), 0)
 
     def __call__(self, pixel_values: Array) -> Array:
-        """Apply patch and position embeddings to pixel values."""
+        """Apply patch and position embeddings to pixel values.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         patch_embeds = self.patch_embedding(pixel_values)
         (b, h, w, c) = patch_embeds.shape
         embeddings = patch_embeds.reshape((b, h * w, c))
@@ -55,7 +61,12 @@ class SiglipAttention(nnx.Module):
         self.proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
 
     def __call__(self, x: Array) -> Array:
-        """Apply multi-head attention."""
+        """Apply multi-head attention.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         (b, t, _) = x.shape
         q = self.q_proj(x).reshape((b, t, self.num_heads, self.head_dim))
         k = self.k_proj(x).reshape((b, t, self.num_heads, self.head_dim))
@@ -84,7 +95,12 @@ class SiglipMLP(nnx.Module):
         self.fc2 = _make_linear(config.intermediate_size, config.hidden_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
 
     def __call__(self, x: Array) -> Array:
-        """Apply the MLP with tanh-approximate GELU activation."""
+        """Apply the MLP with tanh-approximate GELU activation.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         x = self.fc1(x)
         x = jax.nn.gelu(x, approximate=True)
         return self.fc2(x)
@@ -106,10 +122,15 @@ class SiglipEncoderLayer(nnx.Module):
         self.mlp = SiglipMLP(config, rngs=rngs)
 
     def __call__(self, x: Array) -> Array:
-        """Process the encoder layer."""
+        """Process the encoder layer.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         hidden = self.layer_norm1(x)
         hidden = self.self_attn(hidden)
-        x = x + hidden
+        x += hidden
         hidden = self.layer_norm2(x)
         hidden = self.mlp(hidden)
         return x + hidden
@@ -118,13 +139,24 @@ class SiglipEncoderLayer(nnx.Module):
 class Gemma4MultimodalEmbedder(nnx.Module):
     """Embeds multimodal soft tokens (e.g., from audio) into language model space."""
 
-    def __init__(self, multimodal_hidden_size: int, text_hidden_size: int, eps: float, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
-        self.embedding_projection = nnx.Linear(multimodal_hidden_size, text_hidden_size, use_bias=False, rngs=rngs)
+        if config.audio_config:
+            multimodal_hidden_size = getattr(config.audio_config, "output_proj_dims", config.audio_config.hidden_size)
+            eps = config.audio_config.rms_norm_eps
+        else:
+            multimodal_hidden_size = config.hidden_size
+            eps = 1e-6
+        self.embedding_projection = nnx.Linear(multimodal_hidden_size, config.hidden_size, use_bias=False, rngs=rngs)
         self.embedding_pre_projection_norm = Gemma4RMSNorm(multimodal_hidden_size, eps=eps, with_scale=False, rngs=rngs)
 
     def __call__(self, inputs_embeds: jax.Array) -> jax.Array:
-        """Embeds multimodal inputs."""
+        """Embeds multimodal inputs.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         embs_normed = self.embedding_pre_projection_norm(inputs_embeds)
         return self.embedding_projection(embs_normed)
 
@@ -145,14 +177,19 @@ class SiglipVisionTransformer(nnx.Module):
         self.post_layernorm = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, _shd=shd, rngs=rngs)
 
     def __call__(self, pixel_values: Array) -> Array:
-        """Apply the vision transformer to pixel values."""
+        """Apply the vision transformer to pixel values.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         x = self.embeddings(pixel_values)
         for layer in self.layers:
             x = layer(x)
         return self.post_layernorm(x)
 
 
-def _avg_pool_vision_outputs(x: Array, kernel_size: int, num_output_tokens: int, patches_per_img: int, tokens_per_side: int) -> Array:
+def _avg_pool_vision_outputs(x: Array, kernel_size: int, config: VisionConfig, num_output_tokens: int) -> Array:
     """Pools patch tokens into a fixed grid using position-based averaging.
 
     Each patch is assigned to a kernel bin via floor(position / kernel_size).
@@ -163,15 +200,16 @@ def _avg_pool_vision_outputs(x: Array, kernel_size: int, num_output_tokens: int,
     ----
         x: Patch embeddings (B, num_patches, hidden_size).
         kernel_size: Pooling kernel size.
+        config: The vision configuration.
         num_output_tokens: Total output tokens per image.
-        patches_per_img: Number of patches along one spatial dimension.
-        tokens_per_side: Number of output tokens along one spatial dimension.
 
     Returns:
     -------
         Pooled embeddings (B, num_output_tokens, hidden_size).
 
     """
+    patches_per_img = config.image_size // config.patch_size
+    tokens_per_side = int(num_output_tokens**0.5)
     (_b, num_patches, _hidden) = x.shape
     k_sq = kernel_size * kernel_size
     positions = jnp.arange(num_patches)
@@ -199,18 +237,17 @@ class Gemma4MultiModalProjector(nnx.Module):
 
     """
 
-    def __init__(self, text_config: ModelConfig, vision_config: VisionConfig, mm_tokens_per_image: int, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
-        _ = mm_tokens_per_image
-        self.text_config = text_config
-        self.vision_config = vision_config
-        (vhs, ths) = (vision_config.hidden_size, text_config.hidden_size)
-        self.patches_per_img = vision_config.image_size // vision_config.patch_size
-        self.tokens_per_side = int(mm_tokens_per_image**0.5)
+        self.text_config = config
+        self.vision_config = config.vision_config
+        (vhs, ths) = (config.vision_config.hidden_size, config.hidden_size)
+        self.patches_per_img = config.vision_config.image_size // config.vision_config.patch_size
+        self.tokens_per_side = int(config.mm_tokens_per_image**0.5)
         self.kernel_size = self.patches_per_img // self.tokens_per_side
         self.num_output_tokens = self.tokens_per_side * self.tokens_per_side
         self.mm_input_projection_weight = nnx.Param(jnp.zeros((vhs, ths)), rngs=rngs)
-        self.mm_soft_emb_norm = Gemma4RMSNorm(vhs, eps=vision_config.layer_norm_eps, dtype=text_config.dtype, rngs=rngs)
+        self.mm_soft_emb_norm = Gemma4RMSNorm(vhs, eps=config.vision_config.layer_norm_eps, dtype=config.dtype, rngs=rngs)
 
     def __call__(self, vision_outputs: Array) -> Array:
         """Projects and pools the vision outputs.
@@ -224,8 +261,8 @@ class Gemma4MultiModalProjector(nnx.Module):
             Projected image tokens (B, num_output_tokens, text_hidden_size).
 
         """
-        pooled = _avg_pool_vision_outputs(vision_outputs, self.kernel_size, self.num_output_tokens, self.patches_per_img, self.tokens_per_side)
-        pooled = pooled * math.sqrt(self.vision_config.hidden_size)
+        pooled = _avg_pool_vision_outputs(vision_outputs, self.kernel_size, self.vision_config, self.num_output_tokens)
+        pooled *= math.sqrt(self.vision_config.hidden_size)
         pooled = pooled.astype(self.text_config.dtype)
         pooled = self.mm_soft_emb_norm(pooled)
         return jnp.matmul(pooled, self.mm_input_projection_weight[...])

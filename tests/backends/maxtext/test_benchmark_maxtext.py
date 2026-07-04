@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for MaxText Benchmark."""
 
 from __future__ import annotations
@@ -18,7 +19,12 @@ class MockJnp:
 
     @staticmethod
     def zeros(_shape: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [0]
 
 
@@ -27,7 +33,12 @@ class MockJaxRandom:
 
     @staticmethod
     def mock_prngkey(seed: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return seed
 
     PRNGKey = mock_prngkey
@@ -40,7 +51,12 @@ class MockJax:
 
     @staticmethod
     def jit(fn: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return fn
 
     def block_until_ready(self, x: object) -> None:
@@ -54,16 +70,31 @@ class MockGemma4Model:
         """Execute function."""
 
     def init(self, _rng: object, _inputs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "params"
 
     def apply(self, _params: object, inputs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return inputs
 
 
 def test_benchmark_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "jax", None)
     res = benchmark_model("model", "gpu", 1)
     if not res["status"] == "mocked_missing_maxtext":
@@ -71,7 +102,12 @@ def test_benchmark_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "jax", MockJax())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "Gemma4Model", MockGemma4Model)
@@ -83,13 +119,23 @@ def test_benchmark_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "jax", MockJax())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "Gemma4Model", MockGemma4Model)
 
     def mock_raise_error(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -106,16 +152,31 @@ class MockModel:
         """Execute function."""
 
     def init(self, *_args: object, **_kwargs: object) -> str:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "params"
 
     def apply(self, *_args: object, **_kwargs: object) -> str:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "out"
 
 
 def test_benchmark_maxtext_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "jax", type("MockJax", (), {"random": type("MockRng", (), {"PRNGKey": lambda x: x}), "jit": lambda x: x, "distributed": type("MockDist", (), {"initialize": lambda: None})}))
     monkeypatch.setattr(bm, "jnp", type("MockJnp", (), {"int32": "int32", "zeros": lambda *args, **_kwargs: args}))
     monkeypatch.setattr(bm, "Gemma4Model", MockModel)
@@ -125,10 +186,20 @@ def test_benchmark_maxtext_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_benchmark_maxtext_real_no_test_mode_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
 
     def raise_err() -> typing.Never:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -142,9 +213,9 @@ def test_benchmark_maxtext_real_no_test_mode_error(monkeypatch: pytest.MonkeyPat
 
 def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    m_benchmark = __import__("gemma_4_sql.backends.maxtext.benchmark")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    m_benchmark = __import__("gemma_4_sql.backends.maxtext.benchmark", fromlist=[""])
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(m_benchmark)
     monkeypatch.undo()

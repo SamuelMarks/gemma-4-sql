@@ -1,4 +1,5 @@
-"""Provide module docstring."""
+# Copyright 2024
+"""Core functionality for the test_sharding_gemma4 module."""
 
 from absl.testing import absltest
 from flax import nnx
@@ -8,7 +9,7 @@ from gemma_4_sql.backends.jax.gemma4.modeling import ModelConfig as Gemma4Config
 
 
 class TestSharding(absltest.TestCase):
-    """Initialize class TestSharding."""
+    """Implementation of TestSharding."""
 
     @classmethod
     def setUpClass(cls) -> object:
@@ -21,8 +22,7 @@ class TestSharding(absltest.TestCase):
         config = Gemma4Config(vocab_size=100, hidden_size=16, intermediate_size=32, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=8, num_experts=2, shd_cfg=shd)
         rngs = nnx.Rngs(0)
         model = Gemma4ForCausalLM(config, rngs=rngs)
-        if model.model.embed_tokens is None:
-            raise AssertionError
+        assert model.model.embed_tokens is not None
 
 
 if __name__ == "__main__":

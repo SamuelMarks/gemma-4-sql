@@ -1,3 +1,4 @@
+# Copyright 2024
 """Backend registry for gemma-4-sql."""
 
 from __future__ import annotations
@@ -24,6 +25,9 @@ def get_backend(name: str) -> BackendProtocol:
     Raises:
     ------
         ValueError: If the specified backend name is not found in the entry points.
+
+    Raises:
+        ValueError: If the operation encounters an unexpected ValueError.
 
     """
     if not ENTRY_POINTS:

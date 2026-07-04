@@ -1,3 +1,4 @@
+# Copyright 2024
 """Provide module docstring."""
 
 import pytest
@@ -6,7 +7,12 @@ from gemma_4_sql.sdk.serve import serve_model
 
 
 def test_serve_model_routing() -> object:
-    """Initialize function test_serve_model_routing."""
+    """Initialize function test_serve_model_routing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     for backend in ["jax", "keras", "maxtext", "pytorch"]:
         res = serve_model("foo", backend=backend)
         if not res["backend"] == backend:

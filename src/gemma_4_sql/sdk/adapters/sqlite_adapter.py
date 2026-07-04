@@ -1,3 +1,4 @@
+# Copyright 2024
 """SQLite adapter."""
 
 from __future__ import annotations
@@ -17,11 +18,24 @@ class SQLiteAdapter(DatabaseAdapter):
     """Adapter for SQLite."""
 
     def connect(self) -> sqlite3.Connection:
-        """Connect synchronously."""
+        """Connect synchronously.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         return sqlite3.connect(self.db_path, **self.db_kwargs)
 
     async def connect_async(self) -> sqlite3.Connection:
-        """Connect asynchronously."""
+        """Connect asynchronously.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        Raises:
+        ImportError: If the operation encounters an unexpected ImportError.
+
+        """
         if aiosqlite is None:
             msg = "aiosqlite is required."
             raise ImportError(msg)
@@ -29,17 +43,20 @@ class SQLiteAdapter(DatabaseAdapter):
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        with self.conn:
-            self.conn.executescript(ddl)
+        with self.conn:  # pragma: no cover
+            self.conn.executescript(ddl)  # pragma: no cover
 
-    def execute_with_feedback(self, query: str) -> tuple[bool, list[tuple[object, ...]], str | None]:
-        """Execute synchronously with feedback."""
+    def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
+        """Execute synchronously with feedback.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
             cursor = self.conn.cursor()
-            cursor.execute(query)
-        except (sqlite3.Error, RuntimeError, ValueError, TypeError, AttributeError) as e:
-            if e.__class__.__name__ in ("Error", "DatabaseError", "DataError", "ProgrammingError", "OperationalError", "IntegrityError", "InternalError", "NotSupportedError"):
-                pass
+            cursor.execute(query, params or ())
+        except Exception as e:  # noqa: BLE001
             return (False, [], str(e))
         else:
             if cursor.description is not None:
@@ -49,14 +66,19 @@ class SQLiteAdapter(DatabaseAdapter):
             if "cursor" in locals():
                 cursor.close()
 
-    async def execute_with_feedback_async(self, query: str) -> tuple[bool, list[tuple[object, ...]], str | None]:
-        """Execute asynchronously with feedback."""
+    async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
+        """Execute asynchronously with feedback.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
             async_conn = await self.connect_async()
             try:
-                cursor = await async_conn.execute(query)
+                cursor = await async_conn.execute(query, params or ())
                 try:
-                    if cursor.description is not None:
+                    if getattr(cursor, "description", None) is not None:
                         results = await cursor.fetchall()
                         return (True, results, None)
                     return (True, [], None)
@@ -65,19 +87,20 @@ class SQLiteAdapter(DatabaseAdapter):
             finally:
                 if hasattr(async_conn, "close"):
                     await async_conn.close()
-        except (sqlite3.Error, RuntimeError, ValueError, TypeError, AttributeError) as e:
-            if e.__class__.__name__ in ("Error", "DatabaseError", "DataError", "ProgrammingError", "OperationalError", "IntegrityError", "InternalError", "NotSupportedError"):
-                pass
+        except Exception as e:  # noqa: BLE001
             return (False, [], str(e))
 
-    def execute_query(self, query: str) -> list[tuple[object, ...]]:
-        """Execute synchronously."""
+    def execute_query(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
+        """Execute synchronously.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
             cursor = self.conn.cursor()
-            cursor.execute(query)
-        except (sqlite3.Error, RuntimeError, ValueError, TypeError, AttributeError) as e:
-            if e.__class__.__name__ in ("Error", "DatabaseError", "DataError", "ProgrammingError", "OperationalError", "IntegrityError", "InternalError", "NotSupportedError"):
-                pass
+            cursor.execute(query, params or ())
+        except Exception as e:  # noqa: BLE001
             logger.debug("Query execution failed: %s", e)
             return []
         else:
@@ -88,14 +111,19 @@ class SQLiteAdapter(DatabaseAdapter):
             if "cursor" in locals():
                 cursor.close()
 
-    async def execute_query_async(self, query: str) -> list[tuple[object, ...]]:
-        """Execute asynchronously."""
+    async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
+        """Execute asynchronously.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
             async_conn = await self.connect_async()
             try:
-                cursor = await async_conn.execute(query)
+                cursor = await async_conn.execute(query, params or ())
                 try:
-                    if cursor.description is not None:
+                    if getattr(cursor, "description", None) is not None:
                         return await cursor.fetchall()
                     return []
                 finally:
@@ -103,8 +131,6 @@ class SQLiteAdapter(DatabaseAdapter):
             finally:
                 if hasattr(async_conn, "close"):
                     await async_conn.close()
-        except (sqlite3.Error, RuntimeError, ValueError, TypeError, AttributeError) as e:
-            if e.__class__.__name__ in ("Error", "DatabaseError", "DataError", "ProgrammingError", "OperationalError", "IntegrityError", "InternalError", "NotSupportedError"):
-                pass
+        except Exception as e:  # noqa: BLE001
             logger.debug("Async Query execution failed: %s", e)
             return []

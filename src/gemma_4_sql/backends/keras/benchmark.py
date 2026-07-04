@@ -1,3 +1,4 @@
+# Copyright 2024
 """Keras-specific benchmarking pipeline."""
 
 from __future__ import annotations
@@ -6,6 +7,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
@@ -15,16 +17,21 @@ keras = None
 tf = None
 with catch_optional_imports():
     import keras
-    import tensorflow as tf
+    import tensorflow as tf  # pragma: no cover
 
 
 def _load_keras_model(model_name: str, *, test_mode: bool = False) -> object:
-    """Load or mock a Keras model."""
+    """Load or mock a Keras model.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     if test_mode:
         return None
     try:
         gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
-        return gemma_causal_lm_cls.from_preset(model_name)
+        return gemma_causal_lm_cls.from_preset(model_name)  # pragma: no cover
     except (ImportError, ValueError):
         inputs = keras.Input(shape=(None,), dtype="int32")
         x = keras.layers.Embedding(256, 128)(inputs)
@@ -33,12 +40,22 @@ def _load_keras_model(model_name: str, *, test_mode: bool = False) -> object:
 
 
 def _run_benchmark_pass(model: keras.Model, batch_size: int, num_runs: int) -> tuple[float, float, float]:
-    """Execute the forward pass benchmark loop."""
+    """Execute the forward pass benchmark loop.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     dummy_inputs = tf.zeros((batch_size, 32), dtype=tf.int32)
 
     @tf.function
     def forward_pass(inputs: keras.KerasTensor | tf.Tensor) -> object:
-        """Execute function."""
+        """Execute the forward pass operation.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         return model(inputs) if model is not None else inputs
 
     _ = forward_pass(dummy_inputs)
@@ -74,18 +91,18 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         A dictionary containing benchmark metrics and status.
 
     """
-    if keras is None or tf is None:
-        return {"backend": "keras", "model": model_name, "hardware": hardware, "batch_size": batch_size, "status": "mocked_missing_keras", "tokens_per_sec": 0.0, "latency_ms": 0.0, "memory_mb": 0.0}
-    logger.info("Starting Keras benchmark for %s on %s (batch size %d)", model_name, hardware, batch_size)
-    try:
+
+    def _run() -> tuple[float, float, float]:
         model = _load_keras_model(model_name, test_mode=bool(kwargs.get("test_mode")))
         num_runs = int(str(kwargs.get("num_runs", 5)))
-        (tokens_per_sec, latency_ms, memory_mb) = _run_benchmark_pass(model, batch_size, num_runs)
-        status = "success"
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Benchmark failed: ")
-        status = f"failed: {e!s}"
-        latency_ms = 0.0
-        tokens_per_sec = 0.0
-        memory_mb = 0.0
-    return {"backend": "keras", "model": model_name, "hardware": hardware, "batch_size": batch_size, "tokens_per_sec": float(tokens_per_sec), "latency_ms": float(latency_ms), "memory_mb": float(memory_mb), "status": status}
+        return _run_benchmark_pass(model, batch_size, num_runs)
+
+    return run_benchmark_wrapper(
+        backend_name="keras",
+        model_name=model_name,
+        hardware=hardware,
+        batch_size=batch_size,
+        missing_deps=keras is None or tf is None,
+        missing_status="mocked_missing_keras",
+        benchmark_fn=_run,
+    )

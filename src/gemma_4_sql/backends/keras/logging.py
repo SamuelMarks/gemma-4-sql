@@ -1,3 +1,4 @@
+# Copyright 2024
 """Keras-specific logging and metrics."""
 
 from __future__ import annotations

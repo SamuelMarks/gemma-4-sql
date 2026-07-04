@@ -23,6 +23,7 @@ To prevent dependency conflicts and keep the CLI fast, **never** import heavy ML
 # src/gemma_4_sql/backends/mlx/train.py
 from typing import Any
 
+
 def train_model(
     action: str,
     model_name: str,
@@ -33,7 +34,7 @@ def train_model(
     # ✅ IMPORT HEAVY LIBRARIES HERE
     import mlx.core as mx
     import mlx.nn as nn
-    
+
     # Implementation details...
     return {"status": "success", "backend": "mlx"}
 ```
@@ -45,8 +46,10 @@ The SDK will load your backend module and look for specific functions. Expose al
 # src/gemma_4_sql/backends/mlx/__init__.py
 from __future__ import annotations
 
+
 def get_trainer() -> str:
     return "mlx_trainer"
+
 
 from .train import train_model
 from .inference import generate_sql

@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for the Tokenization module."""
 
 import sys
@@ -18,15 +19,18 @@ class MockHFTokenizer:
         text: Description of text.
         add_special_tokens: Description of add_special_tokens.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return [99, 100]
 
     def decode(self, _tokens: list[int]) -> str:
         """Initialize function decode.
 
-        Args:
-        ----
-        tokens: Description of tokens.
+        Returns:
+            object: Description of return.
 
         """
         return "hf_decoded"
@@ -39,9 +43,8 @@ class MockAutoTokenizer:
     def from_pretrained(cls, _model_name: str) -> MockHFTokenizer:
         """Initialize function from_pretrained.
 
-        Args:
-        ----
-        model_name: Description of model_name.
+        Returns:
+            object: Description of return.
 
         """
         return MockHFTokenizer()
@@ -57,7 +60,12 @@ def _mock_transformers(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_sql_tokenizer_fallback() -> None:
-    """Test fallback char-level encoding."""
+    """Test fallback char-level encoding.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     tok = SQLTokenizer()
     encoded = tok.encode("abc")
     if not encoded == [ord("a"), ord("b"), ord("c")]:
@@ -69,7 +77,12 @@ def test_sql_tokenizer_fallback() -> None:
 
 @pytest.mark.usefixtures("_mock_transformers")
 def test_sql_tokenizer_hf() -> None:
-    """Test Hugging Face tokenizer wrapping."""
+    """Test Hugging Face tokenizer wrapping.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     tok = SQLTokenizer(model_name="dummy/model")
     if not tok.hf_tokenizer is not None:
         raise AssertionError

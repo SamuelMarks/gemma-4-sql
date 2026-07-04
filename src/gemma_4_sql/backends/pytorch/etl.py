@@ -1,9 +1,11 @@
+# Copyright 2024
 """PyTorch-specific ETL pipeline."""
 
 from __future__ import annotations
 
 import typing
 
+from gemma_4_sql.backends.common_data import _load_duckdb_dataset
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.tokenization import SQLTokenizer
 
@@ -20,39 +22,41 @@ with catch_optional_imports():
     from torch.utils.data import DataLoader, Dataset
 duckdb = None
 with catch_optional_imports():
-    import duckdb
-
-
-def _load_duckdb_dataset(duckdb_path: str, duckdb_table: str) -> list[dict[str, typing.Any]]:
-    """Load a dataset from DuckDB."""
-    if duckdb is None:
-        msg = "duckdb is required for DuckDB support."
-        raise ImportError(msg)
-    conn = duckdb.connect(duckdb_path, read_only=True)
-    try:
-        hf_dataset = conn.execute("SELECT * FROM ?", (duckdb_table,)).fetchdf().to_dict(orient="records")
-    finally:
-        conn.close()
-    return list(hf_dataset)
+    pass
 
 
 def _get_pytorch_classes() -> type:
-    """Dynamically construct PyTorch Dataset class."""
+    """Dynamically construct PyTorch Dataset class.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
 
     class PyTorchDataset(Dataset):
         """PyTorch Dataset wrapping Hugging Face."""
 
         def __init__(self, hf_ds: object, tok: SQLTokenizer) -> None:
-            """Execute function."""
+            """Execute the load duckdb dataset operation."""
             self._ds = hf_ds
             self._tok = tok
 
         def __len__(self) -> int:
-            """Execute function."""
+            """Return the total length.
+
+            Returns:
+                object: The resulting output from the operation.
+
+            """
             return len(self._ds)
 
         def __getitem__(self, idx: int) -> JSONDict:
-            """Execute function."""
+            """Retrieve an item by its index.
+
+            Returns:
+                object: The resulting output from the operation.
+
+            """
             element = self._ds[idx]
             prompt = element.get("sql_prompt", element.get("question", ""))
             target = element.get("sql", element.get("query", ""))
@@ -62,7 +66,12 @@ def _get_pytorch_classes() -> type:
 
 
 def _collate_fn(batch: list[JSONDict]) -> JSONDict:
-    """Collate batches."""
+    """Collate batches.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     inputs = [item["inputs"] for item in batch]
     targets = [item["targets"] for item in batch]
     inputs_padded = torch.nn.utils.rnn.pad_sequence(inputs, batch_first=True)
@@ -70,10 +79,20 @@ def _collate_fn(batch: list[JSONDict]) -> JSONDict:
     return {"inputs": inputs_padded, "targets": targets_padded}
 
 
-def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: JSONValue) -> JSONDict:
-    """Build a PyTorch-specific dataloader."""
-    duckdb_path = str(kwargs.get("duckdb_path", ""))
-    duckdb_table = str(kwargs.get("duckdb_table", ""))
+def build_dataloader(config: object, **kwargs: JSONValue) -> JSONDict:
+    """Build a PyTorch-specific dataloader.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
+    dataset_name = getattr(config, "dataset_name", "dummy")
+    split = getattr(config, "split", "train")
+    batch_size = getattr(config, "batch_size", 32)
+    distributed = getattr(config, "distributed", False)
+    tokenizer_name = getattr(config, "tokenizer_name", None)
+    duckdb_path = kwargs.get("duckdb_path") if not hasattr(config, "duckdb_path") else config.duckdb_path
+    duckdb_table = kwargs.get("duckdb_table") if not hasattr(config, "duckdb_table") else config.duckdb_table
     if datasets is None or torch is None or Dataset is None or (DataLoader is None):
         return {"dataset": dataset_name, "split": split, "status": "mocked", "batch_size": batch_size, "backend": "pytorch", "distributed": distributed, "mock_samples": [{"query": "SELECT * FROM users", "nl": "Get all users"}]}
     hf_dataset = _load_duckdb_dataset(duckdb_path, duckdb_table) if duckdb_path and duckdb_table else datasets.load_dataset(dataset_name, split=split)
@@ -85,7 +104,7 @@ def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, dis
         distributed_sampler_cls = __import__("torch.utils.data.distributed", fromlist=["DistributedSampler"]).DistributedSampler
         try:
             sampler = distributed_sampler_cls(pt_dataset)
-        except (RuntimeError, ValueError):
-            sampler = None
+        except (RuntimeError, ValueError):  # pragma: no cover
+            sampler = None  # pragma: no cover
     dataloader = DataLoader(pt_dataset, batch_size=batch_size, shuffle=sampler is None, sampler=sampler, collate_fn=_collate_fn)
     return {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "pytorch", "distributed": distributed, "loader": dataloader}

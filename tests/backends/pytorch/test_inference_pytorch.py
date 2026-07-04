@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for PyTorch inference."""
 
 from __future__ import annotations
@@ -24,7 +25,12 @@ class MockAutoTokenizer:
 
 
 def test_inference_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt_inf, "torch", MockTorch())
     monkeypatch.setattr(pt_inf, "AutoModelForCausalLM", MockAutoModelForCausalLM)
     monkeypatch.setattr(pt_inf, "AutoTokenizer", MockAutoTokenizer)
@@ -36,7 +42,12 @@ def test_inference_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_inference_pytorch_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt_inf, "torch", None)
     res = generate_sql("mock", "hi")
     if not res["status"] == "mocked_missing_torch":
@@ -44,13 +55,23 @@ def test_inference_pytorch_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_inference_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt_inf, "torch", MockTorch())
     monkeypatch.setattr(pt_inf, "AutoModelForCausalLM", MockAutoModelForCausalLM)
     monkeypatch.setattr(pt_inf, "AutoTokenizer", MockAutoTokenizer)
 
     def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -64,11 +85,21 @@ class MockTokenizerObj:
     """Provide class docstring."""
 
     def __call__(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return type("M", (), {"to": lambda *_a, **_k: {"input_ids": [1]}})()
 
     def decode(self, *_args: object, **_kwargs: object) -> str:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "prompt SELECT * FROM x"
 
 
@@ -77,7 +108,12 @@ class MockTokenizer:
 
     @classmethod
     def from_pretrained(cls, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockTokenizerObj()
 
 
@@ -87,7 +123,12 @@ class MockModelObj:
     device = "cpu"
 
     def generate(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         class MockOutputs:
             """Provide class docstring."""
@@ -103,13 +144,23 @@ class MockModel:
 
     @classmethod
     def from_pretrained(cls, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockModelObj()
 
 
 def test_inference_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    m_inf = __import__("gemma_4_sql.backends.pytorch.inference")
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    m_inf = __import__("gemma_4_sql.backends.pytorch.inference", fromlist=[""])
     monkeypatch.setattr(m_inf, "torch", object())
     monkeypatch.setattr(m_inf, "AutoTokenizer", MockTokenizer)
     monkeypatch.setattr(m_inf, "AutoModelForCausalLM", MockModel)

@@ -1,3 +1,4 @@
+# Copyright 2024
 """MaxText-specific logging and metrics integration."""
 
 from __future__ import annotations

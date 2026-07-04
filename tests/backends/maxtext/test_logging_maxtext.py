@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for MaxText logging."""
 
 from unittest.mock import MagicMock
@@ -6,7 +7,12 @@ from gemma_4_sql.backends.maxtext import logging as maxtext_logging
 
 
 def test_log_metrics_no_tb() -> None:
-    """Test MaxText logging when TB is missing."""
+    """Test MaxText logging when TB is missing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     maxtext_logging.SummaryWriter = None
     metrics = {"loss": 0.5, "acc": 0.9}
     res = maxtext_logging.log_metrics(metrics, step=10, log_dir="test_logs")
@@ -17,7 +23,12 @@ def test_log_metrics_no_tb() -> None:
 
 
 def test_log_metrics_with_tb() -> None:
-    """Test MaxText logging when TB is available."""
+    """Test MaxText logging when TB is available.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     mock_writer_cls = MagicMock()
     mock_writer = mock_writer_cls.return_value
     maxtext_logging.SummaryWriter = mock_writer_cls

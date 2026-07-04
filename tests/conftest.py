@@ -1,8 +1,10 @@
+# Copyright 2024
 """Global pytest fixtures for gemma-4-sql tests."""
 
 import json
 import sys
 import typing
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -11,7 +13,12 @@ class MockDatasets:
     """Mock for datasets module."""
 
     def load_dataset(self: object, *_args: object, **_kwargs: object) -> list[dict[str, str]]:
-        """Mock load_dataset."""
+        """Mock load_dataset.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [{"query": "SELECT 1", "sql": "SELECT 1", "question": "test", "nl": "test"}]
 
 
@@ -22,21 +29,41 @@ class MockConn:
     """Mock for DuckDB connection."""
 
     def execute(self: object, *_args: object, **_kwargs: object) -> object:
-        """Mock execute."""
+        """Mock execute.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self
 
     def fetchall(self: typing.Any) -> list:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [[json.dumps({"success": True, "generated_sql": "SELECT COUNT(*) FROM test", "results": [[1]]})]]
 
     def fetchdf(self: object) -> object:
-        """Mock fetchdf."""
+        """Mock fetchdf.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         class MockDF:
             """Provide class docstring."""
 
-            def to_dict(self: typing.Any, _orient: str = "records") -> list[dict[str, str]]:
-                """Execute function."""
+            def to_dict(self: typing.Any, orient: str = "records") -> list[dict[str, str]]:
+                """Execute function.
+
+                Returns:
+                    object: Description of return.
+
+                """
                 return [{"query": "SELECT 1", "nl": "Get 1", "sql": "SELECT 1", "sql_prompt": "Get 1"}]
 
         return MockDF()
@@ -52,7 +79,12 @@ class MockDuckDB:
     """Mock for DuckDB module."""
 
     def connect(self: object, *_args: object, **_kwargs: object) -> object:
-        """Mock connect."""
+        """Mock connect.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockConn()
 
 
@@ -63,11 +95,21 @@ class MockHFTokenizer:
     """Mock HF Tokenizer."""
 
     def encode(self: object, _text: str, **_kwargs: object) -> list[int]:
-        """Mock encode."""
+        """Mock encode.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [99, 100]
 
     def decode(self: object, _tokens: list[int], **_kwargs: object) -> str:
-        """Mock decode."""
+        """Mock decode.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "hf_decoded"
 
 
@@ -76,7 +118,12 @@ class MockAutoTokenizer:
 
     @classmethod
     def from_pretrained(cls: type, _model_name: str) -> object:
-        """Mock from_pretrained."""
+        """Mock from_pretrained.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockHFTokenizer()
 
 
@@ -92,7 +139,12 @@ class MockGemma4ForCausalLM:
 
     @classmethod
     def from_pretrained(cls: type, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockModel()
 
 
@@ -113,3 +165,25 @@ def _mock_external_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.gemma4_for_causal_lm_cls", MockGemma4ForCausalLM, raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", None, raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.peft.peft", None, raising=False)
+
+
+class MockDBModule:
+    """Implementation of MockDBModule."""
+
+    def __init__(self, name: str) -> None:
+        """Initialize the instance."""
+        self.name = name
+
+    def connect(self, *args: object, **kwargs: object) -> None:
+        """Execute the connect operation."""
+
+    class Error(Exception):
+        """Implementation of Error."""
+
+
+sys.modules["psycopg2"] = MagicMock(Error=Exception)
+sys.modules["asyncpg"] = MagicMock(Error=Exception)
+sys.modules["snowflake"] = MagicMock(Error=Exception)
+sys.modules["snowflake.connector"] = MagicMock(Error=Exception)
+sys.modules["aiosqlite"] = MagicMock(Error=Exception)
+sys.modules["sentence_transformers"] = MagicMock(Error=Exception)

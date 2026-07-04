@@ -1,4 +1,5 @@
-"""Provide module docstring."""
+# Copyright 2024
+"""Core functionality for the moe module."""
 
 from __future__ import annotations
 
@@ -59,7 +60,7 @@ class Gemma4RoutedExperts(nnx.Module):
         up_out = jnp.matmul(x_expanded, up_w)
         act = jax.nn.silu(gate_out) * up_out
         out = jnp.matmul(act, down_w).squeeze(2)
-        out = out * jnp.expand_dims(w_flat, 2)
+        out *= jnp.expand_dims(w_flat, 2)
         out = jnp.sum(out, axis=1)
         return out.reshape((b, t, h)).astype(self.dtype)
 
@@ -90,7 +91,12 @@ class Gemma4MoE(nnx.Module):
 
     @jax.named_scope("gemma4_moe")
     def __call__(self, x: Array, original_x: Array) -> Array:
-        """Apply Mixture of Experts with shared and routed execution paths."""
+        """Apply Mixture of Experts with shared and routed execution paths.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         shared_out = self.shared_experts(x)
         shared_out = self.post_feedforward_layernorm_1(shared_out)
         routed_inputs = self.pre_feedforward_layernorm_2(original_x)
@@ -101,9 +107,9 @@ class Gemma4MoE(nnx.Module):
         router_logits = self.gate(gate_inputs)
         routing_weights = jax.nn.softmax(router_logits, axis=-1)
         (topk_weights, topk_indices) = jax.lax.top_k(routing_weights, k=self.config.num_experts_per_tok)
-        topk_weights = topk_weights / jnp.sum(topk_weights, axis=-1, keepdims=True)
+        topk_weights /= jnp.sum(topk_weights, axis=-1, keepdims=True)
         per_expert = jnp.asarray(self.per_expert_scale[...], dtype=topk_weights.dtype)
-        topk_weights = topk_weights * per_expert[topk_indices]
+        topk_weights *= per_expert[topk_indices]
         topk_weights = topk_weights.astype(self.dtype)
         routed_out = self.routed_experts(routed_inputs, topk_indices, topk_weights)
         routed_out = self.post_feedforward_layernorm_2(routed_out)

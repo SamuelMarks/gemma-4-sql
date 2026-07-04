@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for PyTorch quantization logic."""
 
 from __future__ import annotations
@@ -29,12 +30,22 @@ class MockAutoModelForCausalLM:
 
     @staticmethod
     def from_pretrained(_model_name: str, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return object()
 
 
 def test_quantize_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test PyTorch quantize when missing."""
+    """Test PyTorch quantize when missing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt_quantize, "torch", None)
     monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", None)
     monkeypatch.setattr(pt_quantize, "AutoModelForCausalLM", None)
@@ -46,7 +57,12 @@ def test_quantize_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test PyTorch quantize."""
+    """Test PyTorch quantize.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt_quantize, "torch", MockTorch())
     monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", MockBitsAndBytesConfig)
     monkeypatch.setattr(pt_quantize, "AutoModelForCausalLM", MockAutoModelForCausalLM)
@@ -59,7 +75,7 @@ def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     if not res["status"] == "quantized_int4":
         raise AssertionError
     res = quantize_model("model", "awq")
-    if res["status"] not in ["quantized_awq", "mocked_missing_torch"]:
+    if res["status"] not in {"quantized_awq", "mocked_missing_torch"}:
         raise AssertionError
     res = quantize_model("model", "unknown")
     if "unsupported" not in res["status"]:
@@ -67,13 +83,23 @@ def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt_quantize, "torch", MockTorch())
     monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", MockBitsAndBytesConfig)
     monkeypatch.setattr(pt_quantize, "AutoModelForCausalLM", MockAutoModelForCausalLM)
 
     def mock_raise_error(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 

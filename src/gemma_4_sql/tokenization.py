@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tokenization module for processing Text-to-SQL datasets."""
 
 from __future__ import annotations
@@ -31,13 +32,23 @@ class SQLTokenizer:
             self.hf_tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 
     def encode(self, text: str) -> list[int]:
-        """Encode a string into a list of token IDs."""
+        """Encode a string into a list of token IDs.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         if self.hf_tokenizer is not None:
             return self.hf_tokenizer.encode(text, add_special_tokens=False)
         return [ord(c) % self.vocab_size for c in text]
 
     def decode(self, tokens: list[int]) -> str:
-        """Decode a list of token IDs back into a string."""
+        """Decode a list of token IDs back into a string.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         if self.hf_tokenizer is not None:
             return self.hf_tokenizer.decode(tokens)
         return "".join(chr(t) for t in tokens)

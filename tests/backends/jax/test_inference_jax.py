@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for JAX inference logic."""
 
 import pytest
@@ -27,7 +28,12 @@ class MockArray:
         return (len(self.data),)
 
     def __getitem__(self: object, idx: object) -> object:
-        """Magic method docstring."""
+        """Magic method docstring.
+
+        Returns:
+            object: Description of return.
+
+        """
         if isinstance(idx, MockArray):
             return MockArray([self.data[i] for i in getattr(idx, "data", [])])
         try:
@@ -39,11 +45,21 @@ class MockArray:
             return MockArray(self.data)
 
     def tolist(self: object) -> object:
-        """Initialize function tolist."""
+        """Initialize function tolist.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self.data
 
     def item(self: object) -> object:
-        """Initialize function item."""
+        """Initialize function item.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self.data[0] if isinstance(self.data, list) else self.data
 
     def reshape(self: object, *shape: object) -> object:
@@ -52,6 +68,10 @@ class MockArray:
         Args:
         ----
         shape: Description of shape.
+
+
+        Returns:
+            object: Description of return.
 
         """
         if shape == (1, 1):
@@ -70,6 +90,10 @@ class MockJNP:
         ----
         val: Description of val.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return MockArray([0] * val)
 
@@ -80,6 +104,10 @@ class MockJNP:
         ----
         data: Description of data.
         dtype: Description of dtype.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return MockArray(data)
@@ -94,6 +122,10 @@ class MockJNP:
         arrays: Description of arrays.
         axis: Description of axis.
 
+
+        Returns:
+            object: Description of return.
+
         """
         if axis == -1:
             res = [arrays[0].data[i] + arrays[1].data[i] for i in range(len(arrays[0].data))]
@@ -106,6 +138,10 @@ class MockJNP:
         Args:
         ----
         array: Description of array.
+
+
+        Returns:
+            object: Description of return.
 
         """
         d = array.data
@@ -123,6 +159,10 @@ class MockNN:
         x: Description of x.
         axis: Description of axis.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return x
 
@@ -138,7 +178,12 @@ class MockGemma4Config:
 
     @staticmethod
     def gemma4_e2b() -> object:
-        """Initialize function gemma4_e2b."""
+        """Initialize function gemma4_e2b.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "mock_config"
 
 
@@ -159,10 +204,8 @@ class MockGemma4ForCausalLM:
     def __call__(self: object, _seq: object, _positions: object = None) -> object:
         """Initialize function __call__.
 
-        Args:
-        ----
-        seq: Description of seq.
-        positions: Description of positions.
+        Returns:
+            object: Description of return.
 
         """
         logits = [0.0] * 300
@@ -207,9 +250,11 @@ def _mock_jax_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_generate_sql_success() -> None:
     """Initialize function test_generate_sql_success.
 
-    Args:
-    ----
-    mock_jax_env: Description of mock_jax_env.
+    Raises:
+        AssertionError: Description.
+
+
+        TypeError: Description.
 
     """
     res = generate_sql("mock-model", "test prompt", beam_width=2, max_length=3)
@@ -228,6 +273,10 @@ def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     ----
     monkeypatch: Description of monkeypatch.
 
+
+    Raises:
+        AssertionError: Description.
+
     """
     monkeypatch.setattr(inf, "jax", None)
     res = generate_sql("mock-model", "test prompt")
@@ -239,9 +288,8 @@ def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_jax_beam_search() -> None:
     """Initialize function test_jax_beam_search.
 
-    Args:
-    ----
-    mock_jax_env: Description of mock_jax_env.
+    Raises:
+        AssertionError: Description.
 
     """
     jnp_mock = MockJNP()
@@ -252,7 +300,10 @@ def test_jax_beam_search() -> None:
         Args:
         ----
         seq: Description of seq.
-        positions: Description of positions.
+
+
+        Returns:
+            object: Description of return.
 
         """
         logits = [0.0] * 300
@@ -271,9 +322,9 @@ def test_jax_beam_search() -> None:
 
 def test_inference_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    mdl = __import__("gemma_4_sql.backends.jax.inference")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    mdl = __import__("gemma_4_sql.backends.jax.inference", fromlist=[""])
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(mdl)
     monkeypatch.undo()

@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for SDK quantize module."""
 
 from __future__ import annotations
@@ -8,7 +9,12 @@ from gemma_4_sql.sdk.quantize import quantize_model
 
 
 def test_quantize_pytorch() -> None:
-    """Initialize function test_quantize_pytorch."""
+    """Initialize function test_quantize_pytorch.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = quantize_model("model1", "int8", backend="pytorch")
     if not res["backend"] == "pytorch":
         raise AssertionError
@@ -19,7 +25,12 @@ def test_quantize_pytorch() -> None:
 
 
 def test_quantize_jax() -> None:
-    """Initialize function test_quantize_jax."""
+    """Initialize function test_quantize_jax.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = quantize_model("model2", "awq", backend="jax")
     if not res["backend"] == "jax":
         raise AssertionError
@@ -30,7 +41,12 @@ def test_quantize_jax() -> None:
 
 
 def test_quantize_keras() -> None:
-    """Initialize function test_quantize_keras."""
+    """Initialize function test_quantize_keras.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = quantize_model("model3", "gptq", backend="keras")
     if not res["backend"] == "keras":
         raise AssertionError
@@ -41,7 +57,12 @@ def test_quantize_keras() -> None:
 
 
 def test_quantize_maxtext() -> None:
-    """Initialize function test_quantize_maxtext."""
+    """Initialize function test_quantize_maxtext.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = quantize_model("model4", "gguf", backend="maxtext")
     if not res["backend"] == "maxtext":
         raise AssertionError

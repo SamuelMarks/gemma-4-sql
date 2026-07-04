@@ -1,4 +1,5 @@
-"""Provide module docstring."""
+# Copyright 2024
+"""Core functionality for the rope module."""
 
 from __future__ import annotations
 
@@ -14,25 +15,32 @@ if TYPE_CHECKING:
 
 
 def segment_ids_to_positions(segment_ids: Array) -> Array:
-    """Initialize function segment_ids_to_positions.
+    """Execute the segment ids to positions operation.
 
     Args:
     ----
-    segment_ids: Description of segment_ids.
+    segment_ids: The segment_ids parameter required for this operation.
+
+
+    Returns:
+        object: The resulting output from the operation.
 
     """
     return jnp.cumsum(segment_ids, axis=-1)
 
 
 def default_rope_params(_positions: Array, head_dim: int, rope_theta: int = 1000000, factor: float = 1.0) -> tuple[Array, Array]:
-    """Initialize function default_rope_params.
+    """Execute the default rope params operation.
 
     Args:
     ----
-    positions: Description of positions.
-    head_dim: Description of head_dim.
-    rope_theta: Description of rope_theta.
-    factor: Description of factor.
+    head_dim: The head_dim parameter required for this operation.
+    rope_theta: The rope_theta parameter required for this operation.
+    factor: The factor parameter required for this operation.
+
+
+    Returns:
+        object: The resulting output from the operation.
 
     """
     fraction = jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim
@@ -47,13 +55,20 @@ rope_functions = {"default": default_rope_params}
 
 
 def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
-    """Initialize function apply_rope.
+    """Execute the apply rope operation.
 
     Args:
     ----
-    x: Description of x.
-    sin: Description of sin.
-    cos: Description of cos.
+    x: The x parameter required for this operation.
+    sin: The sin parameter required for this operation.
+    cos: The cos parameter required for this operation.
+
+
+    Returns:
+        object: The resulting output from the operation.
+
+    Raises:
+        AssertionError: If the test validation fails.
 
     """
     if not (x.ndim == int("4") and sin.ndim == int("3") and (cos.ndim == int("3"))):
@@ -64,26 +79,30 @@ def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
 
 
 class RoPE(nnx.Module):
-    """Initialize class RoPE."""
+    """Implementation of RoPE."""
 
     def __init__(self, *, rope_type: str, **rope_kwargs: object) -> None:
-        """Initialize function __init__.
+        """Initialize the instance parameters.
 
         Args:
         ----
-        rope_type: Description of rope_type.
-        rope_kwargs: Description of rope_kwargs.
+        rope_type: The rope_type parameter required for this operation.
+        rope_kwargs: The rope_kwargs parameter required for this operation.
 
         """
         self.rope_kwargs = rope_kwargs
         self.rope_fn = partial(rope_functions[rope_type], **rope_kwargs)
 
     def __call__(self, positions: Array) -> tuple[Array, Array]:
-        """Initialize function __call__.
+        """Execute the callable logic.
 
         Args:
         ----
-        positions: Description of positions.
+        positions: The positions parameter required for this operation.
+
+
+        Returns:
+            object: The resulting output from the operation.
 
         """
         (rotational_frequency, attention_factor) = self.rope_fn(positions)

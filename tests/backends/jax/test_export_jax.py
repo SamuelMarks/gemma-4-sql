@@ -1,3 +1,4 @@
+# Copyright 2024
 """Provide module docstring."""
 
 from pathlib import Path
@@ -11,7 +12,12 @@ class MockJnp:
     """Provide class docstring."""
 
     def zeros(self, _shape: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [0]
 
 
@@ -26,7 +32,12 @@ class MockOCP:
 
 
 def test_export_jax_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(export_jax, "jax", None)
     monkeypatch.setattr(export_jax, "jnp", None)
     monkeypatch.setattr(export_jax, "ocp", None)
@@ -39,11 +50,16 @@ def test_export_jax_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
 
 
 def test_export_jax_real_no_flax(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(export_jax, "jax", "mock")
     monkeypatch.setattr(export_jax, "jnp", MockJnp())
     monkeypatch.setattr(export_jax, "ocp", MockOCP())
-    sys = __import__("sys")
+    sys = __import__("sys", fromlist=[""])
     monkeypatch.setitem(sys.modules, "flax", None)
     path = str(tmp_path / "export_real")
     res = export_jax.export_model("model2", path)
@@ -56,14 +72,19 @@ class MockConfig:
 
     @staticmethod
     def gemma4_e2b() -> str:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "config"
 
 
 class MockModel:
     """Provide class docstring."""
 
-    def __init__(self, config: object, rngs: object) -> None:
+    def __init__(self, config: object, rngs: object = None, **kwargs: object) -> None:
         """Execute function."""
 
 
@@ -78,19 +99,34 @@ class MockNNX:
 
     @staticmethod
     def state(_model: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return {"w": [0]}
 
 
 def test_export_jax_real_with_flax(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(export_jax, "jax", "mock")
     monkeypatch.setattr(export_jax, "jnp", MockJnp())
     monkeypatch.setattr(export_jax, "ocp", MockOCP())
     original_import = __builtins__["__import__"]
 
     def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         if name == "flax" and "nnx" in fromlist:
 
             class Module:
@@ -127,8 +163,8 @@ def test_export_jax_real_with_flax(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
 def test_export_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(export_jax)
     monkeypatch.undo()

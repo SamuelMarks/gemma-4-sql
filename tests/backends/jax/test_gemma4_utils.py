@@ -1,3 +1,4 @@
+# Copyright 2024
 """Provide module docstring."""
 
 import contextlib
@@ -14,7 +15,12 @@ EXPECTED_VAL = 123
 
 
 def test_utils() -> object:
-    """Docstring for test_utils."""
+    """Docstring for test_utils.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     state = {"a": jax.ShapeDtypeStruct((2, 2), jnp.float32)}
     jnp.ones((2, 2))
     with contextlib.suppress(ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
@@ -42,7 +48,12 @@ def test_utils() -> object:
 
 
 def test_utils_part1() -> object:
-    """Docstring."""
+    """Docstring.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     if not stoi("abc") == "abc":
         raise AssertionError
     mapping = {"abc\\.(\\d+)": ("def.xyz", None), "cde": ("uvw", None)}
@@ -69,23 +80,43 @@ class MockSafeOpen:
         self.framework = framework
 
     def __enter__(self) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> object:
         """Execute function."""
 
     def keys(self) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return ["layer1.weight", "layer2.weight"]
 
     def get_tensor(self, _key: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return jnp.ones((2, 2))
 
 
 def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     d = tmp_path / "model_dir"
     d.mkdir()
     f = d / "model.safetensors"
@@ -98,7 +129,12 @@ def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
 
 def test_create_model_from_safe_tensors_missing_dir(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(ut, "safe_open", MockSafeOpen)
     model = create_model_from_safe_tensors("nonexistent_dir", MockModelCls, "config", {})
     if not model.cfg == "config":
@@ -106,7 +142,12 @@ def test_create_model_from_safe_tensors_missing_dir(monkeypatch: pytest.MonkeyPa
 
 
 def test_create_model_from_safe_tensors_no_safetensors(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(ut, "safe_open", None)
     model = create_model_from_safe_tensors(str(tmp_path), MockModelCls, "config", {})
     if not model.cfg == "config":

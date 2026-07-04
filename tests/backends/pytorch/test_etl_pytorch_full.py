@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for PyTorch-specific ETL pipeline (full implementation)."""
 
 import sys
@@ -7,8 +8,13 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clean_sys_modules() -> object:
-    """Initialize function clean_sys_modules."""
-    sys = __import__("sys")
+    """Initialize function clean_sys_modules.
+
+    Yields:
+        object: Description of yield.
+
+    """
+    sys = __import__("sys", fromlist=[""])
     keys = list(sys.modules.keys())
     yield
     for k in list(sys.modules.keys()):
@@ -30,7 +36,12 @@ class MockDataset:
         self.data = data
 
     def __len__(self) -> object:
-        """Initialize function __len__."""
+        """Initialize function __len__.
+
+        Returns:
+            object: Description of return.
+
+        """
         return len(self.data)
 
     def __getitem__(self, idx: object) -> object:
@@ -39,6 +50,10 @@ class MockDataset:
         Args:
         ----
         idx: Description of idx.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return self.data[idx]
@@ -54,6 +69,10 @@ class MockDatasets:
         ----
         name: Description of name.
         split: Description of split.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return MockDataset([{"question": "What is 1?", "query": "SELECT 1"}, {"question": "What is 2?", "query": "SELECT 2"}])
@@ -75,11 +94,21 @@ class MockTensor:
         self.dtype = dtype
 
     def __repr__(self) -> object:
-        """Initialize function __repr__."""
+        """Initialize function __repr__.
+
+        Returns:
+            object: Description of return.
+
+        """
         return f"MockTensor({self.data})"
 
     def __len__(self) -> object:
-        """Initialize function __len__."""
+        """Initialize function __len__.
+
+        Returns:
+            object: Description of return.
+
+        """
         return len(self.data)
 
 
@@ -94,6 +123,10 @@ class MockNNUtilsRNN:
         ----
         sequences: Description of sequences.
         batch_first: Description of batch_first.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return sequences
@@ -119,7 +152,12 @@ class MockTorch:
 
     @staticmethod
     def tensor(_cls: object, *args: object, **kwargs: object) -> object:
-        """Initialize function tensor."""
+        """Initialize function tensor.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockTensor(kwargs.get("data") if "data" in kwargs else args[0] if args else getattr(_cls, "data", _cls))
 
 
@@ -159,11 +197,19 @@ def _mock_pytorch_env(monkeypatch: pytest.MonkeyPatch) -> None:
         del sys.modules["gemma_4_sql.backends.pytorch.etl"]
 
 
+from gemma_4_sql.type_hints import ETLConfig
+
+
 @pytest.mark.usefixtures("_mock_pytorch_env")
 def test_build_dataloader_pytorch_loaded() -> None:
-    """Test PyTorch build_dataloader when libraries are present."""
+    """Test PyTorch build_dataloader when libraries are present.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     build_dataloader = __import__("gemma_4_sql.backends.pytorch.etl", fromlist=["build_dataloader"]).build_dataloader
-    res = build_dataloader("dummy/data", "train", 16, distributed=False)
+    res = build_dataloader(ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False))
     if not res["backend"] == "pytorch":
         raise AssertionError
     if not res["status"] == "loaded":

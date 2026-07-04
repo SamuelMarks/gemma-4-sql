@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for Keras Benchmark."""
 
 import pytest
@@ -9,7 +10,12 @@ class MockTfTensor:
     """Provide class docstring."""
 
     def numpy(self) -> float:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return 0.0
 
 
@@ -19,11 +25,21 @@ class MockTf:
     int32 = "int32"
 
     def zeros(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockTfTensor()
 
     def function(self, fn: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return fn
 
     class MockConfig:
@@ -34,7 +50,12 @@ class MockTf:
 
             @staticmethod
             def get_memory_info(_device: str) -> dict:
-                """Execute function."""
+                """Execute function.
+
+                Returns:
+                    object: Description of return.
+
+                """
                 return {"current": 1024 * 1024 * 100}
 
         experimental = MockExperimental
@@ -43,7 +64,12 @@ class MockTf:
 
 
 def test_benchmark_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "keras", None)
     res = bm.benchmark_model("model", "gpu", 1)
     if not res["status"] == "mocked_missing_keras":
@@ -51,7 +77,12 @@ def test_benchmark_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "tf", MockTf())
     monkeypatch.setattr(bm, "keras", object())
     res = bm.benchmark_model("model", "gpu", 1, test_mode=True, num_runs=2)
@@ -62,12 +93,22 @@ def test_benchmark_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "tf", MockTf())
     monkeypatch.setattr(bm, "keras", object())
 
     def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -96,7 +137,12 @@ class MockKeras:
                 """Execute function."""
 
             def __call__(self, x: object) -> object:
-                """Execute function."""
+                """Execute function.
+
+                Returns:
+                    object: Description of return.
+
+                """
                 return x
 
         class Dense:
@@ -106,20 +152,35 @@ class MockKeras:
                 """Execute function."""
 
             def __call__(self, x: object) -> object:
-                """Execute function."""
+                """Execute function.
+
+                Returns:
+                    object: Description of return.
+
+                """
                 return x
 
     layers = MockLayers
 
     def mock_model(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return lambda x: x
 
     Model = mock_model
 
 
 def test_benchmark_keras_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "tf", MockTf())
     monkeypatch.setattr(bm, "keras", MockKeras())
     res = bm.benchmark_model("model", "gpu", 1)
@@ -128,7 +189,12 @@ def test_benchmark_keras_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_benchmark_keras_real_mem(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     mock_tf = MockTf()
     mock_tf.config = type("MockConfig", (), {"experimental": type("MockExp", (), {"get_memory_info": lambda _x: {"current": 1024 * 1024}})})()
     monkeypatch.setattr(bm, "tf", mock_tf)

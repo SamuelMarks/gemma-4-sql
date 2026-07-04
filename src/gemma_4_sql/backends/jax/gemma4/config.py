@@ -1,4 +1,5 @@
-"""Provide module docstring."""
+# Copyright 2024
+"""Core functionality for the config module."""
 
 from __future__ import annotations
 
@@ -7,6 +8,8 @@ from enum import Enum
 
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec
+
+DEFAULT_GRADIENT_CLIPPING = 10000000000.0
 
 
 @dataclass(frozen=True)
@@ -30,7 +33,12 @@ class VisionShardConfig:
 
     @staticmethod
     def no_sharding() -> object:
-        """Return an unpartitioned default VisionShardConfig."""
+        """Return an unpartitioned default VisionShardConfig.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         return VisionShardConfig()
 
 
@@ -83,12 +91,22 @@ class ShardConfig:
 
     @staticmethod
     def no_sharding() -> object:
-        """Return empty sharding config."""
+        """Return empty sharding config.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         return ShardConfig()
 
     @staticmethod
     def default(*, use_fsdp: bool, use_tp: bool) -> object:
-        """Return standard sharding patterns."""
+        """Return standard sharding patterns.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         fsdp = ShardMode.FSDP.value if use_fsdp else None
         tp = ShardMode.TP.value if use_tp else None
         return ShardConfig(
@@ -125,7 +143,7 @@ class AudioConfig:
     attention_logit_cap: float = 50.0
     attention_invalid_logits_value: float = 1e-09
     use_clipped_linears: bool = True
-    gradient_clipping: float = 10000000000.0
+    gradient_clipping: float = DEFAULT_GRADIENT_CLIPPING
     output_proj_dims: int = 1536
     rms_norm_eps: float = 1e-06
 
@@ -135,7 +153,12 @@ class ModelConfigPresets:
 
     @classmethod
     def gemma4_base(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for a base Gemma 4 model."""
+        """Preset configuration for a base Gemma 4 model.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         kwargs = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
@@ -143,7 +166,12 @@ class ModelConfigPresets:
 
     @classmethod
     def gemma4_e2b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for Gemma 4 E2B."""
+        """Preset configuration for Gemma 4 E2B.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         kwargs = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
@@ -151,7 +179,12 @@ class ModelConfigPresets:
 
     @classmethod
     def gemma4_e4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for Gemma 4 E4B."""
+        """Preset configuration for Gemma 4 E4B.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         kwargs = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
@@ -159,7 +192,12 @@ class ModelConfigPresets:
 
     @classmethod
     def gemma4_26b_a4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for Gemma 4 26B A4B (MoE)."""
+        """Preset configuration for Gemma 4 26B A4B (MoE).
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         kwargs = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
@@ -167,7 +205,12 @@ class ModelConfigPresets:
 
     @classmethod
     def gemma4_31b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for Gemma 4 31B."""
+        """Preset configuration for Gemma 4 31B.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         kwargs = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)

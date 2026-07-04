@@ -1,3 +1,4 @@
+# Copyright 2024
 """Gemma 4 Decoder Layer implementation."""
 
 from __future__ import annotations
@@ -42,15 +43,20 @@ class Gemma4DecoderLayer(nnx.Module):
 
     @jax.named_scope("gemma4_layer")
     def __call__(self, x: Array, positions: Array, layer_cache: LayerCache | None = None, attention_mask: Array | None = None, per_layer_input: Array | None = None) -> Array:
-        """Apply the decoder layer."""
+        """Apply the decoder layer.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         lnx = self.pre_self_attention_norm(x)
         attn_out = self.self_attention(lnx, positions, layer_cache, attention_mask)
         attn_out = self.post_self_attention_norm(attn_out)
-        x = x + attn_out
+        x += attn_out
         lnx2 = self.pre_ffw_norm(x)
         mlp_out = self.mlp(lnx2, original_x=x) if isinstance(self.mlp, Gemma4MoE) else self.mlp(lnx2)
         mlp_out = self.post_ffw_norm(mlp_out)
-        x = x + mlp_out
+        x += mlp_out
         if self.config.hidden_size_per_layer_input and per_layer_input is not None:
             residual = x
             x_ple = self.per_layer_input_gate(x)

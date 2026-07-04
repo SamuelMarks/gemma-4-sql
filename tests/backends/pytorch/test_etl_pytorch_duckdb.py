@@ -1,8 +1,10 @@
+# Copyright 2024
 """Provide module docstring."""
 
 import pytest
 
 import gemma_4_sql.backends.pytorch.etl as etl_pytorch
+from gemma_4_sql.type_hints import ETLConfig
 
 
 class MockDatasets:
@@ -16,6 +18,10 @@ class MockDatasets:
         ----
         name: Description of name.
         split: Description of split.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return [{"question": "Q1", "query": "A1"}]
@@ -47,7 +53,7 @@ def test_pytorch_etl_duckdb_missing() -> object:
         etl_pytorch.Dataset = MockDataset()
         etl_pytorch.torch = MockTorch()
         with pytest.raises(Exception, match=r".*"):
-            etl_pytorch.build_dataloader("dummy", "train", 10, duckdb_path=":memory:", duckdb_table="tbl")
+            etl_pytorch.build_dataloader(ETLConfig(dataset_name="dummy", split="train", batch_size=10, duckdb_path=":memory:", duckdb_table="tbl"))
     finally:
         etl_pytorch.duckdb = original_duckdb
         etl_pytorch.datasets = original_datasets

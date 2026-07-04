@@ -260,7 +260,7 @@ First, use the `gemma-4-sql export` command to finalize the weights, then upload
 ```bash
 ./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" "
   # Export the trained model to safetensors
-  gemma-4-sql export --model /mnt/ml_data/gemma-4-sql-finetuned --export-path ./exported/gemma-4-pt --backend pytorch
+  gemma-4-sql export --model /mnt/ml_data/gemma-4-sql-finetuned --path ./exported/gemma-4-pt --backend pytorch
   
   # Upload to GCS
   gcloud storage cp -r ./exported/gemma-4-pt \$BUCKET_NAME/

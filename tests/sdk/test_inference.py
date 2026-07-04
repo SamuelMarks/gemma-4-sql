@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for SDK Inference module."""
 
 import sys
@@ -20,7 +21,10 @@ class MockJAX:
             Args:
             ----
             x: Description of x.
-            axis: Description of axis.
+
+
+            Returns:
+                object: Description of return.
 
             """
             return x
@@ -36,6 +40,10 @@ class MockJAX:
             ----
             shape: Description of shape.
 
+
+            Returns:
+                object: Description of return.
+
             """
             return type("MockJNPArray", (), {"at": type("MockAt", (), {"set": lambda _self, _x: [0.0] * shape[1]})(), "tolist": lambda _self: [[0]]})()
 
@@ -43,10 +51,8 @@ class MockJAX:
         def concatenate(_args: object, _axis: object) -> object:
             """Initialize function concatenate.
 
-            Args:
-            ----
-            args: Description of args.
-            axis: Description of axis.
+            Returns:
+                object: Description of return.
 
             """
             return type("MockJNPArray", (), {"__getitem__": lambda _self, _idx: 0, "__len__": lambda _self: 1})()
@@ -55,10 +61,8 @@ class MockJAX:
         def array(_x: object, _dtype: object) -> object:
             """Initialize function array.
 
-            Args:
-            ----
-            x: Description of x.
-            dtype: Description of dtype.
+            Returns:
+                object: Description of return.
 
             """
             return type("MockJNPArray", (), {"__getitem__": lambda _self, _idx: [0], "__len__": lambda _self: 1})()
@@ -80,7 +84,12 @@ def _mock_jax_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_generate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate with jax."""
+    """Test generate with jax.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "jax")
     if not res.get("sql") == "SELECT 1" and (not res.get("status", "").startswith("mocked_missing_")):
@@ -88,7 +97,12 @@ def test_generate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_generate_keras(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate with keras."""
+    """Test generate with keras.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "keras")
     if not res["sql"] == "SELECT 1":
@@ -96,7 +110,12 @@ def test_generate_keras(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_generate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate with maxtext."""
+    """Test generate with maxtext.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "maxtext")
     if not res.get("sql") == "SELECT 1" and (not res.get("status", "").startswith("mocked_missing_")):
@@ -104,7 +123,12 @@ def test_generate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_generate_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate with pytorch."""
+    """Test generate with pytorch.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "pytorch")
     if not res.get("sql") == "SELECT 1" and (not res.get("status", "").startswith("mocked_missing_")):

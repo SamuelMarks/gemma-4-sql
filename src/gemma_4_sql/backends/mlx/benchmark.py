@@ -1,3 +1,4 @@
+# Copyright 2024
 """MLX-specific benchmarking pipeline."""
 
 from __future__ import annotations
@@ -6,22 +7,28 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import JSONDict, JSONValue, ModelType
 logger = logging.getLogger(__name__)
 mlx = None
 AutoModelForCausalLM = None
 with catch_optional_imports():
     import mlx
-    from transformers import AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM  # pragma: no cover
 
 
-def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[object, str]:
-    """Load the model and determine device."""
+def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[ModelType, str]:
+    """Load the model and determine device.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     if test_mode:
-        return (None, "cpu")
+        return (None, "cpu")  # pragma: no cover
     model = AutoModelForCausalLM.from_pretrained(model_name)
     device = "cuda" if hasattr(mlx, "cuda") and mlx.cuda.is_available() and (hardware != "cpu") else "cpu"
     if hasattr(model, "to"):
@@ -45,14 +52,24 @@ def _run_forward_pass(model: object, dummy_inputs: object) -> None:
 
 
 def _get_memory_mb(model: object, device: str) -> float:
-    """Get max memory allocated in MB."""
+    """Get max memory allocated in MB.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     if model is not None and device == "cuda" and hasattr(mlx, "cuda") and hasattr(mlx.cuda, "max_memory_allocated"):
         return float(mlx.cuda.max_memory_allocated() / (1024 * 1024))
     return 8192.0
 
 
 def _run_benchmark_pass(model: object, device: str, batch_size: int, num_runs: int) -> tuple[float, float, float]:
-    """Execute the forward pass benchmark loop."""
+    """Execute the forward pass benchmark loop.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     dummy_inputs = mlx.zeros((batch_size, 32), dtype=getattr(mlx, "long", None))
     if model is not None and hasattr(dummy_inputs, "to"):
         dummy_inputs = dummy_inputs.to(device)
@@ -85,18 +102,18 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         A dictionary containing benchmark metrics and status.
 
     """
-    if mlx is None or AutoModelForCausalLM is None:
-        return {"backend": "mlx", "model": model_name, "hardware": hardware, "batch_size": batch_size, "status": "mocked_missing_mlx", "tokens_per_sec": 0.0, "latency_ms": 0.0, "memory_mb": 0.0}
-    logger.info("Starting MLX benchmark for %s on %s (batch size %d)", model_name, hardware, batch_size)
-    try:
+
+    def _run() -> tuple[float, float, float]:
         (model, device) = _load_mlx_model_and_device(model_name, hardware, test_mode=bool(kwargs.get("test_mode")))
         num_runs = int(str(kwargs.get("num_runs", 5)))
-        (tokens_per_sec, latency_ms, memory_mb) = _run_benchmark_pass(model, device, batch_size, num_runs)
-        status = "success"
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Benchmark failed: ")
-        status = f"failed: {e!s}"
-        latency_ms = 0.0
-        tokens_per_sec = 0.0
-        memory_mb = 0.0
-    return {"backend": "mlx", "model": model_name, "hardware": hardware, "batch_size": batch_size, "tokens_per_sec": float(tokens_per_sec), "latency_ms": float(latency_ms), "memory_mb": float(memory_mb), "status": status}
+        return _run_benchmark_pass(model, device, batch_size, num_runs)
+
+    return run_benchmark_wrapper(
+        backend_name="mlx",
+        model_name=model_name,
+        hardware=hardware,
+        batch_size=batch_size,
+        missing_deps=mlx is None or AutoModelForCausalLM is None,
+        missing_status="mocked_missing_mlx",
+        benchmark_fn=_run,
+    )

@@ -1,3 +1,4 @@
+# Copyright 2024
 """SDK module for gemma-4-sql."""
 
 from __future__ import annotations

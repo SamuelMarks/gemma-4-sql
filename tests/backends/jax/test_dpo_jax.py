@@ -1,11 +1,14 @@
+# Copyright 2024
 """Tests for JAX DPO logic."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Never
+from typing import TYPE_CHECKING
+from typing import NoReturn as Never
 
 import gemma_4_sql.backends.jax.dpo as tr
 from gemma_4_sql.backends.jax.dpo import dpo_loss, run_dpo
+from gemma_4_sql.type_hints import DPOConfig
 
 if TYPE_CHECKING:
     import pytest
@@ -15,23 +18,48 @@ class MockArray:
     """Initialize class MockArray."""
 
     def __sub__(self: object, other: object) -> MockArray:
-        """Initialize function __sub__."""
+        """Initialize function __sub__.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
     def __mul__(self: object, other: object) -> MockArray:
-        """Initialize function __mul__."""
+        """Initialize function __mul__.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
     def __rmul__(self: object, other: object) -> MockArray:
-        """Initialize function __rmul__."""
+        """Initialize function __rmul__.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
     def __neg__(self: object) -> MockArray:
-        """Initialize function __neg__."""
+        """Initialize function __neg__.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
     def item(self: object) -> float:
-        """Initialize function item."""
+        """Initialize function item.
+
+        Returns:
+            object: Description of return.
+
+        """
         return 0.42
 
 
@@ -41,19 +69,39 @@ class MockJnp:
     int32 = 1
 
     def array(self: object, *_args: object, **_kwargs: object) -> MockArray:
-        """Initialize function array."""
+        """Initialize function array.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
     def zeros(self: object, *_args: object, **_kwargs: object) -> MockArray:
-        """Initialize function zeros."""
+        """Initialize function zeros.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
     def mean(self: object, _x: object) -> MockArray:
-        """Initialize function mean."""
+        """Initialize function mean.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
     def sum(self: object, _x: object, **_kwargs: object) -> MockArray:
-        """Initialize function sum."""
+        """Initialize function sum.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
 
@@ -61,7 +109,12 @@ class MockJnn:
     """Initialize class MockJnn."""
 
     def log_sigmoid(self: object, _x: object) -> MockArray:
-        """Initialize function log_sigmoid."""
+        """Initialize function log_sigmoid.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
 
@@ -69,7 +122,12 @@ class MockOptax:
     """Initialize class MockOptax."""
 
     def adamw(self: object, _lr: object) -> object:
-        """Initialize function adamw."""
+        """Initialize function adamw.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "opt_state"
 
 
@@ -78,19 +136,29 @@ class MockGemma4Config:
 
     @staticmethod
     def gemma4_e2b() -> object:
-        """Initialize function gemma4_e2b."""
+        """Initialize function gemma4_e2b.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "mock_config"
 
 
 class MockGemma4ForCausalLM:
     """Initialize class MockGemma4ForCausalLM."""
 
-    def __init__(self, config: object, _rngs: object = None) -> None:
+    def __init__(self, config: object, rngs: object = None, dtype: object = None) -> None:
         """Initialize function __init__."""
         self.config = config
 
     def __call__(self, _inputs: object) -> object:
-        """Initialize function __call__."""
+        """Initialize function __call__.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockArray()
 
 
@@ -118,15 +186,30 @@ class MockNNX:
 
     @staticmethod
     def jit(fn: object) -> object:
-        """Initialize function jit."""
+        """Initialize function jit.
+
+        Returns:
+            object: Description of return.
+
+        """
         return fn
 
     @staticmethod
     def value_and_grad(fn: object) -> object:
-        """Initialize function value_and_grad."""
+        """Initialize function value_and_grad.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         def wrapper(*_args: object, **_kwargs: object) -> object:
-            """Initialize function wrapper."""
+            """Initialize function wrapper.
+
+            Returns:
+                object: Description of return.
+
+            """
             _ = fn(*_args, **_kwargs)
             return (MockArray(), "grads")
 
@@ -136,11 +219,16 @@ class MockNNX:
 
 
 def test_run_dpo_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test JAX DPO when missing."""
+    """Test JAX DPO when missing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(tr, "jnp", None)
     monkeypatch.setattr(tr, "jnn", None)
     monkeypatch.setattr(tr, "jax", None)
-    res = run_dpo("model", "data")
+    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
     if not res["status"] == "mocked_missing_jax":
         raise AssertionError
     (loss, ch_r, re_r) = dpo_loss(None, None, None, None)
@@ -153,7 +241,12 @@ def test_run_dpo_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_run_dpo_jax(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test JAX DPO."""
+    """Test JAX DPO.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
     monkeypatch.setattr(tr, "jax", object())
@@ -163,17 +256,27 @@ def test_run_dpo_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return {"loader": [{"chosen_inputs": MockArray(), "chosen_labels": MockArray(), "rejected_inputs": MockArray(), "rejected_labels": MockArray()}]}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    res = run_dpo("model", "data")
+    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
     if not res["backend"] == "jax":
         raise AssertionError
 
 
 def test_run_dpo_jax_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test JAX DPO without dataloader."""
+    """Test JAX DPO without dataloader.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
     monkeypatch.setattr(tr, "jax", object())
@@ -183,17 +286,27 @@ def test_run_dpo_jax_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return {"loader": None}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    res = run_dpo("model", "data")
+    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
     if not res["backend"] == "jax":
         raise AssertionError
 
 
 def test_run_dpo_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test JAX DPO with error."""
+    """Test JAX DPO with error.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
     monkeypatch.setattr(tr, "jax", object())
@@ -203,18 +316,28 @@ def test_run_dpo_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
     def mock_raise_error(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
     monkeypatch.setattr(tr, "build_dataloader", Exception)
-    res = run_dpo("model", "data")
+    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
     if not res["backend"] == "jax":
         raise AssertionError
 
 
 def test_run_dpo_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(tr, "jax", "mock")
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
@@ -224,29 +347,49 @@ def test_run_dpo_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         class MockLoader:
             """Provide class docstring."""
 
             def __iter__(self) -> object:
-                """Execute function."""
+                """Execute function.
+
+                Yields:
+                    object: Description of yield.
+
+                """
                 yield {"chosen_inputs": MockArray(), "chosen_labels": MockArray(), "rejected_inputs": MockArray(), "rejected_labels": MockArray()}
 
             def __len__(self) -> int:
-                """Execute function."""
+                """Execute function.
+
+                Returns:
+                    object: Description of return.
+
+                """
                 return 1
 
         return {"loader": MockLoader()}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    res = run_dpo("model", "data")
+    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
     if res["status"] != "completed":
         raise AssertionError
 
 
 def test_run_dpo_jax_no_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(tr, "jax", "mock")
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
@@ -256,17 +399,27 @@ def test_run_dpo_jax_no_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return {"loader": None}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    res = run_dpo("model", "data")
+    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
     if res["status"] != "completed":
         raise AssertionError
 
 
 def test_run_dpo_jax_error_2(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(tr, "jax", "mock")
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
@@ -276,18 +429,28 @@ def test_run_dpo_jax_error_2(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "nnx", MockNNX())
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> Never:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "simulated error"
         raise ValueError(msg)
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    res = run_dpo("model", "data")
+    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
     if "failed: simulated error" not in res["status"]:
         raise AssertionError
 
 
 def test_dpo_loss_valid(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        TypeError: Description.
+
+    """
     monkeypatch.setattr(tr, "jnp", MockJnp())
     monkeypatch.setattr(tr, "jnn", MockJnn())
     (a, _b, _c) = dpo_loss(MockArray(), MockArray(), MockArray(), MockArray())
@@ -297,8 +460,8 @@ def test_dpo_loss_valid(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_dpo_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(tr)
     monkeypatch.undo()

@@ -1,3 +1,4 @@
+# Copyright 2024
 """Unified tests for Benchmark across all backends."""
 
 from __future__ import annotations
@@ -14,31 +15,61 @@ class UniversalMock(MagicMock):
     """Mock."""
 
     def __call__(self, *_args: object, **kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         if "num_records" in kwargs:
             return self
         return UniversalMock()
 
     def numpy(self) -> float:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return 0.0
 
     def numel(self) -> int:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return 1000
 
     def to(self, *_a: object, **_k: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self
 
     def eval(self) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self
 
 
 @pytest.fixture
 def mock_benchmark_backend(request: object, monkeypatch: object) -> object:
-    """Mock."""
+    """Mock.
+
+    Returns:
+        object: Description of return.
+
+    """
     backend = request.param
     module = importlib.import_module(f"gemma_4_sql.backends.{backend}.benchmark")
     um = UniversalMock()

@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for SDK DPO module."""
 
 import pytest
@@ -6,8 +7,13 @@ from gemma_4_sql.sdk.dpo import run_dpo
 
 
 def test_run_dpo_pytorch() -> None:
-    """Initialize function test_run_dpo_pytorch."""
-    res = run_dpo("model1", "data1", backend="pytorch", beta=0.1)
+    """Initialize function test_run_dpo_pytorch.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    res = run_dpo("model1", "data1", "pytorch", 0.1)
     if not res["backend"] == "pytorch":
         raise AssertionError
     if not res["action"] == "dpo":
@@ -17,8 +23,13 @@ def test_run_dpo_pytorch() -> None:
 
 
 def test_run_dpo_jax() -> None:
-    """Initialize function test_run_dpo_jax."""
-    res = run_dpo("model2", "data2", backend="jax", beta=0.2)
+    """Initialize function test_run_dpo_jax.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    res = run_dpo("model2", "data2", "jax", 0.2)
     if not res["backend"] == "jax":
         raise AssertionError
     if not res["action"] == "dpo":
@@ -28,8 +39,13 @@ def test_run_dpo_jax() -> None:
 
 
 def test_run_dpo_keras() -> None:
-    """Initialize function test_run_dpo_keras."""
-    res = run_dpo("model3", "data3", backend="keras", beta=0.3)
+    """Initialize function test_run_dpo_keras.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    res = run_dpo("model3", "data3", "keras", 0.3)
     if not res["backend"] == "keras":
         raise AssertionError
     if not res["action"] == "dpo":
@@ -39,8 +55,13 @@ def test_run_dpo_keras() -> None:
 
 
 def test_run_dpo_maxtext() -> None:
-    """Initialize function test_run_dpo_maxtext."""
-    res = run_dpo("model4", "data4", backend="maxtext", beta=0.4)
+    """Initialize function test_run_dpo_maxtext.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    res = run_dpo("model4", "data4", "maxtext", 0.4)
     if not res["backend"] == "maxtext":
         raise AssertionError
     if not res["action"] == "dpo":
@@ -52,4 +73,4 @@ def test_run_dpo_maxtext() -> None:
 def test_run_dpo_unknown_backend() -> None:
     """Initialize function test_run_dpo_unknown_backend."""
     with pytest.raises(ValueError, match="Unknown backend: missing"):
-        run_dpo("my-model", "my-data", backend="missing")
+        run_dpo("my-model", "my-data", "missing")

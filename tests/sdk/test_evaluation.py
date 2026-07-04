@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for SDK Evaluation module."""
 
 import pytest
@@ -6,7 +7,12 @@ from gemma_4_sql.sdk.evaluation import evaluate
 
 
 def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test evaluate with jax."""
+    """Test evaluate with jax.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     jax_agent = get_backend("jax")
     monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
@@ -22,7 +28,12 @@ def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_evaluate_keras(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test evaluate with keras."""
+    """Test evaluate with keras.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     keras_agent = get_backend("keras")
     monkeypatch.setattr(keras_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
@@ -38,10 +49,16 @@ def test_evaluate_keras(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test evaluate with maxtext."""
+    """Test evaluate with maxtext.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     maxtext_agent = get_backend("maxtext")
     monkeypatch.setattr(maxtext_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+    monkeypatch.setattr(maxtext_agent, "build_dataloader", lambda *_args, **_kwargs: {"loader": [{"inputs": [[1]], "targets": [[2]]}]})
     res = evaluate("model1", "data1", "maxtext")
     if res["backend"] != "maxtext":
         raise AssertionError
@@ -54,10 +71,16 @@ def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_evaluate_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test evaluate with pytorch."""
+    """Test evaluate with pytorch.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     pytorch_agent = get_backend("pytorch")
     monkeypatch.setattr(pytorch_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+    monkeypatch.setattr(pytorch_agent, "build_dataloader", lambda *_args, **_kwargs: {"loader": [([[1]], [[2]])]})
     res = evaluate("model1", "data1", "pytorch")
     if res["backend"] != "pytorch":
         raise AssertionError

@@ -1,6 +1,7 @@
+# Copyright 2024
 """Provide module docstring."""
 
-from typing import Never
+from typing import NoReturn as Never
 
 import jax
 import jax.numpy as jnp
@@ -11,10 +12,15 @@ from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
 
 def test_assign_weight_type_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    m_params = __import__("gemma_4_sql.backends.jax.gemma4.params")
+    m_params = __import__("gemma_4_sql.backends.jax.gemma4.params", fromlist=[""])
 
     def raise_type_error(*_args: object, **_kwargs: object) -> Never:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            TypeError: Description.
+
+        """
         msg = "err"
         raise TypeError(msg)
 
@@ -40,15 +46,30 @@ class MockNNX:
     """Provide class docstring."""
 
     def eval_shape(self, _fn: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockModelObj()
 
     def split(self, _x: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return (None, type("State", (), {"to_pure_dict": lambda _self: {"model": {"embed_scale": jax.ShapeDtypeStruct((1,), jnp.bfloat16)}, "vision_tower": {"embeddings": {"position_ids": jax.ShapeDtypeStruct((1,), jnp.int32)}}}})())
 
     def merge(self, _graph_def: object, state: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return state
 
     class Rngs:
@@ -62,13 +83,23 @@ class MockSt:
     """Provide class docstring."""
 
     def safe_open(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
-        return type("CM", (), {"__enter__": lambda _self: _self, "__exit__": lambda _self, *_a: None, "keys": lambda _self: [], "get_tensor": lambda _self, _k: jnp.array(1)})()
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
+        return type("CM", (), {"__enter__": lambda _self: _self, "__exit__": lambda _self, *_a: None, "__iter__": lambda _self: iter([]), "keys": lambda _self: [], "get_tensor": lambda _self, _k: jnp.array(1)})()
 
 
 def test_create_gemma4_from_pretrained_missing_nnx_state(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function."""
-    m_params = __import__("gemma_4_sql.backends.jax.gemma4.params")
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    m_params = __import__("gemma_4_sql.backends.jax.gemma4.params", fromlist=[""])
     monkeypatch.setattr(m_params, "nnx", MockNNX())
     monkeypatch.setattr(m_params, "safetensors", MockSt())
     (tmp_path / "model.safetensors").touch()

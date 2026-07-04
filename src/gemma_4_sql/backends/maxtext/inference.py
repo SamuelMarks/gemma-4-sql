@@ -1,8 +1,10 @@
+# Copyright 2024
 """Maxtext-specific inference logic."""
 
 from __future__ import annotations
 
 import logging
+import operator
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
@@ -21,8 +23,29 @@ with catch_optional_imports():
     from maxtext.models.gemma4 import Gemma4Model
 
 
+def _beam_search_step(seq: jnp.ndarray, score: float, model_apply_fn: object, beam_width: int) -> list[tuple[jnp.ndarray, float]]:
+    """Helper to process a single sequence and expand it into multiple beams."""
+    logits = model_apply_fn(seq)
+    log_probs = jax.nn.log_softmax(logits, axis=-1)[0]
+    top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]
+    top_probs = log_probs[top_indices]
+
+    new_beams = []
+    for i in range(beam_width):
+        token = top_indices[i].reshape(1, 1)
+        new_seq = jnp.concatenate([seq, token], axis=-1)
+        new_score = score + top_probs[i].item()
+        new_beams.append((new_seq, new_score))
+    return new_beams
+
+
 def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: int, max_length: int, eos_token_id: int) -> tuple[jnp.ndarray, float]:
-    """Maxtext native beam search implementation (XLA compiled via JIT)."""
+    """Maxtext native beam search implementation (XLA compiled via JIT).
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     beams = [(input_ids, 0.0)]
     for _ in range(max_length):
         new_beams = []
@@ -30,16 +53,11 @@ def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_wid
             if seq[0, -1] == eos_token_id:
                 new_beams.append((seq, score))
                 continue
-            logits = model_apply_fn(seq)
-            log_probs = jax.nn.log_softmax(logits, axis=-1)[0]
-            top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]
-            top_probs = log_probs[top_indices]
-            for i in range(beam_width):
-                token = top_indices[i].reshape(1, 1)
-                new_seq = jnp.concatenate([seq, token], axis=-1)
-                new_score = score + top_probs[i].item()
-                new_beams.append((new_seq, new_score))
-        new_beams.sort(key=lambda x: x[1], reverse=True)
+
+            expanded_beams = _beam_search_step(seq, score, model_apply_fn, beam_width)
+            new_beams.extend(expanded_beams)
+
+        new_beams.sort(key=operator.itemgetter(1), reverse=True)
         beams = new_beams[:beam_width]
         if all(seq[0, -1] == eos_token_id for (seq, _) in beams):
             break

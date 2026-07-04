@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for missing DB Engine coverage."""
 
 import contextlib
@@ -10,7 +11,12 @@ from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 
 
 def test_db_engine_insert_no_description() -> object:
-    """Initialize function test_db_engine_insert_no_description."""
+    """Initialize function test_db_engine_insert_no_description.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     engine = LiveDatabaseEngine(db_path=":memory:", db_type="sqlite", read_only=False)
     engine.conn.execute("CREATE TABLE t (id INT)")
     (success, res, err) = engine.execute_with_feedback("INSERT INTO t VALUES (1)")
@@ -33,7 +39,12 @@ def test_db_engine_safety() -> None:
 
 
 def test_db_engine_safety_bypass() -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     engine = LiveDatabaseEngine(db_path=":memory:", db_type="sqlite", read_only=False)
     engine.conn.execute("CREATE TABLE t (id INT)")
     (success, _res, _err) = engine.execute_with_feedback("INSERT INTO t VALUES (1)")
@@ -43,7 +54,12 @@ def test_db_engine_safety_bypass() -> None:
 
 @pytest.mark.asyncio
 async def test_live_database_engine_duckdb_async() -> None:
-    """Test DuckDB async fallback."""
+    """Test DuckDB async fallback.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     mock_duckdb = MagicMock()
     mock_conn = MagicMock()
     mock_duckdb.connect.return_value = mock_conn
@@ -69,20 +85,35 @@ async def test_live_database_engine_duckdb_async() -> None:
 
 @pytest.mark.asyncio
 async def test_live_database_engine_postgres_async() -> None:
-    """Test asyncpg for postgres."""
+    """Test asyncpg for postgres.
+
+    Raises:
+        AssertionError: Description.
+
+    """
 
     class MockAsyncpg:
         """Provide class docstring."""
 
         async def connect(self, *_args: object, **_kwargs: object) -> object:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return MockAsyncConn()
 
     class MockAsyncConn:
         """Provide class docstring."""
 
         async def fetch(self, _query: object) -> object:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return [{"col": 42}]
 
         async def close(self) -> None:
@@ -133,7 +164,12 @@ async def test_live_database_engine_postgres_async_kwargs() -> None:
         """Provide class docstring."""
 
         async def connect(self, *_args: object, **_kwargs: object) -> object:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return MockAsyncConn()
 
     class MockAsyncConn:
@@ -148,7 +184,12 @@ async def test_live_database_engine_postgres_async_kwargs() -> None:
 
 @pytest.mark.asyncio
 async def test_live_database_engine_sqlite_async_no_description(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
 
     class MockAsyncCursor:
         """Provide class docstring."""
@@ -156,7 +197,12 @@ async def test_live_database_engine_sqlite_async_no_description(monkeypatch: pyt
         description = None
 
         async def fetchall(self) -> object:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return []
 
         async def close(self) -> None:
@@ -165,8 +211,13 @@ async def test_live_database_engine_sqlite_async_no_description(monkeypatch: pyt
     class MockAsyncConn:
         """Provide class docstring."""
 
-        async def execute(self, _query: object) -> object:
-            """Execute function."""
+        async def execute(self, *_args: object, **_kwargs: object) -> object:
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return MockAsyncCursor()
 
         async def close(self) -> None:
@@ -176,7 +227,12 @@ async def test_live_database_engine_sqlite_async_no_description(monkeypatch: pyt
         """Provide class docstring."""
 
         async def connect(self, *_args: object, **_kwargs: object) -> object:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return MockAsyncConn()
 
     sqlite_adapter = __import__("gemma_4_sql.sdk.adapters", fromlist=["sqlite_adapter"]).sqlite_adapter
@@ -192,15 +248,20 @@ async def test_live_database_engine_sqlite_async_no_description(monkeypatch: pyt
 
 @pytest.mark.asyncio
 async def test_live_database_engine_sqlite_async_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
 
     class MockAsyncConn:
         """Provide class docstring."""
 
-        async def execute(self, _query: object) -> typing.Never:
+        async def execute(self, *_args: object, **_kwargs: object) -> typing.NoReturn:
             """Execute function."""
             msg = "Async error"
-            sqlite3 = __import__("sqlite3")
+            sqlite3 = __import__("sqlite3", fromlist=[""])
             raise sqlite3.Error(msg)
 
         async def close(self) -> None:
@@ -210,7 +271,12 @@ async def test_live_database_engine_sqlite_async_error(monkeypatch: pytest.Monke
         """Provide class docstring."""
 
         async def connect(self, *_args: object, **_kwargs: object) -> object:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
             return MockAsyncConn()
 
     sqlite_adapter = __import__("gemma_4_sql.sdk.adapters", fromlist=["sqlite_adapter"]).sqlite_adapter

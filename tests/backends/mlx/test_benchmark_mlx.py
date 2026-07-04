@@ -1,6 +1,7 @@
+# Copyright 2024
 """Provide module docstring."""
 
-from typing import Never
+from typing import NoReturn as Never
 
 import pytest
 
@@ -12,7 +13,12 @@ class MockMlxCuda:
 
     @staticmethod
     def is_available() -> bool:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return True
 
     @staticmethod
@@ -21,7 +27,12 @@ class MockMlxCuda:
 
     @staticmethod
     def max_memory_allocated() -> float:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return 1024 * 1024 * 100
 
 
@@ -29,7 +40,12 @@ class MockMlxTensor:
     """Provide class docstring."""
 
     def to(self, _device: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self
 
 
@@ -40,8 +56,13 @@ class MockMlx:
     long = "long"
 
     @staticmethod
-    def zeros(_shape: object, _dtype: object) -> object:
-        """Execute function."""
+    def zeros(_shape: object, dtype: object = None) -> object:
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockMlxTensor()
 
     class MockNoGrad:
@@ -66,7 +87,12 @@ class MockModel:
         """Execute function."""
 
     def __call__(self, x: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return x
 
 
@@ -75,12 +101,22 @@ class MockAutoModel:
 
     @staticmethod
     def from_pretrained(_name: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockModel()
 
 
 def test_benchmark_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "mlx", MockMlx())
     monkeypatch.setattr(bm, "AutoModelForCausalLM", MockAutoModel())
     res = bm.benchmark_model("mod", "gpu", 2, test_mode=False)
@@ -91,7 +127,12 @@ def test_benchmark_real(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError
 
     def mock_fail(*_args: object, **_kwargs: object) -> Never:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            RuntimeError: Description.
+
+        """
         msg = "failed!"
         raise RuntimeError(msg)
 

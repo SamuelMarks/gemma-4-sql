@@ -1,3 +1,4 @@
+# Copyright 2024
 """Run main package for gemma-4-sql."""
 
 from __future__ import annotations

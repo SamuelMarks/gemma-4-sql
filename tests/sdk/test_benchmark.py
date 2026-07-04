@@ -1,3 +1,4 @@
+# Copyright 2024
 """Provide module docstring."""
 
 import pytest
@@ -6,28 +7,48 @@ from gemma_4_sql.sdk.benchmark import benchmark
 
 
 def test_benchmark_jax() -> object:
-    """Initialize function test_benchmark_jax."""
+    """Initialize function test_benchmark_jax.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = benchmark("gemma-4", "gpu", 1, "jax")
     if not res["backend"] == "jax":
         raise AssertionError
 
 
 def test_benchmark_keras() -> object:
-    """Initialize function test_benchmark_keras."""
+    """Initialize function test_benchmark_keras.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = benchmark("gemma-4", "gpu", 1, "keras")
     if not res["backend"] == "keras":
         raise AssertionError
 
 
 def test_benchmark_maxtext() -> object:
-    """Initialize function test_benchmark_maxtext."""
+    """Initialize function test_benchmark_maxtext.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = benchmark("gemma-4", "gpu", 1, "maxtext")
     if not res["backend"] == "maxtext":
         raise AssertionError
 
 
 def test_benchmark_pytorch() -> object:
-    """Initialize function test_benchmark_pytorch."""
+    """Initialize function test_benchmark_pytorch.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = benchmark("gemma-4", "gpu", 1, "pytorch")
     if not res["backend"] == "pytorch":
         raise AssertionError

@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for Keras logging."""
 
 from unittest.mock import MagicMock
@@ -6,7 +7,12 @@ from gemma_4_sql.backends.keras import logging as keras_logging
 
 
 def test_log_metrics_no_tb() -> None:
-    """Test Keras logging when TB is missing."""
+    """Test Keras logging when TB is missing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     keras_logging.tf = None
     metrics = {"loss": 0.5, "acc": 0.9}
     res = keras_logging.log_metrics(metrics, step=10, log_dir="test_logs")
@@ -17,7 +23,12 @@ def test_log_metrics_no_tb() -> None:
 
 
 def test_log_metrics_with_tb() -> None:
-    """Test Keras logging when TB is available."""
+    """Test Keras logging when TB is available.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     mock_tf = MagicMock()
     mock_writer = MagicMock()
     mock_tf.summary.create_file_writer.return_value = mock_writer
@@ -37,9 +48,9 @@ def test_log_metrics_with_tb() -> None:
 
 def test_logging_keras_imports_fail(monkeypatch: object) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    mdl = __import__("gemma_4_sql.backends.keras.logging")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    mdl = __import__("gemma_4_sql.backends.keras.logging", fromlist=[""])
     monkeypatch.setitem(sys.modules, "tensorflow", None)
     importlib.reload(mdl)
     monkeypatch.undo()

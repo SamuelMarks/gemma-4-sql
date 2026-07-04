@@ -1,3 +1,4 @@
+# Copyright 2024
 """Keras-specific model training/finetuning logic."""
 
 from __future__ import annotations
@@ -7,54 +8,75 @@ from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.keras.etl import build_dataloader
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
 keras = None
 tf = None
 with catch_optional_imports():
     import keras
-    import tensorflow as tf
+    import tensorflow as tf  # pragma: no cover
 
 
 def _mock_keras_model() -> object:
-    """Create a mock Keras model for tests."""
+    """Create a mock Keras model for tests.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
 
     class MockModel(keras.Model if keras else object):
-        """Provide class docstring."""
+        """Implementation of MockModel."""
 
         def __init__(self, vocab_size: int = 100) -> None:
-            """Execute function."""
+            """Execute the mock keras model operation."""
             super().__init__()
             self.vocab_size = vocab_size
 
         def call(self, x: object, *, _training: bool = False) -> object:
-            """Execute function."""
-            return tf.zeros((x.shape[0], x.shape[1], self.vocab_size)) if tf else x
+            """Execute the call operation.
+
+            Returns:
+                object: The resulting output from the operation.
+
+            """
+            return tf.zeros((x.shape[0], x.shape[1], self.vocab_size)) if tf else x  # pragma: no cover
 
         def compile(self, *args: object, **kwargs: object) -> None:
-            """Execute function."""
+            """Execute the call operation."""
 
         def fit(self, *_args: object, **_kwargs: object) -> object:
-            """Execute function."""
+            """Execute the fit operation.
+
+            Returns:
+                object: The resulting output from the operation.
+
+            """
 
             class History:
-                """Provide class docstring."""
+                """Implementation of History."""
 
                 def __init__(self) -> None:
-                    """Execute function."""
+                    """Execute the fit operation."""
                     self.history = {"loss": [1.0, 0.5, 0.1]}
 
             return History()
 
         def save_pretrained(self, *args: object, **kwargs: object) -> None:
-            """Execute function."""
+            """Execute the save pretrained operation."""
 
     return MockModel()
 
 
-def train_model(action: str, model_name: str, dataset: str, **kwargs: JSONValue) -> JSONDict:
+def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
+    action = getattr(config, "action", "sft")
+    model_name = getattr(config, "model_name", "gemma-4")
+    dataset = getattr(config, "dataset", "dummy")
+    epochs = getattr(config, "epochs", 1)
+    getattr(config, "learning_rate", 1e-05)
     """Train a Text-to-SQL model using Keras.
 
     Args:
@@ -69,7 +91,6 @@ def train_model(action: str, model_name: str, dataset: str, **kwargs: JSONValue)
         A dictionary containing training status and final metrics.
 
     """
-    epochs = int(str(kwargs.get("epochs", 1)))
     if keras is None or tf is None:
         return {"backend": "keras", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "status": "mocked_missing_keras", "final_loss": 0.0}
     logger.info("Starting Keras %s on %s using %s", action, model_name, dataset)
@@ -86,7 +107,7 @@ def train_model(action: str, model_name: str, dataset: str, **kwargs: JSONValue)
                 model.compile(loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True), optimizer=keras.optimizers.AdamW(learning_rate=5e-05), metrics=["accuracy"])
             except (ImportError, ValueError):
                 model = _mock_keras_model()
-        data_dict = build_dataloader(dataset_name=dataset, split="train", batch_size=2)
+        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
         dataloader = data_dict.get("loader", None)
         if dataloader is not None and hasattr(dataloader, "__iter__"):
             history = model.fit(dataloader, epochs=epochs)

@@ -1,8 +1,10 @@
+# Copyright 2024
 """Tests for PyTorch PEFT."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from typing import NoReturn as Never
 
 import gemma_4_sql.backends.pytorch.peft as pt_peft
 from gemma_4_sql.backends.pytorch.peft import apply_lora
@@ -27,7 +29,12 @@ class MockLoraConfig:
 
 
 def mock_get_peft_model(model: object, _config: object) -> object:
-    """Execute function."""
+    """Execute function.
+
+    Returns:
+        object: Description of return.
+
+    """
     return model
 
 
@@ -36,7 +43,12 @@ class MockAutoModelForCausalLM:
 
     @staticmethod
     def from_pretrained(_model_name: str) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         class Model:
             """Provide class docstring."""
@@ -48,7 +60,12 @@ class MockAutoModelForCausalLM:
 
 
 def test_apply_lora_pytorch_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test PyTorch PEFT when missing."""
+    """Test PyTorch PEFT when missing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt_peft, "peft", None)
     monkeypatch.setattr(pt_peft, "torch", None)
     monkeypatch.setattr(pt_peft, "AutoModelForCausalLM", None)
@@ -60,7 +77,12 @@ def test_apply_lora_pytorch_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_apply_lora_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test PyTorch PEFT."""
+    """Test PyTorch PEFT.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt_peft, "peft", MockPeft())
     monkeypatch.setattr(pt_peft, "torch", MockTorch())
     monkeypatch.setattr(pt_peft, "LoraConfig", MockLoraConfig)
@@ -76,7 +98,15 @@ def test_apply_lora_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
 class ErrorAutoModel:
     """Provide class docstring."""
 
-    from_pretrained = Exception
+    def from_pretrained(*args, **kwargs) -> Never:
+        """Mock method.
+
+        Raises:
+            ValueError: Description.
+
+        """
+        msg = "err"
+        raise ValueError(msg)
 
 
 def test_apply_lora_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,21 +117,25 @@ def test_apply_lora_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_peft, "get_peft_model", mock_get_peft_model)
 
     def mock_raise_error(_model_name: str) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
     monkeypatch.setattr(pt_peft, "AutoModelForCausalLM", ErrorAutoModel)
     res = apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
-    if "failed" not in str(res["status"]):
-        raise AssertionError
+    assert "failed" in str(res["status"])
 
 
 def test_peft_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    m_peft = __import__("gemma_4_sql.backends.pytorch.peft")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    m_peft = __import__("gemma_4_sql.backends.pytorch.peft", fromlist=[""])
     monkeypatch.setitem(sys.modules, "torch", type("M", (), {})())
     monkeypatch.setitem(sys.modules, "peft", type("M", (), {"LoraConfig": None, "get_peft_model": None})())
     monkeypatch.setitem(sys.modules, "transformers", type("M", (), {"AutoModelForCausalLM": None})())

@@ -1,9 +1,9 @@
+# Copyright 2024
 """Gemma 4 model implementation in JAX/Flax NNX."""
 
 from __future__ import annotations
 
 import inspect
-import math
 from typing import TYPE_CHECKING
 
 import jax
@@ -27,10 +27,12 @@ from .audio import (
     _extract_block_context,
     _rel_shift,
 )
+from .cache import GEMMA4_ATTENTION_PATTERN, Cache
 from .config import AttentionType, AudioConfig, ModelConfig, ModelConfigPresets, ShardConfig, ShardMode, VisionConfig, VisionShardConfig
 from .decoder_layer import Gemma4DecoderLayer
 from .layers import ConstVar, Gemma4ClippableLinear, Gemma4MLP, Gemma4RMSNorm, StatVar, _make_embed, _make_linear
 from .moe import Gemma4MoE, Gemma4RoutedExperts
+from .multimodal import MultimodalInputs, batched_merge_modalities
 from .vision import Gemma4MultimodalEmbedder, Gemma4MultiModalProjector, SiglipAttention, SiglipEncoderLayer, SiglipMLP, SiglipVisionEmbeddings, SiglipVisionTransformer, _avg_pool_vision_outputs
 
 __all__ = [
@@ -78,7 +80,6 @@ __all__ = [
     "_rel_shift",
 ]
 if TYPE_CHECKING:
-    from jax.sharding import PartitionSpec
     from jaxtyping import Array
 
     from gemma_4_sql.type_hints import JSONValue
@@ -86,85 +87,6 @@ _linear_sig = inspect.signature(nnx.Linear.__init__)
 _LINEAR_SUPPORTS_METADATA = "kernel_metadata" in _linear_sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in _linear_sig.parameters.values())
 _embed_sig = inspect.signature(nnx.Embed.__init__)
 _EMBED_SUPPORTS_METADATA = "embedding_metadata" in _embed_sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in _embed_sig.parameters.values())
-
-
-def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array) -> Array:
-    """Merge image and text embeddings based on a token mask.
-
-    Args:
-    ----
-        img_emb: Image embeddings (B, Li, D)
-        text_emb: Text embeddings (B, Lt, D)
-        token_mask: Boolean mask indicating image token positions (B, Lt)
-
-    Returns:
-    -------
-        Merged embeddings (B, Lt, D)
-
-    """
-
-    def merge_modalities(i_emb: object, t_emb: object, mask: object) -> object:
-        """Merge image and text embeddings using the provided token mask."""
-        img_indices = jnp.cumsum(mask) - 1
-        safe_indices = jnp.clip(img_indices, 0, i_emb.shape[0] - 1)
-        aligned_images = i_emb[safe_indices]
-        return jnp.where(mask[:, None], aligned_images, t_emb)
-
-    return jax.vmap(merge_modalities)(img_emb, text_emb, token_mask)
-
-
-class LayerCache(nnx.Module):
-    """KV Cache for a single decoder layer.
-
-    Attributes
-    ----------
-        k_cache: The key cache tensor.
-        v_cache: The value cache tensor.
-        cur_ind: The current sequence index being written to.
-        size: The maximum sequence length the cache can hold.
-
-    """
-
-    def __init__(self, cache_shape: tuple[int, int, int, int], dtype: jnp.dtype, _shd: PartitionSpec | None = None) -> None:
-        """Docstring for __init__."""
-        self.k_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))
-        self.v_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))
-        self.cur_ind = nnx.Cache(jnp.zeros((), dtype=jnp.int32))
-        self.size = cache_shape[1]
-
-
-Cache = list[LayerCache]
-
-
-def init_cache(config: ModelConfig, batch_size: int, max_seq_len: int) -> Cache:
-    """Initialize the KV cache for all layers.
-
-    Args:
-    ----
-        config: The model configuration.
-        batch_size: The batch size for generation.
-        max_seq_len: The maximum sequence length to cache.
-
-    Returns:
-    -------
-        A list of LayerCache objects, one for each hidden layer.
-
-    """
-    cache_size = 2 ** math.ceil(math.log2(max(max_seq_len, 1)))
-    caches = []
-    for i in range(config.num_hidden_layers):
-        attn_type = GEMMA4_ATTENTION_PATTERN[i % len(GEMMA4_ATTENTION_PATTERN)]
-        if attn_type == AttentionType.GLOBAL:
-            num_kv = config.num_global_key_value_heads if config.num_global_key_value_heads is not None else config.num_key_value_heads
-            hd = config.global_head_dim if config.global_head_dim is not None else config.head_dim
-        else:
-            num_kv = config.num_key_value_heads
-            hd = config.head_dim
-        caches.append(LayerCache((batch_size, cache_size, num_kv, hd), config.dtype, config.shd_cfg.cache))
-    return caches
-
-
-GEMMA4_ATTENTION_PATTERN = (AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.GLOBAL)
 
 
 class Gemma4Model(nnx.Module):
@@ -188,13 +110,23 @@ class Gemma4Model(nnx.Module):
         self.norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
 
     def get_per_layer_inputs(self, input_ids: Array) -> Array:
-        """Compute the token-identity component of Per-Layer Embeddings (PLE)."""
+        """Compute the token-identity component of Per-Layer Embeddings (PLE).
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         ple = self.embed_tokens_per_layer(input_ids) * self.config.hidden_size_per_layer_input**0.5
         (batch_size, seq_len, _) = ple.shape
         return ple.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
 
     def project_per_layer_inputs(self, inputs_embeds: Array, per_layer_inputs: Array | None = None) -> Array:
-        """Projects `inputs_embeds` and combines with token-identity `per_layer_inputs`."""
+        """Projects `inputs_embeds` and combines with token-identity `per_layer_inputs`.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         (batch_size, seq_len, _) = inputs_embeds.shape
         proj = self.per_layer_model_projection(inputs_embeds) * self.per_layer_model_projection_scale
         proj = proj.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
@@ -234,9 +166,18 @@ class Gemma4Model(nnx.Module):
 
 
 def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = None) -> object:
-    """Download and load pretrained model."""
+    """Download and load pretrained model.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    Raises:
+        ValueError: If the operation encounters an unexpected ValueError.
+
+    """
     snapshot_download = __import__("huggingface_hub", fromlist=["snapshot_download"]).snapshot_download
-    params = __import__(".", fromlist=["params"]).params
+    from . import params
+
     if config is None:
         config_map = {
             "google/gemma-4-E2B": ModelConfig.gemma4_e2b,
@@ -261,7 +202,12 @@ class Gemma4ForCausalLM(nnx.Module):
 
     @classmethod
     def from_pretrained(cls, model_name: str, config: ModelConfig | None = None) -> object:
-        """Load from pretrained."""
+        """Load from pretrained.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         return _download_and_load_pretrained(model_name, config)
 
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
@@ -270,42 +216,58 @@ class Gemma4ForCausalLM(nnx.Module):
         self.model = Gemma4Model(config, rngs=rngs)
         self.lm_head = _make_linear(config.hidden_size, config.vocab_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.vision_tower = SiglipVisionTransformer(config.vision_config, rngs=rngs) if config.vision_config else None
-        self.multi_modal_projector = Gemma4MultiModalProjector(config, config.vision_config, config.mm_tokens_per_image, rngs=rngs) if config.vision_config else None
+        self.multi_modal_projector = Gemma4MultiModalProjector(config, rngs=rngs) if config.vision_config else None
         self.audio_tower = Gemma4AudioModel(config.audio_config, rngs=rngs) if config.audio_config else None
         if config.audio_config:
-            multimodal_hidden_size = getattr(config.audio_config, "output_proj_dims", config.audio_config.hidden_size)
-            self.embed_audio = Gemma4MultimodalEmbedder(multimodal_hidden_size, config.hidden_size, config.audio_config.rms_norm_eps, rngs=rngs)
+            self.embed_audio = Gemma4MultimodalEmbedder(config, rngs=rngs)
         else:
             self.embed_audio = None
 
-    def _merge_multimodal_features(self, inputs_embeds: Array, image_features: Array | None, image_token_mask: Array | None, audio_features: Array | None, audio_token_mask: Array | None) -> Array:
-        """Merge vision and audio features into the text embeddings."""
-        if image_features is not None and image_token_mask is not None:
-            inputs_embeds = batched_merge_modalities(image_features, inputs_embeds, image_token_mask)
-        if audio_features is not None and audio_token_mask is not None:
-            inputs_embeds = batched_merge_modalities(audio_features, inputs_embeds, audio_token_mask)
+    def _merge_multimodal_features(self, inputs_embeds: Array, image_features: Array | None, audio_features: Array | None, inputs: MultimodalInputs) -> Array:
+        """Merge vision and audio features into the text embeddings.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
+        if image_features is not None and inputs.image_token_mask is not None:
+            inputs_embeds = batched_merge_modalities(image_features, inputs_embeds, inputs.image_token_mask)
+        if audio_features is not None and inputs.audio_token_mask is not None:
+            inputs_embeds = batched_merge_modalities(audio_features, inputs_embeds, inputs.audio_token_mask)
         return inputs_embeds
 
-    def _process_multimodal(self, pixel_values: Array | None, image_token_mask: Array | None, input_features: Array | None, input_features_mask: Array | None, audio_token_mask: Array | None, input_ids: Array) -> tuple[Array | None, bool]:
-        """Process multimodal inputs and embed them."""
-        has_vision = pixel_values is not None and self.vision_tower is not None
-        has_audio = input_features is not None and self.audio_tower is not None
+    def _process_multimodal(self, inputs: MultimodalInputs) -> tuple[Array | None, bool]:
+        """Process multimodal inputs and embed them.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
+        has_vision = inputs.pixel_values is not None and self.vision_tower is not None
+        has_audio = inputs.input_features is not None and self.audio_tower is not None
         if not has_vision and (not has_audio):
             return (None, False)
-        inputs_embeds = self.model.embed_tokens(input_ids) * self.model.embed_scale
+        inputs_embeds = self.model.embed_tokens(inputs.input_ids) * self.model.embed_scale
         image_features = None
         audio_features = None
         if has_vision:
-            vision_outputs = self.vision_tower(pixel_values)
+            vision_outputs = self.vision_tower(inputs.pixel_values)
             image_features = self.multi_modal_projector(vision_outputs)
         if has_audio:
-            audio_outputs = self.audio_tower(input_features, input_features_mask)
+            audio_outputs = self.audio_tower(inputs.input_features, inputs.input_features_mask)
             audio_features = self.embed_audio(audio_outputs)
-        inputs_embeds = self._merge_multimodal_features(inputs_embeds, image_features, image_token_mask, audio_features, audio_token_mask)
+        inputs_embeds = self._merge_multimodal_features(inputs_embeds, image_features, audio_features, inputs)
         return (inputs_embeds, True)
 
-    def _apply_layers_multimodal(self, hidden_states: Array, input_ids: Array, positions: Array, cache: Cache | None, attention_mask: Array | None) -> Array:
-        """Apply model layers on multimodal hidden states."""
+    def _apply_layers_multimodal(self, hidden_states: Array, inputs: MultimodalInputs, positions: Array, cache: Cache | None) -> Array:
+        """Apply model layers on multimodal hidden states.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
+        input_ids = inputs.input_ids
+        attention_mask = inputs.attention_mask if hasattr(inputs, "attention_mask") else None
         if self.config.hidden_size_per_layer_input:
             per_layer_inputs_id = self.model.get_per_layer_inputs(input_ids)
             per_layer_inputs = self.model.project_per_layer_inputs(hidden_states, per_layer_inputs_id)
@@ -319,23 +281,36 @@ class Gemma4ForCausalLM(nnx.Module):
 
     @jax.named_scope("gemma4_causal_lm")
     def __call__(self, input_ids: Array, positions: Array, cache: Cache | None = None, **kwargs: object) -> Array:
-        """Compute logits for the given sequence, optionally applying soft-capping."""
+        """Compute logits for the given sequence, optionally applying soft-capping.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         attention_mask = kwargs.get("attention_mask")
-        (inputs_embeds, is_multimodal) = self._process_multimodal(kwargs.get("pixel_values"), kwargs.get("image_token_mask"), kwargs.get("input_features"), kwargs.get("input_features_mask"), kwargs.get("audio_token_mask"), input_ids)
-        hidden_states = self._apply_layers_multimodal(inputs_embeds, input_ids, positions, cache, attention_mask) if is_multimodal and inputs_embeds is not None else self.model(input_ids, positions, cache, attention_mask=attention_mask)
+        mm_inputs = MultimodalInputs(input_ids=input_ids, pixel_values=kwargs.get("pixel_values"), image_token_mask=kwargs.get("image_token_mask"), input_features=kwargs.get("input_features"), input_features_mask=kwargs.get("input_features_mask"), audio_token_mask=kwargs.get("audio_token_mask"))
+        mm_inputs.attention_mask = attention_mask
+        (inputs_embeds, is_multimodal) = self._process_multimodal(mm_inputs)
+        hidden_states = self._apply_layers_multimodal(inputs_embeds, mm_inputs, positions, cache) if is_multimodal and inputs_embeds is not None else self.model(input_ids, positions, cache, attention_mask=attention_mask)
         logits = self.lm_head(hidden_states)
         if self.config.final_logit_softcapping is not None:
-            logits = logits / self.config.final_logit_softcapping
+            logits /= self.config.final_logit_softcapping
             logits = jnp.tanh(logits) * self.config.final_logit_softcapping
         return logits.astype(jnp.float32)
 
 
 @nnx.jit
-def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array, pixel_values: Array | None = None, **kwargs: JSONValue) -> tuple[Array, Cache]:
-    """Execute a standard forward pass returning logits and updated cache."""
+def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array, **kwargs: JSONValue) -> tuple[Array, Cache]:
+    """Execute a standard forward pass returning logits and updated cache.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     image_token_mask = kwargs.get("image_token_mask")
     input_features = kwargs.get("input_features")
     input_features_mask = kwargs.get("input_features_mask")
     audio_token_mask = kwargs.get("audio_token_mask")
+    pixel_values = kwargs.get("pixel_values")
     logits = model(input_ids=input_ids, positions=positions, cache=cache, pixel_values=pixel_values, image_token_mask=image_token_mask, input_features=input_features, input_features_mask=input_features_mask, audio_token_mask=audio_token_mask)
     return (logits[:, -1, :], cache)

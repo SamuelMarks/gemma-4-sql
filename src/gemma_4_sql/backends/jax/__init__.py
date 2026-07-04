@@ -1,3 +1,4 @@
+# Copyright 2024
 """JAX backend approach."""
 
 from __future__ import annotations
@@ -17,5 +18,10 @@ __all__ = ["apply_lora", "benchmark_model", "build_dataloader", "export_model", 
 
 
 def get_trainer() -> str:
-    """Return the JAX trainer identifier."""
+    """Return the JAX trainer identifier.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     return "jax_trainer"

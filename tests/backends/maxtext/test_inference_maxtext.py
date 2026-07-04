@@ -1,6 +1,7 @@
+# Copyright 2024
 """Tests for MaxText inference logic."""
 
-from typing import Never
+from typing import NoReturn as Never
 
 import pytest
 
@@ -29,7 +30,12 @@ class MockArray:
         return (len(self.data),)
 
     def __getitem__(self: object, idx: object) -> object:
-        """Magic method docstring."""
+        """Magic method docstring.
+
+        Returns:
+            object: Description of return.
+
+        """
         if isinstance(idx, MockArray):
             return MockArray([self.data[i] for i in getattr(idx, "data", [])])
         try:
@@ -41,11 +47,21 @@ class MockArray:
             return MockArray(self.data)
 
     def tolist(self: object) -> object:
-        """Initialize function tolist."""
+        """Initialize function tolist.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self.data
 
     def item(self: object) -> object:
-        """Initialize function item."""
+        """Initialize function item.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self.data[0] if isinstance(self.data, list) else self.data
 
     def reshape(self: object, *shape: object) -> object:
@@ -54,6 +70,10 @@ class MockArray:
         Args:
         ----
         shape: Description of shape.
+
+
+        Returns:
+            object: Description of return.
 
         """
         if shape == (1, 1):
@@ -73,6 +93,10 @@ class MockJNP:
         data: Description of data.
         dtype: Description of dtype.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return MockArray(data)
 
@@ -86,6 +110,10 @@ class MockJNP:
         arrays: Description of arrays.
         axis: Description of axis.
 
+
+        Returns:
+            object: Description of return.
+
         """
         if axis == -1:
             res = [arrays[0].data[i] + arrays[1].data[i] for i in range(len(arrays[0].data))]
@@ -98,6 +126,10 @@ class MockJNP:
         Args:
         ----
         array: Description of array.
+
+
+        Returns:
+            object: Description of return.
 
         """
         d = array.data
@@ -115,6 +147,10 @@ class MockNN:
         x: Description of x.
         axis: Description of axis.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return x
 
@@ -126,7 +162,12 @@ class MockJAX:
 
     @staticmethod
     def jit(fn: object, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return fn
 
 
@@ -146,9 +187,8 @@ class MockGemma4Model:
     def apply(self: object, _seq: object) -> object:
         """Initialize function apply.
 
-        Args:
-        ----
-        seq: Description of seq.
+        Returns:
+            object: Description of return.
 
         """
         logits = [0.0] * 300
@@ -174,9 +214,11 @@ def _mock_maxtext_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_generate_sql_success() -> None:
     """Initialize function test_generate_sql_success.
 
-    Args:
-    ----
-    mock_maxtext_env: Description of mock_maxtext_env.
+    Raises:
+        AssertionError: Description.
+
+
+        TypeError: Description.
 
     """
     res = generate_sql("mock-model", "test prompt", beam_width=2, max_length=3)
@@ -195,6 +237,10 @@ def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     ----
     monkeypatch: Description of monkeypatch.
 
+
+    Raises:
+        AssertionError: Description.
+
     """
     monkeypatch.setattr(inf, "jax", None)
     res = generate_sql("mock-model", "test prompt")
@@ -206,9 +252,8 @@ def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_maxtext_beam_search() -> None:
     """Initialize function test_maxtext_beam_search.
 
-    Args:
-    ----
-    mock_maxtext_env: Description of mock_maxtext_env.
+    Raises:
+        AssertionError: Description.
 
     """
     jnp_mock = MockJNP()
@@ -219,6 +264,10 @@ def test_maxtext_beam_search() -> None:
         Args:
         ----
         seq: Description of seq.
+
+
+        Returns:
+            object: Description of return.
 
         """
         logits = [0.0] * 300
@@ -237,9 +286,9 @@ def test_maxtext_beam_search() -> None:
 
 def test_inference_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    m_inf = __import__("gemma_4_sql.backends.maxtext.inference")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    m_inf = __import__("gemma_4_sql.backends.maxtext.inference", fromlist=[""])
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(m_inf)
     monkeypatch.undo()
@@ -255,11 +304,21 @@ class MockTokenizer:
         """Execute function."""
 
     def encode(self, _x: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [1]
 
     def decode(self, _x: object) -> str:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "decoded"
 
 
@@ -267,7 +326,12 @@ class MockResult:
     """Provide class docstring."""
 
     def tolist(self) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [1]
 
     @property
@@ -276,13 +340,23 @@ class MockResult:
         return (1, 1)
 
     def __len__(self) -> int:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return 1
 
 
 def test_inference_no_jit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    m_inf = __import__("gemma_4_sql.backends.maxtext.inference")
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    m_inf = __import__("gemma_4_sql.backends.maxtext.inference", fromlist=[""])
     monkeypatch.setattr(m_inf, "jax", type("M", (), {"jit": lambda x, **_kwargs: x, "random": type("R", (), {"PRNGKey": lambda x: x})}))
     monkeypatch.setattr(m_inf, "jnp", type("M", (), {"array": lambda x, **_kwargs: x, "int32": 1}))
     monkeypatch.setattr(m_inf, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: None})())
@@ -294,14 +368,24 @@ def test_inference_no_jit(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_inference_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    m_inf = __import__("gemma_4_sql.backends.maxtext.inference")
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    m_inf = __import__("gemma_4_sql.backends.maxtext.inference", fromlist=[""])
     monkeypatch.setattr(m_inf, "jax", type("M", (), {"jit": lambda x, **_kwargs: x, "random": type("R", (), {"PRNGKey": lambda x: x})}))
     monkeypatch.setattr(m_inf, "jnp", type("M", (), {"array": lambda x, **_kwargs: x, "int32": 1}))
     monkeypatch.setattr(m_inf, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: None})())
 
     def raise_err(*_args: object, **_kwargs: object) -> Never:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 

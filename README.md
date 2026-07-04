@@ -1,7 +1,7 @@
 gemma-4-sql
 ===========
 
-[![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0) <!-- badges --> ![Test coverage](https://img.shields.io/badge/Test%20coverage-100%25-brightgreen) ![Doc coverage](https://img.shields.io/badge/Doc%20coverage-100%25-brightgreen) <!-- /badges -->
+[![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0) <!-- badges --> ![Test coverage](https://img.shields.io/badge/Test%20coverage-100%25-brightgreen) ![Doc coverage](https://img.shields.io/badge/Doc%20coverage-92%25-brightgreen) <!-- /badges -->
 
 Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch; Keras ; JAX; JAX / MaxText.
 
@@ -19,7 +19,7 @@ Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: Py
 We explicitly integrate with and support the following Gemma 4 model architectures across different ecosystems:
 *   **PyTorch**: Directly imports and uses `Gemma4ForCausalLM` from **[Hugging Face Transformers](https://github.com/huggingface/transformers/tree/main/src/transformers/models/gemma4)**;
 *   **MaxText**: Directly imports and uses `Gemma4Model` from **[AI-Hypercomputer MaxText](https://github.com/AI-Hypercomputer/maxtext/blob/main/src/maxtext/models/gemma4.py)**;
-*   **JAX**: Directly imports and uses `Gemma4Model` 
+*   **JAX**: A custom, from-scratch implementation of Gemma 4 built with **Flax NNX**;
 *   **Keras**: Supports generic [Keras 3](https://keras.io) workflows.
 
 ### Feature Support Matrix

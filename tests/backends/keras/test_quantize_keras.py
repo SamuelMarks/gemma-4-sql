@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for Keras quantization logic."""
 
 from __future__ import annotations
@@ -12,7 +13,12 @@ if TYPE_CHECKING:
 
 
 def test_quantize_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test Keras quantize when missing."""
+    """Test Keras quantize when missing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(kr_quantize, "keras", None)
     res = quantize_model("model", "int8")
     if not res["status"] == "mocked_missing_keras":
@@ -22,7 +28,12 @@ def test_quantize_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_keras(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test Keras quantize."""
+    """Test Keras quantize.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(kr_quantize, "keras", object())
     res = quantize_model("model", "int8")
     if not res["backend"] == "keras":
@@ -42,9 +53,9 @@ def test_quantize_keras(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_quantize_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    mdl = __import__("gemma_4_sql.backends.keras.quantize")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    mdl = __import__("gemma_4_sql.backends.keras.quantize", fromlist=[""])
     monkeypatch.setitem(sys.modules, "keras", None)
     importlib.reload(mdl)
     monkeypatch.undo()
@@ -52,7 +63,12 @@ def test_quantize_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(kr_quantize, "keras", type("MockKeras", (), {}))
     res = kr_quantize.quantize_model("model", "awq")
     if res["status"] != "quantized_awq":
@@ -60,11 +76,21 @@ def test_quantize_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(kr_quantize, "keras", type("MockKeras", (), {}))
 
     def raise_err(*_args: object, **_kwargs: object) -> None:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 

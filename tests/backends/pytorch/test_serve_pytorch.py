@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for PyTorch Serving."""
 
 from __future__ import annotations
@@ -22,13 +23,23 @@ class MockAsyncLLMEngine:
 
     @staticmethod
     def from_engine_args(_args: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         class Engine:
             """Provide class docstring."""
 
             def generate(self, *_args: object, **_kwargs: object) -> object:
-                """Execute function."""
+                """Execute function.
+
+                Returns:
+                    object: Description of return.
+
+                """
 
                 class Output:
                     """Provide class docstring."""
@@ -53,12 +64,22 @@ class MockAsyncLLMEngine:
 
 
 def mock_random_uuid() -> str:
-    """Execute function."""
+    """Execute function.
+
+    Returns:
+        object: Description of return.
+
+    """
     return "123"
 
 
 def test_serve_model_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(srv, "AsyncEngineArgs", None)
     res = srv.serve_model("foo")
     if not res["status"] == "mocked_missing_pytorch":
@@ -66,14 +87,29 @@ def test_serve_model_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(srv, "AsyncEngineArgs", MockAsyncEngineArgs)
     monkeypatch.setattr(srv, "AsyncLLMEngine", MockAsyncLLMEngine)
     monkeypatch.setattr(srv, "random_uuid", mock_random_uuid)
-    monkeypatch.setattr(srv, "FastAPI", mock.MagicMock())
+
+    class MockFastAPI:
+        def __init__(self, **_kwargs: object) -> None:
+            self.router = mock.MagicMock()
+
+        def post(self, *_args: object, **_kwargs: object) -> object:
+            def decorator(func: object) -> object:
+                return func
+
+            return decorator
+
+    monkeypatch.setattr(srv, "FastAPI", MockFastAPI)
     monkeypatch.setattr(srv, "Request", mock.MagicMock())
-    monkeypatch.setattr(srv, "JSONResponse", mock.MagicMock())
-    monkeypatch.setattr(srv, "uvicorn", mock.MagicMock())
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
     if not res["backend"] == "pytorch":
         raise AssertionError
@@ -84,13 +120,34 @@ def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_serve_model_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(srv, "AsyncEngineArgs", MockAsyncEngineArgs)
     monkeypatch.setattr(srv, "AsyncLLMEngine", MockAsyncLLMEngine)
-    monkeypatch.setattr(srv, "FastAPI", mock.MagicMock())
+
+    class MockFastAPI:
+        def __init__(self, **_kwargs: object) -> None:
+            self.router = mock.MagicMock()
+
+        def post(self, *_args: object, **_kwargs: object) -> object:
+            def decorator(func: object) -> object:
+                return func
+
+            return decorator
+
+    monkeypatch.setattr(srv, "FastAPI", MockFastAPI)
 
     def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -102,8 +159,13 @@ def test_serve_model_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_generate_endpoint() -> None:
-    """Test generate endpoint logic directly."""
-    importlib = __import__("importlib")
+    """Test generate endpoint logic directly.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    importlib = __import__("importlib", fromlist=[""])
     importlib.reload(srv)
     srv.AsyncEngineArgs = MockAsyncEngineArgs
     srv.AsyncLLMEngine = MockAsyncLLMEngine
@@ -122,10 +184,20 @@ async def test_generate_endpoint() -> None:
         """Provide class docstring."""
 
         def post(self, *_args: object, **_kwargs: object) -> object:
-            """Execute function."""
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
 
             def decorator(func: object) -> object:
-                """Execute function."""
+                """Execute function.
+
+                Returns:
+                    object: Description of return.
+
+                """
                 self.func = func
                 return func
 
@@ -151,9 +223,9 @@ async def test_generate_endpoint() -> None:
 
 def test_serve_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    m_serve = __import__("gemma_4_sql.backends.pytorch.serve")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    m_serve = __import__("gemma_4_sql.backends.pytorch.serve", fromlist=[""])
     monkeypatch.setitem(sys.modules, "uvicorn", type("M", (), {})())
     monkeypatch.setitem(sys.modules, "fastapi", type("M", (), {"FastAPI": None, "Request": None})())
     monkeypatch.setitem(sys.modules, "fastapi.responses", type("M", (), {"JSONResponse": None})())

@@ -1,3 +1,4 @@
+# Copyright 2024
 """SDK interface for model quantization."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# Copyright 2024
 """PyTorch-specific continuous batching inference (vLLM) logic."""
 
 from __future__ import annotations
@@ -5,6 +6,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.common_serve import serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
@@ -25,14 +27,25 @@ with catch_optional_imports():
 
 
 def _create_app(model_name: str, max_batch_size: int) -> object:
-    """Create the FastAPI application for the PyTorch vLLM server."""
+    """Create the FastAPI application for the PyTorch vLLM server.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     engine_args = AsyncEngineArgs(model=model_name, max_num_batched_tokens=max_batch_size * 256, max_num_seqs=max_batch_size, disable_log_requests=True)
     engine = AsyncLLMEngine.from_engine_args(engine_args)
+
     app = FastAPI(title=f"vLLM Serve: {model_name}")
 
     @app.post("/generate")
     async def generate(request: Request) -> JSONResponse:
-        """Execute logic."""
+        """Execute logic.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         request_dict = await request.json()
         prompt = request_dict.pop("prompt", "")
         request_id = random_uuid()
@@ -64,16 +77,23 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         A dictionary containing serving status and metadata.
 
     """
-    if AsyncEngineArgs is None or FastAPI is None:
-        return {"backend": "pytorch", "model": model_name, "port": port, "max_batch_size": max_batch_size, "status": "mocked_missing_pytorch", "mode": "continuous_batching"}
-    app = None
-    try:
-        app = _create_app(model_name, max_batch_size)
-        status = "running_vllm"
-        if not kwargs.get("test_mode"):
-            logger.info("Starting vLLM server on port %d", port)
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Failed to start vLLM server: ")
-        status = f"failed: {e!s}"
-        app = None
-    return {"backend": "pytorch", "model": model_name, "port": port, "max_batch_size": max_batch_size, "status": status, "mode": "continuous_batching", "app": app}
+    result = serve_model_wrapper(
+        backend_name="pytorch",
+        model_name=model_name,
+        port=port,
+        max_batch_size=max_batch_size,
+        missing_deps=AsyncEngineArgs is None,
+        missing_status="mocked_missing_pytorch",
+        app_factory=lambda: _create_app(model_name, max_batch_size),
+        test_mode=bool(kwargs.get("test_mode")),
+    )
+
+    # Standardize specific status string
+    if result["status"] == "running_pytorch_serve":
+        result["status"] = "running_vllm"
+
+    # Maintain specific log from original code
+    if result["status"] == "running_vllm" and not kwargs.get("test_mode"):
+        logger.info("Starting vLLM server on port %d", port)
+
+    return result

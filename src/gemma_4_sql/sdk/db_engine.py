@@ -1,3 +1,4 @@
+# Copyright 2024
 """Live Database Evaluation Engine for Text-to-SQL execution accuracy."""
 
 from __future__ import annotations
@@ -35,6 +36,9 @@ class LiveDatabaseEngine:
             db_type: The type of database backend ('sqlite', 'postgresql', 'snowflake', 'duckdb').
             **kwargs: Extra parameters like db_kwargs, read_only.
 
+        Raises:
+        ValueError: If the operation encounters an unexpected ValueError.
+
         """
         self.db_path = db_path
         self.db_type = db_type.lower()
@@ -57,15 +61,30 @@ class LiveDatabaseEngine:
                 self.adapter.read_only = old_ro
 
     def connect(self) -> object:
-        """Connect to database."""
+        """Connect to database.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         return self.adapter.connect()
 
     async def connect_async(self) -> object:
-        """Asynchronously connect to database."""
+        """Asynchronously connect to database.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         return await self.adapter.connect_async()
 
     def _validate_safety(self, query: str) -> None:
-        """Ensure the query is safe to execute if read_only is True."""
+        """Ensure the query is safe to execute if read_only is True.
+
+        Raises:
+        PermissionError: If the operation encounters an unexpected PermissionError.
+
+        """
         if not self.read_only:
             return
         dangerous_patterns = ["\\bDROP\\b", "\\bDELETE\\b", "\\bUPDATE\\b", "\\bINSERT\\b", "\\bALTER\\b", "\\bTRUNCATE\\b", "\\bGRANT\\b", "\\bREVOKE\\b"]
@@ -80,40 +99,70 @@ class LiveDatabaseEngine:
         self._validate_safety(ddl)
         self.adapter.setup_schema(ddl)
 
-    def execute_with_feedback(self, query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Execute a query and returns execution success status, results, and error message."""
+    def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
+        """Execute a query and returns execution success status, results, and error message.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
             self._validate_safety(query)
-            return self.adapter.execute_with_feedback(query)
+            return self.adapter.execute_with_feedback(query, params)
         except PermissionError as e:
             return (False, [], str(e))
 
-    async def execute_with_feedback_async(self, query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Asynchronously execute a query and returns execution success status, results, and error message."""
+    async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
+        """Asynchronously execute a query and returns execution success status, results, and error message.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
             self._validate_safety(query)
-            return await self.adapter.execute_with_feedback_async(query)
+            return await self.adapter.execute_with_feedback_async(query, params)
         except PermissionError as e:
             return (False, [], str(e))
 
-    def execute_query(self, query: str) -> list[tuple[JSONPrimitive, ...]]:
-        """Execute a query and returns the fetched results."""
-        self._validate_safety(query)
-        return self.adapter.execute_query(query)
+    def execute_query(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
+        """Execute a query and returns the fetched results.
 
-    async def execute_query_async(self, query: str) -> list[tuple[JSONPrimitive, ...]]:
-        """Asynchronously execute a query and returns the fetched results."""
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         self._validate_safety(query)
-        return await self.adapter.execute_query_async(query)
+        return self.adapter.execute_query(query, params)
+
+    async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
+        """Asynchronously execute a query and returns the fetched results.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
+        self._validate_safety(query)
+        return await self.adapter.execute_query_async(query, params)
 
     def compare_queries(self, predicted_sql: str, ground_truth_sql: str) -> bool:
-        """Compare the execution results of two queries."""
+        """Compare the execution results of two queries.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         pred_results = self.execute_query(predicted_sql)
         truth_results = self.execute_query(ground_truth_sql)
         return pred_results == truth_results
 
     async def compare_queries_async(self, predicted_sql: str, ground_truth_sql: str) -> bool:
-        """Asynchronously compare the execution results of two queries."""
+        """Asynchronously compare the execution results of two queries.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         (pred_results, truth_results) = await asyncio.gather(self.execute_query_async(predicted_sql), self.execute_query_async(ground_truth_sql))
         return pred_results == truth_results
 

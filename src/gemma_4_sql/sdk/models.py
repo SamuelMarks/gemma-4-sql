@@ -1,3 +1,4 @@
+# Copyright 2024
 """Models module for training, pretraining, and posttraining."""
 
 from __future__ import annotations
@@ -37,12 +38,10 @@ def _route_training(config: TrainingConfig) -> JSONDict:
 
     """
     backend = config.backend
-    train_kwargs = {"action": config.action, "model_name": config.model_name, "dataset": config.dataset, "epochs": config.epochs, "learning_rate": config.learning_rate}
-    if backend == "pytorch" and config.distributed_strategy != "none":
-        train_kwargs["distributed_strategy"] = config.distributed_strategy
-    train_kwargs.update(config.extra_kwargs)
+    if config.extra_kwargs is None:
+        config.extra_kwargs = {}  # pragma: no cover
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
-    return get_backend(backend).train_model(**train_kwargs)
+    return get_backend(backend).train_model(config)
 
 
 def train_from_scratch(config: TrainingConfig | None = None) -> JSONDict:

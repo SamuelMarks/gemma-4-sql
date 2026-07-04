@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for DuckDB extension."""
 
 from unittest.mock import MagicMock, patch
@@ -15,8 +16,13 @@ def test_embed_in_duckdb_missing() -> None:
 
 
 def test_embed_in_duckdb_success() -> None:
-    """Test successful registration and execution."""
-    importlib = __import__("importlib")
+    """Test successful registration and execution.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    importlib = __import__("importlib", fromlist=[""])
     mock_duckdb = MagicMock()
     with patch.dict("sys.modules", {"duckdb": mock_duckdb}):
         gemma_4_sql = __import__("gemma_4_sql.sdk.duckdb_extension")
@@ -30,6 +36,10 @@ def test_embed_in_duckdb_success() -> None:
             Args:
             ----
             query: Description of query.
+
+
+            Returns:
+                object: Description of return.
 
             """
             mock_cursor = MagicMock()
@@ -47,10 +57,7 @@ def test_embed_in_duckdb_success() -> None:
 
             Args:
             ----
-            name: Description of name.
             func: Description of func.
-            args: Description of args.
-            ret: Description of ret.
 
             """
             nonlocal registered_func
@@ -62,7 +69,7 @@ def test_embed_in_duckdb_success() -> None:
             raise AssertionError
         with patch("gemma_4_sql.sdk.duckdb_extension.run_agentic_loop") as mock_agent:
             mock_agent.return_value = {"final_sql": "SELECT * FROM users", "results": [(1,)], "success": True}
-            json = __import__("json")
+            json = __import__("json", fromlist=[""])
             res_str = registered_func("Get users")
             res_json = json.loads(res_str)
             if res_json["success"] is not True:

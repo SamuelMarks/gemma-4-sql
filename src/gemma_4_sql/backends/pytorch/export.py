@@ -1,3 +1,4 @@
+# Copyright 2024
 """PyTorch-specific model export pipeline."""
 
 from __future__ import annotations
@@ -17,11 +18,17 @@ with catch_optional_imports():
 
 
 def _is_rank_zero() -> bool:
-    """Check if current process is rank 0 in distributed training."""
+    """Check if current process is rank 0 in distributed training.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     if torch is None:
         return True
     try:
-        dist = __import__("torch.distributed")
+        import torch.distributed as dist
+
         if dist.is_initialized():
             return dist.get_rank() == 0
     except (ImportError, RuntimeError) as e:
@@ -32,7 +39,12 @@ def _is_rank_zero() -> bool:
 
 
 def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = True) -> tuple[Path, str]:
-    """Save a real PyTorch model using safetensors."""
+    """Save a real PyTorch model using safetensors.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     try:
         gemma4_for_causal_lm_cls = __import__("transformers.models.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
         model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
@@ -47,7 +59,12 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
 
 
 def _save_mock_model(model_name: str, export_path: str, *, is_rank_zero: bool = True) -> tuple[Path, str]:
-    """Save a mocked model for testing."""
+    """Save a mocked model for testing.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     file_path = Path(export_path) / f"mock_pytorch_model_{model_name}.safetensors"
     if is_rank_zero:
         with Path.open(file_path, "w", encoding="utf-8") as f:

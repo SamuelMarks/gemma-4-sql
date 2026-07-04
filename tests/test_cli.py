@@ -1,3 +1,4 @@
+# Copyright 2024
 """Provide module docstring."""
 
 from unittest.mock import MagicMock, patch

@@ -1,3 +1,4 @@
+# Copyright 2024
 """Keras-specific model quantization logic."""
 
 from __future__ import annotations
@@ -32,10 +33,10 @@ def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
     status = "completed"
     if keras is not None:
         try:
-            if method in ["int8", "int4"]:
+            if method in {"int8", "int4"}:
                 logger.info("Setting Keras model dtype to %s", method)
                 memory_reduction = 0.5 if method == "int8" else 0.75
-            elif method in ["awq", "gptq"]:
+            elif method in {"awq", "gptq"}:
                 logger.warning("Keras natively uses int8/int4 via preset. Simulating %s", method)
                 memory_reduction = 0.7
             else:

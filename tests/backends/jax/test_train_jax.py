@@ -1,9 +1,11 @@
+# Copyright 2024
 """Tests for JAX training pipeline."""
 
 import pytest
 
 import gemma_4_sql.backends.jax.train as tr
 from gemma_4_sql.backends.jax.train import train_model
+from gemma_4_sql.type_hints import TrainingConfig
 
 
 class MockJnpTensor:
@@ -20,7 +22,12 @@ class MockJnpTensor:
         self.shape = shape
 
     def item(self) -> object:
-        """Initialize function item."""
+        """Initialize function item.
+
+        Returns:
+            object: Description of return.
+
+        """
         return 0.35
 
 
@@ -37,6 +44,10 @@ class MockJnp:
         ----
         shape: Description of shape.
         kwargs: Description of kwargs.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return MockJnpTensor(shape)
@@ -62,6 +73,10 @@ class MockJaxRandom:
         Args:
         ----
         seed: Description of seed.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return seed
@@ -102,12 +117,22 @@ class MockJax:
 
     @staticmethod
     def devices() -> list[str]:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return ["cpu"]
 
     @staticmethod
     def device_put(x: object, _sharding: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return x
 
     @staticmethod
@@ -117,6 +142,10 @@ class MockJax:
         Args:
         ----
         fn: Description of fn.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return fn
@@ -129,6 +158,10 @@ class MockJax:
         ----
         fn: Description of fn.
 
+
+        Returns:
+            object: Description of return.
+
         """
 
         def wrapper(*args: object, **kwargs: object) -> object:
@@ -138,6 +171,10 @@ class MockJax:
             ----
             args: Description of args.
             kwargs: Description of kwargs.
+
+
+            Returns:
+                object: Description of return.
 
             """
             _ = fn(*args, **kwargs)
@@ -151,16 +188,20 @@ class MockOptax:
 
     @staticmethod
     def warmup_cosine_decay_schedule(**_kwargs: object) -> object:
-        """Initialize function warmup_cosine_decay_schedule."""
+        """Initialize function warmup_cosine_decay_schedule.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "schedule"
 
     @staticmethod
     def adamw(_lr: object) -> object:
         """Initialize function adamw.
 
-        Args:
-        ----
-        lr: Description of lr.
+        Returns:
+            object: Description of return.
 
         """
 
@@ -170,9 +211,8 @@ class MockOptax:
             def init(self, _params: object) -> object:
                 """Initialize function init.
 
-                Args:
-                ----
-                params: Description of params.
+                Returns:
+                    object: Description of return.
 
                 """
                 return "opt_state"
@@ -180,11 +220,8 @@ class MockOptax:
             def update(self, _grads: object, _opt_state: object, _params: object) -> object:
                 """Initialize function update.
 
-                Args:
-                ----
-                grads: Description of grads.
-                opt_state: Description of opt_state.
-                params: Description of params.
+                Returns:
+                    object: Description of return.
 
                 """
                 return ("updates", "opt_state")
@@ -195,10 +232,8 @@ class MockOptax:
     def softmax_cross_entropy_with_integer_labels(_logits: object, _labels: object) -> object:
         """Initialize function softmax_cross_entropy_with_integer_labels.
 
-        Args:
-        ----
-        logits: Description of logits.
-        labels: Description of labels.
+        Returns:
+            object: Description of return.
 
         """
         return MockJnpTensor((1,))
@@ -210,7 +245,10 @@ class MockOptax:
         Args:
         ----
         params: Description of params.
-        updates: Description of updates.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return params
@@ -221,7 +259,12 @@ class MockGemma4Config:
 
     @staticmethod
     def gemma4_e2b() -> object:
-        """Initialize function gemma4_e2b."""
+        """Initialize function gemma4_e2b.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "mock_config"
 
 
@@ -242,9 +285,8 @@ class MockGemma4ForCausalLM:
     def __call__(self, _inputs: object) -> object:
         """Initialize function __call__.
 
-        Args:
-        ----
-        inputs: Description of inputs.
+        Returns:
+            object: Description of return.
 
         """
         return MockJnpTensor((1,))
@@ -299,6 +341,10 @@ class MockNNX:
         ----
         fn: Description of fn.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return fn
 
@@ -310,6 +356,10 @@ class MockNNX:
         ----
         fn: Description of fn.
 
+
+        Returns:
+            object: Description of return.
+
         """
 
         def wrapper(*args: object, **kwargs: object) -> object:
@@ -319,6 +369,10 @@ class MockNNX:
             ----
             args: Description of args.
             kwargs: Description of kwargs.
+
+
+            Returns:
+                object: Description of return.
 
             """
             _ = fn(*args, **kwargs)
@@ -353,6 +407,10 @@ def _mock_jax_env(monkeypatch: object) -> object:
         args: Description of args.
         kwargs: Description of kwargs.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return {"loader": [{"inputs": MockJnpTensor((1,)), "targets": MockJnpTensor((1,))}]}
 
@@ -363,21 +421,25 @@ def _mock_jax_env(monkeypatch: object) -> object:
 def test_train_model_jax_real() -> object:
     """Initialize function test_train_model_jax_real.
 
-    Args:
-    ----
-    mock_jax_env: Description of mock_jax_env.
+    Raises:
+        AssertionError: Description.
 
     """
-    res = train_model("sft", "mod", "dat", 2, 0.1)
+    res = train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
     if not res["backend"] == "jax":
         raise AssertionError
 
 
 def test_train_model_jax_missing() -> object:
-    """Initialize function test_train_model_jax_missing."""
+    """Initialize function test_train_model_jax_missing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     orig_jax = tr.jax
     tr.jax = None
-    res = train_model("sft", "mod", "dat", 2, 0.1)
+    res = train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
     if not res["status"] == "mocked_missing_jax":
         raise AssertionError
     tr.jax = orig_jax
@@ -389,7 +451,6 @@ def test_train_model_jax_error(monkeypatch: object) -> object:
 
     Args:
     ----
-    mock_jax_env: Description of mock_jax_env.
     monkeypatch: Description of monkeypatch.
 
     """
@@ -402,12 +463,16 @@ def test_train_model_jax_error(monkeypatch: object) -> object:
         args: Description of args.
         kwargs: Description of kwargs.
 
+
+        Raises:
+            ValueError: Description.
+
         """
         msg = "err"
         raise ValueError(msg)
 
     monkeypatch.setattr(tr, "build_dataloader", Exception)
-    train_model("sft", "mod", "dat", 2, 0.1)
+    train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
 
 
 @pytest.mark.usefixtures("_mock_jax_env")
@@ -416,7 +481,6 @@ def test_train_model_jax_no_loader_fallback(monkeypatch: object) -> object:
 
     Args:
     ----
-    mock_jax_env: Description of mock_jax_env.
     monkeypatch: Description of monkeypatch.
 
     """
@@ -429,18 +493,22 @@ def test_train_model_jax_no_loader_fallback(monkeypatch: object) -> object:
         args: Description of args.
         kwargs: Description of kwargs.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return {"loader": None}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    train_model("sft", "mod", "dat", 2, 0.1)
+    train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
 
 
 def test_train_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    mdl = __import__("gemma_4_sql.backends.jax.train")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    mdl = __import__("gemma_4_sql.backends.jax.train", fromlist=[""])
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(mdl)
     monkeypatch.undo()

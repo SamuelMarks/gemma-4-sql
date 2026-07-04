@@ -1,3 +1,4 @@
+# Copyright 2024
 """Serving, Chat, and Evaluation CLI commands."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# Copyright 2024
 """CLI commands for database execution."""
 
 from __future__ import annotations

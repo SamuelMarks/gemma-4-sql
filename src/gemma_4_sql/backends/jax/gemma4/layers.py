@@ -1,4 +1,5 @@
-"""Provide module docstring."""
+# Copyright 2024
+"""Core functionality for the layers module."""
 
 from __future__ import annotations
 
@@ -16,14 +17,24 @@ if TYPE_CHECKING:
 
 
 def _make_linear(*args: object, **kwargs: JSONValue) -> object:
-    """Docstring for _make_linear."""
+    """Docstring for _make_linear.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     kwargs.pop("kernel_metadata", None)
     kwargs.pop("bias_metadata", None)
     return nnx.Linear(*args, **kwargs)
 
 
 def _make_embed(*args: object, **kwargs: JSONValue) -> object:
-    """Docstring for _make_embed."""
+    """Docstring for _make_embed.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     kwargs.pop("embedding_metadata", None)
     return nnx.Embed(*args, **kwargs)
 
@@ -55,7 +66,12 @@ class Gemma4RMSNorm(nnx.Module):
 
     @jax.named_scope("gemma4_rms_norm")
     def __call__(self, x: Array) -> Array:
-        """Apply RMS normalization."""
+        """Apply RMS normalization.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         xf32 = x.astype(jnp.float32)
         normed = xf32 * jax.lax.rsqrt(jnp.square(xf32).mean(-1, keepdims=True) + self.eps)
         if self.with_scale:
@@ -97,7 +113,12 @@ class Gemma4ClippableLinear(nnx.Module):
             self.output_max = StatVar(jnp.array(jnp.inf))
 
     def __call__(self, x: jax.Array) -> jax.Array:
-        """Apply a linear transformation, conditionally clipping the output."""
+        """Apply a linear transformation, conditionally clipping the output.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         if self.use_clipped_linears:
             x = jnp.clip(x, self.input_min[...], self.input_max[...])
         x = self.linear(x)
@@ -121,7 +142,12 @@ class Gemma4MLP(nnx.Module):
 
     @jax.named_scope("gemma4_mlp")
     def __call__(self, x: Array) -> Array:
-        """Apply SwiGLU MLP transformation."""
+        """Apply SwiGLU MLP transformation.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         gate = self.gate_proj(x)
         up = self.up_proj(x)
         activated = jax.nn.silu(gate) * up

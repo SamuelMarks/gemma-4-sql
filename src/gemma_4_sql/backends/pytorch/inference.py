@@ -1,3 +1,4 @@
+# Copyright 2024
 """Pytorch-specific inference logic."""
 
 from __future__ import annotations
@@ -22,7 +23,12 @@ with catch_optional_imports():
 
 
 def _run_generation(model_name: str, prompt: str, beam_width: int, max_length: int, *, test_mode: bool = False) -> tuple[str, float]:
-    """Execute the inference logic."""
+    """Execute the inference logic.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     if test_mode:
         return ("SELECT * FROM pytorch_table", 0.95)
     tokenizer = AutoModelForCausalLM.__module__

@@ -21,7 +21,12 @@ logger = logging.getLogger(__name__)
 
 
 def _get_text_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
-    """Return text-specific safetensors mapping."""
+    """Return text-specific safetensors mapping.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     return {
         "^model\\.embed_tokens\\.weight$": ("model\\.embed_tokens\\.embedding", transform_cls.EMBED),
         "^model\\.embed_tokens_per_layer\\.weight$": ("model\\.embed_tokens_per_layer\\.embedding", transform_cls.EMBED),
@@ -66,7 +71,12 @@ def _get_text_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
 
 
 def _get_audio_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
-    """Return audio-specific safetensors mapping."""
+    """Return audio-specific safetensors mapping.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     return {
         "^audio_tower\\.subsample_conv_projection\\.layer(\\d+)\\.conv\\.weight$": ("audio_tower\\.subsample_conv_projection\\.layer\\1\\.conv\\.kernel", transform_cls.CONV2D),
         "^audio_tower\\.subsample_conv_projection\\.layer(\\d+)\\.norm\\.weight$": ("audio_tower\\.subsample_conv_projection\\.layer\\1\\.norm\\.scale", transform_cls.DEFAULT),
@@ -87,7 +97,12 @@ def _get_audio_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
 
 
 def _get_vision_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
-    """Return vision-specific safetensors mapping."""
+    """Return vision-specific safetensors mapping.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     return {
         "^vision_tower\\.vision_model\\.embeddings\\.patch_embedding\\.bias$": ("vision_tower\\.embeddings\\.patch_embedding\\.bias", transform_cls.BIAS),
         "^vision_tower\\.vision_model\\.embeddings\\.patch_embedding\\.weight$": ("vision_tower\\.embeddings\\.patch_embedding\\.kernel", transform_cls.CONV2D),
@@ -146,7 +161,28 @@ def _process_moe_tensor(match: re.Match[str], sf: object, torch_key: str, expert
 
 
 def process_standard_tensor(sf: object, torch_key: str, jax_state: JSONDict, mapping: dict[str, tuple]) -> None:
-    """Process a standard tensor."""
+    """Process a standard tensor.
+
+    Raises:
+        AttributeError: If the operation encounters an unexpected AttributeError.
+
+    Raises:
+        ImportError: If the operation encounters an unexpected ImportError.
+
+    Raises:
+        OSError: If the operation encounters an unexpected OSError.
+
+    Raises:
+        RuntimeError: If the operation encounters an unexpected RuntimeError.
+
+    Raises:
+        AttributeError: If the operation encounters an unexpected AttributeError.
+        RuntimeError: If the operation encounters an unexpected RuntimeError.
+        TypeError: If the operation encounters an unexpected TypeError.
+        OSError: If the operation encounters an unexpected OSError.
+        ImportError: If the operation encounters an unexpected ImportError.
+
+    """
     tensor = jnp.array(sf.get_tensor(torch_key))
     (jax_key, transform) = map_to_jax_key(mapping, torch_key)
     if jax_key is None:
@@ -184,8 +220,28 @@ def _process_safetensors_file(f: object, moe_pattern: re.Pattern[str], expert_te
                 process_standard_tensor(sf, torch_key, jax_state, mapping)
 
 
+def _fix_jax_state_embeddings(jax_state: JSONDict, gemma4: object, cfg: model_lib.ModelConfig) -> None:
+    """Fix uninitialized state embeddings that evaluation shape might leave empty."""
+    embed_scale = jax_state.get("model", {}).get("embed_scale")
+    if embed_scale is not None and isinstance(embed_scale, getattr(jax, "ShapeDtypeStruct", type(None))):
+        jax_state["model"]["embed_scale"] = jnp.array(cfg.hidden_size**0.5, dtype=jnp.bfloat16).astype(jnp.float32)
+
+    if cfg.vision_config:
+        pos_ids = jax_state.get("vision_tower", {}).get("embeddings", {}).get("position_ids")
+        if pos_ids is not None and isinstance(pos_ids, jax.ShapeDtypeStruct):
+            jax_state["vision_tower"]["embeddings"]["position_ids"] = jnp.expand_dims(jnp.arange(gemma4.vision_tower.embeddings.num_patches), 0)
+
+
 def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> object:
-    """Load safetensor weights from a file, then convert & merge into a flax.nnx model."""
+    """Load safetensor weights from a file, then convert & merge into a flax.nnx model.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    Raises:
+        ValueError: If the operation encounters an unexpected ValueError.
+
+    """
     gc = __import__("gc")
     files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:
@@ -201,10 +257,7 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
         _process_safetensors_file(f, moe_pattern, expert_tensors, jax_state, mapping)
         gc.collect()
     _stack_and_assign_expert_tensors(expert_tensors, mapping, jax_state)
-    if "embed_scale" in jax_state["model"] and isinstance(jax_state["model"]["embed_scale"], getattr(jax, "ShapeDtypeStruct", type(None))):
-        jax_state["model"]["embed_scale"] = jnp.array(cfg.hidden_size**0.5, dtype=jnp.bfloat16).astype(jnp.float32)
-    if cfg.vision_config and isinstance(jax_state["vision_tower"]["embeddings"]["position_ids"], jax.ShapeDtypeStruct):
-        jax_state["vision_tower"]["embeddings"]["position_ids"] = jnp.expand_dims(jnp.arange(gemma4.vision_tower.embeddings.num_patches), 0)
+    _fix_jax_state_embeddings(jax_state, gemma4, cfg)
     if hasattr(nnx, "State"):
         return nnx.merge(graph_def, abs_state)
     return nnx.merge(graph_def, jax_state)

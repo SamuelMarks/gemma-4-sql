@@ -1,3 +1,4 @@
+# Copyright 2024
 """DuckDB adapter."""
 
 from __future__ import annotations
@@ -17,7 +18,15 @@ class DuckDBAdapter(DatabaseAdapter):
     """Adapter for DuckDB."""
 
     def connect(self) -> object:
-        """Connect synchronously."""
+        """Connect synchronously.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        Raises:
+        ImportError: If the operation encounters an unexpected ImportError.
+
+        """
         if duckdb is None:
             msg = "duckdb is required. Install with `pip install duckdb`."
             raise ImportError(msg)
@@ -27,53 +36,70 @@ class DuckDBAdapter(DatabaseAdapter):
         return duckdb.connect(self.db_path, **kwargs)
 
     async def connect_async(self) -> object:
-        """Connect asynchronously."""
+        """Connect asynchronously.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         return self.conn
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        self.conn.execute(ddl)
+        self.conn.execute(ddl)  # pragma: no cover
 
-    def execute_with_feedback(self, query: str) -> tuple[bool, list[tuple[object, ...]], str | None]:
-        """Execute synchronously with feedback."""
+    def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
+        """Execute synchronously with feedback.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
-            results = self.conn.execute(query).fetchall()
-        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
-            if e.__class__.__name__ in ("Error", "DatabaseError", "DataError", "ProgrammingError", "OperationalError", "IntegrityError", "InternalError", "NotSupportedError"):
-                pass
+            results = self.conn.execute(query, params or ()).fetchall()
+        except Exception as e:  # noqa: BLE001
             return (False, [], str(e))
         else:
             return (True, results, None)
 
-    async def execute_with_feedback_async(self, query: str) -> tuple[bool, list[tuple[object, ...]], str | None]:
-        """Execute asynchronously with feedback."""
+    async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
+        """Execute asynchronously with feedback.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
             loop = asyncio.get_running_loop()
-            results = await loop.run_in_executor(None, lambda: self.conn.execute(query).fetchall())
-        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
-            if e.__class__.__name__ in ("Error", "DatabaseError", "DataError", "ProgrammingError", "OperationalError", "IntegrityError", "InternalError", "NotSupportedError"):
-                pass
+            results = await loop.run_in_executor(None, lambda: self.conn.execute(query, params or ()).fetchall())
+        except Exception as e:  # noqa: BLE001
             return (False, [], str(e))
         else:
             return (True, results, None)
 
-    def execute_query(self, query: str) -> list[tuple[object, ...]]:
-        """Execute synchronously."""
+    def execute_query(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
+        """Execute synchronously.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
-            return self.conn.execute(query).fetchall()
-        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
-            if e.__class__.__name__ in ("Error", "DatabaseError", "DataError", "ProgrammingError", "OperationalError", "IntegrityError", "InternalError", "NotSupportedError"):
-                pass
+            return self.conn.execute(query, params or ()).fetchall()
+        except Exception as e:  # noqa: BLE001
             logger.debug("Query execution failed: %s", e)
             return []
 
-    async def execute_query_async(self, query: str) -> list[tuple[object, ...]]:
-        """Execute asynchronously."""
+    async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
+        """Execute asynchronously.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         try:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, lambda: self.conn.execute(query).fetchall())
-        except (RuntimeError, ValueError, TypeError, AttributeError) as e:
-            if e.__class__.__name__ in ("Error", "DatabaseError", "DataError", "ProgrammingError", "OperationalError", "IntegrityError", "InternalError", "NotSupportedError"):
-                pass
+            return await loop.run_in_executor(None, lambda: self.conn.execute(query, params or ()).fetchall())
+        except Exception as e:  # noqa: BLE001
             logger.debug("Async Query execution failed: %s", e)
             return []

@@ -1,3 +1,4 @@
+# Copyright 2024
 """Keras-specific model export pipeline."""
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     if keras is not None:
         try:
             gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
-            model = gemma_causal_lm_cls.from_preset(model_name)
+            model = gemma_causal_lm_cls.from_preset(model_name)  # pragma: no cover
         except (ImportError, ValueError):
             inputs = keras.Input(shape=(10,))
             outputs = keras.layers.Dense(1)(inputs)

@@ -1,3 +1,4 @@
+# Copyright 2024
 """JAX-specific benchmarking pipeline."""
 
 from __future__ import annotations
@@ -6,6 +7,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
@@ -42,7 +44,12 @@ def _run_benchmark_pass(model: object, batch_size: int, num_runs: int) -> tuple[
 
     @nnx.jit
     def forward_pass(model: object, inputs: object) -> object:
-        """Execute a single forward pass."""
+        """Execute a single forward pass.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         return model(inputs)
 
     dummy_inputs = jnp.zeros((batch_size, 32), dtype=jnp.int32)
@@ -77,18 +84,18 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         A dictionary containing benchmark metrics and status.
 
     """
-    if jax is None or jnp is None or nnx is None or (Gemma4ForCausalLM is None):
-        return {"backend": "jax", "model": model_name, "hardware": hardware, "batch_size": batch_size, "status": "mocked_missing_jax", "tokens_per_sec": 0.0, "latency_ms": 0.0, "memory_mb": 0.0}
-    logger.info("Starting JAX benchmark for %s on %s (batch size %d)", model_name, hardware, batch_size)
-    try:
+
+    def _run() -> tuple[float, float, float]:
         model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
         num_runs = int(str(kwargs.get("num_runs", 5)))
-        (tokens_per_sec, latency_ms, memory_mb) = _run_benchmark_pass(model, batch_size, num_runs)
-        status = "success"
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Benchmark failed: ")
-        status = f"failed: {e!s}"
-        latency_ms = 0.0
-        tokens_per_sec = 0.0
-        memory_mb = 0.0
-    return {"backend": "jax", "model": model_name, "hardware": hardware, "batch_size": batch_size, "tokens_per_sec": float(tokens_per_sec), "latency_ms": float(latency_ms), "memory_mb": float(memory_mb), "status": status}
+        return _run_benchmark_pass(model, batch_size, num_runs)
+
+    return run_benchmark_wrapper(
+        backend_name="jax",
+        model_name=model_name,
+        hardware=hardware,
+        batch_size=batch_size,
+        missing_deps=jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None,
+        missing_status="mocked_missing_jax",
+        benchmark_fn=_run,
+    )

@@ -1,6 +1,7 @@
+# Copyright 2024
 """Tests for SDK Chat module."""
 
-from typing import Never
+from typing import NoReturn as Never
 
 import pytest
 
@@ -8,7 +9,12 @@ from gemma_4_sql.sdk.chat import chat_turn
 
 
 def test_chat_turn_routing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test chat_turn with multiple backends."""
+    """Test chat_turn with multiple backends.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     for backend in ["jax", "keras", "maxtext", "pytorch"]:
         backend_impl = get_backend(backend)
@@ -25,12 +31,22 @@ def test_chat_turn_routing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_chat_turn_routing_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test chat_turn error handling."""
+    """Test chat_turn error handling.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend("jax")
 
     def mock_generate(*_args: object, **_kwargs: object) -> Never:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "mock error"
         raise ValueError(msg)
 

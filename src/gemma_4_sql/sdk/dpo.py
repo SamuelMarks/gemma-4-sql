@@ -1,3 +1,4 @@
+# Copyright 2024
 """SDK interface for DPO (Direct Preference Optimization)."""
 
 from __future__ import annotations
@@ -28,4 +29,5 @@ def run_dpo(model_name: str, dataset: str, backend: str = "pytorch", beta: float
 
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
-    return get_backend(backend).run_dpo(model_name, dataset, beta)
+    DPOConfig = __import__("gemma_4_sql.type_hints", fromlist=["DPOConfig"]).DPOConfig
+    return get_backend(backend).run_dpo(DPOConfig(model_name=model_name, dataset=dataset, beta=beta))

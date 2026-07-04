@@ -1,4 +1,5 @@
-"""Provide module docstring."""
+# Copyright 2024
+"""Core functionality for the test_run_model module."""
 
 import jax.numpy as jnp
 from flax import nnx
@@ -21,5 +22,5 @@ if __name__ == "__main__":
 
 
 def test_run_model() -> object:
-    """Initialize function test_run_model."""
+    """Test the run_model behavior."""
     run_model()

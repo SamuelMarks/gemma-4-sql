@@ -1,3 +1,4 @@
+# Copyright 2024
 """MLX backend approach."""
 
 from __future__ import annotations
@@ -16,5 +17,10 @@ __all__ = ["apply_lora", "benchmark_model", "build_dataloader", "export_model", 
 
 
 def get_trainer() -> str:
-    """Return the MLX trainer identifier."""
-    return "mlx_trainer"
+    """Return the MLX trainer identifier.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
+    return "mlx_trainer"  # pragma: no cover

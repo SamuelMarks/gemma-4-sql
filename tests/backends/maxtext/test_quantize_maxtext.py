@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for MaxText quantization logic."""
 
 from __future__ import annotations
@@ -18,7 +19,12 @@ class MockJnp:
 
     @staticmethod
     def zeros(_shape: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [0]
 
 
@@ -27,7 +33,12 @@ class MockJaxRandom:
 
     @staticmethod
     def mock_prngkey(seed: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return seed
 
     PRNGKey = mock_prngkey
@@ -46,12 +57,22 @@ class MockGemma4Model:
         """Execute function."""
 
     def init(self, _rng: object, _inputs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "params"
 
 
 def test_quantize_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test MaxText quantize when missing."""
+    """Test MaxText quantize when missing.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(maxtext_quantize, "jnp", None)
     res = quantize_model("model", "int8")
     if not res["status"] == "mocked_missing_maxtext":
@@ -61,7 +82,12 @@ def test_quantize_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test MaxText quantize."""
+    """Test MaxText quantize.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(maxtext_quantize, "jax", MockJax())
     monkeypatch.setattr(maxtext_quantize, "jnp", MockJnp())
     monkeypatch.setattr(maxtext_quantize, "Gemma4Model", MockGemma4Model)
@@ -76,18 +102,28 @@ def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     res = quantize_model("model", "awq")
     if not res["method"] == "awq":
         raise AssertionError
-    if res["status"] not in ["quantized_awq", "mocked_missing_maxtext"]:
+    if res["status"] not in {"quantized_awq", "mocked_missing_maxtext"}:
         raise AssertionError
 
 
 def test_quantize_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(maxtext_quantize, "jax", MockJax())
     monkeypatch.setattr(maxtext_quantize, "jnp", MockJnp())
     monkeypatch.setattr(maxtext_quantize, "Gemma4Model", MockGemma4Model)
 
     def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -99,9 +135,9 @@ def test_quantize_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_quantize_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    m_quantize = __import__("gemma_4_sql.backends.maxtext.quantize")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    m_quantize = __import__("gemma_4_sql.backends.maxtext.quantize", fromlist=[""])
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(m_quantize)
     monkeypatch.undo()

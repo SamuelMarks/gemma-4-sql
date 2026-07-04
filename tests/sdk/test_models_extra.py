@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for missing models.py coverage."""
 
 import pytest
@@ -12,10 +13,14 @@ def test_train_from_scratch_pytorch(monkeypatch: object) -> object:
     ----
     monkeypatch: Description of monkeypatch.
 
+
+    Raises:
+        AssertionError: Description.
+
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     pt_train = get_backend("pytorch")
-    monkeypatch.setattr(pt_train, "train_model", lambda **_kw: {"status": "mock"})
+    monkeypatch.setattr(pt_train, "train_model", lambda _config, **_kw: {"status": "mock"})
     res = train_from_scratch(TrainingConfig(model_name="mock", dataset="mock", backend="pytorch"))
     if not res == {"status": "mock"}:
         raise AssertionError

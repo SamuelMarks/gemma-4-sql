@@ -1,3 +1,4 @@
+# Copyright 2024
 """Constants for gemma-4-sql."""
 
 DEFAULT_PRETRAIN_DATASET = "seeklhy/SynSQL-2.5M"

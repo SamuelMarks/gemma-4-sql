@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for RAG-based schema contextualization module."""
 
 import pytest
@@ -7,7 +8,12 @@ from gemma_4_sql.sdk.rag import build_rag_prompt, extract_schema_entities, retri
 
 
 def test_extract_schema_entities() -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     ddl = "\n\n    CREATE TABLE users (\n        id INT,\n        name VARCHAR,\n        PRIMARY KEY (id)\n    );\n    CREATE TABLE orders (\n        order_id INT,\n        user_id INT,\n        amount DECIMAL,\n        FOREIGN KEY (user_id) REFERENCES users(id)\n    );\n    "
     schema = extract_schema_entities(ddl)
     if "users" not in schema:
@@ -21,7 +27,12 @@ def test_extract_schema_entities() -> None:
 
 
 def test_extract_schema_entities_ignore_comments() -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     ddl = "\n\n    -- This is a comment\n    CREATE TABLE test (\n        col1 INT\n    );\n    "
     schema = extract_schema_entities(ddl)
     if "test" not in schema:
@@ -31,7 +42,12 @@ def test_extract_schema_entities_ignore_comments() -> None:
 
 
 def test_retrieve_relevant_schema() -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     schema = {"users": ["id", "name"], "orders": ["order_id", "user_id", "amount"], "products": ["prod_id", "name", "price"]}
     context = retrieve_relevant_schema("Find all users names", schema)
     if "Table: users | Columns: id, name" not in context:
@@ -46,7 +62,12 @@ def test_retrieve_relevant_schema() -> None:
 
 
 def test_retrieve_relevant_schema_fallback() -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     schema = {"users": ["id", "name"], "orders": ["order_id", "user_id", "amount"]}
     context = retrieve_relevant_schema("Show everything", schema, top_k_tables=1)
     if "Table: users | Columns: id, name" not in context:
@@ -54,7 +75,12 @@ def test_retrieve_relevant_schema_fallback() -> None:
 
 
 def test_retrieve_relevant_schema_empty() -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     context = retrieve_relevant_schema("Show everything", {})
     if context != "":
         raise AssertionError
@@ -67,7 +93,12 @@ class MockSentenceTransformer:
         """Execute function."""
 
     def encode(self, docs: list[str]) -> list[list[float]]:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [[1.0] for _ in docs]
 
 
@@ -75,23 +106,43 @@ class MockSimilarities:
     """Provide class docstring."""
 
     def argsort(self) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [0]
 
     def __getitem__(self, idx: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         if isinstance(idx, int):
             return 1.0
         return self
 
 
 def mock_cosine_similarity(_a: object, _b: object) -> list:
-    """Execute function."""
+    """Execute function.
+
+    Returns:
+        object: Description of return.
+
+    """
     return [MockSimilarities()]
 
 
 def test_retrieve_relevant_schema_semantic(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(rag, "SentenceTransformer", MockSentenceTransformer)
     monkeypatch.setattr(rag, "cosine_similarity", mock_cosine_similarity)
     schema = {"users": ["id", "name"]}
@@ -101,12 +152,22 @@ def test_retrieve_relevant_schema_semantic(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(rag, "SentenceTransformer", MockSentenceTransformer)
-    __import__("typing")
+    __import__("typing", fromlist=[""])
 
     def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -118,13 +179,23 @@ def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch
 
 
 def test_build_rag_prompt_no_ddl() -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     if not build_rag_prompt("Find users") == "Find users":
         raise AssertionError
 
 
 def test_build_rag_prompt_with_ddl() -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     ddl = "CREATE TABLE users (id INT, name VARCHAR);"
     prompt = "Find all users"
     rag_prompt = build_rag_prompt(prompt, ddl)
@@ -138,3 +209,16 @@ def test_build_rag_prompt_with_ddl() -> None:
         raise AssertionError
     if "SELECT" not in rag_prompt:
         raise AssertionError
+
+
+def test_rag_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test import fallback."""
+    import sys
+
+    with monkeypatch.context() as m:
+        m.setitem(sys.modules, "sentence_transformers", None)
+        if "gemma_4_sql.sdk.rag" in sys.modules:
+            del sys.modules["gemma_4_sql.sdk.rag"]
+        rag = __import__("gemma_4_sql.sdk.rag", fromlist=[""])
+        assert rag.SentenceTransformer is None
+        assert rag.cosine_similarity is None

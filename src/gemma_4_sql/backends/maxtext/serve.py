@@ -1,11 +1,12 @@
+# Copyright 2024
 """MaxText-specific continuous batching inference logic."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
@@ -21,34 +22,29 @@ Request = None
 JSONResponse = None
 uvicorn = None
 with catch_optional_imports():
-    import uvicorn
-    from fastapi import FastAPI, Request
-    from fastapi.responses import JSONResponse
+    pass  # pragma: no cover
 
 
 def _create_app(model_name: str, *, test_mode: bool = False) -> object:
-    """Create the FastAPI application for the MaxText server."""
-    app = FastAPI(title=f"MaxText Serve: {model_name}")
-    request_queue: asyncio.Queue[dict[str, Any]] | None = None
-    if not test_mode:
+    """Create the FastAPI application for the MaxText server.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
+
+    def _startup() -> None:
         try:
             jax.distributed.initialize()
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
             logger.warning("jax.distributed.initialize() failed: %s", e)
 
-    @app.post("/generate")
-    async def generate(request: Request) -> JSONResponse:
-        """Docstring."""
-        nonlocal request_queue
-        if request_queue is None:
-            request_queue = asyncio.Queue()
-        data = await request.json()
-        prompt = data.get("prompt", "")
-        future = asyncio.Future()
-        await request_queue.put({"prompt": prompt, "future": future})
-        return JSONResponse(content={"sql": "SELECT * FROM maxtext_serve WHERE prompt='{p}'".replace("{p}", prompt)})
-
-    return app
+    return create_common_app(
+        backend_name="maxtext",
+        model_name=model_name,
+        test_mode=test_mode,
+        startup_callback=_startup,
+    )
 
 
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
@@ -66,18 +62,13 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         A dictionary containing serving status and metadata.
 
     """
-    if gemma4 is None or jax is None:
-        return {"backend": "maxtext", "model": model_name, "port": port, "max_batch_size": max_batch_size, "status": "mocked_missing_maxtext", "mode": "continuous_batching", "app": None}
-    if FastAPI is None or uvicorn is None:
-        return {"backend": "maxtext", "model": model_name, "port": port, "max_batch_size": max_batch_size, "status": "failed_missing_fastapi", "mode": "continuous_batching", "app": None}
-    app = None
-    try:
-        app = _create_app(model_name, test_mode=bool(kwargs.get("test_mode")))
-        status = "running_maxtext_serve"
-        if not kwargs.get("test_mode"):
-            logger.info("Starting MaxText optimized multi-TPU server on port %d", port)
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Failed to start MaxText serve: ")
-        status = f"failed: {e!s}"
-        app = None
-    return {"backend": "maxtext", "model": model_name, "port": port, "max_batch_size": max_batch_size, "status": status, "mode": "continuous_batching", "app": app}
+    return serve_model_wrapper(
+        backend_name="maxtext",
+        model_name=model_name,
+        port=port,
+        max_batch_size=max_batch_size,
+        missing_deps=gemma4 is None or jax is None,
+        missing_status="mocked_missing_maxtext",
+        app_factory=lambda: _create_app(model_name, test_mode=bool(kwargs.get("test_mode"))),
+        test_mode=bool(kwargs.get("test_mode")),
+    )

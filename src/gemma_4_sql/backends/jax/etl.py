@@ -1,9 +1,11 @@
+# Copyright 2024
 """JAX-specific Grain ETL pipeline."""
 
 from __future__ import annotations
 
 import typing
 
+from gemma_4_sql.backends.common_data import _get_grain_classes, _load_duckdb_dataset
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.tokenization import SQLTokenizer
 
@@ -17,98 +19,29 @@ with catch_optional_imports():
     import grain.python as grain
 duckdb = None
 with catch_optional_imports():
-    import duckdb
+    pass
 
 
-def _load_duckdb_dataset(duckdb_path: str, duckdb_table: str) -> list[dict[str, typing.Any]]:
-    """Load a dataset from DuckDB.
-
-    Args:
-    ----
-        duckdb_path: Path to the DuckDB file.
-        duckdb_table: Name of the table.
-
-    Returns:
-    -------
-        A list of dictionaries representing the dataset.
-
-    """
-    if duckdb is None:
-        msg = "duckdb is required for DuckDB support."
-        raise ImportError(msg)
-    conn = duckdb.connect(duckdb_path, read_only=True)
-    try:
-        hf_dataset = conn.execute("SELECT * FROM ?", (duckdb_table,)).fetchdf().to_dict(orient="records")
-    finally:
-        conn.close()
-    return list(hf_dataset)
-
-
-def _get_grain_classes(grain_module: object) -> tuple[type, type]:
-    """Dynamically construct Grain classes.
-
-    Args:
-    ----
-        grain_module: The loaded grain module.
-
-    Returns:
-    -------
-        A tuple of (HFDataSource, JAXFormatTransform) classes.
-
-    """
-    base_ds = getattr(grain_module, "RandomAccessDataSource", object)
-    base_map = getattr(grain_module, "MapTransform", object)
-
-    class HFDataSource(base_ds):
-        """Data source wrapping a Hugging Face dataset."""
-
-        def __init__(self, hf_ds: object) -> None:
-            """Execute function."""
-            self._ds = hf_ds
-
-        def __len__(self) -> int:
-            """Execute function."""
-            return len(self._ds)
-
-        def __getitem__(self, idx: int) -> object:
-            """Execute function."""
-            return self._ds[idx]
-
-    class JAXFormatTransform(base_map):
-        """Transforms data into numpy/JAX compatible formats."""
-
-        def __init__(self, tokenizer: SQLTokenizer) -> None:
-            """Execute function."""
-            self.tokenizer = tokenizer
-
-        def map(self, element: JSONDict) -> JSONDict:
-            """Execute function."""
-            prompt = element.get("sql_prompt", element.get("question", ""))
-            target = element.get("sql", element.get("query", ""))
-            return {"inputs": self.tokenizer.encode(str(prompt)), "targets": self.tokenizer.encode(str(target))}
-
-    return (HFDataSource, JAXFormatTransform)
-
-
-def build_dataloader(dataset_name: str, split: str, batch_size: int = 32, *, distributed: bool = False, tokenizer_name: str | None = None, **kwargs: JSONValue) -> JSONDict:
+def build_dataloader(config: object, **kwargs: JSONValue) -> JSONDict:
     """Build a JAX-specific Grain dataloader.
 
     Args:
     ----
-        dataset_name: The name of the dataset to load.
-        split: The dataset split (e.g., 'train', 'test').
-        batch_size: Number of items per batch.
-        distributed: Whether to use distributed sharding.
-        tokenizer_name: Optional name for the tokenizer model.
+        config: The ETLConfig.
         **kwargs: Additional keyword arguments.
 
     Returns:
     -------
-        A dictionary containing the built dataloader and dataset metadata.
+        A JSON dictionary with dataloader state.
 
     """
-    duckdb_path = str(kwargs.get("duckdb_path", ""))
-    duckdb_table = str(kwargs.get("duckdb_table", ""))
+    dataset_name = getattr(config, "dataset_name", "dummy")
+    split = getattr(config, "split", "train")
+    batch_size = getattr(config, "batch_size", 32)
+    distributed = getattr(config, "distributed", False)
+    tokenizer_name = getattr(config, "tokenizer_name", None)
+    duckdb_path = kwargs.get("duckdb_path") if not hasattr(config, "duckdb_path") else config.duckdb_path
+    duckdb_table = kwargs.get("duckdb_table") if not hasattr(config, "duckdb_table") else config.duckdb_table
     if datasets is None or grain is None:
         return {"dataset": dataset_name, "split": split, "status": "mocked", "batch_size": batch_size, "backend": "jax", "distributed": distributed, "mock_samples": [{"query": "SELECT * FROM users", "nl": "Get all users"}]}
     hf_dataset = _load_duckdb_dataset(duckdb_path, duckdb_table) if duckdb_path and duckdb_table else datasets.load_dataset(dataset_name, split=split)

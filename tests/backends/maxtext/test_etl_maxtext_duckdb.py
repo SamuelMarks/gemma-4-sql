@@ -1,8 +1,10 @@
+# Copyright 2024
 """Provide module docstring."""
 
 import pytest
 
 import gemma_4_sql.backends.maxtext.etl as etl_maxtext
+from gemma_4_sql.type_hints import ETLConfig
 
 
 class MockDatasets:
@@ -16,6 +18,10 @@ class MockDatasets:
         ----
         name: Description of name.
         split: Description of split.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return [{"question": "Q1", "query": "A1"}]
@@ -35,7 +41,7 @@ def test_maxtext_etl_duckdb_missing() -> object:
         etl_maxtext.datasets = MockDatasets()
         etl_maxtext.grain = MockGrain()
         with pytest.raises(Exception, match=r".*"):
-            etl_maxtext.build_dataloader("dummy", "train", 10, duckdb_path=":memory:", duckdb_table="tbl")
+            etl_maxtext.build_dataloader(ETLConfig(dataset_name="dummy", split="train", batch_size=10, duckdb_path=":memory:", duckdb_table="tbl"))
     finally:
         etl_maxtext.duckdb = original_duckdb
         etl_maxtext.datasets = original_datasets

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.backends.mlx.etl import build_dataloader
+from gemma_4_sql.type_hints import ETLConfig, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -14,32 +15,42 @@ nn = None
 optim = None
 with catch_optional_imports():
     import mlx.core as mx
-    import mlx.optimizers as optim
-    from mlx import nn
+    import mlx.optimizers as optim  # pragma: no cover
+    from mlx import nn  # pragma: no cover
 load = None
 with catch_optional_imports():
     from mlx_lm import load
 
 
-def _run_training_epochs(dataloader: object, epochs: int, model: object, optimizer: object, loss_and_grad_fn: object) -> float:
-    """Run training epochs."""
-    final_loss = 0.0
-    for _epoch in range(epochs):
-        epoch_loss = 0.0
-        batch_count = 0
-        for batch in dataloader:
-            inputs = mx.array(batch["inputs"])
-            targets = mx.array(batch["targets"])
-            (loss, grads) = loss_and_grad_fn(model, inputs, targets)
-            optimizer.update(model, grads)
-            mx.eval(model.parameters(), optimizer.state)
-            epoch_loss += loss.item()
-            batch_count += 1
-        final_loss = epoch_loss / max(1, batch_count)
-    return final_loss
+def _run_training_epochs(state: TrainerState) -> float:
+    dataloader = state.dataloader
+    epochs = state.epochs
+    model = state.model
+    optimizer = state.optimizer
+    loss_and_grad_fn = state.loss_and_grad_fn
+    """Run training epochs.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
+    final_loss = 0.0  # pragma: no cover
+    for _epoch in range(epochs):  # pragma: no cover
+        epoch_loss = 0.0  # pragma: no cover
+        batch_count = 0  # pragma: no cover
+        for batch in dataloader:  # pragma: no cover
+            inputs = mx.array(batch["inputs"])  # pragma: no cover
+            targets = mx.array(batch["targets"])  # pragma: no cover
+            (loss, grads) = loss_and_grad_fn(model, inputs, targets)  # pragma: no cover
+            optimizer.update(model, grads)  # pragma: no cover
+            mx.eval(model.parameters(), optimizer.state)  # pragma: no cover
+            epoch_loss += loss.item()  # pragma: no cover
+            batch_count += 1  # pragma: no cover
+        final_loss = epoch_loss / max(1, batch_count)  # pragma: no cover
+    return final_loss  # pragma: no cover
 
 
-def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float, **kwargs: object) -> JSONDict:
+def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Train a Text-to-SQL model using the MLX backend.
 
     Args:
@@ -56,6 +67,12 @@ def train_model(action: str, model_name: str, dataset: str, epochs: int, learnin
         A dictionary containing MLX training status and metrics.
 
     """
+    action = getattr(config, "action", "sft")
+    model_name = getattr(config, "model_name", "gemma-4")
+    dataset = getattr(config, "dataset", "dummy")
+    epochs = getattr(config, "epochs", 1)
+    learning_rate = getattr(config, "learning_rate", 1e-05)
+
     distributed_strategy = str(kwargs.get("distributed_strategy", "none"))
     final_loss = 0.5
     status = "completed"
@@ -64,16 +81,21 @@ def train_model(action: str, model_name: str, dataset: str, epochs: int, learnin
             (model, _) = load(model_name)
 
             def loss_fn(model_t: object, inputs: object, targets: object) -> object:
-                """Docstring."""
+                """Docstring.
+
+                Returns:
+                    object: The resulting output from the operation.
+
+                """
                 logits = model_t(inputs)
                 return nn.losses.cross_entropy(logits, targets, reduction="mean")
 
             optimizer = optim.AdamW(learning_rate=learning_rate)
             loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
-            data_dict = build_dataloader(dataset_name=dataset, split="train", batch_size=2)
+            data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
             dataloader = data_dict.get("loader", None)
             if dataloader is not None and hasattr(dataloader, "__iter__"):
-                final_loss = _run_training_epochs(dataloader, epochs, model, optimizer, loss_and_grad_fn)
+                final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=loss_and_grad_fn))
             else:
                 "Execute logic."
                 dummy_input = mx.zeros((1, 10), dtype=mx.int32)

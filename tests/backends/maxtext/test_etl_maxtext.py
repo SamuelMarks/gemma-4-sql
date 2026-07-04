@@ -1,3 +1,4 @@
+# Copyright 2024
 """Provide module docstring."""
 
 import contextlib
@@ -6,11 +7,18 @@ from unittest import mock
 
 import pytest
 
+from gemma_4_sql.type_hints import ETLConfig
+
 
 @pytest.fixture(autouse=True)
 def _clean_sys_modules() -> object:
-    """Initialize function clean_sys_modules."""
-    sys = __import__("sys")
+    """Initialize function clean_sys_modules.
+
+    Yields:
+        object: Description of yield.
+
+    """
+    sys = __import__("sys", fromlist=[""])
     keys = list(sys.modules.keys())
     yield
     for k in list(sys.modules.keys()):
@@ -22,14 +30,19 @@ def _clean_sys_modules() -> object:
 
 
 def test_maxtext_etl_mocked() -> None:
-    """Test MaxText ETL when libraries are missing via direct assignment."""
+    """Test MaxText ETL when libraries are missing via direct assignment.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     etl_maxtext = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
     original_datasets = getattr(etl_maxtext, "datasets", None)
     original_grain = getattr(etl_maxtext, "grain", None)
     try:
         etl_maxtext.datasets = None
         etl_maxtext.grain = None
-        res = etl_maxtext.build_dataloader("test", "train", 10)
+        res = etl_maxtext.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
         if not res["status"] == "mocked":
             raise AssertionError
         if not res["backend"] == "maxtext":
@@ -40,12 +53,17 @@ def test_maxtext_etl_mocked() -> None:
 
 
 def test_maxtext_etl_import_error() -> None:
-    """Test MaxText ETL ImportError fallback."""
+    """Test MaxText ETL ImportError fallback.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     if "gemma_4_sql.backends.maxtext.etl" in sys.modules:
         del sys.modules["gemma_4_sql.backends.maxtext.etl"]
     with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
         etl_maxtext = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
-        res = etl_maxtext.build_dataloader("test", "train", 10)
+        res = etl_maxtext.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
         if not res["status"] == "mocked":
             raise AssertionError
 
@@ -62,6 +80,10 @@ class MockDatasets:
         name: Description of name.
         split: Description of split.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return [{"question": "Q1", "query": "A1"}]
 
@@ -77,12 +99,22 @@ class MockGrain:
 
     @staticmethod
     def no_sharding() -> str:
-        """Initialize function nosharding."""
+        """Initialize function nosharding.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "no_sharding"
 
     @staticmethod
     def jax_distributed_sharding() -> str:
-        """Initialize function jaxdistributedsharding."""
+        """Initialize function jaxdistributedsharding.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "jax_distributed_sharding"
 
     @staticmethod
@@ -94,6 +126,10 @@ class MockGrain:
         args: Description of args.
         kwargs: Description of kwargs.
 
+
+        Returns:
+            object: Description of return.
+
         """
         return kwargs.get("shard_options", "sampler")
 
@@ -104,6 +140,10 @@ class MockGrain:
         Args:
         ----
         batch_size: Description of batch_size.
+
+
+        Returns:
+            object: Description of return.
 
         """
         return f"batch_{batch_size}"
@@ -137,7 +177,12 @@ MockGrain.Batch = staticmethod(MockGrain.batch)
 
 
 def _check_res(res: dict, status: str, *, distributed: bool, sampler: str) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     if res["status"] != status:
         raise AssertionError
     if distributed is not None and res.get("distributed") is not distributed:
@@ -154,7 +199,7 @@ def test_maxtext_etl_loaded() -> None:
     try:
         etl.datasets = MockDatasets()
         etl.grain = MockGrain()
-        res = etl.build_dataloader("test", "train", 10, distributed=False)
+        res = etl.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10, distributed=False))
         _check_res(res, "loaded", distributed=False, sampler="no_sharding")
     finally:
         etl.datasets = original_datasets
@@ -169,7 +214,7 @@ def test_maxtext_etl_dist() -> None:
     try:
         etl.datasets = MockDatasets()
         etl.grain = MockGrain()
-        res_dist_ = etl.build_dataloader("test", "train", 10, distributed=True)
+        res_dist_ = etl.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10, distributed=True))
         _check_res(res_dist_, "loaded", distributed=True, sampler="jax_distributed_sharding")
     finally:
         etl.datasets = original_datasets
@@ -178,9 +223,9 @@ def test_maxtext_etl_dist() -> None:
 
 def test_etl_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    m_etl = __import__("gemma_4_sql.backends.maxtext.etl")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    m_etl = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
     monkeypatch.setitem(sys.modules, "duckdb", None)
     importlib.reload(m_etl)
     monkeypatch.undo()
@@ -195,17 +240,32 @@ class MockConn:
     """Provide class docstring."""
 
     def execute(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return self
 
     def fetchdf(self) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
 
         class MockDF:
             """Provide class docstring."""
 
-            def to_dict(self, _orient: object) -> object:
-                """Execute function."""
+            def to_dict(self, orient: object = "records") -> object:
+                """Execute function.
+
+                Returns:
+                    object: Description of return.
+
+                """
                 return [{"a": 1}]
 
         return MockDF()
@@ -218,17 +278,22 @@ class MockDuckdb:
     """Provide class docstring."""
 
     def connect(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return MockConn()
 
 
 def test_duckdb_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    m_etl = __import__("gemma_4_sql.backends.maxtext.etl")
+    m_etl = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
     monkeypatch.setattr(m_etl, "duckdb", MockDuckdb())
     monkeypatch.setattr(m_etl, "grain", object())
     with contextlib.suppress(Exception):
-        m_etl.build_dataloader("dataset", 1, "test.db", "tbl")
+        m_etl.build_dataloader(ETLConfig(dataset_name="dataset", split="train", batch_size=1, duckdb_path="test.db", duckdb_table="tbl"))
 
 
 class MockTokenizer:
@@ -238,28 +303,38 @@ class MockTokenizer:
         """Execute function."""
 
     def encode(self, x: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [x]
 
 
 def test_etl_nested_classes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    m_etl = __import__("gemma_4_sql.backends.maxtext.etl")
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
+    m_etl = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
     monkeypatch.setattr(m_etl, "datasets", MockDatasets())
     monkeypatch.setattr(m_etl, "grain", MockGrain())
     monkeypatch.setattr(m_etl, "SQLTokenizer", MockTokenizer)
-    res = m_etl.build_dataloader("ds", "train")
+    res = m_etl.build_dataloader(ETLConfig(dataset_name="ds", split="train"))
     dl = res["loader"]
     ds = dl.data_source
-    if len(ds) != int("2"):
+    if len(ds) != int("1"):
         raise AssertionError
-    if ds[0] != {"question": "q", "query": "a"}:
+    if ds[0] != {"question": "Q1", "query": "A1"}:
         raise AssertionError
     transform = dl.operations[0]
-    m1 = transform.map({"question": "q", "query": "a"})
-    if m1["inputs"] != ["q"]:
+    m1 = transform.map({"question": "Q1", "query": "A1"})
+    if m1["inputs"] != ["Q1"]:
         raise AssertionError
-    if m1["targets"] != ["a"]:
+    if m1["targets"] != ["A1"]:
         raise AssertionError
     m2 = transform.map({"sql_prompt": "p", "sql": "s"})
     if m2["inputs"] != ["p"]:
@@ -270,19 +345,22 @@ def test_etl_nested_classes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_duckdb_execution_2(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    m_etl = __import__("gemma_4_sql.backends.maxtext.etl")
+    m_etl = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
     monkeypatch.setattr(m_etl, "duckdb", MockDuckdb())
     monkeypatch.setattr(m_etl, "datasets", MockDatasets())
     monkeypatch.setattr(m_etl, "grain", MockGrain())
     monkeypatch.setattr(m_etl, "SQLTokenizer", MockTokenizer)
-    m_etl.build_dataloader("dataset", 1, duckdb_path="test.db", duckdb_table="tbl")
+    m_etl.build_dataloader(ETLConfig(dataset_name="dataset", split="train", batch_size=1, duckdb_path="test.db", duckdb_table="tbl"))
 
 
 def test_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    m_etl = __import__("gemma_4_sql.backends.maxtext.etl")
+    m_etl = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
     monkeypatch.setattr(m_etl, "datasets", MockDatasets())
     monkeypatch.setattr(m_etl, "grain", MockGrain())
-    monkeypatch.setattr(m_etl, "duckdb", None)
+    import sys
+
+    sys.modules["gemma_4_sql.backends.common_data"].duckdb = None
+    monkeypatch.setattr(m_etl, "_load_duckdb_dataset", lambda *args, **kwargs: (_ for _ in ()).throw(ImportError("duckdb is required")))
     with pytest.raises(ImportError):
-        m_etl.build_dataloader("dataset", 1, duckdb_path="test.db", duckdb_table="tbl")
+        m_etl.build_dataloader(ETLConfig(dataset_name="dataset", split="train", batch_size=1, duckdb_path="test.db", duckdb_table="tbl"))

@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for MaxText PEFT."""
 
 from __future__ import annotations
@@ -17,7 +18,12 @@ class MockJnp:
 
     @staticmethod
     def zeros(_shape: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [0]
 
 
@@ -26,7 +32,12 @@ class MockJaxRandom:
 
     @staticmethod
     def mock_prngkey(seed: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return seed
 
     PRNGKey = mock_prngkey
@@ -45,12 +56,22 @@ class MockGemma4Model:
         """Execute function."""
 
     def init(self, _rng: object, _inputs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "params"
 
 
 def test_apply_lora_maxtext_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt, "jax", None)
     res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
     if not res["status"] == "mocked_missing_jax":
@@ -60,7 +81,12 @@ def test_apply_lora_maxtext_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_apply_lora_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt, "jax", MockJax())
     monkeypatch.setattr(pt, "jnp", MockJnp())
     monkeypatch.setattr(pt, "Gemma4Model", MockGemma4Model)
@@ -70,13 +96,23 @@ def test_apply_lora_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_apply_lora_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(pt, "jax", MockJax())
     monkeypatch.setattr(pt, "jnp", MockJnp())
     monkeypatch.setattr(pt, "Gemma4Model", MockGemma4Model)
 
     def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -88,9 +124,9 @@ def test_apply_lora_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_peft_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    m_peft = __import__("gemma_4_sql.backends.maxtext.peft")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
+    m_peft = __import__("gemma_4_sql.backends.maxtext.peft", fromlist=[""])
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(m_peft)
     monkeypatch.undo()

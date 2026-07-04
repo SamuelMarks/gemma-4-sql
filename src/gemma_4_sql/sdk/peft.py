@@ -1,3 +1,4 @@
+# Copyright 2024
 """Parameter-Efficient Fine-Tuning (PEFT / LoRA) configuration module."""
 
 from __future__ import annotations

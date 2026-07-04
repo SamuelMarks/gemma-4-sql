@@ -1,3 +1,4 @@
+# Copyright 2024
 """SDK Serve module for continuous batching and vLLM inference."""
 
 from __future__ import annotations

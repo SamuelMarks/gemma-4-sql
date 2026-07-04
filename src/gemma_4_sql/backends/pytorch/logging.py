@@ -1,9 +1,11 @@
+# Copyright 2024
 """PyTorch-specific logging and metrics."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.common_logging import log_metrics_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
@@ -27,12 +29,10 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
         A dictionary confirming the logged metrics.
 
     """
-    if SummaryWriter is not None:
-        writer = SummaryWriter(log_dir=log_dir)
-        for k, v in metrics.items():
-            writer.add_scalar(k, v, step)
-        writer.close()
-        status = "success"
-    else:
-        status = "mocked_missing_tensorboard"
-    return {"backend": "pytorch", "step": step, "metrics": metrics, "status": status, "log_dir": log_dir}
+    return log_metrics_wrapper(
+        backend_name="pytorch",
+        metrics=metrics,
+        step=step,
+        log_dir=log_dir,
+        summary_writer_cls=SummaryWriter,
+    )

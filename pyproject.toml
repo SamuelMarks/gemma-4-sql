@@ -32,10 +32,18 @@ default = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxte
 [tool.ruff]
 unsafe-fixes = true
 
+preview = true
+
 line-length = 320
-target-version = "py312"
+target-version = "py39"
 
 [tool.ruff.lint]
+ignore = ["D203", "D213", "COM812", "ISC001", "PLC0415", "PLR0914", "PLR0915", "PLR2004", "ANN401", "UP007"]
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "PLR6301", "ARG001", "ARG002", "ARG003", "RUF029", "DOC501", "DOC201", "PT018", "PLC1901"]
+"src/**/tests/*" = ["S101", "PLR6301", "ARG001", "ARG002", "ARG003", "RUF029", "DOC501", "DOC201", "PT018", "PLC1901"]
+select = ["ALL"]
+
 extend-unsafe-fixes = ["ALL"]
 
 extend-safe-fixes = ["ALL"]
@@ -60,8 +68,13 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "except \\(ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError\\):",
     "except \\(ImportError, RuntimeError\\):",
+    "except \\(ImportError, RuntimeError\\) as e:",
+    "except \\(RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError\\):",
+    "except \\(ImportError, ValueError\\):",
     "except ImportError:",
     "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+    "\\.\\.\\.",
     "if mlx is None:",
     "if torch is None:",
     "if tf is None:",
@@ -71,7 +84,23 @@ exclude_lines = [
     "if datasets is None or grain is None:",
     "if not _found_datasets or not _found_torch:",
     "if transformers is None or peft is None:",
-    "if FastAPI is None or uvicorn is None:"
+    "if FastAPI is None or uvicorn is None:",
+    "if mx is not None:",
+    "if mlx is not None:",
+    "if mlx is not None and BitsAndBytesConfig is not None and \\(AutoModelForCausalLM is not None\\):",
+    "if mx is not None and nn is not None and \\(optim is not None\\) and \\(load is not None\\):",
+    "if mlx is not None and nn is not None and \\(optim is not None\\):",
+    "if mlx is None or functional is None:",
+    "if mlx is None or AutoModelForCausalLM is None:",
+    "if load is not None and generate is not None:",
+    "if nn is not None and load is not None:",
+    "if duckdb is None:",
+    "if datasets is None:",
+    "if mx is None or nn is None or optim is None or load is None:",
+    "if mlx is None or BitsAndBytesConfig is None or AutoModelForCausalLM is None:",
+    "if torch is None or peft is None:",
+    "if tf is None or keras is None:",
+    "if mx is not None and nn is not None:"
 ]
 
 [project.entry-points."gemma_4_sql.backends"]

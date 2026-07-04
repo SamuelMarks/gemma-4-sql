@@ -1,3 +1,4 @@
+# Copyright 2024
 """DuckDB extension module for Gemma 4."""
 
 from __future__ import annotations
@@ -24,6 +25,9 @@ def embed_in_duckdb(conn: object, model_name: str, backend: str = "jax", db_path
         backend: The backend framework ('jax', 'keras', 'maxtext', 'pytorch').
         db_path: The database path for the agent to connect to (if not :memory:).
         max_retries: Max number of execution attempts.
+
+    Raises:
+        ImportError: If the operation encounters an unexpected ImportError.
 
     """
     if duckdb is None:

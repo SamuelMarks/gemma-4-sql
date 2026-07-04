@@ -1,11 +1,14 @@
+# Copyright 2024
 """JAX-specific training pipeline."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.jax.etl import build_dataloader
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from gemma_4_sql.type_hints import ETLConfig, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -26,7 +29,12 @@ with catch_optional_imports():
 
 
 def _loss_fn(model: object, batch: JSONDict) -> object:
-    """Compute the cross-entropy loss for the model on a given batch."""
+    """Compute the cross-entropy loss for the model on a given batch.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     logits = model(batch["inputs"])
     targets = batch["targets"]
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
@@ -34,11 +42,21 @@ def _loss_fn(model: object, batch: JSONDict) -> object:
 
 
 def _get_train_step_fn() -> object:
-    """Return a JIT-compiled train step function."""
+    """Return a JIT-compiled train step function.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
 
     @nnx.jit
     def train_step(model: object, optimizer: object, batch: JSONDict) -> object:
-        """Execute a single JAX-compiled training step."""
+        """Execute a single JAX-compiled training step.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         (loss, grads) = nnx.value_and_grad(_loss_fn)(model, batch)
         optimizer.update(grads)
         return loss
@@ -46,21 +64,24 @@ def _get_train_step_fn() -> object:
     return train_step
 
 
-def _run_training_epochs(dataloader: object, epochs: int, model: object, optimizer: object, train_step: object, sharding: object) -> float:
-    """Run training loops."""
-    final_loss = 0.0
-    for _epoch in range(epochs):
-        epoch_loss = 0.0
-        for batch in dataloader:
-            batch["inputs"] = jax.device_put(batch["inputs"], sharding)
-            batch["targets"] = jax.device_put(batch["targets"], sharding)
-            loss = train_step(model, optimizer, batch)
-            epoch_loss += float(loss.item())
-        final_loss = epoch_loss / max(1, len(dataloader))
-    return final_loss
+def _run_training_epochs(state: TrainerState) -> float:
+    """Run training loops.
+
+    Returns:
+        float: The final loss.
+
+    """
+
+    def process_batch(batch: dict) -> float:
+        batch["inputs"] = jax.device_put(batch["inputs"], state.params)
+        batch["targets"] = jax.device_put(batch["targets"], state.params)
+        loss = state.train_step(state.policy_model, state.optimizer, batch)
+        return float(loss.item())
+
+    return generic_run_training_epochs(state.epochs, state.dataloader, process_batch)
 
 
-def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float) -> JSONDict:
+def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Train a Text-to-SQL model using the JAX backend.
 
     Args:
@@ -76,6 +97,12 @@ def train_model(action: str, model_name: str, dataset: str, epochs: int, learnin
         A dictionary containing JAX training status and metrics.
 
     """
+    action = getattr(config, "action", "sft")
+    model_name = getattr(config, "model_name", "gemma-4")
+    dataset = getattr(config, "dataset", "dummy")
+    epochs = getattr(config, "epochs", 1)
+    learning_rate = getattr(config, "learning_rate", 1e-05)
+
     final_loss = 0.45
     status = "completed"
     if jax is not None and jnp is not None and (optax is not None) and (Gemma4ForCausalLM is not None):
@@ -86,10 +113,10 @@ def train_model(action: str, model_name: str, dataset: str, epochs: int, learnin
             schedule = optax.warmup_cosine_decay_schedule(init_value=0.0, peak_value=learning_rate, warmup_steps=100, decay_steps=max(1, epochs * 1000), end_value=learning_rate * 0.1)
             optimizer = nnx.Optimizer(model, optax.adamw(schedule))
             train_step = _get_train_step_fn()
-            data_dict = build_dataloader(dataset_name=dataset, split="train", batch_size=2)
+            data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
             dataloader = data_dict.get("loader", None)
             if dataloader is not None and hasattr(dataloader, "__iter__"):
-                final_loss = _run_training_epochs(dataloader, epochs, model, optimizer, train_step, sharding)
+                final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=train_step, params=sharding))
             else:
                 dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
                 dummy_batch = {"inputs": jax.device_put(dummy_input, sharding), "targets": jax.device_put(dummy_input, sharding)}

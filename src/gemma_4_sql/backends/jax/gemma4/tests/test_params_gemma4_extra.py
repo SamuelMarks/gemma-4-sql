@@ -1,4 +1,5 @@
-"""Provide module docstring."""
+# Copyright 2024
+"""Core functionality for the test_params_gemma4_extra module."""
 
 from unittest import mock
 
@@ -13,14 +14,14 @@ from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, assign_
 
 
 def test_map_to_jax_key_multiple() -> object:
-    """Initialize function test_map_to_jax_key_multiple."""
+    """Test the map_to_jax_key_multiple behavior."""
     mapping = {"a": ("b", None), ".*": ("c", None)}
     with pytest.raises(ValueError, match=r".*"):
         map_to_jax_key(mapping, "a")
 
 
 def test_assign_weights_shape_mismatch() -> object:
-    """Initialize function test_assign_weights_shape_mismatch."""
+    """Test the assign_weights_shape_mismatch behavior."""
     state = {"model": jax.ShapeDtypeStruct((2, 2), jnp.float32)}
     tensor = jnp.ones((3, 3))
     with pytest.raises(ValueError, match=r".*"):
@@ -30,12 +31,11 @@ def test_assign_weights_shape_mismatch() -> object:
         assign_weights(["model"], tensor, state2, "src", None)
     state3 = {"model": {"layer": jnp.zeros((3, 3))}}
     assign_weights(["model", "layer"], tensor, state3, "src", None)
-    if not jnp.array_equal(state3["model"]["layer"], tensor):
-        raise AssertionError
+    assert jnp.array_equal(state3["model"]["layer"], tensor)
 
 
 def test_assign_weights_sharding() -> object:
-    """Initialize function test_assign_weights_sharding."""
+    """Test the assign_weights_sharding behavior."""
     state = {"model": jnp.zeros((8, 8))}
     tensor = jnp.ones((8, 8))
     sharding = {"model": jax.sharding.NamedSharding(jax.sharding.Mesh(jax.devices(), ("x",)), jax.sharding.PartitionSpec("x"))}
@@ -43,19 +43,18 @@ def test_assign_weights_sharding() -> object:
 
 
 def test_segment_ids_to_positions() -> object:
-    """Initialize function test_segment_ids_to_positions."""
+    """Test the segment_ids_to_positions behavior."""
     ids = jnp.array([[1, 1, 0, 1]])
     out = segment_ids_to_positions(ids)
-    if out.shape != (1, 4):
-        raise AssertionError
+    assert out.shape == (1, 4)
 
 
 def test_gemma4_from_pretrained(tmp_path: object) -> object:
-    """Initialize function test_gemma4_from_pretrained.
+    """Test the gemma4 from pretrained behavior.
 
     Args:
     ----
-    tmp_path: Description of tmp_path.
+    tmp_path: The tmp_path parameter required for this operation.
 
     """
     np = __import__("numpy", fromlist=[""])
@@ -75,12 +74,14 @@ def test_gemma4_from_pretrained(tmp_path: object) -> object:
 
 @mock.patch("huggingface_hub.snapshot_download")
 def test_gemma4_causal_from_pretrained(mock_download: object, tmp_path: object) -> object:
-    """Initialize function test_gemma4_causal_from_pretrained.
+    """Test the gemma4 causal from pretrained behavior.
 
     Args:
     ----
-    mock_download: Description of mock_download.
-    tmp_path: Description of tmp_path.
+    mock_download: The mock_download parameter required for this operation.
+    tmp_path: The tmp_path parameter required for this operation.
+
+
 
     """
     mock_download.return_value = str(tmp_path)
@@ -91,16 +92,17 @@ def test_gemma4_causal_from_pretrained(mock_download: object, tmp_path: object) 
         Gemma4ForCausalLM.from_pretrained("unknown_model")
     cfg = ModelConfig(vocab_size=10, hidden_size=16, intermediate_size=32, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=8, num_experts=2, num_experts_per_tok=1, vision_config=None)
     model = Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B", config=cfg)
-    if model is None:
-        raise AssertionError
+    assert model is not None
 
 
 def test_gemma4_causal_from_pretrained_no_config(tmp_path: object) -> object:
-    """Initialize function test_gemma4_causal_from_pretrained_no_config.
+    """Test the gemma4 causal from pretrained no config behavior.
 
     Args:
     ----
-    tmp_path: Description of tmp_path.
+    tmp_path: The tmp_path parameter required for this operation.
+
+
 
     """
     with mock.patch("huggingface_hub.snapshot_download") as mock_download:
@@ -109,5 +111,4 @@ def test_gemma4_causal_from_pretrained_no_config(tmp_path: object) -> object:
         st_np = __import__("safetensors.numpy", fromlist=[""])
         st_np.save_file({"model.embed_tokens.weight": np.zeros((10, 16), dtype=np.float32)}, str(tmp_path) + "/model.safetensors")
         model = Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B")
-        if model is None:
-            raise AssertionError
+        assert model is not None

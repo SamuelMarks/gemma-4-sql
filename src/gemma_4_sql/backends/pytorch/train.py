@@ -1,3 +1,4 @@
+# Copyright 2024
 """PyTorch-specific training pipeline."""
 
 from __future__ import annotations
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
+from gemma_4_sql.type_hints import ETLConfig, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -22,26 +24,43 @@ with catch_optional_imports():
 
 
 def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object, int]:
-    """Set up distributed environment."""
-    is_distributed = distributed_strategy in ("ddp", "fsdp")
+    """Set up distributed environment.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
+    is_distributed = distributed_strategy in {"ddp", "fsdp"}
     dist = None
     device_id = 0
     if is_distributed:
-        dist = __import__("torch.distributed")
+        import torch.distributed as dist
+
         if not dist.is_initialized():
             dist.init_process_group("nccl" if torch.cuda.is_available() else "gloo")
         rank = dist.get_rank()
         device_id = rank % max(1, torch.cuda.device_count())
         device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
-            torch.cuda.set_device(device)
+            torch.cuda.set_device(device)  # pragma: no cover
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return (is_distributed, dist, device, device_id)
 
 
-def _run_training_epochs(dataloader: object, epochs: int, model: torch.nn.Module, optimizer: object, criterion: object, device: object) -> float:
-    """Run training epochs."""
+def _run_training_epochs(state: TrainerState) -> float:
+    dataloader = state.dataloader
+    epochs = state.epochs
+    model = state.policy_model
+    optimizer = state.optimizer
+    criterion = state.criterion
+    device = state.device
+    """Run training epochs.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     final_loss = 0.0
     for _epoch in range(epochs):
         epoch_loss = 0.0
@@ -60,7 +79,12 @@ def _run_training_epochs(dataloader: object, epochs: int, model: torch.nn.Module
 
 
 def _wrap_model_distributed(model: torch.nn.Module, distributed_strategy: str, device_id: int) -> object:
-    """Wrap model for distributed training."""
+    """Wrap model for distributed training.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     if distributed_strategy == "ddp":
         ddp_module = importlib.import_module("torch.nn.parallel")
         ddp_class = ddp_module.DistributedDataParallel
@@ -72,10 +96,22 @@ def _wrap_model_distributed(model: torch.nn.Module, distributed_strategy: str, d
     return model
 
 
-def _run_training_with_fallback(model: torch.nn.Module, dataloader: object, epochs: int, optimizer: object, criterion: object, device: object) -> float:
-    """Run training or fallback to a dummy step if dataloader is invalid."""
+def _run_training_with_fallback(state: TrainerState) -> float:
+    dataloader = state.dataloader
+    epochs = state.epochs
+    model = state.policy_model
+    optimizer = state.optimizer
+    criterion = state.criterion
+    device = state.device
+    epochs = state.epochs
+    """Run training or fallback to a dummy step if dataloader is invalid.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     if dataloader is not None and hasattr(dataloader, "__iter__"):
-        return _run_training_epochs(dataloader, epochs, model, optimizer, criterion, device)
+        return _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, criterion=criterion, device=device))
     dummy_input = torch.zeros((1, 10), dtype=torch.long, device=device)
     dummy_target = torch.zeros((1, 10), dtype=torch.long, device=device)
     out = model(dummy_input)
@@ -91,7 +127,13 @@ def _cleanup_distributed(dist: object) -> None:
         dist.destroy_process_group()
 
 
-def train_model(action: str, model_name: str, dataset: str, epochs: int, learning_rate: float, **kwargs: object) -> JSONDict:
+def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
+    action = getattr(config, "action", "sft")
+    model_name = getattr(config, "model_name", "gemma-4")
+    dataset = getattr(config, "dataset", "dummy")
+    epochs = getattr(config, "epochs", 1)
+    learning_rate = getattr(config, "learning_rate", 1e-05)
+    distributed_strategy = kwargs.get("distributed_strategy", "none") if not hasattr(config, "distributed_strategy") else config.distributed_strategy
     """Train a Text-to-SQL model using the PyTorch backend.
 
     Args:
@@ -108,7 +150,7 @@ def train_model(action: str, model_name: str, dataset: str, epochs: int, learnin
         A dictionary containing PyTorch training status and metrics.
 
     """
-    distributed_strategy = str(kwargs.get("distributed_strategy", "none"))
+
     final_loss = 0.5
     status = "completed"
     if torch is None or Gemma4ForCausalLM is None or optim is None or (nn is None):
@@ -120,10 +162,10 @@ def train_model(action: str, model_name: str, dataset: str, epochs: int, learnin
         model = _wrap_model_distributed(model, distributed_strategy, device_id)
         optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
-        data_dict = build_dataloader(dataset_name=dataset, split="train", batch_size=2, distributed=is_distributed)
+        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2, distributed=is_distributed))
         dataloader = data_dict.get("loader", None)
         model.train()
-        final_loss = _run_training_with_fallback(model, dataloader, epochs, optimizer, criterion, device)
+        final_loss = _run_training_with_fallback(TrainerState(policy_model=model, dataloader=dataloader, epochs=epochs, optimizer=optimizer, criterion=criterion, device=device))
         _cleanup_distributed(dist=dist_module)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         status = f"failed: {e!s}"

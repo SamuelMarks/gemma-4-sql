@@ -1,3 +1,4 @@
+# Copyright 2024
 """MaxText-specific model export pipeline."""
 
 from __future__ import annotations

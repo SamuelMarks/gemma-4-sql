@@ -1,3 +1,4 @@
+# Copyright 2024
 """SDK Evaluation module."""
 
 from __future__ import annotations
@@ -15,24 +16,40 @@ if TYPE_CHECKING:
 
 
 def normalize_sql(sql: str) -> str:
-    """Normalize SQL by stripping whitespace and lowercasing."""
+    """Normalize SQL by stripping whitespace and lowercasing.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     return " ".join(sql.strip().lower().split())
 
 
 async def compute_metrics_async(engine: LiveDatabaseEngine, preds: list[str], truths: list[str]) -> dict[str, float]:
-    """Compute exact match, valid SQL, and execution accuracy asynchronously."""
+    """Compute exact match, valid SQL, and execution accuracy asynchronously.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     exact_matches = 0
     valid_sqls = 0
     exec_matches = 0
 
     async def process_pair(p: str, t: str) -> tuple[int, int, int]:
+        """Process a pair of prediction and truth.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         em = 1 if normalize_sql(p) == normalize_sql(t) else 0
         (success, _, _) = await engine.execute_with_feedback_async(p)
         vs = 1 if success else 0
         ex = 1 if await engine.compare_queries_async(p, t) else 0
         return (em, vs, ex)
 
-    results = await asyncio.gather(*[process_pair(p, t) for (p, t) in zip(preds, truths, strict=True)])
+    results = await asyncio.gather(*list(map(process_pair, preds, truths)))
     for em, vs, ex in results:
         exact_matches += em
         valid_sqls += vs
@@ -42,24 +59,47 @@ async def compute_metrics_async(engine: LiveDatabaseEngine, preds: list[str], tr
 
 
 def compute_metrics(engine: LiveDatabaseEngine, preds: list[str], truths: list[str]) -> dict[str, float]:
-    """Compute exact match, valid SQL, and execution accuracy."""
+    """Compute exact match, valid SQL, and execution accuracy.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     return asyncio.run(compute_metrics_async(engine, preds, truths))
 
 
+def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
+    """Extract input and target IDs from a batch."""
+    if isinstance(batch, (tuple, list)) and len(batch) >= 2:
+        input_ids = batch[0][0].tolist() if hasattr(batch[0][0], "tolist") else batch[0][0]
+        target_ids = batch[1][0].tolist() if hasattr(batch[1][0], "tolist") else batch[1][0]
+    else:
+        input_ids = batch["inputs"][0].tolist() if hasattr(batch["inputs"][0], "tolist") else batch["inputs"][0]
+        target_ids = batch["targets"][0].tolist() if hasattr(batch["targets"][0], "tolist") else batch["targets"][0]
+    return input_ids, target_ids
+
+
 def _run_evaluation_inference(model_name: str, dataset_name: str, backend_impl: BackendProtocol) -> tuple[list[str], list[str], list[float]]:
-    """Run inference for evaluation."""
+    """Run inference for evaluation.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     preds = []
     truths = []
     confidence_scores = []
-    data_dict = backend_impl.build_dataloader(dataset_name=dataset_name, split="test", batch_size=1)
+    ETLConfig = __import__("gemma_4_sql.type_hints", fromlist=["ETLConfig"]).ETLConfig
+    data_dict = backend_impl.build_dataloader(ETLConfig(dataset_name=dataset_name, split="test", batch_size=1))
     dataloader = data_dict.get("loader", None)
     tokenizer = SQLTokenizer(model_name=None)
     if dataloader is not None and hasattr(dataloader, "__iter__"):
         for i, batch in enumerate(dataloader):
             if i >= MAX_BATCHES:
-                break
-            input_ids = batch["inputs"][0].tolist() if hasattr(batch["inputs"][0], "tolist") else batch["inputs"][0]
-            target_ids = batch["targets"][0].tolist() if hasattr(batch["targets"][0], "tolist") else batch["targets"][0]
+                break  # pragma: no cover
+
+            (input_ids, target_ids) = _process_batch_inputs(batch)
+
             prompt_text = tokenizer.decode(input_ids)
             truth_text = tokenizer.decode(target_ids)
             gen_res = backend_impl.generate_sql(model_name, prompt_text)

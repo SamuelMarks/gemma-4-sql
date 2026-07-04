@@ -1,16 +1,15 @@
+# Copyright 2024
 """JAX-specific continuous batching inference logic."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
-    from fastapi import Request
-
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
 jax = None
@@ -19,8 +18,7 @@ with catch_optional_imports():
 FastAPI = None
 uvicorn = None
 with catch_optional_imports():
-    import uvicorn
-    from fastapi import FastAPI
+    pass  # pragma: no cover
 
 
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
@@ -38,26 +36,31 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         A dictionary containing serving status and metadata.
 
     """
-    if jax is None:
-        return {"backend": "jax", "model": model_name, "port": port, "max_batch_size": max_batch_size, "status": "mocked_missing_jax", "mode": "continuous_batching"}
-    if FastAPI is None or uvicorn is None:
-        return {"backend": "jax", "model": model_name, "port": port, "max_batch_size": max_batch_size, "status": "failed_missing_fastapi", "mode": "continuous_batching"}
-    app = FastAPI(title=f"JAX Serve: {model_name}")
-    request_queue: asyncio.Queue[dict[str, Any]] | None = None
 
-    @app.post("/generate")
-    async def generate(request: Request) -> dict[str, str]:
-        """Generate SQL from prompt."""
-        nonlocal request_queue
-        if request_queue is None:
-            request_queue = asyncio.Queue()
-        req_data = await request.json()
-        prompt = req_data.get("prompt", "")
-        future = asyncio.Future()
-        await request_queue.put({"prompt": prompt, "future": future})
-        return {"sql": "SELECT * FROM generated WHERE prompt='{p}'".replace("{p}", prompt)}
+    def _app_factory() -> object:
+        def _generate(prompt: str) -> str:
+            return "SELECT * FROM generated WHERE prompt='{p}'".replace("{p}", prompt)
 
-    status = "running_jax_serve"
-    if not kwargs.get("test_mode"):
+        return create_common_app(
+            backend_name="jax",
+            model_name=model_name,
+            test_mode=bool(kwargs.get("test_mode")),
+            generate_logic=_generate,
+        )
+
+    result = serve_model_wrapper(
+        backend_name="jax",
+        model_name=model_name,
+        port=port,
+        max_batch_size=max_batch_size,
+        missing_deps=jax is None,
+        missing_status="mocked_missing_jax",
+        app_factory=_app_factory,
+        test_mode=bool(kwargs.get("test_mode")),
+    )
+
+    # Maintain JAX specific log message behavior from original logic for backwards compatibility tests
+    if result["status"] == "running_jax_serve" and not kwargs.get("test_mode"):
         logger.info("Starting JAX server on port %d with max_batch_size %d", port, max_batch_size)
-    return {"backend": "jax", "model": model_name, "port": port, "max_batch_size": max_batch_size, "status": status, "mode": "continuous_batching", "app": app}
+
+    return result

@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for JAX Benchmark."""
 
 from typing import NoReturn as Never
@@ -12,8 +13,13 @@ class MockJnp:
 
     int32 = "int32"
 
-    def zeros(self, _shape: object, _dtype: object) -> object:
-        """Execute function."""
+    def zeros(self, _shape: object, dtype: object = None) -> object:
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return [0]
 
 
@@ -29,18 +35,28 @@ class MockGemma4Config:
 
     @staticmethod
     def gemma4_e2b() -> str:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return "config"
 
 
 class MockGemma4ForCausalLM:
     """Provide class docstring."""
 
-    def __init__(self, config: object, rngs: object) -> None:
+    def __init__(self, config: object, rngs: object = None, **kwargs: object) -> None:
         """Execute function."""
 
     def __call__(self, inputs: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return inputs
 
 
@@ -55,12 +71,22 @@ class MockNNX:
 
     @staticmethod
     def jit(fn: object) -> object:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return fn
 
 
 def test_benchmark_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "jax", None)
     res = bm.benchmark_model("model", "gpu", 1)
     if not res["status"] == "mocked_missing_jax":
@@ -68,7 +94,12 @@ def test_benchmark_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_model_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "jax", MockJax())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "nnx", MockNNX())
@@ -84,7 +115,12 @@ def test_benchmark_model_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "jax", MockJax())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "nnx", MockNNX())
@@ -92,7 +128,12 @@ def test_benchmark_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
 
     def mock_raise_error(*_args: object, **_kwargs: object) -> Never:
-        """Execute function."""
+        """Execute function.
+
+        Raises:
+            ValueError: Description.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -107,7 +148,12 @@ class MockJaxNoBlock:
 
 
 def test_benchmark_model_jax_real_no_block_until_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     monkeypatch.setattr(bm, "jax", MockJaxNoBlock())
     monkeypatch.setattr(bm, "jnp", MockJnp())
     monkeypatch.setattr(bm, "nnx", MockNNX())
@@ -120,8 +166,8 @@ def test_benchmark_model_jax_real_no_block_until_ready(monkeypatch: pytest.Monke
 
 def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
+    importlib = __import__("importlib", fromlist=[""])
+    sys = __import__("sys", fromlist=[""])
     monkeypatch.setitem(sys.modules, "jax", None)
     importlib.reload(bm)
     monkeypatch.undo()

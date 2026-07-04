@@ -1,3 +1,4 @@
+# Copyright 2024
 """Provide module docstring."""
 
 import json
@@ -9,13 +10,23 @@ from gemma_4_sql.sdk.duckdb_extension import embed_in_duckdb
 
 
 def test_duckdb_real_integration(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Raises:
+        AssertionError: Description.
+
+    """
 
     def mock_agentic_loop(*_args: object, **_kwargs: object) -> dict:
-        """Execute function."""
+        """Execute function.
+
+        Returns:
+            object: Description of return.
+
+        """
         return {"final_sql": "SELECT COUNT(*) FROM test", "results": [(1,)], "success": True}
 
-    ext = __import__("gemma_4_sql.sdk.duckdb_extension")
+    ext = __import__("gemma_4_sql.sdk.duckdb_extension", fromlist=[""])
     monkeypatch.setattr(ext, "run_agentic_loop", mock_agentic_loop)
     conn = duckdb.connect()
     conn.execute("CREATE TABLE test (a INT); INSERT INTO test VALUES (1);")

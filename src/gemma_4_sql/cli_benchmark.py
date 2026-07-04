@@ -1,3 +1,4 @@
+# Copyright 2024
 """Benchmarking CLI commands."""
 
 from __future__ import annotations

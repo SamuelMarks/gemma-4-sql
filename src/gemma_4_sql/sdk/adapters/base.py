@@ -1,11 +1,15 @@
+# Copyright 2024
 """Base adapter protocol for database connections."""
 
 from __future__ import annotations
 
+import logging
 import typing
 
 if typing.TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONPrimitive
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseAdapter:
@@ -20,31 +24,31 @@ class DatabaseAdapter:
 
     def connect(self) -> object:
         """Connect synchronously."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     async def connect_async(self) -> object:
         """Connect asynchronously."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
-    def execute_with_feedback(self, query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
+    def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute synchronously with feedback."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
-    async def execute_with_feedback_async(self, query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
+    async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute asynchronously with feedback."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
-    def execute_query(self, query: str) -> list[tuple[JSONPrimitive, ...]]:
+    def execute_query(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
         """Execute synchronously."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
-    async def execute_query_async(self, query: str) -> list[tuple[JSONPrimitive, ...]]:
+    async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
         """Execute asynchronously."""
-        raise NotImplementedError
+        raise NotImplementedError  # pragma: no cover
 
     def close(self) -> None:
         """Close connection."""

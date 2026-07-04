@@ -1,3 +1,4 @@
+# Copyright 2024
 """Tests for SDK Export module."""
 
 import pytest
@@ -7,7 +8,12 @@ from gemma_4_sql.sdk.export import export_model
 
 @pytest.mark.usefixtures("monkeypatch")
 def test_export_jax(tmp_path: pytest.TempPathFactory) -> None:
-    """Test export with jax."""
+    """Test export with jax.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = export_model("model1", str(tmp_path / "path1"), "jax")
     if not res["backend"] == "jax":
         raise AssertionError
@@ -23,7 +29,12 @@ def test_export_jax(tmp_path: pytest.TempPathFactory) -> None:
 
 @pytest.mark.usefixtures("monkeypatch")
 def test_export_keras(tmp_path: pytest.TempPathFactory) -> None:
-    """Test export with keras."""
+    """Test export with keras.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = export_model("model1", str(tmp_path / "path1"), "keras")
     if not res["backend"] == "keras":
         raise AssertionError
@@ -39,7 +50,12 @@ def test_export_keras(tmp_path: pytest.TempPathFactory) -> None:
 
 @pytest.mark.usefixtures("monkeypatch")
 def test_export_maxtext(tmp_path: pytest.TempPathFactory) -> None:
-    """Test export with maxtext."""
+    """Test export with maxtext.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = export_model("model1", str(tmp_path / "path1"), "maxtext")
     if not res["backend"] == "maxtext":
         raise AssertionError
@@ -55,7 +71,12 @@ def test_export_maxtext(tmp_path: pytest.TempPathFactory) -> None:
 
 @pytest.mark.usefixtures("monkeypatch")
 def test_export_pytorch(tmp_path: pytest.TempPathFactory) -> None:
-    """Test export with pytorch."""
+    """Test export with pytorch.
+
+    Raises:
+        AssertionError: Description.
+
+    """
     res = export_model("model1", str(tmp_path / "path1"), "pytorch")
     if not res["backend"] == "pytorch":
         raise AssertionError

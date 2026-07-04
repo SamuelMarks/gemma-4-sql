@@ -1,3 +1,4 @@
+# Copyright 2024
 """SDK Agent module for self-correction execution feedback loops."""
 
 from __future__ import annotations
@@ -26,7 +27,12 @@ class AgentContext:
 
 
 async def _process_single_prompt(backend_name: str, backend_impl: BackendProtocol, model_name: str, prompt: str, engine: LiveDatabaseEngine, context: AgentContext) -> JSONDict:
-    """Execute logic."""
+    """Execute logic.
+
+    Returns:
+        object: The resulting output from the operation.
+
+    """
     current_prompt = prompt
     attempts = 0
     success = False
@@ -79,7 +85,12 @@ def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "j
     prompts = prompt if isinstance(prompt, list) else [prompt]
 
     async def _run_all() -> list[JSONDict]:
-        """Execute logic."""
+        """Execute logic.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
         tasks = [_process_single_prompt(backend, backend_impl, model_name, p, engine, context) for p in prompts]
         return await asyncio.gather(*tasks)
 

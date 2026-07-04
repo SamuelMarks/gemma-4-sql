@@ -1,3 +1,4 @@
+# Copyright 2024
 """MLX-specific PEFT / LoRA implementation."""
 
 from __future__ import annotations
@@ -41,7 +42,12 @@ def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alp
             tree_map = __import__("mlx.utils", fromlist=["tree_map"]).tree_map
 
             def check_and_wrap(leaf: object) -> object:
-                """Docstring."""
+                """Docstring.
+
+                Returns:
+                    object: The resulting output from the operation.
+
+                """
                 return leaf
 
             _ = tree_map(check_and_wrap, model.parameters())
