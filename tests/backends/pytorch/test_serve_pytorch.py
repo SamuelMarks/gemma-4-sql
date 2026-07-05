@@ -103,12 +103,14 @@ def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, **_kwargs: object) -> None:
             """Docstring."""
             self.router = mock.MagicMock()
+            self.func = None
 
         def post(self, *_args: object, **_kwargs: object) -> object:
             """Docstring."""
 
             def decorator(func: object) -> object:
                 """Docstring."""
+                self.func = func
                 return func
 
             return decorator
@@ -141,12 +143,14 @@ def test_serve_model_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self, **_kwargs: object) -> None:
             """Docstring."""
             self.router = mock.MagicMock()
+            self.func = None
 
         def post(self, *_args: object, **_kwargs: object) -> object:
             """Docstring."""
 
             def decorator(func: object) -> object:
                 """Docstring."""
+                self.func = func
                 return func
 
             return decorator
@@ -194,6 +198,10 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class MockApp:
         """Provide class docstring."""
+
+        def __init__(self) -> None:
+            """Execute function."""
+            self.func = None
 
         def post(self, *_args: object, **_kwargs: object) -> object:
             """Execute function.
