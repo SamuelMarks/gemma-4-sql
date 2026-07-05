@@ -33,6 +33,7 @@ from .decoder_layer import Gemma4DecoderLayer
 from .layers import ConstVar, Gemma4ClippableLinear, Gemma4MLP, Gemma4RMSNorm, StatVar, _make_embed, _make_linear
 from .moe import Gemma4MoE, Gemma4RoutedExperts
 from .multimodal import MultimodalInputs, batched_merge_modalities
+from .params import create_gemma4_from_pretrained
 from .vision import Gemma4MultimodalEmbedder, Gemma4MultiModalProjector, SiglipAttention, SiglipEncoderLayer, SiglipMLP, SiglipVisionEmbeddings, SiglipVisionTransformer, _avg_pool_vision_outputs
 
 __all__ = [
@@ -176,7 +177,6 @@ def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = 
 
     """
     snapshot_download = __import__("huggingface_hub", fromlist=["snapshot_download"]).snapshot_download
-    from . import params
 
     if config is None:
         config_map = {
@@ -194,7 +194,7 @@ def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = 
             raise ValueError(msg)
         config = config_map[model_name]()
     model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
-    return params.create_gemma4_from_pretrained(model_ckpt_path, config)
+    return create_gemma4_from_pretrained(model_ckpt_path, config)
 
 
 class Gemma4ForCausalLM(nnx.Module):
@@ -223,7 +223,8 @@ class Gemma4ForCausalLM(nnx.Module):
         else:
             self.embed_audio = None
 
-    def _merge_multimodal_features(self, inputs_embeds: Array, image_features: Array | None, audio_features: Array | None, inputs: MultimodalInputs) -> Array:
+    @staticmethod
+    def _merge_multimodal_features(inputs_embeds: Array, image_features: Array | None, audio_features: Array | None, inputs: MultimodalInputs) -> Array:
         """Merge vision and audio features into the text embeddings.
 
         Returns:

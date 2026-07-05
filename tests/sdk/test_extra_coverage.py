@@ -146,5 +146,3 @@ def test_base_methods() -> None:
     adapter.conn = MagicMock()
     with pytest.raises(NotImplementedError):
         adapter.setup_schema("DDL")
-    with pytest.raises(NotImplementedError):
-        adapter.execute_with_feedback("query")

@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import LazyLoader
+
 if TYPE_CHECKING:
     from gemma_4_sql.tokenization import SQLTokenizer
     from gemma_4_sql.type_hints import JSONDict
@@ -111,8 +113,6 @@ def _load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
     RuntimeError: If DuckDB is not available or query fails.
 
     """
-    from gemma_4_sql.backends.lazy_loader import LazyLoader
-
     duckdb_module = LazyLoader("duckdb").get_module()
     if duckdb_module is None:
         msg = "duckdb is required. Install with `pip install duckdb`."  # pragma: no cover

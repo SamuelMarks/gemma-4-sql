@@ -27,8 +27,7 @@ def _is_rank_zero() -> bool:
     if torch is None:
         return True
     try:
-        import torch.distributed as dist
-
+        dist = __import__("torch.distributed", fromlist=[""])
         if dist.is_initialized():
             return dist.get_rank() == 0
     except (ImportError, RuntimeError) as e:

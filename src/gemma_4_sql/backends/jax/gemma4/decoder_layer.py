@@ -54,7 +54,7 @@ class Gemma4DecoderLayer(nnx.Module):
         attn_out = self.post_self_attention_norm(attn_out)
         x += attn_out
         lnx2 = self.pre_ffw_norm(x)
-        mlp_out = self.mlp(lnx2, original_x=x) if isinstance(self.mlp, Gemma4MoE) else self.mlp(lnx2)
+        mlp_out = self.mlp(lnx2, original_x=x)
         mlp_out = self.post_ffw_norm(mlp_out)
         x += mlp_out
         if self.config.hidden_size_per_layer_input and per_layer_input is not None:

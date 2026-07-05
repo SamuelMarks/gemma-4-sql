@@ -122,6 +122,33 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
     return (policy_params, opt_state, final_loss)
 
 
+def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, test_mode: bool) -> tuple[str, float]:
+    """Execute the core DPO loop."""
+    if not test_mode:  # pragma: no cover
+        try:
+            jax.distributed.initialize()
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:
+            logger.warning("jax.distributed.initialize() failed or already initialized: %s", init_err)
+    policy_model = Gemma4Model(model_name)
+    ref_model = Gemma4Model(model_name)
+    rng = jax.random.PRNGKey(0)
+    dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
+    policy_params = policy_model.init(rng, dummy_input)
+    ref_params = ref_model.init(rng, dummy_input)
+    optimizer = optax.adamw(learning_rate)
+    opt_state = optimizer.init(policy_params)
+    train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    dataloader = data_dict.get("loader", None)
+    if dataloader is not None and hasattr(dataloader, "__iter__"):
+        (policy_params, opt_state, final_loss) = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step, policy_params=policy_params, ref_params=ref_params, opt_state=opt_state))
+    else:
+        dummy_batch = {"chosen_inputs": dummy_input, "chosen_labels": dummy_input, "rejected_inputs": dummy_input, "rejected_labels": dummy_input}
+        (policy_params, opt_state, loss) = train_step(policy_params, ref_params, opt_state, dummy_batch)
+        final_loss = float(loss.item())
+    return "completed", final_loss
+
+
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
@@ -154,28 +181,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     status = "completed"
     if jax is not None and jnp is not None and (optax is not None) and (Gemma4Model is not None):
         try:
-            if not kwargs.get("test_mode"):  # pragma: no cover
-                try:
-                    jax.distributed.initialize()
-                except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:
-                    logger.warning("jax.distributed.initialize() failed or already initialized: %s", init_err)
-            policy_model = Gemma4Model(model_name)
-            ref_model = Gemma4Model(model_name)
-            rng = jax.random.PRNGKey(0)
-            dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-            policy_params = policy_model.init(rng, dummy_input)
-            ref_params = ref_model.init(rng, dummy_input)
-            optimizer = optax.adamw(learning_rate)
-            opt_state = optimizer.init(policy_params)
-            train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
-            data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
-            dataloader = data_dict.get("loader", None)
-            if dataloader is not None and hasattr(dataloader, "__iter__"):
-                (policy_params, opt_state, final_loss) = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step, policy_params=policy_params, ref_params=ref_params, opt_state=opt_state))
-            else:
-                dummy_batch = {"chosen_inputs": dummy_input, "chosen_labels": dummy_input, "rejected_inputs": dummy_input, "rejected_labels": dummy_input}
-                (policy_params, opt_state, loss) = train_step(policy_params, ref_params, opt_state, dummy_batch)
-                final_loss = float(loss.item())
+            status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, bool(kwargs.get("test_mode")))
         except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
             logger.exception("DPO Train error: ")
             status = f"failed: {e!s}"

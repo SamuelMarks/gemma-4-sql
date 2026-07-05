@@ -83,6 +83,9 @@ class MockF:
 
 
 class MockNNX:
+    def update(self, *args, **kwargs):
+        pass
+
     """Provide class docstring."""
 
     class Rngs:

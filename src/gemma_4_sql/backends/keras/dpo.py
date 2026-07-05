@@ -115,6 +115,34 @@ def _run_training_epochs(state: TrainerState) -> float:
     return float(final_loss)
 
 
+def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float) -> tuple[str, float]:
+    """Execute the core DPO loop."""
+    policy_model: object = None
+    ref_model: object = None
+    try:
+        gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
+        policy_model = gemma_causal_lm_cls.from_preset(model_name)  # pragma: no cover
+        ref_model = gemma_causal_lm_cls.from_preset(model_name)  # pragma: no cover
+    except (ImportError, ValueError):
+        inputs = keras.Input(shape=(None,), dtype="int32")
+        x = keras.layers.Embedding(256, 128)(inputs)
+        outputs = keras.layers.Dense(256)(x)
+        policy_model = keras.Model(inputs, outputs)
+        ref_model = keras.Model(inputs, outputs)
+    optimizer = keras.optimizers.AdamW(learning_rate=learning_rate)
+    train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    dataloader = data_dict.get("loader", None)
+    if dataloader is not None and hasattr(dataloader, "__iter__"):
+        final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step))
+    else:
+        dummy_input = tf.zeros((1, 10), dtype=tf.int32)
+        dummy_batch = {"chosen_inputs": dummy_input, "chosen_labels": dummy_input, "rejected_inputs": dummy_input, "rejected_labels": dummy_input}
+        loss = train_step(dummy_batch)
+        final_loss = float(loss.numpy()) if hasattr(loss, "numpy") and callable(loss.numpy) else float(loss)
+    return "completed", final_loss
+
+
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
@@ -137,29 +165,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     status = "completed"
     if keras is not None and tf is not None:
         try:
-            policy_model: object = None
-            ref_model: object = None
-            try:
-                gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
-                policy_model = gemma_causal_lm_cls.from_preset(model_name)  # pragma: no cover
-                ref_model = gemma_causal_lm_cls.from_preset(model_name)  # pragma: no cover
-            except (ImportError, ValueError):
-                inputs = keras.Input(shape=(None,), dtype="int32")
-                x = keras.layers.Embedding(256, 128)(inputs)
-                outputs = keras.layers.Dense(256)(x)
-                policy_model = keras.Model(inputs, outputs)
-                ref_model = keras.Model(inputs, outputs)
-            optimizer = keras.optimizers.AdamW(learning_rate=learning_rate)
-            train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
-            data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
-            dataloader = data_dict.get("loader", None)
-            if dataloader is not None and hasattr(dataloader, "__iter__"):
-                final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step))
-            else:
-                dummy_input = tf.zeros((1, 10), dtype=tf.int32)
-                dummy_batch = {"chosen_inputs": dummy_input, "chosen_labels": dummy_input, "rejected_inputs": dummy_input, "rejected_labels": dummy_input}
-                loss = train_step(dummy_batch)
-                final_loss = float(loss.numpy()) if hasattr(loss, "numpy") and callable(loss.numpy) else float(loss)
+            status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate)
         except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
             logger.exception("Keras DPO error: ")
             status = f"failed: {e!s}"

@@ -23,6 +23,8 @@ All high-level training commands pass through the dispatcher. Based on the `--ba
 ### 1.3 Swappable Execution Backends (`backends/`)
 Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`) implements identical interfaces for training, exporting, and inference. This ensures that switching from a PyTorch local setup to a MaxText TPU pod is a simple flag change.
 
+*Architectural Note: This codebase deliberately avoids abstracting or deduplicating core logic (like training loops or data loading) across different backends. The goal is to demonstrate and utilize the ecosystem-recommended, idiomatic ways of performing these tasks within each framework (e.g., using `tf.data` for Keras vs. standard `DataLoaders` for PyTorch). As such, some boilerplate duplication across `backends/` is intentional and preferred over a non-standard meta-framework.*
+
 *   **JAX (`backends/jax`)**: Uses Google's `jax` and `optax`. Integrates directly with the built-in NNX Gemma 4 implementation. Handles `@jax.jit` compiled loops.
 *   **MaxText (`backends/maxtext`)**: Integrates with Google's AI-Hypercomputer stack. Uses the `Gemma4Model` written in pure XLA to leverage TPU interconnects natively.
 *   **Keras (`backends/keras`)**: Uses Keras 3 core abstractions (`keras.Model.fit`), maintaining a standardized TensorFlow-compatible graph.

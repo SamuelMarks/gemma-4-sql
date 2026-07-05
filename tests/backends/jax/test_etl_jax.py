@@ -312,7 +312,6 @@ def test_jax_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
     monkeypatch.setattr(jax_etl, "datasets", "mock")
     monkeypatch.setattr(jax_etl, "grain", type("MockGrain", (), {"IndexSampler": lambda *args, **kwargs: None, "DataLoader": lambda *args, **kwargs: None, "Batch": lambda *args, **kwargs: None, "RandomAccessDataSource": object, "MapTransform": object}))
-    import sys
 
     sys.modules["gemma_4_sql.backends.common_data"].duckdb = None
     monkeypatch.setattr(jax_etl, "_load_duckdb_dataset", lambda *args, **kwargs: (_ for _ in ()).throw(ImportError("duckdb is required")))
@@ -412,7 +411,8 @@ def test_jax_etl_grain_classes() -> None:
     HFDataSource, JAXFormatTransform = jax_etl._get_grain_classes(MockGrain)
 
     ds = HFDataSource([{"a": 1}, {"a": 2}])
-    assert len(ds) == 2
+    expected_len = 2
+    assert len(ds) == expected_len
     assert ds[0] == {"a": 1}
     assert ds[1] == {"a": 2}
 

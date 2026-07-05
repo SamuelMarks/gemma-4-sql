@@ -56,6 +56,37 @@ def _run_training_epochs(state: TrainerState) -> float:
     return final_loss  # pragma: no cover
 
 
+def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float) -> tuple[str, float]:  # pragma: no cover
+    """Execute the core training loop for MLX."""
+    (model, _) = load(model_name)
+
+    def loss_fn(model_t: object, inputs: object, targets: object) -> object:
+        """Docstring.
+
+        Returns:
+            object: The resulting output from the operation.
+
+        """
+        logits = model_t(inputs)
+        return nn.losses.cross_entropy(logits, targets, reduction="mean")
+
+    optimizer = optim.AdamW(learning_rate=learning_rate)
+    loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    dataloader = data_dict.get("loader", None)
+    if dataloader is not None and hasattr(dataloader, "__iter__"):
+        final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=loss_and_grad_fn))
+    else:
+        "Execute logic."
+        dummy_input = mx.zeros((1, 10), dtype=mx.int32)
+        dummy_target = mx.zeros((1, 10), dtype=mx.int32)
+        (_loss, grads) = loss_and_grad_fn(model, dummy_input, dummy_target)
+        optimizer.update(model, grads)
+        mx.eval(model.parameters(), optimizer.state)
+        final_loss = 0.35
+    return "completed", float(final_loss)
+
+
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Train a Text-to-SQL model using the MLX backend.
 
@@ -85,32 +116,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     status = "completed"
     if mx is not None and nn is not None and (optim is not None) and (load is not None):
         try:
-            (model, _) = load(model_name)
-
-            def loss_fn(model_t: object, inputs: object, targets: object) -> object:
-                """Docstring.
-
-                Returns:
-                    object: The resulting output from the operation.
-
-                """
-                logits = model_t(inputs)
-                return nn.losses.cross_entropy(logits, targets, reduction="mean")
-
-            optimizer = optim.AdamW(learning_rate=learning_rate)
-            loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
-            data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
-            dataloader = data_dict.get("loader", None)
-            if dataloader is not None and hasattr(dataloader, "__iter__"):
-                final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=loss_and_grad_fn))
-            else:
-                "Execute logic."
-                dummy_input = mx.zeros((1, 10), dtype=mx.int32)
-                dummy_target = mx.zeros((1, 10), dtype=mx.int32)
-                (_loss, grads) = loss_and_grad_fn(model, dummy_input, dummy_target)
-                optimizer.update(model, grads)
-                mx.eval(model.parameters(), optimizer.state)
-                final_loss = 0.35
+            status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)
         except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
             status = f"failed: {e!s}"
     else:

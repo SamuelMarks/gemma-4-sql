@@ -87,6 +87,26 @@ def _run_training_epochs(state: TrainerState) -> float:
     return generic_run_training_epochs(state.epochs, state.dataloader, process_batch)
 
 
+def _execute_train(dataset: str, epochs: int, learning_rate: float) -> tuple[str, float]:
+    """Execute the core training loop for JAX."""
+    model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
+    mesh = jax.sharding.Mesh(jax.devices(), ("data",))
+    sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("data"))
+    schedule = optax.warmup_cosine_decay_schedule(init_value=0.0, peak_value=learning_rate, warmup_steps=100, decay_steps=max(1, epochs * 1000), end_value=learning_rate * 0.1)
+    optimizer = nnx.Optimizer(model, optax.adamw(schedule))
+    train_step = _get_train_step_fn()
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    dataloader = data_dict.get("loader", None)
+    if dataloader is not None and hasattr(dataloader, "__iter__"):
+        final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=train_step, params=sharding))
+    else:
+        dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
+        dummy_batch = {"inputs": jax.device_put(dummy_input, sharding), "targets": jax.device_put(dummy_input, sharding)}
+        loss = train_step(model, optimizer, dummy_batch)
+        final_loss = float(loss.item())
+    return "completed", float(final_loss)
+
+
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Train a Text-to-SQL model using the JAX backend.
 
@@ -114,21 +134,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     status = "completed"
     if jax is not None and jnp is not None and (optax is not None) and (Gemma4ForCausalLM is not None):
         try:
-            model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
-            mesh = jax.sharding.Mesh(jax.devices(), ("data",))
-            sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("data"))
-            schedule = optax.warmup_cosine_decay_schedule(init_value=0.0, peak_value=learning_rate, warmup_steps=100, decay_steps=max(1, epochs * 1000), end_value=learning_rate * 0.1)
-            optimizer = nnx.Optimizer(model, optax.adamw(schedule))
-            train_step = _get_train_step_fn()
-            data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
-            dataloader = data_dict.get("loader", None)
-            if dataloader is not None and hasattr(dataloader, "__iter__"):
-                final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=train_step, params=sharding))
-            else:
-                dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-                dummy_batch = {"inputs": jax.device_put(dummy_input, sharding), "targets": jax.device_put(dummy_input, sharding)}
-                loss = train_step(model, optimizer, dummy_batch)
-                final_loss = float(loss.item())
+            status, final_loss = _execute_train(dataset, epochs, learning_rate)
         except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
             status = f"failed: {e!s}"
     else:

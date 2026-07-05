@@ -75,7 +75,8 @@ def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
         object: Description of return.
 
     """
-    if isinstance(batch, (tuple, list)) and len(batch) >= 2:
+    MIN_BATCH_TUPLE_LENGTH = 2
+    if isinstance(batch, (tuple, list)) and len(batch) >= MIN_BATCH_TUPLE_LENGTH:
         input_ids = batch[0][0].tolist() if hasattr(batch[0][0], "tolist") else batch[0][0]
         target_ids = batch[1][0].tolist() if hasattr(batch[1][0], "tolist") else batch[1][0]
     else:

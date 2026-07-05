@@ -48,20 +48,6 @@ class DuckDBAdapter(DatabaseAdapter):
         """Execute DDL to set up schema."""
         self.conn.execute(ddl)  # pragma: no cover
 
-    def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
-        """Execute synchronously with feedback.
-
-        Returns:
-            object: The resulting output from the operation.
-
-        """
-        try:
-            results = self.conn.execute(query, params or ()).fetchall()
-        except Exception as e:  # noqa: BLE001
-            return (False, [], str(e))
-        else:
-            return (True, results, None)
-
     async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
         """Execute asynchronously with feedback.
 
@@ -76,19 +62,6 @@ class DuckDBAdapter(DatabaseAdapter):
             return (False, [], str(e))
         else:
             return (True, results, None)
-
-    def execute_query(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
-        """Execute synchronously.
-
-        Returns:
-            object: The resulting output from the operation.
-
-        """
-        try:
-            return self.conn.execute(query, params or ()).fetchall()
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Query execution failed: %s", e)
-            return []
 
     async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
         """Execute asynchronously.

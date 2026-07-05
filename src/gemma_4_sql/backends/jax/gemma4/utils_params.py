@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import re
@@ -142,7 +143,7 @@ def _load_weights_from_safetensors_file(filepath: str, state: dict[str, object],
                     assign_weights(keys, tensor, state, st_key, transform)
                 except KeyError:  # pragma: no cover
                     logger.debug("Key %s not in state", mapped_key)  # pragma: no cover
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
+    except (OSError, ValueError, TypeError):
         logger.exception("Failed to load %s", filepath)
 
 
@@ -156,10 +157,8 @@ def _get_model_and_state(model_cls: object, cfg: object) -> tuple[object, dict]:
     nnx = __import__("flax", fromlist=["nnx"]).nnx
     model = model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
     state = {}
-    try:
+    with contextlib.suppress(RuntimeError, ValueError, TypeError, AttributeError):
         (_, state, _) = nnx.split(model, ...)
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
-        pass
     return model, state
 
 
@@ -193,6 +192,6 @@ def create_model_from_safe_tensors(file_dir: str, model_cls: object, cfg: object
     try:
         nnx = __import__("flax", fromlist=["nnx"]).nnx
         nnx.update(model, state)
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
-        logger.exception("Failed to update model with loaded state: ")
+    except (ValueError, TypeError, KeyError, AttributeError):
+        logger.exception("Failed to update model with loaded state")
     return model

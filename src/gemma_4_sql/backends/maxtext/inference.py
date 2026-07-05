@@ -69,6 +69,22 @@ def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_wid
     return (beams[0][0], beams[0][1])
 
 
+def _execute_generate(model_name: str, input_tokens: list[int], beam_width: int, max_length: int, eos_token_id: int, test_mode: bool, tokenizer: SQLTokenizer) -> tuple[str, str, float]:
+    logger.info("Generating with MaxText: %s", model_name)
+    input_ids = jnp.array([input_tokens], dtype=jnp.int32)
+    model = Gemma4Model(model_name)
+    apply_fn = model.apply if hasattr(model, "apply") else model
+    jitted_beam_search = jax.jit(maxtext_beam_search, static_argnums=(2, 3, 4))
+    if not test_mode:
+        (output_ids, logprob_sum) = jitted_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
+    else:
+        (output_ids, logprob_sum) = maxtext_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
+    sql = tokenizer.decode(output_ids[0].tolist())
+    out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
+    confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))
+    return "success", sql, confidence_score
+
+
 def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50, **kwargs: JSONValue) -> JSONDict:
     """Generate a SQL query from a natural language prompt using MaxText.
 
@@ -91,19 +107,7 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     confidence_score = 0.0
     if jax is not None and jnp is not None and (Gemma4Model is not None):
         try:
-            logger.info("Generating with MaxText: %s", model_name)
-            input_ids = jnp.array([input_tokens], dtype=jnp.int32)
-            model = Gemma4Model(model_name)
-            apply_fn = model.apply if hasattr(model, "apply") else model
-            jitted_beam_search = jax.jit(maxtext_beam_search, static_argnums=(2, 3, 4))
-            if not kwargs.get("test_mode"):
-                (output_ids, logprob_sum) = jitted_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
-            else:
-                (output_ids, logprob_sum) = maxtext_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
-            sql = tokenizer.decode(output_ids[0].tolist())
-            out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
-            confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))
-            status = "success"
+            status, sql, confidence_score = _execute_generate(model_name, input_tokens, beam_width, max_length, eos_token_id, bool(kwargs.get("test_mode")), tokenizer)
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
             logger.exception("MaxText Generation Error: ")
             status = f"failed: {e!s}"

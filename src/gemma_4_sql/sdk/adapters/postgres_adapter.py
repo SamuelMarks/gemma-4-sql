@@ -60,26 +60,6 @@ class PostgresAdapter(DatabaseAdapter):
         finally:  # pragma: no cover
             cursor.close()  # pragma: no cover
 
-    def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
-        """Execute synchronously with feedback.
-
-        Returns:
-            object: The resulting output from the operation.
-
-        """
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute(query, params or ())
-        except Exception as e:  # noqa: BLE001
-            return (False, [], str(e))
-        else:
-            if cursor.description is not None:
-                return (True, cursor.fetchall(), None)
-            return (True, [], None)
-        finally:
-            if "cursor" in locals():
-                cursor.close()
-
     async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
         """Execute asynchronously with feedback.
 
@@ -98,27 +78,6 @@ class PostgresAdapter(DatabaseAdapter):
                     await async_conn.close()
         except Exception as e:  # noqa: BLE001
             return (False, [], str(e))
-
-    def execute_query(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
-        """Execute synchronously.
-
-        Returns:
-            object: The resulting output from the operation.
-
-        """
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute(query, params or ())
-        except Exception as e:  # noqa: BLE001
-            logger.debug("Query execution failed: %s", e)
-            return []
-        else:
-            if cursor.description is not None:
-                return cursor.fetchall()
-            return []
-        finally:
-            if "cursor" in locals():
-                cursor.close()
 
     async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
         """Execute asynchronously.

@@ -71,7 +71,7 @@ def _run_benchmark_pass(model: keras.Model, batch_size: int, num_runs: int) -> t
     try:
         memory_info = tf.config.experimental.get_memory_info("GPU:0")
         memory_mb = memory_info["current"] / (1024 * 1024)
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
+    except ValueError:
         memory_mb = 6000.0
     return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 

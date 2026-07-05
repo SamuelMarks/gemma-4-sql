@@ -36,7 +36,19 @@ class DatabaseAdapter:
 
     def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute synchronously with feedback."""
-        raise NotImplementedError  # pragma: no cover
+        try:
+            if hasattr(self.conn, "cursor"):
+                cursor = self.conn.cursor()
+                cursor.execute(query, params or ())
+                results = cursor.fetchall() if getattr(cursor, "description", None) is not None else []
+                if hasattr(cursor, "close"):
+                    cursor.close()
+                return (True, results, None)
+            else:
+                results = self.conn.execute(query, params or ()).fetchall()
+                return (True, results, None)
+        except Exception as e:  # noqa: BLE001
+            return (False, [], str(e))
 
     async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute asynchronously with feedback."""
@@ -44,7 +56,19 @@ class DatabaseAdapter:
 
     def execute_query(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
         """Execute synchronously."""
-        raise NotImplementedError  # pragma: no cover
+        try:
+            if hasattr(self.conn, "cursor"):
+                cursor = self.conn.cursor()
+                cursor.execute(query, params or ())
+                results = cursor.fetchall() if getattr(cursor, "description", None) is not None else []
+                if hasattr(cursor, "close"):
+                    cursor.close()
+                return results
+            else:
+                return self.conn.execute(query, params or ()).fetchall()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Query execution failed: %s", e)
+            return []
 
     async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
         """Execute asynchronously."""

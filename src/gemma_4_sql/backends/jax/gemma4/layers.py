@@ -65,7 +65,7 @@ class Gemma4RMSNorm(nnx.Module):
             self.scale = None
 
     @jax.named_scope("gemma4_rms_norm")
-    def __call__(self, x: Array) -> Array:
+    def __call__(self, x: Array, original_x: Array | None = None) -> Array:
         """Apply RMS normalization.
 
         Returns:
@@ -141,7 +141,7 @@ class Gemma4MLP(nnx.Module):
         self.dtype = kwargs.get("dtype", jnp.float32)
 
     @jax.named_scope("gemma4_mlp")
-    def __call__(self, x: Array) -> Array:
+    def __call__(self, x: Array, original_x: Array | None = None) -> Array:
         """Apply SwiGLU MLP transformation.
 
         Returns:

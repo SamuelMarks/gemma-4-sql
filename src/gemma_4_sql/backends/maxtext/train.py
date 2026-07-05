@@ -125,6 +125,25 @@ def _run_training_with_fallback(state: TrainerState) -> float:
     return float(loss.item())
 
 
+def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float, test_mode: bool) -> tuple[str, float]:
+    """Execute the core training loop for MaxText."""
+    _initialize_jax_distributed(test_mode=test_mode)
+    if maxtext_train is not None and (not test_mode):
+        logger.info("Connecting to MaxText training loop...")
+    model = Gemma4Model(model_name)
+    rng = jax.random.PRNGKey(0)
+    dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
+    params = model.init(rng, dummy_input)
+    optimizer = optax.adamw(learning_rate)
+    opt_state = optimizer.init(params)
+    train_step = _get_train_step_fn(model, optimizer)
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    dataloader = data_dict.get("loader", None)
+    dummy_batch = {"inputs": dummy_input, "targets": dummy_input}
+    final_loss = _run_training_with_fallback(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step, params=params, opt_state=opt_state, dummy_batch=dummy_batch))
+    return "completed", float(final_loss)
+
+
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Train a Text-to-SQL model using the MaxText backend.
 
@@ -154,20 +173,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     if jax is None or jnp is None or optax is None or (Gemma4Model is None):
         return {"backend": "maxtext", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": "mocked_missing_maxtext", "final_loss": float(final_loss)}
     try:
-        _initialize_jax_distributed(test_mode=bool(kwargs.get("test_mode")))
-        if maxtext_train is not None and (not kwargs.get("test_mode")):
-            logger.info("Connecting to MaxText training loop...")
-        model = Gemma4Model(model_name)
-        rng = jax.random.PRNGKey(0)
-        dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-        params = model.init(rng, dummy_input)
-        optimizer = optax.adamw(learning_rate)
-        opt_state = optimizer.init(params)
-        train_step = _get_train_step_fn(model, optimizer)
-        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
-        dataloader = data_dict.get("loader", None)
-        dummy_batch = {"inputs": dummy_input, "targets": dummy_input}
-        final_loss = _run_training_with_fallback(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step, params=params, opt_state=opt_state, dummy_batch=dummy_batch))
+        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, bool(kwargs.get("test_mode")))
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         logger.exception("MaxText Train error: ")
         status = f"failed: {e!s}"

@@ -126,6 +126,24 @@ def _run_training_epochs(state: TrainerState) -> float:
     return float(final_loss)
 
 
+def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float) -> tuple[str, float]:
+    """Execute the core DPO loop."""
+    policy_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
+    ref_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(1))
+    optimizer = nnx.Optimizer(policy_model, optax.adamw(learning_rate))
+    train_step = _get_train_step_fn(beta)
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    dataloader = data_dict.get("loader", None)
+    if dataloader is not None and hasattr(dataloader, "__iter__"):
+        final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=policy_model, ref_model=ref_model, optimizer=optimizer, train_step=train_step))
+    else:
+        dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
+        dummy_batch = {"chosen_inputs": dummy_input, "chosen_labels": dummy_input, "rejected_inputs": dummy_input, "rejected_labels": dummy_input}
+        loss = train_step(policy_model, ref_model, optimizer, dummy_batch)
+        final_loss = float(loss.item())
+    return "completed", final_loss
+
+
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
@@ -157,19 +175,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     status = "completed"
     if jax is not None and jnp is not None and (jnn is not None) and (optax is not None) and (Gemma4ForCausalLM is not None):
         try:
-            policy_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
-            ref_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(1))
-            optimizer = nnx.Optimizer(policy_model, optax.adamw(learning_rate))
-            train_step = _get_train_step_fn(beta)
-            data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
-            dataloader = data_dict.get("loader", None)
-            if dataloader is not None and hasattr(dataloader, "__iter__"):
-                final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=policy_model, ref_model=ref_model, optimizer=optimizer, train_step=train_step))
-            else:
-                dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-                dummy_batch = {"chosen_inputs": dummy_input, "chosen_labels": dummy_input, "rejected_inputs": dummy_input, "rejected_labels": dummy_input}
-                loss = train_step(policy_model, ref_model, optimizer, dummy_batch)
-                final_loss = float(loss.item())
+            status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate)
         except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
             status = f"failed: {e!s}"
     else:

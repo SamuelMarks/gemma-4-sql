@@ -1074,3 +1074,9 @@ def test_cli_few_shot_invalid_examples(monkeypatch: pytest.MonkeyPatch, capsys: 
     args = ["few-shot", "--prompt", "hello", "--examples", "invalid_json"]
     cli(args)
     capsys.readouterr()
+
+
+def test_dependency_missing_error() -> None:
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    assert str(DependencyMissingError("test")) == "test"

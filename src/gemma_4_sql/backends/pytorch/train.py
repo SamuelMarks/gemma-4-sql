@@ -34,8 +34,7 @@ def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object,
     dist = None
     device_id = 0
     if is_distributed:
-        import torch.distributed as dist
-
+        dist = __import__("torch.distributed", fromlist=[""])
         if not dist.is_initialized():  # pragma: no cover
             dist.init_process_group("nccl" if torch.cuda.is_available() else "gloo")
         rank = dist.get_rank()
@@ -75,7 +74,7 @@ def _run_training_epochs(state: TrainerState) -> float:
             targets = batch["targets"].to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
-            logits = outputs if isinstance(outputs, torch.Tensor) else outputs.logits
+            logits = getattr(outputs, "logits", outputs)
             loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
             loss.backward()
             optimizer.step()
@@ -139,6 +138,26 @@ def _cleanup_distributed(dist: object) -> None:
         dist.destroy_process_group()
 
 
+def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float, distributed_strategy: str) -> tuple[str, float]:
+    """Execute the core PyTorch training loop."""
+    dist_module = None
+    try:
+        (is_distributed, dist_module, device, device_id) = _setup_distributed(distributed_strategy)
+        model = Gemma4ForCausalLM.from_pretrained(model_name).to(device)
+        model = _wrap_model_distributed(model, distributed_strategy, device_id)
+        optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+        criterion = nn.CrossEntropyLoss()
+        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2, distributed=is_distributed))
+        dataloader = data_dict.get("loader", None)
+        model.train()
+        final_loss = _run_training_with_fallback(TrainerState(policy_model=model, dataloader=dataloader, epochs=epochs, optimizer=optimizer, criterion=criterion, device=device))
+        _cleanup_distributed(dist=dist_module)
+        return "completed", float(final_loss)
+    except Exception:
+        _cleanup_distributed(dist=dist_module)
+        raise
+
+
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
@@ -173,19 +192,8 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     status = "completed"
     if torch is None or Gemma4ForCausalLM is None or optim is None or (nn is None):
         return {"backend": "pytorch", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": "mocked_missing_torch", "final_loss": final_loss, "distributed_strategy": distributed_strategy}
-    dist_module = None
     try:
-        (is_distributed, dist_module, device, device_id) = _setup_distributed(distributed_strategy)
-        model = Gemma4ForCausalLM.from_pretrained(model_name).to(device)
-        model = _wrap_model_distributed(model, distributed_strategy, device_id)
-        optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
-        criterion = nn.CrossEntropyLoss()
-        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2, distributed=is_distributed))
-        dataloader = data_dict.get("loader", None)
-        model.train()
-        final_loss = _run_training_with_fallback(TrainerState(policy_model=model, dataloader=dataloader, epochs=epochs, optimizer=optimizer, criterion=criterion, device=device))
-        _cleanup_distributed(dist=dist_module)
+        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, str(distributed_strategy))
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         status = f"failed: {e!s}"
-        _cleanup_distributed(dist=dist_module)
     return {"backend": "pytorch", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}

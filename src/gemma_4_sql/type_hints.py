@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import TypeVar, Union
 
 JSONPrimitive = Union[str, int, float, bool, None]
 JSONValue = Union[JSONPrimitive, Sequence["JSONValue"], Mapping[str, "JSONValue"]]
-JSONDict = dict[str, Any]
+JSONDict = dict[str, JSONValue]
 
 # TensorType is a generic alias for backend-specific tensors (JAX arrays, PyTorch tensors, etc.)
-TensorType = Any
-ModelType = Any
+TensorType = TypeVar("TensorType")
+ModelType = TypeVar("ModelType")
 
 
 @dataclass
@@ -58,19 +58,19 @@ class TrainingConfig:
 class TrainerState:
     """State config for training loops."""
 
-    dataloader: Any = None
+    dataloader: object = None
     epochs: int = 1
-    train_step: Any = None
-    params: Any = None
-    opt_state: Any = None
-    policy_params: Any = None
-    ref_params: Any = None
-    policy_model: Any = None
-    ref_model: Any = None
-    optimizer: Any = None
-    criterion: Any = None
-    device: Any = None
-    dummy_batch: Any = None
+    train_step: object = None
+    params: object = None
+    opt_state: object = None
+    policy_params: object = None
+    ref_params: object = None
+    policy_model: object = None
+    ref_model: object = None
+    optimizer: object = None
+    criterion: object = None
+    device: object = None
+    dummy_batch: object = None
     beta: float = 0.1
     dataset: str = ""
     learning_rate: float = 0.0

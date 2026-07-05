@@ -92,7 +92,7 @@ def test_from_pretrained() -> None:
         Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B", config)
         mock_dl.assert_called_once_with("google/gemma-4-E2B", config)
 
-    with patch("huggingface_hub.snapshot_download") as mock_snap, patch("gemma_4_sql.backends.jax.gemma4.params.create_gemma4_from_pretrained") as mock_create:
+    with patch("huggingface_hub.snapshot_download") as mock_snap, patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained") as mock_create:
         Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B", None)
         mock_snap.assert_called_once()
         mock_create.assert_called_once()

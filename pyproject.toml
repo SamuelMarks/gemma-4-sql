@@ -38,10 +38,10 @@ line-length = 320
 target-version = "py39"
 
 [tool.ruff.lint]
-ignore = ["D203", "D213", "COM812", "ISC001", "PLC0415", "PLR0914", "PLR0915", "PLR2004", "ANN401", "UP007"]
+ignore = ["D203", "D213", "COM812", "ISC001", "PLR0915", "UP007", "PLW0717"]
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "PLR6301", "ARG001", "ARG002", "ARG003", "RUF029", "DOC501", "DOC201", "PT018", "PLC1901"]
-"src/**/tests/*" = ["S101", "PLR6301", "ARG001", "ARG002", "ARG003", "RUF029", "DOC501", "DOC201", "PT018", "PLC1901"]
+"tests/*" = ["S101", "PLR6301", "ARG001", "ARG002", "ARG003", "RUF029", "DOC501", "DOC201", "PT018", "PLC1901", "PLW0717", "PLC0415", "PLC2701", "PLR0914", "PLW0717"]
+"src/**/tests/*" = ["S101", "PLR6301", "ARG001", "ARG002", "ARG003", "RUF029", "DOC501", "DOC201", "PT018", "PLC1901", "PLW0717", "PLC0415", "PLC2701", "PLR0914", "PLW0717"]
 select = ["ALL"]
 
 extend-unsafe-fixes = ["ALL"]
@@ -49,7 +49,7 @@ extend-unsafe-fixes = ["ALL"]
 extend-safe-fixes = ["ALL"]
 
 [tool.ruff.lint.pylint]
-max-args = 15
+max-args = 8
 
 [tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false

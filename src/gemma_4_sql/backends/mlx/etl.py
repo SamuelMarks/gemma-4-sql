@@ -8,6 +8,7 @@ import typing
 from gemma_4_sql.backends.common_data import _load_duckdb_dataset
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.tokenization import SQLTokenizer
+from gemma_4_sql.type_hints import ETLConfig
 
 if typing.TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -67,23 +68,29 @@ class MLXDataLoader:
             yield _pad_batch(batch_inputs, batch_targets)  # pragma: no cover
 
 
-def build_dataloader(config: object, **kwargs: JSONValue) -> JSONDict:
+def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, duckdb_table: str | None) -> object:
+    if duckdb_path and duckdb_table:  # pragma: no cover
+        return _load_duckdb_dataset(duckdb_path, duckdb_table)  # pragma: no cover
+    return datasets.load_dataset(dataset_name, split=split)  # pragma: no cover
+
+
+def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     """Build an MLX-specific dataloader.
 
     Returns:
         object: The resulting output from the operation.
 
     """
-    dataset_name = getattr(config, "dataset_name", "dummy")
-    split = getattr(config, "split", "train")
-    batch_size = getattr(config, "batch_size", 32)
-    distributed = getattr(config, "distributed", False)
-    tokenizer_name = getattr(config, "tokenizer_name", None)
-    duckdb_path = kwargs.get("duckdb_path") if not hasattr(config, "duckdb_path") else config.duckdb_path
-    duckdb_table = kwargs.get("duckdb_table") if not hasattr(config, "duckdb_table") else config.duckdb_table
+    dataset_name = config.dataset_name
+    split = config.split
+    batch_size = config.batch_size
+    distributed = config.distributed
+    tokenizer_name = config.tokenizer_name
+    duckdb_path = str(config.duckdb_path or kwargs.get("duckdb_path") or "")
+    duckdb_table = str(config.duckdb_table or kwargs.get("duckdb_table") or "")
     if datasets is None:
         return {"dataset": dataset_name, "split": split, "status": "mocked", "batch_size": batch_size, "backend": "mlx", "distributed": distributed, "mock_samples": [{"query": "SELECT * FROM users", "nl": "Get all users"}]}
-    hf_dataset = _load_duckdb_dataset(duckdb_path, duckdb_table) if duckdb_path and duckdb_table else datasets.load_dataset(dataset_name, split=split)  # pragma: no cover
+    hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)  # pragma: no cover
     tokenizer = SQLTokenizer(model_name=tokenizer_name)  # pragma: no cover
     dataloader = MLXDataLoader(hf_dataset, tokenizer, batch_size)  # pragma: no cover
     return {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "mlx", "distributed": distributed, "loader": dataloader}  # pragma: no cover
