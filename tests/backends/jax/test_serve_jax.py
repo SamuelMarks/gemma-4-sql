@@ -74,7 +74,11 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(srv, "jax", object())
     mock_app = mock.MagicMock()
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
+    monkeypatch.setattr(srv, "Request", mock.MagicMock())
+    import gemma_4_sql.backends.common_serve
+
+    if hasattr(gemma_4_sql.backends.common_serve, "Request"):
+        monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
     mock_app.router.routes = []
 
     def mock_post(*_args: object, **_kwargs: object) -> object:
