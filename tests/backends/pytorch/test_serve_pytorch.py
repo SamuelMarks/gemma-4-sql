@@ -240,6 +240,7 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     srv.FastAPI = lambda *_args, **_kwargs: app_instance
     srv.Request = mock.MagicMock()
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: app_instance)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
     monkeypatch.setattr(srv, "Request", mock.MagicMock())
     import gemma_4_sql.backends.common_serve
 
