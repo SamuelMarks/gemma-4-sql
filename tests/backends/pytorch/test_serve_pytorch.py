@@ -177,8 +177,8 @@ async def test_generate_endpoint() -> None:
         AssertionError: Description.
 
     """
-    importlib = __import__("importlib", fromlist=[""])
-    importlib.reload(srv)
+    __import__("importlib", fromlist=[""])
+
     srv.AsyncEngineArgs = MockAsyncEngineArgs
     srv.AsyncLLMEngine = MockAsyncLLMEngine
     srv.random_uuid = mock_random_uuid

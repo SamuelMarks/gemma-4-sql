@@ -76,8 +76,8 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
-    importlib = __import__("importlib", fromlist=[""])
-    importlib.reload(srv)
+    __import__("importlib", fromlist=[""])
+
     srv.jax = object()
     srv.gemma4 = object()
 

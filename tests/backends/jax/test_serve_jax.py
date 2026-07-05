@@ -1,7 +1,6 @@
 # Copyright 2024
 """Provide module docstring."""
 
-import sys
 from unittest import mock
 
 import pytest
@@ -34,19 +33,17 @@ def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError
 
 
-def test_serve_model_jax_missing() -> None:
+def test_serve_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function test_serve_model_jax_missing.
 
     Raises:
         AssertionError: Description.
 
     """
-    with mock.patch.dict(sys.modules, {"jax": None}):
-        importlib = __import__("importlib", fromlist=[""])
-        importlib.reload(srv)
-        res = srv.serve_model("foo")
-        if not res["status"] == "mocked_missing_jax":
-            raise AssertionError
+    monkeypatch.setattr(srv, "jax", None)
+    res = srv.serve_model("foo")
+    if not res["status"] == "mocked_missing_jax":
+        raise AssertionError
 
 
 def test_serve_model_jax_missing_fastapi(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,8 +53,8 @@ def test_serve_model_jax_missing_fastapi(monkeypatch: pytest.MonkeyPatch) -> Non
         AssertionError: Description.
 
     """
-    importlib = __import__("importlib", fromlist=[""])
-    importlib.reload(srv)
+    __import__("importlib", fromlist=[""])
+
     monkeypatch.setattr(srv, "jax", object())
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", None)
     res = srv.serve_model("foo")
@@ -73,8 +70,8 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
-    importlib = __import__("importlib", fromlist=[""])
-    importlib.reload(srv)
+    __import__("importlib", fromlist=[""])
+
     monkeypatch.setattr(srv, "jax", object())
     mock_app = mock.MagicMock()
     mock_app.router.routes = []
