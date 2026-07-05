@@ -31,7 +31,6 @@ def test_serve_model_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "jax", object())
     monkeypatch.setattr(srv, "gemma4", object())
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", mock.MagicMock())
-    monkeypatch.setattr(srv, "Request", mock.MagicMock())
     monkeypatch.setattr(srv, "JSONResponse", mock.MagicMock())
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
@@ -107,7 +106,6 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
     mock_app.post = mock_post
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: mock_app)
-    monkeypatch.setattr(srv, "Request", mock.MagicMock())
     import gemma_4_sql.backends.common_serve
 
     if hasattr(gemma_4_sql.backends.common_serve, "Request"):

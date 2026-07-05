@@ -202,6 +202,8 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self) -> None:
             """Execute function."""
             self.func = None
+            self.router = mock.MagicMock()
+            self.router.routes = []
 
         def post(self, *_args: object, **_kwargs: object) -> object:
             """Execute function.
@@ -219,6 +221,9 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
                 """
                 self.func = func
+                route = mock.MagicMock()
+                route.endpoint = func
+                self.router.routes.append(route)
                 return func
 
             return decorator

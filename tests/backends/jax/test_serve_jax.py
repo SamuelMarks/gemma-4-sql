@@ -74,7 +74,6 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(srv, "jax", object())
     mock_app = mock.MagicMock()
-    monkeypatch.setattr(srv, "Request", mock.MagicMock())
     import gemma_4_sql.backends.common_serve
 
     if hasattr(gemma_4_sql.backends.common_serve, "Request"):
