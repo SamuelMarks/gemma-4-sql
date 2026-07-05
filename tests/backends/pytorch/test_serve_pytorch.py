@@ -228,6 +228,14 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
             return decorator
 
+        def on_event(self, *_args: object, **_kwargs: object) -> object:
+            """Execute function."""
+
+            def decorator(func: object) -> object:
+                return func
+
+            return decorator
+
     app_instance = MockApp()
     srv.FastAPI = lambda *_args, **_kwargs: app_instance
     srv.Request = mock.MagicMock()
@@ -239,7 +247,7 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
     res = srv.serve_model("foo", test_mode=True)
     res["app"]
-    generate_func = app_instance.router.routes[-1].endpoint
+    generate_func = app_instance.func
     request = mock.AsyncMock()
     request.json.return_value = {"prompt": "test"}
     request.is_disconnected.return_value = False
