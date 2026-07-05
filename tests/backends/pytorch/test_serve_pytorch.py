@@ -227,6 +227,7 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     srv.FastAPI = lambda *_args, **_kwargs: app_instance
     srv.Request = mock.MagicMock()
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: app_instance)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
     res = srv.serve_model("foo", test_mode=True)
     res["app"]
     generate_func = app_instance.func
