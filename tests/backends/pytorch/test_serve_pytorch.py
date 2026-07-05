@@ -247,7 +247,7 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
     res = srv.serve_model("foo", test_mode=True)
     res["app"]
-    generate_func = app_instance.func
+    generate_func = app_instance.router.routes[-1].endpoint
     request = mock.AsyncMock()
     request.json.return_value = {"prompt": "test"}
     request.is_disconnected.return_value = False
