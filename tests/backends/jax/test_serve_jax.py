@@ -64,51 +64,52 @@ def test_serve_model_jax_missing_fastapi(monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.mark.asyncio
 async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate endpoint logic directly.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Test generate endpoint logic directly."""
     __import__("importlib", fromlist=[""])
-
     monkeypatch.setattr(srv, "jax", object())
-    mock_app = mock.MagicMock()
+
+    class MockJSONResponse:
+        """Mock class."""
+
+        def __init__(self, content: dict) -> None:
+            """Init."""
+            self.content = content
+            self.body = str(content).encode()
+
+    class MockApp:
+        """Mock app."""
+
+        def __init__(self) -> None:
+            """Init."""
+            self.router = mock.MagicMock()
+            self.router.routes = []
+
+        def post(self, *_args: object, **_kwargs: object) -> object:
+            """Post."""
+
+            def decorator(func: object) -> object:
+                """Decorator."""
+                route = mock.MagicMock()
+                route.endpoint = func
+                self.router.routes.append(route)
+                return func
+
+            return decorator
+
+    app_instance = MockApp()
+
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.JSONResponse", MockJSONResponse)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: app_instance)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
+
     import gemma_4_sql.backends.common_serve
 
-    if hasattr(gemma_4_sql.backends.common_serve, "Request"):
-        monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
-    mock_app.router.routes = []
+    gemma_4_sql.backends.common_serve.Request = mock.MagicMock()
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
 
-    def mock_post(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    srv.serve_model("foo", test_mode=True)
+    generate_func = app_instance.router.routes[-1].endpoint
 
-        Returns:
-            object: Description of return.
-
-        """
-
-        def decorator(func: object) -> object:
-            """Execute function.
-
-            Returns:
-                object: Description of return.
-
-            """
-            route = mock.MagicMock()
-            route.endpoint = func
-            mock_app.router.routes.append(route)
-            return func
-
-        return decorator
-
-    mock_app.post = mock_post
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: mock_app)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: mock_app)
-    res = srv.serve_model("foo", test_mode=True)
-    app = res["app"]
-    generate_func = app.router.routes[-1].endpoint
     request = mock.AsyncMock()
     request.json.return_value = {"prompt": "test"}
     result = await generate_func(request)
