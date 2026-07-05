@@ -74,6 +74,7 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(srv, "jax", object())
     mock_app = mock.MagicMock()
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
     mock_app.router.routes = []
 
     def mock_post(*_args: object, **_kwargs: object) -> object:
@@ -101,6 +102,7 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_app.post = mock_post
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: mock_app)
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: mock_app)
     res = srv.serve_model("foo", test_mode=True)
     app = res["app"]
     generate_func = app.router.routes[-1].endpoint

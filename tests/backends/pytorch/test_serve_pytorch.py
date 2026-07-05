@@ -170,7 +170,7 @@ def test_serve_model_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_generate_endpoint() -> None:
+async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test generate endpoint logic directly.
 
     Raises:
@@ -218,6 +218,7 @@ async def test_generate_endpoint() -> None:
     app_instance = MockApp()
     srv.FastAPI = lambda *_args, **_kwargs: app_instance
     srv.Request = mock.MagicMock()
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: app_instance)
     res = srv.serve_model("foo", test_mode=True)
     res["app"]
     generate_func = app_instance.func
