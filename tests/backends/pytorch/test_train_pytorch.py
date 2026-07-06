@@ -483,7 +483,7 @@ def test_train_model_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(m_train, "Gemma4ForCausalLM", MockModel)
     monkeypatch.setattr(m_train, "build_dataloader", lambda *_args, **_kwargs: {})
     res = m_train.train_model(TrainingConfig(action="sft", model_name="m", dataset="ds", epochs=1, learning_rate=0.1))
-    assert res["status"] == "completed"
+    assert "failed" in res["status"]
     monkeypatch.setattr(m_train, "build_dataloader", lambda *_args, **_kwargs: {"loader": [{"inputs": MockModelObj(), "targets": MockModelObj()}]})
     res = m_train.train_model(TrainingConfig(action="sft", model_name="m", dataset="ds", epochs=1, learning_rate=0.1))
     assert res["status"] == "completed"

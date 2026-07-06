@@ -50,8 +50,5 @@ def test_chat_turn_routing_error(monkeypatch: pytest.MonkeyPatch) -> None:
         raise ValueError(msg)
 
     monkeypatch.setattr(backend_impl, "generate_sql", mock_generate)
-    res = chat_turn("foo", [], "prompt", backend="jax")
-    if res["response"] != "SELECT * FROM fallback_chat":
-        raise AssertionError
-    if "failed" not in res["status"]:
-        raise AssertionError
+    with pytest.raises(RuntimeError, match="Chat turn failed"):
+        chat_turn("foo", [], "prompt", backend="jax")

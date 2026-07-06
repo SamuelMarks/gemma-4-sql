@@ -50,14 +50,14 @@ def create_app(model_name: str, *, test_mode: bool = False) -> object:
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
     """Serve a model using Keras continuous batching.
 
-    Args:
-        model_name: The name of the target model.
-        port: The network port to listen on.
-        max_batch_size: The maximum allowed batch size.
-        **kwargs: Additional keyword arguments.
+        Args:
+                    **kwargs: Underlying server and backend-specific configuration options.
+    model_name: The name of the target model.
+            port: The network port to listen on.
+            max_batch_size: The maximum allowed batch size.
 
-    Returns:
-        A dictionary containing the results.
+        Returns:
+            A dictionary containing the results.
     """
     if tf is None or keras is None:
         from gemma_4_sql.exceptions import DependencyMissingError

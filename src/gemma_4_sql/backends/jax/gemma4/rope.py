@@ -81,9 +81,8 @@ class RoPE(nnx.Module):
         """Initialize the instance parameters.
 
         Args:
-        ----
-        rope_type: The rope_type parameter required for this operation.
-        rope_kwargs: The rope_kwargs parameter required for this operation.
+            rope_type: The rope_type parameter required for this operation.
+            **rope_kwargs: Additional configuration for RoPE embeddings.
 
         """
         self.rope_kwargs = rope_kwargs

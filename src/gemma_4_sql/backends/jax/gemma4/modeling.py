@@ -288,8 +288,11 @@ class Gemma4ForCausalLM(nnx.Module):
     def __call__(self, input_ids: Array, positions: Array, cache: Cache | None = None, **kwargs: object) -> Array:
         """Compute logits for the given sequence, optionally applying soft-capping.
 
+
+        Args:
+            **kwargs: Optional keyword arguments for advanced configuration.
         Returns:
-            object: The resulting output from the operation.
+                object: The resulting output from the operation.
 
         """
         attention_mask = kwargs.get("attention_mask")
@@ -308,6 +311,9 @@ class Gemma4ForCausalLM(nnx.Module):
 def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array, **kwargs: JSONValue) -> tuple[Array, Cache]:
     """Execute a standard forward pass returning logits and updated cache.
 
+
+    Args:
+        **kwargs: Optional keyword arguments for advanced configuration.
     Returns:
         object: The resulting output from the operation.
 

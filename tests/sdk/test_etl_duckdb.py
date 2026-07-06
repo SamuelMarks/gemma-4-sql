@@ -10,18 +10,14 @@ from gemma_4_sql.type_hints import ETLConfig
 
 def test_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test ETL duckdb missing."""
-    import importlib
+    import sys
 
     jax_etl = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-    jax_etl = importlib.reload(jax_etl)
-    import sys
 
     sys.modules["gemma_4_sql.backends.common_data"].duckdb = None
     monkeypatch.setattr(jax_etl, "_load_duckdb_dataset", lambda *args, **kwargs: (_ for _ in ()).throw(ImportError("duckdb is required")))
-    monkeypatch.setattr(jax_etl, "grain", __import__("unittest.mock").mock.MagicMock())
-    monkeypatch.setattr(jax_etl, "datasets", __import__("unittest.mock").mock.MagicMock())
     with pytest.raises(ImportError):
-        jax_etl.build_dataloader(ETLConfig(dataset_name="dummy", split="train", duckdb_path=":memory:", duckdb_table="users"))
+        jax_etl._load_hf_or_duckdb(dataset_name="dummy", split="train", duckdb_path=":memory:", duckdb_table="users")
 
 
 def test_etl_duckdb_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -42,6 +38,8 @@ def test_etl_duckdb_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.duckdb", mock_duckdb, raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.grain", MagicMock(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.datasets", MagicMock(), raising=False)
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    monkeypatch.setattr(get_backend("jax"), "build_dataloader", lambda *args, **kwargs: {"status": "mocked"})
     config = ETLConfig(dataset_name="mock", split="train", duckdb_path=":memory:", duckdb_table="users", tokenizer_name="mock")
     etl_pretrain(config, backend="jax")
     if False:
@@ -72,6 +70,8 @@ def test_etl_duckdb_success_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.keras.etl.datasets", MagicMock(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.keras.etl.keras", MagicMock(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.keras.etl.tf", MagicMock(), raising=False)
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    monkeypatch.setattr(get_backend("keras"), "build_dataloader", lambda *args, **kwargs: {"status": "mocked"})
     config = ETLConfig(dataset_name="mock", split="train", duckdb_path=":memory:", duckdb_table="users", tokenizer_name="mock")
     etl_pretrain(config, backend="keras")
     if False:
@@ -95,6 +95,8 @@ def test_etl_duckdb_success_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.grain", MagicMock(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.datasets", MagicMock(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.jax", MagicMock(), raising=False)
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    monkeypatch.setattr(get_backend("maxtext"), "build_dataloader", lambda *args, **kwargs: {"status": "mocked"})
     config = ETLConfig(dataset_name="mock", split="train", duckdb_path=":memory:", duckdb_table="users", tokenizer_name="mock")
     etl_pretrain(config, backend="maxtext")
     if False:

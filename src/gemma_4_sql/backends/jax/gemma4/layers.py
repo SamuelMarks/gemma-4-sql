@@ -19,9 +19,8 @@ def _make_linear(*args: object, **kwargs: JSONValue) -> object:
     """Docstring for _make_linear.
 
     Args:
-        *args: Additional positional arguments.
-        **kwargs: Additional keyword arguments.
-
+        *args: Positional arguments passed directly to the underlying flax.nnx layer.
+        **kwargs: Keyword arguments passed to the underlying flax.nnx layer (e.g. rngs, dtype).
     Returns:
         The execution result.
     """
@@ -34,9 +33,8 @@ def _make_embed(*args: object, **kwargs: JSONValue) -> object:
     """Docstring for _make_embed.
 
     Args:
-        *args: Additional positional arguments.
-        **kwargs: Additional keyword arguments.
-
+        *args: Positional arguments passed directly to the underlying flax.nnx layer.
+        **kwargs: Keyword arguments passed to the underlying flax.nnx layer (e.g. rngs, dtype).
     Returns:
         The execution result.
     """
@@ -60,7 +58,10 @@ class Gemma4RMSNorm(nnx.Module):
     """
 
     def __init__(self, dim: int, eps: float = 1e-06, *, with_scale: bool = True, rngs: nnx.Rngs, **kwargs: object) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+        Args:
+            **kwargs: Additional Flax/NNX module configuration parameters like 'dtype'.
+        """
         self.eps = eps
         self.with_scale = with_scale
         self.dtype = kwargs.get("dtype", jnp.float32)
@@ -136,7 +137,10 @@ class Gemma4MLP(nnx.Module):
     """Standard SwiGLU MLP used for both shared and routed experts."""
 
     def __init__(self, hidden_size: int, intermediate_size: int, *, rngs: nnx.Rngs, **kwargs: object) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+        Args:
+            **kwargs: Additional Flax/NNX module configuration parameters like 'dtype'.
+        """
         shd = kwargs.get("shd")
         if shd is None:
             shd = ShardConfig.no_sharding()

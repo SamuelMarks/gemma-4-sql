@@ -112,6 +112,5 @@ def test_export_model_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: object)
     """
     m_export = __import__("gemma_4_sql.backends.pytorch.export", fromlist=[""])
     monkeypatch.setattr(m_export, "torch", None)
-    res = m_export.export_model("model", str(tmp_path))
-    if res["status"] != "mock_exported":
-        raise AssertionError
+    with pytest.raises(RuntimeError, match="PyTorch or safetensors missing"):
+        m_export.export_model("model", str(tmp_path))

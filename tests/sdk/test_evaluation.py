@@ -24,6 +24,7 @@ def test_evaluate_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     keras_agent = get_backend("keras")
+    monkeypatch.setattr(keras_agent, "build_dataloader", lambda *args, **kwargs: {"loader": [{"inputs": [[1]], "targets": [[1]]}]})
     monkeypatch.setattr(keras_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
     res = evaluate("model1", "data1", "keras")
     if res["backend"] != "keras":

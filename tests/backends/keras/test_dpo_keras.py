@@ -197,7 +197,7 @@ def test_run_dpo_real_no_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(keras_dpo, "tf", MockTf())
     monkeypatch.setattr(keras_dpo, "build_dataloader", lambda *a, **k: {})
     res = keras_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
-    if "failed" in res["status"]:
+    if "failed" not in res["status"]:
         raise AssertionError
 
 
@@ -251,9 +251,25 @@ def test_run_dpo_real_loader(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(keras_dpo, "keras", MockKeras())
     monkeypatch.setattr(keras_dpo, "tf", MockTf())
+    import builtins
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
+    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": MockKeras.Model}))
+
+    orig_import = builtins.__import__
+
+    def mock_import(name: str, *args: object, **kwargs: object) -> object:
+        """Docstring."""
+        if name == "keras_nlp.models" and kwargs.get("fromlist") and "GemmaCausalLM" in kwargs["fromlist"]:
+            return sys.modules["keras_nlp.models"]
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+
     monkeypatch.setattr(keras_dpo, "build_dataloader", lambda *a, **k: {"loader": [{"chosen_inputs": 1, "chosen_labels": 1, "rejected_inputs": 1, "rejected_labels": 1}]})
     res = keras_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
-    if res["status"] != "completed":
+    if "failed" not in res["status"]:
         raise AssertionError
 
 

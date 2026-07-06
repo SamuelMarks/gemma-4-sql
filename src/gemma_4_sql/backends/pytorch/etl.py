@@ -117,6 +117,9 @@ def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, d
 def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     """Build a PyTorch-specific dataloader.
 
+
+    Args:
+        **kwargs: Overrides for ETL configuration (e.g., duckdb_path, duckdb_table).
     Returns:
         object: The resulting output from the operation.
 

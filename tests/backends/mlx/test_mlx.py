@@ -40,9 +40,8 @@ def test_peft_mocked() -> None:
 def test_export_mlx_none(monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory) -> None:
     """Test MLX export when mx is None."""
     monkeypatch.setattr(export, "mx", None)
-    res = export.export_model("m", str(tmp_path))
-    assert res["status"] == "mock_exported"
-    assert res["backend"] == "mlx"
+    with pytest.raises(RuntimeError, match="MLX is not installed, cannot export model."):
+        export.export_model("m", str(tmp_path))
 
 
 class MockMlxCuda:

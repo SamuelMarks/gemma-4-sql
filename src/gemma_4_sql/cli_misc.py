@@ -19,9 +19,9 @@ logger = logging.getLogger(__name__)
 def tokenize_cmd(args: argparse.Namespace) -> None:
     """Run tokenization.
 
+
     Args:
-        args: Additional positional arguments.
-    """
+        args: Parsed command-line arguments containing command-specific options."""
     tokenizer = SQLTokenizer(model_name=args.hf_model, vocab_size=args.vocab_size)
     if args.decode:
         try:
@@ -36,9 +36,9 @@ def tokenize_cmd(args: argparse.Namespace) -> None:
 def quantize_cmd(args: argparse.Namespace) -> None:
     """Run quantization.
 
+
     Args:
-        args: Additional positional arguments.
-    """
+        args: Parsed command-line arguments containing command-specific options."""
     res = quantize_model(args.model, args.method, args.backend)
     logger.info("Quantization completed: %s", res)
 
@@ -46,9 +46,9 @@ def quantize_cmd(args: argparse.Namespace) -> None:
 def export_cmd(args: argparse.Namespace) -> None:
     """Run model export.
 
+
     Args:
-        args: Additional positional arguments.
-    """
+        args: Parsed command-line arguments containing command-specific options."""
     res = export_model(args.model, args.path, args.backend)
     logger.info("Export completed: %s", res)
 
@@ -56,9 +56,9 @@ def export_cmd(args: argparse.Namespace) -> None:
 def rag_cmd(args: argparse.Namespace) -> None:
     """Build a RAG-augmented prompt or extract schema context.
 
+
     Args:
-        args: Additional positional arguments.
-    """
+        args: Parsed command-line arguments containing command-specific options."""
     if getattr(args, "action", "build") == "extract":
         extract_schema_entities(args.ddl)
     elif getattr(args, "action", "build") == "retrieve":
@@ -69,7 +69,10 @@ def rag_cmd(args: argparse.Namespace) -> None:
 
 
 def log_metrics_cmd(args: argparse.Namespace) -> None:
-    """Log training metrics."""
+    """Log training metrics.
+
+    Args:
+        args: Parsed command-line arguments containing command-specific options."""
     metrics_dict = {}
     if args.metrics:  # pragma: no cover
         for m in args.metrics.split(","):

@@ -19,15 +19,15 @@ with catch_optional_imports():
 def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50, **kwargs: JSONValue) -> JSONDict:
     """Generate a SQL query from a natural language prompt using MLX.
 
-    Args:
-        model_name: The name of the target model.
-        prompt: The input text prompt.
-        beam_width: The number of beams for beam search.
-        max_length: The maximum length of the sequence.
-        **kwargs: Additional keyword arguments.
+        Args:
+                    **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
+    model_name: The name of the target model.
+            prompt: The input text prompt.
+            beam_width: The number of beams for beam search.
+            max_length: The maximum length of the sequence.
 
-    Returns:
-        A dictionary containing the results.
+        Returns:
+            A dictionary containing the results.
     """
     confidence_score = 0.0
     if load is None or generate is None:

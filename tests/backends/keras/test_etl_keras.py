@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from gemma_4_sql.exceptions import DependencyMissingError
 
 """Provide module docstring."""

@@ -11,16 +11,16 @@ if TYPE_CHECKING:
 def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int = 3, max_length: int = 50, **kwargs: object) -> JSONDict:
     """Generate a SQL query from a natural language prompt using Beam Search.
 
-    Args:
-        model_name: The name of the target model.
-        prompt: The input text prompt.
-        backend: The backend framework to use.
-        beam_width: The number of beams for beam search.
-        max_length: The maximum length of the sequence.
-        **kwargs: Additional keyword arguments.
+        Args:
+                    **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
+    model_name: The name of the target model.
+            prompt: The input text prompt.
+            backend: The backend framework to use.
+            beam_width: The number of beams for beam search.
+            max_length: The maximum length of the sequence.
 
-    Returns:
-        A dictionary containing the results.
+        Returns:
+            A dictionary containing the results.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     result = get_backend(backend).generate_sql(model_name, prompt, beam_width, max_length)

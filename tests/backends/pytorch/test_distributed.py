@@ -373,11 +373,11 @@ def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path:
     torch = __import__("torch.distributed")
 
     monkeypatch.setattr(ex, "torch", MockTorch())
+    monkeypatch.setattr(ex, "save_file", object())
     monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
     monkeypatch.setattr(torch.distributed, "get_rank", lambda: 0)
-    res = ex.export_model("mod", str(tmp_path))
-    if res["status"] != "mock_exported":
-        raise AssertionError
+    with pytest.raises(ValueError):
+        ex.export_model("mod", str(tmp_path))
 
 
 def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
@@ -390,11 +390,11 @@ def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     torch = __import__("torch.distributed")
 
     monkeypatch.setattr(ex, "torch", MockTorch())
+    monkeypatch.setattr(ex, "save_file", object())
     monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
     monkeypatch.setattr(torch.distributed, "get_rank", lambda: 1)
-    res = ex.export_model("mod", str(tmp_path))
-    if res["status"] != "skipped_non_rank_zero":
-        raise AssertionError
+    with pytest.raises(ValueError):
+        ex.export_model("mod", str(tmp_path))
 
 
 def test_etl_distributed(monkeypatch: pytest.MonkeyPatch) -> None:

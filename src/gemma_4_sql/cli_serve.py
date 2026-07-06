@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 def evaluate_cmd(args: argparse.Namespace) -> None:
     """Evaluate an existing model.
 
+
     Args:
-        args: Additional positional arguments.
-    """
+        args: Parsed command-line arguments containing command-specific options."""
     db_kwargs = {}
     if args.db_kwargs:  # pragma: no cover
         json = __import__("json")
@@ -27,14 +27,17 @@ def evaluate_cmd(args: argparse.Namespace) -> None:
 def generate_cmd(args: argparse.Namespace) -> None:
     """Generate SQL from text.
 
+
     Args:
-        args: Additional positional arguments.
-    """
+        args: Parsed command-line arguments containing command-specific options."""
     generate(model_name=args.model, prompt=args.prompt, backend=args.backend, beam_width=args.beam_width, max_length=args.max_length, show_confidence=getattr(args, "show_confidence", False))
 
 
 def agent_cmd(args: argparse.Namespace) -> None:
-    """Run agentic self-correction loop."""
+    """Run agentic self-correction loop.
+
+    Args:
+        args: Parsed command-line arguments containing command-specific options."""
     db_kwargs = {}
     if args.db_kwargs:  # pragma: no cover
         json = __import__("json")
@@ -47,18 +50,18 @@ def agent_cmd(args: argparse.Namespace) -> None:
 def serve_cmd(args: argparse.Namespace) -> None:
     """Serve a model using continuous batching.
 
+
     Args:
-        args: Additional positional arguments.
-    """
+        args: Parsed command-line arguments containing command-specific options."""
     serve_model(model_name=args.model, port=args.port, max_batch_size=args.max_batch_size, backend=args.backend)
 
 
 def chat_cmd(args: argparse.Namespace) -> None:
     """Run a multi-turn conversational SQL chat turn.
 
+
     Args:
-        args: Additional positional arguments.
-    """
+        args: Parsed command-line arguments containing command-specific options."""
     history = []
     if getattr(args, "history", ""):  # pragma: no cover
         try:
@@ -69,7 +72,10 @@ def chat_cmd(args: argparse.Namespace) -> None:
 
 
 def few_shot_cmd(args: argparse.Namespace) -> None:
-    """Run dynamic few-shot prompting."""
+    """Run dynamic few-shot prompting.
+
+    Args:
+        args: Parsed command-line arguments containing command-specific options."""
     examples = []
     if getattr(args, "examples", ""):  # pragma: no cover
         try:

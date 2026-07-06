@@ -56,12 +56,12 @@ def _get_sampler(source_len: int, distributed: bool) -> object:
 def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     """Build a Keras-specific Grain dataloader.
 
-    Args:
-        config: The configuration parameters.
-        **kwargs: Additional keyword arguments.
+        Args:
+                    **kwargs: Overrides for ETL configuration (e.g., duckdb_path, duckdb_table).
+    config: The configuration parameters.
 
-    Returns:
-        A dictionary containing the results.
+        Returns:
+            A dictionary containing the results.
     """
     dataset_name = config.dataset_name
     split = config.split

@@ -62,15 +62,15 @@ async def _process_single_prompt(backend_name: str, backend_impl: BackendProtoco
 def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "jax", context: AgentContext | None = None, **kwargs: JSONValue) -> JSONDict | list[JSONDict]:
     """Run an agentic self-correction loop.
 
-    Args:
-        model_name: The name of the target model.
-        prompt: The input text prompt.
-        backend: The backend framework to use.
-        context: The context.
-        **kwargs: Additional keyword arguments.
+        Args:
+                    **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
+    model_name: The name of the target model.
+            prompt: The input text prompt.
+            backend: The backend framework to use.
+            context: The context.
 
-    Returns:
-        A list of results.
+        Returns:
+            A list of results.
     """
     if context is None:  # pragma: no cover
         context = AgentContext()

@@ -106,6 +106,9 @@ def _run_training_epochs(state: TrainerState) -> float:
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
+
+    Args:
+        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
     Returns:
         The execution result.
 

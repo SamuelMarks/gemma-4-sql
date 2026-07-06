@@ -28,6 +28,10 @@ class MockTorch:
 
     cuda = MockCuda
 
+    def randint(self, *_args: object, **_kwargs: object) -> object:
+        """Execute function."""
+        return [1]
+
     def zeros(self, *_args: object, **_kwargs: object) -> object:
         """Execute function.
 
@@ -105,7 +109,7 @@ def test_benchmark_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(MockTorch, "zeros", raise_err)
+    monkeypatch.setattr(MockTorch, "randint", raise_err)
     res = benchmark_model("model", "gpu", 1, test_mode=True)
     if "failed" not in str(res["status"]):
         raise AssertionError
@@ -138,8 +142,17 @@ def test_benchmark_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
 
     """
     m_benchmark = __import__("gemma_4_sql.backends.pytorch.benchmark", fromlist=[""])
-    monkeypatch.setattr(m_benchmark, "torch", MockTorch)
-    monkeypatch.setattr(m_benchmark, "AutoModelForCausalLM", object())
+    monkeypatch.setattr(m_benchmark, "torch", MockTorch())
+
+    class MockAutoModel:
+        """Docstring."""
+
+        @classmethod
+        def from_pretrained(cls, *args, **kwargs):
+            """Docstring."""
+            return MockAutoModelForCausalLM()
+
+    monkeypatch.setattr(m_benchmark, "AutoModelForCausalLM", MockAutoModel)
     res = m_benchmark.benchmark_model("m", "cuda", 1, test_mode=True)
     if res["status"] != "success":
         raise AssertionError

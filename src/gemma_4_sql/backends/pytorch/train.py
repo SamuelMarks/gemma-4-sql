@@ -150,6 +150,9 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
+
+    Args:
+        **kwargs: Extra runtime options such as 'test_mode' and 'distributed_strategy'.
     Returns:
         The execution result.
 

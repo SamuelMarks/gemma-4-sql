@@ -64,11 +64,15 @@ def test_export_keras_real(monkeypatch: object) -> None:
     orig_import = builtins.__import__
 
     def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        """Docstring."""
         if name == "keras_nlp.models":
 
             class MockGemma:
+                """Docstring."""
+
                 @staticmethod
                 def from_preset(*args, **kwargs):
+                    """Docstring."""
                     return MockKeras.Model()
 
             return type("M", (), {"GemmaCausalLM": MockGemma})()

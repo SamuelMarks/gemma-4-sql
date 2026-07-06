@@ -29,10 +29,11 @@ class LiveDatabaseEngine:
         """Initialize the LiveDatabaseEngine.
 
         Args:
+        **kwargs: Optional keyword arguments for advanced configuration.
+
             db_path: The file path to the database.
             ddl: The Data Definition Language (DDL) string.
             db_type: The string representing the db type.
-            **kwargs: Additional keyword arguments.
         """
         self.db_path = db_path
         self.db_type = db_type.lower()

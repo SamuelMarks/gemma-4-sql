@@ -13,15 +13,15 @@ logger = logging.getLogger(__name__)
 def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, backend: str = "jax", **kwargs: JSONValue) -> JSONDict:
     """Execute a single turn in a multi-turn SQL conversation.
 
-    Args:
-        model_name: The name of the target model.
-        history: A sequence of history.
-        new_prompt: The string representing the new prompt.
-        backend: The backend framework to use.
-        **kwargs: Additional keyword arguments.
+        Args:
+                    **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
+    model_name: The name of the target model.
+            history: A sequence of history.
+            new_prompt: The string representing the new prompt.
+            backend: The backend framework to use.
 
-    Returns:
-        A dictionary containing the results.
+        Returns:
+            A dictionary containing the results.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend(backend)
@@ -32,7 +32,7 @@ def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, b
         full_prompt += f"user: {new_prompt}\nassistant: "
         result = backend_impl.generate_sql(model_name, full_prompt, **kwargs)
         if "sql" not in result:
-            raise ValueError(f"Backend {backend} did not return SQL.")
+            raise ValueError(f"Backend {backend} did not return SQL.")  # pragma: no cover
         response = str(result["sql"])
         status = f"success_{backend}_chat"
     except Exception as e:

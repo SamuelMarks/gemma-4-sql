@@ -85,6 +85,9 @@ def _apply_transform(tensor: jnp.ndarray, transform: TransformType) -> jnp.ndarr
 def assign_weights(keys: list[str], tensor: jnp.ndarray, state_dict: dict, st_key: str, transform: TransformType, **kwargs: JSONValue) -> object:
     """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
 
+
+    Args:
+        **kwargs: Optional keyword arguments for advanced configuration.
     Raises:
         ValueError: If the operation encounters an unexpected ValueError.
 

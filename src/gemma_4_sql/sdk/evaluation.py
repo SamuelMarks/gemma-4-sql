@@ -130,18 +130,18 @@ def _run_evaluation_inference(model_name: str, dataset_name: str, backend_impl: 
 def evaluate(model_name: str, dataset_name: str, backend: str = "jax", db_path: str = ":memory:", ddl: str | None = None, **kwargs: JSONValue) -> JSONDict:
     """Evaluate a Text-to-SQL model.
 
-    Args:
+        Args:
+                **kwargs: Evaluation overrides and testing parameters.
     ----
-        model_name: The name or path of the model.
-        dataset_name: The dataset to evaluate against.
-        backend: The backend framework ('jax', 'keras', or 'maxtext').
-        db_path: Path to the SQLite database for execution accuracy.
-        ddl: Optional DDL to set up the schema.
-        **kwargs: Additional keyword arguments.
+            model_name: The name or path of the model.
+            dataset_name: The dataset to evaluate against.
+            backend: The backend framework ('jax', 'keras', or 'maxtext').
+            db_path: Path to the SQLite database for execution accuracy.
+            ddl: Optional DDL to set up the schema.
 
-    Returns:
-    -------
-        Evaluation results dictionary.
+        Returns:
+        -------
+            Evaluation results dictionary.
 
     """
     db_type = kwargs.get("db_type", "sqlite")

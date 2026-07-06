@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 def benchmark_cmd(args: argparse.Namespace) -> None:
     """Benchmark a model on target hardware.
 
+
     Args:
-        args: Additional positional arguments.
-    """
+        args: Parsed command-line arguments containing command-specific options."""
     benchmark(model_name=args.model, hardware=args.hardware, batch_size=args.batch_size, backend=args.backend)

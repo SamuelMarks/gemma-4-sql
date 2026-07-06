@@ -16,7 +16,7 @@ def build_few_shot_prompt(model_name: str, prompt: str, examples: list[dict[str,
         prompt: The input text prompt.
         examples: A sequence of examples.
         backend: The backend framework to use.
-        **_kwargs: Additional keyword arguments.
+        **_kwargs: Optional parameters for prompt formatting.
 
     Returns:
         A dictionary containing the results.

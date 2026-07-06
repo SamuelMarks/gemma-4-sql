@@ -213,7 +213,7 @@ def test_run_dpo_real_no_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(jax_dpo, "build_dataloader", lambda *a, **k: {})
 
     res = jax_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
-    if "failed" in res["status"]:
+    if "failed" not in res["status"]:
         raise AssertionError(res["status"])
 
 

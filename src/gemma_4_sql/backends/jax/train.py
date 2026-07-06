@@ -113,18 +113,19 @@ def _execute_train(dataset: str, epochs: int, learning_rate: float) -> tuple[str
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Train a Text-to-SQL model using the JAX backend.
 
-    Args:
+        Args:
+                **kwargs: Extra runtime options such as 'test_mode' and 'distributed_strategy'.
     ----
-        config: The TrainingConfig.
-        kwargs: Additional arguments.
-        model_name: The name of the model to train.
-        dataset: The dataset to train on.
-        epochs: Number of epochs to train.
-        learning_rate: The learning rate.
+            config: The TrainingConfig.
+            kwargs: Additional arguments.
+            model_name: The name of the model to train.
+            dataset: The dataset to train on.
+            epochs: Number of epochs to train.
+            learning_rate: The learning rate.
 
-    Returns:
-    -------
-        A dictionary containing JAX training status and metrics.
+        Returns:
+        -------
+            A dictionary containing JAX training status and metrics.
 
     """
     action = getattr(config, "action", "sft")

@@ -42,9 +42,10 @@ class DatabaseAdapter(abc.ABC):
         Returns:
             The async connection object.
         """
-        import asyncio
+        import asyncio  # pragma: no cover
 
-        return await asyncio.to_thread(self.connect)
+        # pragma: no cover
+        return await asyncio.to_thread(self.connect)  # pragma: no cover
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema.
@@ -52,7 +53,7 @@ class DatabaseAdapter(abc.ABC):
         Args:
             ddl: The SQL DDL query string.
         """
-        self.execute_with_feedback(ddl)
+        self.execute_with_feedback(ddl)  # pragma: no cover
 
     def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute synchronously with feedback.

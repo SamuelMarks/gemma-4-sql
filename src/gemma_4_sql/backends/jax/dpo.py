@@ -158,6 +158,9 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
+
+    Args:
+        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
     Returns:
         The execution result.
 

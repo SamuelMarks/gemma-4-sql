@@ -11,16 +11,16 @@ if TYPE_CHECKING:
 def apply_peft(model_name: str, target_modules: list[str] | None = None, lora_r: int = 8, lora_alpha: int = 16, lora_dropout: float = 0.05, **kwargs: JSONValue) -> JSONDict:
     """Apply Parameter-Efficient Fine-Tuning (PEFT / LoRA) to a model.
 
-    Args:
-        model_name: The name of the target model.
-        target_modules: The names of the modules to apply LoRA.
-        lora_r: The rank of the LoRA update matrices.
-        lora_alpha: The scaling factor for LoRA.
-        lora_dropout: The dropout probability for LoRA layers.
-        **kwargs: Additional keyword arguments.
+        Args:
+                    **kwargs: Backend-specific LoRA parameters.
+    model_name: The name of the target model.
+            target_modules: The names of the modules to apply LoRA.
+            lora_r: The rank of the LoRA update matrices.
+            lora_alpha: The scaling factor for LoRA.
+            lora_dropout: The dropout probability for LoRA layers.
 
-    Returns:
-        A dictionary containing the results.
+        Returns:
+            A dictionary containing the results.
     """
     backend = kwargs.get("backend", "jax")
     if target_modules is None:

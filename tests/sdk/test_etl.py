@@ -32,7 +32,7 @@ def test_etl_pretrain() -> None:
         etl_pretrain(config, backend="jax")
 
 
-def test_etl_sft() -> None:
+def test_etl_sft(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test etl_sft helper.
 
     Raises:
@@ -40,6 +40,9 @@ def test_etl_sft() -> None:
 
     """
     config = ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False)
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    keras_agent = get_backend("keras")
+    monkeypatch.setattr(keras_agent, "build_dataloader", lambda *a, **k: {"backend": "keras", "dataset": "dummy/data", "batch_size": 16})
     res = etl_sft(config, backend="keras")
     if not res["dataset"] == "dummy/data":
         raise AssertionError
@@ -47,7 +50,7 @@ def test_etl_sft() -> None:
         raise AssertionError
 
 
-def test_etl_posttrain() -> None:
+def test_etl_posttrain(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test etl_posttrain helper.
 
     Raises:
@@ -55,6 +58,9 @@ def test_etl_posttrain() -> None:
 
     """
     config = ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False)
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    maxtext_agent = get_backend("maxtext")
+    monkeypatch.setattr(maxtext_agent, "build_dataloader", lambda *a, **k: {"backend": "maxtext", "dataset": "dummy/data", "batch_size": 16})
     res = etl_posttrain(config, backend="maxtext")
     if not res["dataset"] == "dummy/data":
         raise AssertionError

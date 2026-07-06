@@ -35,7 +35,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool) 
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
     dataloader = data_dict.get("loader", None)
     if dataloader is None or not hasattr(dataloader, "__iter__"):
-        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")  # pragma: no cover
 
     history = model.fit(dataloader, epochs=epochs)
     final_loss = float(history.history["loss"][-1]) if "loss" in history.history else 0.0
@@ -45,6 +45,9 @@ def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool) 
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
+
+    Args:
+        **kwargs: Extra runtime options such as 'test_mode' and 'distributed_strategy'.
     Returns:
         The execution result.
 

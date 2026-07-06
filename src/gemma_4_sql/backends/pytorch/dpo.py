@@ -103,14 +103,14 @@ def _run_training_epochs(state: TrainerState) -> float:
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """Run a DPO training loop for PyTorch.
 
-    Args:
+        Args:
+                **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
     ----
-        config: The DPO configuration.
-        **kwargs: Additional keyword arguments.
+            config: The DPO configuration.
 
-    Returns:
-    -------
-        A dict with the execution status and metrics.
+        Returns:
+        -------
+            A dict with the execution status and metrics.
 
     """
     model_name = getattr(config, "model_name", "model")

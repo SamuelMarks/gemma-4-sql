@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from gemma_4_sql.exceptions import DependencyMissingError
 
 """Module docstring."""
@@ -69,10 +71,13 @@ def test_jax_etl_import_error() -> None:
 
 
 class MockTokenizerForJax:
+    """Docstring."""
+
     def __init__(self, *args, **kwargs):
-        pass
+        """Docstring."""
 
     def encode(self, x):
+        """Docstring."""
         return [len(x)]
 
 
@@ -83,13 +88,28 @@ def test_jax_etl_lightweight(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(etl_jax, "grain", None)
 
     class MockDuckDBForLightweight:
+        """Docstring."""
+
         def connect(self, *args, **kwargs):
+            """Docstring."""
+
             class MockConn:
+                """Docstring."""
+
                 def execute(self, *args, **kwargs):
+                    """Docstring."""
+
                     class MockResult:
+                        """Docstring."""
+
                         def fetchdf(self):
+                            """Docstring."""
+
                             class MockDF:
+                                """Docstring."""
+
                                 def to_dict(self, orient="records"):
+                                    """Docstring."""
                                     return [{"question": "q1", "query": "a1"}, {"sql_prompt": "q2", "sql": "a2"}]
 
                             return MockDF()
@@ -97,7 +117,7 @@ def test_jax_etl_lightweight(monkeypatch: pytest.MonkeyPatch) -> None:
                     return MockResult()
 
                 def close(self):
-                    pass
+                    """Docstring."""
 
             return MockConn()
 

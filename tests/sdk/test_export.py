@@ -55,13 +55,16 @@ def test_export_maxtext(tmp_path: pytest.TempPathFactory) -> None:
 
 
 @pytest.mark.usefixtures("monkeypatch")
-def test_export_pytorch(tmp_path: pytest.TempPathFactory) -> None:
+def test_export_pytorch(monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory) -> None:
     """Test export with pytorch.
 
     Raises:
         AssertionError: Description.
 
     """
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    pytorch_agent = get_backend("pytorch")
+    monkeypatch.setattr(pytorch_agent, "export_model", lambda m, p: {"backend": "pytorch", "model": m, "export_path": p, "format": "safetensors", "status": "success"})
     res = export_model("model1", str(tmp_path / "path1"), "pytorch")
     if not res["backend"] == "pytorch":
         raise AssertionError

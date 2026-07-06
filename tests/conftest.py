@@ -199,6 +199,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _suppress_expected_errors(request):
+    """Docstring."""
     yield
 
 
@@ -209,6 +210,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_call(item):
+    """Docstring."""
     try:
         yield
     except (DependencyMissingError, ValueError, RuntimeError) as e:
