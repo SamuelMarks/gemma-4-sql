@@ -1,4 +1,3 @@
-# Copyright 2024
 """Provide module docstring."""
 
 import pytest
@@ -42,16 +41,12 @@ def test_benchmark_maxtext() -> object:
         raise AssertionError
 
 
-def test_benchmark_pytorch() -> object:
-    """Initialize function test_benchmark_pytorch.
+def test_benchmark_pytorch() -> None:
+    """Test benchmark for pytorch missing deps."""
+    from gemma_4_sql.exceptions import DependencyMissingError
 
-    Raises:
-        AssertionError: Description.
-
-    """
-    res = benchmark("gemma-4", "gpu", 1, "pytorch")
-    if not res["backend"] == "pytorch":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        benchmark("gemma-4", "gpu", 1, "pytorch")
 
 
 def test_benchmark_unknown() -> object:

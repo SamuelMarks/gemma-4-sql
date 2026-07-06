@@ -1,4 +1,3 @@
-# Copyright 2024
 """Keras-specific model training/finetuning logic."""
 
 from __future__ import annotations
@@ -20,82 +19,26 @@ with catch_optional_imports():
     import tensorflow as tf  # pragma: no cover
 
 
-def _mock_keras_model() -> object:
-    """Create a mock Keras model for tests.
-
-    Returns:
-        object: The resulting output from the operation.
-
-    """
-
-    class MockModel(keras.Model if keras else object):
-        """Implementation of MockModel."""
-
-        def __init__(self, vocab_size: int = 100) -> None:
-            """Execute the mock keras model operation."""
-            super().__init__()
-            self.vocab_size = vocab_size
-
-        def call(self, x: object, *, _training: bool = False) -> object:
-            """Execute the call operation.
-
-            Returns:
-                object: The resulting output from the operation.
-
-            """
-            return tf.zeros((x.shape[0], x.shape[1], self.vocab_size)) if tf else x  # pragma: no cover
-
-        def compile(self, *args: object, **kwargs: object) -> None:
-            """Execute the call operation."""
-
-        def fit(self, *_args: object, **_kwargs: object) -> object:
-            """Execute the fit operation.
-
-            Returns:
-                object: The resulting output from the operation.
-
-            """
-
-            class History:
-                """Implementation of History."""
-
-                def __init__(self) -> None:
-                    """Execute the fit operation."""
-                    self.history = {"loss": [1.0, 0.5, 0.1]}
-
-            return History()
-
-        def save_pretrained(self, *args: object, **kwargs: object) -> None:
-            """Execute the save pretrained operation."""
-
-    return MockModel()
-
-
 def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool) -> tuple[str, float]:
     """Execute the core training loop."""
     model: keras.Model | None = None
-    if test_mode:
-        model = _mock_keras_model()  # pragma: no cover
-    else:
+    strategy = tf.distribute.MirroredStrategy()
+    with strategy.scope():
         try:
             gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
             model = gemma_causal_lm_cls.from_preset(model_name)
             model.preprocessor.sequence_length = 512
             model.compile(loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True), optimizer=keras.optimizers.AdamW(learning_rate=5e-05), metrics=["accuracy"])
-        except (ImportError, ValueError):
-            model = _mock_keras_model()
+        except (ImportError, ValueError) as e:
+            raise ValueError(f"Failed to load Keras model {model_name}") from e
+
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
     dataloader = data_dict.get("loader", None)
-    if dataloader is not None and hasattr(dataloader, "__iter__"):
-        history = model.fit(dataloader, epochs=epochs)
-        final_loss = float(history.history["loss"][-1]) if "loss" in history.history else 0.0
-    else:
-        np = __import__("numpy")
-        rng = np.random.default_rng()
-        x = rng.integers(0, 100, (2, 10))
-        y = rng.integers(0, 100, (2, 10))
-        history = model.fit(x, y, epochs=epochs, verbose=0)
-        final_loss = float(history.history["loss"][-1]) if "loss" in history.history else 0.0
+    if dataloader is None or not hasattr(dataloader, "__iter__"):
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+
+    history = model.fit(dataloader, epochs=epochs)
+    final_loss = float(history.history["loss"][-1]) if "loss" in history.history else 0.0
     return "completed", final_loss
 
 
@@ -103,7 +46,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     action = getattr(config, "action", "sft")
@@ -126,7 +69,10 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     """
     if keras is None or tf is None:
-        return {"backend": "keras", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "status": "mocked_missing_keras", "final_loss": 0.0}
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Keras training dependencies are missing.")
+
     logger.info("Starting Keras %s on %s using %s", action, model_name, dataset)
     test_mode = bool(kwargs.get("test_mode"))
     try:

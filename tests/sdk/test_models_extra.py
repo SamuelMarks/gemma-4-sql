@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for missing models.py coverage."""
 
 import pytest

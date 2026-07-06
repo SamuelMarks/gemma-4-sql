@@ -1,4 +1,3 @@
-# Copyright 2024
 """SDK interface for DPO (Direct Preference Optimization)."""
 
 from __future__ import annotations
@@ -13,20 +12,13 @@ def run_dpo(model_name: str, dataset: str, backend: str = "pytorch", beta: float
     """Run Direct Preference Optimization (DPO).
 
     Args:
-    ----
-        model_name: Name of the model.
-        dataset: Name of the dataset.
-        backend: The execution backend ('jax', 'keras', 'maxtext', 'pytorch').
-        beta: Temperature parameter for the DPO loss.
+        model_name: The name of the target model.
+        dataset: The name or path of the dataset.
+        backend: The backend framework to use.
+        beta: The beta parameter controlling the KL penalty.
 
     Returns:
-    -------
-        A dict with execution status and metrics.
-
-    Raises:
-    ------
-        ValueError: If an unknown backend is provided.
-
+        A dictionary containing the results.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     DPOConfig = __import__("gemma_4_sql.type_hints", fromlist=["DPOConfig"]).DPOConfig

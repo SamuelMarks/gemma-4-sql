@@ -1,4 +1,3 @@
-# Copyright 2024
 """JAX-specific benchmarking pipeline."""
 
 from __future__ import annotations
@@ -31,15 +30,12 @@ def _run_benchmark_pass(model: object, batch_size: int, num_runs: int) -> tuple[
     """Execute the forward pass benchmark loop.
 
     Args:
-    ----
-        model: The initialized model.
-        batch_size: Inference batch size.
-        num_runs: Number of benchmark iterations.
+        model: The model.
+        batch_size: The number of items to process in a single batch.
+        num_runs: The integer value for num runs.
 
     Returns:
-    -------
-        A tuple of (tokens_per_sec, latency_ms, memory_mb).
-
+        A tuple containing the results.
     """
 
     @nnx.jit
@@ -52,7 +48,7 @@ def _run_benchmark_pass(model: object, batch_size: int, num_runs: int) -> tuple[
         """
         return model(inputs)
 
-    dummy_inputs = jnp.zeros((batch_size, 32), dtype=jnp.int32)
+    dummy_inputs = jax.random.randint(jax.random.key(0), (batch_size, 32), 1, 1000, dtype=jnp.int32)
     _ = forward_pass(model, dummy_inputs)
     if hasattr(jax, "block_until_ready"):
         jax.block_until_ready(_)
@@ -89,19 +85,24 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         """Execute function.
 
         Returns:
-            object: Description of return.
+            The execution result.
 
         """
         model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
         num_runs = int(str(kwargs.get("num_runs", 5)))
         return _run_benchmark_pass(model, batch_size, num_runs)
 
+    if jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("JAX dependencies are missing.")
+
     return run_benchmark_wrapper(
         backend_name="jax",
         model_name=model_name,
         hardware=hardware,
         batch_size=batch_size,
-        missing_deps=jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None,
-        missing_status="mocked_missing_jax",
+        missing_deps=False,
+        missing_status="missing_jax",
         benchmark_fn=_run,
     )

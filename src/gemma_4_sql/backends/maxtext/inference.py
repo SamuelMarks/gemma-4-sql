@@ -1,4 +1,3 @@
-# Copyright 2024
 """Maxtext-specific inference logic."""
 
 from __future__ import annotations
@@ -26,9 +25,14 @@ with catch_optional_imports():
 def _beam_search_step(seq: jnp.ndarray, score: float, model_apply_fn: object, beam_width: int) -> list[tuple[jnp.ndarray, float]]:
     """Helper to process a single sequence and expand it into multiple beams.
 
-    Returns:
-        object: Description of return.
+    Args:
+        seq: The seq.
+        score: The float value for score.
+        model_apply_fn: The model apply fn.
+        beam_width: The number of beams for beam search.
 
+    Returns:
+        A tuple containing the results.
     """
     logits = model_apply_fn(seq)
     log_probs = jax.nn.log_softmax(logits, axis=-1)[0]
@@ -70,6 +74,20 @@ def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_wid
 
 
 def _execute_generate(model_name: str, input_tokens: list[int], beam_width: int, max_length: int, eos_token_id: int, test_mode: bool, tokenizer: SQLTokenizer) -> tuple[str, str, float]:
+    """Execute the generation logic.
+
+    Args:
+        model_name: The name of the model.
+        input_tokens: The list of input tokens.
+        beam_width: The beam width for search.
+        max_length: The maximum length for generation.
+        eos_token_id: The end-of-sequence token ID.
+        test_mode: Whether to run in test mode.
+        tokenizer: The tokenizer instance.
+
+    Returns:
+        A tuple of raw output text, clean SQL, and generation time.
+    """
     logger.info("Generating with MaxText: %s", model_name)
     input_ids = jnp.array([input_tokens], dtype=jnp.int32)
     model = Gemma4Model(model_name)
@@ -105,15 +123,14 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     input_tokens = tokenizer.encode(prompt)
     eos_token_id = tokenizer.vocab_size - 1
     confidence_score = 0.0
-    if jax is not None and jnp is not None and (Gemma4Model is not None):
-        try:
-            status, sql, confidence_score = _execute_generate(model_name, input_tokens, beam_width, max_length, eos_token_id, bool(kwargs.get("test_mode")), tokenizer)
-        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-            logger.exception("MaxText Generation Error: ")
-            status = f"failed: {e!s}"
-            sql = ""
-    else:
-        sql = "SELECT * FROM maxtext_table"
-        confidence_score = 0.95
-        status = "mocked_missing_maxtext"
+    if jax is None or jnp is None or Gemma4Model is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("MaxText dependencies are missing.")
+    try:
+        status, sql, confidence_score = _execute_generate(model_name, input_tokens, beam_width, max_length, eos_token_id, bool(kwargs.get("test_mode")), tokenizer)
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+        logger.exception("MaxText Generation Error: ")
+        status = f"failed: {e!s}"
+        sql = ""
     return {"backend": "maxtext", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}

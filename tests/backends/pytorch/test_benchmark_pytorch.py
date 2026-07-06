@@ -1,15 +1,11 @@
-# Copyright 2024
 """Tests for PyTorch Benchmark."""
 
 from __future__ import annotations
 
-import typing
+import pytest
 
 import gemma_4_sql.backends.pytorch.benchmark as pt_bm
 from gemma_4_sql.backends.pytorch.benchmark import benchmark_model
-
-if typing.TYPE_CHECKING:
-    import pytest
 
 
 class MockTorch:
@@ -65,11 +61,12 @@ def test_benchmark_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(pt_bm, "torch", None)
     monkeypatch.setattr(pt_bm, "AutoModelForCausalLM", None)
-    res = benchmark_model("model", "gpu", 1)
-    if not res["status"] == "mocked_missing_torch":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="PyTorch dependencies are missing."):
+        benchmark_model("model", "gpu", 1)
 
 
 def test_benchmark_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:

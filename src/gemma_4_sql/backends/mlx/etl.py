@@ -1,4 +1,3 @@
-# Copyright 2024
 """MLX-specific ETL pipeline."""
 
 from __future__ import annotations
@@ -26,9 +25,12 @@ with catch_optional_imports():
 def _pad_batch(batch_inputs: list[list[int]], batch_targets: list[list[int]]) -> JSONDict:
     """Pad batch sequences to max length.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        batch_inputs: A sequence of batch inputs.
+        batch_targets: A sequence of batch targets.
 
+    Returns:
+        A dictionary containing the results.
     """
     max_len_in = max(len(x) for x in batch_inputs)  # pragma: no cover
     max_len_tgt = max(len(x) for x in batch_targets)  # pragma: no cover
@@ -41,7 +43,13 @@ class MLXDataLoader:
     """Simple DataLoader for MLX that yields padded batches."""
 
     def __init__(self, ds: object, tok: SQLTokenizer, bs: int) -> None:
-        """Execute logic."""
+        """Execute logic.
+
+        Args:
+            ds: The ds.
+            tok: The tok.
+            bs: The integer value for bs.
+        """
         self.ds = ds  # pragma: no cover
         self.tok = tok  # pragma: no cover
         self.bs = bs  # pragma: no cover
@@ -69,6 +77,17 @@ class MLXDataLoader:
 
 
 def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, duckdb_table: str | None) -> object:
+    """Load a dataset from Hugging Face or DuckDB.
+
+    Args:
+        dataset_name: The name of the Hugging Face dataset.
+        split: The dataset split to load.
+        duckdb_path: Optional path to a DuckDB database.
+        duckdb_table: Optional name of the DuckDB table.
+
+    Returns:
+        The loaded dataset.
+    """
     if duckdb_path and duckdb_table:  # pragma: no cover
         return _load_duckdb_dataset(duckdb_path, duckdb_table)  # pragma: no cover
     return datasets.load_dataset(dataset_name, split=split)  # pragma: no cover
@@ -89,7 +108,10 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     duckdb_path = str(config.duckdb_path or kwargs.get("duckdb_path") or "")
     duckdb_table = str(config.duckdb_table or kwargs.get("duckdb_table") or "")
     if datasets is None:
-        return {"dataset": dataset_name, "split": split, "status": "mocked", "batch_size": batch_size, "backend": "mlx", "distributed": distributed, "mock_samples": [{"query": "SELECT * FROM users", "nl": "Get all users"}]}
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError(f"Missing datasets. Cannot load {dataset_name}.")
+
     hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)  # pragma: no cover
     tokenizer = SQLTokenizer(model_name=tokenizer_name)  # pragma: no cover
     dataloader = MLXDataLoader(hf_dataset, tokenizer, batch_size)  # pragma: no cover

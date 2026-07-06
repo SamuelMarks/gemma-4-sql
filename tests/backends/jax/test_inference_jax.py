@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for JAX inference logic."""
 
 import pytest
@@ -278,10 +277,11 @@ def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(inf, "jax", None)
-    res = generate_sql("mock-model", "test prompt")
-    if not res["status"] == "mocked_missing_jax":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="JAX inference dependencies are missing."):
+        generate_sql("mock-model", "test prompt")
 
 
 @pytest.mark.usefixtures("_mock_jax_env")

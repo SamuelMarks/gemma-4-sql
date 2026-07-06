@@ -1,8 +1,6 @@
-# Copyright 2024
 """Provide module docstring."""
 
-import contextlib
-from typing import NoReturn as Never
+import pytest
 
 import gemma_4_sql.backends.keras.export as kexp
 
@@ -59,13 +57,25 @@ class MockKeras:
 
 
 def test_export_keras_real(monkeypatch: object) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Execute function."""
     monkeypatch.setattr(kexp, "keras", MockKeras())
+
+    builtins = __import__("builtins", fromlist=[""])
+    orig_import = builtins.__import__
+
+    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "keras_nlp.models":
+
+            class MockGemma:
+                @staticmethod
+                def from_preset(*args, **kwargs):
+                    return MockKeras.Model()
+
+            return type("M", (), {"GemmaCausalLM": MockGemma})()
+        return orig_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+
     res = kexp.export_model("model", "out")
     if res["backend"] != "keras":
         raise AssertionError
@@ -75,32 +85,17 @@ def test_export_keras_error(monkeypatch: object) -> None:
     """Execute function."""
     monkeypatch.setattr(kexp, "keras", MockKeras())
 
-    def raise_err(*_args: object, **_kwargs: object) -> Never:
-        """Execute function.
-
-        Raises:
-            ValueError: Description.
-
-        """
-        msg = "err"
-        raise ValueError(msg)
-
-    monkeypatch.setattr(MockKeras.Model, "save", raise_err)
-    with contextlib.suppress(ValueError):
+    with pytest.raises(ValueError, match="Failed to load model model"):
         kexp.export_model("model", "out")
 
 
 def test_export_keras_missing(monkeypatch: object) -> None:
-    """Execute function.
+    """Execute function."""
+    from gemma_4_sql.exceptions import DependencyMissingError
 
-    Raises:
-        AssertionError: Description.
-
-    """
     monkeypatch.setattr(kexp, "keras", None)
-    res = kexp.export_model("model", "out")
-    if res["status"] != "mock_exported":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        kexp.export_model("model", "out")
 
 
 def test_export_keras_imports_fail(monkeypatch: object) -> None:

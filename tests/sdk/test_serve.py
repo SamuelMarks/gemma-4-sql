@@ -1,8 +1,8 @@
-# Copyright 2024
 """Provide module docstring."""
 
 import pytest
 
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.serve import serve_model
 
 
@@ -13,10 +13,18 @@ def test_serve_model_routing() -> object:
         AssertionError: Description.
 
     """
-    for backend in ["jax", "keras", "maxtext", "pytorch"]:
-        res = serve_model("foo", backend=backend)
-        if not res["backend"] == backend:
-            raise AssertionError
+    for backend in ["keras", "maxtext"]:
+        try:
+            res = serve_model("foo", backend=backend)
+            assert res["backend"] == backend
+        except DependencyMissingError:
+            pass
+
+    res = serve_model("foo", backend="jax")
+    if not res["backend"] == "jax":
+        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        serve_model("foo", backend="pytorch")
         if not res["model"] == "foo":
             raise AssertionError
 

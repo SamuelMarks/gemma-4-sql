@@ -1,4 +1,3 @@
-# Copyright 2024
 """Snowflake adapter."""
 
 from __future__ import annotations
@@ -20,11 +19,7 @@ class SnowflakeAdapter(DatabaseAdapter):
         """Connect synchronously.
 
         Returns:
-            object: The resulting output from the operation.
-
-        Raises:
-        ImportError: If the operation encounters an unexpected ImportError.
-
+            The execution result.
         """
         if snowflake is None:
             msg = "snowflake-connector-python is required."  # pragma: no cover

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for MaxText DPO logic."""
 
 from __future__ import annotations
@@ -275,10 +274,11 @@ def test_run_dpo_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(tr, "jnp", None)
-    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
-    if not res["status"] == "mocked_missing_maxtext":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        run_dpo(DPOConfig(model_name="model", dataset="data"))
 
 
 @pytest.mark.usefixtures("_mock_maxtext_env")

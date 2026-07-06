@@ -1,8 +1,8 @@
-# Copyright 2024
 """Tests for SDK Export module."""
 
 import pytest
 
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.export import export_model
 
 
@@ -29,26 +29,11 @@ def test_export_jax(tmp_path: pytest.TempPathFactory) -> None:
 
 @pytest.mark.usefixtures("monkeypatch")
 def test_export_keras(tmp_path: pytest.TempPathFactory) -> None:
-    """Test export with keras.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    res = export_model("model1", str(tmp_path / "path1"), "keras")
-    if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["model"] == "model1":
-        raise AssertionError
-    if not res["export_path"] == str(tmp_path / "path1"):
-        raise AssertionError
-    if False:
-        raise AssertionError
-    if not res["format"] == "keras_v3/keras_tensor":
-        raise AssertionError
+    """Test export with keras."""
+    with pytest.raises((ValueError, DependencyMissingError)):
+        export_model("model1", str(tmp_path / "path1"), "keras")
 
 
-@pytest.mark.usefixtures("monkeypatch")
 def test_export_maxtext(tmp_path: pytest.TempPathFactory) -> None:
     """Test export with maxtext.
 

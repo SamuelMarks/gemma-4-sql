@@ -17,23 +17,29 @@ logger = logging.getLogger(__name__)
 def _create_hf_data_source(base_ds: type) -> type:
     """Execute function.
 
-    Returns:
-        object: Description of return.
+    Args:
+        base_ds: The base ds.
 
+    Returns:
+        The execution result.
     """
 
     class HFDataSource(base_ds):
         """Data source wrapping a Hugging Face dataset."""
 
         def __init__(self, hf_ds: object) -> None:
-            """Execute function."""
+            """Execute function.
+
+            Args:
+                hf_ds: The hf ds.
+            """
             self._ds = hf_ds
 
         def __len__(self) -> int:
             """Execute function.
 
             Returns:
-                object: Description of return.
+                The execution result.
 
             """
             return len(self._ds)
@@ -42,7 +48,7 @@ def _create_hf_data_source(base_ds: type) -> type:
             """Execute function.
 
             Returns:
-                object: Description of return.
+                The execution result.
 
             """
             return self._ds[idx]
@@ -54,7 +60,7 @@ def _create_base_format_transform(base_map: type) -> type:
     """Execute function.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
 
@@ -62,14 +68,21 @@ def _create_base_format_transform(base_map: type) -> type:
         """Transforms data into numpy/JAX/TF compatible formats."""
 
         def __init__(self, tokenizer: SQLTokenizer) -> None:
-            """Execute function."""
+            """Execute function.
+
+            Args:
+                element: The element.
+
+            Returns:
+                A dictionary containing the results.
+            """
             self.tokenizer = tokenizer
 
         def map(self, element: JSONDict) -> JSONDict:
             """Execute function.
 
             Returns:
-                object: Description of return.
+                The execution result.
 
             """
             prompt = element.get("sql_prompt", element.get("question", ""))

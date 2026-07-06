@@ -1,4 +1,3 @@
-# Copyright 2024
 """MaxText-specific Grain ETL pipeline."""
 
 from __future__ import annotations
@@ -24,12 +23,32 @@ with catch_optional_imports():
 
 
 def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, duckdb_table: str | None) -> object:
+    """Load a dataset from Hugging Face or DuckDB.
+
+    Args:
+        dataset_name: The name of the Hugging Face dataset.
+        split: The dataset split to load.
+        duckdb_path: Optional path to a DuckDB database.
+        duckdb_table: Optional name of the DuckDB table.
+
+    Returns:
+        The loaded dataset.
+    """
     if duckdb_path and duckdb_table:
         return _load_duckdb_dataset(duckdb_path, duckdb_table)
     return datasets.load_dataset(dataset_name, split=split)
 
 
 def _get_sampler(source_len: int, distributed: bool) -> object:
+    """Get the appropriate Grain sampler for data loading.
+
+    Args:
+        source_len: The length of the source data.
+        distributed: Whether to use distributed sharding.
+
+    Returns:
+        A Grain IndexSampler.
+    """
     shard_options = getattr(grain, "JAXDistributedSharding", lambda: None)() if distributed else getattr(grain, "NoSharding", lambda: None)()
     return grain.IndexSampler(num_records=source_len, shard_options=shard_options, shuffle=False, num_epochs=1)
 
@@ -37,9 +56,12 @@ def _get_sampler(source_len: int, distributed: bool) -> object:
 def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     """Build a MaxText-specific Grain dataloader.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        config: The configuration parameters.
+        **kwargs: Additional keyword arguments.
 
+    Returns:
+        A dictionary containing the results.
     """
     dataset_name = config.dataset_name
     split = config.split
@@ -49,7 +71,9 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     duckdb_path = str(config.duckdb_path or kwargs.get("duckdb_path") or "")
     duckdb_table = str(config.duckdb_table or kwargs.get("duckdb_table") or "")
     if datasets is None or grain is None:
-        return {"dataset": dataset_name, "split": split, "status": "mocked", "batch_size": batch_size, "backend": "maxtext", "distributed": distributed, "mock_samples": [{"query": "SELECT * FROM users", "nl": "Get all users"}]}
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError(f"Missing grain or datasets. Cannot load {dataset_name}.")
     hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)
     (data_source_cls, transform_cls) = _get_grain_classes(grain)
     source = data_source_cls(hf_dataset)

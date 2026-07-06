@@ -1,4 +1,3 @@
-# Copyright 2024
 """JAX-specific continuous batching inference logic."""
 
 from __future__ import annotations
@@ -25,23 +24,20 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
     """Serve a model using JAX continuous batching.
 
     Args:
-    ----
-        model_name: The name of the model to serve.
-        port: The port to bind the server to.
-        max_batch_size: The maximum batch size.
-        **kwargs: Additional parameters.
+        model_name: The name of the target model.
+        port: The network port to listen on.
+        max_batch_size: The maximum allowed batch size.
+        **kwargs: Additional keyword arguments.
 
     Returns:
-    -------
-        A dictionary containing serving status and metadata.
-
+        A dictionary containing the results.
     """
 
     def _app_factory() -> object:
         """Execute function.
 
         Returns:
-            object: Description of return.
+            The execution result.
 
         """
 
@@ -49,7 +45,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
             """Execute function.
 
             Returns:
-                object: Description of return.
+                The execution result.
 
             """
             return "SELECT * FROM generated WHERE prompt='{p}'".replace("{p}", prompt)
@@ -61,12 +57,17 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
             generate_logic=_generate,
         )
 
+    if jax is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("JAX dependencies are missing for serve.")
+
     result = serve_model_wrapper(
         backend_name="jax",
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
-        missing_deps=jax is None,
+        missing_deps=False,
         missing_status="mocked_missing_jax",
         app_factory=_app_factory,
         test_mode=bool(kwargs.get("test_mode")),

@@ -1,9 +1,13 @@
-# Copyright 2024
 """Tests for Keras logging."""
+
+from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from gemma_4_sql.backends.keras import logging as keras_logging
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_log_metrics_no_tb() -> None:
@@ -15,11 +19,8 @@ def test_log_metrics_no_tb() -> None:
     """
     keras_logging.tf = None
     metrics = {"loss": 0.5, "acc": 0.9}
-    res = keras_logging.log_metrics(metrics, step=10, log_dir="test_logs")
-    if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["status"] == "mocked_missing_tensorboard":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        keras_logging.log_metrics(metrics, step=10, log_dir="test_logs")
 
 
 def test_log_metrics_with_tb() -> None:

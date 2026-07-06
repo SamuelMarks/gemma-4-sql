@@ -1,4 +1,3 @@
-# Copyright 2024
 """SDK Inference module."""
 
 from __future__ import annotations
@@ -13,18 +12,15 @@ def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int
     """Generate a SQL query from a natural language prompt using Beam Search.
 
     Args:
-    ----
-        model_name: The name or path of the model.
-        prompt: The natural language prompt.
-        backend: The backend framework ('jax', 'keras', 'maxtext', or 'pytorch').
-        beam_width: The number of beams to maintain during search.
-        max_length: The maximum generation length.
-        **kwargs: Additional parameters like `show_confidence`.
+        model_name: The name of the target model.
+        prompt: The input text prompt.
+        backend: The backend framework to use.
+        beam_width: The number of beams for beam search.
+        max_length: The maximum length of the sequence.
+        **kwargs: Additional keyword arguments.
 
     Returns:
-    -------
-        Generation results dictionary containing the output SQL and status.
-
+        A dictionary containing the results.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     result = get_backend(backend).generate_sql(model_name, prompt, beam_width, max_length)

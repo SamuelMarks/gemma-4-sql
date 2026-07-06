@@ -1,4 +1,3 @@
-# Copyright 2024
 """Backend registry for gemma-4-sql."""
 
 from __future__ import annotations
@@ -15,20 +14,10 @@ def get_backend(name: str) -> BackendProtocol:
     """Get backend by name.
 
     Args:
-    ----
-        name: The name of the backend to load (e.g., 'jax', 'keras', 'maxtext', 'pytorch').
+        name: The string representing the name.
 
     Returns:
-    -------
-        The loaded BackendProtocol implementation.
-
-    Raises:
-    ------
-        ValueError: If the specified backend name is not found in the entry points.
-
-    Raises:
-        ValueError: If the operation encounters an unexpected ValueError.
-
+        The execution result.
     """
     if not ENTRY_POINTS:
         eps_all = importlib.metadata.entry_points()

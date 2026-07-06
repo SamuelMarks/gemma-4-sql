@@ -1,4 +1,3 @@
-# Copyright 2024
 """MLX-specific benchmarking pipeline."""
 
 from __future__ import annotations
@@ -23,9 +22,13 @@ with catch_optional_imports():
 def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[ModelType, str]:
     """Load the model and determine device.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model_name: The name of the target model.
+        hardware: The target hardware accelerator.
+        test_mode: Boolean flag indicating test mode.
 
+    Returns:
+        A tuple containing the results.
     """
     if test_mode:
         return (None, "cpu")  # pragma: no cover
@@ -39,13 +42,25 @@ def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: boo
 
 
 def _sync_cuda(device: str) -> None:
-    """Synchronize CUDA if using GPU."""
+    """Synchronize CUDA if using GPU.
+
+    Args:
+        device: The string representing the device.
+    """
     if device == "cuda" and hasattr(mlx, "cuda") and hasattr(mlx.cuda, "synchronize"):
         mlx.cuda.synchronize()
 
 
 def _run_forward_pass(model: object, dummy_inputs: object) -> None:
-    """Run a single forward pass."""
+    """Run a single forward pass.
+
+    Args:
+        model: The model.
+        device: The string representing the device.
+
+    Returns:
+        The computed float value.
+    """
     if model is not None and hasattr(mlx, "no_grad"):  # pragma: no cover
         with mlx.no_grad():
             _ = model(dummy_inputs)
@@ -54,9 +69,14 @@ def _run_forward_pass(model: object, dummy_inputs: object) -> None:
 def _get_memory_mb(model: object, device: str) -> float:
     """Get max memory allocated in MB.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model: The model.
+        device: The string representing the device.
+        batch_size: The number of items to process in a single batch.
+        num_runs: The integer value for num runs.
 
+    Returns:
+        A tuple containing the results.
     """
     if model is not None and device == "cuda" and hasattr(mlx, "cuda") and hasattr(mlx.cuda, "max_memory_allocated"):
         return float(mlx.cuda.max_memory_allocated() / (1024 * 1024))
@@ -107,7 +127,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         """Execute function.
 
         Returns:
-            object: Description of return.
+            The execution result.
 
         """
         (model, device) = _load_mlx_model_and_device(model_name, hardware, test_mode=bool(kwargs.get("test_mode")))

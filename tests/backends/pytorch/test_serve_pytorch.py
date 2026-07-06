@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for PyTorch Serving."""
 
 from __future__ import annotations
@@ -80,10 +79,11 @@ def test_serve_model_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(srv, "AsyncEngineArgs", None)
-    res = srv.serve_model("foo")
-    if not res["status"] == "mocked_missing_pytorch":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="vLLM dependencies are missing for PyTorch serving."):
+        srv.serve_model("foo")
 
 
 def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -232,6 +232,7 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
             """Execute function."""
 
             def decorator(func: object) -> object:
+                """Test function."""
                 return func
 
             return decorator

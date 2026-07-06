@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for the backend approaches."""
 
 from gemma_4_sql.backends.jax import get_trainer as jax_trainer

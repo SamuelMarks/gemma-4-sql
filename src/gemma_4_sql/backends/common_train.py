@@ -1,6 +1,5 @@
 """Provide module docstring."""
 
-# Copyright 2024
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypeVar
@@ -16,15 +15,12 @@ def generic_run_training_epochs(epochs: int, dataloader: T_Data, process_batch_f
     """A generic training loop for iterating over epochs and batches.
 
     Args:
-    ----
-        epochs: Number of epochs to train.
-        dataloader: Iterable dataloader yielding batches.
-        process_batch_fn: Function that takes a batch and returns the loss as a float.
+        epochs: The integer value for epochs.
+        dataloader: The dataloader.
+        process_batch_fn: The process batch fn.
 
     Returns:
-    -------
-        The average loss of the final epoch.
-
+        The computed float value.
     """
     final_loss = 0.0
     for _epoch in range(epochs):

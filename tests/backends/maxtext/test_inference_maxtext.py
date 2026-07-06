@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for MaxText inference logic."""
 
 from typing import NoReturn as Never
@@ -242,10 +241,11 @@ def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(inf, "jax", None)
-    res = generate_sql("mock-model", "test prompt")
-    if not res["status"] == "mocked_missing_maxtext":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        generate_sql("mock-model", "test prompt")
 
 
 @pytest.mark.usefixtures("_mock_maxtext_env")

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for PyTorch training pipeline."""
 
 import pytest
@@ -341,11 +340,12 @@ def test_train_model_pytorch_missing() -> object:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     orig_torch = tr.torch
     tr.torch = None
-    res = train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
-    if not res["status"] == "mocked_missing_torch":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="PyTorch dependencies are missing."):
+        train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
     tr.torch = orig_torch
 
 

@@ -1,4 +1,3 @@
-# Copyright 2024
 """MaxText-specific model export pipeline."""
 
 from __future__ import annotations
@@ -24,14 +23,11 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     """Export a Text-to-SQL model using the MaxText backend.
 
     Args:
-    ----
-        model_name: The name of the model to export.
-        export_path: The destination path for the checkpoint.
+        model_name: The name of the target model.
+        export_path: The path where the model will be exported.
 
     Returns:
-    -------
-        A dictionary containing export metadata.
-
+        A dictionary containing the results.
     """
     Path(export_path).mkdir(parents=True, exist_ok=True)
     if jax is not None and jnp is not None and (ocp is not None):

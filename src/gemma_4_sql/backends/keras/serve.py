@@ -1,4 +1,3 @@
-# Copyright 2024
 """Keras-specific continuous batching inference logic."""
 
 from __future__ import annotations
@@ -28,9 +27,12 @@ with catch_optional_imports():
 def create_app(model_name: str, *, test_mode: bool = False) -> object:
     """Create the FastAPI application for the Keras server.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model_name: The name of the target model.
+        test_mode: Boolean flag indicating test mode.
 
+    Returns:
+        The execution result.
     """
 
     def _startup() -> None:
@@ -48,16 +50,26 @@ def create_app(model_name: str, *, test_mode: bool = False) -> object:
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
     """Serve a model using Keras continuous batching.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model_name: The name of the target model.
+        port: The network port to listen on.
+        max_batch_size: The maximum allowed batch size.
+        **kwargs: Additional keyword arguments.
 
+    Returns:
+        A dictionary containing the results.
     """
+    if tf is None or keras is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Keras dependencies are missing for serve.")
+
     return serve_model_wrapper(
         backend_name="keras",
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
-        missing_deps=tf is None or keras is None,
+        missing_deps=False,
         missing_status="mocked_missing_keras",
         app_factory=lambda: create_app(model_name, test_mode=bool(kwargs.get("test_mode"))),
         test_mode=bool(kwargs.get("test_mode")),

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for DuckDB extension."""
 
 from unittest.mock import MagicMock, patch

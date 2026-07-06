@@ -1,16 +1,13 @@
-# Copyright 2024
 """Tests for PyTorch PEFT."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 from typing import NoReturn as Never
+
+import pytest
 
 import gemma_4_sql.backends.pytorch.peft as pt_peft
 from gemma_4_sql.backends.pytorch.peft import apply_lora
-
-if TYPE_CHECKING:
-    import pytest
 
 
 class MockPeft:
@@ -66,14 +63,13 @@ def test_apply_lora_pytorch_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(pt_peft, "peft", None)
     monkeypatch.setattr(pt_peft, "torch", None)
     monkeypatch.setattr(pt_peft, "AutoModelForCausalLM", None)
-    res = apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
-    if not res["status"] == "mocked_missing_peft":
-        raise AssertionError
-    if not res["backend"] == "pytorch":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="PyTorch PEFT dependencies are missing."):
+        apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
 
 
 def test_apply_lora_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:

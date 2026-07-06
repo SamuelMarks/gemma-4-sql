@@ -1,4 +1,3 @@
-# Copyright 2024
 """Provide module docstring."""
 
 import gemma_4_sql.backends.maxtext as m_init

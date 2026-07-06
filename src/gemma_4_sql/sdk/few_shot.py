@@ -1,4 +1,3 @@
-# Copyright 2024
 """SDK Few-Shot module for dynamic prompting."""
 
 from __future__ import annotations
@@ -13,17 +12,14 @@ def build_few_shot_prompt(model_name: str, prompt: str, examples: list[dict[str,
     """Build a dynamic few-shot prompt.
 
     Args:
-    ----
-        model_name: The name or path of the model.
-        prompt: The natural language prompt.
-        examples: List of example dictionaries (e.g., {"input": "...", "output": "..."}).
-        backend: The backend framework ('jax', 'keras', 'maxtext', 'pytorch').
+        model_name: The name of the target model.
+        prompt: The input text prompt.
+        examples: A sequence of examples.
+        backend: The backend framework to use.
         **_kwargs: Additional keyword arguments.
 
     Returns:
-    -------
-        A dictionary containing the generated few-shot prompt and status.
-
+        A dictionary containing the results.
     """
     status = f"success_{backend}_few_shot"
     formatted_examples = "\n".join([f"Input: {ex.get('input', '')}\nOutput: {ex.get('output', '')}" for ex in examples])

@@ -1,4 +1,3 @@
-# Copyright 2024
 """MaxText-specific continuous batching inference logic."""
 
 from __future__ import annotations
@@ -28,9 +27,12 @@ with catch_optional_imports():
 def _create_app(model_name: str, *, test_mode: bool = False) -> object:
     """Create the FastAPI application for the MaxText server.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model_name: The name of the target model.
+        test_mode: Boolean flag indicating test mode.
 
+    Returns:
+        The execution result.
     """
 
     def _startup() -> None:
@@ -52,24 +54,25 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
     """Serve a model using MaxText continuous batching.
 
     Args:
-    ----
-        model_name: The name of the model to serve.
-        port: The port to bind the server to.
-        max_batch_size: The maximum batch size.
-        **kwargs: Additional parameters.
+        model_name: The name of the target model.
+        port: The network port to listen on.
+        max_batch_size: The maximum allowed batch size.
+        **kwargs: Additional keyword arguments.
 
     Returns:
-    -------
-        A dictionary containing serving status and metadata.
-
+        A dictionary containing the results.
     """
+    if gemma4 is None or jax is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("MaxText dependencies are missing.")
     return serve_model_wrapper(
         backend_name="maxtext",
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
-        missing_deps=gemma4 is None or jax is None,
-        missing_status="mocked_missing_maxtext",
+        missing_deps=False,
+        missing_status="",
         app_factory=lambda: _create_app(model_name, test_mode=bool(kwargs.get("test_mode"))),
         test_mode=bool(kwargs.get("test_mode")),
     )

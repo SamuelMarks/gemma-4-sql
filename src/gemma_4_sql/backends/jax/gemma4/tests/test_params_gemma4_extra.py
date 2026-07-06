@@ -1,4 +1,3 @@
-# Copyright 2024
 """Core functionality for the test_params_gemma4_extra module."""
 
 import pytest
@@ -18,14 +17,22 @@ from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, assign_
 
 
 def test_map_to_jax_key_multiple() -> object:
-    """Test the map_to_jax_key_multiple behavior."""
+    """Test the map_to_jax_key_multiple behavior.
+
+    Returns:
+        The execution result.
+    """
     mapping = {"a": ("b", None), ".*": ("c", None)}
     with pytest.raises(ValueError, match=r".*"):
         map_to_jax_key(mapping, "a")
 
 
 def test_assign_weights_shape_mismatch() -> object:
-    """Test the assign_weights_shape_mismatch behavior."""
+    """Test the assign_weights_shape_mismatch behavior.
+
+    Returns:
+        The execution result.
+    """
     state = {"model": jax.ShapeDtypeStruct((2, 2), jnp.float32)}
     tensor = jnp.ones((3, 3))
     with pytest.raises(ValueError, match=r".*"):
@@ -39,7 +46,11 @@ def test_assign_weights_shape_mismatch() -> object:
 
 
 def test_assign_weights_sharding() -> object:
-    """Test the assign_weights_sharding behavior."""
+    """Test the assign_weights_sharding behavior.
+
+    Returns:
+        The execution result.
+    """
     state = {"model": jnp.zeros((8, 8))}
     tensor = jnp.ones((8, 8))
     sharding = {"model": jax.sharding.NamedSharding(jax.sharding.Mesh(jax.devices(), ("x",)), jax.sharding.PartitionSpec("x"))}

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for JAX PEFT."""
 
 import pytest
@@ -65,10 +64,11 @@ def test_apply_lora_jax_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(pt, "optax", None)
-    res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
-    if not res["status"] == "mocked_missing_optax":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="JAX PEFT dependencies are missing."):
+        pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
 
 
 def test_apply_lora_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:

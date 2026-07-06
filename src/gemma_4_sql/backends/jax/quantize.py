@@ -1,4 +1,3 @@
-# Copyright 2024
 """JAX-specific model quantization logic."""
 
 from __future__ import annotations
@@ -30,13 +29,10 @@ def quantize_int8(tensor: TensorType) -> tuple[TensorType, TensorType]:
     """Quantize a tensor to int8.
 
     Args:
-    ----
-        tensor: The JAX array to quantize.
+        tensor: The input tensor.
 
     Returns:
-    -------
-        A tuple of (quantized_tensor, scale).
-
+        A tuple containing the results.
     """
     scale = jnp.max(jnp.abs(tensor)) / 127.0
     quantized = jnp.round(tensor / scale).astype(jnp.int8)
@@ -78,14 +74,16 @@ def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
         A dictionary containing quantization status and metadata.
 
     """
-    if jax is not None and jnp is not None and (nnx is not None) and (Gemma4ForCausalLM is not None):
-        try:
-            model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
-            (status, memory_reduction, _) = _apply_quantization_to_model(model, method)
-        except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-            status = f"failed: {e!s}"
-            memory_reduction = 0.0
-    else:
-        status = "mocked_missing_jax"
+    if jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("JAX quantization dependencies are missing.")
+
+    try:
+        model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
+        (status, memory_reduction, _) = _apply_quantization_to_model(model, method)
+    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        status = f"failed: {e!s}"
         memory_reduction = 0.0
+
     return {"backend": "jax", "model": model_name, "method": method, "status": status, "memory_reduction_factor": float(memory_reduction)}

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Core functionality for the config module."""
 
 from __future__ import annotations
@@ -36,8 +35,7 @@ class VisionShardConfig:
         """Return an unpartitioned default VisionShardConfig.
 
         Returns:
-            object: The resulting output from the operation.
-
+            The execution result.
         """
         return VisionShardConfig()
 

@@ -1,4 +1,5 @@
-# Copyright 2024
+from gemma_4_sql.exceptions import DependencyMissingError
+
 """Provide module docstring."""
 
 import contextlib
@@ -17,19 +18,27 @@ def test_build_dataloader_pytorch_mocked() -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     etl_mod = __import__("gemma_4_sql.backends.pytorch.etl", fromlist=[""])
     orig_torch = etl_mod.torch
     try:
         etl_mod.torch = None
-        res = etl_mod.build_dataloader(ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False))
-        if not res["backend"] == "pytorch":
-            raise AssertionError
-        if not res["status"] == "mocked":
-            raise AssertionError
-        if "mock_samples" not in res:
-            raise AssertionError
+        with pytest.raises(DependencyMissingError, match="Missing PyTorch or datasets. Cannot load dummy/data."):
+            etl_mod.build_dataloader(ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False))
     finally:
         etl_mod.torch = orig_torch
+
+
+def test_build_dataloader_pytorch_lightweight(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test PyTorch build_dataloader lightweight fallback when duckdb is provided but torch is missing."""
+    pt_etl = __import__("gemma_4_sql.backends.pytorch.etl", fromlist=[""])
+    monkeypatch.setattr(pt_etl, "duckdb", MockDuckdb())
+    monkeypatch.setattr(pt_etl, "torch", None)
+    monkeypatch.setattr(pt_etl, "SQLTokenizer", MockTokenizer)
+
+    with pytest.raises(DependencyMissingError):
+        pt_etl.build_dataloader(ETLConfig(dataset_name="dataset", split="split", batch_size=2, duckdb_path="test.db", duckdb_table="tbl"))
 
 
 class MockConn:

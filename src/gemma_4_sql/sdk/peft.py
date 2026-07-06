@@ -1,4 +1,3 @@
-# Copyright 2024
 """Parameter-Efficient Fine-Tuning (PEFT / LoRA) configuration module."""
 
 from __future__ import annotations
@@ -13,19 +12,15 @@ def apply_peft(model_name: str, target_modules: list[str] | None = None, lora_r:
     """Apply Parameter-Efficient Fine-Tuning (PEFT / LoRA) to a model.
 
     Args:
-    ----
-        model_name: The name of the model to fine-tune.
-        target_modules: List of target modules for LoRA. Defaults to ["q_proj", "v_proj"].
-        lora_r: LoRA attention dimension (rank).
-        lora_alpha: LoRA alpha parameter.
-        lora_dropout: LoRA dropout probability.
-        backend: The backend approach to use ('jax', 'keras', 'maxtext', 'pytorch').
+        model_name: The name of the target model.
+        target_modules: The names of the modules to apply LoRA.
+        lora_r: The rank of the LoRA update matrices.
+        lora_alpha: The scaling factor for LoRA.
+        lora_dropout: The dropout probability for LoRA layers.
         **kwargs: Additional keyword arguments.
 
     Returns:
-    -------
-        A dictionary indicating the PEFT job status and configuration.
-
+        A dictionary containing the results.
     """
     backend = kwargs.get("backend", "jax")
     if target_modules is None:

@@ -26,9 +26,15 @@ with catch_optional_imports():
 def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[TensorType, TensorType, TensorType]:
     """Compute the DPO loss.
 
-    Returns:
-        tuple: The losses.
+    Args:
+        policy_chosen_logps: Log probabilities of the chosen completions from the policy model.
+        policy_rejected_logps: Log probabilities of the rejected completions from the policy model.
+        ref_chosen_logps: Log probabilities of the chosen completions from the reference model.
+        ref_rejected_logps: Log probabilities of the rejected completions from the reference model.
+        beta: The beta parameter controlling the KL penalty.
 
+    Returns:
+        A tuple containing the results.
     """
     if torch is None or functional is None:
         return (0.0, 0.0, 0.0)
@@ -50,11 +56,11 @@ def _run_dpo_step(policy_model: object, ref_model: object, optimizer: object, ba
 
     """
     optimizer.zero_grad()
-    pi_ch = policy_model(batch.get("chosen_inputs", torch.zeros((1, 10))))
-    pi_re = policy_model(batch.get("rejected_inputs", torch.zeros((1, 10))))
+    pi_ch = policy_model(batch["chosen_inputs"])
+    pi_re = policy_model(batch["rejected_inputs"])
     with torch.no_grad():
-        ref_ch = ref_model(batch.get("chosen_inputs", torch.zeros((1, 10))))
-        ref_re = ref_model(batch.get("rejected_inputs", torch.zeros((1, 10))))
+        ref_ch = ref_model(batch["chosen_inputs"])
+        ref_re = ref_model(batch["rejected_inputs"])
     pi_ch_logps = pi_ch.mean(dim=-1)
     pi_re_logps = pi_re.mean(dim=-1)
     ref_ch_logps = ref_ch.mean(dim=-1)
@@ -69,7 +75,7 @@ def _run_training_epochs(state: TrainerState) -> float:
     """Execute function.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     dataloader = state.dataloader
@@ -95,10 +101,16 @@ def _run_training_epochs(state: TrainerState) -> float:
 
 
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
-    """Execute function.
+    """Run a DPO training loop for PyTorch.
+
+    Args:
+    ----
+        config: The DPO configuration.
+        **kwargs: Additional keyword arguments.
 
     Returns:
-        object: Description of return.
+    -------
+        A dict with the execution status and metrics.
 
     """
     model_name = getattr(config, "model_name", "model")
@@ -106,58 +118,31 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     beta = getattr(config, "beta", 0.1)
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
-    """Run a DPO training loop for PyTorch.
 
-    Args:
-    ----
-        model_name: The name of the model.
-        dataset: The dataset name.
-        beta: The beta temperature parameter.
-        epochs: The number of epochs.
-        learning_rate: The learning rate.
+    if torch is None or nn is None or optim is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
 
-    Returns:
-    -------
-        A dict with the execution status and metrics.
+        raise DependencyMissingError("PyTorch dependencies are missing.")
 
-    """
-    if torch is not None and nn is not None and (optim is not None):
+    try:
         try:
+            gemma4_for_causal_lm_cls = __import__("transformers.models.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
+            policy_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
+            ref_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
+        except (ImportError, ValueError) as e:
+            msg = f"Failed to load model {model_name}"
+            raise ValueError(msg) from e
 
-            class DummyModel(nn.Module):
-                """Dummy model for PyTorch DPO."""
-
-                def __init__(self: object) -> None:
-                    """Execute logic."""
-                    super().__init__()
-                    self.linear = nn.Linear(10, 10)
-
-                def __call__(self: object, x: object) -> object:
-                    """Execute logic.
-
-                    Returns:
-                        object: The resulting output from the operation.
-
-                    """
-                    return self.linear(x)
-
-            policy_model = DummyModel()
-            ref_model = DummyModel()
-            optimizer = optim.AdamW(policy_model.parameters(), lr=learning_rate)
-            data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
-            dataloader = data_dict.get("loader", None)
-            if dataloader is not None and hasattr(dataloader, "__iter__"):
-                final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=policy_model, ref_model=ref_model, optimizer=optimizer, beta=beta))
-            else:
-                dummy_batch = {"chosen_inputs": torch.zeros((1, 10)), "chosen_labels": torch.zeros((1, 10)), "rejected_inputs": torch.zeros((1, 10)), "rejected_labels": torch.zeros((1, 10))}
-                loss = _run_dpo_step(policy_model, ref_model, optimizer, dummy_batch, beta)
-                final_loss = float(loss.item())
-            status = "completed"
-        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-            logger.exception("DPO failed: ")
-            status = f"failed: {e!s}"
-            final_loss = 0.0
-    else:
-        status = "mocked_missing_torch"
+        optimizer = optim.AdamW(policy_model.parameters(), lr=learning_rate)
+        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+        dataloader = data_dict.get("loader", None)
+        if dataloader is None or not hasattr(dataloader, "__iter__"):
+            raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+        final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=policy_model, ref_model=ref_model, optimizer=optimizer, beta=beta))
+        status = "completed"
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+        logger.exception("DPO failed: ")
+        status = f"failed: {e!s}"
         final_loss = 0.0
+
     return {"backend": "pytorch", "action": "dpo", "model": model_name, "dataset": dataset, "beta": beta, "status": status, "final_loss": float(final_loss)}

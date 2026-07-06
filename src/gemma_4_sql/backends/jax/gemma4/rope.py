@@ -1,4 +1,3 @@
-# Copyright 2024
 """Core functionality for the rope module."""
 
 from __future__ import annotations
@@ -18,13 +17,10 @@ def segment_ids_to_positions(segment_ids: Array) -> Array:
     """Execute the segment ids to positions operation.
 
     Args:
-    ----
-    segment_ids: The segment_ids parameter required for this operation.
-
+        segment_ids: The segment ids.
 
     Returns:
-        object: The resulting output from the operation.
-
+        The resulting tensor array.
     """
     return jnp.cumsum(segment_ids, axis=-1)
 

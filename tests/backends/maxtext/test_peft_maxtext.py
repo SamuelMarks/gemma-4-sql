@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for MaxText PEFT."""
 
 from __future__ import annotations
@@ -72,12 +71,13 @@ def test_apply_lora_maxtext_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    import pytest
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(pt, "jax", None)
-    res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
-    if not res["status"] == "mocked_missing_jax":
-        raise AssertionError
-    if not res["backend"] == "maxtext":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
 
 
 def test_apply_lora_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Live Database Evaluation Engine for Text-to-SQL execution accuracy."""
 
 from __future__ import annotations
@@ -30,15 +29,10 @@ class LiveDatabaseEngine:
         """Initialize the LiveDatabaseEngine.
 
         Args:
-        ----
-            db_path: Path to the database or connection URI. Defaults to an in-memory DB for sqlite and duckdb.
-            ddl: Optional SQL Data Definition Language string to initialize the schema.
-            db_type: The type of database backend ('sqlite', 'postgresql', 'snowflake', 'duckdb').
-            **kwargs: Extra parameters like db_kwargs, read_only.
-
-        Raises:
-        ValueError: If the operation encounters an unexpected ValueError.
-
+            db_path: The file path to the database.
+            ddl: The Data Definition Language (DDL) string.
+            db_type: The string representing the db type.
+            **kwargs: Additional keyword arguments.
         """
         self.db_path = db_path
         self.db_type = db_type.lower()
@@ -102,9 +96,8 @@ class LiveDatabaseEngine:
     def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute a query and returns execution success status, results, and error message.
 
-        Returns:
-            object: The resulting output from the operation.
-
+        Args:
+            ddl: The Data Definition Language (DDL) string.
         """
         try:
             self._validate_safety(query)

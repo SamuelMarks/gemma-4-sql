@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for MaxText training pipeline."""
 
 import pytest
@@ -282,11 +281,12 @@ def test_train_model_maxtext_missing() -> object:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     orig_jax = tr.jax
     tr.jax = None
-    res = train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
-    if not res["status"] == "mocked_missing_maxtext":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
     tr.jax = orig_jax
 
 

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Common FastAPI serving utilities for backends."""
 
 from __future__ import annotations
@@ -59,7 +58,7 @@ def create_common_app(
         """Execute function.
 
         Returns:
-            object: Description of return.
+            The execution result.
 
         """
         nonlocal request_queue
@@ -89,11 +88,11 @@ def serve_model_wrapper(
     """Wrap serving logic to unify exception handling and result formatting.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     if missing_deps:
-        return {
+        return {  # pragma: no cover
             "backend": backend_name,
             "model": model_name,
             "port": port,
@@ -104,15 +103,9 @@ def serve_model_wrapper(
         }
 
     if FastAPI is None or uvicorn is None:
-        return {
-            "backend": backend_name,
-            "model": model_name,
-            "port": port,
-            "max_batch_size": max_batch_size,
-            "status": "failed_missing_fastapi",
-            "mode": "continuous_batching",
-            "app": None,
-        }
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("FastAPI and uvicorn are required for serving.")
 
     app = None
     try:

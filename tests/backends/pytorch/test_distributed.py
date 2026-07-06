@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for PyTorch distributed training pipeline."""
 
 from __future__ import annotations

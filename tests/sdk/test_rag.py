@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for RAG-based schema contextualization module."""
 
 import pytest

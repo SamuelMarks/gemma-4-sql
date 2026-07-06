@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for SDK Agent module."""
 
 import pytest

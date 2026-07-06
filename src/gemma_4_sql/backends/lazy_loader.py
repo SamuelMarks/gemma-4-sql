@@ -1,4 +1,3 @@
-# Copyright 2024
 """Centralized lazy loader for optional backend dependencies."""
 
 from __future__ import annotations
@@ -17,7 +16,11 @@ OPTIONAL_IMPORT_ERRORS = (ImportError,)
 
 @contextmanager
 def catch_optional_imports() -> Iterator[None]:
-    """Context manager to gracefully catch missing optional backend dependencies."""
+    """Context manager to gracefully catch missing optional backend dependencies.
+
+    Yields:
+        The yielded output.
+    """
     with suppress(OPTIONAL_IMPORT_ERRORS):
         yield
 
@@ -26,7 +29,11 @@ class LazyLoader:
     """Lazily load an optional dependency."""
 
     def __init__(self, module_name: str) -> None:
-        """Initialize the lazy loader."""
+        """Initialize the lazy loader.
+
+        Args:
+            module_name: The string representing the module name.
+        """
         self.module_name = module_name
         self._module: types.ModuleType | None = None
         self._loaded = False

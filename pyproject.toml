@@ -111,3 +111,13 @@ pytorch = "gemma_4_sql.backends.pytorch"
 mlx = "gemma_4_sql.backends.mlx"
 
 
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::FutureWarning",
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+    "ignore::ImportWarning",
+    "ignore:.*PyparsingDeprecationWarning.*",
+    "ignore:.*non-supported Python version.*:FutureWarning"
+]

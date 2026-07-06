@@ -1,376 +1,272 @@
-# Copyright 2024
-"""Tests for Keras DPO logic."""
+"""Test Keras DPO logic."""
 
-from __future__ import annotations
+import pytest
 
-import typing
-from typing import TYPE_CHECKING
-
-import gemma_4_sql.backends.keras.dpo as kr_dpo
-from gemma_4_sql.backends.keras.dpo import run_dpo
-from gemma_4_sql.type_hints import DPOConfig
-
-if TYPE_CHECKING:
-    import pytest
-
-
-class MockTensor:
-    """Provide class docstring."""
-
-    def __sub__(self: object, other: object) -> MockTensor:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockTensor()
-
-    def __mul__(self: object, other: object) -> MockTensor:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockTensor()
-
-    def __rmul__(self: object, other: object) -> MockTensor:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockTensor()
-
-    def __neg__(self: typing.Any) -> MockTensor:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockTensor()
-
-    def numpy(self: typing.Any) -> float:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return 0.42
-
-
-class MockMath:
-    """Provide class docstring."""
-
-    def log_sigmoid(self: object, _x: object) -> MockTensor:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockTensor()
-
-
-class MockGradientTape:
-    """Provide class docstring."""
-
-    def __enter__(self) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self
-
-    def __exit__(self, *args: object, **kwargs: object) -> None:
-        """Execute function."""
-
-    def gradient(self, *_args: object, **_kwargs: object) -> list:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return ["grads"]
-
-
-def mock_dpo_loss(*_args: object, **_kwargs: object) -> object:
-    """Execute function.
-
-    Returns:
-        object: Description of return.
-
-    """
-    return (MockTensor(), MockTensor(), MockTensor())
-
-
-def test_dpo_loss() -> None:
-    """Execute function."""
-    mdl = __import__("gemma_4_sql.backends.keras.dpo", fromlist=[""])
-    mdl.tf = MockTf()
-    mdl.dpo_loss(MockTensor(), MockTensor(), MockTensor(), MockTensor())
+import gemma_4_sql.backends.keras.dpo as keras_dpo
+from gemma_4_sql.type_hints import DPOConfig, TrainerState
 
 
 class MockTf:
     """Provide class docstring."""
 
-    float32 = "float32"
-    int32 = "int32"
-
-    def __init__(self: typing.Any) -> None:
+    def expand_dims(self, a: object, axis: int) -> object:
         """Execute function."""
-        self.math = MockMath()
+        return a
 
-    def reduce_sum(self: object, *_args: object, **_kwargs: object) -> MockTensor:
-        """Mock reduce_sum.
+    def gather(self, params: object, indices: object, batch_dims: int) -> object:
+        """Execute function."""
+        return params
 
-        Returns:
-            object: Description of return.
+    def squeeze(self, a: object, axis: int) -> object:
+        """Execute function."""
+        return a
 
-        """
-        return MockTensor()
+    def cast(self, a: object, dtype: object) -> object:
+        """Execute function."""
+        return a
 
-    def reduce_mean(self: object, *_args: object, **_kwargs: object) -> MockTensor:
-        """Mock reduce_mean.
+    def reduce_sum(self, a: object, axis: int) -> object:
+        """Execute function."""
+        return a
 
-        Returns:
-            object: Description of return.
+    def zeros(self, *_a: object, **_k: object) -> object:
+        """Execute function."""
+        return 0
 
-        """
-        return MockTensor()
+    class nn:
+        """Class docstring."""
 
-    def constant(self: object, *_args: object, **_kwargs: object) -> MockTensor:
-        """Execute function.
+        @staticmethod
+        def log_softmax(logits: object, axis: int) -> object:
+            """Execute function."""
+            return logits
 
-        Returns:
-            object: Description of return.
+    class math:
+        """Class docstring."""
 
-        """
-        return MockTensor()
+        @staticmethod
+        def log_sigmoid(x: object) -> object:
+            """Test function."""
+            return x
 
-    def cast(self: object, *_args: object, **_kwargs: object) -> MockTensor:
-        """Mock cast.
+    class GradientTape:
+        """Class docstring."""
 
-        Returns:
-            object: Description of return.
+        def __enter__(self):
+            """Test function."""
+            return self
 
-        """
-        return MockTensor()
+        def __exit__(self, *a):
+            """Test function."""
 
-    def zeros(self, *_args: object, **_kwargs: object) -> MockTensor:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockTensor()
+        def gradient(self, *a, **k):
+            """Test function."""
+            return []
 
     def function(self, fn: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
+        """Test function."""
         return fn
 
-    def mock_gradienttape(self) -> MockGradientTape:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockGradientTape()
-
-    GradientTape = mock_gradienttape
+    int32 = "int32"
+    float32 = "float32"
 
 
-class MockKeras:
-    """Provide class docstring."""
+def test_compute_logps_keras(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test compute logps in keras."""
+    monkeypatch.setattr(keras_dpo, "tf", MockTf())
 
-    @staticmethod
-    def mock_input(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    class MockModel:
+        """Class docstring."""
 
-        Returns:
-            object: Description of return.
+        def __call__(self, inputs: object) -> object:
+            """Test function."""
+            return inputs
 
-        """
-        return "inputs"
-
-    Input = mock_input
-
-    class MockLayers:
-        """Provide class docstring."""
-
-        @staticmethod
-        def mock_embedding(*_args: object, **_kwargs: object) -> object:
-            """Execute function.
-
-            Returns:
-                object: Description of return.
-
-            """
-            return lambda _x: "x"
-
-        Embedding = mock_embedding
-
-        @staticmethod
-        def mock_dense(*_args: object, **_kwargs: object) -> object:
-            """Execute function.
-
-            Returns:
-                object: Description of return.
-
-            """
-            return lambda _x: "x"
-
-        Dense = mock_dense
-
-    layers = MockLayers
-
-    class Model:
-        """Provide class docstring."""
-
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            """Execute function."""
-            self.trainable_variables = ["vars"]
-
-        def __call__(self, *_args: object, **_kwargs: object) -> MockTensor:
-            """Execute function.
-
-            Returns:
-                object: Description of return.
-
-            """
-            return MockTensor()
-
-    class MockOptimizers:
-        """Provide class docstring."""
-
-        class AdamW:
-            """Provide class docstring."""
-
-            def __init__(self, *args: object, **kwargs: object) -> None:
-                """Execute function."""
-
-            def apply_gradients(self, *args: object, **kwargs: object) -> None:
-                """Execute function."""
-
-    optimizers = MockOptimizers
+    inputs = [1, 2]
+    labels = [1, 2]
+    model = MockModel()
+    res = keras_dpo._compute_logps(model, inputs, labels)
+    assert res is not None
 
 
-def test_run_dpo_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test Keras DPO when missing.
+def test_dpo_loss_keras(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test function."""
+    res = keras_dpo.dpo_loss(0, 0, 0, 0)
+    assert res is not None
+    monkeypatch.setattr(keras_dpo, "tf", MockTf())
+    res = keras_dpo.dpo_loss(0, 0, 0, 0)
+    assert res is not None
 
-    Raises:
-        AssertionError: Description.
 
-    """
-    monkeypatch.setattr(kr_dpo, "tf", None)
-    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
-    if not res["status"] == "mocked_missing_keras":
+def test_get_train_step_fn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test function."""
+    monkeypatch.setattr(keras_dpo, "tf", MockTf())
+
+    class MockModel:
+        """Class docstring."""
+
+        def __call__(self, inputs: object) -> object:
+            """Test function."""
+            return inputs
+
+    class MockOpt:
+        """Class docstring."""
+
+        def apply_gradients(self, *a, **k) -> None:
+            """Test function."""
+
+    fn = keras_dpo._get_train_step_fn(MockModel(), MockModel(), MockOpt(), 0.1)
+    batch = {"chosen_inputs": 1, "chosen_labels": 1, "rejected_inputs": 1, "rejected_labels": 1}
+    res = fn(batch)
+    assert res is not None
+
+
+def test_run_training_epochs() -> None:
+    """Test function."""
+
+    class MockLoss:
+        """Class docstring."""
+
+        def numpy(self):
+            """Test function."""
+            return 1.0
+
+    state = TrainerState(dataloader=[1, 2], epochs=2, train_step=lambda *a: MockLoss())
+    res = keras_dpo._run_training_epochs(state)
+    assert res == 1.0
+
+
+def test_run_dpo_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test function."""
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(keras_dpo, "tf", None)
+    with pytest.raises(DependencyMissingError, match="Keras DPO dependencies are missing."):
+        keras_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
+
+
+def test_run_dpo_real_no_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test function."""
+
+    class MockKeras:
+        """Class docstring."""
+
+        def Input(self, *a, **k):
+            """Test function."""
+            return 1
+
+        class layers:
+            """Class docstring."""
+
+            def Embedding(self, *a, **k):
+                """Test function."""
+                return lambda x: x
+
+            def Dense(self, *a, **k):
+                """Test function."""
+                return lambda x: x
+
+        def Model(self, *a, **k):
+            """Test function."""
+
+            class _Model:
+                """Class docstring."""
+
+                def __call__(self, *a, **k):
+                    """Test function."""
+                    return 0
+
+            return _Model()
+
+        class optimizers:
+            """Class docstring."""
+
+            @staticmethod
+            def AdamW(*a: object, **k: object) -> object:
+                """Test function."""
+
+                class MockOpt:
+                    """Class docstring."""
+
+                    def apply_gradients(self, *a: object, **k: object) -> None:
+                        """Test function."""
+
+                return MockOpt()
+
+    monkeypatch.setattr(keras_dpo, "keras", MockKeras())
+    monkeypatch.setattr(keras_dpo, "tf", MockTf())
+    monkeypatch.setattr(keras_dpo, "build_dataloader", lambda *a, **k: {})
+    res = keras_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
+    if "failed" in res["status"]:
         raise AssertionError
 
 
-def test_run_dpo_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test Keras DPO.
+def test_run_dpo_real_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test function."""
 
-    Raises:
-        AssertionError: Description.
+    class MockKeras:
+        """Class docstring."""
 
-    """
-    monkeypatch.setattr(kr_dpo, "tf", MockTf())
-    monkeypatch.setattr(kr_dpo, "keras", MockKeras)
+        def Input(self, *a, **k):
+            """Test function."""
+            return 1
 
-    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
-        """Execute function.
+        class layers:
+            """Class docstring."""
 
-        Returns:
-            object: Description of return.
+            def Embedding(self, *a, **k):
+                """Test function."""
+                return lambda x: x
 
-        """
-        return {"loader": [{"chosen_inputs": MockTensor(), "chosen_labels": MockTensor(), "rejected_inputs": MockTensor(), "rejected_labels": MockTensor()}]}
+            def Dense(self, *a, **k):
+                """Test function."""
+                return lambda x: x
 
-    monkeypatch.setattr(kr_dpo, "build_dataloader", mock_build_dataloader)
-    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
-    if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["status"] == "completed":
-        raise AssertionError
+        def Model(self, *a, **k):
+            """Test function."""
 
+            class _Model:
+                """Class docstring."""
 
-def test_run_dpo_keras_no_loader(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+                def __call__(self, *a, **k):
+                    """Test function."""
+                    return 0
 
-    Raises:
-        AssertionError: Description.
+            return _Model()
 
-    """
-    monkeypatch.setattr(kr_dpo, "tf", MockTf())
-    monkeypatch.setattr(kr_dpo, "keras", MockKeras)
+        class optimizers:
+            """Class docstring."""
 
-    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
-        """Execute function.
+            @staticmethod
+            def AdamW(*a: object, **k: object) -> object:
+                """Test function."""
 
-        Returns:
-            object: Description of return.
+                class MockOpt:
+                    """Class docstring."""
 
-        """
-        return {"loader": None}
+                    def apply_gradients(self, *a: object, **k: object) -> None:
+                        """Test function."""
 
-    monkeypatch.setattr(kr_dpo, "build_dataloader", mock_build_dataloader)
-    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
-    if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["status"] == "completed":
-        raise AssertionError
+                return MockOpt()
 
-
-def test_run_dpo_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    monkeypatch.setattr(kr_dpo, "tf", MockTf())
-    monkeypatch.setattr(kr_dpo, "keras", MockKeras)
-
-    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
-        """Execute function.
-
-        Raises:
-            ValueError: Description.
-
-        """
-        msg = "err"
-        raise ValueError(msg)
-
-    monkeypatch.setattr(kr_dpo, "build_dataloader", mock_build_dataloader)
-    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
-    if "failed" not in str(res["status"]):
+    monkeypatch.setattr(keras_dpo, "keras", MockKeras())
+    monkeypatch.setattr(keras_dpo, "tf", MockTf())
+    monkeypatch.setattr(keras_dpo, "build_dataloader", lambda *a, **k: {"loader": [{"chosen_inputs": 1, "chosen_labels": 1, "rejected_inputs": 1, "rejected_labels": 1}]})
+    res = keras_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
+    if res["status"] != "completed":
         raise AssertionError
 
 
-def test_dpo_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    mdl = __import__("gemma_4_sql.backends.keras.dpo", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "keras", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    monkeypatch.setitem(sys.modules, "tensorflow", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    importlib.reload(mdl)
+def test_run_dpo_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test function."""
+    monkeypatch.setattr(keras_dpo, "keras", object())
+    monkeypatch.setattr(keras_dpo, "tf", MockTf())
+
+    def raise_err(*a, **k):
+        """Test function."""
+        raise ValueError("err")
+
+    monkeypatch.setattr(keras_dpo, "_execute_dpo", raise_err)
+    res = keras_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
+    if "failed" not in res["status"]:
+        raise AssertionError

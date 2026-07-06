@@ -1,4 +1,3 @@
-# Copyright 2024
 """SDK Agent module for self-correction execution feedback loops."""
 
 from __future__ import annotations
@@ -64,17 +63,14 @@ def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "j
     """Run an agentic self-correction loop.
 
     Args:
-    ----
-        model_name: The name or path of the model.
-        prompt: The natural language prompt.
-        backend: The backend framework ('jax', 'keras', 'maxtext', 'pytorch').
-        context: AgentContext for database and loop configurations.
+        model_name: The name of the target model.
+        prompt: The input text prompt.
+        backend: The backend framework to use.
+        context: The context.
         **kwargs: Additional keyword arguments.
 
     Returns:
-    -------
-        Agentic loop results dictionary.
-
+        A list of results.
     """
     if context is None:  # pragma: no cover
         context = AgentContext()

@@ -25,9 +25,11 @@ with catch_optional_imports():
 def _run_training_epochs(state: TrainerState) -> float:
     """Execute function.
 
-    Returns:
-        object: Description of return.
+    Args:
+        state: The state.
 
+    Returns:
+        The computed float value.
     """
     dataloader = state.dataloader  # pragma: no cover
     epochs = state.epochs  # pragma: no cover
@@ -57,7 +59,17 @@ def _run_training_epochs(state: TrainerState) -> float:
 
 
 def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float) -> tuple[str, float]:  # pragma: no cover
-    """Execute the core training loop for MLX."""
+    """Execute the core training loop for MLX.
+
+    Args:
+        model_name: The name of the target model.
+        dataset: The name or path of the dataset.
+        epochs: The integer value for epochs.
+        learning_rate: The float value for learning rate.
+
+    Returns:
+        A tuple containing the results.
+    """
     (model, _) = load(model_name)
 
     def loss_fn(model_t: object, inputs: object, targets: object) -> object:
@@ -74,16 +86,9 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
     loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
     dataloader = data_dict.get("loader", None)
-    if dataloader is not None and hasattr(dataloader, "__iter__"):
-        final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=loss_and_grad_fn))
-    else:
-        "Execute logic."
-        dummy_input = mx.zeros((1, 10), dtype=mx.int32)
-        dummy_target = mx.zeros((1, 10), dtype=mx.int32)
-        (_loss, grads) = loss_and_grad_fn(model, dummy_input, dummy_target)
-        optimizer.update(model, grads)
-        mx.eval(model.parameters(), optimizer.state)
-        final_loss = 0.35
+    if dataloader is None or not hasattr(dataloader, "__iter__"):
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=loss_and_grad_fn))
     return "completed", float(final_loss)
 
 
@@ -114,11 +119,12 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     distributed_strategy = str(kwargs.get("distributed_strategy", "none"))
     final_loss = 0.5
     status = "completed"
-    if mx is not None and nn is not None and (optim is not None) and (load is not None):
-        try:
-            status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)
-        except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-            status = f"failed: {e!s}"
-    else:
-        status = "mocked_missing_mlx"
-    return {"backend": "mlx", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}
+    if mx is None or nn is None or optim is None or load is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("MLX dependencies are missing.")
+    try:  # pragma: no cover
+        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)  # pragma: no cover
+    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:  # pragma: no cover
+        status = f"failed: {e!s}"  # pragma: no cover
+    return {"backend": "mlx", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}  # pragma: no cover

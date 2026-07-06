@@ -1,4 +1,3 @@
-# Copyright 2024
 """Provide module docstring."""
 
 from pathlib import Path
@@ -38,15 +37,14 @@ def test_export_jax_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(export_jax, "jax", None)
     monkeypatch.setattr(export_jax, "jnp", None)
     monkeypatch.setattr(export_jax, "ocp", None)
     path = str(tmp_path / "export")
-    res = export_jax.export_model("model1", path)
-    if res["status"] != "mock_exported":
-        raise AssertionError
-    if not (tmp_path / "export" / "mock_jax_model_model1.bin").exists():
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="JAX export dependencies are missing."):
+        export_jax.export_model("model1", path)
 
 
 def test_export_jax_real_no_flax(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -62,9 +60,8 @@ def test_export_jax_real_no_flax(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     sys = __import__("sys", fromlist=[""])
     monkeypatch.setitem(sys.modules, "flax", None)
     path = str(tmp_path / "export_real")
-    res = export_jax.export_model("model2", path)
-    if res["status"] != "exported_with_orbax":
-        raise AssertionError
+    with pytest.raises(ValueError, match="Failed to load model model2"):
+        export_jax.export_model("model2", path)
 
 
 class MockConfig:

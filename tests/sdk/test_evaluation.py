@@ -1,30 +1,18 @@
-# Copyright 2024
 """Tests for SDK Evaluation module."""
 
 import pytest
 
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.evaluation import evaluate
 
 
 def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test evaluate with jax.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Test evaluate with jax."""
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     jax_agent = get_backend("jax")
     monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
-    res = evaluate("model1", "data1", "jax")
-    if res["backend"] != "jax":
-        raise AssertionError
-    if res["model"] != "model1":
-        raise AssertionError
-    if res["dataset"] != "data1":
-        raise AssertionError
-    if "metrics" not in res:
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        evaluate("model1", "data1", "jax")
 
 
 def test_evaluate_keras(monkeypatch: pytest.MonkeyPatch) -> None:

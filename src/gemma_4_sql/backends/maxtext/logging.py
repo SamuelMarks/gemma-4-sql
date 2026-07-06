@@ -1,4 +1,3 @@
-# Copyright 2024
 """MaxText-specific logging and metrics integration."""
 
 from __future__ import annotations
@@ -18,22 +17,20 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
     """Log metrics for a MaxText training run using TensorBoard.
 
     Args:
-    ----
-        metrics: A dictionary of metric names and their float values.
-        step: The current training step.
-        log_dir: Directory to save the TensorBoard logs.
+        metrics: The evaluation or training metrics.
+        step: The current training or logging step.
+        log_dir: The directory to save logs.
 
     Returns:
-    -------
-        A dictionary containing logging metadata.
-
+        A dictionary containing the results.
     """
-    if SummaryWriter is not None:
-        writer = SummaryWriter(log_dir=log_dir)
-        for k, v in metrics.items():
-            writer.add_scalar(k, v, step)
-        writer.close()
-        status = "success"
-    else:
-        status = "mocked_missing_tensorboard"
+    if SummaryWriter is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("TensorBoardX dependencies are missing.")
+    writer = SummaryWriter(log_dir=log_dir)
+    for k, v in metrics.items():
+        writer.add_scalar(k, v, step)
+    writer.close()
+    status = "success"
     return {"backend": "maxtext", "action": "log_metrics", "step": step, "metrics": metrics, "status": status, "log_dir": log_dir}

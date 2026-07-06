@@ -1,15 +1,13 @@
-# Copyright 2024
 """Tests for PyTorch inference."""
 
 from __future__ import annotations
 
 import typing
 
+import pytest
+
 import gemma_4_sql.backends.pytorch.inference as pt_inf
 from gemma_4_sql.backends.pytorch.inference import generate_sql
-
-if typing.TYPE_CHECKING:
-    import pytest
 
 
 class MockTorch:
@@ -48,10 +46,11 @@ def test_inference_pytorch_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(pt_inf, "torch", None)
-    res = generate_sql("mock", "hi")
-    if not res["status"] == "mocked_missing_torch":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="PyTorch dependencies are missing."):
+        generate_sql("mock", "hi")
 
 
 def test_inference_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:

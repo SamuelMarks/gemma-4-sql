@@ -1,4 +1,3 @@
-# Copyright 2024
 """MaxText-specific benchmarking pipeline."""
 
 from __future__ import annotations
@@ -26,9 +25,14 @@ with catch_optional_imports():
 def _run_benchmark_pass(model: object, params: dict[str, object] | object, batch_size: int, num_runs: int) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model: The model.
+        params: A mapping representing params.
+        batch_size: The number of items to process in a single batch.
+        num_runs: The integer value for num runs.
 
+    Returns:
+        A tuple containing the results.
     """
     dummy_inputs = jnp.zeros((batch_size, 32), dtype=jnp.int32)
 
@@ -78,7 +82,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         """Execute function.
 
         Returns:
-            object: Description of return.
+            The execution result.
 
         """
         if not kwargs.get("test_mode"):

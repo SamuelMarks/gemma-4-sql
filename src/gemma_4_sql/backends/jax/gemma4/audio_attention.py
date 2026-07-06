@@ -1,4 +1,3 @@
-# Copyright 2024
 """Audio attention implementation."""
 
 from __future__ import annotations
@@ -20,7 +19,11 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
     """Sinusoidal relative positional encoding for the audio encoder."""
 
     def __init__(self, config: AudioConfig) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+
+        Args:
+            config: The configuration parameters.
+        """
         self.hidden_size = config.hidden_size
         self.context_size = config.attention_chunk_size + config.attention_context_left - 1 + config.attention_context_right
         min_timescale = 1.0
@@ -33,9 +36,11 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
     def __call__(self, x: jax.Array) -> jax.Array:
         """Apply relative positional encoding.
 
-        Returns:
-            object: The resulting output from the operation.
+        Args:
+            x: The input x.
 
+        Returns:
+            The execution result.
         """
         position_ids = jnp.arange(self.context_size // 2, -1, -1, dtype=x.dtype)
         position_ids = position_ids[..., None]

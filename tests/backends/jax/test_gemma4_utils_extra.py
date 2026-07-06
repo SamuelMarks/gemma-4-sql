@@ -1,4 +1,3 @@
-# Copyright 2024
 """Provide module docstring."""
 
 import contextlib
@@ -83,8 +82,10 @@ class MockF:
 
 
 class MockNNX:
+    """Class docstring."""
+
     def update(self, *args, **kwargs):
-        pass
+        """Test function."""
 
     """Provide class docstring."""
 

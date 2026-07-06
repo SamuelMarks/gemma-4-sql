@@ -1,4 +1,3 @@
-# Copyright 2024
 """CLI commands for database execution."""
 
 from __future__ import annotations
@@ -17,7 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 def db_execute_cmd(args: argparse.Namespace) -> None:
-    """Execute a SQL query against the LiveDatabaseEngine."""
+    """Execute a SQL query against the LiveDatabaseEngine.
+
+    Args:
+        args: Additional positional arguments.
+    """
     db_kwargs = {}
     if getattr(args, "db_kwargs", ""):
         db_kwargs = json.loads(args.db_kwargs)
@@ -27,7 +30,11 @@ def db_execute_cmd(args: argparse.Namespace) -> None:
 
 
 def embed_duckdb_cmd(args: argparse.Namespace) -> None:
-    """Embed Gemma as a UDF in DuckDB and execute a prompt."""
+    """Embed Gemma as a UDF in DuckDB and execute a prompt.
+
+    Args:
+        args: Additional positional arguments.
+    """
     duckdb = LazyLoader("duckdb").get_module()
     if duckdb is None:
         return

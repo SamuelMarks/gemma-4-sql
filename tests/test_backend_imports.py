@@ -1,4 +1,3 @@
-# Copyright 2024
 """Test that all backends can be imported without collisions."""
 
 import importlib

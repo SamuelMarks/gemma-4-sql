@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 def _get_text_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
     """Return text-specific safetensors mapping.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        transform_cls: The transform cls.
 
+    Returns:
+        A tuple containing the results.
     """
     return {
         "^model\\.embed_tokens\\.weight$": ("model\\.embed_tokens\\.embedding", transform_cls.EMBED),
@@ -73,9 +75,11 @@ def _get_text_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
 def _get_audio_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
     """Return audio-specific safetensors mapping.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        transform_cls: The transform cls.
 
+    Returns:
+        A tuple containing the results.
     """
     return {
         "^audio_tower\\.subsample_conv_projection\\.layer(\\d+)\\.conv\\.weight$": ("audio_tower\\.subsample_conv_projection\\.layer\\1\\.conv\\.kernel", transform_cls.CONV2D),
@@ -99,9 +103,11 @@ def _get_audio_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
 def _get_vision_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
     """Return vision-specific safetensors mapping.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        transform_cls: The transform cls.
 
+    Returns:
+        A tuple containing the results.
     """
     return {
         "^vision_tower\\.vision_model\\.embeddings\\.patch_embedding\\.bias$": ("vision_tower\\.embeddings\\.patch_embedding\\.bias", transform_cls.BIAS),

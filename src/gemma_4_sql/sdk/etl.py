@@ -1,4 +1,3 @@
-# Copyright 2024
 """ETL module for generating SQL training datasets using grain."""
 
 from __future__ import annotations
@@ -16,15 +15,12 @@ def _route_backend(config: ETLConfig, backend: str, **kwargs: JSONValue) -> JSON
     """Routes the ETL request to the specific backend implementation.
 
     Args:
-    ----
-        config: The ETL configuration.
-        backend: The backend ecosystem ('jax', 'keras', or 'maxtext').
+        config: The configuration parameters.
+        backend: The backend framework to use.
         **kwargs: Additional keyword arguments.
 
     Returns:
-    -------
-        Dict containing dataset metadata and loader status.
-
+        A dictionary containing the results.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     return get_backend(backend).build_dataloader(config, **kwargs)

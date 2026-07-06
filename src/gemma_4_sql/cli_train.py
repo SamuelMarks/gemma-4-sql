@@ -1,4 +1,3 @@
-# Copyright 2024
 """Training CLI commands."""
 
 from __future__ import annotations
@@ -12,22 +11,38 @@ if TYPE_CHECKING:
 
 
 def train_cmd(args: argparse.Namespace) -> None:
-    """Train a new model from scratch."""
+    """Train a new model from scratch.
+
+    Args:
+        args: Additional positional arguments.
+    """
     train_from_scratch(TrainingConfig(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend, distributed_strategy=getattr(args, "distributed_strategy", "none")))
 
 
 def pretrain_cmd(args: argparse.Namespace) -> None:
-    """Pretrain an existing model."""
+    """Pretrain an existing model.
+
+    Args:
+        args: Additional positional arguments.
+    """
     pretrain_model(TrainingConfig(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend, distributed_strategy=getattr(args, "distributed_strategy", "none")))
 
 
 def sft_cmd(args: argparse.Namespace) -> None:
-    """Supervised fine-tune an existing model."""
+    """Supervised fine-tune an existing model.
+
+    Args:
+        args: Additional positional arguments.
+    """
     sft_model(TrainingConfig(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend, distributed_strategy=getattr(args, "distributed_strategy", "none")))
 
 
 def posttrain_cmd(args: argparse.Namespace) -> None:
-    """Post-train an existing model."""
+    """Post-train an existing model.
+
+    Args:
+        args: Additional positional arguments.
+    """
     posttrain_model(TrainingConfig(model_name=args.model, dataset=args.dataset, epochs=args.epochs, learning_rate=args.learning_rate, backend=args.backend, distributed_strategy=getattr(args, "distributed_strategy", "none")))
 
 

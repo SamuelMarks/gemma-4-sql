@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for SDK Inference module."""
 
 import sys

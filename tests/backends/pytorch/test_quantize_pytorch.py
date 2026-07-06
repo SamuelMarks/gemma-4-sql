@@ -1,15 +1,11 @@
-# Copyright 2024
 """Tests for PyTorch quantization logic."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import pytest
 
 import gemma_4_sql.backends.pytorch.quantize as pt_quantize
 from gemma_4_sql.backends.pytorch.quantize import quantize_model
-
-if TYPE_CHECKING:
-    import pytest
 
 
 class MockTorch:
@@ -46,14 +42,13 @@ def test_quantize_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(pt_quantize, "torch", None)
     monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", None)
     monkeypatch.setattr(pt_quantize, "AutoModelForCausalLM", None)
-    res = quantize_model("model", "int8")
-    if not res["status"] == "mocked_missing_torch":
-        raise AssertionError
-    if not res["memory_reduction_factor"] == 0.0:
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="PyTorch quantization dependencies are missing."):
+        quantize_model("model", "int8")
 
 
 def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,4 +1,3 @@
-# Copyright 2024
 """CLI commands for miscellaneous tasks."""
 
 from __future__ import annotations
@@ -18,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 
 def tokenize_cmd(args: argparse.Namespace) -> None:
-    """Run tokenization."""
+    """Run tokenization.
+
+    Args:
+        args: Additional positional arguments.
+    """
     tokenizer = SQLTokenizer(model_name=args.hf_model, vocab_size=args.vocab_size)
     if args.decode:
         try:
@@ -31,19 +34,31 @@ def tokenize_cmd(args: argparse.Namespace) -> None:
 
 
 def quantize_cmd(args: argparse.Namespace) -> None:
-    """Run quantization."""
+    """Run quantization.
+
+    Args:
+        args: Additional positional arguments.
+    """
     res = quantize_model(args.model, args.method, args.backend)
     logger.info("Quantization completed: %s", res)
 
 
 def export_cmd(args: argparse.Namespace) -> None:
-    """Run model export."""
+    """Run model export.
+
+    Args:
+        args: Additional positional arguments.
+    """
     res = export_model(args.model, args.path, args.backend)
     logger.info("Export completed: %s", res)
 
 
 def rag_cmd(args: argparse.Namespace) -> None:
-    """Build a RAG-augmented prompt or extract schema context."""
+    """Build a RAG-augmented prompt or extract schema context.
+
+    Args:
+        args: Additional positional arguments.
+    """
     if getattr(args, "action", "build") == "extract":
         extract_schema_entities(args.ddl)
     elif getattr(args, "action", "build") == "retrieve":

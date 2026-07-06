@@ -1,15 +1,11 @@
-# Copyright 2024
 """Tests for JAX quantization logic."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import pytest
 
 import gemma_4_sql.backends.jax.quantize as qt
 from gemma_4_sql.backends.jax.quantize import quantize_model
-
-if TYPE_CHECKING:
-    import pytest
 
 
 class MockArray:
@@ -131,12 +127,11 @@ def test_quantize_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(qt, "jax", None)
-    res = quantize_model("model", "int8")
-    if not res["status"] == "mocked_missing_jax":
-        raise AssertionError
-    if not res["memory_reduction_factor"] == 0.0:
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="JAX quantization dependencies are missing."):
+        quantize_model("model", "int8")
 
 
 def test_quantize_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,4 +1,3 @@
-# Copyright 2024
 """SQLite adapter."""
 
 from __future__ import annotations
@@ -21,8 +20,7 @@ class SQLiteAdapter(DatabaseAdapter):
         """Connect synchronously.
 
         Returns:
-            object: The resulting output from the operation.
-
+            The execution result.
         """
         return sqlite3.connect(self.db_path, **self.db_kwargs)
 

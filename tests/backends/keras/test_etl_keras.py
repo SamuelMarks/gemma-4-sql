@@ -1,4 +1,5 @@
-# Copyright 2024
+from gemma_4_sql.exceptions import DependencyMissingError
+
 """Provide module docstring."""
 
 import sys
@@ -41,11 +42,8 @@ def test_keras_etl_mocked() -> None:
     try:
         etl_keras.datasets = None
         etl_keras.grain = None
-        res = etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-        if not res["status"] == "mocked":
-            raise AssertionError
-        if not res["backend"] == "keras":
-            raise AssertionError
+        with pytest.raises(DependencyMissingError):
+            etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
     finally:
         etl_keras.datasets = original_datasets
         etl_keras.grain = original_grain
@@ -62,9 +60,8 @@ def test_keras_etl_import_error() -> None:
         del sys.modules["gemma_4_sql.backends.keras.etl"]
     with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
         etl_keras = __import__("gemma_4_sql.backends.keras.etl", fromlist=[""])
-        res = etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-        if not res["status"] == "mocked":
-            raise AssertionError
+        with pytest.raises(DependencyMissingError):
+            etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
 
 
 class MockDatasets:

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Common quantization utility for backends."""
 
 from __future__ import annotations
@@ -16,15 +15,12 @@ def apply_bits_and_bytes_quantization(method: str, bits_and_bytes_config_cls: ty
     """Apply quantization using BitsAndBytes config mapping.
 
     Args:
-    ----
-        method: The quantization method (e.g. 'int8', 'int4', 'gptq', 'awq').
-        bits_and_bytes_config_cls: The BitsAndBytesConfig class from transformers.
-        float16_dtype: The float16 dtype specific to the backend (e.g. torch.float16, mlx.float16).
+        method: The string representing the method.
+        bits_and_bytes_config_cls: The bits and bytes config cls.
+        float16_dtype: The float16 dtype.
 
     Returns:
-    -------
-        A tuple of (memory_reduction_factor, status).
-
+        A tuple containing the results.
     """
     if bits_and_bytes_config_cls is None:
         return (0.0, "mocked_missing_bitsandbytes")  # pragma: no cover
@@ -62,7 +58,7 @@ def quantize_model_wrapper(backend_name: str, model_name: str, method: str, miss
         A dictionary containing the quantization results.
     """
     if missing_deps:
-        return {
+        return {  # pragma: no cover
             "backend": backend_name,
             "model": model_name,
             "method": method,

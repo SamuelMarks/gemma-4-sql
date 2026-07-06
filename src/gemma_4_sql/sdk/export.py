@@ -1,4 +1,3 @@
-# Copyright 2024
 """SDK Export module."""
 
 from __future__ import annotations
@@ -13,15 +12,12 @@ def export_model(model_name: str, export_path: str, backend: str = "jax") -> JSO
     """Export a trained Text-to-SQL model.
 
     Args:
-    ----
-        model_name: The name or path of the model.
-        export_path: The filesystem path to export the checkpoint.
-        backend: The backend framework ('jax', 'keras', or 'maxtext').
+        model_name: The name of the target model.
+        export_path: The path where the model will be exported.
+        backend: The backend framework to use.
 
     Returns:
-    -------
-        Export results dictionary.
-
+        A dictionary containing the results.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     return get_backend(backend).export_model(model_name, export_path)

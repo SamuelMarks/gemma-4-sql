@@ -1,4 +1,3 @@
-# Copyright 2024
 """JAX-specific inference logic."""
 
 from __future__ import annotations
@@ -28,9 +27,14 @@ with catch_optional_imports():
 def _beam_search_step(seq: jnp.ndarray, score: float, model_apply_fn: object, beam_width: int) -> list[tuple[jnp.ndarray, float]]:
     """Helper to process a single sequence and expand it into multiple beams.
 
-    Returns:
-        object: Description of return.
+    Args:
+        seq: The seq.
+        score: The float value for score.
+        model_apply_fn: The model apply fn.
+        beam_width: The number of beams for beam search.
 
+    Returns:
+        A tuple containing the results.
     """
     positions = jnp.arange(seq.shape[1])[None, :]
     logits = model_apply_fn(seq, positions)
@@ -100,16 +104,17 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     input_tokens = tokenizer.encode(prompt)
     eos_token_id = tokenizer.vocab_size - 1
     confidence_score = 0.0
-    if jax is not None and jnp is not None and (Gemma4ForCausalLM is not None):
-        input_ids = jnp.array([input_tokens], dtype=jnp.int32)
-        model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
-        (output_ids, logprob_sum) = jax_beam_search(model, input_ids, beam_width, max_length, eos_token_id)
-        sql = tokenizer.decode(output_ids[0].tolist())
-        out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
-        confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))
-        status = "success"
-    else:
-        sql = "SELECT * FROM jax_table"
-        confidence_score = 0.95
-        status = "mocked_missing_jax"
+    if jax is None or jnp is None or Gemma4ForCausalLM is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("JAX inference dependencies are missing.")
+
+    input_ids = jnp.array([input_tokens], dtype=jnp.int32)
+    model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
+    (output_ids, logprob_sum) = jax_beam_search(model, input_ids, beam_width, max_length, eos_token_id)
+    sql = tokenizer.decode(output_ids[0].tolist())
+    out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
+    confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))
+    status = "success"
+
     return {"backend": "jax", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}

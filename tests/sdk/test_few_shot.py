@@ -1,4 +1,3 @@
-# Copyright 2024
 """Provide module docstring."""
 
 from gemma_4_sql.sdk.few_shot import build_few_shot_prompt

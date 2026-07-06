@@ -1,4 +1,3 @@
-# Copyright 2024
 """JAX-specific training pipeline."""
 
 from __future__ import annotations
@@ -31,9 +30,12 @@ with catch_optional_imports():
 def _loss_fn(model: object, batch: JSONDict) -> object:
     """Compute the cross-entropy loss for the model on a given batch.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model: The model.
+        batch: The batch.
 
+    Returns:
+        The execution result.
     """
     logits = model(batch["inputs"])
     targets = batch["targets"]
@@ -45,17 +47,20 @@ def _get_train_step_fn() -> object:
     """Return a JIT-compiled train step function.
 
     Returns:
-        object: The resulting output from the operation.
-
+        The execution result.
     """
 
     @nnx.jit
     def train_step(model: object, optimizer: object, batch: JSONDict) -> object:
         """Execute a single JAX-compiled training step.
 
-        Returns:
-            object: The resulting output from the operation.
+        Args:
+            model: The model.
+            optimizer: The optimizer.
+            batch: The batch.
 
+        Returns:
+            The execution result.
         """
         (loss, grads) = nnx.value_and_grad(_loss_fn)(model, batch)
         optimizer.update(grads)
@@ -76,7 +81,7 @@ def _run_training_epochs(state: TrainerState) -> float:
         """Execute function.
 
         Returns:
-            object: Description of return.
+            The execution result.
 
         """
         batch["inputs"] = jax.device_put(batch["inputs"], state.params)
@@ -97,13 +102,11 @@ def _execute_train(dataset: str, epochs: int, learning_rate: float) -> tuple[str
     train_step = _get_train_step_fn()
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
     dataloader = data_dict.get("loader", None)
-    if dataloader is not None and hasattr(dataloader, "__iter__"):
-        final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=train_step, params=sharding))
-    else:
-        dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-        dummy_batch = {"inputs": jax.device_put(dummy_input, sharding), "targets": jax.device_put(dummy_input, sharding)}
-        loss = train_step(model, optimizer, dummy_batch)
-        final_loss = float(loss.item())
+
+    if dataloader is None or not hasattr(dataloader, "__iter__"):
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+
+    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=train_step, params=sharding))
     return "completed", float(final_loss)
 
 
@@ -132,11 +135,14 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     final_loss = 0.45
     status = "completed"
-    if jax is not None and jnp is not None and (optax is not None) and (Gemma4ForCausalLM is not None):
-        try:
-            status, final_loss = _execute_train(dataset, epochs, learning_rate)
-        except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-            status = f"failed: {e!s}"
-    else:
-        status = "mocked_missing_jax"
+    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("JAX dependencies are missing for training.")
+
+    try:
+        status, final_loss = _execute_train(dataset, epochs, learning_rate)
+    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        status = f"failed: {e!s}"
+
     return {"backend": "jax", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": float(final_loss)}

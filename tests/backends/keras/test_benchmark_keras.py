@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for Keras Benchmark."""
 
 import pytest
@@ -84,7 +83,7 @@ def test_benchmark_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
     """
     monkeypatch.setattr(bm, "tf", MockTf())
-    monkeypatch.setattr(bm, "keras", object())
+    monkeypatch.setattr(bm, "keras", MockKeras())
     res = bm.benchmark_model("model", "gpu", 1, test_mode=True, num_runs=2)
     if not res["status"] == "success":
         raise AssertionError
@@ -181,6 +180,22 @@ def test_benchmark_keras_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> N
         AssertionError: Description.
 
     """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
+    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": type("MockGemma", (), {"from_preset": lambda *a, **k: MockKeras.Model()})}))
+
+    builtins = __import__("builtins", fromlist=[""])
+    orig_import = builtins.__import__
+
+    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
+        """Test function."""
+        if name == "keras_nlp.models":
+            return sys.modules["keras_nlp.models"]
+        return orig_import(name, _globals, _locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+
     monkeypatch.setattr(bm, "tf", MockTf())
     monkeypatch.setattr(bm, "keras", MockKeras())
     res = bm.benchmark_model("model", "gpu", 1)
@@ -195,8 +210,30 @@ def test_benchmark_keras_real_mem(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
+    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": type("MockGemma", (), {"from_preset": lambda *a, **k: MockKeras.Model()})}))
+
+    builtins = __import__("builtins", fromlist=[""])
+    orig_import = builtins.__import__
+
+    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
+        """Test function."""
+        if name == "keras_nlp.models":
+            return sys.modules["keras_nlp.models"]
+        return orig_import(name, _globals, _locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+
     mock_tf = MockTf()
-    mock_tf.config = type("MockConfig", (), {"experimental": type("MockExp", (), {"get_memory_info": lambda _x: {"current": 1024 * 1024}})})()
+
+    def mock_get_memory_info(_x: str) -> dict:
+        """Test function."""
+        msg = "No memory info"
+        raise ValueError(msg)
+
+    mock_tf.config = type("MockConfig", (), {"experimental": type("MockExp", (), {"get_memory_info": mock_get_memory_info})})()
     monkeypatch.setattr(bm, "tf", mock_tf)
     monkeypatch.setattr(bm, "keras", MockKeras())
     res = bm.benchmark_model("model", "gpu", 1)

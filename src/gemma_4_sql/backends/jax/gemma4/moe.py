@@ -1,4 +1,3 @@
-# Copyright 2024
 """Core functionality for the moe module."""
 
 from __future__ import annotations
@@ -20,7 +19,12 @@ class Gemma4RoutedExperts(nnx.Module):
     """Monolithic MoE expert module vectorizing all routed experts."""
 
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+
+        Args:
+            config: The configuration parameters.
+            rngs: The rngs.
+        """
         self.config = config
         e = config.num_experts
         h = config.hidden_size

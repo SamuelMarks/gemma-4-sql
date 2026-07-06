@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for the Tokenization module."""
 
 import sys

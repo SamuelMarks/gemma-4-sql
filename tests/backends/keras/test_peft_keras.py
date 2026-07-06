@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 import gemma_4_sql.backends.keras.peft as pt
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
 class MockLayers:
@@ -73,11 +74,8 @@ def test_apply_lora_keras_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
 
     """
     monkeypatch.setattr(pt, "keras", None)
-    res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
-    if not res["status"] == "mocked_missing_keras":
-        raise AssertionError
-    if not res["backend"] == "keras":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
 
 
 def test_apply_lora_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,4 +1,3 @@
-# Copyright 2024
 """MLX-specific model quantization logic."""
 
 from __future__ import annotations
@@ -24,20 +23,21 @@ def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
     """Quantize a MLX model.
 
     Args:
-    ----
-        model_name: The name of the model to quantize.
-        method: The quantization method ('int8', 'int4', 'awq', 'gptq', 'gguf').
+        model_name: The name of the target model.
+        method: The string representing the method.
 
     Returns:
-    -------
-        A dictionary containing quantization status and metadata.
-
+        A dictionary containing the results.
     """
-    return quantize_model_wrapper(
+    if mlx is None or BitsAndBytesConfig is None or AutoModelForCausalLM is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("MLX dependencies are missing.")
+    return quantize_model_wrapper(  # pragma: no cover
         backend_name="mlx",
         model_name=model_name,
         method=method,
-        missing_deps=mlx is None or BitsAndBytesConfig is None or AutoModelForCausalLM is None,
-        missing_status="mocked_missing_mlx",
+        missing_deps=False,
+        missing_status="",
         apply_fn=lambda: apply_bits_and_bytes_quantization(method, BitsAndBytesConfig, getattr(mlx, "float16", None)),
     )

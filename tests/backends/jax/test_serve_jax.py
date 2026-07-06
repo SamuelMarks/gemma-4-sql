@@ -1,4 +1,3 @@
-# Copyright 2024
 """Provide module docstring."""
 
 from unittest import mock
@@ -40,10 +39,11 @@ def test_serve_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(srv, "jax", None)
-    res = srv.serve_model("foo")
-    if not res["status"] == "mocked_missing_jax":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing for serve."):
+        srv.serve_model("foo")
 
 
 def test_serve_model_jax_missing_fastapi(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,11 +55,12 @@ def test_serve_model_jax_missing_fastapi(monkeypatch: pytest.MonkeyPatch) -> Non
     """
     __import__("importlib", fromlist=[""])
 
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(srv, "jax", object())
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", None)
-    res = srv.serve_model("foo")
-    if not res["status"] == "failed_missing_fastapi":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        srv.serve_model("foo")
 
 
 @pytest.mark.asyncio

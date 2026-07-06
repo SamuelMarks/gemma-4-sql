@@ -1,4 +1,5 @@
-# Copyright 2024
+from gemma_4_sql.exceptions import DependencyMissingError
+
 """Module docstring."""
 
 import sys
@@ -35,17 +36,16 @@ def test_jax_etl_mocked() -> None:
         TypeError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
     original_datasets = getattr(etl_jax, "datasets", None)
     original_grain = getattr(etl_jax, "grain", None)
     try:
         etl_jax.datasets = None
         etl_jax.grain = None
-        res = etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-        if not res["status"] == "mocked":
-            raise TypeError
-        if not res["backend"] == "jax":
-            raise TypeError
+        with pytest.raises(DependencyMissingError, match="Missing grain or datasets. Cannot load test."):
+            etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
     finally:
         etl_jax.datasets = original_datasets
         etl_jax.grain = original_grain
@@ -58,13 +58,54 @@ def test_jax_etl_import_error() -> None:
         TypeError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
         if "gemma_4_sql.backends.jax.etl" in sys.modules:
             del sys.modules["gemma_4_sql.backends.jax.etl"]
         etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-        res = etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-        if not res["status"] == "mocked":
-            raise TypeError
+        with pytest.raises(DependencyMissingError, match="Missing grain or datasets. Cannot load test."):
+            etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
+
+
+class MockTokenizerForJax:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def encode(self, x):
+        return [len(x)]
+
+
+def test_jax_etl_lightweight(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test JAX ETL lightweight loader."""
+    etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
+    monkeypatch.setattr(etl_jax, "datasets", None)
+    monkeypatch.setattr(etl_jax, "grain", None)
+
+    class MockDuckDBForLightweight:
+        def connect(self, *args, **kwargs):
+            class MockConn:
+                def execute(self, *args, **kwargs):
+                    class MockResult:
+                        def fetchdf(self):
+                            class MockDF:
+                                def to_dict(self, orient="records"):
+                                    return [{"question": "q1", "query": "a1"}, {"sql_prompt": "q2", "sql": "a2"}]
+
+                            return MockDF()
+
+                    return MockResult()
+
+                def close(self):
+                    pass
+
+            return MockConn()
+
+    monkeypatch.setattr(etl_jax, "duckdb", MockDuckDBForLightweight())
+    monkeypatch.setattr(etl_jax, "SQLTokenizer", MockTokenizerForJax)
+
+    with pytest.raises(DependencyMissingError):
+        etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=2, duckdb_path="path", duckdb_table="table"))
 
 
 class MockDatasets:

@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest import mock
 
 import pytest
@@ -5,6 +7,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_build_dataloader():
+    """Test function."""
     with (
         mock.patch("gemma_4_sql.backends.jax.etl.build_dataloader", return_value={"status": "mocked", "dataset": "dummy/data", "mock_samples": []}),
         mock.patch("gemma_4_sql.backends.keras.etl.build_dataloader", return_value={"status": "mocked", "dataset": "dummy/data", "mock_samples": []}),

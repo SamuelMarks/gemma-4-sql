@@ -1,4 +1,3 @@
-# Copyright 2024
 """Core functionality for the vision module."""
 
 from __future__ import annotations
@@ -21,7 +20,12 @@ class SiglipVisionEmbeddings(nnx.Module):
     """Embeddings for the SigLIP vision model."""
 
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+
+        Args:
+            config: The configuration parameters.
+            rngs: The rngs.
+        """
         self.config = config
         self.num_patches = (config.image_size // config.patch_size) ** 2
         functools = __import__("functools")

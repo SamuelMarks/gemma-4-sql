@@ -1,4 +1,3 @@
-# Copyright 2024
 """MaxText-specific training pipeline."""
 
 from __future__ import annotations
@@ -31,9 +30,13 @@ with catch_optional_imports():
 def _loss_fn(model: object, params: dict[str, object] | object, batch: JSONDict) -> object:
     """Execute logic.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model: The model.
+        params: A mapping representing params.
+        batch: The batch.
 
+    Returns:
+        The execution result.
     """
     logits = model.apply(params, batch["inputs"])
     targets = batch["targets"]
@@ -44,9 +47,12 @@ def _loss_fn(model: object, params: dict[str, object] | object, batch: JSONDict)
 def _get_train_step_fn(model: object, optimizer: object) -> object:
     """Execute the get train step fn operation.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model: The model.
+        optimizer: The optimizer.
 
+    Returns:
+        The execution result.
     """
 
     @jax.jit
@@ -79,7 +85,7 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
         """Execute function.
 
         Returns:
-            object: Description of return.
+            The execution result.
 
         """
         nonlocal params, opt_state
@@ -99,32 +105,6 @@ def _initialize_jax_distributed(*, test_mode: bool = False) -> None:
             logger.warning("jax.distributed.initialize() failed or already initialized: %s", init_err)
 
 
-def _run_training_with_fallback(state: TrainerState) -> float:
-    """Execute function.
-
-    Returns:
-        object: Description of return.
-
-    """
-    dataloader = state.dataloader
-    epochs = state.epochs
-    train_step = state.train_step
-    params = state.params
-    opt_state = state.opt_state
-    dummy_batch = state.dummy_batch
-    """Run training loop or fallback to a single dummy step.
-
-    Returns:
-        object: The resulting output from the operation.
-
-    """
-    if dataloader is not None and hasattr(dataloader, "__iter__"):
-        (params, opt_state, final_loss) = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step, params=params, opt_state=opt_state))
-        return float(final_loss)
-    (params, opt_state, loss) = train_step(params, opt_state, dummy_batch)
-    return float(loss.item())
-
-
 def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float, test_mode: bool) -> tuple[str, float]:
     """Execute the core training loop for MaxText."""
     _initialize_jax_distributed(test_mode=test_mode)
@@ -139,8 +119,10 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
     train_step = _get_train_step_fn(model, optimizer)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
     dataloader = data_dict.get("loader", None)
-    dummy_batch = {"inputs": dummy_input, "targets": dummy_input}
-    final_loss = _run_training_with_fallback(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step, params=params, opt_state=opt_state, dummy_batch=dummy_batch))
+    if dataloader is None or not hasattr(dataloader, "__iter__"):
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+
+    (params, opt_state, final_loss) = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step, params=params, opt_state=opt_state))
     return "completed", float(final_loss)
 
 
@@ -170,8 +152,10 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     final_loss = 0.42
     status = "completed"
-    if jax is None or jnp is None or optax is None or (Gemma4Model is None):
-        return {"backend": "maxtext", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": "mocked_missing_maxtext", "final_loss": float(final_loss)}
+    if jax is None or jnp is None or optax is None or Gemma4Model is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("MaxText dependencies are missing.")
     try:
         status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, bool(kwargs.get("test_mode")))
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:

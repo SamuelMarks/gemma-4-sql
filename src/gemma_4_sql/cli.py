@@ -1,4 +1,3 @@
-# Copyright 2024
 """Main CLI entrypoint for gemma-4-sql."""
 
 from __future__ import annotations
@@ -15,7 +14,15 @@ from gemma_4_sql.constants import DEFAULT_POSTTRAIN_DATASET, DEFAULT_PRETRAIN_DA
 
 
 def _add_etl_subparser(subparsers: argparse._SubParsersAction, name: str, help_text: str, default_dataset: str, cmd_func: object) -> None:
-    """Execute function."""
+    """Execute function.
+
+    Args:
+        subparsers: The subparsers.
+        name: The string representing the name.
+        help_text: The string representing the help text.
+        default_dataset: The string representing the default dataset.
+        cmd_func: The cmd func.
+    """
     parser = subparsers.add_parser(name, help=help_text)
     parser.add_argument("--dataset", default=default_dataset, help="Hugging Face dataset name.")
     parser.add_argument("--split", default="train", help="Dataset split.")
@@ -41,7 +48,7 @@ def _add_peft_quantize_parsers(subparsers: argparse._SubParsersAction) -> None:
     """Execute the add peft quantize parsers operation."""
     parser_dpo = subparsers.add_parser("dpo", help="Run Direct Preference Optimization (DPO).")
     parser_dpo.add_argument("--model", default="gemma-4", help="Model name.")
-    parser_dpo.add_argument("--dataset", default="dummy_dataset", help="Training dataset.")
+    parser_dpo.add_argument("--dataset", required=True, help="Training dataset.")
     parser_dpo.add_argument("--beta", type=float, default=0.1, help="DPO temperature parameter.")
     parser_dpo.add_argument("--backend", default="jax", help="Backend to use.")
     parser_dpo.set_defaults(func=dpo_cmd)
@@ -64,7 +71,7 @@ def _add_training_subparser(subparsers: argparse._SubParsersAction, name: str, h
     """Execute function."""
     parser = subparsers.add_parser(name, help=help_text)
     parser.add_argument("--model", default="gemma-4", help="Model name.")
-    parser.add_argument("--dataset", default="dummy_dataset", help="Training dataset.")
+    parser.add_argument("--dataset", required=True, help="Training dataset.")
     parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs.")
     parser.add_argument("--learning-rate", type=float, default=0.0001, help="Learning rate.")
     parser.add_argument("--backend", default=backend, help="Backend to use.")
@@ -91,8 +98,6 @@ def _add_evaluate_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_evaluate.add_argument("--db-type", default="sqlite", help="Type of database backend.")
     parser_evaluate.add_argument("--db-kwargs", default="", help="JSON string of DB kwargs.")
     parser_evaluate.add_argument("--ddl", default="", help="DDL string to setup the evaluation schema.")
-    parser_evaluate.add_argument("--predictions", default=None, help="Semicolon separated mock predictions.")
-    parser_evaluate.add_argument("--truths", default=None, help="Semicolon separated mock truths.")
     parser_evaluate.set_defaults(func=evaluate_cmd)
     parser_few_shot = subparsers.add_parser("few-shot", help="Build a dynamic few-shot prompt.")
     parser_few_shot.add_argument("--model", default="gemma-4", help="Model name.")

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Core functionality for the test_sharding_gemma4 module."""
 
 import pytest
@@ -18,11 +17,19 @@ class TestSharding(absltest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> object:
-        """Set up the virtual mesh for sharding tests."""
+        """Set up the virtual mesh for sharding tests.
+
+        Returns:
+            The execution result.
+        """
         super().setUpClass()
 
     def test_model_sharding(self) -> object:
-        """Test that model sharding config works correctly."""
+        """Test that model sharding config works correctly.
+
+        Returns:
+            The execution result.
+        """
         shd = ShardConfig.no_sharding()
         config = Gemma4Config(vocab_size=100, hidden_size=16, intermediate_size=32, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=8, num_experts=2, shd_cfg=shd)
         rngs = nnx.Rngs(0)

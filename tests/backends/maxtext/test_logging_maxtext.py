@@ -1,7 +1,8 @@
-# Copyright 2024
 """Tests for MaxText logging."""
 
 from unittest.mock import MagicMock
+
+import pytest
 
 from gemma_4_sql.backends.maxtext import logging as maxtext_logging
 
@@ -13,13 +14,12 @@ def test_log_metrics_no_tb() -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     maxtext_logging.SummaryWriter = None
     metrics = {"loss": 0.5, "acc": 0.9}
-    res = maxtext_logging.log_metrics(metrics, step=10, log_dir="test_logs")
-    if not res["backend"] == "maxtext":
-        raise AssertionError
-    if not res["status"] == "mocked_missing_tensorboard":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        maxtext_logging.log_metrics(metrics, step=10, log_dir="test_logs")
 
 
 def test_log_metrics_with_tb() -> None:

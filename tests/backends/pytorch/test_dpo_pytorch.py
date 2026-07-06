@@ -1,17 +1,14 @@
-# Copyright 2024
 """Tests for PyTorch DPO logic."""
 
 from __future__ import annotations
 
 import typing
-from typing import TYPE_CHECKING
+
+import pytest
 
 import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 from gemma_4_sql.backends.pytorch.dpo import dpo_loss, run_dpo
 from gemma_4_sql.type_hints import DPOConfig
-
-if TYPE_CHECKING:
-    import pytest
 
 
 class MockTensor:
@@ -186,13 +183,14 @@ def test_run_dpo_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(pt_dpo, "torch", None)
     monkeypatch.setattr(pt_dpo, "nn", None)
     monkeypatch.setattr(pt_dpo, "optim", None)
     monkeypatch.setattr(pt_dpo, "functional", None)
-    res = run_dpo(DPOConfig(model_name="model", dataset="data"))
-    if not res["status"] == "mocked_missing_torch":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="PyTorch dependencies are missing."):
+        run_dpo(DPOConfig(model_name="model", dataset="data"))
     (loss, ch_r, re_r) = dpo_loss(None, None, None, None)
     if not loss == 0.0:
         raise AssertionError
@@ -200,6 +198,30 @@ def test_run_dpo_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError
     if not re_r == 0.0:
         raise AssertionError
+
+
+def _mock_transformers_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    builtins = __import__("builtins", fromlist=[""])
+    orig_import = builtins.__import__
+
+    class MockGemma4Instance:
+        def parameters(self):
+            return []
+
+        def __call__(self, _x, **kwargs):
+            return MockTensor()
+
+    class MockGemma4:
+        @classmethod
+        def from_pretrained(cls, *_args: object, **_kwargs: object) -> object:
+            return MockGemma4Instance()
+
+    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
+        if name == "transformers.models.gemma4" and "Gemma4ForCausalLM" in fromlist:
+            return type("M", (), {"Gemma4ForCausalLM": MockGemma4})
+        return orig_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
 
 
 def test_run_dpo_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -213,6 +235,7 @@ def test_run_dpo_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_dpo, "nn", MockNN())
     monkeypatch.setattr(pt_dpo, "optim", MockOptim())
     monkeypatch.setattr(pt_dpo, "functional", MockF())
+    _mock_transformers_import(monkeypatch)
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
         """Execute function.
@@ -253,6 +276,7 @@ def test_run_dpo_pytorch_no_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_dpo, "nn", MockNN())
     monkeypatch.setattr(pt_dpo, "optim", MockOptim())
     monkeypatch.setattr(pt_dpo, "functional", MockF())
+    _mock_transformers_import(monkeypatch)
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
         """Execute function.
@@ -283,6 +307,7 @@ def test_run_dpo_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_dpo, "nn", MockNN())
     monkeypatch.setattr(pt_dpo, "optim", MockOptim())
     monkeypatch.setattr(pt_dpo, "functional", MockF())
+    _mock_transformers_import(monkeypatch)
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
         """Execute function.

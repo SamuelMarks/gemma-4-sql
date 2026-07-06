@@ -1,4 +1,3 @@
-# Copyright 2024
 """Core functionality for the audio module."""
 
 from __future__ import annotations
@@ -51,7 +50,12 @@ class Gemma4AudioLayer(nnx.Module):
     """A single layer of the audio transformer model."""
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+
+        Args:
+            config: The configuration parameters.
+            rngs: The rngs.
+        """
         self.feed_forward1 = Gemma4AudioFeedForward(config, rngs=rngs)
         self.feed_forward2 = Gemma4AudioFeedForward(config, rngs=rngs)
         self.self_attn = Gemma4AudioAttention(config, rngs=rngs)

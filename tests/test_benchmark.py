@@ -1,4 +1,3 @@
-# Copyright 2024
 """Unified tests for Benchmark across all backends."""
 
 from __future__ import annotations

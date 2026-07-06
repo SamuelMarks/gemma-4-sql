@@ -1,4 +1,3 @@
-# Copyright 2024
 """KV Cache definitions."""
 
 from __future__ import annotations
@@ -30,7 +29,13 @@ class LayerCache(nnx.Module):
     """
 
     def __init__(self, cache_shape: tuple[int, int, int, int], dtype: jnp.dtype, _shd: PartitionSpec | None = None) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+
+        Args:
+            cache_shape: A sequence of cache shape.
+            dtype: The dtype.
+            _shd: The  shd.
+        """
         self.k_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))
         self.v_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))
         self.cur_ind = nnx.Cache(jnp.zeros((), dtype=jnp.int32))

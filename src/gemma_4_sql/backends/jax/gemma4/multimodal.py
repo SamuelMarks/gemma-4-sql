@@ -1,4 +1,3 @@
-# Copyright 2024
 """Multimodal utilities for Gemma 4."""
 
 from __future__ import annotations
@@ -14,15 +13,12 @@ def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array)
     """Merge image and text embeddings based on a token mask.
 
     Args:
-    ----
-        img_emb: Image embeddings (B, Li, D)
-        text_emb: Text embeddings (B, Lt, D)
-        token_mask: Boolean mask indicating image token positions (B, Lt)
+        img_emb: The img emb.
+        text_emb: The text emb.
+        token_mask: The token mask.
 
     Returns:
-    -------
-        Merged embeddings (B, Lt, D)
-
+        The resulting tensor array.
     """
 
     def merge_modalities(i_emb: object, t_emb: object, mask: object) -> object:

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Gemma 4 Decoder Layer implementation."""
 
 from __future__ import annotations
@@ -23,7 +22,13 @@ class Gemma4DecoderLayer(nnx.Module):
     """A single decoder layer combining Attention, MoE, and Normalization."""
 
     def __init__(self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+
+        Args:
+            config: The configuration parameters.
+            attention_type: The attention type.
+            rngs: The rngs.
+        """
         self.config = config
         shd = config.shd_cfg
         self.pre_self_attention_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)

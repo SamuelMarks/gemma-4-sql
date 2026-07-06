@@ -1,15 +1,12 @@
-# Copyright 2024
 """Tests for Keras quantization logic."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import pytest
 
 import gemma_4_sql.backends.keras.quantize as kr_quantize
 from gemma_4_sql.backends.keras.quantize import quantize_model
-
-if TYPE_CHECKING:
-    import pytest
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_quantize_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -20,11 +17,8 @@ def test_quantize_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
     """
     monkeypatch.setattr(kr_quantize, "keras", None)
-    res = quantize_model("model", "int8")
-    if not res["status"] == "mocked_missing_keras":
-        raise AssertionError
-    if not res["memory_reduction_factor"] == 0.0:
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        quantize_model("model", "int8")
 
 
 def test_quantize_keras(monkeypatch: pytest.MonkeyPatch) -> None:

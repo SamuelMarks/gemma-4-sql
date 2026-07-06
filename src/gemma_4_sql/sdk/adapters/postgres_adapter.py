@@ -1,4 +1,3 @@
-# Copyright 2024
 """PostgreSQL adapter."""
 
 from __future__ import annotations
@@ -21,11 +20,7 @@ class PostgresAdapter(DatabaseAdapter):
         """Connect synchronously.
 
         Returns:
-            object: The resulting output from the operation.
-
-        Raises:
-        ImportError: If the operation encounters an unexpected ImportError.
-
+            The execution result.
         """
         if psycopg2 is None:
             msg = "psycopg2 is required. Install with `pip install psycopg2-binary`."  # pragma: no cover

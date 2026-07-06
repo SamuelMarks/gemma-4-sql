@@ -1,4 +1,3 @@
-# Copyright 2024
 """PyTorch-specific ETL pipeline."""
 
 from __future__ import annotations
@@ -30,8 +29,7 @@ def _get_pytorch_classes() -> type:
     """Dynamically construct PyTorch Dataset class.
 
     Returns:
-        object: The resulting output from the operation.
-
+        The execution result.
     """
 
     class PyTorchDataset(Dataset):
@@ -45,9 +43,9 @@ def _get_pytorch_classes() -> type:
         def __len__(self) -> int:
             """Return the total length.
 
-            Returns:
-                object: The resulting output from the operation.
-
+            Args:
+                hf_ds: The hf ds.
+                tok: The tok.
             """
             return len(self._ds)
 
@@ -81,6 +79,15 @@ def _collate_fn(batch: list[JSONDict]) -> JSONDict:
 
 
 def _get_sampler(pt_dataset: Dataset, distributed: bool) -> object:
+    """Get the appropriate PyTorch sampler for data loading.
+
+    Args:
+        pt_dataset: The PyTorch dataset.
+        distributed: Whether to use a DistributedSampler.
+
+    Returns:
+        A DistributedSampler if distributed is true, otherwise None.
+    """
     if not distributed:
         return None
     distributed_sampler_cls = __import__("torch.utils.data.distributed", fromlist=["DistributedSampler"]).DistributedSampler
@@ -91,6 +98,17 @@ def _get_sampler(pt_dataset: Dataset, distributed: bool) -> object:
 
 
 def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, duckdb_table: str | None) -> object:
+    """Load a dataset from Hugging Face or DuckDB.
+
+    Args:
+        dataset_name: The name of the Hugging Face dataset.
+        split: The dataset split to load.
+        duckdb_path: Optional path to a DuckDB database.
+        duckdb_table: Optional name of the DuckDB table.
+
+    Returns:
+        The loaded dataset.
+    """
     if duckdb_path and duckdb_table:
         return _load_duckdb_dataset(duckdb_path, duckdb_table)
     return datasets.load_dataset(dataset_name, split=split)
@@ -111,7 +129,10 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     duckdb_path = str(config.duckdb_path or kwargs.get("duckdb_path") or "")
     duckdb_table = str(config.duckdb_table or kwargs.get("duckdb_table") or "")
     if datasets is None or torch is None or Dataset is None or (DataLoader is None):
-        return {"dataset": dataset_name, "split": split, "status": "mocked", "batch_size": batch_size, "backend": "pytorch", "distributed": distributed, "mock_samples": [{"query": "SELECT * FROM users", "nl": "Get all users"}]}
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError(f"Missing PyTorch or datasets. Cannot load {dataset_name}.")
+
     hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)
     tokenizer = SQLTokenizer(model_name=tokenizer_name)
     pt_dataset_cls = _get_pytorch_classes()

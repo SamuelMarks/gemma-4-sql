@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tokenization module for processing Text-to-SQL datasets."""
 
 from __future__ import annotations
@@ -20,10 +19,8 @@ class SQLTokenizer:
         """Initialize the tokenizer.
 
         Args:
-        ----
-            vocab_size: Fallback vocabulary size for char-level encoding.
-            model_name: Optional Hugging Face model identifier (e.g., 'google/gemma-2b').
-
+            vocab_size: The integer value for vocab size.
+            model_name: The name of the target model.
         """
         self.vocab_size = vocab_size
         self.model_name = model_name

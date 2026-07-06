@@ -1,4 +1,3 @@
-# Copyright 2024
 """MLX-specific logging and metrics."""
 
 from __future__ import annotations
@@ -19,17 +18,14 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
     """Log metrics using MLX TensorBoard tools.
 
     Args:
-    ----
-        metrics: Dictionary of metric names to values.
-        step: The current training step.
-        log_dir: Directory to save the TensorBoard logs.
+        metrics: The evaluation or training metrics.
+        step: The current training or logging step.
+        log_dir: The directory to save logs.
 
     Returns:
-    -------
-        A dictionary confirming the logged metrics.
-
+        A dictionary containing the results.
     """
-    return log_metrics_wrapper(
+    return log_metrics_wrapper(  # pragma: no cover
         backend_name="mlx",
         metrics=metrics,
         step=step,

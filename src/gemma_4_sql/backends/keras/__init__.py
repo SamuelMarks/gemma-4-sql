@@ -1,4 +1,3 @@
-# Copyright 2024
 """Keras backend approach."""
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ def get_trainer() -> str:
     """Return the Keras trainer identifier.
 
     Returns:
-        object: The resulting output from the operation.
-
+        The resulting string.
     """
     return "keras_trainer"

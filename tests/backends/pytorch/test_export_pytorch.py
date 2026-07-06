@@ -1,4 +1,3 @@
-# Copyright 2024
 """Provide module docstring."""
 
 import pytest
@@ -100,9 +99,8 @@ def test_export_model_error(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -
         return orig_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr("builtins.__import__", mock_import)
-    res = m_export.export_model("model", str(tmp_path))
-    if res["status"] != "exported_with_safetensors":
-        raise AssertionError
+    with pytest.raises(ValueError, match="Failed to load model model"):
+        m_export.export_model("model", str(tmp_path))
 
 
 def test_export_model_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:

@@ -32,31 +32,44 @@ with catch_optional_imports():
 def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[TensorType, TensorType, TensorType]:
     """Compute the DPO loss.
 
-    Returns:
-        tuple: The losses.
+    Args:
+        policy_chosen_logps: Log probabilities of the chosen completions from the policy model.
+        policy_rejected_logps: Log probabilities of the rejected completions from the policy model.
+        ref_chosen_logps: Log probabilities of the chosen completions from the reference model.
+        ref_rejected_logps: Log probabilities of the rejected completions from the reference model.
+        beta: The beta parameter controlling the KL penalty.
 
+    Returns:
+        A tuple containing the results.
     """
     if jnp is None or jnn is None:
         return (0.0, 0.0, 0.0)
     return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, jnn.log_sigmoid)
-    pi_logratios = policy_chosen_logps - policy_rejected_logps
-    ref_logratios = ref_chosen_logps - ref_rejected_logps
-    logits = pi_logratios - ref_logratios
-    loss = -jnn.log_sigmoid(beta * logits)
-    chosen_rewards = beta * (policy_chosen_logps - ref_chosen_logps)
-    rejected_rewards = beta * (policy_rejected_logps - ref_rejected_logps)
-    return (jnp.mean(loss), jnp.mean(chosen_rewards), jnp.mean(rejected_rewards))  # pragma: no cover
 
 
 def _compute_logps(model: object, inputs: object, labels: object) -> object:
-    """Mock logp computation.
+    """Compute exact log probabilities for DPO math using categorical cross-entropy approach.
 
     Returns:
-        object: The resulting output from the operation.
-
+        The resulting output from the operation.
     """
     logits = model(inputs)
-    return jnp.sum(logits * labels, axis=-1)
+    # The labels act as the vocabulary indices of the correct next token.
+    # Compute log_softmax over the vocabulary dimension (usually axis -1)
+    log_probs = jnn.log_softmax(logits, axis=-1)
+
+    # Gather the log probability of the true next token (label).
+    # Since jax operations need to be jitted, we use take_along_axis
+    # labels shape is (batch_size, sequence_length)
+    # log_probs shape is (batch_size, sequence_length, vocab_size)
+    labels_expanded = jnp.expand_dims(labels, axis=-1)
+    selected_log_probs = jnp.take_along_axis(log_probs, labels_expanded, axis=-1)
+
+    # Remove the extra dimension and sum over the sequence length
+    selected_log_probs = jnp.squeeze(selected_log_probs, axis=-1)
+    # We might want to mask out padding tokens in the future, assuming non-zero labels are valid tokens for now
+    mask = labels != 0
+    return jnp.sum(selected_log_probs * mask, axis=-1)
 
 
 def _dpo_step_loss(policy_model: object, ref_model: object, batch: JSONDict, beta: float) -> object:
@@ -101,7 +114,7 @@ def _run_training_epochs(state: TrainerState) -> float:
     """Execute function.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     dataloader = state.dataloader
@@ -134,13 +147,11 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
     train_step = _get_train_step_fn(beta)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
     dataloader = data_dict.get("loader", None)
-    if dataloader is not None and hasattr(dataloader, "__iter__"):
-        final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=policy_model, ref_model=ref_model, optimizer=optimizer, train_step=train_step))
-    else:
-        dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-        dummy_batch = {"chosen_inputs": dummy_input, "chosen_labels": dummy_input, "rejected_inputs": dummy_input, "rejected_labels": dummy_input}
-        loss = train_step(policy_model, ref_model, optimizer, dummy_batch)
-        final_loss = float(loss.item())
+
+    if dataloader is None or not hasattr(dataloader, "__iter__"):
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+
+    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=policy_model, ref_model=ref_model, optimizer=optimizer, train_step=train_step))
     return "completed", final_loss
 
 
@@ -148,7 +159,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     model_name = getattr(config, "model_name", "model")
@@ -173,12 +184,14 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """
     final_loss = 0.0
     status = "completed"
-    if jax is not None and jnp is not None and (jnn is not None) and (optax is not None) and (Gemma4ForCausalLM is not None):
-        try:
-            status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate)
-        except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-            status = f"failed: {e!s}"
-    else:
-        status = "mocked_missing_jax"
-        final_loss = 0.0
+    if jax is None or jnp is None or jnn is None or optax is None or Gemma4ForCausalLM is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("JAX DPO dependencies are missing.")
+
+    try:
+        status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate)
+    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        status = f"failed: {e!s}"
+
     return {"backend": "jax", "action": "dpo", "model": model_name, "dataset": dataset, "beta": beta, "status": status, "final_loss": final_loss}

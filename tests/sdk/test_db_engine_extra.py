@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for missing DB Engine coverage."""
 
 import contextlib

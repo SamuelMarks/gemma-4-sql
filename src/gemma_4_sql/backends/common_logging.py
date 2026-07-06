@@ -1,4 +1,3 @@
-# Copyright 2024
 """Common logging utility for backends."""
 
 from __future__ import annotations
@@ -13,18 +12,15 @@ def log_metrics_wrapper(backend_name: str, metrics: dict[str, float], step: int,
     """Log metrics for a training run using a unified TensorBoard wrapper.
 
     Args:
-    ----
-        backend_name: The name of the backend.
-        metrics: A dictionary of metric names and their float values.
-        step: The current training step.
-        log_dir: Directory to save the TensorBoard logs.
-        summary_writer_cls: The backend specific SummaryWriter class, or None if missing.
-        extra_fields: Optional extra fields to include in the output dictionary.
+        backend_name: The backend framework to use.
+        metrics: The evaluation or training metrics.
+        step: The current training or logging step.
+        log_dir: The directory to save logs.
+        summary_writer_cls: The summary writer cls.
+        extra_fields: A mapping representing extra fields.
 
     Returns:
-    -------
-        A dictionary containing logging metadata.
-
+        A dictionary containing the results.
     """
     if summary_writer_cls is not None:
         writer = summary_writer_cls(log_dir=log_dir)

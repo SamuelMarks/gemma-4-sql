@@ -1,4 +1,3 @@
-# Copyright 2024
 """RAG-based schema contextualization module."""
 
 from __future__ import annotations
@@ -21,13 +20,10 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
     """Extract table names and their corresponding column names from a DDL string.
 
     Args:
-    ----
-        ddl: The SQL Data Definition Language string.
+        ddl: The Data Definition Language (DDL) string.
 
     Returns:
-    -------
-        A dictionary mapping table names to lists of column names.
-
+        A list of results.
     """
     schema = {}
     table_pattern = re.compile("CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?([a-zA-Z0-9_]+)\\s*\\((.*?)\\);?", re.IGNORECASE | re.DOTALL)
@@ -49,7 +45,7 @@ def _score_table(table: str, columns: list[str], prompt_words: set[str]) -> int:
     """Calculate the relevance score for a single table.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     score = 0

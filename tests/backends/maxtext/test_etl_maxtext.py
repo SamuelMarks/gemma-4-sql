@@ -1,4 +1,5 @@
-# Copyright 2024
+from gemma_4_sql.exceptions import DependencyMissingError
+
 """Provide module docstring."""
 
 import contextlib
@@ -42,11 +43,8 @@ def test_maxtext_etl_mocked() -> None:
     try:
         etl_maxtext.datasets = None
         etl_maxtext.grain = None
-        res = etl_maxtext.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-        if not res["status"] == "mocked":
-            raise AssertionError
-        if not res["backend"] == "maxtext":
-            raise AssertionError
+        with pytest.raises(DependencyMissingError):
+            etl_maxtext.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
     finally:
         etl_maxtext.datasets = original_datasets
         etl_maxtext.grain = original_grain
@@ -63,9 +61,8 @@ def test_maxtext_etl_import_error() -> None:
         del sys.modules["gemma_4_sql.backends.maxtext.etl"]
     with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
         etl_maxtext = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
-        res = etl_maxtext.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-        if not res["status"] == "mocked":
-            raise AssertionError
+        with pytest.raises(DependencyMissingError):
+            etl_maxtext.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
 
 
 class MockDatasets:

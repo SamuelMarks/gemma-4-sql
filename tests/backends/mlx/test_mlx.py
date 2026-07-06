@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for MLX backend."""
 
 from typing import NoReturn as Never
@@ -8,65 +7,34 @@ import pytest
 import gemma_4_sql.backends.mlx.benchmark as bm
 import gemma_4_sql.backends.mlx.inference as inf
 import gemma_4_sql.backends.mlx.train as tr
-from gemma_4_sql.backends.mlx import dpo, etl, export, logging, peft, quantize
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, TrainingConfig
+from gemma_4_sql.backends.mlx import etl, export, peft
+from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
 
 
 def test_train_mocked() -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=1, learning_rate=0.1))
-    if res["status"] != "mocked_missing_mlx":
-        raise AssertionError
+    """Execute function."""
+    with pytest.raises(DependencyMissingError):
+        tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=1, learning_rate=0.1))
 
 
 def test_etl_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Execute function."""
     monkeypatch.setattr(etl, "datasets", None)
-    res = etl.build_dataloader(ETLConfig(dataset_name="ds", split="train"))
-    if res["status"] != "mocked":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        etl.build_dataloader(ETLConfig(dataset_name="ds", split="train"))
 
 
 def test_inference_mocked() -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    res = inf.generate_sql("mod", "prompt")
-    if res["status"] != "mocked_missing_mlx":
-        raise AssertionError
+    """Execute function."""
+    with pytest.raises(DependencyMissingError):
+        inf.generate_sql("mod", "prompt")
 
 
 def test_peft_mocked() -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    res = peft.apply_lora("mod", ["q_proj"], 8, 16, 0.1)
-    if res["status"] != "mocked_missing_mlx":
-        raise AssertionError
-    if dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))["backend"] != "mlx":
-        raise AssertionError
-    if export.export_model("m", "p")["backend"] != "mlx":
-        raise AssertionError
-    if logging.log_metrics({"l": 1.0}, 1, "d")["backend"] != "mlx":
-        raise AssertionError
-    if quantize.quantize_model("m", "awq")["backend"] != "mlx":
-        raise AssertionError
+    """Execute function."""
+    with pytest.raises(DependencyMissingError):
+        peft.apply_lora("mod", ["q_proj"], 8, 16, 0.1)
 
 
 def test_export_mlx_none(monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory) -> None:

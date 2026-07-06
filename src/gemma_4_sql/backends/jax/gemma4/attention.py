@@ -1,4 +1,3 @@
-# Copyright 2024
 """Gemma 4 Attention implementation."""
 
 from __future__ import annotations
@@ -24,9 +23,13 @@ if TYPE_CHECKING:
 def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Array], attention_mask: jax.Array | None, config_params: tuple[int, float | None, int, int]) -> jax.Array:
     """Compute attention scores and output.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        qkv: A sequence of qkv.
+        attention_mask: The attention mask.
+        config_params: A sequence of config params.
 
+    Returns:
+        The execution result.
     """
     (q, k, v) = qkv
     (head_dim, soft_cap, num_kv_heads, num_heads) = config_params
@@ -49,9 +52,14 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
 def _prepare_qkv_for_attention(qkv: tuple[jax.Array, jax.Array, jax.Array], positions: Array, rope: object, cache: LayerCache | None) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """Prepare QKV and return masks.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        qkv: A sequence of qkv.
+        positions: The positions.
+        rope: The rope.
+        cache: The cache.
 
+    Returns:
+        A tuple containing the results.
     """
     (q, k, v) = qkv
     (_batch_size, seq_len, _, _) = q.shape

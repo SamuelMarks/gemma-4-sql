@@ -1,11 +1,13 @@
-# Copyright 2024
 """Tests for Keras inference logic."""
+
+from __future__ import annotations
 
 import builtins
 
 import pytest
 
 import gemma_4_sql.backends.keras.inference as inf
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
 class MockTf:
@@ -44,9 +46,8 @@ def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
     """
     monkeypatch.setattr(inf, "keras", None)
-    res = inf.generate_sql("mock-model", "test prompt")
-    if not res["status"] == "mocked_missing_keras":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        inf.generate_sql("mock-model", "test prompt")
 
 
 def test_generate_sql_error(monkeypatch: pytest.MonkeyPatch) -> None:

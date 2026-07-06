@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for PyTorch-specific ETL pipeline (full implementation)."""
 
 import sys

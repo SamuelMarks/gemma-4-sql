@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for Keras Train module."""
 
 from __future__ import annotations
@@ -12,9 +11,11 @@ from gemma_4_sql.type_hints import TrainingConfig
 class MockKerasModel:
     """Provide class docstring."""
 
-    def __init__(self, vocab_size: int = 100) -> None:
+    def __init__(self, inputs: object = None, outputs: object = None, vocab_size: int = 100) -> None:
         """Execute function."""
         self.vocab_size = vocab_size
+        self.inputs = inputs
+        self.outputs = outputs
 
     def __call__(self, x: object, *, _training: bool = False) -> object:
         """Execute function.
@@ -136,6 +137,23 @@ class MockKeras:
 class MockTf:
     """Provide class docstring."""
 
+    class distribute:
+        """Provide class docstring."""
+
+        class MirroredStrategy:
+            """Provide class docstring."""
+
+            def scope(self) -> object:
+                """Test function."""
+                import contextlib
+
+                @contextlib.contextmanager
+                def _scope():
+                    """Test function."""
+                    yield
+
+                return _scope()
+
     @staticmethod
     def zeros(*_args: object, **_kwargs: object) -> str:
         """Execute function.
@@ -189,17 +207,13 @@ def test_train_model_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_train_model_keras_missing() -> None:
-    """Execute function.
+    """Execute function."""
+    from gemma_4_sql.exceptions import DependencyMissingError
 
-    Raises:
-        AssertionError: Description.
-
-    """
     tr.keras = None
     tr.tf = None
-    res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2))
-    if res["status"] != "mocked_missing_keras":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="Keras training dependencies are missing."):
+        tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2))
 
 
 def test_train_model_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -234,7 +248,7 @@ def test_train_model_keras_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -
 
     """
     monkeypatch.setattr(tr, "build_dataloader", lambda *_args, **_kwargs: {"loader": None})
-    res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, extra_kwargs={"test_mode": True}))
+    res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2), test_mode=True)
     if res["status"] != "completed":
         raise AssertionError
 
@@ -247,7 +261,7 @@ def test_train_keras_real_import(monkeypatch: pytest.MonkeyPatch) -> None:
 
     """
     monkeypatch.setattr(tr, "build_dataloader", lambda *_args, **_kwargs: {"loader": None})
-    res = tr.train_model(TrainingConfig(action="sft", model_name="model", dataset="ds", epochs=1, extra_kwargs={"test_mode": True}))
+    res = tr.train_model(TrainingConfig(action="sft", model_name="model", dataset="ds", epochs=1), test_mode=True)
     if res["status"] != "completed":
         raise AssertionError
 
@@ -260,6 +274,6 @@ def test_train_keras_real_import_with_loader_iter(monkeypatch: pytest.MonkeyPatc
 
     """
     monkeypatch.setattr(tr, "build_dataloader", lambda *_args, **_kwargs: {"loader": [1, 2]})
-    res = tr.train_model(TrainingConfig(action="sft", model_name="model", dataset="ds", epochs=1, extra_kwargs={"test_mode": True}))
+    res = tr.train_model(TrainingConfig(action="sft", model_name="model", dataset="ds", epochs=1), test_mode=True)
     if res["status"] != "completed":
         raise AssertionError

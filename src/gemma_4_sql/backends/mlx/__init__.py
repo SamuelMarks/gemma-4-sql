@@ -1,4 +1,3 @@
-# Copyright 2024
 """MLX backend approach."""
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ def get_trainer() -> str:
     """Return the MLX trainer identifier.
 
     Returns:
-        object: The resulting output from the operation.
-
+        The resulting string.
     """
     return "mlx_trainer"  # pragma: no cover

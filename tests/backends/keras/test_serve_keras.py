@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for Keras Serve."""
 
 from __future__ import annotations
@@ -11,17 +10,12 @@ import gemma_4_sql.backends.keras.serve as srv
 
 
 def test_serve_model_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+    """Execute function."""
+    from gemma_4_sql.exceptions import DependencyMissingError
 
-    Raises:
-        AssertionError: Description.
-
-    """
     monkeypatch.setattr(srv, "keras", None)
-    "Execute function."
-    res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    if res["status"] != "mocked_missing_keras":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing for serve."):
+        srv.serve_model("foo", port=8000, max_batch_size=16)
 
 
 def test_serve_model_keras_fastapi_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -31,12 +25,13 @@ def test_serve_model_keras_fastapi_missing(monkeypatch: pytest.MonkeyPatch) -> N
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(srv, "tf", object())
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", None)
     monkeypatch.setattr(srv, "keras", object())
-    res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    if res["status"] != "failed_missing_fastapi":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        srv.serve_model("foo", port=8000, max_batch_size=16)
 
 
 def test_serve_model_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,4 +1,3 @@
-# Copyright 2024
 """Common benchmarking utilities."""
 
 from __future__ import annotations

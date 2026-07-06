@@ -1,4 +1,3 @@
-# Copyright 2024
 """Audio layers and submodules."""
 
 from __future__ import annotations
@@ -19,7 +18,14 @@ class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):
     """A single convolutional projection layer for audio subsampling."""
 
     def __init__(self, in_channels: int, channels: int, norm_eps: float, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+
+        Args:
+            in_channels: The integer value for in channels.
+            channels: The integer value for channels.
+            norm_eps: The float value for norm eps.
+            rngs: The rngs.
+        """
         self.conv = nnx.Conv(in_channels, channels, kernel_size=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)), use_bias=False, rngs=rngs)
         self.norm = nnx.LayerNorm(channels, epsilon=norm_eps, use_bias=False, rngs=rngs)
 
@@ -103,7 +109,14 @@ class Gemma4AudioCausalConv1d(nnx.Module):
     """Causal 1D convolution layer for audio processing."""
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+
+        Args:
+            x: The input x.
+
+        Returns:
+            The execution result.
+        """
         self.kernel_size = config.conv_kernel_size
         self.left_pad = self.kernel_size - 1
         self.conv = nnx.Conv(config.hidden_size, config.hidden_size, kernel_size=self.kernel_size, feature_group_count=config.hidden_size, use_bias=False, padding=0, rngs=rngs)
@@ -111,9 +124,9 @@ class Gemma4AudioCausalConv1d(nnx.Module):
     def __call__(self, x: jax.Array) -> jax.Array:
         """Apply causal 1D convolution.
 
-        Returns:
-            object: The resulting output from the operation.
-
+        Args:
+            config: The configuration parameters.
+            rngs: The rngs.
         """
         x = jnp.pad(x, ((0, 0), (self.left_pad, 0), (0, 0)))
         return self.conv(x)

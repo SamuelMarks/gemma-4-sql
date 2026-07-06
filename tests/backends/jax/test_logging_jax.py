@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for JAX logging."""
 
 from unittest.mock import MagicMock

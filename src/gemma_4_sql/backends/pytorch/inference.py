@@ -1,4 +1,3 @@
-# Copyright 2024
 """Pytorch-specific inference logic."""
 
 from __future__ import annotations
@@ -25,9 +24,15 @@ with catch_optional_imports():
 def _run_generation(model_name: str, prompt: str, beam_width: int, max_length: int, *, test_mode: bool = False) -> tuple[str, float]:
     """Execute the inference logic.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model_name: The name of the target model.
+        prompt: The input text prompt.
+        beam_width: The number of beams for beam search.
+        max_length: The maximum length of the sequence.
+        test_mode: Boolean flag indicating test mode.
 
+    Returns:
+        A tuple containing the results.
     """
     if test_mode:
         return ("SELECT * FROM pytorch_table", 0.95)
@@ -60,17 +65,16 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
 
     """
     confidence_score = 0.0
-    if torch is not None and AutoModelForCausalLM is not None and (AutoTokenizer is not None):
-        try:
-            logger.info("Generating with %s", model_name)
-            (sql, confidence_score) = _run_generation(model_name, prompt, beam_width, max_length, test_mode=bool(kwargs.get("test_mode")))
-            status = "success"
-        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-            logger.exception("Generation failed: ")
-            sql = ""
-            status = f"failed: {e!s}"
-    else:
-        sql = "SELECT * FROM pytorch_table"
-        confidence_score = 0.95
-        status = "mocked_missing_torch"
+    if torch is None or AutoModelForCausalLM is None or AutoTokenizer is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("PyTorch dependencies are missing.")
+    try:
+        logger.info("Generating with %s", model_name)
+        (sql, confidence_score) = _run_generation(model_name, prompt, beam_width, max_length, test_mode=bool(kwargs.get("test_mode")))
+        status = "success"
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+        logger.exception("Generation failed: ")
+        sql = ""
+        status = f"failed: {e!s}"
     return {"backend": "pytorch", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}

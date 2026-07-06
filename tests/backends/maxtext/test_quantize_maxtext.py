@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for MaxText quantization logic."""
 
 from __future__ import annotations
@@ -73,12 +72,13 @@ def test_quantize_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    import pytest
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(maxtext_quantize, "jnp", None)
-    res = quantize_model("model", "int8")
-    if not res["status"] == "mocked_missing_maxtext":
-        raise AssertionError
-    if not res["memory_reduction_factor"] == 0.0:
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        quantize_model("model", "int8")
 
 
 def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:

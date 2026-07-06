@@ -1,4 +1,3 @@
-# Copyright 2024
 """SDK Evaluation module."""
 
 from __future__ import annotations
@@ -18,9 +17,11 @@ if TYPE_CHECKING:
 def normalize_sql(sql: str) -> str:
     """Normalize SQL by stripping whitespace and lowercasing.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        sql: The string representing the sql.
 
+    Returns:
+        The resulting string.
     """
     return " ".join(sql.strip().lower().split())
 
@@ -61,9 +62,13 @@ async def compute_metrics_async(engine: LiveDatabaseEngine, preds: list[str], tr
 def compute_metrics(engine: LiveDatabaseEngine, preds: list[str], truths: list[str]) -> dict[str, float]:
     """Compute exact match, valid SQL, and execution accuracy.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        engine: The engine.
+        preds: A sequence of preds.
+        truths: A sequence of truths.
 
+    Returns:
+        The execution result.
     """
     return asyncio.run(compute_metrics_async(engine, preds, truths))
 
@@ -72,7 +77,7 @@ def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
     """Extract input and target IDs from a batch.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     MIN_BATCH_TUPLE_LENGTH = 2
@@ -141,17 +146,11 @@ def evaluate(model_name: str, dataset_name: str, backend: str = "jax", db_path: 
     """
     db_type = kwargs.get("db_type", "sqlite")
     db_kwargs = kwargs.get("db_kwargs")
-    mock_predictions = kwargs.get("mock_predictions")
-    mock_truths = kwargs.get("mock_truths")
     engine = LiveDatabaseEngine(db_path=db_path, ddl=ddl, db_type=str(db_type), db_kwargs=db_kwargs)
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend(backend)
-    confidence_scores = []
-    if mock_predictions is not None and mock_truths is not None:
-        preds = list(mock_predictions)
-        truths = list(mock_truths)
-    else:
-        (preds, truths, confidence_scores) = _run_evaluation_inference(model_name, dataset_name, backend_impl)
+
+    (preds, truths, confidence_scores) = _run_evaluation_inference(model_name, dataset_name, backend_impl)
     metrics = asyncio.run(compute_metrics_async(engine, preds, truths))
     if confidence_scores:
         metrics["mean_confidence"] = sum(confidence_scores) / len(confidence_scores)

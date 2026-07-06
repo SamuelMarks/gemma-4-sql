@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for MaxText Serving."""
 
 from unittest import mock
@@ -15,10 +14,11 @@ def test_serve_model_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     monkeypatch.setattr(srv, "jax", None)
-    res = srv.serve_model("foo")
-    if not res["status"] == "mocked_missing_maxtext":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        srv.serve_model("foo")
 
 
 def test_serve_model_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -140,10 +140,11 @@ def test_serve_fastapi_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: Description.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     m_serve = __import__("gemma_4_sql.backends.maxtext.serve", fromlist=[""])
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", None)
     monkeypatch.setattr(m_serve, "jax", object())
     monkeypatch.setattr(m_serve, "gemma4", object())
-    res = m_serve.serve_model("m")
-    if res["status"] != "failed_missing_fastapi":
-        raise AssertionError
+    with pytest.raises(DependencyMissingError):
+        m_serve.serve_model("m")

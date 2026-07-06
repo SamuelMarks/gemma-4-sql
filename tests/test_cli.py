@@ -1,4 +1,3 @@
-# Copyright 2024
 """Provide module docstring."""
 
 from unittest.mock import MagicMock, patch
@@ -133,7 +132,7 @@ def test_cli_train(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixtur
     monkeypatch.setattr("gemma_4_sql.cli_etl.etl_posttrain", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_train.apply_peft", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     "Test the CLI train command."
-    args = ["train", "--model", "test-model", "--backend", "jax"]
+    args = ["train", "--model", "test-model", "--backend", "jax", "--dataset", "dummy"]
     cli(args)
     capsys.readouterr()
 
@@ -165,7 +164,7 @@ def test_cli_pretrain(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFix
     monkeypatch.setattr("gemma_4_sql.cli_etl.etl_posttrain", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_train.apply_peft", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     "Test the CLI pretrain command."
-    args = ["pretrain", "--model", "test-model", "--backend", "maxtext"]
+    args = ["pretrain", "--model", "test-model", "--backend", "maxtext", "--dataset", "dummy"]
     cli(args)
     capsys.readouterr()
 
@@ -197,7 +196,7 @@ def test_cli_sft(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[
     monkeypatch.setattr("gemma_4_sql.cli_etl.etl_posttrain", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_train.apply_peft", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     "Test the CLI sft command."
-    args = ["sft", "--model", "test-model", "--backend", "jax"]
+    args = ["sft", "--model", "test-model", "--backend", "jax", "--dataset", "dummy"]
     cli(args)
     capsys.readouterr()
 
@@ -229,7 +228,7 @@ def test_cli_posttrain(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFi
     monkeypatch.setattr("gemma_4_sql.cli_etl.etl_posttrain", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_train.apply_peft", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     "Test the CLI posttrain command."
-    args = ["posttrain", "--model", "test-model", "--backend", "keras"]
+    args = ["posttrain", "--model", "test-model", "--backend", "keras", "--dataset", "dummy"]
     cli(args)
     capsys.readouterr()
 
@@ -261,7 +260,7 @@ def test_cli_dpo(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[
     monkeypatch.setattr("gemma_4_sql.cli_etl.etl_posttrain", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_train.apply_peft", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     "Test the CLI dpo command."
-    args = ["dpo", "--model", "test-model", "--backend", "jax", "--beta", "0.2"]
+    args = ["dpo", "--model", "test-model", "--backend", "jax", "--beta", "0.2", "--dataset", "dummy"]
     cli(args)
     capsys.readouterr()
 
@@ -1077,6 +1076,7 @@ def test_cli_few_shot_invalid_examples(monkeypatch: pytest.MonkeyPatch, capsys: 
 
 
 def test_dependency_missing_error() -> None:
+    """Test function."""
     from gemma_4_sql.exceptions import DependencyMissingError
 
     assert str(DependencyMissingError("test")) == "test"

@@ -1,4 +1,3 @@
-# Copyright 2024
 """SDK Serve module for continuous batching and vLLM inference."""
 
 from __future__ import annotations
@@ -13,17 +12,14 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, ba
     """Serve a model using continuous batching.
 
     Args:
-    ----
-        model_name: The name of the model to serve.
-        port: The port to bind the server to.
-        max_batch_size: The maximum batch size.
-        backend: The backend framework ('jax', 'keras', 'maxtext', 'pytorch').
-        **kwargs: Additional parameters.
+        model_name: The name of the target model.
+        port: The network port to listen on.
+        max_batch_size: The maximum allowed batch size.
+        backend: The backend framework to use.
+        **kwargs: Additional keyword arguments.
 
     Returns:
-    -------
-        Serving configuration and status dictionary.
-
+        A dictionary containing the results.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     return get_backend(backend).serve_model(model_name, port, max_batch_size, **kwargs)

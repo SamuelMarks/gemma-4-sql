@@ -1,4 +1,3 @@
-# Copyright 2024
 """MaxText-specific DPO (Direct Preference Optimization) logic."""
 
 from __future__ import annotations
@@ -32,17 +31,14 @@ def dpo_loss(policy_chosen_logps: object, policy_rejected_logps: object, ref_cho
     """Compute the DPO loss for MaxText (using JAX under the hood).
 
     Args:
-    ----
-        policy_chosen_logps: Log probabilities of chosen responses from policy model.
-        policy_rejected_logps: Log probabilities of rejected responses from policy model.
-        ref_chosen_logps: Log probabilities of chosen responses from reference model.
-        ref_rejected_logps: Log probabilities of rejected responses from reference model.
-        beta: Temperature parameter for the DPO loss.
+        policy_chosen_logps: Log probabilities of the chosen completions from the policy model.
+        policy_rejected_logps: Log probabilities of the rejected completions from the policy model.
+        ref_chosen_logps: Log probabilities of the chosen completions from the reference model.
+        ref_rejected_logps: Log probabilities of the rejected completions from the reference model.
+        beta: The beta parameter controlling the KL penalty.
 
     Returns:
-    -------
-        A tuple of (loss, chosen_rewards, rejected_rewards).
-
+        A tuple containing the results.
     """
     return jax_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta)  # pragma: no cover
 
@@ -111,7 +107,7 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
         """Execute function.
 
         Returns:
-            object: Description of return.
+            The execution result.
 
         """
         nonlocal policy_params, opt_state
@@ -140,12 +136,11 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
     train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
     dataloader = data_dict.get("loader", None)
-    if dataloader is not None and hasattr(dataloader, "__iter__"):
-        (policy_params, opt_state, final_loss) = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step, policy_params=policy_params, ref_params=ref_params, opt_state=opt_state))
-    else:
-        dummy_batch = {"chosen_inputs": dummy_input, "chosen_labels": dummy_input, "rejected_inputs": dummy_input, "rejected_labels": dummy_input}
-        (policy_params, opt_state, loss) = train_step(policy_params, ref_params, opt_state, dummy_batch)
-        final_loss = float(loss.item())
+
+    if dataloader is None or not hasattr(dataloader, "__iter__"):
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+
+    (policy_params, opt_state, final_loss) = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step, policy_params=policy_params, ref_params=ref_params, opt_state=opt_state))
     return "completed", final_loss
 
 
@@ -153,7 +148,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     model_name = getattr(config, "model_name", "model")
@@ -179,13 +174,13 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     """
     final_loss = 0.0
     status = "completed"
-    if jax is not None and jnp is not None and (optax is not None) and (Gemma4Model is not None):
-        try:
-            status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, bool(kwargs.get("test_mode")))
-        except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-            logger.exception("DPO Train error: ")
-            status = f"failed: {e!s}"
-    else:
-        status = "mocked_missing_maxtext"
-        final_loss = 0.0
+    if jax is None or jnp is None or optax is None or Gemma4Model is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("MaxText dependencies are missing.")
+    try:
+        status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, bool(kwargs.get("test_mode")))
+    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        logger.exception("DPO Train error: ")
+        status = f"failed: {e!s}"
     return {"backend": "maxtext", "action": "dpo", "model": model_name, "dataset": dataset, "beta": beta, "status": status, "final_loss": final_loss}

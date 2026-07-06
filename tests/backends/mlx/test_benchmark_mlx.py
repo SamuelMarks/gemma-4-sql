@@ -1,4 +1,3 @@
-# Copyright 2024
 """Provide module docstring."""
 
 from typing import NoReturn as Never

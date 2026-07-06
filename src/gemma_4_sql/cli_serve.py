@@ -1,4 +1,3 @@
-# Copyright 2024
 """Serving, Chat, and Evaluation CLI commands."""
 
 from __future__ import annotations
@@ -13,18 +12,24 @@ if TYPE_CHECKING:
 
 
 def evaluate_cmd(args: argparse.Namespace) -> None:
-    """Evaluate an existing model."""
-    preds = args.predictions.split(";") if args.predictions else None
-    truths = args.truths.split(";") if args.truths else None
+    """Evaluate an existing model.
+
+    Args:
+        args: Additional positional arguments.
+    """
     db_kwargs = {}
     if args.db_kwargs:  # pragma: no cover
         json = __import__("json")
         db_kwargs = json.loads(args.db_kwargs)
-    evaluate(model_name=args.model, dataset_name=args.dataset, backend=args.backend, db_path=args.db_path, ddl=args.ddl, db_type=args.db_type, db_kwargs=db_kwargs, mock_predictions=preds, mock_truths=truths)
+    evaluate(model_name=args.model, dataset_name=args.dataset, backend=args.backend, db_path=args.db_path, ddl=args.ddl, db_type=args.db_type, db_kwargs=db_kwargs)
 
 
 def generate_cmd(args: argparse.Namespace) -> None:
-    """Generate SQL from text."""
+    """Generate SQL from text.
+
+    Args:
+        args: Additional positional arguments.
+    """
     generate(model_name=args.model, prompt=args.prompt, backend=args.backend, beam_width=args.beam_width, max_length=args.max_length, show_confidence=getattr(args, "show_confidence", False))
 
 
@@ -40,12 +45,20 @@ def agent_cmd(args: argparse.Namespace) -> None:
 
 
 def serve_cmd(args: argparse.Namespace) -> None:
-    """Serve a model using continuous batching."""
+    """Serve a model using continuous batching.
+
+    Args:
+        args: Additional positional arguments.
+    """
     serve_model(model_name=args.model, port=args.port, max_batch_size=args.max_batch_size, backend=args.backend)
 
 
 def chat_cmd(args: argparse.Namespace) -> None:
-    """Run a multi-turn conversational SQL chat turn."""
+    """Run a multi-turn conversational SQL chat turn.
+
+    Args:
+        args: Additional positional arguments.
+    """
     history = []
     if getattr(args, "history", ""):  # pragma: no cover
         try:

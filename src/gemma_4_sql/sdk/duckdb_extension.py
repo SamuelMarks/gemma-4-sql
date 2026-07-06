@@ -1,4 +1,3 @@
-# Copyright 2024
 """DuckDB extension module for Gemma 4."""
 
 from __future__ import annotations
@@ -12,23 +11,14 @@ duckdb = LazyLoader("duckdb").get_module()
 
 
 def embed_in_duckdb(conn: object, model_name: str, backend: str = "jax", db_path: str = ":memory:", max_retries: int = 3) -> None:
-    """Register a scalar function in DuckDB to ask natural language questions.
-
-    The function 'ask_gemma' will take a natural language string, use the
-    Gemma 4 model to generate the appropriate SQL, and return the execution
-    results as a JSON string.
+    """Register a scalar function in DuckDB to ask natural language questions. The function 'ask_gemma' will take a natural language string, use the Gemma 4 model to generate the appropriate SQL, and return the execution results as a JSON string.
 
     Args:
-    ----
-        conn: The DuckDB connection.
-        model_name: The name or path of the model.
-        backend: The backend framework ('jax', 'keras', 'maxtext', 'pytorch').
-        db_path: The database path for the agent to connect to (if not :memory:).
-        max_retries: Max number of execution attempts.
-
-    Raises:
-        ImportError: If the operation encounters an unexpected ImportError.
-
+        conn: The database connection object.
+        model_name: The name of the target model.
+        backend: The backend framework to use.
+        db_path: The file path to the database.
+        max_retries: The integer value for max retries.
     """
     if duckdb is None:
         msg = "duckdb is required. Install with `pip install duckdb`."

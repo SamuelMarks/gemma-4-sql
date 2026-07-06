@@ -1,4 +1,3 @@
-# Copyright 2024
 """SDK Logging module."""
 
 from __future__ import annotations
@@ -13,16 +12,13 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", bac
     """Log training or evaluation metrics to TensorBoard.
 
     Args:
-    ----
-        metrics: A dictionary of metric names and their float values.
-        step: The current training or evaluation step.
-        log_dir: The directory to save the TensorBoard logs.
-        backend: The backend framework ('jax', 'keras', 'maxtext', 'pytorch').
+        metrics: The evaluation or training metrics.
+        step: The current training or logging step.
+        log_dir: The directory to save logs.
+        backend: The backend framework to use.
 
     Returns:
-    -------
-        Logging results dictionary.
-
+        A dictionary containing the results.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     return get_backend(backend).log_metrics(metrics, step, log_dir)

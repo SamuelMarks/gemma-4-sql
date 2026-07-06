@@ -1,4 +1,3 @@
-# Copyright 2024
 """DuckDB adapter."""
 
 from __future__ import annotations
@@ -21,11 +20,7 @@ class DuckDBAdapter(DatabaseAdapter):
         """Connect synchronously.
 
         Returns:
-            object: The resulting output from the operation.
-
-        Raises:
-        ImportError: If the operation encounters an unexpected ImportError.
-
+            The execution result.
         """
         if duckdb is None:
             msg = "duckdb is required. Install with `pip install duckdb`."

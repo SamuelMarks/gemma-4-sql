@@ -1,4 +1,3 @@
-# Copyright 2024
 """Gemma 4 model implementation in JAX/Flax NNX."""
 
 from __future__ import annotations
@@ -94,7 +93,12 @@ class Gemma4Model(nnx.Module):
     """The base Gemma 4 trunk consisting of embeddings and a stack of decoder layers."""
 
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Docstring for __init__.
+
+        Args:
+            config: The configuration parameters.
+            rngs: The rngs.
+        """
         self.config = config
         shd = config.shd_cfg
         self.embed_tokens = _make_embed(config.vocab_size, config.hidden_size, embedding_metadata={}, rngs=rngs)

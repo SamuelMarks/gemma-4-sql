@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for MaxText Benchmark."""
 
 from __future__ import annotations

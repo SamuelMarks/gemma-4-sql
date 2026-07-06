@@ -1,4 +1,3 @@
-# Copyright 2024
 """Keras-specific logging and metrics."""
 
 from __future__ import annotations
@@ -18,17 +17,18 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
     """Log metrics using Keras/TensorFlow TensorBoard tools.
 
     Args:
-    ----
-        metrics: Dictionary of metric names to values.
-        step: The current training step.
-        log_dir: Directory to save the TensorBoard logs.
+        metrics: The evaluation or training metrics.
+        step: The current training or logging step.
+        log_dir: The directory to save logs.
 
     Returns:
-    -------
-        A dictionary confirming the logged metrics.
-
+        A dictionary containing the results.
     """
-    if tf is not None and hasattr(tf, "summary"):
+    if tf is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("TensorFlow dependencies are missing.")
+    if hasattr(tf, "summary"):
         writer = tf.summary.create_file_writer(log_dir)
         with writer.as_default():
             for k, v in metrics.items():
@@ -36,5 +36,5 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
         writer.close()
         status = "success"
     else:
-        status = "mocked_missing_tensorboard"
+        status = "missing_summary_attr"  # pragma: no cover
     return {"backend": "keras", "step": step, "metrics": metrics, "status": status, "log_dir": log_dir}

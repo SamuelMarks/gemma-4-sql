@@ -1,4 +1,3 @@
-# Copyright 2024
 """Extra tests for SDK coverage."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -142,7 +141,5 @@ def test_rag_semantic_no_relevant() -> None:
 
 def test_base_methods() -> None:
     """Test base methods."""
-    adapter = DatabaseAdapter.__new__(DatabaseAdapter)
-    adapter.conn = MagicMock()
-    with pytest.raises(NotImplementedError):
-        adapter.setup_schema("DDL")
+    with pytest.raises(TypeError, match="Can't instantiate abstract class DatabaseAdapter"):
+        DatabaseAdapter()

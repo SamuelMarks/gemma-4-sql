@@ -1,4 +1,3 @@
-# Copyright 2024
 """PyTorch-specific continuous batching inference (vLLM) logic."""
 
 from __future__ import annotations
@@ -29,9 +28,12 @@ with catch_optional_imports():
 def _create_app(model_name: str, max_batch_size: int) -> object:
     """Create the FastAPI application for the PyTorch vLLM server.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model_name: The name of the target model.
+        max_batch_size: The maximum allowed batch size.
 
+    Returns:
+        The execution result.
     """
     engine_args = AsyncEngineArgs(model=model_name, max_num_batched_tokens=max_batch_size * 256, max_num_seqs=max_batch_size, disable_log_requests=True)
     engine = AsyncLLMEngine.from_engine_args(engine_args)
@@ -66,23 +68,25 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
     """Serve a model using vLLM for continuous batching.
 
     Args:
-    ----
-        model_name: The name of the model to serve.
-        port: The port to bind the server to.
-        max_batch_size: The maximum batch size for continuous batching.
-        **kwargs: Additional parameters.
+        model_name: The name of the target model.
+        port: The network port to listen on.
+        max_batch_size: The maximum allowed batch size.
+        **kwargs: Additional keyword arguments.
 
     Returns:
-    -------
-        A dictionary containing serving status and metadata.
-
+        A dictionary containing the results.
     """
+    if AsyncEngineArgs is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("vLLM dependencies are missing for PyTorch serving.")
+
     result = serve_model_wrapper(
         backend_name="pytorch",
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
-        missing_deps=AsyncEngineArgs is None,
+        missing_deps=False,
         missing_status="mocked_missing_pytorch",
         app_factory=lambda: _create_app(model_name, max_batch_size),
         test_mode=bool(kwargs.get("test_mode")),

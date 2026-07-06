@@ -1,4 +1,3 @@
-# Copyright 2024
 """PyTorch-specific benchmarking pipeline."""
 
 from __future__ import annotations
@@ -23,12 +22,14 @@ with catch_optional_imports():
 def _load_pytorch_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[ModelType, str]:
     """Load the model and determine device.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model_name: The name of the target model.
+        hardware: The target hardware accelerator.
+        test_mode: Boolean flag indicating test mode.
 
+    Returns:
+        A tuple containing the results.
     """
-    if test_mode:
-        return (None, "cpu")
     model = AutoModelForCausalLM.from_pretrained(model_name)
     device = "cuda" if getattr(torch, "cuda", None) and getattr(torch.cuda, "is_available", lambda: False)() and (hardware != "cpu") else "cpu"
     if hasattr(model, "to"):
@@ -39,14 +40,26 @@ def _load_pytorch_model_and_device(model_name: str, hardware: str, *, test_mode:
 
 
 def _sync_cuda(device: str) -> None:
-    """Synchronize CUDA if using GPU."""
+    """Synchronize CUDA if using GPU.
+
+    Args:
+        device: The string representing the device.
+    """
     if device == "cuda" and hasattr(torch, "cuda") and hasattr(torch.cuda, "synchronize"):
         torch.cuda.synchronize()  # pragma: no cover
 
 
 def _run_forward_pass(model: torch.nn.Module, dummy_inputs: object) -> None:
-    """Run a single forward pass."""
-    if model is not None and hasattr(torch, "no_grad"):
+    """Run a single forward pass.
+
+    Args:
+        model: The model.
+        device: The string representing the device.
+
+    Returns:
+        The computed float value.
+    """
+    if hasattr(torch, "no_grad"):
         with torch.no_grad():  # pragma: no cover
             _ = model(dummy_inputs)  # pragma: no cover
 
@@ -54,11 +67,16 @@ def _run_forward_pass(model: torch.nn.Module, dummy_inputs: object) -> None:
 def _get_memory_mb(model: torch.nn.Module, device: str) -> float:
     """Get max memory allocated in MB.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model: The model.
+        device: The string representing the device.
+        batch_size: The number of items to process in a single batch.
+        num_runs: The integer value for num runs.
 
+    Returns:
+        A tuple containing the results.
     """
-    if model is not None and device == "cuda" and hasattr(torch, "cuda") and hasattr(torch.cuda, "max_memory_allocated"):
+    if device == "cuda" and hasattr(torch, "cuda") and hasattr(torch.cuda, "max_memory_allocated"):
         return float(torch.cuda.max_memory_allocated() / (1024 * 1024))  # pragma: no cover
     return 8192.0
 
@@ -70,8 +88,8 @@ def _run_benchmark_pass(model: torch.nn.Module, device: str, batch_size: int, nu
         object: The resulting output from the operation.
 
     """
-    dummy_inputs = torch.zeros((batch_size, 32), dtype=getattr(torch, "long", None))
-    if model is not None and hasattr(dummy_inputs, "to"):
+    dummy_inputs = torch.randint(1, 1000, (batch_size, 32), dtype=getattr(torch, "long", None))
+    if hasattr(dummy_inputs, "to"):
         dummy_inputs = dummy_inputs.to(device)  # pragma: no cover
     _run_forward_pass(model, dummy_inputs)
     _sync_cuda(device)
@@ -107,19 +125,24 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         """Execute function.
 
         Returns:
-            object: Description of return.
+            The execution result.
 
         """
         (model, device) = _load_pytorch_model_and_device(model_name, hardware, test_mode=bool(kwargs.get("test_mode")))
         num_runs = int(str(kwargs.get("num_runs", 5)))
         return _run_benchmark_pass(model, device, batch_size, num_runs)
 
+    if torch is None or AutoModelForCausalLM is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("PyTorch dependencies are missing.")
+
     return run_benchmark_wrapper(
         backend_name="pytorch",
         model_name=model_name,
         hardware=hardware,
         batch_size=batch_size,
-        missing_deps=torch is None or AutoModelForCausalLM is None,
+        missing_deps=False,
         missing_status="mocked_missing_torch",
         benchmark_fn=_run,
     )

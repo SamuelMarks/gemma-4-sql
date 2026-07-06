@@ -1,4 +1,3 @@
-# Copyright 2024
 """PyTorch-specific training pipeline."""
 
 from __future__ import annotations
@@ -26,9 +25,11 @@ with catch_optional_imports():
 def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object, int]:
     """Set up distributed environment.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        distributed_strategy: The string representing the distributed strategy.
 
+    Returns:
+        A tuple containing the results.
     """
     is_distributed = distributed_strategy in {"ddp", "fsdp"}
     dist = None
@@ -50,9 +51,11 @@ def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object,
 def _run_training_epochs(state: TrainerState) -> float:
     """Execute function.
 
-    Returns:
-        object: Description of return.
+    Args:
+        state: The state.
 
+    Returns:
+        The computed float value.
     """
     dataloader = state.dataloader
     epochs = state.epochs
@@ -86,9 +89,13 @@ def _run_training_epochs(state: TrainerState) -> float:
 def _wrap_model_distributed(model: torch.nn.Module, distributed_strategy: str, device_id: int) -> object:
     """Wrap model for distributed training.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model: The model.
+        distributed_strategy: The string representing the distributed strategy.
+        device_id: The integer value for device id.
 
+    Returns:
+        The execution result.
     """
     if distributed_strategy == "ddp":
         ddp_module = importlib.import_module("torch.nn.parallel")
@@ -101,39 +108,19 @@ def _wrap_model_distributed(model: torch.nn.Module, distributed_strategy: str, d
     return model
 
 
-def _run_training_with_fallback(state: TrainerState) -> float:
-    """Execute function.
-
-    Returns:
-        object: Description of return.
-
-    """
-    dataloader = state.dataloader
-    epochs = state.epochs
-    model = state.policy_model
-    optimizer = state.optimizer
-    criterion = state.criterion
-    device = state.device
-    epochs = state.epochs
-    """Run training or fallback to a dummy step if dataloader is invalid.
-
-    Returns:
-        object: The resulting output from the operation.
-
-    """
-    if dataloader is not None and hasattr(dataloader, "__iter__"):
-        return _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, criterion=criterion, device=device))
-    dummy_input = torch.zeros((1, 10), dtype=torch.long, device=device)
-    dummy_target = torch.zeros((1, 10), dtype=torch.long, device=device)
-    out = model(dummy_input)
-    loss = criterion(out.view(-1, out.size(-1)), dummy_target.view(-1))
-    loss.backward()
-    optimizer.step()
-    return 0.35
-
-
 def _cleanup_distributed(dist: object) -> None:
-    """Cleanup distributed environment."""
+    """Cleanup distributed environment.
+
+    Args:
+        model_name: The name of the target model.
+        dataset: The name or path of the dataset.
+        epochs: The integer value for epochs.
+        learning_rate: The float value for learning rate.
+        distributed_strategy: The string representing the distributed strategy.
+
+    Returns:
+        A tuple containing the results.
+    """
     if dist is not None and getattr(dist, "is_initialized", lambda: False)():
         dist.destroy_process_group()
 
@@ -149,8 +136,10 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
         criterion = nn.CrossEntropyLoss()
         data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2, distributed=is_distributed))
         dataloader = data_dict.get("loader", None)
+        if dataloader is None or not hasattr(dataloader, "__iter__"):
+            raise ValueError(f"Invalid dataloader for dataset: {dataset}")
         model.train()
-        final_loss = _run_training_with_fallback(TrainerState(policy_model=model, dataloader=dataloader, epochs=epochs, optimizer=optimizer, criterion=criterion, device=device))
+        final_loss = _run_training_epochs(TrainerState(policy_model=model, dataloader=dataloader, epochs=epochs, optimizer=optimizer, criterion=criterion, device=device))
         _cleanup_distributed(dist=dist_module)
         return "completed", float(final_loss)
     except Exception:
@@ -162,7 +151,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Execute function.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     action = getattr(config, "action", "sft")
@@ -191,7 +180,9 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     final_loss = 0.5
     status = "completed"
     if torch is None or Gemma4ForCausalLM is None or optim is None or (nn is None):
-        return {"backend": "pytorch", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": "mocked_missing_torch", "final_loss": final_loss, "distributed_strategy": distributed_strategy}
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("PyTorch dependencies are missing.")
     try:
         status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, str(distributed_strategy))
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:

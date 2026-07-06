@@ -1,4 +1,3 @@
-# Copyright 2024
 """Core functionality for the layers module."""
 
 from __future__ import annotations
@@ -19,9 +18,12 @@ if TYPE_CHECKING:
 def _make_linear(*args: object, **kwargs: JSONValue) -> object:
     """Docstring for _make_linear.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        *args: Additional positional arguments.
+        **kwargs: Additional keyword arguments.
 
+    Returns:
+        The execution result.
     """
     kwargs.pop("kernel_metadata", None)
     kwargs.pop("bias_metadata", None)
@@ -31,9 +33,12 @@ def _make_linear(*args: object, **kwargs: JSONValue) -> object:
 def _make_embed(*args: object, **kwargs: JSONValue) -> object:
     """Docstring for _make_embed.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        *args: Additional positional arguments.
+        **kwargs: Additional keyword arguments.
 
+    Returns:
+        The execution result.
     """
     kwargs.pop("embedding_metadata", None)
     return nnx.Embed(*args, **kwargs)

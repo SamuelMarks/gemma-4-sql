@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for SDK Chat module."""
 
 from typing import NoReturn as Never

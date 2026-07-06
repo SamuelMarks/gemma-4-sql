@@ -1,4 +1,3 @@
-# Copyright 2024
 """Tests for duckdb support in ETL."""
 
 from unittest.mock import MagicMock
@@ -11,7 +10,10 @@ from gemma_4_sql.type_hints import ETLConfig
 
 def test_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test ETL duckdb missing."""
+    import importlib
+
     jax_etl = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
+    jax_etl = importlib.reload(jax_etl)
     import sys
 
     sys.modules["gemma_4_sql.backends.common_data"].duckdb = None

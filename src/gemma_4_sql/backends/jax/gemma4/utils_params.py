@@ -27,12 +27,12 @@ except ImportError:
 def map_to_jax_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapType | tuple[None, None]:
     """Map a safetensors key to exactly one JAX key & transform, else warn/error.
 
+    Args:
+        mapping: A mapping representing mapping.
+        source_key: The string representing the source key.
+
     Returns:
-        object: The resulting output from the operation.
-
-    Raises:
-        ValueError: If the operation encounters an unexpected ValueError.
-
+        A tuple containing the results.
     """
     subs = [(re.sub(pat, repl, source_key), transform) for (pat, (repl, transform)) in mapping.items() if re.match(pat, source_key)]
     if not subs:
@@ -48,9 +48,11 @@ def map_to_jax_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapTyp
 def stoi(s: str) -> int | str:
     """Convert a string to an int if possible, otherwise return the string.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        s: The string representing the s.
 
+    Returns:
+        The execution result.
     """
     try:
         return int(s)
@@ -61,9 +63,12 @@ def stoi(s: str) -> int | str:
 def _apply_transform(tensor: jnp.ndarray, transform: TransformType) -> jnp.ndarray:
     """Apply transformation to tensor.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        tensor: The input tensor.
+        transform: The transform.
 
+    Returns:
+        The resulting tensor array.
     """
     if transform is None:
         return tensor
@@ -151,7 +156,7 @@ def _get_model_and_state(model_cls: object, cfg: object) -> tuple[object, dict]:
     """Helper to instantiate the model and extract its state.
 
     Returns:
-        object: Description of return.
+        The execution result.
 
     """
     nnx = __import__("flax", fromlist=["nnx"]).nnx
@@ -192,6 +197,6 @@ def create_model_from_safe_tensors(file_dir: str, model_cls: object, cfg: object
     try:
         nnx = __import__("flax", fromlist=["nnx"]).nnx
         nnx.update(model, state)
-    except (ValueError, TypeError, KeyError, AttributeError):
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError):
         logger.exception("Failed to update model with loaded state")
     return model

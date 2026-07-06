@@ -1,6 +1,5 @@
 """Provide module docstring."""
 
-# Copyright 2024
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -15,18 +14,15 @@ def generic_dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: Ten
     """Generic computation of the Direct Preference Optimization (DPO) loss.
 
     Args:
-    ----
-        policy_chosen_logps: Log probabilities of chosen responses from policy model.
-        policy_rejected_logps: Log probabilities of rejected responses from policy model.
-        ref_chosen_logps: Log probabilities of chosen responses from reference model.
-        ref_rejected_logps: Log probabilities of rejected responses from reference model.
-        beta: Temperature parameter.
-        log_sigmoid_fn: Backend-specific log-sigmoid function.
+        policy_chosen_logps: Log probabilities of the chosen completions from the policy model.
+        policy_rejected_logps: Log probabilities of the rejected completions from the policy model.
+        ref_chosen_logps: Log probabilities of the chosen completions from the reference model.
+        ref_rejected_logps: Log probabilities of the rejected completions from the reference model.
+        beta: The beta parameter controlling the KL penalty.
+        log_sigmoid_fn: The log sigmoid fn.
 
     Returns:
-    -------
-        A tuple of (loss, chosen_rewards, rejected_rewards).
-
+        A tuple containing the results.
     """
     pi_logratios = policy_chosen_logps - policy_rejected_logps
     ref_logratios = ref_chosen_logps - ref_rejected_logps
