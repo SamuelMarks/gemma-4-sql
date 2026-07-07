@@ -1,5 +1,10 @@
 """Provide module docstring."""
 
+import pytest
+
+pytest.importorskip("jax")
+pytest.importorskip("flax")
+
 import jax
 import jax.numpy as jnp
 from flax import nnx

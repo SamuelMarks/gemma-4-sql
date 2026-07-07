@@ -6,6 +6,8 @@ import typing
 
 import pytest
 
+pytest.importorskip("torch")
+
 import gemma_4_sql.backends.pytorch.export as ex
 import gemma_4_sql.backends.pytorch.train as tr
 from gemma_4_sql.backends.pytorch import etl

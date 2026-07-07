@@ -2,8 +2,12 @@
 
 import contextlib
 
-import jax.numpy as jnp
 import pytest
+
+pytest.importorskip("jax")
+pytest.importorskip("flax")
+
+import jax.numpy as jnp
 
 from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, create_model_from_safe_tensors
 

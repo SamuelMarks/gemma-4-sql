@@ -2,9 +2,13 @@
 
 from typing import NoReturn as Never
 
+import pytest
+
+pytest.importorskip("jax")
+pytest.importorskip("flax")
+
 import jax
 import jax.numpy as jnp
-import pytest
 
 from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
 

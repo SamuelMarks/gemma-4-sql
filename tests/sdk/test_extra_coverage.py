@@ -2,8 +2,11 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import numpy as np
 import pytest
+
+pytest.importorskip("numpy")
+
+import numpy as np
 
 from gemma_4_sql.sdk.adapters.base import DatabaseAdapter
 from gemma_4_sql.sdk.agent import AgentContext, _process_single_prompt

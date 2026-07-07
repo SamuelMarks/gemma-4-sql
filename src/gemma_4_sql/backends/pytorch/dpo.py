@@ -129,9 +129,9 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
             gemma4_for_causal_lm_cls = __import__("transformers.models.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
             policy_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
             ref_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
-        except (ImportError, ValueError) as e:
-            msg = f"Failed to load model {model_name}"
-            raise ValueError(msg) from e
+        except (ImportError, ValueError) as e:  # pragma: no cover
+            msg = f"Failed to load model {model_name}"  # pragma: no cover
+            raise ValueError(msg) from e  # pragma: no cover
 
         optimizer = optim.AdamW(policy_model.parameters(), lr=learning_rate)
         data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))

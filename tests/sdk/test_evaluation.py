@@ -11,6 +11,13 @@ def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     jax_agent = get_backend("jax")
     monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+
+    def raise_err(*a, **k):
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Mocked missing JAX")
+
+    monkeypatch.setattr(jax_agent, "build_dataloader", raise_err)
     with pytest.raises(DependencyMissingError):
         evaluate("model1", "data1", "jax")
 

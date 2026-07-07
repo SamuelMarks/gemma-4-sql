@@ -19,7 +19,7 @@ FastAPI = None
 JSONResponse = None
 uvicorn = None
 
-with catch_optional_imports():
+with catch_optional_imports():  # pragma: no cover
     import uvicorn
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse

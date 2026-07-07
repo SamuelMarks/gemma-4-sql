@@ -1,7 +1,11 @@
 """Provide module docstring."""
 
-import jax.numpy as jnp
 import pytest
+
+pytest.importorskip("jax")
+pytest.importorskip("flax")
+
+import jax.numpy as jnp
 
 from gemma_4_sql.backends.jax.gemma4.rope import apply_rope
 

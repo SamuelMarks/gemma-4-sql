@@ -41,8 +41,11 @@ def test_benchmark_maxtext() -> object:
         raise AssertionError
 
 
-def test_benchmark_pytorch() -> None:
+def test_benchmark_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test benchmark for pytorch missing deps."""
+    import gemma_4_sql.backends.pytorch.benchmark as bm
+
+    monkeypatch.setattr(bm, "torch", None)
     from gemma_4_sql.exceptions import DependencyMissingError
 
     with pytest.raises(DependencyMissingError):

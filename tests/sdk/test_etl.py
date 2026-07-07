@@ -25,9 +25,18 @@ def test_route_backend_pytorch() -> None:
         raise AssertionError
 
 
-def test_etl_pretrain() -> None:
+def test_etl_pretrain(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test etl_pretrain helper."""
     config = ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False)
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    jax_agent = get_backend("jax")
+
+    def raise_err(*a, **k):
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Mocked missing JAX")
+
+    monkeypatch.setattr(jax_agent, "build_dataloader", raise_err)
     with pytest.raises(DependencyMissingError):
         etl_pretrain(config, backend="jax")
 

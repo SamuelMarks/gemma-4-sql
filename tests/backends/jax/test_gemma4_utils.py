@@ -2,10 +2,14 @@
 
 import contextlib
 
+import pytest
+
+pytest.importorskip("jax")
+pytest.importorskip("flax")
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 import gemma_4_sql.backends.jax.gemma4.utils_params as ut
 from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, assign_weights_from_eval_shape, create_model_from_safe_tensors, map_to_jax_key, stoi

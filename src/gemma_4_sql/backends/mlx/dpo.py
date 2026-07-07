@@ -18,9 +18,9 @@ nn = None
 optim = None
 functional = None
 with catch_optional_imports():
-    import mlx
-    import mlx.core as mx
-    import mlx.nn as mx_nn
+    import mlx  # pragma: no cover
+    import mlx.core as mx  # pragma: no cover
+    import mlx.nn as mx_nn  # pragma: no cover
     from mlx import nn, optim  # pragma: no cover
     from mlx.nn import functional  # pragma: no cover
     from mlx_lm import load  # pragma: no cover
@@ -87,12 +87,7 @@ def _run_training_epochs(state: TrainerState) -> float:
     ref_model = state.ref_model  # pragma: no cover
     optimizer = state.optimizer  # pragma: no cover
     beta = state.beta  # pragma: no cover
-    """Run training epochs.
-
-    Returns:
-        object: The resulting output from the operation.
-
-    """
+    # Run training epochs.
     final_loss = 0.0  # pragma: no cover
     for _epoch in range(epochs):  # pragma: no cover
         epoch_loss = 0.0  # pragma: no cover

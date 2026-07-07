@@ -36,12 +36,7 @@ def _run_training_epochs(state: TrainerState) -> float:
     model = state.model  # pragma: no cover
     optimizer = state.optimizer  # pragma: no cover
     loss_and_grad_fn = state.loss_and_grad_fn  # pragma: no cover
-    """Run training epochs.
-
-    Returns:
-        object: The resulting output from the operation.
-
-    """
+    # Run training epochs.
     final_loss = 0.0  # pragma: no cover
     for _epoch in range(epochs):  # pragma: no cover
         epoch_loss = 0.0  # pragma: no cover

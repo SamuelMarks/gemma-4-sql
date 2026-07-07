@@ -22,13 +22,16 @@ def test_quantize_jax() -> None:
         raise AssertionError
 
 
-def test_quantize_pytorch() -> None:
+def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function test_quantize_pytorch.
 
     Raises:
         AssertionError: Description.
 
     """
+    import gemma_4_sql.backends.pytorch.quantize as pt_q
+
+    monkeypatch.setattr(pt_q, "torch", None)
     with pytest.raises(DependencyMissingError):
         quantize_model("model2", "int4", backend="pytorch")
 
@@ -47,8 +50,11 @@ def test_quantize_keras() -> None:
         raise AssertionError
 
 
-def test_quantize_maxtext() -> None:
+def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function test_quantize_maxtext."""
+    import gemma_4_sql.backends.maxtext.quantize as mx_q
+
+    monkeypatch.setattr(mx_q, "jax", None)
     with pytest.raises(DependencyMissingError):
         quantize_model("model4", "gguf", backend="maxtext")
 
