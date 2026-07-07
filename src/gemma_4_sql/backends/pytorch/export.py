@@ -46,7 +46,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
         gemma4_for_causal_lm_cls = __import__("transformers.models.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
         model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
         tensors = model.state_dict()
-    except (ImportError, ValueError) as e:
+    except (ImportError, ValueError, OSError) as e:
         msg = f"Failed to load model {model_name}"
         raise ValueError(msg) from e
     file_path = Path(export_path) / "model.safetensors"

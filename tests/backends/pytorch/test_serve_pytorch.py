@@ -116,7 +116,10 @@ def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
             return decorator
 
     monkeypatch.setattr(srv, "FastAPI", MockFastAPI)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", MockFastAPI)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
     monkeypatch.setattr(srv, "Request", mock.MagicMock())
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", MockFastAPI)
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
     if not res["backend"] == "pytorch":
@@ -156,6 +159,8 @@ def test_serve_model_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
             return decorator
 
     monkeypatch.setattr(srv, "FastAPI", MockFastAPI)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", MockFastAPI)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
 
     def raise_err(*_args: object, **_kwargs: object) -> object:
         """Execute function.
