@@ -32,11 +32,11 @@ def _pad_batch(batch_inputs: list[list[int]], batch_targets: list[list[int]]) ->
     Returns:
         A dictionary containing the results.
     """
-    max_len_in = max(len(x) for x in batch_inputs)  # pragma: no cover
-    max_len_tgt = max(len(x) for x in batch_targets)  # pragma: no cover
-    padded_in = [x + [0] * (max_len_in - len(x)) for x in batch_inputs]  # pragma: no cover
-    padded_tgt = [x + [0] * (max_len_tgt - len(x)) for x in batch_targets]  # pragma: no cover
-    return {"inputs": padded_in, "targets": padded_tgt}  # pragma: no cover
+    max_len_in = max(len(x) for x in batch_inputs)
+    max_len_tgt = max(len(x) for x in batch_targets)
+    padded_in = [x + [0] * (max_len_in - len(x)) for x in batch_inputs]
+    padded_tgt = [x + [0] * (max_len_tgt - len(x)) for x in batch_targets]
+    return {"inputs": padded_in, "targets": padded_tgt}
 
 
 class MLXDataLoader:
@@ -50,9 +50,9 @@ class MLXDataLoader:
             tok: The tok.
             bs: The integer value for bs.
         """
-        self.ds = ds  # pragma: no cover
-        self.tok = tok  # pragma: no cover
-        self.bs = bs  # pragma: no cover
+        self.ds = ds
+        self.tok = tok
+        self.bs = bs
 
     def __iter__(self) -> typing.Iterator[JSONDict]:
         """Execute logic.
@@ -61,19 +61,19 @@ class MLXDataLoader:
             object: The yielded item during generation.
 
         """
-        batch_inputs = []  # pragma: no cover
-        batch_targets = []  # pragma: no cover
-        for item in self.ds:  # pragma: no cover
-            prompt = item.get("sql_prompt", item.get("question", ""))  # pragma: no cover
-            target = item.get("sql", item.get("query", ""))  # pragma: no cover
-            batch_inputs.append(self.tok.encode(str(prompt)))  # pragma: no cover
-            batch_targets.append(self.tok.encode(str(target)))  # pragma: no cover
-            if len(batch_inputs) == self.bs:  # pragma: no cover
-                yield _pad_batch(batch_inputs, batch_targets)  # pragma: no cover
-                batch_inputs = []  # pragma: no cover
-                batch_targets = []  # pragma: no cover
-        if batch_inputs:  # pragma: no cover
-            yield _pad_batch(batch_inputs, batch_targets)  # pragma: no cover
+        batch_inputs = []
+        batch_targets = []
+        for item in self.ds:
+            prompt = item.get("sql_prompt", item.get("question", ""))
+            target = item.get("sql", item.get("query", ""))
+            batch_inputs.append(self.tok.encode(str(prompt)))
+            batch_targets.append(self.tok.encode(str(target)))
+            if len(batch_inputs) == self.bs:
+                yield _pad_batch(batch_inputs, batch_targets)
+                batch_inputs = []
+                batch_targets = []
+        if batch_inputs:
+            yield _pad_batch(batch_inputs, batch_targets)
 
 
 def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, duckdb_table: str | None) -> object:
@@ -88,9 +88,9 @@ def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, d
     Returns:
         The loaded dataset.
     """
-    if duckdb_path and duckdb_table:  # pragma: no cover
-        return _load_duckdb_dataset(duckdb_path, duckdb_table)  # pragma: no cover
-    return datasets.load_dataset(dataset_name, split=split)  # pragma: no cover
+    if duckdb_path and duckdb_table:
+        return _load_duckdb_dataset(duckdb_path, duckdb_table)
+    return datasets.load_dataset(dataset_name, split=split)
 
 
 def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
@@ -115,7 +115,7 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
 
         raise DependencyMissingError(f"Missing datasets. Cannot load {dataset_name}.")
 
-    hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)  # pragma: no cover
-    tokenizer = SQLTokenizer(model_name=tokenizer_name)  # pragma: no cover
-    dataloader = MLXDataLoader(hf_dataset, tokenizer, batch_size)  # pragma: no cover
-    return {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "mlx", "distributed": distributed, "loader": dataloader}  # pragma: no cover
+    hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)
+    tokenizer = SQLTokenizer(model_name=tokenizer_name)
+    dataloader = MLXDataLoader(hf_dataset, tokenizer, batch_size)
+    return {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "mlx", "distributed": distributed, "loader": dataloader}

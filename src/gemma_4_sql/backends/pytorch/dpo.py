@@ -39,13 +39,6 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
     if torch is None or functional is None:
         return (0.0, 0.0, 0.0)
     return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, functional.logsigmoid)
-    pi_logratios = policy_chosen_logps - policy_rejected_logps
-    ref_logratios = ref_chosen_logps - ref_rejected_logps
-    logits = pi_logratios - ref_logratios
-    loss = -functional.logsigmoid(beta * logits)
-    chosen_rewards = beta * (policy_chosen_logps - ref_chosen_logps).detach()
-    rejected_rewards = beta * (policy_rejected_logps - ref_rejected_logps).detach()
-    return (loss.mean(), chosen_rewards.mean(), rejected_rewards.mean())  # pragma: no cover
 
 
 def _run_dpo_step(policy_model: object, ref_model: object, optimizer: object, batch: JSONDict, beta: float) -> object:
@@ -129,9 +122,9 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
             gemma4_for_causal_lm_cls = __import__("transformers.models.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
             policy_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
             ref_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
-        except (ImportError, ValueError) as e:  # pragma: no cover
-            msg = f"Failed to load model {model_name}"  # pragma: no cover
-            raise ValueError(msg) from e  # pragma: no cover
+        except (ImportError, ValueError) as e:
+            msg = f"Failed to load model {model_name}"
+            raise ValueError(msg) from e
 
         optimizer = optim.AdamW(policy_model.parameters(), lr=learning_rate)
         data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))

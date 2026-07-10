@@ -13,7 +13,7 @@ You must first process a large-scale SQL dataset into tokens. We use Google's `g
 
 ```bash
 # Normalize the dataset for your chosen backend
-gemma-4-sql etl pretrain --dataset seeklhy/SynSQL-2.5M --batch-size 256 --backend jax
+gemma-4-sql etl pretrain --dataset my-custom-dataset --batch-size 256 --backend jax
 ```
 
 ### Step 2: Train from Scratch
@@ -25,7 +25,7 @@ Execute the `train` command. This will instantiate an uninitialized model and be
 ```bash
 gemma-4-sql train \
     --model gemma-4 \
-    --dataset seeklhy/SynSQL-2.5M \
+    --dataset my-custom-dataset \
     --epochs 10 \
     --learning-rate 1e-4 \
     --backend jax
@@ -36,7 +36,7 @@ gemma-4-sql train \
 ```bash
 gemma-4-sql train \
     --model gemma-4 \
-    --dataset seeklhy/SynSQL-2.5M \
+    --dataset my-custom-dataset \
     --epochs 10 \
     --learning-rate 1e-4 \
     --backend maxtext
@@ -47,7 +47,7 @@ gemma-4-sql train \
 ```bash
 gemma-4-sql train \
     --model gemma-4 \
-    --dataset seeklhy/SynSQL-2.5M \
+    --dataset my-custom-dataset \
     --epochs 10 \
     --learning-rate 1e-4 \
     --backend keras
@@ -58,7 +58,7 @@ gemma-4-sql train \
 ```bash
 gemma-4-sql train \
     --model gemma-4 \
-    --dataset seeklhy/SynSQL-2.5M \
+    --dataset my-custom-dataset \
     --epochs 10 \
     --learning-rate 1e-4 \
     --backend pytorch
@@ -69,7 +69,7 @@ For multi-GPU or multi-node PyTorch training, use `torchrun` along with the `--d
 ```bash
 torchrun --nproc_per_node=8 -m gemma_4_sql.cli train \
     --model gemma-4 \
-    --dataset seeklhy/SynSQL-2.5M \
+    --dataset my-custom-dataset \
     --backend pytorch \
     --distributed-strategy fsdp
 ```
@@ -82,7 +82,7 @@ Instead of random initialization, you take Google's foundation Gemma-4 weights (
 
 ### Step 1: Data Preparation
 ```bash
-gemma-4-sql etl pretrain --dataset b-mc2/sql-create-context --batch-size 128 --backend pytorch
+gemma-4-sql etl pretrain --dataset my-custom-dataset --batch-size 128 --backend pytorch
 ```
 
 ### Step 2: Run Continuous Pretraining
@@ -91,22 +91,22 @@ Use the `pretrain` command. This loads existing weights and continues the learni
 
 **JAX:**
 ```bash
-gemma-4-sql pretrain --model google/gemma-4 --dataset b-mc2/sql-create-context --backend jax
+gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend jax
 ```
 
 **JAX (MaxText):**
 ```bash
-gemma-4-sql pretrain --model google/gemma-4 --dataset b-mc2/sql-create-context --backend maxtext
+gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend maxtext
 ```
 
 **Keras:**
 ```bash
-gemma-4-sql pretrain --model google/gemma-4 --dataset b-mc2/sql-create-context --backend keras
+gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend keras
 ```
 
 **PyTorch:**
 ```bash
-gemma-4-sql pretrain --model google/gemma-4 --dataset b-mc2/sql-create-context --backend pytorch
+gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend pytorch
 ```
 
 ---
@@ -118,7 +118,7 @@ Post-training is the final alignment phase. This includes Supervised Fine-Tuning
 ### Step 1: Data Preparation (SFT & DPO)
 ```bash
 # ETL for Instruction Tuning
-gemma-4-sql etl sft --dataset gretelai/synthetic_text_to_sql --batch-size 64 --backend jax
+gemma-4-sql etl sft --dataset my-custom-sft-dataset --batch-size 64 --backend jax
 
 # ETL for DPO (requires chosen/rejected pairs)
 gemma-4-sql etl posttrain --dataset my_custom_dpo_dataset --batch-size 32 --backend jax
@@ -128,22 +128,22 @@ gemma-4-sql etl posttrain --dataset my_custom_dpo_dataset --batch-size 32 --back
 
 **JAX:**
 ```bash
-gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset gretelai/synthetic_text_to_sql --backend jax
+gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset my-custom-sft-dataset --backend jax
 ```
 
 **JAX (MaxText):**
 ```bash
-gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset gretelai/synthetic_text_to_sql --backend maxtext
+gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset my-custom-sft-dataset --backend maxtext
 ```
 
 **Keras:**
 ```bash
-gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset gretelai/synthetic_text_to_sql --backend keras
+gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset my-custom-sft-dataset --backend keras
 ```
 
 **PyTorch:**
 ```bash
-gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset gretelai/synthetic_text_to_sql --backend pytorch
+gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset my-custom-sft-dataset --backend pytorch
 ```
 
 ### Step 3: Direct Preference Optimization (DPO)
@@ -236,3 +236,12 @@ If you have custom evaluation scripts running alongside your training jobs, you 
 # Push custom evaluation metrics to the active TB directory
 gemma-4-sql log --step 1000 --metrics "eval_loss=0.3,execution_accuracy=0.89" --log-dir "./logs" --backend maxtext
 ```
+
+
+---
+
+## Automated Infrastructure Provisioning (Libscript)
+
+To automatically provision and orchestrate this hardware (including DNS, network, firewall, storage, and nodes) across Google Cloud (or AWS/Azure), `gemma-4-sql` relies on the `libscript` multicloud abstractions. 
+
+For an exhaustive, step-by-step guide on using `libscript` to orchestrate TFRC TPU VMs and GKE clusters (including queuing and spot instance support), please see **[DEPLOY_TO_TPU.md](./DEPLOY_TO_TPU.md)**.

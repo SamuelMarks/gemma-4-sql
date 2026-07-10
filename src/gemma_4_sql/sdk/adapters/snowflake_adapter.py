@@ -15,6 +15,13 @@ snowflake = LazyLoader("snowflake.connector").get_module()
 class SnowflakeAdapter(DatabaseAdapter):
     """Adapter for Snowflake."""
 
+    @property
+    def error_classes(self) -> tuple[type[Exception], ...]:
+        """Return the exception classes."""
+        import snowflake.connector
+
+        return (snowflake.connector.errors.Error,)
+
     def connect(self) -> object:
         """Connect synchronously.
 
@@ -22,8 +29,8 @@ class SnowflakeAdapter(DatabaseAdapter):
             The execution result.
         """
         if snowflake is None:
-            msg = "snowflake-connector-python is required."  # pragma: no cover
-            raise ImportError(msg)  # pragma: no cover
+            msg = "snowflake-connector-python is required."
+            raise ImportError(msg)
         return snowflake.connector.connect(**self.db_kwargs)
 
     async def connect_async(self) -> object:
@@ -38,12 +45,12 @@ class SnowflakeAdapter(DatabaseAdapter):
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        cursor = self.conn.cursor()  # pragma: no cover
-        try:  # pragma: no cover
-            cursor.execute(ddl)  # pragma: no cover
-            self.conn.commit()  # pragma: no cover
-        finally:  # pragma: no cover
-            cursor.close()  # pragma: no cover
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(ddl)
+            self.conn.commit()
+        finally:
+            cursor.close()
 
     async def execute_with_feedback_async(self, _query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
         """Execute asynchronously with feedback.

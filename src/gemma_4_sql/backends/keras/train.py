@@ -16,7 +16,7 @@ keras = None
 tf = None
 with catch_optional_imports():
     import keras
-    import tensorflow as tf  # pragma: no cover
+    import tensorflow as tf
 
 
 def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool) -> tuple[str, float]:
@@ -35,7 +35,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool) 
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
     dataloader = data_dict.get("loader", None)
     if dataloader is None or not hasattr(dataloader, "__iter__"):
-        raise ValueError(f"Invalid dataloader for dataset: {dataset}")  # pragma: no cover
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
     history = model.fit(dataloader, epochs=epochs)
     final_loss = float(history.history["loss"][-1]) if "loss" in history.history else 0.0

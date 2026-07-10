@@ -32,7 +32,7 @@ def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, b
         full_prompt += f"user: {new_prompt}\nassistant: "
         result = backend_impl.generate_sql(model_name, full_prompt, **kwargs)
         if "sql" not in result:
-            raise ValueError(f"Backend {backend} did not return SQL.")  # pragma: no cover
+            raise ValueError(f"Backend {backend} did not return SQL.")
         response = str(result["sql"])
         status = f"success_{backend}_chat"
     except Exception as e:

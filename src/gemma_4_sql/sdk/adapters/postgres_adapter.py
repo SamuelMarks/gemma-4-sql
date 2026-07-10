@@ -16,6 +16,18 @@ asyncpg = LazyLoader("asyncpg").get_module()
 class PostgresAdapter(DatabaseAdapter):
     """Adapter for PostgreSQL."""
 
+    @property
+    def error_classes(self) -> tuple[type[Exception], ...]:
+        """Return the exception classes."""
+        classes = []
+        if psycopg2 is not None:
+            classes.append(psycopg2.Error)
+        if asyncpg is not None:
+            classes.append(asyncpg.PostgresError)
+        if not classes:
+            classes.append(Exception)
+        return tuple(classes)
+
     def connect(self) -> psycopg2.extensions.connection:
         """Connect synchronously.
 
@@ -23,8 +35,8 @@ class PostgresAdapter(DatabaseAdapter):
             The execution result.
         """
         if psycopg2 is None:
-            msg = "psycopg2 is required. Install with `pip install psycopg2-binary`."  # pragma: no cover
-            raise ImportError(msg)  # pragma: no cover
+            msg = "psycopg2 is required. Install with `pip install psycopg2-binary`."
+            raise ImportError(msg)
         if self.db_path and self.db_path != ":memory:":
             return psycopg2.connect(self.db_path, **self.db_kwargs)
         return psycopg2.connect(**self.db_kwargs)
@@ -40,20 +52,20 @@ class PostgresAdapter(DatabaseAdapter):
 
         """
         if asyncpg is None:
-            msg = "asyncpg is required."  # pragma: no cover
-            raise ImportError(msg)  # pragma: no cover
+            msg = "asyncpg is required."
+            raise ImportError(msg)
         if self.db_path and self.db_path != ":memory:":
             return await asyncpg.connect(self.db_path, **self.db_kwargs)
         return await asyncpg.connect(**self.db_kwargs)
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        cursor = self.conn.cursor()  # pragma: no cover
-        try:  # pragma: no cover
-            cursor.execute(ddl)  # pragma: no cover
-            self.conn.commit()  # pragma: no cover
-        finally:  # pragma: no cover
-            cursor.close()  # pragma: no cover
+        cursor = self.conn.cursor()
+        try:
+            cursor.execute(ddl)
+            self.conn.commit()
+        finally:
+            cursor.close()
 
     async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
         """Execute asynchronously with feedback.
@@ -71,7 +83,7 @@ class PostgresAdapter(DatabaseAdapter):
             finally:
                 if hasattr(async_conn, "close"):
                     await async_conn.close()
-        except Exception as e:  # noqa: BLE001
+        except self.error_classes as e:
             return (False, [], str(e))
 
     async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
@@ -89,6 +101,6 @@ class PostgresAdapter(DatabaseAdapter):
             finally:
                 if hasattr(async_conn, "close"):
                     await async_conn.close()
-        except Exception as e:  # noqa: BLE001
+        except self.error_classes as e:
             logger.debug("Async Query execution failed: %s", e)
             return []

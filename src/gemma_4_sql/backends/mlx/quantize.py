@@ -16,7 +16,7 @@ BitsAndBytesConfig = None
 AutoModelForCausalLM = None
 with catch_optional_imports():
     import mlx
-    from transformers import AutoModelForCausalLM, BitsAndBytesConfig  # pragma: no cover
+    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
 
 def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
@@ -33,7 +33,7 @@ def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("MLX dependencies are missing.")
-    return quantize_model_wrapper(  # pragma: no cover
+    return quantize_model_wrapper(
         backend_name="mlx",
         model_name=model_name,
         method=method,

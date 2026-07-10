@@ -221,3 +221,45 @@ def test_rag_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         rag = __import__("gemma_4_sql.sdk.rag", fromlist=[""])
         assert rag.SentenceTransformer is None
         assert rag.cosine_similarity is None
+
+
+def test_rag_no_relevant_tables(monkeypatch):
+    import gemma_4_sql.sdk.rag as rg
+
+    monkeypatch.setattr(rg, "MIN_SIMILARITY", 100.0)
+    schema = {"users": ["id"], "orders": ["id"]}
+
+    class MockModel:
+        def encode(self, x):
+            return [[1.0]]
+
+    monkeypatch.setattr(rg, "SentenceTransformer", lambda *a, **k: MockModel())
+
+    class MockSim:
+        def argsort(self):
+            return [0, 1]
+
+        def __getitem__(self, i):
+            return 0.5
+
+    monkeypatch.setattr(rg, "cosine_similarity", lambda a, b: [MockSim()])
+    res = rg._semantic_search("hi", schema, ["users", "orders"], 2)
+    assert len(res) > 0
+
+
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
+
+
+def test_rag_semantic_no_relevant() -> None:
+    """Test rag semantic no relevant."""
+    mock_st = MagicMock()
+    mock_st.return_value.encode.return_value = np.array([[1.0]])
+
+    with patch("gemma_4_sql.sdk.rag.SentenceTransformer", mock_st), patch("gemma_4_sql.sdk.rag.cosine_similarity", return_value=np.array([[0.0, 0.0]])):
+        schema = {"t1": ["c1"], "t2": ["c2"]}
+        res = retrieve_relevant_schema("prompt", schema)
+        assert "Table: t1" in res
+        assert "Table: t2" in res

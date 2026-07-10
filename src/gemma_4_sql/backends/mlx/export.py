@@ -28,15 +28,15 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     if mx is None:
         raise RuntimeError("MLX is not installed, cannot export model.")
 
-    try:  # pragma: no cover
-        load = __import__("mlx_lm", fromlist=["load"]).load  # pragma: no cover
-        (model, _) = load(model_name)  # pragma: no cover
-        tensors = dict(model.parameters())  # pragma: no cover
-    except (ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError) as e:  # pragma: no cover
-        raise ValueError(f"Failed to load MLX model {model_name}") from e  # pragma: no cover
-    # pragma: no cover
-    file_path = Path(export_path) / "model.safetensors"  # pragma: no cover
-    mx.save_safetensors(str(file_path), tensors)  # pragma: no cover
-    status = "exported_with_safetensors"  # pragma: no cover
-    # pragma: no cover
-    return {"backend": "mlx", "model": model_name, "export_path": export_path, "file_path": file_path, "status": status, "format": "safetensors"}  # pragma: no cover
+    try:
+        load = __import__("mlx_lm", fromlist=["load"]).load
+        (model, _) = load(model_name)
+        tensors = dict(model.parameters())
+    except (ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError) as e:
+        raise ValueError(f"Failed to load MLX model {model_name}") from e
+
+    file_path = Path(export_path) / "model.safetensors"
+    mx.save_safetensors(str(file_path), tensors)
+    status = "exported_with_safetensors"
+
+    return {"backend": "mlx", "model": model_name, "export_path": export_path, "file_path": file_path, "status": status, "format": "safetensors"}

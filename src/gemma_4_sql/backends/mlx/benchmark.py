@@ -16,7 +16,7 @@ mlx = None
 AutoModelForCausalLM = None
 with catch_optional_imports():
     import mlx
-    from transformers import AutoModelForCausalLM  # pragma: no cover
+    from transformers import AutoModelForCausalLM
 
 
 def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[ModelType, str]:
@@ -31,12 +31,12 @@ def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: boo
         A tuple containing the results.
     """
     if test_mode:
-        return (None, "cpu")  # pragma: no cover
+        return (None, "cpu")
     model = AutoModelForCausalLM.from_pretrained(model_name)
     device = "cuda" if hasattr(mlx, "cuda") and mlx.cuda.is_available() and (hardware != "cpu") else "cpu"
-    if hasattr(model, "to"):  # pragma: no cover
+    if hasattr(model, "to"):
         model.to(device)
-    if hasattr(model, "eval"):  # pragma: no cover
+    if hasattr(model, "eval"):
         model.eval()
     return (model, device)
 
@@ -61,7 +61,7 @@ def _run_forward_pass(model: object, dummy_inputs: object) -> None:
     Returns:
         The computed float value.
     """
-    if model is not None and hasattr(mlx, "no_grad"):  # pragma: no cover
+    if model is not None and hasattr(mlx, "no_grad"):
         with mlx.no_grad():
             _ = model(dummy_inputs)
 
@@ -91,7 +91,7 @@ def _run_benchmark_pass(model: object, device: str, batch_size: int, num_runs: i
 
     """
     dummy_inputs = mlx.zeros((batch_size, 32), dtype=getattr(mlx, "long", None))
-    if model is not None and hasattr(dummy_inputs, "to"):  # pragma: no cover
+    if model is not None and hasattr(dummy_inputs, "to"):
         dummy_inputs = dummy_inputs.to(device)
     _run_forward_pass(model, dummy_inputs)
     _sync_cuda(device)

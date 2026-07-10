@@ -2,7 +2,7 @@
 
 `gemma-4-sql` is built with a highly modular and backend-agnostic architecture. Its core philosophy is to provide a single, unified interface for building state-of-the-art Text-to-SQL models while seamlessly delegating the heavy lifting (training, execution, distributed computing) to specialized backends.
 
-This architecture is optimized for environments spanning from local experimentation (PyTorch, Keras) to massive supercomputer scale (JAX, MaxText on Google Cloud TPUs).
+This architecture is optimized for environments spanning from local experimentation (PyTorch, Keras) to massive supercomputer scale (JAX, MaxText on Google Cloud TPUs provisioned dynamically via libscript).
 
 ---
 
@@ -36,7 +36,7 @@ Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`) implements identical 
 
 ### 2.1 ETL Pipeline (The `grain` Integration)
 Data loading at scale is a massive bottleneck. We use **Google Grain**, a high-performance dataloader built for distributed training.
-1.  **Datasets:** We natively connect to Hugging Face datasets (e.g., `seeklhy/SynSQL-2.5M`, `xlangai/spider2-lite`).
+1.  **Datasets:** We natively connect to Hugging Face datasets (e.g., `my-custom-dataset`, `my-custom-dpo-dataset`).
 2.  **Transformations:** Datasets pass through a series of `MapTransform` pipelines.
 3.  **Target Formats:** The pipeline normalizes the text into integer sequences and produces dataset shards tailored to the specific backend:
     *   **JAX/MaxText:** Yields structures matching `JAXDistributed` expectations (sharded arrays).

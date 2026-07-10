@@ -74,7 +74,7 @@ def log_metrics_cmd(args: argparse.Namespace) -> None:
     Args:
         args: Parsed command-line arguments containing command-specific options."""
     metrics_dict = {}
-    if args.metrics:  # pragma: no cover
+    if args.metrics:
         for m in args.metrics.split(","):
             (k, v) = m.split("=")
             metrics_dict[k.strip()] = float(v.strip())

@@ -49,14 +49,14 @@ The ETL process standardizes Hugging Face datasets into optimized formats using 
 ### CLI
 
 ```bash
-# Pretrain: Extract from seeklhy/SynSQL-2.5M
-gemma-4-sql etl pretrain --dataset seeklhy/SynSQL-2.5M --batch-size 32 --backend jax
+# Pretrain: Extract from my-custom-dataset
+gemma-4-sql etl pretrain --dataset my-custom-dataset --batch-size 32 --backend jax
 
 # SFT: Supervised Fine-Tuning ETL
-gemma-4-sql etl sft --dataset gretelai/synthetic_text_to_sql --batch-size 16 --backend keras
+gemma-4-sql etl sft --dataset my-custom-sft-dataset --batch-size 16 --backend keras
 
 # Posttrain / RLHF ETL
-gemma-4-sql etl posttrain --dataset xlangai/spider2-lite --batch-size 8 --backend maxtext
+gemma-4-sql etl posttrain --dataset my-custom-dpo-dataset --batch-size 8 --backend maxtext
 
 # ETL using DuckDB (bypassing Hugging Face datasets)
 gemma-4-sql etl pretrain --duckdb-path my_dataset.duckdb --duckdb-table pretrain_data --backend jax
@@ -69,12 +69,12 @@ from gemma_4_sql.type_hints import ETLConfig
 from gemma_4_sql.sdk.etl import etl_pretrain, etl_sft
 
 # Prepare pretraining dataloader for JAX
-config = ETLConfig(dataset_name="seeklhy/SynSQL-2.5M", split="train", batch_size=64)
+config = ETLConfig(dataset_name="my-custom-dataset", split="train", batch_size=64)
 pretrain_data = etl_pretrain(config=config, backend="jax")
 jax_loader = pretrain_data["loader"]
 
 # Prepare SFT dataloader for Keras
-config = ETLConfig(dataset_name="gretelai/synthetic_text_to_sql", split="train", batch_size=16)
+config = ETLConfig(dataset_name="my-custom-sft-dataset", split="train", batch_size=16)
 sft_data = etl_sft(config=config, backend="keras")
 keras_loader = sft_data["loader"]
 ```
@@ -92,13 +92,13 @@ The framework supports multiple training stages out-of-the-box. The backend flag
 gemma-4-sql train --model gemma-4 --dataset my_dataset --backend pytorch
 
 # 2. Pretrain (Domain Adaptation)
-gemma-4-sql pretrain --model gemma-4 --dataset seeklhy/SynSQL-2.5M --backend maxtext
+gemma-4-sql pretrain --model gemma-4 --dataset my-custom-dataset --backend maxtext
 
 # 3. Supervised Fine-Tuning (SFT)
-gemma-4-sql sft --model gemma-4 --dataset gretelai/synthetic_text_to_sql --backend jax
+gemma-4-sql sft --model gemma-4 --dataset my-custom-sft-dataset --backend jax
 
 # 4. Post-Training
-gemma-4-sql posttrain --model gemma-4 --dataset xlangai/spider2-lite --backend keras
+gemma-4-sql posttrain --model gemma-4 --dataset my-custom-dpo-dataset --backend keras
 
 # 5. Direct Preference Optimization (DPO)
 gemma-4-sql dpo --model gemma-4 --dataset my_dpo_dataset --beta 0.1 --backend jax
@@ -111,7 +111,7 @@ from gemma_4_sql.sdk.models import pretrain_model, sft_model, TrainingConfig
 from gemma_4_sql.sdk.dpo import run_dpo
 
 # Pretrain using MaxText
-config = TrainingConfig(model_name="gemma-4", dataset="seeklhy/SynSQL-2.5M", backend="maxtext")
+config = TrainingConfig(model_name="gemma-4", dataset="my-custom-dataset", backend="maxtext")
 pretrain_model(config)
 
 # Run DPO using JAX

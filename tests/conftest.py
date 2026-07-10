@@ -186,11 +186,21 @@ class MockDBModule:
         """Implementation of Error."""
 
 
+from unittest.mock import AsyncMock
+
 sys.modules["psycopg2"] = MagicMock(Error=Exception)
 sys.modules["asyncpg"] = MagicMock(Error=Exception)
 sys.modules["snowflake"] = MagicMock(Error=Exception)
 sys.modules["snowflake.connector"] = MagicMock(Error=Exception)
-sys.modules["aiosqlite"] = MagicMock(Error=Exception)
+
+mock_aiosqlite = MagicMock(Error=Exception)
+mock_conn = AsyncMock()
+mock_cursor = AsyncMock()
+mock_cursor.fetchall = AsyncMock(return_value=[])
+mock_conn.execute = AsyncMock(return_value=mock_cursor)
+mock_aiosqlite.connect = AsyncMock(return_value=mock_conn)
+sys.modules["aiosqlite"] = mock_aiosqlite
+
 sys.modules["sentence_transformers"] = MagicMock(Error=Exception)
 
 

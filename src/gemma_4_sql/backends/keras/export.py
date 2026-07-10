@@ -32,7 +32,7 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
 
     try:
         gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
-        model = gemma_causal_lm_cls.from_preset(model_name)  # pragma: no cover
+        model = gemma_causal_lm_cls.from_preset(model_name)
     except (ImportError, ValueError) as e:
         msg = f"Failed to load model {model_name}"
         raise ValueError(msg) from e

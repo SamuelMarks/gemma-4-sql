@@ -40,7 +40,7 @@ def etl_pretrain(config: ETLConfig | None = None, backend: str = "jax") -> JSOND
 
     """
     if config is None:
-        config = ETLConfig(dataset_name="seeklhy/SynSQL-2.5M", split="train")  # pragma: no cover
+        config = ETLConfig(dataset_name="my-custom-dataset", split="train")
     return _route_backend(config, backend)
 
 
@@ -58,7 +58,7 @@ def etl_sft(config: ETLConfig | None = None, backend: str = "jax") -> JSONDict:
 
     """
     if config is None:
-        config = ETLConfig(dataset_name=DEFAULT_SFT_DATASET, split="train")  # pragma: no cover
+        config = ETLConfig(dataset_name=DEFAULT_SFT_DATASET, split="train")
     return _route_backend(config, backend)
 
 
@@ -76,5 +76,5 @@ def etl_posttrain(config: ETLConfig | None = None, backend: str = "jax") -> JSON
 
     """
     if config is None:
-        config = ETLConfig(dataset_name=DEFAULT_POSTTRAIN_DATASET, split="train")  # pragma: no cover
+        config = ETLConfig(dataset_name=DEFAULT_POSTTRAIN_DATASET, split="train")
     return _route_backend(config, backend)

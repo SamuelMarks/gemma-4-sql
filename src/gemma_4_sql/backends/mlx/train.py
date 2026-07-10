@@ -15,8 +15,8 @@ nn = None
 optim = None
 with catch_optional_imports():
     import mlx.core as mx
-    import mlx.optimizers as optim  # pragma: no cover
-    from mlx import nn  # pragma: no cover
+    import mlx.optimizers as optim
+    from mlx import nn
 load = None
 with catch_optional_imports():
     from mlx_lm import load
@@ -31,29 +31,29 @@ def _run_training_epochs(state: TrainerState) -> float:
     Returns:
         The computed float value.
     """
-    dataloader = state.dataloader  # pragma: no cover
-    epochs = state.epochs  # pragma: no cover
-    model = state.model  # pragma: no cover
-    optimizer = state.optimizer  # pragma: no cover
-    loss_and_grad_fn = state.loss_and_grad_fn  # pragma: no cover
+    dataloader = state.dataloader
+    epochs = state.epochs
+    model = state.policy_model
+    optimizer = state.optimizer
+    loss_and_grad_fn = state.train_step
     # Run training epochs.
-    final_loss = 0.0  # pragma: no cover
-    for _epoch in range(epochs):  # pragma: no cover
-        epoch_loss = 0.0  # pragma: no cover
-        batch_count = 0  # pragma: no cover
-        for batch in dataloader:  # pragma: no cover
-            inputs = mx.array(batch["inputs"])  # pragma: no cover
-            targets = mx.array(batch["targets"])  # pragma: no cover
-            (loss, grads) = loss_and_grad_fn(model, inputs, targets)  # pragma: no cover
-            optimizer.update(model, grads)  # pragma: no cover
-            mx.eval(model.parameters(), optimizer.state)  # pragma: no cover
-            epoch_loss += loss.item()  # pragma: no cover
-            batch_count += 1  # pragma: no cover
-        final_loss = epoch_loss / max(1, batch_count)  # pragma: no cover
-    return final_loss  # pragma: no cover
+    final_loss = 0.0
+    for _epoch in range(epochs):
+        epoch_loss = 0.0
+        batch_count = 0
+        for batch in dataloader:
+            inputs = mx.array(batch["inputs"])
+            targets = mx.array(batch["targets"])
+            (loss, grads) = loss_and_grad_fn(model, inputs, targets)
+            optimizer.update(model, grads)
+            mx.eval(model.parameters(), optimizer.state)
+            epoch_loss += loss.item()
+            batch_count += 1
+        final_loss = epoch_loss / max(1, batch_count)
+    return final_loss
 
 
-def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float) -> tuple[str, float]:  # pragma: no cover
+def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float) -> tuple[str, float]:
     """Execute the core training loop for MLX.
 
     Args:
@@ -118,8 +118,8 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("MLX dependencies are missing.")
-    try:  # pragma: no cover
-        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)  # pragma: no cover
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:  # pragma: no cover
-        status = f"failed: {e!s}"  # pragma: no cover
-    return {"backend": "mlx", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}  # pragma: no cover
+    try:
+        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)
+    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        status = f"failed: {e!s}"
+    return {"backend": "mlx", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}

@@ -15,13 +15,13 @@ keras = None
 tf = None
 with catch_optional_imports():
     import keras
-    import tensorflow as tf  # pragma: no cover
+    import tensorflow as tf
 FastAPI = None
 Request = None
 JSONResponse = None
 uvicorn = None
 with catch_optional_imports():
-    pass  # pragma: no cover
+    pass
 
 
 def create_app(model_name: str, *, test_mode: bool = False) -> object:

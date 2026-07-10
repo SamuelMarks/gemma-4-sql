@@ -28,6 +28,11 @@ class DatabaseAdapter(abc.ABC):
         self.read_only = read_only
         self.conn = self.connect()
 
+    @property
+    @abc.abstractmethod
+    def error_classes(self) -> tuple[type[Exception], ...]:
+        """Return the tuple of exceptions that this adapter can catch."""
+
     @abc.abstractmethod
     def connect(self) -> object:
         """Connect synchronously.
@@ -42,10 +47,9 @@ class DatabaseAdapter(abc.ABC):
         Returns:
             The async connection object.
         """
-        import asyncio  # pragma: no cover
+        import asyncio
 
-        # pragma: no cover
-        return await asyncio.to_thread(self.connect)  # pragma: no cover
+        return await asyncio.to_thread(self.connect)
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema.
@@ -53,7 +57,7 @@ class DatabaseAdapter(abc.ABC):
         Args:
             ddl: The SQL DDL query string.
         """
-        self.execute_with_feedback(ddl)  # pragma: no cover
+        self.execute_with_feedback(ddl)
 
     def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute synchronously with feedback.
@@ -76,7 +80,7 @@ class DatabaseAdapter(abc.ABC):
             else:
                 results = self.conn.execute(query, params or ()).fetchall()
                 return (True, results, None)
-        except Exception as e:  # noqa: BLE001
+        except self.error_classes as e:
             return (False, [], str(e))
 
     async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
@@ -113,7 +117,7 @@ class DatabaseAdapter(abc.ABC):
                 return results
             else:
                 return self.conn.execute(query, params or ()).fetchall()
-        except Exception as e:  # noqa: BLE001
+        except self.error_classes as e:
             logger.debug("Query execution failed: %s", e)
             return []
 
@@ -133,5 +137,5 @@ class DatabaseAdapter(abc.ABC):
 
     def close(self) -> None:
         """Close connection."""
-        if hasattr(self.conn, "close"):  # pragma: no cover
+        if hasattr(self.conn, "close"):
             self.conn.close()

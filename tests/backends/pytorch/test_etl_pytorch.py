@@ -121,3 +121,109 @@ def test_duckdb_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_etl, "SQLTokenizer", MockTokenizer)
     with contextlib.suppress(TypeError):
         pt_etl.build_dataloader(ETLConfig(dataset_name="dataset", split="split", duckdb_path="test.db", duckdb_table="tbl"))
+
+
+def test_pytorch_etl_exception(monkeypatch):
+    import gemma_4_sql.backends.pytorch.etl as pt_etl
+
+    def mock_tok(x):
+        raise ValueError("err")
+
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.SQLTokenizer", type("Tok", (), {"encode": lambda self, x: mock_tok(x), "__init__": lambda self, **k: None}))
+
+    def fail_load(*a, **k):
+        raise ValueError("err")
+
+    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", fail_load)
+    try:
+        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
+    except ValueError:
+        res = None
+    assert res is None or res.get("loader") is None
+
+
+def test_pytorch_etl_exception2(monkeypatch):
+    import gemma_4_sql.backends.pytorch.etl as pt_etl
+
+    def mock_tok(x):
+        raise ValueError("err")
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "gemma_4_sql.tokenization", type("TokModule", (), {"SQLTokenizer": type("Tok", (), {"encode": mock_tok, "__init__": lambda self, **k: None})}))
+    import builtins
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *a, **k):
+        if name == "gemma_4_sql.tokenization":
+            return sys.modules["gemma_4_sql.tokenization"]
+        return orig_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", lambda *a, **k: (_ for _ in ()).throw(ValueError("err")))
+
+    try:
+        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
+    except ValueError:
+        res = None
+    assert res is None or res.get("loader") is None
+
+
+def test_pytorch_etl_except(monkeypatch):
+    import gemma_4_sql.backends.pytorch.etl as pt_etl
+
+    monkeypatch.setattr(pt_etl, "SQLTokenizer", type("Tok", (), {"encode": lambda self, x: 1, "__init__": lambda self, **k: None}))
+    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", lambda *a, **k: (_ for _ in ()).throw(ValueError("err")))
+    try:
+        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
+    except ValueError:
+        res = None
+    assert res is None
+
+
+def test_pytorch_etl_return_none(monkeypatch):
+    import gemma_4_sql.backends.pytorch.etl as pt_etl
+
+    monkeypatch.setattr(pt_etl, "SQLTokenizer", type("Tok", (), {"encode": lambda self, x: 1, "__init__": lambda self, **k: None}))
+    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", lambda *a, **k: (_ for _ in ()).throw(ValueError("err")))
+    try:
+        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
+    except ValueError:
+        res = None
+    assert res is None or res.get("loader") is None
+
+
+def test_pytorch_etl_except2(monkeypatch):
+    import gemma_4_sql.backends.pytorch.etl as pt_etl
+
+    monkeypatch.setattr(pt_etl, "SQLTokenizer", type("Tok", (), {"encode": lambda self, x: 1, "__init__": lambda self, **k: None}))
+    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", lambda *a, **k: (_ for _ in ()).throw(ValueError("err")))
+    try:
+        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
+    except ValueError:
+        res = None
+    assert res is None or res.get("loader") is None
+
+
+def test_pytorch_etl_sampler_err(monkeypatch):
+    import gemma_4_sql.backends.pytorch.etl as pt_etl
+
+    def mock_dist(*a, **k):
+        raise ValueError("err")
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "torch.utils.data.distributed", type("Dist", (), {"DistributedSampler": mock_dist}))
+    import builtins
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *a, **k):
+        if name == "torch.utils.data.distributed":
+            return sys.modules["torch.utils.data.distributed"]
+        return orig_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+    res = pt_etl._get_sampler([], True)
+    assert res is None

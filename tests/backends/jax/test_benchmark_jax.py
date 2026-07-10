@@ -175,3 +175,30 @@ def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     importlib.reload(bm)
     monkeypatch.undo()
     importlib.reload(bm)
+
+
+from unittest.mock import MagicMock
+
+from gemma_4_sql.backends.jax.benchmark import benchmark_model
+
+
+class MockJaxWithBlock:
+    def __init__(self):
+        self.random = MagicMock()
+
+    def block_until_ready(self, _):
+        pass
+
+
+def test_benchmark_jax_block_until_ready(monkeypatch):
+    import gemma_4_sql.backends.jax.benchmark as bm
+
+    mock_jax = MockJaxWithBlock()
+    monkeypatch.setattr(bm, "jax", mock_jax)
+    monkeypatch.setattr(bm, "jnp", MagicMock())
+    monkeypatch.setattr(bm, "nnx", MagicMock())
+    monkeypatch.setattr(bm, "Gemma4ForCausalLM", MagicMock())
+    monkeypatch.setattr(bm, "Gemma4Config", MagicMock())
+
+    res = benchmark_model("model", "gpu", 1, num_runs=1)
+    assert res["status"] == "success"

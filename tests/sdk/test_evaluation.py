@@ -93,3 +93,52 @@ def test_evaluate_invalid() -> None:
     """Test evaluate with invalid backend."""
     with pytest.raises(ValueError, match="Unknown backend: invalid"):
         evaluate("model1", "data1", "invalid")
+
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from gemma_4_sql.sdk.evaluation import _run_evaluation_inference, compute_metrics
+
+
+def test_compute_metrics() -> None:
+    """Test compute metrics."""
+    engine = MagicMock()
+
+    async def mock_execute(*args: object, **kwargs: object) -> tuple[bool, list, None]:
+        """Docstring."""
+        return True, [(1,)], None
+
+    engine.execute_with_feedback_async.side_effect = mock_execute
+
+    async def mock_compare(*args: object, **kwargs: object) -> bool:
+        """Docstring."""
+        return True
+
+    engine.compare_queries_async.side_effect = mock_compare
+    res = compute_metrics(engine, ["SELECT 1"], ["SELECT 1"])
+    assert res["exact_match"] == 1.0
+
+
+def test_evaluate_mock_predictions() -> None:
+    """Test evaluate with mock predictions."""
+    with patch("gemma_4_sql.sdk.evaluation.compute_metrics_async") as mock_compute:
+
+        async def mock_compute_async(*args: object, **kwargs: object) -> dict:
+            """Docstring."""
+            return {"exact_match": 1.0}
+
+        mock_compute.side_effect = mock_compute_async
+        with patch("gemma_4_sql.sdk.registry.get_backend"):
+            res = evaluate("model", "dataset", mock_predictions=["s1"], mock_truths=["s1"])
+            assert res["metrics"]["exact_match"] == 1.0
+
+
+def test_run_evaluation_inference_no_dataloader() -> None:
+    """Test run evaluation inference no dataloader."""
+    backend_impl = MagicMock()
+    backend_impl.build_dataloader.return_value = {"loader": None}
+    backend_impl.generate_sql.return_value = {"sql": "SELECT 2"}
+    preds, _truths, _scores = _run_evaluation_inference("model", "dataset", backend_impl)
+    assert preds[0] == "SELECT 2"

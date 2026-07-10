@@ -33,9 +33,9 @@ def _load_pytorch_model_and_device(model_name: str, hardware: str, *, test_mode:
     model = AutoModelForCausalLM.from_pretrained(model_name)
     device = "cuda" if getattr(torch, "cuda", None) and getattr(torch.cuda, "is_available", lambda: False)() and (hardware != "cpu") else "cpu"
     if hasattr(model, "to"):
-        model.to(device)  # pragma: no cover
+        model.to(device)
     if hasattr(model, "eval"):
-        model.eval()  # pragma: no cover
+        model.eval()
     return (model, device)
 
 
@@ -46,7 +46,7 @@ def _sync_cuda(device: str) -> None:
         device: The string representing the device.
     """
     if device == "cuda" and hasattr(torch, "cuda") and hasattr(torch.cuda, "synchronize"):
-        torch.cuda.synchronize()  # pragma: no cover
+        torch.cuda.synchronize()
 
 
 def _run_forward_pass(model: torch.nn.Module, dummy_inputs: object) -> None:
@@ -60,8 +60,8 @@ def _run_forward_pass(model: torch.nn.Module, dummy_inputs: object) -> None:
         The computed float value.
     """
     if hasattr(torch, "no_grad"):
-        with torch.no_grad():  # pragma: no cover
-            _ = model(dummy_inputs)  # pragma: no cover
+        with torch.no_grad():
+            _ = model(dummy_inputs)
 
 
 def _get_memory_mb(model: torch.nn.Module, device: str) -> float:
@@ -77,7 +77,7 @@ def _get_memory_mb(model: torch.nn.Module, device: str) -> float:
         A tuple containing the results.
     """
     if device == "cuda" and hasattr(torch, "cuda") and hasattr(torch.cuda, "max_memory_allocated"):
-        return float(torch.cuda.max_memory_allocated() / (1024 * 1024))  # pragma: no cover
+        return float(torch.cuda.max_memory_allocated() / (1024 * 1024))
     return 8192.0
 
 
@@ -90,7 +90,7 @@ def _run_benchmark_pass(model: torch.nn.Module, device: str, batch_size: int, nu
     """
     dummy_inputs = torch.randint(1, 1000, (batch_size, 32), dtype=getattr(torch, "long", None))
     if hasattr(dummy_inputs, "to"):
-        dummy_inputs = dummy_inputs.to(device)  # pragma: no cover
+        dummy_inputs = dummy_inputs.to(device)
     _run_forward_pass(model, dummy_inputs)
     _sync_cuda(device)
     start_time = time.time()

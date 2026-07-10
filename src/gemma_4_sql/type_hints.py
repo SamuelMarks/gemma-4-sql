@@ -51,7 +51,7 @@ class TrainingConfig:
     learning_rate: float = 1e-05
     backend: str = "jax"
     distributed_strategy: str = "none"
-    extra_kwargs: dict = None  # pragma: no cover
+    extra_kwargs: dict = None
 
 
 @dataclass
@@ -74,4 +74,4 @@ class TrainerState:
     beta: float = 0.1
     dataset: str = ""
     learning_rate: float = 0.0
-    extra_kwargs: dict = None  # pragma: no cover
+    extra_kwargs: dict = None

@@ -52,3 +52,6 @@ def test_chat_turn_routing_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backend_impl, "generate_sql", mock_generate)
     with pytest.raises(RuntimeError, match="Chat turn failed"):
         chat_turn("foo", [], "prompt", backend="jax")
+
+
+import pytest

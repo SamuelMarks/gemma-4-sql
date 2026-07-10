@@ -16,6 +16,13 @@ duckdb = LazyLoader("duckdb").get_module()
 class DuckDBAdapter(DatabaseAdapter):
     """Adapter for DuckDB."""
 
+    @property
+    def error_classes(self) -> tuple[type[Exception], ...]:
+        """Return the exception classes."""
+        import duckdb
+
+        return (duckdb.Error,)
+
     def connect(self) -> object:
         """Connect synchronously.
 
@@ -41,7 +48,7 @@ class DuckDBAdapter(DatabaseAdapter):
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        self.conn.execute(ddl)  # pragma: no cover
+        self.conn.execute(ddl)
 
     async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
         """Execute asynchronously with feedback.
@@ -53,7 +60,7 @@ class DuckDBAdapter(DatabaseAdapter):
         try:
             loop = asyncio.get_running_loop()
             results = await loop.run_in_executor(None, lambda: self.conn.execute(query, params or ()).fetchall())
-        except Exception as e:  # noqa: BLE001
+        except self.error_classes as e:
             return (False, [], str(e))
         else:
             return (True, results, None)
@@ -68,6 +75,6 @@ class DuckDBAdapter(DatabaseAdapter):
         try:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, lambda: self.conn.execute(query, params or ()).fetchall())
-        except Exception as e:  # noqa: BLE001
+        except self.error_classes as e:
             logger.debug("Async Query execution failed: %s", e)
             return []

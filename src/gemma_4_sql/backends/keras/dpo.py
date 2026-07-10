@@ -17,7 +17,7 @@ keras = None
 tf = None
 with catch_optional_imports():
     import keras
-    import tensorflow as tf  # pragma: no cover
+    import tensorflow as tf
 
 
 def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[TensorType, TensorType, TensorType]:
@@ -47,22 +47,22 @@ def _compute_logps(model: keras.Model, inputs: keras.KerasTensor | tf.Tensor, la
     """
     if tf is None:
         return 0.0
-    logits = model(inputs)  # pragma: no cover
+    logits = model(inputs)
 
     # Compute log_softmax over the vocabulary dimension (usually axis -1)
-    log_probs = tf.nn.log_softmax(logits, axis=-1)  # pragma: no cover
+    log_probs = tf.nn.log_softmax(logits, axis=-1)
 
     # Gather the log probability of the true next token (label).
     # labels shape is (batch_size, sequence_length)
     # log_probs shape is (batch_size, sequence_length, vocab_size)
-    labels_expanded = tf.expand_dims(tf.cast(labels, tf.int32), axis=-1)  # pragma: no cover
-    selected_log_probs = tf.gather(log_probs, labels_expanded, batch_dims=2)  # pragma: no cover
+    labels_expanded = tf.expand_dims(tf.cast(labels, tf.int32), axis=-1)
+    selected_log_probs = tf.gather(log_probs, labels_expanded, batch_dims=2)
 
     # Remove the extra dimension and sum over the sequence length
-    selected_log_probs = tf.squeeze(selected_log_probs, axis=-1)  # pragma: no cover
+    selected_log_probs = tf.squeeze(selected_log_probs, axis=-1)
     # We might want to mask out padding tokens in the future, assuming non-zero labels are valid tokens for now
-    mask = tf.cast(labels != 0, tf.float32)  # pragma: no cover
-    return tf.reduce_sum(selected_log_probs * mask, axis=-1)  # pragma: no cover
+    mask = tf.cast(labels != 0, tf.float32)
+    return tf.reduce_sum(selected_log_probs * mask, axis=-1)
 
 
 def _get_train_step_fn(policy_model: object, ref_model: object, optimizer: object, beta: float) -> object:
@@ -119,7 +119,7 @@ def _run_training_epochs(state: TrainerState) -> float:
             if hasattr(loss, "numpy") and callable(loss.numpy):
                 epoch_loss += float(loss.numpy())
             else:
-                epoch_loss += float(loss)  # pragma: no cover
+                epoch_loss += float(loss)
         final_loss = epoch_loss / max(1, len(dataloader) if hasattr(dataloader, "__len__") else 1)
     return float(final_loss)
 
@@ -129,20 +129,20 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
     try:
         gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
         policy_model = gemma_causal_lm_cls.from_preset(model_name)
-        ref_model = gemma_causal_lm_cls.from_preset(model_name)  # pragma: no cover
+        ref_model = gemma_causal_lm_cls.from_preset(model_name)
     except (ImportError, ValueError) as e:
         raise ValueError(f"Failed to load Keras model {model_name}") from e
 
-    optimizer = keras.optimizers.AdamW(learning_rate=learning_rate)  # pragma: no cover
-    train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)  # pragma: no cover
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))  # pragma: no cover
-    dataloader = data_dict.get("loader", None)  # pragma: no cover
-    # pragma: no cover
-    if dataloader is None or not hasattr(dataloader, "__iter__"):  # pragma: no cover
-        raise ValueError(f"Invalid dataloader for dataset: {dataset}")  # pragma: no cover
-    # pragma: no cover
-    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step))  # pragma: no cover
-    return "completed", final_loss  # pragma: no cover
+    optimizer = keras.optimizers.AdamW(learning_rate=learning_rate)
+    train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    dataloader = data_dict.get("loader", None)
+
+    if dataloader is None or not hasattr(dataloader, "__iter__"):
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+
+    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step))
+    return "completed", final_loss
 
 
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:

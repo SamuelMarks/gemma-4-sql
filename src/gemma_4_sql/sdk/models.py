@@ -35,7 +35,7 @@ def _route_training(config: TrainingConfig) -> JSONDict:
     """
     backend = config.backend
     if config.extra_kwargs is None:
-        config.extra_kwargs = {}  # pragma: no cover
+        config.extra_kwargs = {}
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     return get_backend(backend).train_model(config)
 
@@ -86,9 +86,9 @@ def sft_model(config: TrainingConfig | None = None) -> JSONDict:
         A dictionary indicating the SFT job status.
 
     """
-    cfg = config or TrainingConfig()  # pragma: no cover
-    cfg.action = "sft"  # pragma: no cover
-    return _route_training(cfg)  # pragma: no cover
+    cfg = config or TrainingConfig()
+    cfg.action = "sft"
+    return _route_training(cfg)
 
 
 def posttrain_model(config: TrainingConfig | None = None) -> JSONDict:
@@ -103,6 +103,6 @@ def posttrain_model(config: TrainingConfig | None = None) -> JSONDict:
         A dictionary indicating the post-training job status.
 
     """
-    cfg = config or TrainingConfig(backend="keras")  # pragma: no cover
-    cfg.action = "posttrain"  # pragma: no cover
-    return _route_training(cfg)  # pragma: no cover
+    cfg = config or TrainingConfig(backend="keras")
+    cfg.action = "posttrain"
+    return _route_training(cfg)

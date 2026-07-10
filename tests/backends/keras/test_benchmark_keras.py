@@ -23,6 +23,21 @@ class MockTf:
 
     int32 = "int32"
 
+    class MockRandom:
+        """Provide class docstring."""
+
+        @staticmethod
+        def uniform(*_args: object, **_kwargs: object) -> object:
+            """Execute function.
+
+            Returns:
+                object: Description of return.
+
+            """
+            return MockTfTensor()
+
+    random = MockRandom
+
     def zeros(self, *_args: object, **_kwargs: object) -> object:
         """Execute function.
 

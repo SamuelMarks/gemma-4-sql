@@ -1080,3 +1080,35 @@ def test_dependency_missing_error() -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     assert str(DependencyMissingError("test")) == "test"
+
+
+def test_cli_serve_branches(monkeypatch):
+    import argparse
+
+    import gemma_4_sql.cli_serve as cli_s
+
+    # evaluate
+    args = argparse.Namespace(model="m", dataset="d", backend="b", db_path="p", ddl="d", db_type="t", db_kwargs='{"a": 1}')
+    monkeypatch.setattr(cli_s, "evaluate", lambda **k: None)
+    cli_s.evaluate_cmd(args)
+
+    # agent
+    args = argparse.Namespace(model="m", prompt="p", backend="b", db_path="p", ddl="d", db_type="t", max_retries=1, db_kwargs='{"a": 1}', min_confidence=0.0)
+    monkeypatch.setattr(cli_s, "run_agentic_loop", lambda **k: None)
+    cli_s.agent_cmd(args)
+
+    # chat
+    args = argparse.Namespace(model="m", prompt="p", backend="b", history='[{"a": 1}]')
+    monkeypatch.setattr(cli_s, "chat_turn", lambda **k: None)
+    cli_s.chat_cmd(args)
+
+    # few shot
+    args = argparse.Namespace(model="m", prompt="p", backend="b", examples='[{"a": 1}]')
+    monkeypatch.setattr(cli_s, "build_few_shot_prompt", lambda **k: None)
+    cli_s.few_shot_cmd(args)
+
+    # test bad json
+    args = argparse.Namespace(model="m", prompt="p", backend="b", history="bad")
+    cli_s.chat_cmd(args)
+    args = argparse.Namespace(model="m", prompt="p", backend="b", examples="bad")
+    cli_s.few_shot_cmd(args)

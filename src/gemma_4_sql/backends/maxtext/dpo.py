@@ -40,7 +40,7 @@ def dpo_loss(policy_chosen_logps: object, policy_rejected_logps: object, ref_cho
     Returns:
         A tuple containing the results.
     """
-    return jax_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta)  # pragma: no cover
+    return jax_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta)
 
 
 def _compute_logps(model: object, params: dict[str, object] | object, inputs: object, labels: object) -> object:
@@ -50,8 +50,8 @@ def _compute_logps(model: object, params: dict[str, object] | object, inputs: ob
         object: The resulting output from the operation.
 
     """
-    logits = model.apply(params, inputs)  # pragma: no cover
-    return jnp.sum(logits * labels, axis=-1)  # pragma: no cover
+    logits = model.apply(params, inputs)
+    return jnp.sum(logits * labels, axis=-1)
 
 
 def _dpo_step_loss(policy_model: object, policy_params: object, ref_model: object, ref_params: object, batch: JSONDict, beta: float) -> object:
@@ -61,12 +61,12 @@ def _dpo_step_loss(policy_model: object, policy_params: object, ref_model: objec
         object: The resulting output from the operation.
 
     """
-    pi_ch_logps = _compute_logps(policy_model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])  # pragma: no cover
-    pi_re_logps = _compute_logps(policy_model, policy_params, batch["rejected_inputs"], batch["rejected_labels"])  # pragma: no cover
-    ref_ch_logps = _compute_logps(ref_model, ref_params, batch["chosen_inputs"], batch["chosen_labels"])  # pragma: no cover
-    ref_re_logps = _compute_logps(ref_model, ref_params, batch["rejected_inputs"], batch["rejected_labels"])  # pragma: no cover
-    (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)  # pragma: no cover
-    return loss  # pragma: no cover
+    pi_ch_logps = _compute_logps(policy_model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])
+    pi_re_logps = _compute_logps(policy_model, policy_params, batch["rejected_inputs"], batch["rejected_labels"])
+    ref_ch_logps = _compute_logps(ref_model, ref_params, batch["chosen_inputs"], batch["chosen_labels"])
+    ref_re_logps = _compute_logps(ref_model, ref_params, batch["rejected_inputs"], batch["rejected_labels"])
+    (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
+    return loss
 
 
 def _get_train_step_fn(policy_model: object, ref_model: object, optimizer: object, beta: float) -> object:
@@ -120,7 +120,7 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
 
 def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, test_mode: bool) -> tuple[str, float]:
     """Execute the core DPO loop."""
-    if not test_mode:  # pragma: no cover
+    if not test_mode:
         try:
             jax.distributed.initialize()
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:

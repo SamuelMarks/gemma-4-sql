@@ -23,7 +23,7 @@ def apply_bits_and_bytes_quantization(method: str, bits_and_bytes_config_cls: ty
         A tuple containing the results.
     """
     if bits_and_bytes_config_cls is None:
-        return (0.0, "mocked_missing_bitsandbytes")  # pragma: no cover
+        return (0.0, "mocked_missing_bitsandbytes")
 
     if method == "int8":
         bits_and_bytes_config_cls(load_in_8bit=True)
@@ -58,7 +58,7 @@ def quantize_model_wrapper(backend_name: str, model_name: str, method: str, miss
         A dictionary containing the quantization results.
     """
     if missing_deps:
-        return {  # pragma: no cover
+        return {
             "backend": backend_name,
             "model": model_name,
             "method": method,

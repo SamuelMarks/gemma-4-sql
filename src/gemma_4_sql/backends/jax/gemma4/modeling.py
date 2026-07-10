@@ -136,7 +136,7 @@ class Gemma4Model(nnx.Module):
         proj = self.per_layer_model_projection(inputs_embeds) * self.per_layer_model_projection_scale
         proj = proj.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
         proj = self.per_layer_projection_norm(proj)
-        if per_layer_inputs is not None:  # pragma: no cover
+        if per_layer_inputs is not None:
             proj = (proj + per_layer_inputs) * self.per_layer_input_scale
         return proj
 
@@ -160,7 +160,7 @@ class Gemma4Model(nnx.Module):
         per_layer_inputs = kwargs.get("per_layer_inputs")
         x = self.embed_tokens(input_ids) * self.embed_scale
         if self.config.hidden_size_per_layer_input:
-            if per_layer_inputs is None:  # pragma: no cover
+            if per_layer_inputs is None:
                 per_layer_inputs = self.get_per_layer_inputs(input_ids)
             per_layer_inputs = self.project_per_layer_inputs(x, per_layer_inputs)
         for i, layer in enumerate(self.layers):

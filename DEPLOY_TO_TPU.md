@@ -15,8 +15,8 @@ Before running the commands in this guide, export the following environment vari
 export HF_TOKEN="your_huggingface_token_here"
 
 # Model & Dataset Configuration
-export MODEL_NAME="google/gemma-4-sql-it"
-export DATASET_NAME="seeklhy/SynSQL-2.5M"
+export MODEL_NAME="google/gemma-4"
+export DATASET_NAME="my-custom-dataset"
 export DUCKDB_URL="https://example.com/my_dataset.duckdb"
 export DUCKDB_PATH="analytics.duckdb"
 export DUCKDB_TABLE="pretrain_data"
@@ -28,6 +28,9 @@ export GCP_ZONE="us-central2-b"
 # TPU Hardware Configuration
 export TPU_ZONE="us-central2-b"
 export TPU_ACCELERATOR_TYPE="v4-8"
+export TPU_SCHEDULING_TYPE="on-demand" # For TFRC, change to "spot" or "preemptible"
+export TPU_USE_QUEUED_RESOURCE="false" # For TFRC, change to "true" to wait for capacity
+export TPU_COUNT="1" # Set >1 for multiple nodes
 
 # Single-Node TPU VM Config
 export TPU_NAME="gemma-train-node"
@@ -42,6 +45,23 @@ export NUM_SLICES="4"
 # Object Storage for Asset Persistence
 # Choose a unique bucket name, for example:
 export BUCKET_NAME="gs://gemma-4-sql-artifacts-123456789"
+```
+
+---
+
+## 0.5. TFRC (TPU Research Cloud) Special Instructions
+
+If you have been granted access via the [TPU Research Cloud (TFRC)](https://sites.research.google/trc/about/), you receive sponsored compute in specific shapes and geographical zones. To ensure your workloads do not incur unexpected billing and properly leverage your grant, adhere to the following configurations:
+
+1. **Strict Zone Matching:** TFRC grants are rigidly tied to specific zones (e.g., `us-central1-a`, `us-central1-b`, `us-central2-b`, or `europe-west4-a`). You **must** set your `GCP_ZONE` and `TPU_ZONE` environment variables precisely to the zone specified in your grant approval email.
+2. **Preemptible / Spot Instances:** Most TFRC grants provide *preemptible* (spot) TPUs, with perhaps only a small number of on-demand TPUs. When provisioning via `gcloud` (or using `libscript`), ensure you export `TPU_SCHEDULING_TYPE="spot"` (or `"preemptible"`) and `TPU_USE_QUEUED_RESOURCE="true"`. If using `xpk` for distributed workloads, include `--spot` in your `xpk workload create` command.
+3. **Accelerator Types:** TFRC commonly provides `v2-8`, `v3-8`, or sometimes specific v4 typologies. Update `TPU_ACCELERATOR_TYPE` (e.g., `v3-8`) to exactly match your allocated capacity.
+
+**To verify your quota before provisioning:**
+```bash
+gcloud compute tpus tpu-vm locations list
+# Check your specific granted zone limits
+gcloud alpha compute tpus tpu-vm list --zone="your-tfrc-zone"
 ```
 
 ---
@@ -84,7 +104,7 @@ You can now dispatch native `gemma-4-sql` CLI commands using the stack's deploym
 
 **Example 1: ETL from DuckDB for JAX**
 ```bash
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" "
+./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "
   # Install the framework
   pip install gemma-4-sql[all]
   
@@ -98,7 +118,7 @@ You can now dispatch native `gemma-4-sql` CLI commands using the stack's deploym
 
 **Example 2: Supervised Fine-Tuning (SFT) with LoRA via MaxText**
 ```bash
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" "
+./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "
   export HF_TOKEN=\$HF_TOKEN
   
   # 1. Apply PEFT/LoRA adapters
@@ -111,7 +131,7 @@ You can now dispatch native `gemma-4-sql` CLI commands using the stack's deploym
 
 **Example 3: Direct Preference Optimization (DPO)**
 ```bash
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" "
+./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "
   gemma-4-sql dpo --model \$MODEL_NAME --dataset my_dpo_dataset --beta 0.1 --backend jax
 "
 ```
@@ -123,13 +143,13 @@ If you prefer to be explicit about each resource being provisioned, you can leve
 **Step 1: Provision the TPU VM and Persistent Disk**
 ```bash
 # Uses TPU_DATA_DISK_SIZE to attach a persistent data disk
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh create "$TPU_NAME"
+./libscript.sh gcp/tpu-vm create "$TPU_NAME"
 ```
 
 **Step 2: Provision Remote Toolchains**
 Install the required `libscript` components directly on the TPU VM to manage storage, execution resilience, and observability.
 ```bash
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" "
+./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "
   git clone https://github.com/SamuelMarks/libscript.git ~/.libscript
   cd ~/.libscript
   ./libscript.sh install storage-layers/gcsfuse latest
@@ -141,8 +161,8 @@ Install the required `libscript` components directly on the TPU VM to manage sto
 **Step 3: Mount Object Storage**
 Bind your Google Cloud Storage bucket to the remote persistent disk for streaming checkpoints.
 ```bash
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" "
-  ~/.libscript/_lib/storage-layers/gcsfuse/cli.sh mount \$BUCKET_NAME /mnt/ml_data
+./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "
+  ~/.libscript/libscript.sh storage-layers/gcsfuse mount \$BUCKET_NAME /mnt/ml_data
 "
 ```
 
@@ -150,12 +170,12 @@ Bind your Google Cloud Storage bucket to the remote persistent disk for streamin
 Start TensorBoard in the background and execute your training loop inside a protected `tmux` session, forwarding the port to your local machine.
 ```bash
 # 4a. Start TensorBoard on the remote node
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" "
-  ~/.libscript/_lib/logging/tensorboard/cli.sh start /mnt/ml_data/logs 6006 &
+./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "
+  ~/.libscript/libscript.sh logging/tensorboard start /mnt/ml_data/logs 6006 &
 "
 
 # 4b. Execute the Training Loop explicitly via Tmux with Port Forwarding
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" --detached --forward-port 6006:localhost:6006 "
+./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" --detached --forward-port 6006:localhost:6006 "
   gemma-4-sql sft --model \$MODEL_NAME --dataset \$DATASET_NAME --backend maxtext
 "
 ```
@@ -173,7 +193,7 @@ Start TensorBoard in the background and execute your training loop inside a prot
 
 ```bash
 # Creates the cluster via XPK with Kueue configured
-./_lib/cloud-providers/gcp/gke-tpu-cluster/cli.sh create "$XPK_CLUSTER_NAME"
+./libscript.sh gcp/gke-tpu-cluster create "$XPK_CLUSTER_NAME"
 ```
 
 ### Step 3.2: Submit a Distributed Training Workload
@@ -220,7 +240,7 @@ export WORKLOAD_NAME="gemma-serve-api"
 To utilize the SQL self-correction loop against a live database:
 
 ```bash
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$SERVE_TPU_NAME" "
+./libscript.sh gcp/tpu-vm ssh "$SERVE_TPU_NAME" "
   # Run the agentic loop evaluating against an in-memory SQLite DB
   gemma-4-sql agent --model /mnt/ml_data/gemma-4-sql-finetuned \
       --prompt 'Show the total sales for 2024' \
@@ -235,7 +255,7 @@ To utilize the SQL self-correction loop against a live database:
 Embed the model directly into a DuckDB instance running on your TPU:
 
 ```bash
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$SERVE_TPU_NAME" "
+./libscript.sh gcp/tpu-vm ssh "$SERVE_TPU_NAME" "
   gemma-4-sql embed-duckdb --model /mnt/ml_data/gemma-4-sql-finetuned --db-path \$DUCKDB_PATH --prompt 'How many users joined yesterday?'
 "
 ```
@@ -250,15 +270,15 @@ Because `libscript` securely configures the `gcp/cli` environment, `gcloud stora
 
 ### Step 5.1: Create the Bucket
 ```bash
-# Use the libscript gcloud installation to create the bucket defined in Section 0
-./installed/gcp-cli/bin/gcloud storage buckets create "$BUCKET_NAME" --location="us-central2"
+# Use the libscript multicloud storage abstraction to create the bucket defined in Section 0
+./libscript.sh cloud/storage create --cloud gcp --bucket "$BUCKET_NAME"
 ```
 
 ### Step 5.2: Export and Upload Artifacts (Single TPU VM)
 First, use the `gemma-4-sql export` command to finalize the weights, then upload them.
 
 ```bash
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" "
+./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "
   # Export the trained model to safetensors
   gemma-4-sql export --model /mnt/ml_data/gemma-4-sql-finetuned --path ./exported/gemma-4-pt --backend pytorch
   
@@ -277,16 +297,16 @@ To avoid runaway costs, destroy all compute resources once the assets are safely
 ### Teardown: Single TPU VMs
 ```bash
 # If mounted manually, safely unmount first
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh ssh "$TPU_NAME" "~/.libscript/_lib/storage-layers/gcsfuse/cli.sh unmount /mnt/ml_data" || true
+./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "~/.libscript/libscript.sh storage-layers/gcsfuse unmount /mnt/ml_data" || true
 
 # Delete the TPU VM
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh delete "$TPU_NAME"
-./_lib/cloud-providers/gcp/tpu-vm/cli.sh delete "$SERVE_TPU_NAME"
+./libscript.sh gcp/tpu-vm delete "$TPU_NAME"
+./libscript.sh gcp/tpu-vm delete "$SERVE_TPU_NAME"
 ```
 
 ### Teardown: GKE TPU Clusters (XPK)
 ```bash
-./_lib/cloud-providers/gcp/gke-tpu-cluster/cli.sh delete "$XPK_CLUSTER_NAME"
+./libscript.sh gcp/gke-tpu-cluster delete "$XPK_CLUSTER_NAME"
 ```
 
 ### Final Verification

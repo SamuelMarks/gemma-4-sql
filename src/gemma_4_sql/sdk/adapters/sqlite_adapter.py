@@ -16,6 +16,11 @@ aiosqlite = LazyLoader("aiosqlite").get_module()
 class SQLiteAdapter(DatabaseAdapter):
     """Adapter for SQLite."""
 
+    @property
+    def error_classes(self) -> tuple[type[Exception], ...]:
+        """Return the exception classes."""
+        return (sqlite3.Error,)
+
     def connect(self) -> sqlite3.Connection:
         """Connect synchronously.
 
@@ -41,8 +46,8 @@ class SQLiteAdapter(DatabaseAdapter):
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        with self.conn:  # pragma: no cover
-            self.conn.executescript(ddl)  # pragma: no cover
+        with self.conn:
+            self.conn.executescript(ddl)
 
     async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
         """Execute asynchronously with feedback.
@@ -65,7 +70,7 @@ class SQLiteAdapter(DatabaseAdapter):
             finally:
                 if hasattr(async_conn, "close"):
                     await async_conn.close()
-        except Exception as e:  # noqa: BLE001
+        except self.error_classes as e:
             return (False, [], str(e))
 
     async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
@@ -88,6 +93,6 @@ class SQLiteAdapter(DatabaseAdapter):
             finally:
                 if hasattr(async_conn, "close"):
                     await async_conn.close()
-        except Exception as e:  # noqa: BLE001
+        except self.error_classes as e:
             logger.debug("Async Query execution failed: %s", e)
             return []

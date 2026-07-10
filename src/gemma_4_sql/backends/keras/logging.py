@@ -36,5 +36,5 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
         writer.close()
         status = "success"
     else:
-        status = "missing_summary_attr"  # pragma: no cover
+        status = "missing_summary_attr"
     return {"backend": "keras", "step": step, "metrics": metrics, "status": status, "log_dir": log_dir}

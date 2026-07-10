@@ -107,7 +107,7 @@ def _run_evaluation_inference(model_name: str, dataset_name: str, backend_impl: 
     if dataloader is not None and hasattr(dataloader, "__iter__"):
         for i, batch in enumerate(dataloader):
             if i >= MAX_BATCHES:
-                break  # pragma: no cover
+                break
 
             (input_ids, target_ids) = _process_batch_inputs(batch)
 

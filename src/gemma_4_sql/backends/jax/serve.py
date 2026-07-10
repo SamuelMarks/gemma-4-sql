@@ -16,8 +16,6 @@ with catch_optional_imports():
     import jax
 FastAPI = None
 uvicorn = None
-with catch_optional_imports():
-    pass  # pragma: no cover
 
 
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:

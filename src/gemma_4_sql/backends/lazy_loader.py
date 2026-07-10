@@ -45,7 +45,7 @@ class LazyLoader:
             types.ModuleType: The resulting output from the operation.
 
         """
-        if not self._loaded:  # pragma: no cover
+        if not self._loaded:
             try:
                 self._module = importlib.import_module(self.module_name)
             except ImportError:
@@ -56,7 +56,7 @@ class LazyLoader:
     @property
     def is_available(self) -> bool:
         """Check if the module is available."""
-        return self.get_module() is not None  # pragma: no cover
+        return self.get_module() is not None
 
 
 _JAX_LOADER = LazyLoader("jax")

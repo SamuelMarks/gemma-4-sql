@@ -21,7 +21,7 @@ Request = None
 JSONResponse = None
 uvicorn = None
 with catch_optional_imports():
-    pass  # pragma: no cover
+    pass
 
 
 def _create_app(model_name: str, *, test_mode: bool = False) -> object:

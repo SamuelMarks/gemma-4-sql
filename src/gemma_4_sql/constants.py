@@ -1,8 +1,8 @@
 """Constants for gemma-4-sql."""
 
-DEFAULT_PRETRAIN_DATASET = "seeklhy/SynSQL-2.5M"
-DEFAULT_SFT_DATASET = "gretelai/synthetic_text_to_sql"
-DEFAULT_POSTTRAIN_DATASET = "xlangai/spider2-lite"
+DEFAULT_PRETRAIN_DATASET = "my-custom-dataset"
+DEFAULT_SFT_DATASET = "my-custom-sft-dataset"
+DEFAULT_POSTTRAIN_DATASET = "my-custom-dpo-dataset"
 MODEL_GEMMA4_E2B = "google/gemma-4-E2B"
 MODEL_GEMMA4_E2B_IT = "google/gemma-4-E2B-it"
 MODEL_GEMMA4_E4B = "google/gemma-4-E4B"

@@ -93,8 +93,8 @@ def _get_sampler(pt_dataset: Dataset, distributed: bool) -> object:
     distributed_sampler_cls = __import__("torch.utils.data.distributed", fromlist=["DistributedSampler"]).DistributedSampler
     try:
         return distributed_sampler_cls(pt_dataset)
-    except (RuntimeError, ValueError):  # pragma: no cover
-        return None  # pragma: no cover
+    except (RuntimeError, ValueError):
+        return None
 
 
 def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, duckdb_table: str | None) -> object:

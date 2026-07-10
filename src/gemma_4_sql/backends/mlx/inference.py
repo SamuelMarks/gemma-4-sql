@@ -34,19 +34,19 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("MLX dependencies are missing.")
-    try:  # pragma: no cover
-        logger.info("Generating with %s", model_name)  # pragma: no cover
-        if kwargs.get("test_mode"):  # pragma: no cover
-            sql = "SELECT * FROM mlx_table"  # pragma: no cover
-            confidence_score = 0.95  # pragma: no cover
-        else:  # pragma: no cover
-            (model, tokenizer) = load(model_name)  # pragma: no cover
-            generated_text = generate(model, tokenizer, prompt=prompt, max_tokens=max_length, verbose=False)  # pragma: no cover
-            sql = generated_text.strip()  # pragma: no cover
-            confidence_score = 0.85  # pragma: no cover
-        status = "success"  # pragma: no cover
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:  # pragma: no cover
-        logger.exception("Generation failed: ")  # pragma: no cover
-        sql = ""  # pragma: no cover
-        status = f"failed: {e!s}"  # pragma: no cover
-    return {"backend": "mlx", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}  # pragma: no cover
+    try:
+        logger.info("Generating with %s", model_name)
+        if kwargs.get("test_mode"):
+            sql = "SELECT * FROM mlx_table"
+            confidence_score = 0.95
+        else:
+            (model, tokenizer) = load(model_name)
+            generated_text = generate(model, tokenizer, prompt=prompt, max_tokens=max_length, verbose=False)
+            sql = generated_text.strip()
+            confidence_score = 0.85
+        status = "success"
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+        logger.exception("Generation failed: ")
+        sql = ""
+        status = f"failed: {e!s}"
+    return {"backend": "mlx", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}

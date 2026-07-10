@@ -56,3 +56,15 @@ def test_logging_keras_imports_fail(monkeypatch: object) -> None:
     importlib.reload(mdl)
     monkeypatch.undo()
     importlib.reload(mdl)
+
+
+def test_logging_keras_missing_attr(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test function."""
+    import gemma_4_sql.backends.keras.logging as log_module
+
+    class MockTf:
+        pass
+
+    monkeypatch.setattr(log_module, "tf", MockTf)
+    res = log_module.log_metrics({"a": 1}, 1)
+    assert res["status"] == "missing_summary_attr"

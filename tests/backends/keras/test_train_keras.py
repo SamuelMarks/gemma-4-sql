@@ -277,3 +277,30 @@ def test_train_keras_real_import_with_loader_iter(monkeypatch: pytest.MonkeyPatc
     tr.train_model(TrainingConfig(action="sft", model_name="model", dataset="ds", epochs=1), test_mode=True)
     if False:
         raise AssertionError
+
+
+def test_train_invalid_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test function."""
+    sys = __import__("sys", fromlist=[""])
+    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
+    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": tr.keras.Model}))
+    builtins = __import__("builtins", fromlist=[""])
+    orig_import = builtins.__import__
+
+    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
+        if name == "keras_nlp.models":
+            return sys.modules["keras_nlp.models"]
+        return orig_import(name, _globals, _locals, fromlist, level)
+
+    monkeypatch.setattr("builtins.__import__", mock_import)
+    monkeypatch.setattr(tr, "build_dataloader", lambda *_args, **_kwargs: {"loader": None})
+    res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2))
+    assert "failed" in res["status"]
+    assert "Invalid dataloader" in res["status"]
+
+
+def test_get_trainer() -> None:
+    """Test function."""
+    import gemma_4_sql.backends.keras as keras_init
+
+    assert keras_init.get_trainer() == "keras_trainer"

@@ -128,8 +128,8 @@ def _load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
     """
     duckdb_module = LazyLoader("duckdb").get_module()
     if duckdb_module is None:
-        msg = "duckdb is required. Install with `pip install duckdb`."  # pragma: no cover
-        raise RuntimeError(msg)  # pragma: no cover
+        msg = "duckdb is required. Install with `pip install duckdb`."
+        raise RuntimeError(msg)
 
     try:
         conn = duckdb_module.connect(db_path, read_only=True)
@@ -137,7 +137,7 @@ def _load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
         columns = [desc[0] for desc in getattr(conn, "description", [("col" + str(i),) for i in range(len(results[0]))] if results else [])]
         conn.close()
         return [dict(zip(columns, row)) for row in results]
-    except Exception as e:  # pragma: no cover
-        logger.exception("Failed to load dataset from DuckDB")  # pragma: no cover
-        msg = f"DuckDB error: {e}"  # pragma: no cover
-        raise RuntimeError(msg) from e  # pragma: no cover
+    except Exception as e:
+        logger.exception("Failed to load dataset from DuckDB")
+        msg = f"DuckDB error: {e}"
+        raise RuntimeError(msg) from e

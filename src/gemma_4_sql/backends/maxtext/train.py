@@ -24,7 +24,7 @@ Gemma4Model = None
 maxtext_train = None
 with catch_optional_imports():
     import maxtext.train as maxtext_train
-    from maxtext.models.gemma4 import Gemma4Model  # pragma: no cover
+    from maxtext.models.gemma4 import Gemma4Model
 
 
 def _loss_fn(model: object, params: dict[str, object] | object, batch: JSONDict) -> object:
@@ -98,7 +98,7 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
 
 def _initialize_jax_distributed(*, test_mode: bool = False) -> None:
     """Initialize JAX distributed if not in test mode."""
-    if not test_mode:  # pragma: no cover
+    if not test_mode:
         try:
             jax.distributed.initialize()
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:

@@ -35,6 +35,11 @@ def test_modeling_coverage() -> None:
     config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, num_experts=4, num_experts_per_tok=2)
     model_moe = Gemma4ForCausalLM(config, rngs=rngs)
     model_moe(input_ids, positions)
+
+    # Coverage for per_layer_inputs condition in Gemma4Model
+    per_layer_inputs = jnp.zeros((1, 2, 1, 64))
+    model_v.model(input_ids, positions, per_layer_inputs=per_layer_inputs)
+
     audio_config = modeling.AudioConfig(hidden_size=64, num_hidden_layers=1, num_attention_heads=4, use_clipped_linears=True)
     config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, audio_config=audio_config)
     model_a = Gemma4ForCausalLM(config, rngs=rngs)
@@ -51,6 +56,15 @@ def test_modeling_coverage() -> None:
     init_cache(config_g, 1, 10)
     config_s = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=7, num_attention_heads=4, num_key_value_heads=2, head_dim=16, share_kv_projections=True)
     Gemma4ForCausalLM(config_s, rngs=rngs)
+
+    # Coverage for LOCAL_SLIDING
+    from gemma_4_sql.backends.jax.gemma4.attention import Gemma4Attention
+    from gemma_4_sql.backends.jax.gemma4.modeling import AttentionType
+
+    local_config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, sliding_window_size=2)
+    local_attn = Gemma4Attention(local_config, AttentionType.LOCAL_SLIDING, rngs=rngs)
+    local_attn(jnp.zeros((1, 4, 64)), jnp.array([[0, 1, 2, 3]]), attention_mask=jnp.zeros((1, 1, 4, 4)))
+
     jax.jit = orig_jit
 
 

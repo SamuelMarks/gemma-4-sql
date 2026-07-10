@@ -169,7 +169,8 @@ class MockJax:
                 object: Description of return.
 
             """
-            return (MockJnpTensor((1,)), "grads")
+            loss = fn(*args, **kwargs)
+            return (loss, "grads")
 
         return wrapper
 
@@ -369,7 +370,9 @@ def test_dpo_distributed_initialize(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "jax", MockJax)
     monkeypatch.setattr(tr, "optax", MockOptax)
     monkeypatch.setattr(tr, "jnp", MockJnp)
-    monkeypatch.setattr(tr, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: None})())
+    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnp", MockJnp())
+    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnn", MockJnn())
+    monkeypatch.setattr(tr, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: MockJnpTensor((1,))})())
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
         """Execute function.
@@ -397,7 +400,9 @@ def test_dpo_distributed_initialize_fail(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(tr, "jax", MockJax)
     monkeypatch.setattr(tr, "optax", MockOptax)
     monkeypatch.setattr(tr, "jnp", MockJnp)
-    monkeypatch.setattr(tr, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: None})())
+    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnp", MockJnp())
+    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnn", MockJnn())
+    monkeypatch.setattr(tr, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: MockJnpTensor((1,))})())
 
     def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
         """Execute function.
