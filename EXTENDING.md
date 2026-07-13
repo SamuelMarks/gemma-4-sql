@@ -74,6 +74,8 @@ jax = "gemma_4_sql.backends.jax"
 keras = "gemma_4_sql.backends.keras"
 maxtext = "gemma_4_sql.backends.maxtext"
 pytorch = "gemma_4_sql.backends.pytorch"
+pytorch_hf = "gemma_4_sql.backends.pytorch"
+pytorch_native = "gemma_4_sql.backends.pytorch"
 mlx = "gemma_4_sql.backends.mlx"  # <-- Add your new backend here
 ```
 

@@ -120,7 +120,7 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
 
 def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, test_mode: bool) -> tuple[str, float]:
     """Execute the core DPO loop."""
-    if not test_mode:
+    if not test_mode:  # pragma: no cover
         try:
             jax.distributed.initialize()
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:

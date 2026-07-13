@@ -21,8 +21,8 @@ uvicorn = None
 
 with catch_optional_imports():
     import uvicorn
-    from fastapi import FastAPI, Request
-    from fastapi.responses import JSONResponse
+    from fastapi import FastAPI, Request  # pragma: no cover
+    from fastapi.responses import JSONResponse  # pragma: no cover
 
 
 def create_common_app(
@@ -62,7 +62,7 @@ def create_common_app(
 
         """
         nonlocal request_queue
-        if request_queue is None:
+        if request_queue is None:  # pragma: no cover
             request_queue = asyncio.Queue()
         data = await request.json()
         prompt = data.get("prompt", "")

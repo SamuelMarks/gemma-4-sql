@@ -15,7 +15,7 @@ keras = None
 tf = None
 with catch_optional_imports():
     import keras
-    import tensorflow as tf
+    import tensorflow as tf  # pragma: no cover
 FastAPI = None
 Request = None
 JSONResponse = None

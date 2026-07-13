@@ -27,6 +27,7 @@ def test_mlx_export_fail(monkeypatch):
         return orig_import(name, *a, **k)
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
+    monkeypatch.setattr(mexp, "mx", type("MX", (), {}))
     with pytest.raises(ValueError):
         mexp.export_model("model", "path")
 
@@ -197,6 +198,8 @@ def test_mlx_train_inner_success(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", mock_import)
 
     monkeypatch.setattr(mtrain, "load", lambda n: (None, None))
+    monkeypatch.setattr(mtrain, "optim", type("Opt", (), {"AdamW": lambda **k: None}))
+    monkeypatch.setattr(mtrain, "nn", type("NN", (), {"value_and_grad": lambda *a, **k: lambda *a, **k: (None, None)}))
     res = mtrain._execute_train("m", "d", 1, 0.1)
     assert res[0] == "completed"
 

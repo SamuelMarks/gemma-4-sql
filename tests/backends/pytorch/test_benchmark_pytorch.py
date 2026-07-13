@@ -191,14 +191,14 @@ def test_pytorch_benchmark_eval(monkeypatch):
         def __call__(self, x):
             return x
 
-    def mock_get(m, h, t):
+    def mock_get(m, h, test_mode=False, dtype="bfloat16", backend_alias="pytorch"):
         return (MockModel(), "cuda")
 
     monkeypatch.setattr(bm, "_load_pytorch_model_and_device", mock_get)
 
     import torch
 
-    monkeypatch.setattr(bm, "torch", type("Torch", (), {"no_grad": torch.no_grad, "cuda": type("Cuda", (), {"is_available": lambda: True, "synchronize": lambda: None, "max_memory_allocated": lambda: 1024 * 1024 * 1024})}))
+    monkeypatch.setattr(bm, "torch", type("Torch", (), {"no_grad": torch.no_grad, "cuda": type("Cuda", (), {"is_available": lambda: True, "synchronize": lambda *a, **kw: None, "max_memory_allocated": lambda: 1024 * 1024 * 1024}), "randint": lambda *a, **k: MockModel()}))
 
     res = bm.benchmark_model("m", "gpu", 1)
     assert res["status"] == "success"
@@ -221,14 +221,14 @@ def test_pytorch_benchmark_rest(monkeypatch):
         def __call__(self, x):
             return x
 
-    def mock_get(m, h, t):
+    def mock_get(m, h, test_mode=False, dtype="bfloat16", backend_alias="pytorch"):
         return (MockModel(), "cuda")
 
     monkeypatch.setattr(bm, "_load_pytorch_model_and_device", mock_get)
 
     import torch
 
-    monkeypatch.setattr(bm, "torch", type("Torch", (), {"no_grad": torch.no_grad, "cuda": type("Cuda", (), {"is_available": lambda: True, "synchronize": lambda: None, "max_memory_allocated": lambda: 1024 * 1024 * 1024})(), "randint": lambda *a, **k: MockModel()}))
+    monkeypatch.setattr(bm, "torch", type("Torch", (), {"no_grad": torch.no_grad, "cuda": type("Cuda", (), {"is_available": lambda: True, "synchronize": lambda *a, **kw: None, "max_memory_allocated": lambda: 1024 * 1024 * 1024}), "randint": lambda *a, **k: MockModel()}))
 
     res = bm.benchmark_model("m", "gpu", 1)
     assert res["status"] == "success"
@@ -244,7 +244,7 @@ def test_pytorch_benchmark_eval2(monkeypatch):
         def eval(self):
             pass
 
-    monkeypatch.setattr(bm, "AutoModelForCausalLM", type("Auto", (), {"from_pretrained": lambda x: MockModel()}))
+    monkeypatch.setattr(bm, "AutoModelForCausalLM", type("Auto", (), {"from_pretrained": lambda x, torch_dtype=None: MockModel()}))
     monkeypatch.setattr(bm, "torch", type("Torch", (), {"cuda": type("Cuda", (), {"is_available": lambda self: True})()}))
     bm._load_pytorch_model_and_device("m", "gpu")
 
@@ -330,6 +330,12 @@ def test_pytorch_benchmark_all(monkeypatch):
         def __call__(self, x):
             return x
 
+        def generate(self, x, **kwargs):
+            return x
+
+        def to(self, x):
+            pass
+
     class MockNoGrad:
         def __enter__(self):
             pass
@@ -344,9 +350,37 @@ def test_pytorch_benchmark_all(monkeypatch):
         def max_memory_allocated(self):
             return 1024 * 1024 * 1024
 
+        def reset_peak_memory_stats(self):
+            pass
+
+        def is_available(self):
+            return True
+
+    class MockMps:
+        def synchronize(self):
+            pass
+
+        def driver_allocated_memory(self):
+            return 1024 * 1024 * 1024
+
+        def is_available(self):
+            return True
+
+    class MockBackends:
+        mps = MockMps()
+
+    import torch
+
     class MockTorch:
         long = "long"
+        bfloat16 = torch.bfloat16
         cuda = MockCuda()
+        mps = MockMps()
+        backends = MockBackends()
+
+        @staticmethod
+        def compile(model):
+            raise RuntimeError("mock compile err")
 
         @staticmethod
         def no_grad():
@@ -356,8 +390,46 @@ def test_pytorch_benchmark_all(monkeypatch):
         def randint(*a, **k):
             return MockTensor()
 
-    monkeypatch.setattr(bm, "torch", MockTorch)
+        @staticmethod
+        def manual_seed(s):
+            pass
 
-    res = bm._run_benchmark_pass(MockModel(), "cuda", 1, 1)
+    monkeypatch.setattr(bm, "torch", MockTorch)
+    monkeypatch.setattr(bm, "AutoModelForCausalLM", MockAutoModelForCausalLM)
+
+    # Test prefill mode
+    res = bm._run_benchmark_pass(MockModel(), "cuda", 1, 1, 1, "prefill", 128)
     assert len(res) == 3
     assert res[2] == 1024.0  # memory_mb
+
+    # Test generation mode
+    res_gen = bm._run_benchmark_pass(MockModel(), "cuda", 1, 1, 1, "generate", 128)
+    assert len(res_gen) == 3
+
+    # Test MPS memory
+    assert bm._get_memory_mb(None, "mps") == 1024.0
+
+    # Test MPS sync
+    bm._sync_cuda("mps")
+
+    # Test MPS device mapping
+    assert bm._get_device("mps") == "cuda"  # cuda is checked first if available in MockTorch
+    # Let's disable cuda to test MPS
+    MockTorch.cuda.is_available = lambda: False
+    assert bm._get_device("mps") == "mps"
+
+    class MockNativeModel:
+        def to(self, device):
+            pass
+
+        def eval(self):
+            pass
+
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM", lambda config: MockNativeModel(), raising=False)
+
+    # Test native backend loading
+    res_load_native = bm._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native")
+    assert res_load_native[1] == "cpu"
+
+    # Test compile error logging
+    bm._load_pytorch_model_and_device("m", "cpu", test_mode=False, backend_alias="pytorch")

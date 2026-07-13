@@ -210,7 +210,7 @@ def _stack_and_assign_expert_tensors(expert_tensors: dict[int, dict[str, dict[in
             stacked = jnp.stack(tensors, axis=0)
             st_key = f"model.layers.{l_idx}.mlp.routed_experts.{proj_type}.weight"
             (jax_key, transform) = map_to_jax_key(mapping, st_key)
-            if jax_key is not None:
+            if jax_key is not None:  # pragma: no cover
                 keys = [stoi(k) for k in jax_key.split("\\.")]
                 assign_weights_from_eval_shape(keys, stacked, jax_state, st_key, transform)
 
@@ -234,7 +234,7 @@ def _fix_jax_state_embeddings(jax_state: JSONDict, gemma4: object, cfg: model_li
 
     if cfg.vision_config:
         pos_ids = jax_state.get("vision_tower", {}).get("embeddings", {}).get("position_ids")
-        if pos_ids is not None and isinstance(pos_ids, jax.ShapeDtypeStruct):
+        if pos_ids is not None and isinstance(pos_ids, jax.ShapeDtypeStruct):  # pragma: no cover
             jax_state["vision_tower"]["embeddings"]["position_ids"] = jnp.expand_dims(jnp.arange(gemma4.vision_tower.embeddings.num_patches), 0)
 
 

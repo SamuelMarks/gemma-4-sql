@@ -31,6 +31,11 @@ class MockJaxRandom:
     """Provide class docstring."""
 
     @staticmethod
+    def randint(*args: object, **kwargs: object) -> object:
+        """Execute function."""
+        return [0]
+
+    @staticmethod
     def mock_prngkey(seed: object) -> object:
         """Execute function.
 
@@ -47,6 +52,16 @@ class MockJax:
     """Provide class docstring."""
 
     random = MockJaxRandom()
+
+    def devices(self, *args):
+        from unittest.mock import MagicMock
+
+        return [MagicMock()]
+
+    def default_device(self, *args):
+        from unittest.mock import MagicMock
+
+        return MagicMock()
 
     @staticmethod
     def jit(fn: object) -> object:
@@ -138,7 +153,7 @@ def test_benchmark_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(MockJnp, "zeros", Exception)
+    monkeypatch.setattr(bm.jax.random, "randint", Exception)
     res = benchmark_model("model", "gpu", 1, test_mode=True)
     if "failed" not in str(res["status"]):
         raise AssertionError
@@ -176,7 +191,21 @@ def test_benchmark_maxtext_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) ->
         AssertionError: Description.
 
     """
-    monkeypatch.setattr(bm, "jax", type("MockJax", (), {"random": type("MockRng", (), {"PRNGKey": lambda x: x}), "jit": lambda x: x, "distributed": type("MockDist", (), {"initialize": lambda: None})}))
+    monkeypatch.setattr(
+        bm,
+        "jax",
+        type(
+            "MockJax",
+            (),
+            {
+                "random": type("MockRng", (), {"PRNGKey": lambda x: x, "randint": lambda *a, **k: [0]}),
+                "jit": lambda x: x,
+                "distributed": type("MockDist", (), {"initialize": lambda: None}),
+                "devices": lambda *a: [type("MockDevice", (), {})()],
+                "default_device": lambda *a: type("MockContextManager", (), {"__enter__": lambda self: None, "__exit__": lambda self, *args: None})(),
+            },
+        ),
+    )
     monkeypatch.setattr(bm, "jnp", type("MockJnp", (), {"int32": "int32", "zeros": lambda *args, **_kwargs: args}))
     monkeypatch.setattr(bm, "Gemma4Model", MockModel)
     res = bm.benchmark_model("model", "tpu", 1)
@@ -202,7 +231,21 @@ def test_benchmark_maxtext_real_no_test_mode_error(monkeypatch: pytest.MonkeyPat
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(bm, "jax", type("MockJax", (), {"random": type("MockRng", (), {"PRNGKey": lambda x: x}), "jit": lambda x: x, "distributed": type("MockDist", (), {"initialize": raise_err})}))
+    monkeypatch.setattr(
+        bm,
+        "jax",
+        type(
+            "MockJax",
+            (),
+            {
+                "random": type("MockRng", (), {"PRNGKey": lambda x: x, "randint": lambda *a, **k: [0]}),
+                "jit": lambda x: x,
+                "distributed": type("MockDist", (), {"initialize": raise_err}),
+                "devices": lambda *a: [type("MockDevice", (), {})()],
+                "default_device": lambda *a: type("MockContextManager", (), {"__enter__": lambda self: None, "__exit__": lambda self, *args: None})(),
+            },
+        ),
+    )
     monkeypatch.setattr(bm, "jnp", type("MockJnp", (), {"int32": "int32", "zeros": lambda *args, **_kwargs: args}))
     monkeypatch.setattr(bm, "Gemma4Model", MockModel)
     res = bm.benchmark_model("model", "tpu", 1)

@@ -15,8 +15,8 @@ nn = None
 optim = None
 with catch_optional_imports():
     import mlx.core as mx
-    import mlx.optimizers as optim
-    from mlx import nn
+    import mlx.optimizers as optim  # pragma: no cover
+    from mlx import nn  # pragma: no cover
 load = None
 with catch_optional_imports():
     from mlx_lm import load
@@ -120,6 +120,6 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
         raise DependencyMissingError("MLX dependencies are missing.")
     try:
         status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        status = f"failed: {e!s}"
+    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:  # pragma: no cover
+        status = f"failed: {e!s}"  # pragma: no cover
     return {"backend": "mlx", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}

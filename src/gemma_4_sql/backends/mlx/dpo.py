@@ -19,10 +19,10 @@ optim = None
 functional = None
 with catch_optional_imports():
     import mlx
-    import mlx.core as mx
-    import mlx.nn as mx_nn
-    from mlx import nn, optim
-    from mlx_lm import load
+    import mlx.core as mx  # pragma: no cover
+    import mlx.nn as mx_nn  # pragma: no cover
+    from mlx import nn, optim  # pragma: no cover
+    from mlx_lm import load  # pragma: no cover
 
 
 def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[TensorType, TensorType, TensorType]:

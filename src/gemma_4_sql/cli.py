@@ -208,6 +208,10 @@ def _add_misc_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_benchmark.add_argument("--hardware", default="gpu", choices=["gpu", "tpu", "cpu"], help="Target hardware.")
     parser_benchmark.add_argument("--batch-size", type=int, default=1, help="Batch size for benchmark.")
     parser_benchmark.add_argument("--backend", default="jax", help="Backend to use.")
+    parser_benchmark.add_argument("--dtype", default="bfloat16", help="Precision to use.")
+    parser_benchmark.add_argument("--mode", default="prefill", choices=["prefill", "decode", "end-to-end"], help="Benchmark mode.")
+    parser_benchmark.add_argument("--max-new-tokens", type=int, default=128, help="Max new tokens for generation.")
+    parser_benchmark.add_argument("--warmup-steps", type=int, default=5, help="Number of warmup steps.")
     parser_benchmark.set_defaults(func=benchmark_cmd)
 
 

@@ -322,6 +322,10 @@ Before deploying your models, you can benchmark their throughput, latency, and m
 # Benchmark PyTorch backend on GPU
 gemma-4-sql benchmark --model gemma-4 --hardware gpu --batch-size 32 --backend pytorch
 
+# Benchmark Hugging Face PyTorch vs Native PyTorch (Apples-to-Apples)
+gemma-4-sql benchmark --model gemma-4 --hardware gpu --batch-size 32 --backend pytorch_hf
+gemma-4-sql benchmark --model gemma-4 --hardware gpu --batch-size 32 --backend pytorch_native
+
 # Benchmark MaxText backend on TPU
 gemma-4-sql benchmark --model gemma-4 --hardware tpu --batch-size 128 --backend maxtext
 ```

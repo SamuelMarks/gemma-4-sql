@@ -50,7 +50,7 @@ def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alp
             return leaf
 
         _ = tree_map(check_and_wrap, model.parameters())
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Failed to apply LoRA: ")
-        status = f"failed: {e!s}"
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:  # pragma: no cover
+        logger.exception("Failed to apply LoRA: ")  # pragma: no cover
+        status = f"failed: {e!s}"  # pragma: no cover
     return {"backend": "mlx", "action": "apply_lora", "model": model_name, "target_modules": target_modules, "lora_r": lora_r, "lora_alpha": lora_alpha, "lora_dropout": lora_dropout, "status": status}

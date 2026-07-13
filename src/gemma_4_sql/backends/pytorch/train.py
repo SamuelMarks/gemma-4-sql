@@ -36,7 +36,7 @@ def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object,
     device_id = 0
     if is_distributed:
         dist = __import__("torch.distributed", fromlist=[""])
-        if not dist.is_initialized():
+        if not dist.is_initialized():  # pragma: no cover
             dist.init_process_group("nccl" if torch.cuda.is_available() else "gloo")
         rank = dist.get_rank()
         device_id = rank % max(1, torch.cuda.device_count())

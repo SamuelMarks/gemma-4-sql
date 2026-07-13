@@ -23,12 +23,12 @@ All high-level training commands pass through the dispatcher. Based on the `--ba
 ### 1.3 Swappable Execution Backends (`backends/`)
 Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`) implements identical interfaces for training, exporting, and inference. This ensures that switching from a PyTorch local setup to a MaxText TPU pod is a simple flag change.
 
-*Architectural Note: This codebase deliberately avoids abstracting or deduplicating core logic (like training loops or data loading) across different backends. The goal is to demonstrate and utilize the ecosystem-recommended, idiomatic ways of performing these tasks within each framework (e.g., using `tf.data` for Keras vs. standard `DataLoaders` for PyTorch). As such, some boilerplate duplication across `backends/` is intentional and preferred over a non-standard meta-framework.*
+*Architectural Note: This codebase deliberately avoids abstracting or deduplicating core logic (like training loops or data loading) across different backends. The goal is to demonstrate and utilize the ecosystem-recommended, idiomatic ways of performing these tasks within each framework (e.g., using `grain` for JAX/MaxText/Keras vs. standard `DataLoaders` for PyTorch). As such, some boilerplate duplication across `backends/` is intentional and preferred over a non-standard meta-framework.*
 
 *   **JAX (`backends/jax`)**: Uses Google's `jax` and `optax`. Integrates directly with the built-in NNX Gemma 4 implementation. Handles `@jax.jit` compiled loops.
 *   **MaxText (`backends/maxtext`)**: Integrates with Google's AI-Hypercomputer stack. Uses the `Gemma4Model` written in pure XLA to leverage TPU interconnects natively.
-*   **Keras (`backends/keras`)**: Uses Keras 3 core abstractions (`keras.Model.fit`), maintaining a standardized TensorFlow-compatible graph.
-*   **PyTorch (`backends/pytorch`)**: Connects to the standard Hugging Face `transformers` API (`Gemma4ForCausalLM`). 
+*   **Keras (`backends/keras`)**: Integrates with `keras_nlp` (using `GemmaCausalLM`) and leverages Keras 3 core abstractions (`keras.Model.fit`), maintaining a standardized TensorFlow-compatible graph.
+*   **PyTorch (`backends/pytorch`)**: Connects to the standard Hugging Face `transformers` API (`Gemma4ForCausalLM`) and also provides a pure Native PyTorch implementation (`torch.nn`) for isolated benchmarking.
 
 ---
 
@@ -39,8 +39,8 @@ Data loading at scale is a massive bottleneck. We use **Google Grain**, a high-p
 1.  **Datasets:** We natively connect to Hugging Face datasets (e.g., `my-custom-dataset`, `my-custom-dpo-dataset`).
 2.  **Transformations:** Datasets pass through a series of `MapTransform` pipelines.
 3.  **Target Formats:** The pipeline normalizes the text into integer sequences and produces dataset shards tailored to the specific backend:
-    *   **JAX/MaxText:** Yields structures matching `JAXDistributed` expectations (sharded arrays).
-    *   **Keras/PyTorch:** Yields standard `(inputs, labels)` batched tuples or native `DataLoaders`.
+    *   **JAX/MaxText/Keras:** Utilizes Grain's `BaseFormatTransform` to yield `inputs` and `targets` dictionaries, with sharding handled via `JAXDistributedSharding`.
+    *   **PyTorch:** Yields standard `inputs` and `targets` dictionaries via native `DataLoaders`.
 
 ### 2.2 Live Database Execution Engine (`db_engine.py`)
 Unlike standard NLP generation where BLEU/ROUGE are sufficient, Text-to-SQL must be measured by **Execution Accuracy (EX)**. We developed the `LiveDatabaseEngine`.

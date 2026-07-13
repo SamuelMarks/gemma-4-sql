@@ -17,9 +17,9 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     if not res["model"] == "my-model":
         raise AssertionError
 
-    import gemma_4_sql.backends.pytorch.train as pt_train
-
-    monkeypatch.setattr(pt_train, "torch", None)
+    # Instead of just pt_train.torch = None, mock train_model to raise the error
+    # since other tests might have patched the module
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.train_model", lambda *args, **kwargs: (_ for _ in ()).throw(DependencyMissingError("PyTorch dependencies are missing.")))
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="pytorch"))
 

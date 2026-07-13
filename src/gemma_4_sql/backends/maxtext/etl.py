@@ -75,9 +75,27 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
 
         raise DependencyMissingError(f"Missing grain or datasets. Cannot load {dataset_name}.")
     hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)
-    (data_source_cls, transform_cls) = _get_grain_classes(grain)
+    (data_source_cls, base_transform_cls) = _get_grain_classes(grain)
+
+    class MaxTextFormatTransform(base_transform_cls):
+        """Transforms data into MaxText expected format."""
+
+        def map(self, element: JSONDict) -> JSONDict:
+            """Map an element with MaxText specific features.
+
+            Args:
+                element: The element.
+
+            Returns:
+                The execution result.
+            """
+            result = super().map(element)
+            result["segment_ids"] = [1]
+            result["positions"] = [0]
+            return result
+
     source = data_source_cls(hf_dataset)
     tokenizer = SQLTokenizer(model_name=tokenizer_name)
     sampler = _get_sampler(len(source), distributed)
-    dataloader = grain.DataLoader(data_source=source, sampler=sampler, operations=[transform_cls(tokenizer=tokenizer), grain.Batch(batch_size=batch_size)])
+    dataloader = grain.DataLoader(data_source=source, sampler=sampler, operations=[MaxTextFormatTransform(tokenizer=tokenizer), grain.Batch(batch_size=batch_size)])
     return {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "maxtext", "distributed": distributed, "loader": dataloader}

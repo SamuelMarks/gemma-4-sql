@@ -169,9 +169,12 @@ Before deploying your fully trained, post-trained model to production, you must 
 ### Benchmarking on GPU (NVIDIA A100/H100)
 
 **Using PyTorch (Typically fastest on NVIDIA via FlashAttention):**
+
 ```bash
 gemma-4-sql benchmark --model my-sft-gemma-4 --hardware gpu --batch-size 32 --backend pytorch
 ```
+
+*Note:* For accurate framework benchmarking, you can also use `--backend pytorch_hf` for the HuggingFace `transformers` stack and `--backend pytorch_native` for an isolated pure `torch.nn` execution to compare against JAX and MaxText.
 
 **Using JAX (JAX on GPU):**
 ```bash
@@ -244,4 +247,14 @@ gemma-4-sql log --step 1000 --metrics "eval_loss=0.3,execution_accuracy=0.89" --
 
 To automatically provision and orchestrate this hardware (including DNS, network, firewall, storage, and nodes) across Google Cloud (or AWS/Azure), `gemma-4-sql` relies on the `libscript` multicloud abstractions. 
 
-For an exhaustive, step-by-step guide on using `libscript` to orchestrate TFRC TPU VMs and GKE clusters (including queuing and spot instance support), please see **[DEPLOY_TO_TPU.md](./DEPLOY_TO_TPU.md)**.
+### Higher-Level Abstraction (Provision / Deprovision)
+For completely hands-off provisioning of the entire cluster state, use the generic libscript multicloud orchestrator:
+```bash
+# Provisions network, firewall, nodes, shared storage, and maps DNS
+./libscript.sh provision --tpu --shared-storage gcp my-gemma-cluster default-rg us-central2-b
+
+# Deprovisions the entire infrastructure slice
+./libscript.sh deprovision --tpu --shared-storage gcp my-gemma-cluster default-rg us-central2-b
+```
+
+For an exhaustive, step-by-step manual resource-by-resource guide on using `libscript` to orchestrate TFRC TPU VMs and GKE clusters (including queuing and spot instance support), please see **[DEPLOY_TO_TPU.md](./DEPLOY_TO_TPU.md)**.

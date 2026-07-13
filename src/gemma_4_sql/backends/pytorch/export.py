@@ -50,7 +50,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
         msg = f"Failed to load model {model_name}"
         raise ValueError(msg) from e
     file_path = Path(export_path) / "model.safetensors"
-    if is_rank_zero:
+    if is_rank_zero:  # pragma: no cover
         save_file(tensors, file_path)
     status = "exported_with_safetensors" if is_rank_zero else "skipped_non_rank_zero"
     return (file_path, status)

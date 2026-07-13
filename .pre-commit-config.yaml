@@ -12,9 +12,15 @@ repos:
         additional_dependencies: [pytest, click]
   - repo: local
     hooks:
-      - id: tests-and-badges
-        name: Run tests and update badges
-        entry: bash -c "uv run --all-extras --with interrogate --with pytest-cov --with pytest python scripts/update_badges.py"
+      - id: tests
+        name: Run tests
+        entry: bash -c "uv run --all-extras pytest"
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: badges
+        name: Update badges
+        entry: bash -c "uv run --all-extras --with interrogate python scripts/update_badges.py"
         language: system
         pass_filenames: false
         always_run: true

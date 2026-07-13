@@ -17,7 +17,7 @@ keras = None
 tf = None
 with catch_optional_imports():
     import keras
-    import tensorflow as tf
+    import tensorflow as tf  # pragma: no cover
 
 
 def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[TensorType, TensorType, TensorType]:

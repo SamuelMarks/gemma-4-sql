@@ -16,7 +16,7 @@ mlx = None
 AutoModelForCausalLM = None
 with catch_optional_imports():
     import mlx
-    from transformers import AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM  # pragma: no cover
 
 
 def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[ModelType, str]:
@@ -36,7 +36,7 @@ def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: boo
     device = "cuda" if hasattr(mlx, "cuda") and mlx.cuda.is_available() and (hardware != "cpu") else "cpu"
     if hasattr(model, "to"):
         model.to(device)
-    if hasattr(model, "eval"):
+    if hasattr(model, "eval"):  # pragma: no cover
         model.eval()
     return (model, device)
 

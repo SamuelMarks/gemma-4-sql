@@ -62,7 +62,13 @@ class InferenceProtocol(Protocol):
         """
         ...
 
-    def benchmark_model(self, model_name: str, hardware: str = "tpu-v5p", batch_size: int = 32) -> JSONDict:
+    def benchmark_model(
+        self,
+        model_name: str,
+        hardware: str = "tpu-v5p",
+        batch_size: int = 32,
+        **kwargs: typing.Any,
+    ) -> JSONDict:
         """Protocol method."""
         ...
 

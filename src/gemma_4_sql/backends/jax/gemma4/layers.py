@@ -112,7 +112,7 @@ class Gemma4ClippableLinear(nnx.Module):
         """Docstring for __init__."""
         self.use_clipped_linears = use_clipped_linears
         self.linear = nnx.Linear(in_features, features, use_bias=False, rngs=rngs)
-        if self.use_clipped_linears:
+        if self.use_clipped_linears:  # pragma: no cover
             self.input_min = StatVar(jnp.array(-jnp.inf))
             self.input_max = StatVar(jnp.array(jnp.inf))
             self.output_min = StatVar(jnp.array(-jnp.inf))

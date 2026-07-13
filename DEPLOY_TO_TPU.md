@@ -138,15 +138,24 @@ You can now dispatch native `gemma-4-sql` CLI commands using the stack's deploym
 
 
 ### 2.2 Manual Component-by-Component Deployment
-If you prefer to be explicit about each resource being provisioned, you can leverage the underlying `libscript` components individually. This gives you granular control over the TPU VM, storage mounts, and background execution.
+If you prefer to be explicit about each resource being provisioned, you can leverage the underlying `libscript` multicloud abstractions step-by-step. This gives you granular control over the network, firewall, storage mounts, TPU VMs, and background execution.
 
-**Step 1: Provision the TPU VM and Persistent Disk**
+**Step 1: Provision the Network and Firewall**
 ```bash
-# Uses TPU_DATA_DISK_SIZE to attach a persistent data disk
+./libscript.sh cloud gcp network create "$TPU_NAME-vpc"
+./libscript.sh cloud gcp firewall create "$TPU_NAME-fw" --network "$TPU_NAME-vpc" --allow tcp:22,tcp:6006
+```
+
+**Step 2: Provision the TPU VM and Persistent Disk**
+```bash
+# Export the newly created network so the TPU VM is provisioned within it
+export TPU_NETWORK="$TPU_NAME-vpc"
+
+# Uses TPU_DATA_DISK_SIZE to attach a persistent data disk inside the newly created network
 ./libscript.sh gcp/tpu-vm create "$TPU_NAME"
 ```
 
-**Step 2: Provision Remote Toolchains**
+**Step 3: Provision Remote Toolchains**
 Install the required `libscript` components directly on the TPU VM to manage storage, execution resilience, and observability.
 ```bash
 ./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "
@@ -158,7 +167,7 @@ Install the required `libscript` components directly on the TPU VM to manage sto
 "
 ```
 
-**Step 3: Mount Object Storage**
+**Step 4: Mount Object Storage**
 Bind your Google Cloud Storage bucket to the remote persistent disk for streaming checkpoints.
 ```bash
 ./libscript.sh gcp/tpu-vm ssh "$TPU_NAME" "
@@ -166,7 +175,7 @@ Bind your Google Cloud Storage bucket to the remote persistent disk for streamin
 "
 ```
 
-**Step 4: Launch TensorBoard and Detached Training**
+**Step 5: Launch TensorBoard and Detached Training**
 Start TensorBoard in the background and execute your training loop inside a protected `tmux` session, forwarding the port to your local machine.
 ```bash
 # 4a. Start TensorBoard on the remote node
@@ -302,6 +311,10 @@ To avoid runaway costs, destroy all compute resources once the assets are safely
 # Delete the TPU VM
 ./libscript.sh gcp/tpu-vm delete "$TPU_NAME"
 ./libscript.sh gcp/tpu-vm delete "$SERVE_TPU_NAME"
+
+# Clean up Firewall and Network
+./libscript.sh cloud gcp firewall delete "$TPU_NAME-fw"
+./libscript.sh cloud gcp network delete "$TPU_NAME-vpc"
 ```
 
 ### Teardown: GKE TPU Clusters (XPK)

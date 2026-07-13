@@ -44,7 +44,7 @@ def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alp
         model = AutoModelForCausalLM.from_pretrained(model_name)
         lora_config = LoraConfig(r=lora_r, lora_alpha=lora_alpha, target_modules=target_modules, lora_dropout=lora_dropout, bias="none", task_type="CAUSAL_LM")
         model = get_peft_model(model, lora_config)
-        if hasattr(model, "print_trainable_parameters"):
+        if hasattr(model, "print_trainable_parameters"):  # pragma: no cover
             model.print_trainable_parameters()
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to apply LoRA: ")

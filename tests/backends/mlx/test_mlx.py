@@ -346,6 +346,8 @@ def test_mlx_train_inner_exceptions(monkeypatch):
 
     # force exception in _execute_train when build_dataloader fails
     monkeypatch.setattr(mtrain, "build_dataloader", lambda c: {"loader": None})
+    monkeypatch.setattr(mtrain, "optim", type("Opt", (), {"AdamW": lambda **k: None}))
+    monkeypatch.setattr(mtrain, "nn", type("NN", (), {"value_and_grad": lambda *a, **k: None}))
     with __import__("pytest").raises(ValueError):
         mtrain._execute_train("m", "d", 1, 0.1)
 

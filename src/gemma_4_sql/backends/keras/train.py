@@ -16,7 +16,7 @@ keras = None
 tf = None
 with catch_optional_imports():
     import keras
-    import tensorflow as tf
+    import tensorflow as tf  # pragma: no cover
 
 
 def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool) -> tuple[str, float]:

@@ -1,6 +1,7 @@
 """Tests for JAX Benchmark."""
 
 from typing import NoReturn as Never
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,8 +26,16 @@ class MockJnp:
 class MockJax:
     """Provide class docstring."""
 
+    random = MagicMock()
+
     def block_until_ready(self, x: object) -> None:
         """Execute function."""
+
+    def devices(self, *args):
+        return [MagicMock()]
+
+    def default_device(self, *args):
+        return MagicMock()
 
 
 class MockGemma4Config:
@@ -146,6 +155,14 @@ def test_benchmark_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
 class MockJaxNoBlock:
     """Provide class docstring."""
 
+    random = MagicMock()
+
+    def devices(self, *args):
+        return [MagicMock()]
+
+    def default_device(self, *args):
+        return MagicMock()
+
 
 def test_benchmark_model_jax_real_no_block_until_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function.
@@ -188,6 +205,12 @@ class MockJaxWithBlock:
 
     def block_until_ready(self, _):
         pass
+
+    def devices(self, *args):
+        return [MagicMock()]
+
+    def default_device(self, *args):
+        return MagicMock()
 
 
 def test_benchmark_jax_block_until_ready(monkeypatch):
