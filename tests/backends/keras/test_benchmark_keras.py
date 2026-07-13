@@ -27,6 +27,10 @@ class MockTf:
         """Provide class docstring."""
 
         @staticmethod
+        def set_seed(*_args: object, **_kwargs: object) -> None:
+            pass
+
+        @staticmethod
         def uniform(*_args: object, **_kwargs: object) -> object:
             """Execute function.
 
@@ -47,17 +51,23 @@ class MockTf:
         """
         return MockTfTensor()
 
-    def function(self, fn: object) -> object:
+    def function(self, fn: object = None, **_kwargs: object) -> object:
         """Execute function.
 
         Returns:
             object: Description of return.
 
         """
+        if fn is None:
+            return lambda x: x
         return fn
 
     class MockConfig:
         """Provide class docstring."""
+
+        @staticmethod
+        def list_physical_devices(_d: str) -> list:
+            return [1]
 
         class MockExperimental:
             """Provide class docstring."""
@@ -72,9 +82,23 @@ class MockTf:
                 """
                 return {"current": 1024 * 1024 * 100}
 
+            @staticmethod
+            def reset_memory_stats(_device: str) -> None:
+                pass
+
         experimental = MockExperimental
 
     config = MockConfig
+
+    class device:
+        def __init__(self, d):
+            self.d = d
+
+        def __enter__(self):
+            pass
+
+        def __exit__(self, *a):
+            pass
 
 
 def test_benchmark_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,6 +157,13 @@ def test_benchmark_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class MockKeras:
     """Provide class docstring."""
+
+    class MockKerasConfig:
+        @staticmethod
+        def set_floatx(dtype):
+            pass
+
+    config = MockKerasConfig
 
     def mock_input(*_args: object, **_kwargs: object) -> None:
         """Execute function."""
@@ -212,7 +243,9 @@ def test_benchmark_keras_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(bm, "tf", MockTf())
     monkeypatch.setattr(bm, "keras", MockKeras())
-    bm.benchmark_model("model", "gpu", 1)
+    res = bm.benchmark_model("model", "gpu", 1)
+    if "failed" in str(res.get("status", "")):
+        raise AssertionError(f"Expected success, got {res}")
 
 
 def test_benchmark_keras_real_mem(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -467,22 +500,22 @@ def test_keras_benchmark_126_127(monkeypatch):
         class config:
             @staticmethod
             def list_physical_devices(d):
-                return []
+                return [1]
 
             class experimental:
                 @staticmethod
                 def reset_memory_stats(d):
-                    pass
+                    raise ValueError("dummy")
 
                 @staticmethod
                 def get_memory_info(d):
-                    return {"peak": "not_a_float"}
+                    raise ValueError("dummy")
 
     monkeypatch.setattr(bm, "tf", MockTF)
     monkeypatch.setattr(bm, "keras", type("Keras", (), {}))
 
-    # This should trigger the ValueError in float() conversion
-    res = bm._run_benchmark_pass(MockModel(), 1, 1, 1, "prefill", 128, "cpu")
+    # This should trigger the ValueError
+    res = bm._run_benchmark_pass(MockModel(), 1, 1, 1, "prefill", 128, "gpu")
     assert res[2] == 6000.0
 
 
