@@ -32,26 +32,16 @@ class MockAsyncLLMEngine:
         class Engine:
             """Provide class docstring."""
 
-            def generate(self, *_args: object, **_kwargs: object) -> object:
-                """Execute function.
-
-                Returns:
-                    object: Description of return.
-
-                """
-
+            def generate(self, prompt, *_args: object, **_kwargs: object) -> object:
                 class Output:
-                    """Provide class docstring."""
-
                     class Out:
-                        """Provide class docstring."""
-
                         text = "SELECT * FROM vllm"
 
                     outputs: typing.ClassVar = [Out()]
 
                 async def gen() -> typing.AsyncGenerator:
-                    """Execute function."""
+                    if prompt == "empty":
+                        return
                     yield Output()
 
                 return gen()
@@ -265,6 +255,11 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     result2 = await generate_func(request)
     if "error" not in result2.content:
         raise AssertionError
+    request.json.return_value = {"prompt": "empty"}
+    request.is_disconnected.return_value = False
+    result3 = await generate_func(request)
+    if result3.content["sql"] != "":
+        raise AssertionError
 
 
 def test_serve_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -280,3 +275,57 @@ def test_serve_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
     importlib.reload(m_serve)
     monkeypatch.undo()
     importlib.reload(m_serve)
+
+
+@pytest.mark.asyncio
+async def test_serve_pytorch_coverage(monkeypatch):
+    import gemma_4_sql.backends.pytorch.serve as pts
+
+    class MockEngine:
+        async def generate(self, *a, **k):
+            # empty generator to cover 56->61
+            if False:
+                yield None
+
+        async def abort(self, *a, **k):
+            pass
+
+    class MockRequest:
+        async def json(self):
+            return {"prompt": "p"}
+
+        async def is_disconnected(self):
+            return False
+
+    monkeypatch.setattr(pts, "AsyncLLMEngine", type("AsyncLLMEngine", (), {"from_engine_args": lambda *a: MockEngine()}))
+    monkeypatch.setattr(pts, "AsyncEngineArgs", lambda **k: None)
+    monkeypatch.setattr(pts, "random_uuid", lambda: "123")
+
+    class MockFastAPI:
+        def __init__(self, **kwargs):
+            self.routes = []
+
+        def post(self, path):
+            def decorator(f):
+                class Route:
+                    def __init__(self, path, endpoint):
+                        self.path = path
+                        self.endpoint = endpoint
+
+                self.routes.append(Route(path, f))
+                return f
+
+            return decorator
+
+    monkeypatch.setattr(pts, "FastAPI", MockFastAPI)
+    monkeypatch.setattr(pts, "JSONResponse", lambda content: type("JSONResponse", (), {"body": __import__("json").dumps(content).encode()})())
+
+    app = pts._create_app("model", 100)
+    # find the route
+    route = next(r for r in app.routes if getattr(r, "path", "") == "/generate")
+
+    # We must patch endpoint directly since FastAPI Request requires scope
+    res = await route.endpoint(MockRequest())
+    import json
+
+    assert json.loads(res.body.decode()) == {"sql": ""}

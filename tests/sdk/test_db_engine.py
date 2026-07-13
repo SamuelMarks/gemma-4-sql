@@ -5,17 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from gemma_4_sql.sdk.adapters.base import DatabaseAdapter
-from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
+from gemma_4_sql.sdk.db_engine import _ADAPTERS, LiveDatabaseEngine
 
 
 def test_db_engine_connect_close() -> None:
     """Test db engine connect and close."""
-    with patch("gemma_4_sql.sdk.db_engine._ADAPTERS") as mock_adapters:
-        mock_adapter_cls = MagicMock()
-        mock_adapter = MagicMock()
-        mock_adapter.connect.return_value = "conn"
-        mock_adapter_cls.return_value = mock_adapter
-        mock_adapters.get.return_value = mock_adapter_cls
+    mock_adapter_cls = MagicMock()
+    mock_adapter = MagicMock()
+    mock_adapter.connect.return_value = "conn"
+    mock_adapter_cls.return_value = mock_adapter
+    with patch.dict(_ADAPTERS, {"sqlite": mock_adapter_cls}):
         engine = LiveDatabaseEngine(db_type="sqlite", db_path=":memory:")
         assert engine.connect() == "conn"
         engine.close()
@@ -30,11 +29,10 @@ def test_db_engine_unsupported_type() -> None:
 
 def test_db_engine_ddl() -> None:
     """Test db engine ddl."""
-    with patch("gemma_4_sql.sdk.db_engine._ADAPTERS") as mock_adapters:
-        mock_adapter_cls = MagicMock()
-        mock_adapter = MagicMock()
-        mock_adapter_cls.return_value = mock_adapter
-        mock_adapters.get.return_value = mock_adapter_cls
+    mock_adapter_cls = MagicMock()
+    mock_adapter = MagicMock()
+    mock_adapter_cls.return_value = mock_adapter
+    with patch.dict(_ADAPTERS, {"sqlite": mock_adapter_cls}):
         LiveDatabaseEngine(ddl="CREATE TABLE t (a INT);")
         mock_adapter.setup_schema.side_effect = RuntimeError("error")
         with pytest.raises(RuntimeError):
@@ -43,12 +41,11 @@ def test_db_engine_ddl() -> None:
 
 def test_db_engine_compare_queries() -> None:
     """Test compare queries."""
-    with patch("gemma_4_sql.sdk.db_engine._ADAPTERS") as mock_adapters:
-        mock_adapter_cls = MagicMock()
-        mock_adapter = MagicMock()
-        mock_adapter.execute_query.side_effect = [[(1,)], [(1,)], [(1,)], [(2,)]]
-        mock_adapter_cls.return_value = mock_adapter
-        mock_adapters.get.return_value = mock_adapter_cls
+    mock_adapter_cls = MagicMock()
+    mock_adapter = MagicMock()
+    mock_adapter.execute_query.side_effect = [[(1,)], [(1,)], [(1,)], [(2,)]]
+    mock_adapter_cls.return_value = mock_adapter
+    with patch.dict(_ADAPTERS, {"sqlite": mock_adapter_cls}):
         engine = LiveDatabaseEngine()
         assert engine.compare_queries("q1", "q2") is True
         assert engine.compare_queries("q1", "q2") is False
@@ -57,13 +54,12 @@ def test_db_engine_compare_queries() -> None:
 @pytest.mark.asyncio
 async def test_db_engine_execute_async() -> None:
     """Test db engine execute async."""
-    with patch("gemma_4_sql.sdk.db_engine._ADAPTERS") as mock_adapters:
-        mock_adapter_cls = MagicMock()
-        mock_adapter = MagicMock()
-        mock_adapter.execute_query_async = AsyncMock(return_value=[("row",)])
-        mock_adapter.execute_with_feedback_async = AsyncMock(return_value=(True, [("row",)], None))
-        mock_adapter_cls.return_value = mock_adapter
-        mock_adapters.get.return_value = mock_adapter_cls
+    mock_adapter_cls = MagicMock()
+    mock_adapter = MagicMock()
+    mock_adapter.execute_query_async = AsyncMock(return_value=[("row",)])
+    mock_adapter.execute_with_feedback_async = AsyncMock(return_value=(True, [("row",)], None))
+    mock_adapter_cls.return_value = mock_adapter
+    with patch.dict(_ADAPTERS, {"sqlite": mock_adapter_cls}):
         engine = LiveDatabaseEngine()
         assert await engine.execute_query_async("q") == [("row",)]
         assert await engine.execute_with_feedback_async("q") == (True, [("row",)], None)

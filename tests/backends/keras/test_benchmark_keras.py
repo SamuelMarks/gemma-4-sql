@@ -249,3 +249,250 @@ def test_benchmark_keras_real_mem(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bm, "tf", mock_tf)
     monkeypatch.setattr(bm, "keras", MockKeras())
     bm.benchmark_model("model", "gpu", 1)
+
+
+def test_benchmark_keras_coverage(monkeypatch):
+    import gemma_4_sql.backends.keras.benchmark as bm
+
+    class MockOut:
+        def numpy(self):
+            pass
+
+    class MockModel:
+        def __call__(self, x):
+            return MockOut()
+
+        def generate(self, *a, **k):
+            return MockOut()
+
+    class MockTF:
+        class random:
+            @staticmethod
+            def set_seed(s):
+                pass
+
+            @staticmethod
+            def uniform(*a, **k):
+                return "dummy"
+
+        int32 = "int32"
+
+        class device:
+            def __init__(self, d):
+                self.d = d
+
+            def __enter__(self):
+                pass
+
+            def __exit__(self, *a):
+                pass
+
+        @staticmethod
+        def function(*a, **k):
+            return lambda f: f
+
+        class config:
+            @staticmethod
+            def list_physical_devices(d):
+                return [1] if d == "GPU" else []
+
+            class experimental:
+                @staticmethod
+                def reset_memory_stats(d):
+                    if "err" in d:
+                        raise ValueError()
+
+                @staticmethod
+                def get_memory_info(d):
+                    if "err" in d:
+                        raise ValueError()
+                    return {"peak": 1024 * 1024 * 100}
+
+        class Tensor:
+            pass
+
+    monkeypatch.setattr(bm, "tf", MockTF)
+    monkeypatch.setattr(bm, "keras", type("Keras", (), {"KerasTensor": MockTF.Tensor}))
+
+    bm._run_benchmark_pass(MockModel(), 1, 1, 1, "prefill", 128, "cpu")
+    bm._run_benchmark_pass(MockModel(), 1, 1, 1, "generate", 128, "gpu")
+
+    # cover exceptions in GPU memory
+    bm._run_benchmark_pass(MockModel(), 1, 1, 1, "generate", 128, "errGPU")
+
+
+def test_benchmark_keras_coverage2(monkeypatch):
+    import gemma_4_sql.backends.keras.benchmark as bm
+
+    class MockModelNoNumpy:
+        def __call__(self, x):
+            return x
+
+        def generate(self, *a, **k):
+            return "out"
+
+    class MockTF:
+        class random:
+            @staticmethod
+            def set_seed(s):
+                pass
+
+            @staticmethod
+            def uniform(*a, **k):
+                return "dummy"
+
+        int32 = "int32"
+
+        class device:
+            def __init__(self, d):
+                self.d = d
+
+            def __enter__(self):
+                pass
+
+            def __exit__(self, *a):
+                pass
+
+        @staticmethod
+        def function(*a, **k):
+            return lambda f: f
+
+        class config:
+            @staticmethod
+            def list_physical_devices(d):
+                return []
+
+            class experimental:
+                @staticmethod
+                def reset_memory_stats(d):
+                    pass
+
+                @staticmethod
+                def get_memory_info(d):
+                    return {"peak": 10}
+
+        class Tensor:
+            pass
+
+    monkeypatch.setattr(bm, "tf", MockTF)
+    monkeypatch.setattr(bm, "keras", type("Keras", (), {"KerasTensor": MockTF.Tensor}))
+
+    # cpu string
+    assert bm._get_device_str("cpu")
+    # missing deps
+    monkeypatch.setattr(bm, "keras", None)
+    import pytest
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    with pytest.raises(DependencyMissingError):
+        bm.benchmark_model("m", "cpu", 1)
+
+    monkeypatch.setattr(bm, "keras", type("Keras", (), {"KerasTensor": MockTF.Tensor}))
+    # Cover False branch of hasattr(out, 'numpy')
+    bm._run_benchmark_pass(MockModelNoNumpy(), 1, 2, 1, "prefill", 128, "cpu")
+    bm._run_benchmark_pass(MockModelNoNumpy(), 1, 2, 1, "generate", 128, "cpu")
+
+    # Cover False branch of hasattr(model, 'generate')
+    class MockModelNoGenerate:
+        def __call__(self, x):
+            return x
+
+    bm._run_benchmark_pass(MockModelNoGenerate(), 1, 2, 1, "generate", 128, "cpu")
+
+
+def test_benchmark_keras_coverage3(monkeypatch):
+    import gemma_4_sql.backends.keras.benchmark as bm
+
+    class config:
+        @staticmethod
+        def list_physical_devices(d):
+            return [1] if d in ("GPU", "TPU") else []
+
+        class experimental:
+            @staticmethod
+            def reset_memory_stats(d):
+                pass
+
+            @staticmethod
+            def get_memory_info(d):
+                return {"peak": 10}
+
+    monkeypatch.setattr(bm, "tf", type("MockTF", (), {"config": config()}))
+    assert bm._get_device_str("tpu") == "/TPU:0"
+
+    # 51 -> 161 (DependencyMissingError)
+    monkeypatch.setattr(bm, "keras", None)
+    import pytest
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    with pytest.raises(DependencyMissingError):
+        bm.benchmark_model("m", "gpu", 1)
+
+
+def test_keras_benchmark_126_127(monkeypatch):
+    import gemma_4_sql.backends.keras.benchmark as bm
+
+    class MockModel:
+        def __call__(self, x):
+            return x
+
+    class MockTF:
+        class random:
+            @staticmethod
+            def set_seed(s):
+                pass
+
+            @staticmethod
+            def uniform(*a, **k):
+                return "dummy"
+
+        int32 = "int32"
+
+        class device:
+            def __init__(self, d):
+                self.d = d
+
+            def __enter__(self):
+                pass
+
+            def __exit__(self, *a):
+                pass
+
+        @staticmethod
+        def function(*a, **k):
+            return lambda f: f
+
+        class config:
+            @staticmethod
+            def list_physical_devices(d):
+                return []
+
+            class experimental:
+                @staticmethod
+                def reset_memory_stats(d):
+                    pass
+
+                @staticmethod
+                def get_memory_info(d):
+                    return {"peak": "not_a_float"}
+
+    monkeypatch.setattr(bm, "tf", MockTF)
+    monkeypatch.setattr(bm, "keras", type("Keras", (), {}))
+
+    # This should trigger the ValueError in float() conversion
+    res = bm._run_benchmark_pass(MockModel(), 1, 1, 1, "prefill", 128, "cpu")
+    assert res[2] == 6000.0
+
+
+def test_keras_benchmark_missing_deps(monkeypatch):
+    import gemma_4_sql.backends.keras.benchmark as bm
+
+    monkeypatch.setattr(bm, "keras", None)
+    import pytest
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    with pytest.raises(DependencyMissingError):
+        bm.benchmark_model("m", "cpu", 1)

@@ -153,3 +153,49 @@ def test_gemma4_for_causal_lm():
     logits_dyn, dyn_cache = model(input_ids, past_key_values=dyn_cache)
     assert logits_dyn.shape == (2, 4, 1000)
     assert dyn_cache.get_seq_length(0) == 4
+
+
+def test_attention_edge_cases(monkeypatch):
+    import torch
+
+    import gemma_4_sql.backends.pytorch.gemma4.attention as attn
+
+    class MockConfig:
+        hidden_size = 32
+        num_attention_heads = 4
+        num_key_value_heads = 2
+        head_dim = 8
+        rope_theta = 10000.0
+        max_position_embeddings = 128
+        sliding_window = 10
+        is_global = True
+        global_attn_layers = (0,)
+
+    config = MockConfig()
+    attention = attn.Gemma4Attention(config, layer_idx=0)
+
+    hidden_states = torch.randn(1, 2, 32)
+    position_ids = torch.tensor([[0, 1]], dtype=torch.long)
+
+    # attention_mask not None, position_ids provided, is_global=True, sliding_window not None
+    # this covers 64->67 (position_ids provided) and 99->105 (not self.is_global is False)
+    res = attention(hidden_states, attention_mask=torch.ones(1, 1, 2, 2), position_ids=position_ids)
+    assert res is not None
+
+
+def test_audio_layers_edge_cases(monkeypatch):
+    import torch
+
+    import gemma_4_sql.backends.pytorch.gemma4.audio_layers as al
+
+    class MockConfig:
+        audio_hidden_size = 32
+        hidden_size = 32
+
+    config = MockConfig()
+
+    # 23->26: in AudioEncoderLayer forward, attention_mask is None
+    layer = al.Gemma4AudioFeatureExtractor(config)
+    hidden_states = torch.randn(1, 1, 32)
+    res = layer(hidden_states)
+    assert res is not None

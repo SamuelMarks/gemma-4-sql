@@ -433,3 +433,58 @@ def test_pytorch_benchmark_all(monkeypatch):
 
     # Test compile error logging
     bm._load_pytorch_model_and_device("m", "cpu", test_mode=False, backend_alias="pytorch")
+
+
+def test_pytorch_benchmark_edge_cases(monkeypatch):
+    import gemma_4_sql.backends.pytorch.benchmark as bm
+
+    # 58->67 (native model without .to)
+    class MockNativeModelNoTo:
+        def eval(self):
+            pass
+
+        def __call__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM", lambda config: MockNativeModelNoTo(), raising=False)
+    bm._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native")
+
+    # 59->61 (native model with .to but torch_dtype=None)
+    class MockNativeModelWithTo:
+        def to(self, *a, **k):
+            pass
+
+        def eval(self):
+            pass
+
+        def __call__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM", lambda config: MockNativeModelWithTo(), raising=False)
+
+    # mock torch to not have float32 so torch_dtype becomes None when test_mode=True
+    class MockTorchNoFloat32:
+        pass
+
+    monkeypatch.setattr(bm, "torch", MockTorchNoFloat32)
+    bm._load_pytorch_model_and_device("m", "cpu", test_mode=True, backend_alias="pytorch_native")
+
+    # 136->131, 146->141 (generate mode but model has no generate)
+    class MockTorch:
+        cuda = type("Cuda", (), {"is_available": lambda: False})()
+        mps = type("Mps", (), {"is_available": lambda: False})()
+
+        @staticmethod
+        def no_grad():
+            return type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})()
+
+        @staticmethod
+        def randint(*a, **k):
+            return "dummy"
+
+    monkeypatch.setattr(bm, "torch", MockTorch)
+
+    class MockModelNoGenerate:
+        pass
+
+    bm._run_benchmark_pass(MockModelNoGenerate(), "cpu", 1, 1, 1, "generate", 128)

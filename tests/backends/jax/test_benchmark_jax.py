@@ -225,3 +225,124 @@ def test_benchmark_jax_block_until_ready(monkeypatch):
 
     res = benchmark_model("model", "gpu", 1, num_runs=1)
     assert res["status"] == "success"
+
+
+def test_benchmark_jax_coverage(monkeypatch):
+    import gemma_4_sql.backends.jax.benchmark as bm
+
+    class MockJax:
+        def __init__(self, mode="normal"):
+            self.mode = mode
+            self.random = type("R", (), {"PRNGKey": staticmethod(lambda s: s), "key": staticmethod(lambda s: s), "randint": staticmethod(lambda *a, **k: type("I", (), {"shape": (1, 1)})())})()
+
+        def devices(self, d):
+            if self.mode == "err" and d == "gpu":
+                raise RuntimeError("err")
+            if d == "tpu" and self.mode != "tpu":
+                raise RuntimeError("err")
+            return [type("D", (), {})()]
+
+        def block_until_ready(self, x):
+            return x
+
+        def default_device(self, d):
+            return type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})()
+
+    class MockOut:
+        def __getitem__(self, k):
+            return "dummy"
+
+    class MockModel:
+        def __call__(self, *a, **k):
+            return MockOut()
+
+        def generate(self, *a, **k):
+            return "out"
+
+    monkeypatch.setattr(bm, "jax", MockJax())
+    monkeypatch.setattr(bm, "jnp", type("JNP", (), {"zeros": lambda *a, **k: "zeros", "int32": "int32", "arange": lambda *a, **k: type("A", (), {"__getitem__": lambda s, k: "dummy", "shape": (1,)})(), "argmax": lambda *a, **k: "dummy", "concatenate": lambda *a, **k: type("C", (), {"shape": (1, 2)})()})())
+    monkeypatch.setattr(bm, "nnx", type("NNX", (), {"jit": staticmethod(lambda f, *a, **k: f)})())
+
+    # 33, 34->38 (TPU devices)
+    assert bm._get_device("tpu")
+    monkeypatch.setattr(bm, "jax", MockJax("tpu"))
+    assert bm._get_device("tpu")
+
+    # Error in GPU device
+    monkeypatch.setattr(bm, "jax", MockJax("err"))
+    assert bm._get_device("gpu")  # falls back to CPU
+
+    monkeypatch.setattr(bm, "jax", MockJax())
+    # Generate mode
+    bm._run_benchmark_pass(MockModel(), 1, 2, 1, "generate", 128, "cpu")
+    bm._run_benchmark_pass(MockModel(), 1, 2, 1, "prefill", 128, "cpu")
+
+    # Mock no generate
+    bm._run_benchmark_pass(type("M", (), {"__call__": lambda s, *a, **k: MockOut()})(), 1, 2, 1, "generate", 128, "cpu")
+
+
+def test_jax_benchmark_branch_34_38(monkeypatch):
+    import gemma_4_sql.backends.jax.benchmark as bm
+
+    class MockJax:
+        def devices(self, d):
+            if d == "tpu":
+                # Return an object that raises RuntimeError when indexed at 0
+                class ExplodingList:
+                    def __bool__(self):
+                        return True
+
+                    def __getitem__(self, k):
+                        raise RuntimeError("err")
+
+                return ExplodingList()
+            return ["cpu"]
+
+    monkeypatch.setattr(bm, "jax", MockJax())
+    assert bm._get_device("tpu") == "cpu"
+
+
+def test_jax_benchmark_loops(monkeypatch):
+    import gemma_4_sql.backends.jax.benchmark as bm
+
+    class MockJax:
+        def __init__(self):
+            self.random = type("R", (), {"key": staticmethod(lambda s: s), "randint": staticmethod(lambda *a, **k: "dummy")})()
+
+        def default_device(self, d):
+            return type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})()
+
+    class MockModel:
+        def __call__(self, *a, **k):
+            return None
+
+    monkeypatch.setattr(bm, "jax", MockJax())
+    monkeypatch.setattr(bm, "jnp", type("JNP", (), {"int32": "int32"})())
+    monkeypatch.setattr(bm, "nnx", type("NNX", (), {"jit": staticmethod(lambda f, *a, **k: f)})())
+
+    # 0 warmup steps
+    bm._run_benchmark_pass(MockModel(), 1, 1, 0, "prefill", 128, "cpu")
+    # 0 num runs
+    bm._run_benchmark_pass(MockModel(), 1, 0, 1, "prefill", 128, "cpu")
+
+
+def test_jax_benchmark_branch_empty(monkeypatch):
+    import gemma_4_sql.backends.jax.benchmark as bm
+
+    class MockJaxEmpty:
+        def devices(self, d):
+            return []
+
+    monkeypatch.setattr(bm, "jax", MockJaxEmpty())
+
+    # 34->35/38 (TPU devices empty)
+    # This will trigger an exception if cpu is also empty, but let's just make cpu return a device
+    class MockJaxCPUFallback:
+        def devices(self, d):
+            if d in ("tpu", "gpu"):
+                return []
+            return ["cpu"]
+
+    monkeypatch.setattr(bm, "jax", MockJaxCPUFallback())
+    assert bm._get_device("tpu") == "cpu"
+    assert bm._get_device("gpu") == "cpu"

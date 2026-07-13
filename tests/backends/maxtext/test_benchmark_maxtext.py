@@ -262,3 +262,89 @@ def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     importlib.reload(m_benchmark)
     monkeypatch.undo()
     importlib.reload(m_benchmark)
+
+
+def test_benchmark_maxtext_coverage(monkeypatch):
+    import gemma_4_sql.backends.maxtext.benchmark as bm
+
+    class MockJax:
+        def __init__(self, mode="normal"):
+            self.mode = mode
+            self.random = type("R", (), {"PRNGKey": staticmethod(lambda s: s), "randint": staticmethod(lambda *a, **k: "dummy")})()
+
+        def devices(self, d):
+            if self.mode == "err" and d == "gpu":
+                raise RuntimeError("err")
+            if d == "tpu" and self.mode != "tpu":
+                raise RuntimeError("err")
+            return [type("D", (), {})()]
+
+        def block_until_ready(self, x):
+            return x
+
+        def jit(self, f, *a, **k):
+            return f
+
+        def default_device(self, d):
+            return type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})()
+
+    monkeypatch.setattr(bm, "jnp", type("JNP", (), {"zeros": lambda *a, **k: "zeros", "int32": "int32", "argmax": lambda *a, **k: "dummy", "concatenate": lambda *a, **k: "dummy"})())
+
+    class MockOut:
+        def __getitem__(self, k):
+            return "dummy"
+
+    class MockModel:
+        def init(self, rng, inputs):
+            return "params"
+
+        def apply(self, params, inputs):
+            return MockOut()
+
+        def generate(self, *a, **k):
+            return MockOut()
+
+        def __call__(self, x):
+            return x
+
+    monkeypatch.setattr(bm, "Gemma4Model", lambda name: MockModel())
+    monkeypatch.setattr(bm, "jax", MockJax())
+
+    # 32-34 (TPU devices)
+    assert bm._get_device("tpu")
+    monkeypatch.setattr(bm, "jax", MockJax("tpu"))
+    assert bm._get_device("tpu")
+
+    # Error in GPU device
+    monkeypatch.setattr(bm, "jax", MockJax("err"))
+    assert bm._get_device("gpu")  # falls back to CPU
+
+    monkeypatch.setattr(bm, "jax", MockJax())
+    # Generate mode
+    bm._run_benchmark_pass(MockModel(), "params", 1, 2, 1, "generate", 128, "cpu")
+    bm._run_benchmark_pass(MockModel(), "params", 1, 2, 1, "prefill", 128, "cpu")
+
+    # Mock no generate
+    bm._run_benchmark_pass(type("M", (), {"apply": lambda *a, **k: MockOut()})(), "params", 1, 2, 1, "generate", 128, "cpu")
+
+
+def test_maxtext_benchmark_branch_empty(monkeypatch):
+    import gemma_4_sql.backends.maxtext.benchmark as bm
+
+    class MockJaxEmpty:
+        def devices(self, d):
+            return []
+
+    monkeypatch.setattr(bm, "jax", MockJaxEmpty())
+
+    # 34->35/38 (TPU devices empty)
+    # This will trigger an exception if cpu is also empty, but let's just make cpu return a device
+    class MockJaxCPUFallback:
+        def devices(self, d):
+            if d in ("tpu", "gpu"):
+                return []
+            return ["cpu"]
+
+    monkeypatch.setattr(bm, "jax", MockJaxCPUFallback())
+    assert bm._get_device("tpu") == "cpu"
+    assert bm._get_device("gpu") == "cpu"
