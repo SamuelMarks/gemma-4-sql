@@ -75,6 +75,7 @@ def _run_benchmark_pass(model: keras.Model, batch_size: int, num_runs: int, warm
 
         @tf.function(jit_compile=True)
         def forward_pass(inputs: keras.KerasTensor | tf.Tensor) -> object:
+            """Run forward pass."""
             return model(inputs)
 
         # Reset memory stats if on GPU

@@ -28,7 +28,10 @@ jobs:
           ruff format --check .
       - name: Run tests
         run: |
-          pytest --cov=src/gemma_4_sql --cov-report=xml --cov-report=term src/ tests/
+          pytest --cov=src/gemma_4_sql --cov-branch --cov-report=xml --cov-report=term tests/core/ tests/sdk/ tests/cli/ src/
+          pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-report=xml --cov-report=term tests/backends/pytorch/ tests/backends/keras/
+          pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-report=xml --cov-report=term tests/backends/jax/ tests/backends/maxtext/
+          pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-report=xml --cov-report=term tests/backends/mlx/ tests/backends/test_*.py
 
   test-gpu:
     runs-on: ubuntu-latest
@@ -51,7 +54,8 @@ jobs:
           pip install keras tensorflow
       - name: Run GPU tests
         run: |
-          pytest tests/backends/pytorch/ tests/backends/keras/
+          pytest tests/backends/pytorch/
+          pytest tests/backends/keras/
 
   test-tpu:
     runs-on: ubuntu-latest
@@ -73,4 +77,5 @@ jobs:
           pip install -U "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
       - name: Run TPU tests
         run: |
-          pytest tests/backends/jax/ tests/backends/maxtext/
+          pytest tests/backends/jax/
+          pytest tests/backends/maxtext/

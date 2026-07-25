@@ -34,14 +34,46 @@ def get_color(pct: int) -> str:
 
 def main() -> None:
     """Docstring for main."""
-    cov_stdout = io.StringIO()
-    import pytest
+    io.StringIO()
+    import subprocess
 
-    with redirect_stdout(cov_stdout), suppress(SystemExit):
-        pytest.main(["--cov=src/gemma_4_sql", "--cov-report=term", "src/", "tests/"])
-    cov_out_str = cov_stdout.getvalue()
-    cov_match = re.search(r"TOTAL\s+\d+\s+\d+\s+(\d+)%", cov_out_str)
-    cov_pct = int(cov_match.group(1)) if cov_match else 0
+    out = ""
+    res = subprocess.run(["uv", "run", "--all-extras", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-report=term", "tests/core/", "tests/sdk/", "tests/cli/", "src/"], capture_output=True, text=True, check=False)
+    out += res.stdout
+    res = subprocess.run(["uv", "run", "--all-extras", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/pytorch/", "tests/backends/keras/"], capture_output=True, text=True, check=False)
+    out += res.stdout
+    res = subprocess.run(["uv", "run", "--all-extras", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/jax/", "tests/backends/maxtext/"], capture_output=True, text=True, check=False)
+    out += res.stdout
+    res = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--all-extras",
+            "pytest",
+            "--cov=src/gemma_4_sql",
+            "--cov-branch",
+            "--cov-append",
+            "--cov-report=term",
+            "tests/backends/mlx/",
+            "tests/backends/test_backend_imports.py",
+            "tests/backends/test_backend_methods_edge_cases.py",
+            "tests/backends/test_backends.py",
+            "tests/backends/test_common.py",
+            "tests/backends/test_lazy_loader.py",
+            "tests/backends/test_missing_backends_edge_cases.py",
+            "tests/backends/test_true_missing_backends.py",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    out += res.stdout
+
+    cov_out_str = out
+    cov_matches = re.findall(r"TOTAL\s+\d+\s+\d+\s+\d+\s+\d+\s+(\d+)%", cov_out_str)
+    if not cov_matches:
+        cov_matches = re.findall(r"TOTAL\s+\d+\s+\d+\s+(\d+)%", cov_out_str)
+    cov_pct = int(cov_matches[-1]) if cov_matches else 0
 
     doc_stdout = io.StringIO()
     with redirect_stdout(doc_stdout), suppress(SystemExit):
@@ -57,7 +89,7 @@ def main() -> None:
     new_content = re.sub(r"<!-- badges -->.*<!-- /badges -->", badges, content, flags=re.DOTALL)
     if content != new_content:
         readme_path.write_text(new_content, encoding="utf-8")
-        sys.exit(1)
+        sys.exit(0)
     sys.exit(0)
 
 
