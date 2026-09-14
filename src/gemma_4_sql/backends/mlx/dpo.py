@@ -128,7 +128,8 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
         policy_model, _ = load(model_name)
         ref_model, _ = load(model_name)
         optimizer = optim.AdamW(learning_rate=learning_rate)
-        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+        batch_size = getattr(config, "batch_size", 2)
+        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
         dataloader = data_dict.get("loader", None)
         if dataloader is None or not hasattr(dataloader, "__iter__"):
             raise ValueError(f"Invalid dataloader for dataset: {dataset}")

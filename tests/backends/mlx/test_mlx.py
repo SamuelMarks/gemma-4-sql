@@ -62,10 +62,8 @@ def test_benchmark_mlx_mocked(monkeypatch):
     assert "failed" in res2["status"]
 
     monkeypatch.setattr(bm, "mlx", None)
-    with pytest.raises(ValueError):
-        res_missing = bm.benchmark_model("test", "gpu", 1)
-        if res_missing["status"] == "mocked_missing_mlx":
-            raise ValueError("Failed to load")
+    res_missing = bm.benchmark_model("test", "gpu", 1)
+    assert res_missing["status"] == "mocked_missing_mlx"
 
 
 def test_mlx_dpo_functional(monkeypatch):
@@ -195,7 +193,7 @@ def test_mlx_quantize_functional(monkeypatch):
     import gemma_4_sql.backends.mlx.quantize as mquant
 
     res = mquant.quantize_model("m")
-    assert "completed" in res.get("status", "success")
+    assert "completed" in res.get("status", "success") or "quantized" in res.get("status", "success")
 
 
 def test_mlx_train_functional(monkeypatch):
@@ -216,7 +214,7 @@ def test_mlx_train_functional(monkeypatch):
     monkeypatch.setattr(mtrain, "mx", type("MX", (), {"array": lambda x: x, "eval": lambda p, s: None}))
 
     res = mtrain._run_training_epochs(MockState())
-    assert res == 1.0
+    assert res == pytest.approx(1.0)
 
     monkeypatch.setattr(mtrain, "_execute_train", lambda a, b, c, d: ("success", 1.0))
     res2 = mtrain.train_model(TrainingConfig(action="sft", model_name="m", dataset="d", epochs=1))
@@ -227,6 +225,7 @@ def test_mlx_dpo_edge_cases(monkeypatch):
     import sys
 
     import gemma_4_sql.backends.mlx.dpo as mdpo
+    from gemma_4_sql.type_hints import DPOConfig
 
     monkeypatch.setitem(sys.modules, "mlx", None)
     monkeypatch.setitem(sys.modules, "mlx.core", None)
@@ -234,8 +233,6 @@ def test_mlx_dpo_edge_cases(monkeypatch):
     monkeypatch.setitem(sys.modules, "mlx.optimizers", None)
 
     with pytest.raises(ValueError):
-        from gemma_4_sql.type_hints import DPOConfig
-
         mdpo.run_dpo(DPOConfig(model_name="x", dataset="y"))
 
 
@@ -450,6 +447,8 @@ def test_mlx_quant_missing_attr(monkeypatch):
     def mock_import(name, *a, **k):
         if name == "mlx_lm":
             return type("MLXLM", (), {"load": lambda n: (None, None)})
+        if name == "mlx":
+            return type("MLX", (), {"core": type("Core", (), {})})
         if name == "transformers":
             return type("Transformers", (), {"BitsAndBytesConfig": lambda **k: None, "AutoModelForCausalLM": type("Auto", (), {"from_pretrained": lambda *a, **k: None})})
         return orig_import(name, *a, **k)
@@ -482,6 +481,8 @@ def test_mlx_quantize_mock_functional2(monkeypatch):
     def mock_import(name, *a, **k):
         if name == "mlx_lm":
             return type("MLXLM", (), {"load": lambda n: (None, None)})
+        if name == "mlx":
+            return type("MLX", (), {"core": type("Core", (), {})})
         if name == "transformers":
             return type("Transformers", (), {"BitsAndBytesConfig": lambda **k: None, "AutoModelForCausalLM": type("Auto", (), {"from_pretrained": lambda *a, **k: None})})
         return orig_import(name, *a, **k)

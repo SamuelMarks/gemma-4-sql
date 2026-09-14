@@ -46,21 +46,13 @@ class LiveDatabaseEngine:
         self.adapter = adapter_cls(self.db_path, self.db_kwargs, read_only=self.read_only)
         self.conn = self.adapter.conn
         if ddl:
-            old_ro = self.read_only
-            self.read_only = False
-            self.adapter.read_only = False
-            try:
-                self.setup_schema(ddl)
-            finally:
-                self.read_only = old_ro
-                self.adapter.read_only = old_ro
+            self.setup_schema(ddl)
 
     def connect(self) -> object:
         """Connect to database.
 
         Returns:
-            object: The resulting output from the operation.
-
+            The database connection.
         """
         return self.adapter.connect()
 
@@ -68,17 +60,18 @@ class LiveDatabaseEngine:
         """Asynchronously connect to database.
 
         Returns:
-            object: The resulting output from the operation.
-
+            The asynchronous database connection.
         """
         return await self.adapter.connect_async()
 
     def _validate_safety(self, query: str) -> None:
         """Ensure the query is safe to execute if read_only is True.
 
-        Raises:
-        PermissionError: If the operation encounters an unexpected PermissionError.
+        Args:
+            query: SQL query string to inspect.
 
+        Raises:
+            PermissionError: If mutating statements are attempted in read-only mode.
         """
         if not self.read_only:
             return
@@ -90,15 +83,29 @@ class LiveDatabaseEngine:
                 raise PermissionError(msg)
 
     def setup_schema(self, ddl: str) -> None:
-        """Execute DDL statements to construct the database schema."""
-        self._validate_safety(ddl)
-        self.adapter.setup_schema(ddl)
+        """Execute DDL statements to construct the database schema.
+
+        Args:
+            ddl: The Data Definition Language (DDL) string.
+        """
+        old_ro = self.read_only
+        self.read_only = False
+        self.adapter.read_only = False
+        try:
+            self.adapter.setup_schema(ddl)
+        finally:
+            self.read_only = old_ro
+            self.adapter.read_only = old_ro
 
     def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute a query and returns execution success status, results, and error message.
 
         Args:
-            ddl: The Data Definition Language (DDL) string.
+            query: SQL query string to execute.
+            params: Optional tuple of query parameters.
+
+        Returns:
+            Tuple of (success, fetched rows, optional error message).
         """
         try:
             self._validate_safety(query)

@@ -42,7 +42,7 @@ def test_serve_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(srv, "jax", None)
-    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing for serve."):
+    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing for serve\."):
         srv.serve_model("foo")
 
 

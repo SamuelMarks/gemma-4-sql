@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TypeVar, Union
 
 JSONPrimitive = Union[str, int, float, bool, None]
@@ -24,6 +24,7 @@ class DPOConfig:
     beta: float = 0.1
     epochs: int = 1
     learning_rate: float = 1e-05
+    batch_size: int = 2
     test_mode: bool = False
 
 
@@ -44,14 +45,15 @@ class ETLConfig:
 class TrainingConfig:
     """Config for training execution."""
 
-    action: str
-    model_name: str
-    dataset: str
+    action: str = ""
+    model_name: str = "gemma-4"
+    dataset: str = "dummy"
     epochs: int = 1
-    learning_rate: float = 1e-05
+    learning_rate: float = 0.0001
+    batch_size: int = 2
     backend: str = "jax"
     distributed_strategy: str = "none"
-    extra_kwargs: dict = None
+    extra_kwargs: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -74,4 +76,4 @@ class TrainerState:
     beta: float = 0.1
     dataset: str = ""
     learning_rate: float = 0.0
-    extra_kwargs: dict = None
+    extra_kwargs: dict[str, object] | None = None

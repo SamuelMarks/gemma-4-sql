@@ -46,7 +46,7 @@ def test_jax_etl_mocked() -> None:
     try:
         etl_jax.datasets = None
         etl_jax.grain = None
-        with pytest.raises(DependencyMissingError, match="Missing grain or datasets. Cannot load test."):
+        with pytest.raises(DependencyMissingError, match=r"Missing grain or datasets\. Cannot load test\."):
             etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
     finally:
         etl_jax.datasets = original_datasets
@@ -66,7 +66,7 @@ def test_jax_etl_import_error() -> None:
         if "gemma_4_sql.backends.jax.etl" in sys.modules:
             del sys.modules["gemma_4_sql.backends.jax.etl"]
         etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-        with pytest.raises(DependencyMissingError, match="Missing grain or datasets. Cannot load test."):
+        with pytest.raises(DependencyMissingError, match=r"Missing grain or datasets\. Cannot load test\."):
             etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
 
 

@@ -68,7 +68,7 @@ def test_apply_lora_pytorch_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_peft, "peft", None)
     monkeypatch.setattr(pt_peft, "torch", None)
     monkeypatch.setattr(pt_peft, "AutoModelForCausalLM", None)
-    with pytest.raises(DependencyMissingError, match="PyTorch PEFT dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"PyTorch PEFT dependencies are missing\."):
         apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
 
 

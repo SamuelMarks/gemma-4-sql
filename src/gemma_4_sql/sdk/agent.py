@@ -11,7 +11,7 @@ from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 MAX_ERR_LEN = 500
 if TYPE_CHECKING:
     from gemma_4_sql.sdk.protocols import BackendProtocol
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import JSONDict, JSONPrimitive, JSONValue
 
 
 @dataclass
@@ -36,27 +36,39 @@ async def _process_single_prompt(backend_name: str, backend_impl: BackendProtoco
     attempts = 0
     success = False
     final_sql = ""
+    final_results: list[tuple[JSONPrimitive, ...]] = []
     history: list[JSONDict] = []
     while attempts < context.max_retries:
         attempts += 1
         gen_res = backend_impl.generate_sql(model_name, current_prompt)
         sql = str(gen_res.get("sql", ""))
-        confidence_score = float(gen_res.get("confidence_score", 1.0))
+        confidence_score = float(str(gen_res.get("confidence_score", 1.0)))
         if context.min_confidence and confidence_score < context.min_confidence:
             history.append({"attempt": attempts, "prompt": current_prompt, "sql": sql, "success": False, "error": f"Confidence score {confidence_score:.2f} below threshold {context.min_confidence}"})
             current_prompt = f"{prompt}\nPrevious attempt was rejected due to low confidence ({confidence_score:.2f}). Please provide a more certain SQL query."
             final_sql = sql
             continue
-        (is_success, _, error_msg) = await engine.execute_with_feedback_async(sql)
+        (is_success, query_results, error_msg) = await engine.execute_with_feedback_async(sql)
         error_msg = error_msg[:MAX_ERR_LEN] + "... (truncated)" if error_msg and len(error_msg) > MAX_ERR_LEN else error_msg
         history.append({"attempt": attempts, "prompt": current_prompt, "sql": sql, "success": is_success, "error": error_msg})
         if is_success:
             success = True
             final_sql = sql
+            final_results = query_results
             break
         current_prompt = f"{prompt}\nPrevious attempt failed with error: {error_msg}\nPlease fix the SQL query."
         final_sql = sql
-    return {"backend": backend_name, "model": model_name, "initial_prompt": prompt, "final_sql": final_sql, "success": success, "attempts": attempts, "history": history, "status": "completed"}
+    return {
+        "backend": backend_name,
+        "model": model_name,
+        "initial_prompt": prompt,
+        "final_sql": final_sql,
+        "results": final_results,
+        "success": success,
+        "attempts": attempts,
+        "history": history,
+        "status": "completed",
+    }
 
 
 def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "jax", context: AgentContext | None = None, **kwargs: JSONValue) -> JSONDict | list[JSONDict]:

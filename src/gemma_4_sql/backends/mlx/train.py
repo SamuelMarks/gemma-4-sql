@@ -53,7 +53,7 @@ def _run_training_epochs(state: TrainerState) -> float:
     return final_loss
 
 
-def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float) -> tuple[str, float]:
+def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
     """Execute the core training loop for MLX.
 
     Args:
@@ -61,6 +61,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
         dataset: The name or path of the dataset.
         epochs: The integer value for epochs.
         learning_rate: The float value for learning rate.
+        batch_size: Batch size for dataloader.
 
     Returns:
         A tuple containing the results.
@@ -79,7 +80,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
 
     optimizer = optim.AdamW(learning_rate=learning_rate)
     loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
@@ -119,7 +120,11 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
         raise DependencyMissingError("MLX dependencies are missing.")
     try:
-        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)
+        batch_size = getattr(config, "batch_size", 2)
+        try:
+            status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, batch_size=batch_size)
+        except TypeError:
+            status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:  # pragma: no cover
         status = f"failed: {e!s}"  # pragma: no cover
     return {"backend": "mlx", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}

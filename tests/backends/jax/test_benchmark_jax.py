@@ -12,6 +12,8 @@ class MockJnp:
     """Provide class docstring."""
 
     int32 = "int32"
+    bfloat16 = "bfloat16"
+    float32 = "float32"
 
     def zeros(self, _shape: object, dtype: object = None) -> object:
         """Execute function.
@@ -38,18 +40,24 @@ class MockJax:
         return MagicMock()
 
 
+class MockConfigObj:
+    """Mock config object."""
+
+    dtype: object = None
+
+
 class MockGemma4Config:
     """Provide class docstring."""
 
     @staticmethod
-    def gemma4_e2b() -> str:
+    def gemma4_e2b() -> MockConfigObj:
         """Execute function.
 
         Returns:
             object: Description of return.
 
         """
-        return "config"
+        return MockConfigObj()
 
 
 class MockGemma4ForCausalLM:
@@ -98,7 +106,7 @@ def test_benchmark_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(bm, "jax", None)
-    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing\."):
         bm.benchmark_model("model", "gpu", 1)
 
 
@@ -115,12 +123,9 @@ def test_benchmark_model_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bm, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
     monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
     res = bm.benchmark_model("model", "gpu", 1, num_runs=2)
-    if res["status"] != "success":
-        pass
-    if not res["tokens_per_sec"] > 0:
-        pass
-    if not res["latency_ms"] >= 0:
-        pass
+    assert res["status"] == "success"
+    assert res["tokens_per_sec"] > 0
+    assert res["latency_ms"] >= 0
 
 
 def test_benchmark_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -146,10 +151,9 @@ def test_benchmark_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
         msg = "err"
         raise ValueError(msg)
 
-    monkeypatch.setattr(MockJnp, "zeros", Exception)
+    monkeypatch.setattr(bm, "_run_benchmark_pass", mock_raise_error)
     res = bm.benchmark_model("model", "gpu", 1)
-    if "failed" not in res["status"]:
-        pass
+    assert "failed" in res["status"]
 
 
 class MockJaxNoBlock:
@@ -177,8 +181,7 @@ def test_benchmark_model_jax_real_no_block_until_ready(monkeypatch: pytest.Monke
     monkeypatch.setattr(bm, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
     monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
     res = bm.benchmark_model("model", "gpu", 1, num_runs=2)
-    if res["status"] != "success":
-        pass
+    assert res["status"] == "success"
 
 
 def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:

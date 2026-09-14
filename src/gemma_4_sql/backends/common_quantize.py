@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -41,7 +41,7 @@ def apply_bits_and_bytes_quantization(method: str, bits_and_bytes_config_cls: ty
     return (memory_reduction, f"quantized_{method}")
 
 
-def quantize_model_wrapper(backend_name: str, model_name: str, method: str, missing_deps: bool, missing_status: str, apply_fn: callable) -> JSONDict:
+def quantize_model_wrapper(backend_name: str, model_name: str, method: str, missing_deps: bool, missing_status: str, apply_fn: Callable[..., tuple[float, str]]) -> JSONDict:
     """Wrapper to handle errors and standardized response for quantization.
 
     Args:

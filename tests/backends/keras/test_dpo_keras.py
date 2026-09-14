@@ -133,7 +133,7 @@ def test_run_training_epochs() -> None:
 
     state = TrainerState(dataloader=[1, 2], epochs=2, train_step=lambda *a: MockLoss())
     res = keras_dpo._run_training_epochs(state)
-    assert res == 1.0
+    assert res == pytest.approx(1.0)
 
 
 def test_run_dpo_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -141,7 +141,7 @@ def test_run_dpo_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(keras_dpo, "tf", None)
-    with pytest.raises(DependencyMissingError, match="Keras DPO dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"Keras DPO dependencies are missing\."):
         keras_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
 
 

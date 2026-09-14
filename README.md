@@ -4,7 +4,7 @@ gemma-4-sql
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue.svg)](https://opensource.org/licenses/Apache-2.0) <!-- badges --> ![Test coverage](https://img.shields.io/badge/Test%20coverage-100%25-brightgreen) ![Doc coverage](https://img.shields.io/badge/Doc%20coverage-100%25-brightgreen) <!-- /badges -->
 [![CI](https://github.com/SamuelMarks/gemma-4-sql/actions/workflows/ci.yml/badge.svg)](https://github.com/SamuelMarks/gemma-4-sql/actions/workflows/ci.yml)
 
-Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch (HF); PyTorch (Native); Keras ; JAX; JAX / MaxText.
+Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch (HF); PyTorch (Native); Keras ; JAX; JAX / MaxText; MLX (Apple Silicon).
 
 **Documentation:**
 - [Extending / Custom Backends](EXTENDING.md)
@@ -19,24 +19,35 @@ Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: Py
 
 We explicitly integrate with and support the following Gemma 4 model architectures across different ecosystems:
 *   **PyTorch (HF)**: Directly imports and uses `Gemma4ForCausalLM` from **[Hugging Face Transformers](https://github.com/huggingface/transformers/tree/main/src/transformers/models/gemma4)**;
-*   **PyTorch (Native)**: A custom, from-scratch implementation of Gemma 4 built with **Native PyTorch** (`torch.nn`);
+*   **PyTorch (Native)**: A custom, from-scratch implementation of Gemma 4 built with **Native PyTorch** (`torch.nn`) featuring `DynamicCache` KV generation and direct safetensors serialization;
 *   **MaxText**: Directly imports and uses `Gemma4Model` from **[AI-Hypercomputer MaxText](https://github.com/AI-Hypercomputer/maxtext/blob/main/src/maxtext/models/gemma4.py)**;
 *   **JAX**: A custom, from-scratch implementation of Gemma 4 built with **Flax NNX**;
 *   **Keras**: Directly imports and uses `GemmaCausalLM` from **[KerasNLP](https://keras.io/keras_nlp/)**;
+*   **MLX**: Native Apple Silicon implementation for optimized training, DPO, quantization, and continuous serving on macOS.
 
 ### Feature Support Matrix
 
-| Feature | PyTorch (HF) | PyTorch (Native) | Keras 3 Backend | JAX | MaxText |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **ETL (Data Loading)** | ✅ Native `DataLoader` | ✅ Native `DataLoader` | ✅ Grain + `BaseFormatTransform` | ✅ Grain + `BaseFormatTransform` | ✅ Grain + `MaxTextFormatTransform` |
-| **Training (Fit/JIT)** | ✅ `Gemma4ForCausalLM` | ✅ Native `torch.nn.Module` | ✅ `keras.Model.fit()` | ✅ `@nnx.jit` loop | ✅ `@jax.jit` loop |
-| **PEFT / LoRA** | ✅ `peft` | ✅ `peft` | ✅ Native Keras | ✅ `optax` | ✅ Native JAX |
-| **Inference (Beam)** | ✅ Tensor-based Search | ✅ Tensor-based Search | ✅ TF Native Search | ✅ Compiled `argsort` | ✅ Compiled `argsort` |
-| **Evaluation (DB)** | ✅ Live `sqlite3` Loop | ✅ Live `sqlite3` Loop | ✅ Live `sqlite3` Loop | ✅ Live `sqlite3` Loop | ✅ Live `sqlite3` Loop |
-| **Export (Ckpt)** | ✅ `safetensors` | ✅ `safetensors` | ✅ `.keras` v3 format | ✅ `orbax` Checkpointer | ✅ `orbax` Checkpointer |
-| **Agentic Loop** | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction |
+| Feature | PyTorch (HF) | PyTorch (Native) | Keras 3 Backend | JAX | MaxText | MLX |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **ETL (Data Loading)** | ✅ Native `DataLoader` | ✅ Native `DataLoader` | ✅ Grain + `BaseFormatTransform` | ✅ Grain + `BaseFormatTransform` | ✅ Grain + `MaxTextFormatTransform` | ✅ Native Batching |
+| **Training (Fit/JIT)** | ✅ `Gemma4ForCausalLM` | ✅ Native `torch.nn.Module` | ✅ `keras.Model.fit()` | ✅ `@nnx.jit` loop | ✅ `@jax.jit` loop | ✅ `mx.compile` |
+| **PEFT / LoRA** | ✅ `peft` | ✅ `peft` | ✅ Native Keras | ✅ `optax` | ✅ Native JAX | ✅ MLX LoRA |
+| **Inference (Beam)** | ✅ Tensor-based Search | ✅ DynamicCache Search | ✅ TF Native Search | ✅ Compiled `argsort` | ✅ Compiled `argsort` | ✅ MLX Greed/Beam |
+| **Evaluation (DB)** | ✅ Live `sqlite3` Loop | ✅ Live `sqlite3` Loop | ✅ Live `sqlite3` Loop | ✅ Live `sqlite3` Loop | ✅ Live `sqlite3` Loop | ✅ Live `sqlite3` Loop |
+| **Export (Ckpt)** | ✅ `safetensors` | ✅ `safetensors` | ✅ `.keras` v3 format | ✅ `orbax` Checkpointer | ✅ `orbax` Checkpointer | ✅ `safetensors` |
+| **Agentic Loop** | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction |
 
-*Note on ETL differences:* JAX, MaxText, and Keras all leverage Google's `grain` library. While JAX and Keras use a shared `BaseFormatTransform` yielding standard `inputs` and `targets`, MaxText uses `MaxTextFormatTransform` to inject additional Seq2Seq features like `segment_ids` and `positions` expected by the MaxText architecture. Distributed environments use `JAXDistributedSharding`.
+*Note on ETL differences:* JAX, MaxText, and Keras all leverage Google's `grain` library. While JAX and Keras use a shared `BaseFormatTransform` yielding standard `inputs` and `targets`, MaxText uses `MaxTextFormatTransform` to inject additional Seq2Seq features like `segment_ids` and `positions` expected by the MaxText architecture. Distributed environments use `JAXDistributedSharding`. All training commands support configurable `--batch-size` arguments.
+
+### CLI Output & Interaction
+
+All CLI commands support direct standard output (stdout) reporting:
+*   `gemma-4-sql generate --prompt "..."`: Prints clean SQL directly to stdout.
+*   `gemma-4-sql agent --prompt "..."`: Emits JSON execution status, retry count, and final verified SQL.
+*   `gemma-4-sql chat --prompt "..."`: Prints multi-turn conversational SQL assistant response.
+*   `gemma-4-sql evaluate --dataset "..."`: Displays formatted evaluation metrics table.
+*   `gemma-4-sql tokenize --encode "..."`: Emits JSON token IDs array.
+*   `gemma-4-sql execute --query "..."`: Outputs query execution results and error status.
 
 ## Documentation & Usage
 

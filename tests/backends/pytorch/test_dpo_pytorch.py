@@ -189,15 +189,12 @@ def test_run_dpo_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_dpo, "nn", None)
     monkeypatch.setattr(pt_dpo, "optim", None)
     monkeypatch.setattr(pt_dpo, "functional", None)
-    with pytest.raises(DependencyMissingError, match="PyTorch dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"PyTorch dependencies are missing\."):
         run_dpo(DPOConfig(model_name="model", dataset="data"))
     (loss, ch_r, re_r) = dpo_loss(None, None, None, None)
-    if not loss == 0.0:
-        raise AssertionError
-    if not ch_r == 0.0:
-        raise AssertionError
-    if not re_r == 0.0:
-        raise AssertionError
+    assert loss == pytest.approx(0.0)
+    assert ch_r == pytest.approx(0.0)
+    assert re_r == pytest.approx(0.0)
 
 
 def _mock_transformers_import(monkeypatch: pytest.MonkeyPatch) -> None:

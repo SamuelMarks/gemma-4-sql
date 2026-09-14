@@ -131,7 +131,9 @@ class MockJNP:
             object: Description of return.
 
         """
-        d = array.data
+        d = getattr(array, "data", array)
+        if isinstance(d, list) and len(d) > 0 and isinstance(d[0], list):
+            d = d[0]
         return MockArray(sorted(range(len(d)), key=lambda x: d[x]))
 
 
@@ -151,7 +153,9 @@ class MockNN:
             object: Description of return.
 
         """
-        return x
+        if isinstance(x, MockArray):
+            return x
+        return MockArray(x)
 
 
 class MockJAX:

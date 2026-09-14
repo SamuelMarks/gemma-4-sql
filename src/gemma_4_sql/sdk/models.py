@@ -2,23 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-
-@dataclass
-class TrainingConfig:
-    """Configuration for training jobs."""
-
-    dataset: str
-    action: str = ""
-    model_name: str = "gemma-4"
-    epochs: int = 1
-    learning_rate: float = 0.0001
-    backend: str = "jax"
-    distributed_strategy: str = "none"
-    extra_kwargs: dict[str, object] = field(default_factory=dict)
-
+from gemma_4_sql.type_hints import TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict

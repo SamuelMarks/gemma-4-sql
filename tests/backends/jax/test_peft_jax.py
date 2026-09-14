@@ -67,7 +67,7 @@ def test_apply_lora_jax_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(pt, "optax", None)
-    with pytest.raises(DependencyMissingError, match="JAX PEFT dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"JAX PEFT dependencies are missing\."):
         pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
 
 

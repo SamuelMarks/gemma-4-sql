@@ -92,3 +92,51 @@ def test_quantize_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = kr_quantize.quantize_model("model", "unsupported")
     if "failed" not in res["status"]:
         raise AssertionError
+
+
+def test_quantize_keras_with_policies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test Keras quantize setting dtype_policies and config policies."""
+    called_policies: list[str] = []
+
+    class MockPolicies:
+        """Mock dtype policies."""
+
+        def set_dtype_policy(self, policy: str) -> None:
+            """Set policy."""
+            called_policies.append(policy)
+
+    class MockConfig:
+        """Mock keras config."""
+
+        def set_dtype_policy(self, policy: str) -> None:
+            """Set policy."""
+            called_policies.append(policy)
+
+    mock_keras_1 = type("MockKeras1", (), {"dtype_policies": MockPolicies()})
+    monkeypatch.setattr(kr_quantize, "keras", mock_keras_1)
+    res1 = kr_quantize.quantize_model("model", "int8")
+    assert res1["status"] == "quantized_int8"
+    assert "int8_from_float32" in called_policies
+
+    mock_keras_2 = type("MockKeras2", (), {"config": MockConfig()})
+    monkeypatch.setattr(kr_quantize, "keras", mock_keras_2)
+    res2 = kr_quantize.quantize_model("model", "int4")
+    assert res2["status"] == "quantized_int4"
+    assert "int4_from_float32" in called_policies
+
+    class MockFailingPolicies:
+        """Mock policies raising ValueError."""
+
+        def set_dtype_policy(self, _policy: str) -> None:
+            """Raise ValueError."""
+            raise ValueError("policy error")
+
+    mock_keras_fail = type("MockKerasFail", (), {"dtype_policies": MockFailingPolicies()})
+    monkeypatch.setattr(kr_quantize, "keras", mock_keras_fail)
+    res_fail = kr_quantize.quantize_model("model", "int8")
+    assert res_fail["status"] == "quantized_int8"
+
+    mock_keras_fail_cfg = type("MockKerasFailCfg", (), {"config": MockFailingPolicies()})
+    monkeypatch.setattr(kr_quantize, "keras", mock_keras_fail_cfg)
+    res_fail_cfg = kr_quantize.quantize_model("model", "int4")
+    assert res_fail_cfg["status"] == "quantized_int4"

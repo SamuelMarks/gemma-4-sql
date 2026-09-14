@@ -26,7 +26,7 @@ def test_build_dataloader_pytorch_mocked() -> None:
     orig_torch = etl_mod.torch
     try:
         etl_mod.torch = None
-        with pytest.raises(DependencyMissingError, match="Missing PyTorch or datasets. Cannot load dummy/data."):
+        with pytest.raises(DependencyMissingError, match=r"Missing PyTorch or datasets\. Cannot load dummy/data\."):
             etl_mod.build_dataloader(ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False))
     finally:
         etl_mod.torch = orig_torch

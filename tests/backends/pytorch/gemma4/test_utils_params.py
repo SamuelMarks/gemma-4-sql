@@ -8,8 +8,9 @@ from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_py
 
 def test_translate_jax_to_pytorch():
     """Test JAX to PyTorch state dict translation."""
+    rng = np.random.default_rng(42)
     jax_params = {
-        "model.layers.0.mlp.gate_proj.kernel": np.random.randn(256, 512).astype(np.float32),
+        "model.layers.0.mlp.gate_proj.kernel": rng.standard_normal((256, 512)).astype(np.float32),
         "model.norm.scale": np.ones(256, dtype=np.float32),
         "some_other_param": [1.0, 2.0],
     }

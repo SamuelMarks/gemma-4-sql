@@ -77,7 +77,7 @@ def _run_training_epochs(state: TrainerState) -> float:
             targets = batch["targets"].to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
-            logits = getattr(outputs, "logits", outputs)
+            logits = outputs[0] if isinstance(outputs, tuple) else getattr(outputs, "logits", outputs)
             loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
             loss.backward()
             optimizer.step()
@@ -125,16 +125,30 @@ def _cleanup_distributed(dist: object) -> None:
         dist.destroy_process_group()
 
 
-def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float, distributed_strategy: str) -> tuple[str, float]:
+def _execute_train(
+    model_name: str,
+    dataset: str,
+    epochs: int,
+    learning_rate: float,
+    distributed_strategy: str,
+    batch_size: int = 2,
+    backend_alias: str = "pytorch",
+    **kwargs: object,
+) -> tuple[str, float]:
     """Execute the core PyTorch training loop."""
     dist_module = None
     try:
         (is_distributed, dist_module, device, device_id) = _setup_distributed(distributed_strategy)
-        model = Gemma4ForCausalLM.from_pretrained(model_name).to(device)
+        if backend_alias == "pytorch_native":
+            from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
+
+            model = NativeGemma4.from_pretrained(model_name, config=kwargs.get("model_config") or kwargs.get("config")).to(device)
+        else:
+            model = Gemma4ForCausalLM.from_pretrained(model_name).to(device)
         model = _wrap_model_distributed(model, distributed_strategy, device_id)
         optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
-        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2, distributed=is_distributed))
+        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size, distributed=is_distributed))
         dataloader = data_dict.get("loader", None)
         if dataloader is None or not hasattr(dataloader, "__iter__"):
             raise ValueError(f"Invalid dataloader for dataset: {dataset}")
@@ -163,31 +177,39 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
     distributed_strategy = kwargs.get("distributed_strategy", "none") if not hasattr(config, "distributed_strategy") else config.distributed_strategy
-    """Train a Text-to-SQL model using the PyTorch backend.
-
-    Args:
-    ----
-        action: The training action (e.g. 'pretrain', 'sft').
-        model_name: The name of the model to train.
-        dataset: The dataset to train on.
-        epochs: Number of epochs to train.
-        learning_rate: The learning rate.
-        **kwargs: Extra parameters like distributed_strategy.
-
-    Returns:
-    -------
-        A dictionary containing PyTorch training status and metrics.
-
-    """
+    backend_alias = str(kwargs.get("backend_alias") or kwargs.get("backend") or ("pytorch_native" if getattr(config, "backend", None) == "pytorch_native" else "pytorch"))
 
     final_loss = 0.5
     status = "completed"
-    if torch is None or Gemma4ForCausalLM is None or optim is None or (nn is None):
+    if torch is None or optim is None or (nn is None) or (backend_alias != "pytorch_native" and Gemma4ForCausalLM is None):
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("PyTorch dependencies are missing.")
     try:
-        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, str(distributed_strategy))
+        batch_size = getattr(config, "batch_size", 2)
+        train_kwargs = dict(kwargs)
+        train_kwargs.pop("backend_alias", None)
+        train_kwargs.pop("backend", None)
+        status, final_loss = _execute_train(
+            model_name,
+            dataset,
+            epochs,
+            learning_rate,
+            str(distributed_strategy),
+            batch_size=batch_size,
+            backend_alias=backend_alias,
+            **train_kwargs,
+        )
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         status = f"failed: {e!s}"
-    return {"backend": "pytorch", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}
+    return {
+        "backend": backend_alias,
+        "action": action,
+        "model": model_name,
+        "dataset": dataset,
+        "epochs": epochs,
+        "learning_rate": learning_rate,
+        "status": status,
+        "final_loss": final_loss,
+        "distributed_strategy": distributed_strategy,
+    }

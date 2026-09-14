@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONPrimitive
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 
@@ -28,7 +32,7 @@ class PostgresAdapter(DatabaseAdapter):
             classes.append(Exception)
         return tuple(classes)
 
-    def connect(self) -> psycopg2.extensions.connection:
+    def connect(self) -> object:
         """Connect synchronously.
 
         Returns:
@@ -41,7 +45,7 @@ class PostgresAdapter(DatabaseAdapter):
             return psycopg2.connect(self.db_path, **self.db_kwargs)
         return psycopg2.connect(**self.db_kwargs)
 
-    async def connect_async(self) -> psycopg2.extensions.connection:
+    async def connect_async(self) -> object:
         """Connect asynchronously.
 
         Returns:
@@ -60,14 +64,15 @@ class PostgresAdapter(DatabaseAdapter):
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        cursor = self.conn.cursor()
+        conn_obj = cast(Any, self.conn)
+        cursor = conn_obj.cursor()
         try:
             cursor.execute(ddl)
-            self.conn.commit()
+            conn_obj.commit()
         finally:
             cursor.close()
 
-    async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
+    async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute asynchronously with feedback.
 
         Returns:
@@ -75,10 +80,10 @@ class PostgresAdapter(DatabaseAdapter):
 
         """
         try:
-            async_conn = await self.connect_async()
+            async_conn = cast(Any, await self.connect_async())
             try:
                 records = await async_conn.fetch(query)
-                results = [tuple(r.values()) for r in records]
+                results: list[tuple[JSONPrimitive, ...]] = [tuple(r.values()) for r in records]
                 return (True, results, None)
             finally:
                 if hasattr(async_conn, "close"):
@@ -86,7 +91,7 @@ class PostgresAdapter(DatabaseAdapter):
         except self.error_classes as e:
             return (False, [], str(e))
 
-    async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
+    async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
         """Execute asynchronously.
 
         Returns:
@@ -94,7 +99,7 @@ class PostgresAdapter(DatabaseAdapter):
 
         """
         try:
-            async_conn = await self.connect_async()
+            async_conn = cast(Any, await self.connect_async())
             try:
                 records = await async_conn.fetch(query)
                 return [tuple(r.values()) for r in records]

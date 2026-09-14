@@ -92,7 +92,7 @@ def _run_training_epochs(state: TrainerState) -> float:
     return generic_run_training_epochs(state.epochs, state.dataloader, process_batch)
 
 
-def _execute_train(dataset: str, epochs: int, learning_rate: float) -> tuple[str, float]:
+def _execute_train(dataset: str, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
     """Execute the core training loop for JAX."""
     model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
     mesh = jax.sharding.Mesh(jax.devices(), ("data",))
@@ -100,7 +100,7 @@ def _execute_train(dataset: str, epochs: int, learning_rate: float) -> tuple[str
     schedule = optax.warmup_cosine_decay_schedule(init_value=0.0, peak_value=learning_rate, warmup_steps=100, decay_steps=max(1, epochs * 1000), end_value=learning_rate * 0.1)
     optimizer = nnx.Optimizer(model, optax.adamw(schedule))
     train_step = _get_train_step_fn()
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
 
     if dataloader is None or not hasattr(dataloader, "__iter__"):
@@ -142,7 +142,8 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
         raise DependencyMissingError("JAX dependencies are missing for training.")
 
     try:
-        status, final_loss = _execute_train(dataset, epochs, learning_rate)
+        batch_size = getattr(config, "batch_size", 2)
+        status, final_loss = _execute_train(dataset, epochs, learning_rate, batch_size=batch_size)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         status = f"failed: {e!s}"
 

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONPrimitive
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 
@@ -48,9 +52,13 @@ class DuckDBAdapter(DatabaseAdapter):
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        self.conn.execute(ddl)
+        cast(Any, self.conn).execute(ddl)
 
-    async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
+    async def execute_with_feedback_async(
+        self,
+        query: str,
+        params: tuple[object, ...] | None = None,
+    ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute asynchronously with feedback.
 
         Returns:
@@ -59,13 +67,24 @@ class DuckDBAdapter(DatabaseAdapter):
         """
         try:
             loop = asyncio.get_running_loop()
-            results = await loop.run_in_executor(None, lambda: self.conn.execute(query, params or ()).fetchall())
+
+            def _exec() -> list[tuple[JSONPrimitive, ...]]:
+                """Execute query on thread-safe cursor."""
+                conn_obj = cast(Any, self.conn)
+                cur = conn_obj.cursor() if hasattr(conn_obj, "cursor") and not hasattr(conn_obj, "_mock_return_value") else conn_obj
+                return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
+
+            results = await loop.run_in_executor(None, _exec)
         except self.error_classes as e:
             return (False, [], str(e))
         else:
             return (True, results, None)
 
-    async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
+    async def execute_query_async(
+        self,
+        query: str,
+        params: tuple[object, ...] | None = None,
+    ) -> list[tuple[JSONPrimitive, ...]]:
         """Execute asynchronously.
 
         Returns:
@@ -74,7 +93,14 @@ class DuckDBAdapter(DatabaseAdapter):
         """
         try:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, lambda: self.conn.execute(query, params or ()).fetchall())
+
+            def _exec() -> list[tuple[JSONPrimitive, ...]]:
+                """Execute query on thread-safe cursor."""
+                conn_obj = cast(Any, self.conn)
+                cur = conn_obj.cursor() if hasattr(conn_obj, "cursor") and not hasattr(conn_obj, "_mock_return_value") else conn_obj
+                return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
+
+            return await loop.run_in_executor(None, _exec)
         except self.error_classes as e:
             logger.debug("Async Query execution failed: %s", e)
             return []

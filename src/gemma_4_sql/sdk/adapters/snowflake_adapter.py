@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONPrimitive
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 
@@ -34,40 +39,57 @@ class SnowflakeAdapter(DatabaseAdapter):
         return snowflake.connector.connect(**self.db_kwargs)
 
     async def connect_async(self) -> object:
-        """Connect asynchronously.
+        """Connect asynchronously using a thread worker.
 
-        Raises:
-        ValueError: If the operation encounters an unexpected ValueError.
-
+        Returns:
+            The established connection object.
         """
-        msg = "Async operations not natively supported for db_type: snowflake"
-        raise ValueError(msg)
+        conn = await asyncio.to_thread(self.connect)
+        self.conn = conn
+        return conn
 
     def setup_schema(self, ddl: str) -> None:
-        """Execute DDL to set up schema."""
-        cursor = self.conn.cursor()
+        """Execute DDL to set up schema.
+
+        Args:
+            ddl: The DDL string to execute.
+        """
+        conn_obj = cast(Any, self.conn)
+        cursor = conn_obj.cursor()
         try:
             cursor.execute(ddl)
-            self.conn.commit()
+            conn_obj.commit()
         finally:
             cursor.close()
 
-    async def execute_with_feedback_async(self, _query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[object, ...]], str | None]:
-        """Execute asynchronously with feedback.
+    async def execute_with_feedback_async(
+        self,
+        query: str,
+        params: tuple[object, ...] | None = None,
+    ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
+        """Execute asynchronously with feedback via thread offload.
 
-        Raises:
-        ValueError: If the operation encounters an unexpected ValueError.
+        Args:
+            query: The SQL query string to execute.
+            params: Optional query parameters.
 
+        Returns:
+            Tuple of success status, result rows, and error message if failed.
         """
-        msg = "Async operations not natively supported for db_type: snowflake"
-        raise ValueError(msg)
+        return await asyncio.to_thread(self.execute_with_feedback, query, params)
 
-    async def execute_query_async(self, _query: str, params: tuple[object, ...] | None = None) -> list[tuple[object, ...]]:
-        """Execute asynchronously.
+    async def execute_query_async(
+        self,
+        query: str,
+        params: tuple[object, ...] | None = None,
+    ) -> list[tuple[JSONPrimitive, ...]]:
+        """Execute query asynchronously via thread offload.
 
-        Raises:
-        ValueError: If the operation encounters an unexpected ValueError.
+        Args:
+            query: The SQL query string to execute.
+            params: Optional query parameters.
 
+        Returns:
+            List of query result tuples.
         """
-        msg = "Async operations not natively supported for db_type: snowflake"
-        raise ValueError(msg)
+        return await asyncio.to_thread(self.execute_query, query, params)

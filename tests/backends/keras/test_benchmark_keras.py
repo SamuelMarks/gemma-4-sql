@@ -111,7 +111,7 @@ def test_benchmark_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bm, "keras", None)
     from gemma_4_sql.exceptions import DependencyMissingError
 
-    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"Keras dependencies are missing\."):
         bm.benchmark_model("model", "gpu", 1)
 
 
@@ -516,7 +516,7 @@ def test_keras_benchmark_126_127(monkeypatch):
 
     # This should trigger the ValueError
     res = bm._run_benchmark_pass(MockModel(), 1, 1, 1, "prefill", 128, "gpu")
-    assert res[2] == 6000.0
+    assert res[2] == pytest.approx(6000.0)
 
 
 def test_keras_benchmark_missing_deps(monkeypatch):

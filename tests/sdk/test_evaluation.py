@@ -12,7 +12,8 @@ def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     jax_agent = get_backend("jax")
     monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
 
-    def raise_err(*a, **k):
+    def raise_err(*a: object, **k: object) -> None:
+        """Mock error when building dataloader."""
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("Mocked missing JAX")
@@ -118,7 +119,7 @@ def test_compute_metrics() -> None:
 
     engine.compare_queries_async.side_effect = mock_compare
     res = compute_metrics(engine, ["SELECT 1"], ["SELECT 1"])
-    assert res["exact_match"] == 1.0
+    assert res["exact_match"] == pytest.approx(1.0)
 
 
 def test_evaluate_mock_predictions() -> None:
@@ -132,7 +133,7 @@ def test_evaluate_mock_predictions() -> None:
         mock_compute.side_effect = mock_compute_async
         with patch("gemma_4_sql.sdk.registry.get_backend"):
             res = evaluate("model", "dataset", mock_predictions=["s1"], mock_truths=["s1"])
-            assert res["metrics"]["exact_match"] == 1.0
+            assert res["metrics"]["exact_match"] == pytest.approx(1.0)
 
 
 def test_run_evaluation_inference_no_dataloader() -> None:
@@ -142,3 +143,69 @@ def test_run_evaluation_inference_no_dataloader() -> None:
     backend_impl.generate_sql.return_value = {"sql": "SELECT 2"}
     preds, _truths, _scores = _run_evaluation_inference("model", "dataset", backend_impl)
     assert preds[0] == "SELECT 2"
+
+
+@pytest.mark.asyncio
+async def test_negative_execution_accuracy_syntax_error() -> None:
+    """Test compute_metrics_async when predicted SQL has a syntax error.
+
+    Returns:
+        None.
+    """
+    from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
+    from gemma_4_sql.sdk.evaluation import compute_metrics_async
+
+    engine = LiveDatabaseEngine(":memory:", db_type="sqlite")
+    preds = ["SELEKT INVALID SQL FROM tbl"]
+    truths = ["SELECT 1"]
+
+    metrics = await compute_metrics_async(engine, preds, truths)
+    assert metrics["valid_sql"] == pytest.approx(0.0)
+    assert metrics["execution_accuracy"] == pytest.approx(0.0)
+    assert metrics["exact_match"] == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_negative_execution_accuracy_both_invalid() -> None:
+    """Test compute_metrics_async when both predicted and truth SQL queries are invalid.
+
+    Returns:
+        None.
+    """
+    from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
+    from gemma_4_sql.sdk.evaluation import compute_metrics_async
+
+    engine = LiveDatabaseEngine(":memory:", db_type="sqlite")
+    preds = ["BROKEN QUERY ONE"]
+    truths = ["BROKEN QUERY TWO"]
+
+    metrics = await compute_metrics_async(engine, preds, truths)
+    assert metrics["valid_sql"] == pytest.approx(0.0)
+    assert metrics["execution_accuracy"] == pytest.approx(0.0)
+    assert metrics["exact_match"] == pytest.approx(0.0)
+
+
+def test_extract_batch_ids_fallback() -> None:
+    """Test _process_batch_inputs with unexpected batch object.
+
+    Returns:
+        None.
+    """
+    from gemma_4_sql.sdk.evaluation import _process_batch_inputs
+
+    inputs, targets = _process_batch_inputs(None)
+    assert inputs == []
+    assert targets == []
+
+
+def test_evaluate_empty_confidence_scores() -> None:
+    """Test evaluate with empty mock predictions to cover confidence_scores False branch.
+
+    Returns:
+        None.
+    """
+    from gemma_4_sql.sdk.evaluation import evaluate
+
+    res = evaluate("model", "dataset", "jax", mock_predictions=[], mock_truths=[])
+    assert res["status"] == "completed"
+    assert "mean_confidence" not in res["metrics"]

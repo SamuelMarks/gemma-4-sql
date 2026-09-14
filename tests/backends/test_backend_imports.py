@@ -28,6 +28,11 @@ def test_import_maxtext() -> None:
     importlib.import_module("gemma_4_sql.backends.maxtext")
 
 
+def test_import_mlx() -> None:
+    """Test importing MLX backend."""
+    importlib.import_module("gemma_4_sql.backends.mlx")
+
+
 def test_lazy_loader_getters() -> None:
     """Test that lazy loader getters do not crash."""
     get_duckdb = __import__("gemma_4_sql.backends.lazy_loader", fromlist=["get_duckdb"]).get_duckdb

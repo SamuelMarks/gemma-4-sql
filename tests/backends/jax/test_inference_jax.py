@@ -143,7 +143,9 @@ class MockJNP:
             object: Description of return.
 
         """
-        d = array.data
+        d = getattr(array, "data", array)
+        if isinstance(d, list) and len(d) > 0 and isinstance(d[0], list):
+            d = d[0]
         return MockArray(sorted(range(len(d)), key=lambda x: d[x]))
 
 
@@ -163,7 +165,9 @@ class MockNN:
             object: Description of return.
 
         """
-        return x
+        if isinstance(x, MockArray):
+            return x
+        return MockArray(x)
 
 
 class MockJAX:
@@ -280,7 +284,7 @@ def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(inf, "jax", None)
-    with pytest.raises(DependencyMissingError, match="JAX inference dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"JAX inference dependencies are missing\."):
         generate_sql("mock-model", "test prompt")
 
 
@@ -318,6 +322,44 @@ def test_jax_beam_search() -> None:
     (result, _score) = jax_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
     if not result.tolist() == [[1, 5, 299]]:
         raise AssertionError
+
+
+def test_real_jax_beam_search() -> None:
+    """Test native JAX beam search using genuine JAX arrays."""
+    real_jax = pytest.importorskip("jax")
+    real_jnp = real_jax.numpy
+
+    def mock_model(seq: object, _positions: object) -> object:
+        """Apply mock model returning realistic 3D logits.
+
+        Args:
+            seq: Input sequence array.
+            _positions: Position array.
+
+        Returns:
+            Logits tensor of shape (batch, seq_len, vocab_size).
+        """
+        batch_size = seq.shape[0]
+        seq_len = seq.shape[1]
+        vocab_size = 50
+        logits = real_jnp.zeros((batch_size, seq_len, vocab_size))
+        if seq_len == 1:
+            logits = logits.at[0, -1, 7].set(10.0)
+        else:
+            logits = logits.at[0, -1, 42].set(10.0)
+        return logits
+
+    input_ids = real_jnp.array([[1]])
+    best_seq, score = jax_beam_search(
+        model_apply_fn=mock_model,
+        input_ids=input_ids,
+        beam_width=2,
+        max_length=5,
+        eos_token_id=42,
+    )
+    assert [int(x) for x in best_seq[0]] == [1, 7, 42]
+    assert score <= 0.0
+    assert score > -1.0
 
 
 def test_inference_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:

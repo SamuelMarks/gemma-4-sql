@@ -42,8 +42,10 @@ def test_common_dpo_run_training_epochs():
     def mock_step(policy, ref, opt, batch, beta):
         return MockLoss()
 
+    import pytest
+
     loss = generic_run_training_epochs(MockState(), mock_step)
-    assert loss == 1.0
+    assert loss == pytest.approx(1.0)
 
 
 def test_common_logging_close():
@@ -77,3 +79,38 @@ from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantizati
 def test_quantize_missing_bitsandbytes():
     res = apply_bits_and_bytes_quantization("int8", None, None)
     assert res[1] == "mocked_missing_bitsandbytes"
+
+
+def test_apply_bits_and_bytes_quantization_awq():
+    """Test simulated AWQ quantization in apply_bits_and_bytes_quantization."""
+
+    class MockConfig:
+        def __init__(self, **kwargs):
+            pass
+
+    reduction, status = apply_bits_and_bytes_quantization("awq", MockConfig, None)
+    assert status == "quantized_awq"
+    assert reduction == pytest.approx(0.7)
+
+
+def test_serve_model_wrapper_run_server(monkeypatch):
+    """Test serve_model_wrapper with run_server=True and test_mode=False."""
+    import gemma_4_sql.backends.common_serve as cs
+
+    mock_uvicorn = MagicMock()
+    monkeypatch.setattr(cs, "uvicorn", mock_uvicorn)
+    monkeypatch.setattr(cs, "FastAPI", MagicMock())
+
+    res = serve_model_wrapper(
+        backend_name="test",
+        model_name="model",
+        port=8000,
+        max_batch_size=32,
+        missing_deps=False,
+        missing_status="",
+        app_factory=lambda: "mock_app",
+        test_mode=False,
+        run_server=True,
+    )
+    assert res["status"] == "running_test_serve"
+    mock_uvicorn.run.assert_called_once_with("mock_app", host="0.0.0.0", port=8000)

@@ -69,7 +69,7 @@ def test_benchmark_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(pt_bm, "torch", None)
     monkeypatch.setattr(pt_bm, "AutoModelForCausalLM", None)
-    with pytest.raises(DependencyMissingError, match="PyTorch dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"PyTorch dependencies are missing\."):
         benchmark_model("model", "gpu", 1)
 
 
@@ -277,9 +277,7 @@ def test_pytorch_benchmark_inner(monkeypatch):
         def to(self, device):
             return self
 
-    monkeypatch.setattr(
-        bm, "torch", type("Torch", (), {"no_grad": lambda: type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})(), "randint": lambda *a, **k: MockTensor(), "cuda": type("Cuda", (), {"synchronize": lambda self=None: None, "max_memory_allocated": lambda self=None: 1024 * 1024 * 1024})()})
-    )
+    monkeypatch.setattr(bm, "torch", type("Torch", (), {"no_grad": type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None}), "randint": lambda *a, **k: MockTensor(), "cuda": type("Cuda", (), {"synchronize": lambda self=None: None, "max_memory_allocated": lambda self=None: 1024 * 1024 * 1024})()}))
 
 
 def test_pytorch_dpo_loss_exec(monkeypatch):
@@ -400,14 +398,14 @@ def test_pytorch_benchmark_all(monkeypatch):
     # Test prefill mode
     res = bm._run_benchmark_pass(MockModel(), "cuda", 1, 1, 1, "prefill", 128)
     assert len(res) == 3
-    assert res[2] == 1024.0  # memory_mb
+    assert res[2] == pytest.approx(1024.0)  # memory_mb
 
     # Test generation mode
     res_gen = bm._run_benchmark_pass(MockModel(), "cuda", 1, 1, 1, "generate", 128)
     assert len(res_gen) == 3
 
     # Test MPS memory
-    assert bm._get_memory_mb(None, "mps") == 1024.0
+    assert bm._get_memory_mb(None, "mps") == pytest.approx(1024.0)
 
     # Test MPS sync
     bm._sync_cuda("mps")

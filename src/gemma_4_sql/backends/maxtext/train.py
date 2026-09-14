@@ -105,8 +105,8 @@ def _initialize_jax_distributed(*, test_mode: bool = False) -> None:
             logger.warning("jax.distributed.initialize() failed or already initialized: %s", init_err)
 
 
-def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float, test_mode: bool) -> tuple[str, float]:
-    """Execute the core training loop for MaxText."""
+def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float, test_mode: bool, batch_size: int = 2) -> tuple[str, float]:
+    """Execute the core MaxText training loop."""
     _initialize_jax_distributed(test_mode=test_mode)
     if maxtext_train is not None and (not test_mode):
         logger.info("Connecting to MaxText training loop...")
@@ -117,7 +117,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
     optimizer = optax.adamw(learning_rate)
     opt_state = optimizer.init(params)
     train_step = _get_train_step_fn(model, optimizer)
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
@@ -157,7 +157,8 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
         raise DependencyMissingError("MaxText dependencies are missing.")
     try:
-        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, bool(kwargs.get("test_mode")))
+        batch_size = getattr(config, "batch_size", 2)
+        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, bool(kwargs.get("test_mode")), batch_size=batch_size)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         logger.exception("MaxText Train error: ")
         status = f"failed: {e!s}"

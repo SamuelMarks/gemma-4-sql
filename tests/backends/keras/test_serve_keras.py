@@ -14,7 +14,7 @@ def test_serve_model_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(srv, "keras", None)
-    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing for serve."):
+    with pytest.raises(DependencyMissingError, match=r"Keras dependencies are missing for serve\."):
         srv.serve_model("foo", port=8000, max_batch_size=16)
 
 

@@ -263,3 +263,34 @@ def test_rag_semantic_no_relevant() -> None:
         res = retrieve_relevant_schema("prompt", schema)
         assert "Table: t1" in res
         assert "Table: t2" in res
+
+
+def test_extract_schema_entities_complex() -> None:
+    """Test extract_schema_entities with parameterized types, constraints, and multiple tables."""
+    ddl = """
+    CREATE TABLE orders (
+        order_id INT PRIMARY KEY,
+        amount DECIMAL(10, 2),
+        cust_id INT,
+        CONSTRAINT fk_customer FOREIGN KEY (cust_id) REFERENCES customers(id),
+        status VARCHAR(50),
+        UNIQUE (order_id)
+    );
+    CREATE TABLE IF NOT EXISTS items (
+        item_id INT,
+        price NUMERIC(8, 2) CHECK (price > 0),
+        title TEXT
+    );
+    """
+    schema = extract_schema_entities(ddl)
+    assert schema == {
+        "orders": ["order_id", "amount", "cust_id", "status"],
+        "items": ["item_id", "price", "title"],
+    }
+
+
+def test_extract_schema_entities_edge_cases() -> None:
+    """Test extract_schema_entities with empty columns, trailing commas, and invalid entries."""
+    ddl = "CREATE TABLE t (col1 INT, , @invalid INT, col2 TEXT, );\nCREATE TABLE t2 (a INT,);"
+    schema = extract_schema_entities(ddl)
+    assert schema == {"t": ["col1", "col2"], "t2": ["a"]}

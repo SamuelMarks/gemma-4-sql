@@ -139,13 +139,13 @@ def _run_training_epochs(state: TrainerState) -> float:
     return float(final_loss)
 
 
-def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float) -> tuple[str, float]:
+def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
     """Execute the core DPO loop."""
     policy_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
     ref_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(1))
     optimizer = nnx.Optimizer(policy_model, optax.adamw(learning_rate))
     train_step = _get_train_step_fn(beta)
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
 
     if dataloader is None or not hasattr(dataloader, "__iter__"):
@@ -170,6 +170,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     beta = getattr(config, "beta", 0.1)
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
+    batch_size = getattr(config, "batch_size", 2)
     """Run a DPO training loop for JAX.
 
     Args:
@@ -193,7 +194,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
         raise DependencyMissingError("JAX DPO dependencies are missing.")
 
     try:
-        status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate)
+        status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, batch_size=batch_size)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         status = f"failed: {e!s}"
 

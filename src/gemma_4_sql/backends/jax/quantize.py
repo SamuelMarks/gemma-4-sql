@@ -50,7 +50,8 @@ def _apply_quantization_to_model(model: object, method: str) -> tuple[str, float
     if method in {"int8", "awq"}:
         for _path, param in nnx.graph.iter_graph(model):
             if isinstance(param, nnx.Param) and hasattr(param.value, "ndim") and (param.value.ndim >= MIN_NDIM_FOR_QUANTIZATION):
-                (_q_tensor, _scale) = quantize_int8(param.value)
+                (q_tensor, _scale) = quantize_int8(param.value)
+                param.value = q_tensor
                 quantized_params += 1
         status = f"quantized_{method}"
         memory_reduction = 0.5 if method == "int8" else 0.7

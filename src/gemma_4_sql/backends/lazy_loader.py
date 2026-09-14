@@ -21,7 +21,7 @@ def catch_optional_imports() -> Iterator[None]:
     Yields:
         The yielded output.
     """
-    with suppress(OPTIONAL_IMPORT_ERRORS):
+    with suppress(*OPTIONAL_IMPORT_ERRORS):
         yield
 
 

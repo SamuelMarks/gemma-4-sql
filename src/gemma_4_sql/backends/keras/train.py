@@ -19,7 +19,7 @@ with catch_optional_imports():
     import tensorflow as tf  # pragma: no cover
 
 
-def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool) -> tuple[str, float]:
+def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool, batch_size: int = 2) -> tuple[str, float]:
     """Execute the core training loop."""
     model: keras.Model | None = None
     strategy = tf.distribute.MirroredStrategy()
@@ -32,7 +32,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool) 
         except (ImportError, ValueError) as e:
             raise ValueError(f"Failed to load Keras model {model_name}") from e
 
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
@@ -78,8 +78,9 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     logger.info("Starting Keras %s on %s using %s", action, model_name, dataset)
     test_mode = bool(kwargs.get("test_mode"))
+    batch_size = getattr(config, "batch_size", 2)
     try:
-        status, final_loss = _execute_train(model_name, dataset, epochs, test_mode)
+        status, final_loss = _execute_train(model_name, dataset, epochs, test_mode, batch_size=batch_size)
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Keras training error: ")
         status = f"failed: {e!s}"

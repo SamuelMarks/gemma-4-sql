@@ -124,7 +124,7 @@ def _run_training_epochs(state: TrainerState) -> float:
     return float(final_loss)
 
 
-def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float) -> tuple[str, float]:
+def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
     """Execute the core DPO loop."""
     try:
         gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
@@ -135,7 +135,7 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
 
     optimizer = keras.optimizers.AdamW(learning_rate=learning_rate)
     train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
 
     if dataloader is None or not hasattr(dataloader, "__iter__"):
@@ -173,8 +173,9 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
 
         raise DependencyMissingError("Keras DPO dependencies are missing.")
 
+    batch_size = getattr(config, "batch_size", 2)
     try:
-        status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate)
+        status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, batch_size=batch_size)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         logger.exception("Keras DPO error: ")
         status = f"failed: {e!s}"

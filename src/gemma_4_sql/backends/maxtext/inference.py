@@ -35,7 +35,13 @@ def _beam_search_step(seq: jnp.ndarray, score: float, model_apply_fn: object, be
         A tuple containing the results.
     """
     logits = model_apply_fn(seq)
-    log_probs = jax.nn.log_softmax(logits, axis=-1)[0]
+    if hasattr(logits, "shape") and len(logits.shape) == 3:
+        last_logits = logits[0, -1, :]
+    elif hasattr(logits, "shape") and len(logits.shape) == 2:
+        last_logits = logits[-1, :]
+    else:
+        last_logits = logits
+    log_probs = jax.nn.log_softmax(last_logits, axis=-1)
     top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]
     top_probs = log_probs[top_indices]
 
@@ -43,7 +49,8 @@ def _beam_search_step(seq: jnp.ndarray, score: float, model_apply_fn: object, be
     for i in range(beam_width):
         token = top_indices[i].reshape(1, 1)
         new_seq = jnp.concatenate([seq, token], axis=-1)
-        new_score = score + top_probs[i].item()
+        prob_val = top_probs[i].item() if hasattr(top_probs[i], "item") else float(top_probs[i])
+        new_score = score + prob_val
         new_beams.append((new_seq, new_score))
     return new_beams
 

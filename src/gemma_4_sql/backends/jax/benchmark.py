@@ -139,7 +139,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         max_new_tokens = int(str(kwargs.get("max_new_tokens", 128)))
         warmup_steps = int(str(kwargs.get("warmup_steps", 5)))
 
-        target_dtype = getattr(jnp, dtype_str, jnp.bfloat16)
+        target_dtype = getattr(jnp, dtype_str, getattr(jnp, "bfloat16", "bfloat16"))
 
         config = Gemma4Config.gemma4_e2b()
         config.dtype = target_dtype

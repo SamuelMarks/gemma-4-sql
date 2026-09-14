@@ -440,7 +440,7 @@ def test_train_model_jax_missing() -> object:
 
     orig_jax = tr.jax
     tr.jax = None
-    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing for training."):
+    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing for training\."):
         train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
     tr.jax = orig_jax
 

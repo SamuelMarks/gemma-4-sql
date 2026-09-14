@@ -8,14 +8,33 @@ import pytest
 
 """Global pytest fixtures for gemma-4-sql tests."""
 
+import importlib.machinery
 import json
 import sys
+import types
 import typing
 from unittest.mock import MagicMock
 
+try:
+    import duckdb as _real_duckdb
+except ImportError:
+    _real_duckdb = None
 
-class MockDatasets:
+try:
+    import aiosqlite as _real_aiosqlite
+except ImportError:
+    _real_aiosqlite = None
+
+pytest._real_duckdb = _real_duckdb
+
+
+class MockDatasets(types.ModuleType):
     """Mock for datasets module."""
+
+    def __init__(self: object) -> None:
+        """Initialize MockDatasets as a valid module with spec."""
+        super().__init__("datasets")
+        self.__spec__ = importlib.machinery.ModuleSpec("datasets", None)
 
     def load_dataset(self: object, *_args: object, **_kwargs: object) -> list[dict[str, str]]:
         """Mock load_dataset.
@@ -193,13 +212,14 @@ sys.modules["asyncpg"] = MagicMock(Error=Exception)
 sys.modules["snowflake"] = MagicMock(Error=Exception)
 sys.modules["snowflake.connector"] = MagicMock(Error=Exception)
 
-mock_aiosqlite = MagicMock(Error=Exception)
-mock_conn = AsyncMock()
-mock_cursor = AsyncMock()
-mock_cursor.fetchall = AsyncMock(return_value=[])
-mock_conn.execute = AsyncMock(return_value=mock_cursor)
-mock_aiosqlite.connect = AsyncMock(return_value=mock_conn)
-sys.modules["aiosqlite"] = mock_aiosqlite
+if _real_aiosqlite is None:
+    mock_aiosqlite = MagicMock(Error=Exception)
+    mock_conn = AsyncMock()
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchall = AsyncMock(return_value=[])
+    mock_conn.execute = AsyncMock(return_value=mock_cursor)
+    mock_aiosqlite.connect = AsyncMock(return_value=mock_conn)
+    sys.modules["aiosqlite"] = mock_aiosqlite
 
 sys.modules["sentence_transformers"] = MagicMock(Error=Exception)
 
@@ -219,13 +239,19 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 @pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_call(item):
-    """Docstring."""
+def pytest_runtest_call(item: pytest.Item) -> typing.Iterator[None]:
+    """Intercept and handle test execution outcomes.
+
+    Args:
+        item: The pytest test item being executed.
+
+    Yields:
+        None: Yields to test execution.
+    """
     outcome = yield
     excinfo = outcome.excinfo
     if excinfo is not None:
         exc_type, exc_value, _ = excinfo
-        if issubclass(exc_type, (DependencyMissingError, ValueError, RuntimeError, ImportError)):
+        if issubclass(exc_type, DependencyMissingError):
             e_str = str(exc_value)
-            if "Missing " in e_str or "missing" in e_str or "Invalid dataloader" in e_str or "mock error" in e_str or "No module named" in e_str or "required for serving" in e_str:
-                pytest.skip(f"Skipping due to missing dependency or mock: {e_str}")
+            pytest.skip(f"Skipping due to missing dependency: {e_str}")

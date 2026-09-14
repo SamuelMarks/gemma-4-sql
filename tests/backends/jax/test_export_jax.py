@@ -43,7 +43,7 @@ def test_export_jax_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     monkeypatch.setattr(export_jax, "jnp", None)
     monkeypatch.setattr(export_jax, "ocp", None)
     path = str(tmp_path / "export")
-    with pytest.raises(DependencyMissingError, match="JAX export dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"JAX export dependencies are missing\."):
         export_jax.export_model("model1", path)
 
 

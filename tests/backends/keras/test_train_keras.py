@@ -212,7 +212,7 @@ def test_train_model_keras_missing() -> None:
 
     tr.keras = None
     tr.tf = None
-    with pytest.raises(DependencyMissingError, match="Keras training dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"Keras training dependencies are missing\."):
         tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2))
 
 

@@ -1,5 +1,7 @@
 """Tests for native PyTorch Gemma 4 modeling."""
 
+from pathlib import Path
+
 import torch
 
 from gemma_4_sql.backends.pytorch.gemma4 import (
@@ -199,3 +201,86 @@ def test_audio_layers_edge_cases(monkeypatch):
     hidden_states = torch.randn(1, 1, 32)
     res = layer(hidden_states)
     assert res is not None
+
+
+def test_gemma4_native_save_load_and_generate(tmp_path):
+    """Test save_pretrained, from_pretrained, and generate with DynamicCache."""
+    config = Gemma4Config(
+        vocab_size=128,
+        hidden_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=32,
+        intermediate_size=128,
+    )
+    model = Gemma4ForCausalLM(config)
+    save_file = model.save_pretrained(str(tmp_path))
+    assert Path(save_file).is_file()
+
+    loaded = Gemma4ForCausalLM.from_pretrained(str(tmp_path), config=config)
+    assert loaded is not None
+    loaded_direct = Gemma4ForCausalLM.from_pretrained(save_file, config=config)
+    assert loaded_direct is not None
+
+    input_ids = torch.tensor([[1, 2, 3]], dtype=torch.long)
+    generated = loaded.generate(input_ids, max_new_tokens=2)
+    assert generated.shape == (1, 5)
+
+    # Test corrupt safetensors file
+    corrupt_file = tmp_path / "corrupt.safetensors"
+    corrupt_file.write_bytes(b"not_valid_safetensors")
+    model_corrupt = Gemma4ForCausalLM.from_pretrained(str(corrupt_file), config=config)
+    assert model_corrupt is not None
+
+    # Test empty dir where st_path is not a file
+    empty_dir = tmp_path / "empty_dir"
+    empty_dir.mkdir()
+    model_empty = Gemma4ForCausalLM.from_pretrained(str(empty_dir), config=config)
+    assert model_empty is not None
+
+
+def test_pytorch_native_pipeline_integration(tmp_path, monkeypatch):
+    """Test pytorch_native backend integration for train, inference, and export."""
+    from safetensors.torch import save_file
+
+    from gemma_4_sql.backends.pytorch.export import export_model
+    from gemma_4_sql.backends.pytorch.inference import generate_sql
+    from gemma_4_sql.backends.pytorch.train import train_model
+    from gemma_4_sql.type_hints import TrainingConfig
+
+    tiny_cfg = Gemma4Config(
+        vocab_size=128,
+        hidden_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=32,
+        intermediate_size=128,
+    )
+
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", save_file)
+    exp_res = export_model("test_model", str(tmp_path), backend_alias="pytorch_native", config=tiny_cfg)
+    assert exp_res["status"] == "exported_with_safetensors"
+    assert exp_res["backend"] == "pytorch_native"
+
+    gen_res = generate_sql("test_model", "SELECT 1", max_length=2, backend_alias="pytorch_native", config=tiny_cfg)
+    assert gen_res["status"] == "success"
+    assert gen_res["backend"] == "pytorch_native"
+    assert "sql" in gen_res
+
+    class MockLoader:
+        def __iter__(self):
+            yield {"inputs": torch.tensor([[1, 2]], dtype=torch.long), "targets": torch.tensor([[2, 3]], dtype=torch.long)}
+
+        def __len__(self):
+            return 1
+
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.train.build_dataloader", lambda c: {"loader": MockLoader()})
+    train_res = train_model(
+        TrainingConfig(action="sft", model_name="test_model", dataset="dummy", epochs=1, backend="pytorch_native"),
+        backend_alias="pytorch_native",
+        model_config=tiny_cfg,
+    )
+    assert train_res["status"] == "completed"
+    assert train_res["backend"] == "pytorch_native"

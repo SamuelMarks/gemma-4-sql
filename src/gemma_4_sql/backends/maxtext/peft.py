@@ -20,7 +20,14 @@ with catch_optional_imports():
     from maxtext.models.gemma4 import Gemma4Model
 
 
-def apply_lora(model_name: str, target_modules: list[str], lora_r: int, lora_alpha: int, lora_dropout: float) -> JSONDict:
+def apply_lora(
+    model_name: str,
+    target_modules: list[str],
+    lora_r: int = 8,
+    lora_alpha: int = 16,
+    lora_dropout: float = 0.05,
+    **kwargs: object,
+) -> JSONDict:
     """Apply LoRA to a model using the MaxText backend.
 
     Args:

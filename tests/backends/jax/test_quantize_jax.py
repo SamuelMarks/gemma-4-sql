@@ -130,7 +130,7 @@ def test_quantize_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(qt, "jax", None)
-    with pytest.raises(DependencyMissingError, match="JAX quantization dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"JAX quantization dependencies are missing\."):
         quantize_model("model", "int8")
 
 
@@ -149,7 +149,7 @@ def test_quantize_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
     res = quantize_model("model", "int8")
     if not res["status"] == "quantized_int8":
         raise AssertionError
-    if not res["memory_reduction_factor"] == float("0.5"):
+    if res["memory_reduction_factor"] != pytest.approx(0.5):
         raise AssertionError
     res = quantize_model("model", "awq")
     if not res["status"] == "quantized_awq":

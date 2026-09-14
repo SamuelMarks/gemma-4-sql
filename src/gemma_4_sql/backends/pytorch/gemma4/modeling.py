@@ -6,7 +6,7 @@ import torch
 from torch import nn
 
 from .audio import Gemma4AudioModel
-from .cache import Cache
+from .cache import Cache, DynamicCache
 from .config import Gemma4Config
 from .decoder_layer import Gemma4DecoderLayer
 from .layers import Gemma4RMSNorm
@@ -106,14 +106,86 @@ class Gemma4ForCausalLM(nn.Module):
         return logits, next_decoder_cache if len(next_decoder_cache) > 0 else None
 
     def generate(self, input_ids: torch.Tensor, max_new_tokens: int = 128, min_new_tokens: int = 0) -> torch.Tensor:
-        """Generate text."""
-        past_key_values = None
-        for _ in range(max_new_tokens):
+        """Generate text using autoregressive generation with DynamicCache KV caching.
+
+        Args:
+            input_ids: Input tensor of token IDs.
+            max_new_tokens: Maximum number of tokens to generate.
+            min_new_tokens: Minimum number of tokens to generate.
+
+        Returns:
+            Tensor of generated token IDs including prompt tokens.
+        """
+        past_key_values: Cache | None = DynamicCache()
+        for i in range(max_new_tokens):
+            curr_input = input_ids if i == 0 else input_ids[:, -1:]
             logits, past_key_values = self(
-                input_ids[:, -1:] if past_key_values is not None else input_ids,
+                curr_input,
                 past_key_values=past_key_values,
             )
             next_token_logits = logits[:, -1, :]
             next_tokens = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
             input_ids = torch.cat([input_ids, next_tokens], dim=-1)
         return input_ids
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_name_or_path: str,
+        config: Gemma4Config | None = None,
+        **kwargs: object,
+    ) -> Gemma4ForCausalLM:
+        """Load native Gemma 4 model from path or initialize with config.
+
+        Args:
+            model_name_or_path: Directory, safetensors path, or model identifier.
+            config: Optional Gemma4Config instance.
+            **kwargs: Extra arguments.
+
+        Returns:
+            Initialized Gemma4ForCausalLM model instance.
+        """
+        from pathlib import Path
+
+        cfg = config or Gemma4Config()
+        model = cls(cfg)
+        path = Path(str(model_name_or_path))
+        target_file: Path | None = None
+        if path.is_file() and (path.suffix == ".safetensors" or path.name.endswith(".safetensors")):
+            target_file = path
+        elif path.is_dir():
+            st_path = path / "model.safetensors"
+            if st_path.is_file():
+                target_file = st_path
+        if target_file is not None:
+            try:
+                from safetensors import SafetensorError
+                from safetensors.torch import load_file
+
+                state_dict = load_file(str(target_file))
+                model.load_state_dict(state_dict, strict=False)
+            except (SafetensorError, ValueError, RuntimeError, OSError, KeyError, AttributeError) as exc:
+                import logging
+
+                logging.getLogger(__name__).debug("Failed to load safetensors: %s", exc)
+        return model
+
+    def save_pretrained(self, save_directory: str) -> str:
+        """Save native model weights to a safetensors file in save_directory.
+
+        Args:
+            save_directory: Directory path to save model weights.
+
+        Returns:
+            Path to the saved safetensors file.
+        """
+        from pathlib import Path
+
+        from safetensors.torch import save_file
+
+        save_path = Path(save_directory)
+        save_path.mkdir(parents=True, exist_ok=True)
+        file_path = save_path / "model.safetensors"
+        state_dict = {k: v.clone() if k == "lm_head.weight" else v for k, v in self.state_dict().items()}
+        save_file(state_dict, str(file_path))
+        return str(file_path)

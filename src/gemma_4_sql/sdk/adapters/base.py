@@ -26,7 +26,7 @@ class DatabaseAdapter(abc.ABC):
         self.db_path = db_path
         self.db_kwargs = db_kwargs
         self.read_only = read_only
-        self.conn = self.connect()
+        self.conn: typing.Any = self.connect()
 
     @property
     @abc.abstractmethod

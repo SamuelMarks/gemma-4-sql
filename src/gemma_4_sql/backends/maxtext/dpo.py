@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
@@ -15,14 +15,14 @@ from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.type_hints import ETLConfig, TrainerState
 
 logger = logging.getLogger(__name__)
-jax = None
-jnp = None
-optax = None
+jax: Any = None
+jnp: Any = None
+optax: Any = None
 with catch_optional_imports():
     import jax
     import jax.numpy as jnp
     import optax
-Gemma4Model = None
+Gemma4Model: Any = None
 with catch_optional_imports():
     from maxtext.models.gemma4 import Gemma4Model
 
@@ -118,7 +118,7 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
     return (policy_params, opt_state, final_loss)
 
 
-def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, test_mode: bool) -> tuple[str, float]:
+def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, test_mode: bool, batch_size: int = 2) -> tuple[str, float]:
     """Execute the core DPO loop."""
     if not test_mode:  # pragma: no cover
         try:
@@ -134,7 +134,7 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
     optimizer = optax.adamw(learning_rate)
     opt_state = optimizer.init(policy_params)
     train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=2))
+    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
 
     if dataloader is None or not hasattr(dataloader, "__iter__"):
@@ -182,7 +182,8 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
 
         raise DependencyMissingError("MaxText dependencies are missing.")
     try:
-        status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, bool(kwargs.get("test_mode")))
+        batch_size = getattr(config, "batch_size", 2)
+        status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, bool(kwargs.get("test_mode")), batch_size=batch_size)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         logger.exception("DPO Train error: ")
         status = f"failed: {e!s}"

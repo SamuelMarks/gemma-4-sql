@@ -72,7 +72,7 @@ def test_serve_model_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(srv, "AsyncEngineArgs", None)
-    with pytest.raises(DependencyMissingError, match="vLLM dependencies are missing for PyTorch serving."):
+    with pytest.raises(DependencyMissingError, match=r"vLLM dependencies are missing for PyTorch serving\."):
         srv.serve_model("foo")
 
 
@@ -114,8 +114,7 @@ def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
     if not res["backend"] == "pytorch":
         raise AssertionError
-    if res["status"] != "running_vllm":
-        pass
+    assert res["status"] == "running_vllm"
     if not res["port"] == int("8000"):
         raise AssertionError
 

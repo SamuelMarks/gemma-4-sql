@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 FastAPI = None
 JSONResponse = None
+Request = None
 uvicorn = None
 
 with catch_optional_imports():
@@ -53,8 +54,13 @@ def create_common_app(
     if not test_mode and startup_callback is not None:
         startup_callback()
 
-    @app.post("/generate")
-    async def generate(request: Request) -> JSONResponse:
+    try:
+        from fastapi import Request as _RealRequest
+    except (ImportError, TypeError, AttributeError):
+        _RealRequest = Request if Request is not None else Any
+
+    @app.post("/generate", response_model=None)
+    async def generate(request: _RealRequest) -> Any:
         """Execute function.
 
         Returns:
@@ -84,6 +90,8 @@ def serve_model_wrapper(
     missing_status: str,
     app_factory: Callable[[], object],
     test_mode: bool = False,
+    run_server: bool = False,
+    host: str = "0.0.0.0",
 ) -> JSONDict:
     """Wrap serving logic to unify exception handling and result formatting.
 
@@ -113,6 +121,8 @@ def serve_model_wrapper(
         status = f"running_{backend_name}_serve"
         if not test_mode:
             logger.info("Starting %s server on port %d", backend_name.title(), port)
+            if run_server:
+                uvicorn.run(app, host=host, port=port)
     except Exception as e:
         logger.exception("Failed to start %s serve: ", backend_name)
         status = f"failed: {e!s}"

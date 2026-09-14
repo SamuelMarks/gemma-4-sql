@@ -208,14 +208,14 @@ async def test_live_database_engine_postgres_async() -> None:
 
 @pytest.mark.asyncio
 async def test_live_database_engine_async_unsupported() -> None:
-    """Test async for unsupported db."""
+    """Test async for snowflake db using threadpool."""
     mock_snowflake = MagicMock()
     mock_conn = MagicMock()
     mock_snowflake.connector.connect.return_value = mock_conn
     with patch("gemma_4_sql.sdk.adapters.snowflake_adapter.snowflake", mock_snowflake):
         engine = LiveDatabaseEngine(db_type="snowflake", db_kwargs={"account": "xy12345", "user": "admin"})
-        with pytest.raises(ValueError, match="Async operations not natively supported"):
-            await engine.connect_async()
+        conn = await engine.connect_async()
+        assert conn == mock_conn
 
 
 @patch("gemma_4_sql.sdk.adapters.sqlite_adapter.aiosqlite", new=None)
@@ -642,6 +642,55 @@ def test_snowflake_setup_schema_real(monkeypatch):
     ad.setup_schema("SQL")
 
 
+@pytest.mark.asyncio
+async def test_snowflake_async_operations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test SnowflakeAdapter async operations offloaded to threadpool.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
+
+    class MockCursor:
+        """Mock Snowflake cursor."""
+
+        description = (("col",),)
+
+        def execute(self, query: str, params: object = None) -> None:
+            """Execute query."""
+
+        def fetchall(self) -> list[tuple[object, ...]]:
+            """Fetch all rows."""
+            return [(1, "test")]
+
+        def close(self) -> None:
+            """Close cursor."""
+
+    class MockConn:
+        """Mock Snowflake connection."""
+
+        def cursor(self) -> MockCursor:
+            """Return cursor."""
+            return MockCursor()
+
+        def commit(self) -> None:
+            """Commit."""
+
+        def close(self) -> None:
+            """Close connection."""
+
+    monkeypatch.setattr(s_ad.SnowflakeAdapter, "connect", lambda self: MockConn())
+    ad = s_ad.SnowflakeAdapter("path", {})
+    conn = await ad.connect_async()
+    assert conn is not None
+    rows = await ad.execute_query_async("SELECT 1")
+    assert rows == [(1, "test")]
+    success, feedback_rows, err = await ad.execute_with_feedback_async("SELECT 1")
+    assert success is True
+    assert feedback_rows == [(1, "test")]
+    assert err is None
+
+
 def test_duckdb_setup_schema_real(monkeypatch):
     import gemma_4_sql.sdk.adapters.duckdb_adapter as d_ad
 
@@ -735,3 +784,26 @@ def test_base_setup_schema(monkeypatch):
     ad = Base("path", {})
     ad.execute_with_feedback = lambda ddl: None
     ad.setup_schema("SQL")
+
+
+@pytest.mark.asyncio
+async def test_sqlite_adapter_disk_file(tmp_path) -> None:
+    """Test SQLiteAdapter connecting to a real file path on disk."""
+    from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
+
+    db_file = str(tmp_path / "test_disk.db")
+    adapter = SQLiteAdapter(db_file, {})
+    assert adapter.conn is not None
+    adapter.setup_schema("CREATE TABLE t (val INT); INSERT INTO t VALUES (123);")
+
+    async_conn = await adapter.connect_async()
+    assert async_conn is not None
+    await async_conn.close()
+
+
+@pytest.mark.asyncio
+async def test_compare_queries_async() -> None:
+    """Test compare_queries_async in LiveDatabaseEngine."""
+    engine = LiveDatabaseEngine(":memory:", db_type="sqlite")
+    assert await engine.compare_queries_async("SELECT 1", "SELECT 1") is True
+    assert await engine.compare_queries_async("SELECT 1", "SELECT 2") is False

@@ -28,7 +28,8 @@ Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`) implements identical 
 *   **JAX (`backends/jax`)**: Uses Google's `jax` and `optax`. Integrates directly with the built-in NNX Gemma 4 implementation. Handles `@jax.jit` compiled loops.
 *   **MaxText (`backends/maxtext`)**: Integrates with Google's AI-Hypercomputer stack. Uses the `Gemma4Model` written in pure XLA to leverage TPU interconnects natively.
 *   **Keras (`backends/keras`)**: Integrates with `keras_nlp` (using `GemmaCausalLM`) and leverages Keras 3 core abstractions (`keras.Model.fit`), maintaining a standardized TensorFlow-compatible graph.
-*   **PyTorch (`backends/pytorch`)**: Connects to the standard Hugging Face `transformers` API (`Gemma4ForCausalLM`) and also provides a pure Native PyTorch implementation (`torch.nn`) for isolated benchmarking.
+*   **PyTorch (`backends/pytorch`)**: Connects to the standard Hugging Face `transformers` API (`Gemma4ForCausalLM`) and provides a standalone pure Native PyTorch pipeline (`pytorch_native`) featuring `DynamicCache` KV caching, native forward/loss loops, and direct safetensors serialization.
+*   **MLX (`backends/mlx`)**: Tailored for Apple Silicon hardware, providing compiled metal-accelerated training, DPO, quantization, and continuous batching server via FastAPI.
 
 ---
 
@@ -40,7 +41,8 @@ Data loading at scale is a massive bottleneck. We use **Google Grain**, a high-p
 2.  **Transformations:** Datasets pass through a series of `MapTransform` pipelines.
 3.  **Target Formats:** The pipeline normalizes the text into integer sequences and produces dataset shards tailored to the specific backend:
     *   **JAX/MaxText/Keras:** Utilizes Grain's `BaseFormatTransform` to yield `inputs` and `targets` dictionaries, with sharding handled via `JAXDistributedSharding`.
-    *   **PyTorch:** Yields standard `inputs` and `targets` dictionaries via native `DataLoaders`.
+    *   **PyTorch/MLX:** Yields standard `inputs` and `targets` dictionaries via native `DataLoaders` or MLX batching streams.
+    *   **Configurable Batch Size:** Every training pipeline accepts unified `batch_size` settings across CLI and SDK configurations.
 
 ### 2.2 Live Database Execution Engine (`db_engine.py`)
 Unlike standard NLP generation where BLEU/ROUGE are sufficient, Text-to-SQL must be measured by **Execution Accuracy (EX)**. We developed the `LiveDatabaseEngine`.

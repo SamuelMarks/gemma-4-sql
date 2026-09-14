@@ -23,20 +23,57 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
         ddl: The Data Definition Language (DDL) string.
 
     Returns:
-        A list of results.
+        A dictionary mapping table names to lists of column names.
     """
-    schema = {}
-    table_pattern = re.compile("CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?([a-zA-Z0-9_]+)\\s*\\((.*?)\\);?", re.IGNORECASE | re.DOTALL)
-    for match in table_pattern.finditer(ddl):
+    schema: dict[str, list[str]] = {}
+    pattern = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)\s*\(", re.IGNORECASE)
+    pos = 0
+    while True:
+        match = pattern.search(ddl, pos)
+        if not match:
+            break
         table_name = match.group(1)
-        columns_block = match.group(2)
         schema[table_name] = []
-        for raw_col in columns_block.split(","):
-            c_def = raw_col.strip()
-            if not c_def or c_def.upper().startswith("PRIMARY KEY") or c_def.upper().startswith("FOREIGN KEY"):
+        start_idx = match.end()
+        depth = 1
+        i = start_idx
+        while i < len(ddl) and depth > 0:
+            if ddl[i] == "(":
+                depth += 1
+            elif ddl[i] == ")":
+                depth -= 1
+            i += 1
+        columns_block = ddl[start_idx : i - 1]
+        pos = i
+
+        raw_cols: list[str] = []
+        cur: list[str] = []
+        d = 0
+        for ch in columns_block:
+            if ch == "(":
+                d += 1
+                cur.append(ch)
+            elif ch == ")":
+                d -= 1
+                cur.append(ch)
+            elif ch == "," and d == 0:
+                raw_cols.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(ch)
+        if cur:
+            raw_cols.append("".join(cur).strip())
+
+        ignored_keywords = ("PRIMARY KEY", "FOREIGN KEY", "CONSTRAINT", "UNIQUE", "CHECK")
+        for col_def in raw_cols:
+            c = col_def.strip()
+            if not c:
                 continue
-            col_match = re.match("([a-zA-Z0-9_]+)\\b", c_def)
-            if col_match:  # pragma: no cover
+            c_upper = c.upper()
+            if any(c_upper.startswith(kw) for kw in ignored_keywords):
+                continue
+            col_match = re.match(r"^([a-zA-Z0-9_]+)", c)
+            if col_match:
                 schema[table_name].append(col_match.group(1))
     return schema
 

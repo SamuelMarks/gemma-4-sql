@@ -168,7 +168,7 @@ def test_process_safetensors_file_jax_key_not_none(monkeypatch):
     _process_safetensors_file("test.safetensors", moe_pattern, expert_tensors, jax_state, mapping)
 
 
-def test_create_gemma4_vision_pos_ids(monkeypatch):
+def test_create_gemma4_vision_pos_ids():
     class MockConfig:
         vision_config = True
         audio_config = False
@@ -186,12 +186,11 @@ def test_create_gemma4_vision_pos_ids(monkeypatch):
 
     mock_model = MagicMock()
     mock_model.vision_tower.embeddings.num_patches = 14
-    monkeypatch.setattr("gemma_4_sql.backends.jax.gemma4.params.gemma4.Gemma4ForCausalLM", MagicMock(return_value=mock_model))
-    monkeypatch.setattr("gemma_4_sql.backends.jax.gemma4.params._populate_state_from_files", MagicMock())
 
     import jax
 
-    mock_state = {"vision_tower": {"embeddings": {"position_ids": jax.ShapeDtypeStruct((1, 14), jnp.int32)}}}
-    monkeypatch.setattr("gemma_4_sql.backends.jax.gemma4.params._get_model_and_state", MagicMock(return_value=(mock_model, mock_state)))
+    from gemma_4_sql.backends.jax.gemma4.params import _fix_jax_state_embeddings
 
-    create_gemma4_from_pretrained("test_dir", cfg)
+    mock_state = {"model": {"embed_scale": jax.ShapeDtypeStruct((), jnp.float32)}, "vision_tower": {"embeddings": {"position_ids": jax.ShapeDtypeStruct((1, 14), jnp.int32)}}}
+    _fix_jax_state_embeddings(mock_state, mock_model, cfg)
+    assert mock_state["vision_tower"]["embeddings"]["position_ids"].shape == (1, 14)

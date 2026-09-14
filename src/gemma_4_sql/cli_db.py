@@ -18,30 +18,44 @@ logger = logging.getLogger(__name__)
 def db_execute_cmd(args: argparse.Namespace) -> None:
     """Execute a SQL query against the LiveDatabaseEngine.
 
-
     Args:
-        args: Parsed command-line arguments containing command-specific options."""
+        args: Parsed command-line arguments containing command-specific options.
+    """
     db_kwargs = {}
     if getattr(args, "db_kwargs", ""):
         db_kwargs = json.loads(args.db_kwargs)
     engine = LiveDatabaseEngine(db_path=args.db_path, ddl=args.ddl, db_type=args.db_type, db_kwargs=db_kwargs)
-    (_success, _results, _error) = engine.execute_with_feedback(args.query)
+    (success, results, error) = engine.execute_with_feedback(args.query)
     engine.close()
+    output = {
+        "success": success,
+        "results": results,
+        "error": error,
+    }
+    print(json.dumps(output, indent=2))
 
 
 def embed_duckdb_cmd(args: argparse.Namespace) -> None:
     """Embed Gemma as a UDF in DuckDB and execute a prompt.
 
-
     Args:
-        args: Parsed command-line arguments containing command-specific options."""
+        args: Parsed command-line arguments containing command-specific options.
+    """
     duckdb = LazyLoader("duckdb").get_module()
     if duckdb is None:
         return
     conn = duckdb.connect(args.db_path)
     if args.ddl:
         conn.execute(args.ddl)
-    embed_in_duckdb(conn=conn, model_name=args.model, backend=args.backend, db_path=args.db_path, max_retries=args.max_retries)
+    embed_in_duckdb(
+        conn=conn,
+        model_name=args.model,
+        backend=args.backend,
+        db_path=args.db_path,
+        max_retries=args.max_retries,
+    )
     if args.prompt:
-        conn.execute("SELECT ask_gemma(?)", [args.prompt]).fetchall()
+        rows = conn.execute("SELECT ask_gemma(?)", [args.prompt]).fetchall()
+        for row in rows:
+            print(str(row[0]))
     conn.close()

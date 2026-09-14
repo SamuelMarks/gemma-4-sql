@@ -153,7 +153,7 @@ def test_run_training_epochs() -> None:
 
     state = TrainerState(dataloader=[1, 2], epochs=2, policy_model=None, ref_model=None, optimizer=None, train_step=lambda *a: MockLoss())
     res = jax_dpo._run_training_epochs(state)
-    assert res == 1.0
+    assert res == pytest.approx(1.0)
 
 
 def test_run_dpo_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -161,7 +161,7 @@ def test_run_dpo_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(jax_dpo, "jax", None)
-    with pytest.raises(DependencyMissingError, match="JAX DPO dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"JAX DPO dependencies are missing\."):
         jax_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
 
 
@@ -269,7 +269,7 @@ def test_run_dpo_real_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     res = jax_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
     if res["status"] != "completed":
         raise AssertionError(res["status"])
-    assert res["final_loss"] == 1.0
+    assert res["final_loss"] == pytest.approx(1.0)
 
 
 def test_run_dpo_error(monkeypatch: pytest.MonkeyPatch) -> None:

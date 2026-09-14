@@ -34,6 +34,16 @@ def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
     try:
         if method in {"int8", "int4"}:
             logger.info("Setting Keras model dtype to %s", method)
+            if hasattr(keras, "dtype_policies") and hasattr(keras.dtype_policies, "set_dtype_policy"):
+                try:
+                    keras.dtype_policies.set_dtype_policy(f"{method}_from_float32")
+                except (ValueError, TypeError, AttributeError):
+                    pass
+            elif hasattr(keras, "config") and hasattr(keras.config, "set_dtype_policy"):
+                try:
+                    keras.config.set_dtype_policy(f"{method}_from_float32")
+                except (ValueError, TypeError, AttributeError):
+                    pass
             memory_reduction = 0.5 if method == "int8" else 0.75
         elif method in {"awq", "gptq"}:
             logger.warning("Keras natively uses int8/int4 via preset. Simulating %s", method)

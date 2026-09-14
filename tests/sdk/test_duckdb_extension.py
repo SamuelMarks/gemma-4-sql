@@ -29,13 +29,14 @@ def test_embed_in_duckdb_success() -> None:
         embed_in_duckdb = __import__("gemma_4_sql.sdk.duckdb_extension", fromlist=["embed_in_duckdb"]).embed_in_duckdb
         conn = MagicMock()
 
-        def mock_execute(query: object) -> object:
+        def mock_execute(query: object, *args: object, **kwargs: object) -> object:
             """Initialize function mock_execute.
 
             Args:
             ----
             query: Description of query.
-
+            *args: Optional arguments.
+            **kwargs: Optional keyword arguments.
 
             Returns:
                 object: Description of return.

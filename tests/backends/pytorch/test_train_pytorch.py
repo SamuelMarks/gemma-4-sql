@@ -344,7 +344,7 @@ def test_train_model_pytorch_missing() -> object:
 
     orig_torch = tr.torch
     tr.torch = None
-    with pytest.raises(DependencyMissingError, match="PyTorch dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"PyTorch dependencies are missing\."):
         train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1))
     tr.torch = orig_torch
 
