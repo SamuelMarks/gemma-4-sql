@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from torch import nn
 
@@ -24,7 +26,11 @@ class Gemma4MultiModalProjector(nn.Module):
         self.linear_2 = nn.Linear(config.hidden_size, config.hidden_size, bias=True)
 
     def forward(self, image_features: torch.Tensor) -> torch.Tensor:
-        """Forward pass for multimodal projector."""
+        """Forward pass for multimodal projector.
+
+        Returns:
+            Projected multimodal features.
+        """
         hidden_states = self.linear_1(image_features)
         hidden_states = self.act(hidden_states)
         hidden_states = self.linear_2(hidden_states)
@@ -62,7 +68,11 @@ class Gemma4ForCausalLM(nn.Module):
         pixel_values: torch.Tensor | None = None,
         audio_values: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, tuple[tuple[torch.Tensor, torch.Tensor], ...] | Cache | None]:
-        """Forward pass of the model."""
+        """Forward pass of the model.
+
+        Returns:
+            Tuple containing output logits and updated past key values.
+        """
         hidden_states = self.embed_tokens(input_ids)
 
         if pixel_values is not None:
@@ -81,18 +91,19 @@ class Gemma4ForCausalLM(nn.Module):
         next_decoder_cache: tuple[tuple[torch.Tensor, torch.Tensor], ...] = ()
 
         for idx, decoder_layer in enumerate(self.layers):
+            layer_past_key_value: tuple[torch.Tensor, torch.Tensor] | Cache | None
             if past_key_values is None:
-                past_key_value = None
+                layer_past_key_value = None
             elif isinstance(past_key_values, Cache):
-                past_key_value = past_key_values
+                layer_past_key_value = past_key_values
             else:
-                past_key_value = past_key_values[idx]
+                layer_past_key_value = past_key_values[idx]
 
             hidden_states, present_key_value, _router_logits = decoder_layer(
                 hidden_states,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
-                past_key_value=past_key_value,
+                past_key_value=layer_past_key_value,
             )
             if present_key_value is not None and not isinstance(present_key_value, Cache):
                 next_decoder_cache += (present_key_value,)
@@ -105,24 +116,33 @@ class Gemma4ForCausalLM(nn.Module):
 
         return logits, next_decoder_cache if len(next_decoder_cache) > 0 else None
 
-    def generate(self, input_ids: torch.Tensor, max_new_tokens: int = 128, min_new_tokens: int = 0) -> torch.Tensor:
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 128,
+        min_new_tokens: int = 0,
+        **kwargs: Any,
+    ) -> torch.Tensor:
         """Generate text using autoregressive generation with DynamicCache KV caching.
 
         Args:
             input_ids: Input tensor of token IDs.
             max_new_tokens: Maximum number of tokens to generate.
             min_new_tokens: Minimum number of tokens to generate.
+            **kwargs: Extra generation parameters ignored or handled.
 
         Returns:
             Tensor of generated token IDs including prompt tokens.
         """
-        past_key_values: Cache | None = DynamicCache()
+        gen_cache: Cache | tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = DynamicCache()
         for i in range(max_new_tokens):
             curr_input = input_ids if i == 0 else input_ids[:, -1:]
-            logits, past_key_values = self(
+            call_res = self(
                 curr_input,
-                past_key_values=past_key_values,
+                past_key_values=gen_cache,
             )
+            logits = call_res[0]
+            gen_cache = call_res[1]
             next_token_logits = logits[:, -1, :]
             next_tokens = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
             input_ids = torch.cat([input_ids, next_tokens], dim=-1)

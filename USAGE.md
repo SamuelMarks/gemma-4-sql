@@ -239,7 +239,7 @@ metrics = evaluate(model_name="gemma-4", dataset_name="test-data", db_type="duck
 
 ---
 
-## 5. Agentic Loop (Self-Correction)
+## 7. Agentic Loop (Self-Correction)
 
 For real-world inference, models often generate malformed SQL. The **Agentic Loop** runs the generated SQL, captures runtime errors from the database, and injects them back into the prompt for the model to self-correct in real-time.
 
@@ -279,7 +279,7 @@ gemma-4-sql embed-duckdb \
 
 ---
 
-## 7. Serving & Chat Interfaces
+## 9. Serving & Chat Interfaces
 
 ### Multi-Turn Chat
 ```bash
@@ -296,7 +296,7 @@ gemma-4-sql serve --model gemma-4 --port 8000 --max-batch-size 256 --backend pyt
 
 ---
 
-## 8. RAG Contextualization & Few-Shot Prompting
+## 10. RAG Contextualization & Few-Shot Prompting
 
 Injecting database schemas (DDL) and contextual examples dramatically improves SQL generation.
 
@@ -312,7 +312,7 @@ gemma-4-sql few-shot --model gemma-4 \
 
 ---
 
-## 9. Hardware Benchmarking
+## 11. Hardware Benchmarking
 
 Before deploying your models, you can benchmark their throughput, latency, and memory characteristics on your target hardware (GPU, TPU, CPU) using the newly integrated benchmark tools.
 
@@ -341,7 +341,7 @@ print(f"Tokens/sec: {metrics['tokens_per_sec']}")
 
 ---
 
-## 10. Tokenization
+## 12. Tokenization
 
 You can manually encode strings or decode tokens using the same tokenization logic the ETL process uses. It defaults to character-level encoding, or it can use a Hugging Face tokenizer if provided.
 
@@ -360,7 +360,7 @@ gemma-4-sql tokenize --encode "SELECT * FROM users" --hf-model "google/gemma-2b"
 
 ---
 
-## 11. Logging (TensorBoard Integration)
+## 13. Logging (TensorBoard Integration)
 
 Gemma-4-SQL provides native integration with TensorBoard across all backend topologies (`jax`, `maxtext`, `keras`, `pytorch`). You can log arbitrary metrics (loss, accuracy, execution accuracy) during training, pretraining, or evaluation.
 

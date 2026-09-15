@@ -33,13 +33,20 @@ class MockAsyncLLMEngine:
             """Provide class docstring."""
 
             def generate(self, prompt, *_args: object, **_kwargs: object) -> object:
+                """Execute generate helper."""
+
                 class Output:
+                    """Test class for Output."""
+
                     class Out:
+                        """Test class for Out."""
+
                         text = "SELECT * FROM vllm"
 
                     outputs: typing.ClassVar = [Out()]
 
                 async def gen() -> typing.AsyncGenerator:
+                    """Execute gen helper."""
                     if prompt == "empty":
                         return
                     yield Output()
@@ -278,22 +285,30 @@ def test_serve_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_serve_pytorch_coverage(monkeypatch):
+    """Test serve pytorch coverage functionality."""
     import gemma_4_sql.backends.pytorch.serve as pts
 
     class MockEngine:
+        """Test class for MockEngine."""
+
         async def generate(self, *a, **k):
             # empty generator to cover 56->61
+            """Execute generate helper."""
             if False:
                 yield None
 
         async def abort(self, *a, **k):
-            pass
+            """Execute abort helper."""
 
     class MockRequest:
+        """Test class for MockRequest."""
+
         async def json(self):
+            """Execute json helper."""
             return {"prompt": "p"}
 
         async def is_disconnected(self):
+            """Execute is disconnected helper."""
             return False
 
     monkeypatch.setattr(pts, "AsyncLLMEngine", type("AsyncLLMEngine", (), {"from_engine_args": lambda *a: MockEngine()}))
@@ -301,13 +316,23 @@ async def test_serve_pytorch_coverage(monkeypatch):
     monkeypatch.setattr(pts, "random_uuid", lambda: "123")
 
     class MockFastAPI:
+        """Test class for MockFastAPI."""
+
         def __init__(self, **kwargs):
+            """Initialize __init__."""
             self.routes = []
 
         def post(self, path):
+            """Execute post helper."""
+
             def decorator(f):
+                """Execute decorator helper."""
+
                 class Route:
+                    """Test class for Route."""
+
                     def __init__(self, path, endpoint):
+                        """Initialize __init__."""
                         self.path = path
                         self.endpoint = endpoint
 

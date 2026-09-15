@@ -3,26 +3,37 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_serve import serve_model_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
+
 logger = logging.getLogger(__name__)
-AsyncEngineArgs = None
-AsyncLLMEngine = None
-random_uuid = None
-FastAPI = None
-Request = None
-JSONResponse = None
+
+try:
+    from fastapi import FastAPI as _FastAPI
+    from fastapi import Request as _Request
+    from fastapi.responses import JSONResponse as _JSONResponse
+    from vllm import AsyncEngineArgs as _AsyncEngineArgs
+    from vllm import AsyncLLMEngine as _AsyncLLMEngine
+    from vllm.utils import random_uuid as _random_uuid
+
+    FastAPI: Any = _FastAPI
+    Request: Any = _Request
+    JSONResponse: Any = _JSONResponse
+    AsyncEngineArgs: Any = _AsyncEngineArgs
+    AsyncLLMEngine: Any = _AsyncLLMEngine
+    random_uuid: Any = _random_uuid
+except (ImportError, AttributeError):
+    FastAPI = None
+    Request = None
+    JSONResponse = None
+    AsyncEngineArgs = None
+    AsyncLLMEngine = None
+    random_uuid = None
 uvicorn = None
-with catch_optional_imports():
-    from fastapi import FastAPI, Request
-    from fastapi.responses import JSONResponse
-    from vllm import AsyncEngineArgs, AsyncLLMEngine
-    from vllm.utils import random_uuid
 
 
 def _create_app(model_name: str, max_batch_size: int) -> object:
@@ -41,7 +52,7 @@ def _create_app(model_name: str, max_batch_size: int) -> object:
     app = FastAPI(title=f"vLLM Serve: {model_name}")
 
     @app.post("/generate")
-    async def generate(request: Request) -> JSONResponse:
+    async def generate(request: Any) -> Any:
         """Execute logic.
 
         Returns:
@@ -67,14 +78,17 @@ def _create_app(model_name: str, max_batch_size: int) -> object:
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
     """Serve a model using vLLM for continuous batching.
 
-        Args:
-                    **kwargs: Underlying server and backend-specific configuration options.
-    model_name: The name of the target model.
-            port: The network port to listen on.
-            max_batch_size: The maximum allowed batch size.
+    Args:
+        model_name: The name of the target model.
+        port: The network port to listen on.
+        max_batch_size: The maximum allowed batch size.
+        **kwargs: Underlying server and backend-specific configuration options.
 
-        Returns:
-            A dictionary containing the results.
+    Returns:
+        A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If vLLM dependencies are missing for PyTorch serving.
     """
     if AsyncEngineArgs is None:
         from gemma_4_sql.exceptions import DependencyMissingError

@@ -80,3 +80,48 @@ async def test_duckdb_in_memory_async_persistence(monkeypatch: pytest.MonkeyPatc
     res1, res2 = await asyncio.gather(t1, t2)
     assert res1 == [("Laptop",)]
     assert res2 == [("Phone",)]
+
+
+@pytest.mark.asyncio
+async def test_sqlite_async_rollback_on_error() -> None:
+    """Test SQLite async execution error handling and rollback on bad queries.
+
+    Returns:
+        None.
+    """
+    ddl = "CREATE TABLE accounts (id INT PRIMARY KEY, balance INT);"
+    engine = LiveDatabaseEngine(db_path=":memory:", db_type="sqlite", ddl=ddl, read_only=False)
+    await engine.connect_async()
+
+    # Insert initial row
+    await engine.execute_query_async("INSERT INTO accounts VALUES (1, 100)")
+
+    # Execute a failing query
+    success, rows, err = await engine.execute_with_feedback_async("INSERT INTO accounts VALUES (1, 200)")
+    assert success is False
+    assert rows == []
+    assert err is not None
+
+    # Verify state remains consistent
+    res = await engine.execute_query_async("SELECT balance FROM accounts WHERE id = 1")
+    assert res == [(100,)]
+
+
+@pytest.mark.asyncio
+async def test_sqlite_async_schema_migration() -> None:
+    """Test SQLite async schema migration by altering table structure and querying.
+
+    Returns:
+        None.
+    """
+    ddl = "CREATE TABLE items (id INT, name TEXT);"
+    engine = LiveDatabaseEngine(db_path=":memory:", db_type="sqlite", ddl=ddl, read_only=False)
+    await engine.connect_async()
+
+    await engine.execute_query_async("INSERT INTO items VALUES (1, 'hammer')")
+    # Schema migration: ADD COLUMN
+    await engine.execute_query_async("ALTER TABLE items ADD COLUMN price INT DEFAULT 0")
+    await engine.execute_query_async("UPDATE items SET price = 25 WHERE id = 1")
+
+    rows = await engine.execute_query_async("SELECT name, price FROM items WHERE id = 1")
+    assert rows == [("hammer", 25)]

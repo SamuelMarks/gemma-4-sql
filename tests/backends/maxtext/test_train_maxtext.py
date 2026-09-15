@@ -411,3 +411,22 @@ def test_train_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
     importlib.reload(m_train)
     monkeypatch.undo()
     importlib.reload(m_train)
+
+
+def test_maxtext_train_step_nojit_and_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_train_step_fn without jax.jit and _execute_train missing dependencies."""
+    import gemma_4_sql.backends.maxtext.train as m_train
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    # Test without jax.jit
+    class MockNoJitJax:
+        """Test class for MockNoJitJax."""
+
+    monkeypatch.setattr(m_train, "jax", MockNoJitJax())
+    step_fn = m_train._get_train_step_fn(None, None)
+    assert callable(step_fn)
+
+    # Test _execute_train missing dependencies
+    monkeypatch.setattr(m_train, "jax", None)
+    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing for training"):
+        m_train._execute_train("mod", "ds", 1, 1e-4, False)

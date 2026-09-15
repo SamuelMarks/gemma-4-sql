@@ -35,7 +35,7 @@ def run_dpo(
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     DPOConfig = __import__("gemma_4_sql.type_hints", fromlist=["DPOConfig"]).DPOConfig
-    test_mode = bool(kwargs.get("test_mode", False))
+    test_mode = bool(kwargs.get("test_mode"))
     return get_backend(backend).run_dpo(
         DPOConfig(
             model_name=model_name,

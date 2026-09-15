@@ -39,6 +39,8 @@ def test_modeling_coverage() -> None:
     # Coverage for per_layer_inputs condition in Gemma4Model
     per_layer_inputs = jnp.zeros((1, 2, 1, 64))
     model_v.model(input_ids, positions, per_layer_inputs=per_layer_inputs)
+    # Coverage for get_per_layer_inputs when hidden_size_per_layer_input is None
+    assert model.model.get_per_layer_inputs(input_ids) is input_ids
 
     audio_config = modeling.AudioConfig(hidden_size=64, num_hidden_layers=1, num_attention_heads=4, use_clipped_linears=True)
     config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, audio_config=audio_config)
@@ -88,14 +90,20 @@ def test_mlp_attention_sharding() -> None:
     gemma4_attention_cls(config, "local", rngs=rngs)
 
 
-def test_download_and_load_pretrained_error() -> None:
+def test_download_and_load_pretrained() -> None:
     """Execute function."""
+    from unittest.mock import patch
+
     import pytest
 
     from gemma_4_sql.backends.jax.gemma4.modeling import _download_and_load_pretrained
 
     with pytest.raises(ValueError, match="is unknown, please provide config argument"):
         _download_and_load_pretrained("unknown_model_name")
+
+    config = Gemma4Config(vocab_size=10, hidden_size=16, intermediate_size=32, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=8)
+    with patch("huggingface_hub.snapshot_download"), patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained"):
+        _download_and_load_pretrained("google/gemma-4-E2B", config=config)
 
 
 def test_from_pretrained() -> None:

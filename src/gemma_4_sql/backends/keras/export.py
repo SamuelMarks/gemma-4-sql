@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-keras = None
-with catch_optional_imports():
-    import keras
+
+try:
+    import keras as _keras
+
+    keras: Any = _keras
+except (ImportError, AttributeError):
+    keras = None
 
 
 def export_model(model_name: str, export_path: str) -> JSONDict:
@@ -23,6 +25,10 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If Keras dependencies are missing for export.
+        ValueError: If loading the model fails.
     """
     Path(export_path).mkdir(parents=True, exist_ok=True)
     if keras is None:
@@ -41,4 +47,4 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     model.save(file_path)
     status = "exported_with_keras"
 
-    return {"backend": "keras", "model": model_name, "export_path": export_path, "file_path": file_path, "status": status, "format": "keras_v3/keras_tensor"}
+    return {"backend": "keras", "model": model_name, "export_path": export_path, "file_path": str(file_path), "status": status, "format": "keras_v3/keras_tensor"}

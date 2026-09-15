@@ -13,15 +13,19 @@ logger = logging.getLogger(__name__)
 def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, backend: str = "jax", **kwargs: JSONValue) -> JSONDict:
     """Execute a single turn in a multi-turn SQL conversation.
 
-        Args:
-                    **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
-    model_name: The name of the target model.
-            history: A sequence of history.
-            new_prompt: The string representing the new prompt.
-            backend: The backend framework to use.
+    Args:
+        model_name: The name of the target model.
+        history: A sequence of history.
+        new_prompt: The string representing the new prompt.
+        backend: The backend framework to use.
+        **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
 
-        Returns:
-            A dictionary containing the results.
+    Returns:
+        A dictionary containing the results.
+
+    Raises:
+        ValueError: If backend does not return SQL.
+        RuntimeError: If chat turn execution fails.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend(backend)

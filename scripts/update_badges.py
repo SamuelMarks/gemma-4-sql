@@ -59,6 +59,7 @@ def main() -> None:
             "tests/backends/test_backend_methods_edge_cases.py",
             "tests/backends/test_backends.py",
             "tests/backends/test_common.py",
+            "tests/backends/test_common_serve_batching.py",
             "tests/backends/test_lazy_loader.py",
             "tests/backends/test_missing_backends_edge_cases.py",
             "tests/backends/test_true_missing_backends.py",

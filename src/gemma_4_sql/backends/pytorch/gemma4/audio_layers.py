@@ -19,7 +19,11 @@ class Gemma4AudioFeatureExtractor(nn.Module):
         self.activation = nn.GELU(approximate="tanh")
 
     def forward(self, input_values: torch.Tensor) -> torch.Tensor:
-        """Forward pass for audio feature extractor."""
+        """Forward pass for audio feature extractor.
+
+        Returns:
+            Extracted audio feature embeddings.
+        """
         if input_values.dim() == 2:
             input_values = input_values.unsqueeze(1)
 
@@ -54,7 +58,11 @@ class Gemma4AudioEncoderBlock(nn.Module):
         self.layer_norm2 = nn.LayerNorm(self.hidden_size)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        """Forward pass for audio encoder block."""
+        """Forward pass for audio encoder block.
+
+        Returns:
+            Encoded audio representations.
+        """
         residual = hidden_states
         hidden_states = self.layer_norm1(hidden_states)
 

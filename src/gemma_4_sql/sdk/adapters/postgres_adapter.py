@@ -23,11 +23,15 @@ class PostgresAdapter(DatabaseAdapter):
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
         """Return the exception classes."""
-        classes = []
+        classes: list[type[Exception]] = []
         if psycopg2 is not None:
-            classes.append(psycopg2.Error)
+            err = getattr(psycopg2, "Error", None)
+            if isinstance(err, type) and issubclass(err, Exception):
+                classes.append(err)
         if asyncpg is not None:
-            classes.append(asyncpg.PostgresError)
+            err = getattr(asyncpg, "PostgresError", None)
+            if isinstance(err, type) and issubclass(err, Exception):
+                classes.append(err)
         if not classes:
             classes.append(Exception)
         return tuple(classes)
@@ -37,6 +41,9 @@ class PostgresAdapter(DatabaseAdapter):
 
         Returns:
             The execution result.
+
+        Raises:
+            ImportError: If psycopg2 is not installed.
         """
         if psycopg2 is None:
             msg = "psycopg2 is required. Install with `pip install psycopg2-binary`."
@@ -75,14 +82,18 @@ class PostgresAdapter(DatabaseAdapter):
     async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute asynchronously with feedback.
 
-        Returns:
-            object: The resulting output from the operation.
+        Args:
+            query: The SQL query.
+            params: Optional query parameters.
 
+        Returns:
+            A tuple of success boolean, result tuples, and optional error message.
         """
         try:
             async_conn = cast(Any, await self.connect_async())
             try:
-                records = await async_conn.fetch(query)
+                query_params = params or ()
+                records = await async_conn.fetch(query, *query_params)
                 results: list[tuple[JSONPrimitive, ...]] = [tuple(r.values()) for r in records]
                 return (True, results, None)
             finally:
@@ -94,14 +105,18 @@ class PostgresAdapter(DatabaseAdapter):
     async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
         """Execute asynchronously.
 
-        Returns:
-            object: The resulting output from the operation.
+        Args:
+            query: The SQL query.
+            params: Optional query parameters.
 
+        Returns:
+            A list of result tuples.
         """
         try:
             async_conn = cast(Any, await self.connect_async())
             try:
-                records = await async_conn.fetch(query)
+                query_params = params or ()
+                records = await async_conn.fetch(query, *query_params)
                 return [tuple(r.values()) for r in records]
             finally:
                 if hasattr(async_conn, "close"):

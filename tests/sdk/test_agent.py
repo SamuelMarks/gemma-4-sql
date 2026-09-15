@@ -100,18 +100,26 @@ async def test_process_single_prompt_coverage() -> None:
 
 
 def test_agent_confidence_and_no_context(monkeypatch):
+    """Test agent confidence and no context functionality."""
+
     class MockEngine(LiveDatabaseEngine):
+        """Test class for MockEngine."""
+
         def __init__(self, **kwargs):
-            pass
+            """Initialize __init__."""
 
         def close(self):
-            pass
+            """Execute close helper."""
 
         async def execute_with_feedback_async(self, sql):
+            """Execute execute with feedback async helper."""
             return (False, [], "err")
 
     class MockBackend:
+        """Test class for MockBackend."""
+
         def generate_sql(self, m, p):
+            """Execute generate sql helper."""
             return {"sql": "SELECT", "confidence_score": 0.5}
 
     import sys
@@ -122,6 +130,7 @@ def test_agent_confidence_and_no_context(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "gemma_4_sql.sdk.registry":
             return sys.modules["gemma_4_sql.sdk.registry"]
         return orig_import(name, *a, **k)
@@ -142,21 +151,28 @@ def test_agent_confidence_and_no_context(monkeypatch):
 
 
 def test_agent_success(monkeypatch):
+    """Test agent success functionality."""
     import gemma_4_sql.sdk.agent as ag
     from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 
     class MockEngine(LiveDatabaseEngine):
+        """Test class for MockEngine."""
+
         def __init__(self, **kwargs):
-            pass
+            """Initialize __init__."""
 
         def close(self):
-            pass
+            """Execute close helper."""
 
         async def execute_with_feedback_async(self, sql):
+            """Execute execute with feedback async helper."""
             return (True, [], None)
 
     class MockBackend:
+        """Test class for MockBackend."""
+
         def generate_sql(self, m, p):
+            """Execute generate sql helper."""
             return {"sql": "SELECT", "confidence_score": 0.9}
 
     import sys
@@ -167,6 +183,7 @@ def test_agent_success(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "gemma_4_sql.sdk.registry":
             return sys.modules["gemma_4_sql.sdk.registry"]
         return orig_import(name, *a, **k)
@@ -176,4 +193,70 @@ def test_agent_success(monkeypatch):
 
     ctx = ag.AgentContext(max_retries=1, min_confidence=0.8)
     res = ag.run_agentic_loop("model", "prompt", "jax", ctx)
+    assert res["success"] is True
+
+
+def test_agent_max_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test agentic loop when max_retries is exhausted after continuous errors.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.agent as ag
+
+    class AlwaysFailingEngine:
+        """Engine that always fails."""
+
+        def __init__(self, **kwargs: object) -> None:
+            """Initialize."""
+
+        def close(self) -> None:
+            """Close."""
+
+        async def execute_with_feedback_async(self, sql: str) -> tuple[bool, list, str]:
+            """Return syntax error."""
+            return (False, [], "persistent syntax error")
+
+    class AlwaysSucceedingBackend:
+        """Backend that generates high confidence SQL."""
+
+        def generate_sql(self, m: str, p: str) -> dict:
+            """Generate SQL."""
+            return {"sql": "SELECT bad_col FROM table", "confidence_score": 0.99}
+
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _: AlwaysSucceedingBackend())
+    monkeypatch.setattr(ag, "LiveDatabaseEngine", AlwaysFailingEngine)
+
+    ctx = ag.AgentContext(max_retries=3, min_confidence=0.5)
+    res = ag.run_agentic_loop("model", "prompt", "jax", ctx)
+    assert res["success"] is False
+    assert res["attempts"] == 3
+    assert len(res["history"]) == 3
+    assert res["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_agent_from_running_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test run_agentic_loop when called from within an active running asyncio event loop.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.agent as ag
+
+    class SimpleBackend:
+        """Simple mock backend."""
+
+        def generate_sql(self, m: str, p: str, **k: object) -> dict:
+            """Generate simple SQL."""
+            return {"sql": "SELECT 1", "confidence_score": 1.0}
+
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _: SimpleBackend())
+    res = ag.run_agentic_loop("m", "p", "jax", ag.AgentContext())
     assert res["success"] is True

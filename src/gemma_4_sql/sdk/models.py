@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.type_hints import TrainingConfig
@@ -30,15 +31,12 @@ def train_from_scratch(config: TrainingConfig | None = None) -> JSONDict:
     """Train a model from scratch.
 
     Args:
-    ----
-        config: A TrainingConfig object specifying all parameters.
+        config: Optional TrainingConfig object specifying training parameters.
 
     Returns:
-    -------
         A dictionary indicating the training job status.
-
     """
-    cfg = config or TrainingConfig()
+    cfg = copy.copy(config) if config is not None else TrainingConfig()
     cfg.action = "train_from_scratch"
     return _route_training(cfg)
 
@@ -47,15 +45,12 @@ def pretrain_model(config: TrainingConfig | None = None) -> JSONDict:
     """Pretrains an existing model.
 
     Args:
-    ----
-        config: A TrainingConfig object specifying all parameters.
+        config: Optional TrainingConfig object specifying pretraining parameters.
 
     Returns:
-    -------
         A dictionary indicating the pretraining job status.
-
     """
-    cfg = config or TrainingConfig(backend="maxtext")
+    cfg = copy.copy(config) if config is not None else TrainingConfig(backend="maxtext")
     cfg.action = "pretrain"
     return _route_training(cfg)
 
@@ -64,15 +59,12 @@ def sft_model(config: TrainingConfig | None = None) -> JSONDict:
     """Supervised fine-tunes (SFT) an existing model.
 
     Args:
-    ----
-        config: A TrainingConfig object specifying all parameters.
+        config: Optional TrainingConfig object specifying SFT parameters.
 
     Returns:
-    -------
         A dictionary indicating the SFT job status.
-
     """
-    cfg = config or TrainingConfig()
+    cfg = copy.copy(config) if config is not None else TrainingConfig()
     cfg.action = "sft"
     return _route_training(cfg)
 
@@ -81,14 +73,11 @@ def posttrain_model(config: TrainingConfig | None = None) -> JSONDict:
     """Post-trains an existing model (e.g., RLHF, DPO).
 
     Args:
-    ----
-        config: A TrainingConfig object specifying all parameters.
+        config: Optional TrainingConfig object specifying posttraining parameters.
 
     Returns:
-    -------
         A dictionary indicating the post-training job status.
-
     """
-    cfg = config or TrainingConfig(backend="keras")
+    cfg = copy.copy(config) if config is not None else TrainingConfig(backend="keras")
     cfg.action = "posttrain"
     return _route_training(cfg)

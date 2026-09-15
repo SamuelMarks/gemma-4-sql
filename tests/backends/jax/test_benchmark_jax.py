@@ -34,9 +34,11 @@ class MockJax:
         """Execute function."""
 
     def devices(self, *args):
+        """Execute devices helper."""
         return [MagicMock()]
 
     def default_device(self, *args):
+        """Execute default device helper."""
         return MagicMock()
 
 
@@ -127,6 +129,20 @@ def test_benchmark_model_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res["tokens_per_sec"] > 0
     assert res["latency_ms"] >= 0
 
+    # Test without nnx.jit
+    class MockNNXNoJit:
+        """Mock NNX without jit attribute."""
+
+        class Rngs:
+            """Provide class docstring."""
+
+            def __init__(self, seed: object) -> None:
+                """Execute function."""
+
+    monkeypatch.setattr(bm, "nnx", MockNNXNoJit())
+    res_nojit = bm.benchmark_model("model", "gpu", 1, num_runs=1)
+    assert res_nojit["status"] == "success"
+
 
 def test_benchmark_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function.
@@ -162,9 +178,11 @@ class MockJaxNoBlock:
     random = MagicMock()
 
     def devices(self, *args):
+        """Execute devices helper."""
         return [MagicMock()]
 
     def default_device(self, *args):
+        """Execute default device helper."""
         return MagicMock()
 
 
@@ -203,20 +221,26 @@ from gemma_4_sql.backends.jax.benchmark import benchmark_model
 
 
 class MockJaxWithBlock:
+    """Test class for MockJaxWithBlock."""
+
     def __init__(self):
+        """Initialize __init__."""
         self.random = MagicMock()
 
     def block_until_ready(self, _):
-        pass
+        """Execute block until ready helper."""
 
     def devices(self, *args):
+        """Execute devices helper."""
         return [MagicMock()]
 
     def default_device(self, *args):
+        """Execute default device helper."""
         return MagicMock()
 
 
 def test_benchmark_jax_block_until_ready(monkeypatch):
+    """Test benchmark jax block until ready functionality."""
     import gemma_4_sql.backends.jax.benchmark as bm
 
     mock_jax = MockJaxWithBlock()
@@ -231,14 +255,19 @@ def test_benchmark_jax_block_until_ready(monkeypatch):
 
 
 def test_benchmark_jax_coverage(monkeypatch):
+    """Test benchmark jax coverage functionality."""
     import gemma_4_sql.backends.jax.benchmark as bm
 
     class MockJax:
+        """Test class for MockJax."""
+
         def __init__(self, mode="normal"):
+            """Initialize __init__."""
             self.mode = mode
             self.random = type("R", (), {"PRNGKey": staticmethod(lambda s: s), "key": staticmethod(lambda s: s), "randint": staticmethod(lambda *a, **k: type("I", (), {"shape": (1, 1)})())})()
 
         def devices(self, d):
+            """Execute devices helper."""
             if self.mode == "err" and d == "gpu":
                 raise RuntimeError("err")
             if d == "tpu" and self.mode != "tpu":
@@ -246,20 +275,29 @@ def test_benchmark_jax_coverage(monkeypatch):
             return [type("D", (), {})()]
 
         def block_until_ready(self, x):
+            """Execute block until ready helper."""
             return x
 
         def default_device(self, d):
+            """Execute default device helper."""
             return type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})()
 
     class MockOut:
+        """Test class for MockOut."""
+
         def __getitem__(self, k):
+            """Initialize __getitem__."""
             return "dummy"
 
     class MockModel:
+        """Test class for MockModel."""
+
         def __call__(self, *a, **k):
+            """Initialize __call__."""
             return MockOut()
 
         def generate(self, *a, **k):
+            """Execute generate helper."""
             return "out"
 
     monkeypatch.setattr(bm, "jax", MockJax())
@@ -285,17 +323,25 @@ def test_benchmark_jax_coverage(monkeypatch):
 
 
 def test_jax_benchmark_branch_34_38(monkeypatch):
+    """Test jax benchmark branch 34 38 functionality."""
     import gemma_4_sql.backends.jax.benchmark as bm
 
     class MockJax:
+        """Test class for MockJax."""
+
         def devices(self, d):
+            """Execute devices helper."""
             if d == "tpu":
                 # Return an object that raises RuntimeError when indexed at 0
                 class ExplodingList:
+                    """Test class for ExplodingList."""
+
                     def __bool__(self):
+                        """Initialize __bool__."""
                         return True
 
                     def __getitem__(self, k):
+                        """Initialize __getitem__."""
                         raise RuntimeError("err")
 
                 return ExplodingList()
@@ -306,18 +352,26 @@ def test_jax_benchmark_branch_34_38(monkeypatch):
 
 
 def test_jax_benchmark_loops(monkeypatch):
+    """Test jax benchmark loops functionality."""
     import gemma_4_sql.backends.jax.benchmark as bm
 
     class MockJax:
+        """Test class for MockJax."""
+
         def __init__(self):
+            """Initialize __init__."""
             self.random = type("R", (), {"key": staticmethod(lambda s: s), "randint": staticmethod(lambda *a, **k: "dummy")})()
 
         def default_device(self, d):
+            """Execute default device helper."""
             return type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})()
 
     class MockModel:
+        """Test class for MockModel."""
+
         def __call__(self, *a, **k):
-            return None
+            """Initialize __call__."""
+            return
 
     monkeypatch.setattr(bm, "jax", MockJax())
     monkeypatch.setattr(bm, "jnp", type("JNP", (), {"int32": "int32"})())
@@ -330,10 +384,14 @@ def test_jax_benchmark_loops(monkeypatch):
 
 
 def test_jax_benchmark_branch_empty(monkeypatch):
+    """Test jax benchmark branch empty functionality."""
     import gemma_4_sql.backends.jax.benchmark as bm
 
     class MockJaxEmpty:
+        """Test class for MockJaxEmpty."""
+
         def devices(self, d):
+            """Execute devices helper."""
             return []
 
     monkeypatch.setattr(bm, "jax", MockJaxEmpty())
@@ -341,7 +399,10 @@ def test_jax_benchmark_branch_empty(monkeypatch):
     # 34->35/38 (TPU devices empty)
     # This will trigger an exception if cpu is also empty, but let's just make cpu return a device
     class MockJaxCPUFallback:
+        """Test class for MockJaxCPUFallback."""
+
         def devices(self, d):
+            """Execute devices helper."""
             if d in ("tpu", "gpu"):
                 return []
             return ["cpu"]

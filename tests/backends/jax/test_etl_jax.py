@@ -6,6 +6,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 import sys
 from unittest import mock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -38,7 +39,6 @@ def test_jax_etl_mocked() -> None:
         TypeError: Description.
 
     """
-    from gemma_4_sql.exceptions import DependencyMissingError
 
     etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
     original_datasets = getattr(etl_jax, "datasets", None)
@@ -60,7 +60,6 @@ def test_jax_etl_import_error() -> None:
         TypeError: Description.
 
     """
-    from gemma_4_sql.exceptions import DependencyMissingError
 
     with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
         if "gemma_4_sql.backends.jax.etl" in sys.modules:
@@ -83,9 +82,18 @@ class MockTokenizerForJax:
 
 def test_jax_etl_lightweight(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test JAX ETL lightweight loader."""
+
     etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
     monkeypatch.setattr(etl_jax, "datasets", None)
     monkeypatch.setattr(etl_jax, "grain", None)
+
+    with pytest.raises(DependencyMissingError, match="Grain dependency is missing"):
+        etl_jax._get_sampler(10, False)
+
+    mock_grain = MagicMock()
+    monkeypatch.setattr(etl_jax, "grain", mock_grain)
+    etl_jax._get_sampler(10, False)
+    etl_jax._get_sampler(10, True)
 
     class MockDuckDBForLightweight:
         """Docstring."""

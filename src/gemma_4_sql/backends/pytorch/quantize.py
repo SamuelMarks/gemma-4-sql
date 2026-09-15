@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization, quantize_model_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
-torch = None
-BitsAndBytesConfig = None
-AutoModelForCausalLM = None
-with catch_optional_imports():
-    import torch
-    from transformers import AutoModelForCausalLM, BitsAndBytesConfig
+
+try:
+    import torch as _torch
+    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
+    from transformers import BitsAndBytesConfig as _BitsAndBytesConfig
+
+    torch: Any = _torch
+    BitsAndBytesConfig: Any = _BitsAndBytesConfig
+    AutoModelForCausalLM: Any = _AutoModelForCausalLM
+except (ImportError, AttributeError):
+    torch = None
+    BitsAndBytesConfig = None
+    AutoModelForCausalLM = None
 
 
 def _apply_awq_quantization(model_name: str) -> tuple[float, str]:
@@ -88,6 +94,9 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If PyTorch quantization dependencies are missing.
     """
     if torch is None or (method in {"int8", "int4"} and (BitsAndBytesConfig is None or AutoModelForCausalLM is None)):
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -97,26 +106,42 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
     if method == "gguf":
 
         def apply_fn() -> tuple[float, str]:
-            """Apply GGUF export."""
+            """Apply GGUF export.
+
+            Returns:
+                Tuple of memory reduction and status.
+            """
             export_path = str(kwargs.get("export_path", "./gguf_export"))
             return _export_gguf(model_name, export_path)
 
     elif method == "awq":
 
         def apply_fn() -> tuple[float, str]:
-            """Apply AWQ quantization."""
+            """Apply AWQ quantization.
+
+            Returns:
+                Tuple of memory reduction and status.
+            """
             return _apply_awq_quantization(model_name)
 
     elif method == "gptq":
 
         def apply_fn() -> tuple[float, str]:
-            """Apply GPTQ quantization."""
+            """Apply GPTQ quantization.
+
+            Returns:
+                Tuple of memory reduction and status.
+            """
             return _apply_gptq_quantization(model_name)
 
     else:
 
         def apply_fn() -> tuple[float, str]:
-            """Apply standard BitsAndBytes quantization."""
+            """Apply standard BitsAndBytes quantization.
+
+            Returns:
+                Tuple of memory reduction and status.
+            """
             return apply_bits_and_bytes_quantization(method, BitsAndBytesConfig, getattr(torch, "float16", None))
 
     return quantize_model_wrapper(

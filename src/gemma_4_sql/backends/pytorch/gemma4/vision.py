@@ -32,7 +32,11 @@ class Gemma4VisionEmbeddings(nn.Module):
         self.position_embedding = nn.Embedding(self.num_patches, self.hidden_size)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        """Forward pass for vision embeddings."""
+        """Forward pass for vision embeddings.
+
+        Returns:
+            Patch embeddings tensor.
+        """
         batch_size = pixel_values.shape[0]
         patch_embeds = self.patch_embedding(pixel_values)
         patch_embeds = patch_embeds.flatten(2).transpose(1, 2)
@@ -57,7 +61,11 @@ class Gemma4VisionAttention(nn.Module):
         self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        """Forward pass for vision attention."""
+        """Forward pass for vision attention.
+
+        Returns:
+            Output projected attention tensor.
+        """
         bsz, seq_len, _ = hidden_states.size()
 
         qkv = self.qkv_proj(hidden_states)
@@ -87,7 +95,11 @@ class Gemma4VisionEncoderLayer(nn.Module):
         self.post_attention_layernorm = Gemma4RMSNorm(self.hidden_size)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        """Forward pass for vision encoder layer."""
+        """Forward pass for vision encoder layer.
+
+        Returns:
+            Encoded layer hidden states tensor.
+        """
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
         hidden_states = self.self_attn(hidden_states)
@@ -113,7 +125,11 @@ class Gemma4VisionModel(nn.Module):
         self.post_layernorm = Gemma4RMSNorm(config.hidden_size)
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
-        """Forward pass for vision model."""
+        """Forward pass for vision model.
+
+        Returns:
+            Final vision representations tensor.
+        """
         hidden_states = self.embeddings(pixel_values)
 
         for layer in self.layers:

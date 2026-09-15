@@ -288,6 +288,7 @@ def test_train_invalid_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
     orig_import = builtins.__import__
 
     def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
+        """Execute mock import helper."""
         if name == "keras_nlp.models":
             return sys.modules["keras_nlp.models"]
         return orig_import(name, _globals, _locals, fromlist, level)
@@ -304,3 +305,18 @@ def test_get_trainer() -> None:
     import gemma_4_sql.backends.keras as keras_init
 
     assert keras_init.get_trainer() == "keras_trainer"
+
+
+def test_execute_train_missing_deps_and_model_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _execute_train error cases."""
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(tr, "keras", None)
+    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
+        tr._execute_train("m", "d", 1, True)
+
+    monkeypatch.setattr(tr, "keras", MockKeras())
+    monkeypatch.setattr(tr, "tf", MockTf())
+
+    with pytest.raises(ValueError, match="Failed to load Keras model"):
+        tr._execute_train("nonexistent_model", "d", 1, True)

@@ -15,6 +15,8 @@ from .moe import Gemma4MoE
 class Gemma4DecoderLayer(nn.Module):
     """Decoder layer for Gemma 4."""
 
+    mlp: Gemma4MLP | Gemma4MoE
+
     def __init__(self, config: Gemma4Config, layer_idx: int):
         """Initialize Gemma4DecoderLayer."""
         super().__init__()
@@ -36,7 +38,11 @@ class Gemma4DecoderLayer(nn.Module):
         position_ids: torch.Tensor | None = None,
         past_key_value: tuple[torch.Tensor, torch.Tensor] | Cache | None = None,
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor] | Cache | None, torch.Tensor | None]:
-        """Forward pass for decoder layer."""
+        """Forward pass for decoder layer.
+
+        Returns:
+            Tuple of hidden states, updated key-value cache, and router loss if MoE.
+        """
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
         hidden_states, present_key_value = self.self_attn(

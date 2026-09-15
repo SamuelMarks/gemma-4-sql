@@ -4,6 +4,16 @@ import pytest
 
 from gemma_4_sql.sdk.benchmark import benchmark
 
+try:
+    import keras
+except ImportError:
+    keras = None
+
+try:
+    import maxtext
+except ImportError:
+    maxtext = None
+
 
 def test_benchmark_jax() -> object:
     """Initialize function test_benchmark_jax.
@@ -17,6 +27,7 @@ def test_benchmark_jax() -> object:
         raise AssertionError
 
 
+@pytest.mark.skipif(keras is None, reason="Keras is not installed")
 def test_benchmark_keras() -> object:
     """Initialize function test_benchmark_keras.
 
@@ -29,6 +40,7 @@ def test_benchmark_keras() -> object:
         raise AssertionError
 
 
+@pytest.mark.skipif(maxtext is None, reason="MaxText is not installed")
 def test_benchmark_maxtext() -> object:
     """Initialize function test_benchmark_maxtext.
 

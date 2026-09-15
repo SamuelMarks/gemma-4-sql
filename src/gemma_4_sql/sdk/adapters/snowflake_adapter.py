@@ -23,20 +23,36 @@ class SnowflakeAdapter(DatabaseAdapter):
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
         """Return the exception classes."""
-        import snowflake.connector
+        try:
+            import snowflake.connector
 
-        return (snowflake.connector.errors.Error,)
+            err_cls = getattr(getattr(snowflake.connector, "errors", None), "Error", None)
+            if isinstance(err_cls, type) and issubclass(err_cls, Exception):
+                return (err_cls,)
+            return (Exception,)
+        except (ImportError, AttributeError):
+            return (Exception,)
 
     def connect(self) -> object:
         """Connect synchronously.
 
         Returns:
             The execution result.
+
+        Raises:
+            ImportError: If snowflake-connector-python is missing.
         """
         if snowflake is None:
-            msg = "snowflake-connector-python is required."
+            msg = "snowflake-connector-python is required. Install with `pip install snowflake-connector-python`."
             raise ImportError(msg)
-        return snowflake.connector.connect(**self.db_kwargs)
+        if hasattr(snowflake, "connector") and hasattr(snowflake.connector, "connect"):
+            connect_fn = snowflake.connector.connect
+        else:
+            connect_fn = getattr(snowflake, "connect", None)
+        if connect_fn is None:
+            msg = "snowflake connect function could not be resolved."
+            raise ImportError(msg)
+        return connect_fn(**self.db_kwargs)
 
     async def connect_async(self) -> object:
         """Connect asynchronously using a thread worker.

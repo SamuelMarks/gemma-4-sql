@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import jax
 import jax.numpy as jnp
@@ -86,7 +86,7 @@ class Gemma4MoE(nnx.Module):
         self.pre_forward_scale_2 = nnx.Param(jnp.ones(config.hidden_size, dtype=config.weight_dtype))
         self.gate_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         gate_dtype = jnp.float32 if config.float32_gate_logits else config.dtype
-        self.gate = _make_linear(config.hidden_size, config.num_experts, use_bias=False, dtype=gate_dtype, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.gate: Any = _make_linear(config.hidden_size, config.num_experts, use_bias=False, dtype=gate_dtype, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.per_expert_scale = nnx.Param(jnp.ones(config.num_experts, dtype=config.weight_dtype))
         self.routed_experts = Gemma4RoutedExperts(config, rngs=rngs)
         self.pre_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)

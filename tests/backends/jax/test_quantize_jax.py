@@ -133,6 +133,10 @@ def test_quantize_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError, match=r"JAX quantization dependencies are missing\."):
         quantize_model("model", "int8")
 
+    monkeypatch.setattr(qt, "jnp", None)
+    with pytest.raises(DependencyMissingError, match="JAX is required for quantize_int8"):
+        qt.quantize_int8([1.0, 2.0])
+
 
 def test_quantize_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test JAX quantize real.

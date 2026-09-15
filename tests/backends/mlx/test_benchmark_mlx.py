@@ -139,3 +139,9 @@ def test_benchmark_real(monkeypatch: pytest.MonkeyPatch) -> None:
     res = bm.benchmark_model("mod", "gpu", 2, test_mode=False)
     if "failed" not in res["status"]:
         raise AssertionError
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(bm, "AutoModelForCausalLM", None)
+    with pytest.raises(DependencyMissingError, match="Transformers AutoModelForCausalLM is missing"):
+        bm._load_mlx_model_and_device("mod", "gpu", test_mode=False)

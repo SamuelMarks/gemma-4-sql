@@ -4,14 +4,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypeVar
 
-T_Data = TypeVar("T_Data")
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
 T_Batch = TypeVar("T_Batch")
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
-
-def generic_run_training_epochs(epochs: int, dataloader: T_Data, process_batch_fn: Callable[[T_Batch], float]) -> float:
+def generic_run_training_epochs(
+    epochs: int,
+    dataloader: Iterable[T_Batch],
+    process_batch_fn: Callable[[T_Batch], float],
+) -> float:
     """A generic training loop for iterating over epochs and batches.
 
     Args:

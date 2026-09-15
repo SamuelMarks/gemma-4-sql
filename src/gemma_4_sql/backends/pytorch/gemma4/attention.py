@@ -45,7 +45,11 @@ class Gemma4Attention(nn.Module):
         position_ids: torch.Tensor | None = None,
         past_key_value: tuple[torch.Tensor, torch.Tensor] | Cache | None = None,
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor] | Cache | None]:
-        """Forward pass for attention."""
+        """Forward pass for attention.
+
+        Returns:
+            Tuple containing attention output states and updated key-value cache.
+        """
         bsz, q_len, _ = hidden_states.size()
 
         query_states = self.q_proj(hidden_states).view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)

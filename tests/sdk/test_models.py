@@ -6,6 +6,11 @@ from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.models import pretrain_model
 from gemma_4_sql.type_hints import TrainingConfig
 
+try:
+    import keras
+except ImportError:
+    keras = None
+
 
 def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test pretraining a model."""
@@ -23,11 +28,15 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="pytorch"))
 
-    res = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
-    if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["action"] == "pretrain":
-        raise AssertionError
+    if keras is not None:
+        res = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
+        if not res["backend"] == "keras":
+            raise AssertionError
+        if not res["action"] == "pretrain":
+            raise AssertionError
+    else:
+        with pytest.raises(DependencyMissingError):
+            pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
 
     import gemma_4_sql.backends.maxtext.train as mx_train
 
@@ -35,8 +44,8 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="maxtext"))
 
-    with pytest.raises(ValueError):
-        pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="mlx"))
+    res_mlx = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="mlx"))
+    assert res_mlx["backend"] == "mlx"
 
 
 def test_pretrain_model_error() -> None:
@@ -49,6 +58,7 @@ import pytest
 
 
 def test_chat_no_sql(monkeypatch):
+    """Test chat no sql functionality."""
     import builtins
 
     from gemma_4_sql.sdk import chat
@@ -56,11 +66,15 @@ def test_chat_no_sql(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "gemma_4_sql.sdk.registry":
 
             class MockReg:
+                """Test class for MockReg."""
+
                 @staticmethod
                 def get_backend(b):
+                    """Execute get backend helper."""
                     return type("Backend", (), {"generate_sql": lambda *a, **k: {}})()
 
             return MockReg
@@ -76,6 +90,7 @@ def test_chat_no_sql(monkeypatch):
 def test_etl_defaults():
     # We mock _route_backend to just return config
 
+    """Test etl defaults functionality."""
     from gemma_4_sql.sdk import etl
 
     orig_route = etl._route_backend
@@ -95,13 +110,18 @@ def test_etl_defaults():
 
 
 def test_evaluation_max_batches(monkeypatch):
+    """Test evaluation max batches functionality."""
     import gemma_4_sql.sdk.evaluation as ev
 
     class MockBackend:
+        """Test class for MockBackend."""
+
         def build_dataloader(self, c):
+            """Execute build dataloader helper."""
             return {"loader": [{"inputs": [1], "targets": [2]}] * (ev.MAX_BATCHES + 2)}
 
         def generate_sql(self, *a, **k):
+            """Execute generate sql helper."""
             return {"sql": "A", "confidence_score": 0.5}
 
     import builtins
@@ -109,11 +129,15 @@ def test_evaluation_max_batches(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "gemma_4_sql.sdk.registry":
 
             class MockReg:
+                """Test class for MockReg."""
+
                 @staticmethod
                 def get_backend(b):
+                    """Execute get backend helper."""
                     return MockBackend()
 
             return MockReg
@@ -130,15 +154,20 @@ def test_evaluation_max_batches(monkeypatch):
 
 
 def test_models_defaults(monkeypatch):
+    """Test models defaults functionality."""
     import gemma_4_sql.sdk.models as mod
 
     def mock_route(c):
+        """Execute mock route helper."""
         return c
 
     monkeypatch.setattr(mod, "_route_training", mock_route)
 
     class FakeTC:
+        """Test class for FakeTC."""
+
         def __init__(self, **kwargs):
+            """Initialize __init__."""
             self.backend = kwargs.get("backend", "jax")
             self.action = None
 
@@ -181,3 +210,25 @@ def test_train_from_scratch_unknown() -> object:
     """Initialize function test_train_from_scratch_unknown."""
     with pytest.raises(ValueError, match=r".*"):
         train_from_scratch(TrainingConfig(action="pretrain", model_name="mock", dataset="mock", backend="unknown"))
+
+
+def test_training_config_immutability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that pretrain_model, sft_model, train_from_scratch, posttrain_model do not mutate input config."""
+    from gemma_4_sql.sdk.models import posttrain_model, sft_model
+
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    pt_train = get_backend("pytorch")
+    monkeypatch.setattr(pt_train, "train_model", lambda _config, **_kw: {"status": "ok"})
+
+    orig_cfg = TrainingConfig(action="custom_action", model_name="mock", dataset="mock", backend="pytorch")
+    pretrain_model(orig_cfg)
+    assert orig_cfg.action == "custom_action"
+
+    sft_model(orig_cfg)
+    assert orig_cfg.action == "custom_action"
+
+    train_from_scratch(orig_cfg)
+    assert orig_cfg.action == "custom_action"
+
+    posttrain_model(orig_cfg)
+    assert orig_cfg.action == "custom_action"

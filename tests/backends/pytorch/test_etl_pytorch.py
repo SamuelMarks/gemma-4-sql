@@ -124,14 +124,17 @@ def test_duckdb_execution(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_pytorch_etl_exception(monkeypatch):
+    """Test pytorch etl exception functionality."""
     import gemma_4_sql.backends.pytorch.etl as pt_etl
 
     def mock_tok(x):
+        """Execute mock tok helper."""
         raise ValueError("err")
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.SQLTokenizer", type("Tok", (), {"encode": lambda self, x: mock_tok(x), "__init__": lambda self, **k: None}))
 
     def fail_load(*a, **k):
+        """Execute fail load helper."""
         raise ValueError("err")
 
     monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", fail_load)
@@ -143,9 +146,11 @@ def test_pytorch_etl_exception(monkeypatch):
 
 
 def test_pytorch_etl_exception2(monkeypatch):
+    """Test pytorch etl exception2 functionality."""
     import gemma_4_sql.backends.pytorch.etl as pt_etl
 
     def mock_tok(x):
+        """Execute mock tok helper."""
         raise ValueError("err")
 
     import sys
@@ -156,6 +161,7 @@ def test_pytorch_etl_exception2(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "gemma_4_sql.tokenization":
             return sys.modules["gemma_4_sql.tokenization"]
         return orig_import(name, *a, **k)
@@ -171,6 +177,7 @@ def test_pytorch_etl_exception2(monkeypatch):
 
 
 def test_pytorch_etl_except(monkeypatch):
+    """Test pytorch etl except functionality."""
     import gemma_4_sql.backends.pytorch.etl as pt_etl
 
     monkeypatch.setattr(pt_etl, "SQLTokenizer", type("Tok", (), {"encode": lambda self, x: 1, "__init__": lambda self, **k: None}))
@@ -183,6 +190,7 @@ def test_pytorch_etl_except(monkeypatch):
 
 
 def test_pytorch_etl_return_none(monkeypatch):
+    """Test pytorch etl return none functionality."""
     import gemma_4_sql.backends.pytorch.etl as pt_etl
 
     monkeypatch.setattr(pt_etl, "SQLTokenizer", type("Tok", (), {"encode": lambda self, x: 1, "__init__": lambda self, **k: None}))
@@ -195,6 +203,7 @@ def test_pytorch_etl_return_none(monkeypatch):
 
 
 def test_pytorch_etl_except2(monkeypatch):
+    """Test pytorch etl except2 functionality."""
     import gemma_4_sql.backends.pytorch.etl as pt_etl
 
     monkeypatch.setattr(pt_etl, "SQLTokenizer", type("Tok", (), {"encode": lambda self, x: 1, "__init__": lambda self, **k: None}))
@@ -207,9 +216,11 @@ def test_pytorch_etl_except2(monkeypatch):
 
 
 def test_pytorch_etl_sampler_err(monkeypatch):
+    """Test pytorch etl sampler err functionality."""
     import gemma_4_sql.backends.pytorch.etl as pt_etl
 
     def mock_dist(*a, **k):
+        """Execute mock dist helper."""
         raise ValueError("err")
 
     import sys
@@ -220,6 +231,7 @@ def test_pytorch_etl_sampler_err(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "torch.utils.data.distributed":
             return sys.modules["torch.utils.data.distributed"]
         return orig_import(name, *a, **k)

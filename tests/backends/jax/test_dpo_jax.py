@@ -140,6 +140,15 @@ def test_get_train_step_fn(monkeypatch: pytest.MonkeyPatch) -> None:
     res = fn(MockModel(), MockModel(), MockOpt(), batch)
     assert res is not None
 
+    # Test without nnx.value_and_grad and without optimizer
+    class MockEmptyNnx:
+        """Mock nnx with neither value_and_grad nor jit."""
+
+    monkeypatch.setattr(jax_dpo, "nnx", MockEmptyNnx())
+    fn_empty = jax_dpo._get_train_step_fn(0.1)
+    res_empty = fn_empty(MockModel(), MockModel(), None, batch)
+    assert res_empty == pytest.approx(0.0)
+
 
 def test_run_training_epochs() -> None:
     """Test run training epochs."""
@@ -161,6 +170,8 @@ def test_run_dpo_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(jax_dpo, "jax", None)
+    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing for DPO\."):
+        jax_dpo._execute_dpo("m", "d", 0.1, 1, 1e-5)
     with pytest.raises(DependencyMissingError, match=r"JAX DPO dependencies are missing\."):
         jax_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
 

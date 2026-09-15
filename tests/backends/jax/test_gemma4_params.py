@@ -1,3 +1,5 @@
+"""Tests for test gemma4 params module."""
+
 import jax.numpy as jnp
 import pytest
 
@@ -5,12 +7,14 @@ from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights
 
 
 def test_assign_weights_key_error():
+    """Test assign weights key error functionality."""
     state = {"a": jnp.zeros((1,))}
     with pytest.raises(KeyError):
         assign_weights(["b"], jnp.ones((1,)), state, "st_key", None)
 
 
 def test_assign_weights_permute():
+    """Test assign weights permute functionality."""
     state = {"a": jnp.zeros((2, 1))}
     assign_weights(["a"], jnp.ones((1, 2)), state, "st_key", transform=((1, 0), None, False))
     assert state["a"].shape == (2, 1)
@@ -131,11 +135,17 @@ from gemma_4_sql.backends.jax.gemma4.utils_params import _load_weights_from_safe
 
 
 def test_load_weights_from_safetensors_file_key_error(monkeypatch):
+    """Test load weights from safetensors file key error functionality."""
+
     class MockFile:
+        """Test class for MockFile."""
+
         def __iter__(self):
+            """Initialize __iter__."""
             yield "model.layer.weight"
 
         def get_tensor(self, key):
+            """Execute get tensor helper."""
             return jnp.ones((1,))
 
     mock_safe_open = MagicMock()
@@ -147,14 +157,21 @@ def test_load_weights_from_safetensors_file_key_error(monkeypatch):
 
 
 def test_process_safetensors_file_jax_key_not_none(monkeypatch):
+    """Test process safetensors file jax key not none functionality."""
+
     class MockFile:
+        """Test class for MockFile."""
+
         def __init__(self):
+            """Initialize __init__."""
             self.keys_list = ["model.layers.0.mlp.routed_experts.w1.weight"]
 
         def keys(self):
+            """Execute keys helper."""
             return self.keys_list
 
         def get_tensor(self, key):
+            """Execute get tensor helper."""
             return jnp.ones((1,))
 
     mock_safe_open = MagicMock()
@@ -169,7 +186,11 @@ def test_process_safetensors_file_jax_key_not_none(monkeypatch):
 
 
 def test_create_gemma4_vision_pos_ids():
+    """Test create gemma4 vision pos ids functionality."""
+
     class MockConfig:
+        """Test class for MockConfig."""
+
         vision_config = True
         audio_config = False
         hidden_size = 64

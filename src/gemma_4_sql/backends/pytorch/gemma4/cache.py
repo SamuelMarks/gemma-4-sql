@@ -37,7 +37,11 @@ class DynamicCache(Cache):
         self.value_cache: list[torch.Tensor] = []
 
     def update(self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Update the cache with new key and value states."""
+        """Update the cache with new key and value states.
+
+        Returns:
+            Tuple of updated key states and value states.
+        """
         if len(self.key_cache) <= layer_idx:
             self.key_cache.append(key_states)
             self.value_cache.append(value_states)
@@ -48,13 +52,21 @@ class DynamicCache(Cache):
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
     def get_seq_length(self, layer_idx: int = 0) -> int:
-        """Get the sequence length of the specified layer."""
+        """Get the sequence length of the specified layer.
+
+        Returns:
+            Sequence length integer.
+        """
         if len(self.key_cache) <= layer_idx:
             return 0
         return self.key_cache[layer_idx].shape[2]
 
     def get_max_length(self) -> int | None:
-        """Return the maximum length (None for dynamic cache)."""
+        """Return the maximum length (None for dynamic cache).
+
+        Returns:
+            Maximum sequence length or None.
+        """
         return None
 
     def reorder_cache(self, beam_idx: torch.Tensor) -> None:
@@ -96,7 +108,11 @@ class StaticCache(Cache):
         self.seen_tokens = 0
 
     def update(self, key_states: torch.Tensor, value_states: torch.Tensor, layer_idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Update the cache with new key and value states."""
+        """Update the cache with new key and value states.
+
+        Returns:
+            Tuple of key states and value states up to current length.
+        """
         batch_size, _, seq_len, _ = key_states.shape
 
         self.key_cache[layer_idx][:batch_size, :, self.seen_tokens : self.seen_tokens + seq_len, :] = key_states
@@ -105,11 +121,19 @@ class StaticCache(Cache):
         return self.key_cache[layer_idx][:batch_size, :, : self.seen_tokens + seq_len, :], self.value_cache[layer_idx][:batch_size, :, : self.seen_tokens + seq_len, :]
 
     def get_seq_length(self, layer_idx: int = 0) -> int:
-        """Get the current sequence length (seen tokens)."""
+        """Get the current sequence length (seen tokens).
+
+        Returns:
+            Current sequence length integer.
+        """
         return self.seen_tokens
 
     def get_max_length(self) -> int | None:
-        """Get the maximum sequence length the static cache can hold."""
+        """Get the maximum sequence length the static cache can hold.
+
+        Returns:
+            Maximum sequence length integer.
+        """
         return self.max_cache_len
 
     def reorder_cache(self, beam_idx: torch.Tensor) -> None:

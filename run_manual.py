@@ -1,3 +1,5 @@
+"""Manual test run script to collect coverage metrics across test suites."""
+
 import re
 import subprocess
 

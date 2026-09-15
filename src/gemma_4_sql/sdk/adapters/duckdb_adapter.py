@@ -32,7 +32,14 @@ class DuckDBAdapter(DatabaseAdapter):
 
         Returns:
             The execution result.
+
+        Raises:
+            ImportError: If duckdb is not installed.
         """
+        if "existing_conn" in self.db_kwargs and self.db_kwargs["existing_conn"] is not None:
+            return self.db_kwargs["existing_conn"]
+        if "conn" in self.db_kwargs and self.db_kwargs["conn"] is not None:
+            return self.db_kwargs["conn"]
         if duckdb is None:
             msg = "duckdb is required. Install with `pip install duckdb`."
             raise ImportError(msg)
@@ -51,8 +58,20 @@ class DuckDBAdapter(DatabaseAdapter):
         return self.conn
 
     def setup_schema(self, ddl: str) -> None:
-        """Execute DDL to set up schema."""
+        """Execute DDL to set up schema.
+
+        Args:
+            ddl: Schema DDL string to execute.
+        """
+        if "existing_conn" in self.db_kwargs or "conn" in self.db_kwargs:
+            return
         cast(Any, self.conn).execute(ddl)
+
+    def close(self) -> None:
+        """Close connection if not an externally provided connection."""
+        if "existing_conn" in self.db_kwargs or "conn" in self.db_kwargs:
+            return
+        super().close()
 
     async def execute_with_feedback_async(
         self,
@@ -69,7 +88,11 @@ class DuckDBAdapter(DatabaseAdapter):
             loop = asyncio.get_running_loop()
 
             def _exec() -> list[tuple[JSONPrimitive, ...]]:
-                """Execute query on thread-safe cursor."""
+                """Execute query on thread-safe cursor.
+
+                Returns:
+                    Query result rows.
+                """
                 conn_obj = cast(Any, self.conn)
                 cur = conn_obj.cursor() if hasattr(conn_obj, "cursor") and not hasattr(conn_obj, "_mock_return_value") else conn_obj
                 return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
@@ -95,7 +118,11 @@ class DuckDBAdapter(DatabaseAdapter):
             loop = asyncio.get_running_loop()
 
             def _exec() -> list[tuple[JSONPrimitive, ...]]:
-                """Execute query on thread-safe cursor."""
+                """Execute query on thread-safe cursor.
+
+                Returns:
+                    Query result rows.
+                """
                 conn_obj = cast(Any, self.conn)
                 cur = conn_obj.cursor() if hasattr(conn_obj, "cursor") and not hasattr(conn_obj, "_mock_return_value") else conn_obj
                 return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())

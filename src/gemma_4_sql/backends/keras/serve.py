@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
@@ -11,11 +11,16 @@ from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
-keras = None
-tf = None
-with catch_optional_imports():
-    import keras
-    import tensorflow as tf  # pragma: no cover
+
+try:
+    import keras as _keras
+    import tensorflow as _tf
+
+    keras: Any = _keras
+    tf: Any = _tf
+except (ImportError, AttributeError):
+    keras = None
+    tf = None
 FastAPI = None
 Request = None
 JSONResponse = None
@@ -50,14 +55,17 @@ def create_app(model_name: str, *, test_mode: bool = False) -> object:
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
     """Serve a model using Keras continuous batching.
 
-        Args:
-                    **kwargs: Underlying server and backend-specific configuration options.
-    model_name: The name of the target model.
-            port: The network port to listen on.
-            max_batch_size: The maximum allowed batch size.
+    Args:
+        model_name: The name of the target model.
+        port: The network port to listen on.
+        max_batch_size: The maximum allowed batch size.
+        **kwargs: Underlying server and backend-specific configuration options.
 
-        Returns:
-            A dictionary containing the results.
+    Returns:
+        A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If Keras dependencies are missing for serve.
     """
     if tf is None or keras is None:
         from gemma_4_sql.exceptions import DependencyMissingError

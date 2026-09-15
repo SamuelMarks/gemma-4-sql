@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
-nn = None
-with catch_optional_imports():
-    from mlx import nn
-load = None
-with catch_optional_imports():
-    from mlx_lm import load
+
+try:
+    from mlx import nn as _nn
+    from mlx_lm import load as _load
+
+    nn: Any = _nn
+    load: Any = _load
+except (ImportError, AttributeError):
+    nn = None
+    load = None
 
 
 def apply_lora(
@@ -37,6 +39,9 @@ def apply_lora(
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If MLX dependencies are missing.
     """
     status = "completed"
     if nn is None or load is None:

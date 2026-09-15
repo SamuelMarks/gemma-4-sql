@@ -157,6 +157,10 @@ def test_export_jax_real_with_flax(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
     if res["status"] != "exported_with_orbax":
         raise AssertionError
 
+    # Test model1 branch
+    res_m1 = export_jax.export_model("model1", path)
+    assert res_m1["status"] == "exported_with_orbax"
+
 
 def test_export_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""

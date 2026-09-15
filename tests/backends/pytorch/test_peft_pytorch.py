@@ -53,6 +53,9 @@ class MockAutoModelForCausalLM:
             def print_trainable_parameters(self) -> None:
                 """Execute function."""
 
+            def save_pretrained(self, path: str) -> None:
+                """Save pretrained adapter."""
+
         return Model()
 
 
@@ -84,11 +87,14 @@ def test_apply_lora_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt_peft, "LoraConfig", MockLoraConfig)
     monkeypatch.setattr(pt_peft, "get_peft_model", mock_get_peft_model)
     monkeypatch.setattr(pt_peft, "AutoModelForCausalLM", MockAutoModelForCausalLM)
-    res = apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
+    res = apply_lora("test-model", ["q_proj"], 8, 16, 0.05, output_dir="/tmp/peft_adapter")
     if not res["status"] == "completed":
         raise AssertionError
     if not res["backend"] == "pytorch":
         raise AssertionError
+
+    res_no_out = apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
+    assert res_no_out["status"] == "completed"
 
 
 class ErrorAutoModel:

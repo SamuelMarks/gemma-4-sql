@@ -3,25 +3,49 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.keras.etl import build_dataloader
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
-keras = None
-tf = None
-with catch_optional_imports():
-    import keras
-    import tensorflow as tf  # pragma: no cover
+
+try:
+    import keras as _keras
+    import tensorflow as _tf
+
+    keras: Any = _keras
+    tf: Any = _tf
+except (ImportError, AttributeError):
+    keras = None
+    tf = None
 
 
 def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool, batch_size: int = 2) -> tuple[str, float]:
-    """Execute the core training loop."""
-    model: keras.Model | None = None
+    """Execute the core training loop.
+
+    Args:
+        model_name: Target model name.
+        dataset: Dataset identifier.
+        epochs: Number of training epochs.
+        test_mode: Whether to run in test mode.
+        batch_size: Training batch size.
+
+    Returns:
+        A tuple of (status, final_loss).
+
+    Raises:
+        DependencyMissingError: If Keras or TensorFlow dependencies are missing.
+        ValueError: If model loading or dataloader fails.
+    """
+    if keras is None or tf is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Keras dependencies are missing.")
+
+    model: Any = None
     strategy = tf.distribute.MirroredStrategy()
     with strategy.scope():
         try:
@@ -43,34 +67,24 @@ def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool, 
 
 
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
-    """Execute function.
-
+    """Train a Text-to-SQL model using Keras.
 
     Args:
+        config: Training configuration object.
         **kwargs: Extra runtime options such as 'test_mode' and 'distributed_strategy'.
-    Returns:
-        The execution result.
 
+    Returns:
+        A dictionary containing training status and final metrics.
+
+    Raises:
+        DependencyMissingError: If Keras training dependencies are missing.
     """
     action = getattr(config, "action", "sft")
     model_name = getattr(config, "model_name", "gemma-4")
     dataset = getattr(config, "dataset", "dummy")
     epochs = getattr(config, "epochs", 1)
     getattr(config, "learning_rate", 1e-05)
-    """Train a Text-to-SQL model using Keras.
 
-    Args:
-    ----
-        action: The training action ('pretrain', 'sft', 'posttrain').
-        model_name: The name or path of the model.
-        dataset: The dataset to use for training.
-        **kwargs: Additional parameters (e.g., 'test_mode', 'epochs').
-
-    Returns:
-    -------
-        A dictionary containing training status and final metrics.
-
-    """
     if keras is None or tf is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 

@@ -25,7 +25,15 @@ class AgentContext:
     min_confidence: float = 0.0
 
 
-async def _process_single_prompt(backend_name: str, backend_impl: BackendProtocol, model_name: str, prompt: str, engine: LiveDatabaseEngine, context: AgentContext) -> JSONDict:
+async def _process_single_prompt(
+    backend_name: str,
+    backend_impl: BackendProtocol,
+    model_name: str,
+    prompt: str,
+    engine: LiveDatabaseEngine,
+    context: AgentContext,
+    **gen_kwargs: JSONValue,
+) -> JSONDict:
     """Execute logic.
 
     Returns:
@@ -40,7 +48,13 @@ async def _process_single_prompt(backend_name: str, backend_impl: BackendProtoco
     history: list[JSONDict] = []
     while attempts < context.max_retries:
         attempts += 1
-        gen_res = backend_impl.generate_sql(model_name, current_prompt)
+        b_width = int(str(gen_kwargs.get("beam_width", 3)))
+        m_len = int(str(gen_kwargs.get("max_length", 50)))
+        other_kwargs = {k: v for k, v in gen_kwargs.items() if k not in ("beam_width", "max_length")}
+        try:
+            gen_res = backend_impl.generate_sql(model_name, current_prompt, beam_width=b_width, max_length=m_len, **other_kwargs)
+        except TypeError:
+            gen_res = backend_impl.generate_sql(model_name, current_prompt)
         sql = str(gen_res.get("sql", ""))
         confidence_score = float(str(gen_res.get("confidence_score", 1.0)))
         if context.min_confidence and confidence_score < context.min_confidence:
@@ -87,6 +101,7 @@ def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "j
     if context is None:
         context = AgentContext()
     db_kwargs = kwargs.get("db_kwargs")
+    gen_kwargs = {k: v for k, v in kwargs.items() if k != "db_kwargs"}
     engine = LiveDatabaseEngine(db_path=context.db_path, ddl=context.ddl, db_type=context.db_type, db_kwargs=db_kwargs)
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend(backend)
@@ -99,11 +114,22 @@ def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "j
             object: The resulting output from the operation.
 
         """
-        tasks = [_process_single_prompt(backend, backend_impl, model_name, p, engine, context) for p in prompts]
+        tasks = [_process_single_prompt(backend, backend_impl, model_name, p, engine, context, **gen_kwargs) for p in prompts]
         return await asyncio.gather(*tasks)
 
     try:
-        results = asyncio.run(_run_all())
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        if running_loop is not None and running_loop.is_running():
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                results = executor.submit(asyncio.run, _run_all()).result()
+        else:
+            results = asyncio.run(_run_all())
     finally:
         engine.close()
     return results if isinstance(prompt, list) else results[0]

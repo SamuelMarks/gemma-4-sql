@@ -255,10 +255,17 @@ def test_run_dpo_real_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
     class MockKerasLM:
+        """Test class for MockKerasLM."""
+
         @classmethod
         def from_preset(cls, preset):
+            """Execute from preset helper."""
+
             class _Model:
+                """Test class for  Model."""
+
                 def __call__(self, *a, **k):
+                    """Initialize __call__."""
                     return 0
 
             return _Model()
@@ -302,8 +309,11 @@ def test_run_dpo_invalid_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(keras_dpo, "build_dataloader", lambda *a, **k: {"loader": None})
 
     class MockKerasLM:
+        """Test class for MockKerasLM."""
+
         @classmethod
         def from_preset(cls, preset):
+            """Execute from preset helper."""
             return lambda x: 0
 
     import sys
@@ -315,6 +325,7 @@ def test_run_dpo_invalid_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
     orig_import = builtins.__import__
 
     def mock_import(name: str, *args: object, **kwargs: object) -> object:
+        """Execute mock import helper."""
         if name == "keras_nlp.models" and kwargs.get("fromlist") and "GemmaCausalLM" in kwargs["fromlist"]:
             return sys.modules["keras_nlp.models"]
         return orig_import(name, *args, **kwargs)
@@ -327,3 +338,31 @@ def test_run_dpo_invalid_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
     res = keras_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
     assert "failed" in res["status"]
     assert "Invalid dataloader" in res["status"]
+
+
+def test_execute_dpo_model_load_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _execute_dpo raises ValueError when model fails to load."""
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(keras_dpo, "keras", None)
+    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
+        keras_dpo._execute_dpo("model", "dataset", 0.1, 1, 1e-4)
+
+    monkeypatch.setattr(keras_dpo, "keras", object())
+    monkeypatch.setattr(keras_dpo, "tf", MockTf())
+
+    class FailingKerasLM:
+        """Test class for FailingKerasLM."""
+
+        @classmethod
+        def from_preset(cls, _preset):
+            """Execute from preset helper."""
+            raise ValueError("model not found")
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
+    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": FailingKerasLM}))
+
+    with pytest.raises(ValueError, match="Failed to load Keras model"):
+        keras_dpo._execute_dpo("bad_model", "dataset", 0.1, 1, 1e-4)

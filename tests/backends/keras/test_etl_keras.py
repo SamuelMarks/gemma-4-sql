@@ -223,3 +223,17 @@ def test_etl_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     importlib.reload(mdl)
     monkeypatch.undo()
     importlib.reload(mdl)
+
+
+def test_keras_etl_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test missing datasets and grain dependencies in Keras ETL."""
+    import gemma_4_sql.backends.keras.etl as k_etl
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(k_etl, "datasets", None)
+    with pytest.raises(DependencyMissingError, match="Datasets dependency is missing"):
+        k_etl._load_hf_or_duckdb("ds", "train", None, None)
+
+    monkeypatch.setattr(k_etl, "grain", None)
+    with pytest.raises(DependencyMissingError, match="Grain dependency is missing"):
+        k_etl._get_sampler(10, False)

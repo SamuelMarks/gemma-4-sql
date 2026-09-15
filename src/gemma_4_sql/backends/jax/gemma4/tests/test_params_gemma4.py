@@ -13,23 +13,15 @@ from gemma_4_sql.backends.jax.gemma4.params import _get_key_and_transform_mappin
 from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights_from_eval_shape, map_to_jax_key, stoi
 
 
-def test_stoi() -> object:
-    """Test the stoi behavior.
-
-    Returns:
-        The execution result.
-    """
+def test_stoi() -> None:
+    """Test the stoi behavior."""
     expected_val = 123
     assert stoi("123") == expected_val
     assert stoi("abc") == "abc"
 
 
-def test_map_to_jax_key() -> object:
-    """Test the map_to_jax_key behavior.
-
-    Returns:
-        The execution result.
-    """
+def test_map_to_jax_key() -> None:
+    """Test the map_to_jax_key behavior."""
     mapping = _get_key_and_transform_mapping()
     (jax_key, _transform) = map_to_jax_key(mapping, "model.embed_tokens.weight")
     assert jax_key == "model\\.embed_tokens\\.embedding"

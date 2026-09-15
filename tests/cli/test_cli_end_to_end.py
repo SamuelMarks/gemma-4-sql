@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 import pytest
 
@@ -110,8 +111,8 @@ def test_cli_evaluate_stdout(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Cap
     cli(["evaluate", "--model", "dummy_model", "--dataset", "spider", "--backend", "jax"])
     captured = capsys.readouterr()
     parsed = json.loads(captured.out)
-    assert parsed["exact_match"] == 0.85
-    assert parsed["execution_accuracy"] == 0.80
+    assert math.isclose(parsed["exact_match"], 0.85)
+    assert math.isclose(parsed["execution_accuracy"], 0.80)
 
 
 def test_cli_tokenize_encode_and_decode_stdout(capsys: pytest.CaptureFixture[str]) -> None:
@@ -167,7 +168,7 @@ def test_cli_benchmark_stdout(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
     cli(["benchmark", "--model", "dummy_model", "--backend", "jax"])
     captured = capsys.readouterr()
     parsed = json.loads(captured.out)
-    assert parsed["tokens_per_second"] == 120.5
+    assert math.isclose(parsed["tokens_per_second"], 120.5)
     assert parsed["status"] == "completed"
 
 
@@ -191,3 +192,15 @@ def test_cli_exit_code_invalid_subcommand() -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli(["nonexistent_action"])
     assert exc_info.value.code != 0
+
+
+def test_cli_exit_code_database_failure() -> None:
+    """Test CLI returns exit code 3 on database execution failure."""
+    code = cli(["execute", "--query", "SELECT * FROM nonexistent_table;", "--db-path", ":memory:"])
+    assert code == 3
+
+
+def test_cli_exit_code_success() -> None:
+    """Test CLI returns exit code 0 on successful execution."""
+    code = cli(["execute", "--query", "SELECT 42;", "--db-path", ":memory:"])
+    assert code == 0

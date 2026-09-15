@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import jax
 import jax.numpy as jnp
@@ -49,7 +49,7 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
     return out.reshape((out.shape[0], out.shape[1], -1))
 
 
-def _prepare_qkv_for_attention(qkv: tuple[jax.Array, jax.Array, jax.Array], positions: Array, rope: object, cache: LayerCache | None) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+def _prepare_qkv_for_attention(qkv: tuple[jax.Array, jax.Array, jax.Array], positions: Array, rope: Any, cache: LayerCache | None) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """Prepare QKV and return masks.
 
     Args:

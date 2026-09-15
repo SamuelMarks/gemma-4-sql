@@ -9,6 +9,12 @@ def translate_jax_to_pytorch(jax_params: dict[str, Any]) -> dict[str, torch.Tens
     """Translate JAX parameters to PyTorch state dict.
 
     This function handles the necessary transposition for Dense/Linear layers.
+
+    Args:
+        jax_params: Dictionary of JAX parameters.
+
+    Returns:
+        PyTorch state dictionary with mapped keys and weights.
     """
     pytorch_state_dict: dict[str, torch.Tensor] = {}
 

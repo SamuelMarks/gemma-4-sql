@@ -14,12 +14,14 @@ from .layers import Gemma4MLP, Gemma4RMSNorm, _make_linear
 from .moe import Gemma4MoE
 
 if TYPE_CHECKING:
+    from .cache import LayerCache
     from .config import AttentionType, ModelConfig
-    from .modeling import LayerCache
 
 
 class Gemma4DecoderLayer(nnx.Module):
     """A single decoder layer combining Attention, MoE, and Normalization."""
+
+    mlp: Gemma4MLP | Gemma4MoE
 
     def __init__(self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__.

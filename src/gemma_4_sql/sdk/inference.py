@@ -8,21 +8,28 @@ if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 
 
-def generate(model_name: str, prompt: str, backend: str = "jax", beam_width: int = 3, max_length: int = 50, **kwargs: object) -> JSONDict:
+def generate(
+    model_name: str,
+    prompt: str,
+    backend: str = "jax",
+    beam_width: int = 3,
+    max_length: int = 50,
+    **kwargs: object,
+) -> JSONDict:
     """Generate a SQL query from a natural language prompt using Beam Search.
 
-        Args:
-                    **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
-    model_name: The name of the target model.
-            prompt: The input text prompt.
-            backend: The backend framework to use.
-            beam_width: The number of beams for beam search.
-            max_length: The maximum length of the sequence.
+    Args:
+        model_name: The name of the target model.
+        prompt: The input text prompt.
+        backend: The backend framework to use.
+        beam_width: The number of beams for beam search.
+        max_length: The maximum length of the sequence.
+        **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
 
-        Returns:
-            A dictionary containing the results.
+    Returns:
+        A dictionary containing the generated SQL and generation metadata.
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
-    result = get_backend(backend).generate_sql(model_name, prompt, beam_width, max_length)
-    kwargs.get("show_confidence") and "confidence_score" in result
+    backend_impl = get_backend(backend)
+    result = backend_impl.generate_sql(model_name, prompt, beam_width, max_length, **kwargs)
     return result

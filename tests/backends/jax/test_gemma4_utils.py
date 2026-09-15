@@ -1,6 +1,7 @@
 """Provide module docstring."""
 
 import contextlib
+from typing import Any
 
 import pytest
 
@@ -142,6 +143,34 @@ def test_create_model_from_safe_tensors_missing_dir(monkeypatch: pytest.MonkeyPa
     model = create_model_from_safe_tensors("nonexistent_dir", MockModelCls, "config", {})
     if not model.cfg == "config":
         raise AssertionError
+
+
+def test_assign_weights_int_to_str_keys() -> None:
+    """Test integer to string key conversion in assign_weights and assign_weights_from_eval_shape."""
+    import jax.numpy as jnp
+
+    from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, assign_weights_from_eval_shape
+
+    # str key in state_dict, int passed in keys
+    d_str: dict[str, Any] = {"0": {"val": jnp.zeros((2, 2))}}
+    assign_weights([0, "val"], jnp.zeros((2, 2)), d_str, "k", None)
+    assert "0" in d_str
+
+    # int key in state_dict, str passed in keys
+    d_int: dict[int, Any] = {0: {"val": jnp.zeros((2, 2))}}
+    assign_weights(["0", "val"], jnp.zeros((2, 2)), d_int, "k", None)
+    assert 0 in d_int
+
+    class Dummy:
+        """Test class for Dummy."""
+
+        shape = (2, 2)
+        dtype = None
+        sharding = None
+
+    d_str2: dict[str, Any] = {"0": {"val": Dummy()}}
+    assign_weights_from_eval_shape([0, "val"], jnp.zeros((2, 2)), d_str2, "k", None)
+    assert "0" in d_str2
 
 
 def test_create_model_from_safe_tensors_no_safetensors(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:

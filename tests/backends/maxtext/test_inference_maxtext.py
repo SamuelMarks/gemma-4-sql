@@ -398,3 +398,55 @@ def test_inference_error(monkeypatch: pytest.MonkeyPatch) -> None:
     res = m_inf.generate_sql("m", "prompt", test_mode=True, use_jit=False)
     if "failed" not in res["status"]:
         raise AssertionError
+
+
+def test_beam_search_step_logits_shapes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _beam_search_step with 1D, 2D, and 3D logits."""
+    import gemma_4_sql.backends.maxtext.inference as m_inf
+
+    monkeypatch.setattr(m_inf, "jax", MockJAX())
+    monkeypatch.setattr(m_inf, "jnp", MockJNP())
+
+    # 3D logits: shape (1, 2, 5)
+    class Mock3DLogits(MockArray):
+        """Test class for Mock3DLogits."""
+
+        @property
+        def shape(self):
+            """Execute shape helper."""
+            return (1, 2, 5)
+
+        def __getitem__(self, item):
+            """Initialize __getitem__."""
+            return MockArray([0] * 5)
+
+    res3d = m_inf._beam_search_step(MockArray([[1]]), 0.0, lambda s: Mock3DLogits([[[0] * 5] * 2]), 2)
+    assert len(res3d) == 2
+
+    # 2D logits: shape (3, 5)
+    class Mock2DLogits(MockArray):
+        """Test class for Mock2DLogits."""
+
+        @property
+        def shape(self):
+            """Execute shape helper."""
+            return (3, 5)
+
+        def __getitem__(self, item):
+            """Initialize __getitem__."""
+            return MockArray([0] * 5)
+
+    res2d = m_inf._beam_search_step(MockArray([[1]]), 0.0, lambda s: Mock2DLogits([[0] * 5] * 3), 2)
+    assert len(res2d) == 2
+
+    # 1D logits: shape (5,)
+    class Mock1DLogits(MockArray):
+        """Test class for Mock1DLogits."""
+
+        @property
+        def shape(self):
+            """Execute shape helper."""
+            return (5,)
+
+    res1d = m_inf._beam_search_step(MockArray([[1]]), 0.0, lambda s: Mock1DLogits([0] * 5), 2)
+    assert len(res1d) == 2

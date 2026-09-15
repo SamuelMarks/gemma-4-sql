@@ -3,24 +3,28 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.keras.etl import build_dataloader
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, TensorType, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, ETLConfig, TrainerState
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
-keras = None
-tf = None
-with catch_optional_imports():
-    import keras
-    import tensorflow as tf  # pragma: no cover
+
+try:
+    import keras as _keras
+    import tensorflow as _tf
+
+    keras: Any = _keras
+    tf: Any = _tf
+except (ImportError, AttributeError):
+    keras = None
+    tf = None
 
 
-def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[TensorType, TensorType, TensorType]:
+def dpo_loss(policy_chosen_logps: Any, policy_rejected_logps: Any, ref_chosen_logps: Any, ref_rejected_logps: Any, beta: float = 0.1) -> tuple[Any, Any, Any]:
     """Compute the DPO loss.
 
     Args:
@@ -38,7 +42,7 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
     return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, tf.math.log_sigmoid)
 
 
-def _compute_logps(model: keras.Model, inputs: keras.KerasTensor | tf.Tensor, labels: object) -> object:
+def _compute_logps(model: Any, inputs: Any, labels: Any) -> Any:
     """Compute exact log probabilities for DPO math using categorical cross-entropy approach.
 
     Returns:
@@ -65,7 +69,7 @@ def _compute_logps(model: keras.Model, inputs: keras.KerasTensor | tf.Tensor, la
     return tf.reduce_sum(selected_log_probs * mask, axis=-1)
 
 
-def _get_train_step_fn(policy_model: object, ref_model: object, optimizer: object, beta: float) -> object:
+def _get_train_step_fn(policy_model: Any, ref_model: Any, optimizer: Any, beta: float) -> object:
     """Return a tf.function compiled train step function.
 
     Returns:
@@ -125,7 +129,28 @@ def _run_training_epochs(state: TrainerState) -> float:
 
 
 def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
-    """Execute the core DPO loop."""
+    """Execute the core DPO loop.
+
+    Args:
+        model_name: Target model name.
+        dataset: Target dataset name.
+        beta: DPO beta temperature.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        batch_size: Training batch size.
+
+    Returns:
+        A tuple of (status, final_loss).
+
+    Raises:
+        DependencyMissingError: If Keras dependencies are missing.
+        ValueError: If model loading or dataloader fails.
+    """
+    if keras is None or tf is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Keras dependencies are missing.")
+
     try:
         gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
         policy_model = gemma_causal_lm_cls.from_preset(model_name)
@@ -146,26 +171,23 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
 
 
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
-    """Execute function.
-
+    """Run a DPO training loop for Keras.
 
     Args:
+        config: DPO configuration object.
         **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
-    Returns:
-        The execution result.
 
+    Returns:
+        A dictionary containing execution status and loss.
+
+    Raises:
+        DependencyMissingError: If Keras DPO dependencies are missing.
     """
     model_name = getattr(config, "model_name", "model")
     dataset = getattr(config, "dataset", "dataset")
     beta = getattr(config, "beta", 0.1)
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
-    """Run a DPO training loop for Keras.
-
-    Returns:
-        object: The resulting output from the operation.
-
-    """
     final_loss = 0.0
     status = "completed"
     if keras is None or tf is None:

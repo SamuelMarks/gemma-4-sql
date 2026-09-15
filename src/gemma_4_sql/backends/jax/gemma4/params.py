@@ -5,6 +5,7 @@ Provides parameter matching and checkpoint utilities.
 
 import logging
 import re
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -12,15 +13,13 @@ import safetensors.flax as safetensors
 from etils import epath
 from flax import nnx
 
-from gemma_4_sql.type_hints import JSONDict
-
 from . import modeling as model_lib
 from .utils_params import assign_weights_from_eval_shape, map_to_jax_key, stoi
 
 logger = logging.getLogger(__name__)
 
 
-def _get_text_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
+def _get_text_mappings(transform_cls: Any) -> dict[str, tuple[str, object]]:
     """Return text-specific safetensors mapping.
 
     Args:
@@ -72,7 +71,7 @@ def _get_text_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
     }
 
 
-def _get_audio_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
+def _get_audio_mappings(transform_cls: Any) -> dict[str, tuple[str, object]]:
     """Return audio-specific safetensors mapping.
 
     Args:
@@ -100,7 +99,7 @@ def _get_audio_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
     }
 
 
-def _get_vision_mappings(transform_cls: type) -> dict[str, tuple[str, object]]:
+def _get_vision_mappings(transform_cls: Any) -> dict[str, tuple[str, object]]:
     """Return vision-specific safetensors mapping.
 
     Args:
@@ -155,7 +154,7 @@ def _get_key_and_transform_mapping() -> object:
     return mapping
 
 
-def _process_moe_tensor(match: re.Match[str], sf: object, torch_key: str, expert_tensors: dict[int, dict[str, dict[int, jax.Array]]]) -> None:
+def _process_moe_tensor(match: re.Match[str], sf: Any, torch_key: str, expert_tensors: dict[int, dict[str, dict[int, jax.Array]]]) -> None:
     """Process an MoE expert tensor."""
     (l_idx_str, e_idx_str, proj_type) = match.groups()
     (l_idx, e_idx) = (int(l_idx_str), int(e_idx_str))
@@ -166,43 +165,31 @@ def _process_moe_tensor(match: re.Match[str], sf: object, torch_key: str, expert
     expert_tensors[l_idx][proj_type][e_idx] = jnp.array(sf.get_tensor(torch_key))
 
 
-def process_standard_tensor(sf: object, torch_key: str, jax_state: JSONDict, mapping: dict[str, tuple]) -> None:
+def process_standard_tensor(sf: Any, torch_key: str, jax_state: Any, mapping: dict[str, tuple[str, Any]]) -> None:
     """Process a standard tensor.
 
     Raises:
         AttributeError: If the operation encounters an unexpected AttributeError.
-
-    Raises:
         ImportError: If the operation encounters an unexpected ImportError.
-
-    Raises:
         OSError: If the operation encounters an unexpected OSError.
-
-    Raises:
-        RuntimeError: If the operation encounters an unexpected RuntimeError.
-
-    Raises:
-        AttributeError: If the operation encounters an unexpected AttributeError.
         RuntimeError: If the operation encounters an unexpected RuntimeError.
         TypeError: If the operation encounters an unexpected TypeError.
-        OSError: If the operation encounters an unexpected OSError.
-        ImportError: If the operation encounters an unexpected ImportError.
-
     """
     tensor = jnp.array(sf.get_tensor(torch_key))
     (jax_key, transform) = map_to_jax_key(mapping, torch_key)
     if jax_key is None:
         return
-    keys = [stoi(k) for k in jax_key.split("\\.")]
+    keys = [str(stoi(k)) for k in jax_key.split("\\.")]
     try:
-        assign_weights_from_eval_shape(keys, tensor, jax_state, torch_key, transform.value if hasattr(transform, "value") else transform)
+        transform_val = getattr(transform, "value", transform) if transform is not None else None
+        assign_weights_from_eval_shape(keys, tensor, jax_state, torch_key, transform_val)
     except (KeyError, ValueError) as e:
         logger.debug("Skipping assignment for %s: %s", torch_key, e)
     except (TypeError, AttributeError, ImportError, RuntimeError, OSError):
         raise
 
 
-def _stack_and_assign_expert_tensors(expert_tensors: dict[int, dict[str, dict[int, jax.Array]]], mapping: dict[str, tuple[str, object]], jax_state: JSONDict) -> None:
+def _stack_and_assign_expert_tensors(expert_tensors: dict[int, dict[str, dict[int, jax.Array]]], mapping: Any, jax_state: Any) -> None:
     """Stack expert tensors and assign them to the jax state."""
     for l_idx, projs in expert_tensors.items():
         for proj_type, e_dict in projs.items():
@@ -211,11 +198,11 @@ def _stack_and_assign_expert_tensors(expert_tensors: dict[int, dict[str, dict[in
             st_key = f"model.layers.{l_idx}.mlp.routed_experts.{proj_type}.weight"
             (jax_key, transform) = map_to_jax_key(mapping, st_key)
             if jax_key is not None:  # pragma: no cover
-                keys = [stoi(k) for k in jax_key.split("\\.")]
+                keys = [str(stoi(k)) for k in jax_key.split("\\.")]
                 assign_weights_from_eval_shape(keys, stacked, jax_state, st_key, transform)
 
 
-def _process_safetensors_file(f: object, moe_pattern: re.Pattern[str], expert_tensors: dict[int, dict[str, dict[int, jax.Array]]], jax_state: JSONDict, mapping: dict[str, tuple[str, object]]) -> None:
+def _process_safetensors_file(f: Any, moe_pattern: re.Pattern[str], expert_tensors: dict[int, dict[str, dict[int, jax.Array]]], jax_state: Any, mapping: Any) -> None:
     """Process a single safetensors file."""
     with safetensors.safe_open(f, framework="numpy") as sf:
         for torch_key in list(sf.keys()):
@@ -226,7 +213,7 @@ def _process_safetensors_file(f: object, moe_pattern: re.Pattern[str], expert_te
                 process_standard_tensor(sf, torch_key, jax_state, mapping)
 
 
-def _fix_jax_state_embeddings(jax_state: JSONDict, gemma4: object, cfg: model_lib.ModelConfig) -> None:
+def _fix_jax_state_embeddings(jax_state: Any, gemma4: Any, cfg: model_lib.ModelConfig) -> None:
     """Fix uninitialized state embeddings that evaluation shape might leave empty."""
     embed_scale = jax_state.get("model", {}).get("embed_scale")
     if embed_scale is not None and isinstance(embed_scale, getattr(jax, "ShapeDtypeStruct", type(None))):

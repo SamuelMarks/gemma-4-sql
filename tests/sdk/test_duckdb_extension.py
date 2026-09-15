@@ -82,3 +82,39 @@ def test_embed_in_duckdb_success() -> None:
             kwargs = mock_agent.call_args.kwargs
             if not kwargs["context"].ddl == "CREATE TABLE users (id INTEGER);":
                 raise AssertionError
+
+
+def test_duckdb_adapter_missing_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test DuckDBAdapter raises ImportError when duckdb is missing."""
+    import gemma_4_sql.sdk.adapters.duckdb_adapter as dda
+
+    monkeypatch.setattr(dda, "duckdb", None)
+    with pytest.raises(ImportError, match="duckdb is required"):
+        dda.DuckDBAdapter(":memory:", {})
+
+
+def test_duckdb_adapter_external_conn_close() -> None:
+    """Test DuckDBAdapter does not close an externally provided connection."""
+    import gemma_4_sql.sdk.adapters.duckdb_adapter as dda
+
+    mock_conn = MagicMock()
+    ad = dda.DuckDBAdapter(":memory:", {"existing_conn": mock_conn})
+    ad.setup_schema("CREATE TABLE t (x INT);")
+    ad.close()
+    mock_conn.close.assert_not_called()
+
+    ad2 = dda.DuckDBAdapter(":memory:", {"conn": mock_conn})
+    ad2.setup_schema("CREATE TABLE t (x INT);")
+    ad2.close()
+    mock_conn.close.assert_not_called()
+
+
+def test_duckdb_adapter_readonly_file(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test DuckDBAdapter with read_only flag on disk path."""
+    import gemma_4_sql.sdk.adapters.duckdb_adapter as dda
+
+    mock_duckdb = MagicMock()
+    monkeypatch.setattr(dda, "duckdb", mock_duckdb)
+    ad = dda.DuckDBAdapter(str(tmp_path) + "/test.db", {}, read_only=True)
+    ad.close()
+    mock_duckdb.connect.assert_called_once_with(str(tmp_path) + "/test.db", read_only=True)

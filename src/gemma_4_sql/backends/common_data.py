@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+import re
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 
@@ -25,9 +26,11 @@ def _create_hf_data_source(base_ds: type) -> type:
     """
 
     class HFDataSource(base_ds):
-        """Data source wrapping a Hugging Face dataset."""
+        """Adapter to turn Hugging Face Dataset into Grain RandomAccessDataSource."""
 
-        def __init__(self, hf_ds: object) -> None:
+        _ds: Any
+
+        def __init__(self, hf_ds: Any) -> None:
             """Execute function.
 
             Args:
@@ -68,13 +71,10 @@ def _create_base_format_transform(base_map: type) -> type:
         """Transforms data into numpy/JAX/TF compatible formats."""
 
         def __init__(self, tokenizer: SQLTokenizer) -> None:
-            """Execute function.
+            """Initialize transform with tokenizer.
 
             Args:
-                element: The element.
-
-            Returns:
-                A dictionary containing the results.
+                tokenizer: The SQL tokenizer instance.
             """
             self.tokenizer = tokenizer
 
@@ -114,17 +114,15 @@ def _load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
     """Load a dataset from a DuckDB database.
 
     Args:
-    ----
         db_path: Path to DuckDB database file.
         table: Table name to read from.
 
     Returns:
-    -------
         A list of dictionaries representing the dataset.
 
     Raises:
-    RuntimeError: If DuckDB is not available or query fails.
-
+        RuntimeError: If DuckDB is not available or query fails.
+        ValueError: If the table name is invalid or unsafe.
     """
     duckdb_module = LazyLoader("duckdb").get_module()
     if duckdb_module is None:
@@ -132,8 +130,11 @@ def _load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
         raise RuntimeError(msg)
 
     try:
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table):
+            msg = f"Invalid or unsafe table name: {table!r}"
+            raise ValueError(msg)
         conn = duckdb_module.connect(db_path, read_only=True)
-        results = conn.execute(f"SELECT * FROM {table}").fetchall()
+        results = conn.execute(f'SELECT * FROM "{table}"').fetchall()
         columns = [desc[0] for desc in getattr(conn, "description", [("col" + str(i),) for i in range(len(results[0]))] if results else [])]
         conn.close()
         return [dict(zip(columns, row)) for row in results]

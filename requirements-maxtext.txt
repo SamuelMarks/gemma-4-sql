@@ -1,1 +1,4 @@
 maxtext
+omegaconf
+einops
+orbax-checkpoint

@@ -63,7 +63,7 @@ def test_logging_keras_missing_attr(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.keras.logging as log_module
 
     class MockTf:
-        pass
+        """Test class for MockTf."""
 
     monkeypatch.setattr(log_module, "tf", MockTf)
     res = log_module.log_metrics({"a": 1}, 1)

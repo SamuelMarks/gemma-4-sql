@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -33,7 +33,7 @@ def generic_dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: Ten
     return (loss.mean() if hasattr(loss, "mean") else loss, chosen_rewards, rejected_rewards)
 
 
-def generic_run_training_epochs(state: TrainerState, step_fn: Callable[[object, object, object, JSONDict, float], object]) -> float:
+def generic_run_training_epochs(state: TrainerState, step_fn: Callable[[Any, Any, Any, JSONDict, float], Any]) -> float:
     """Run training epochs abstracting backend details.
 
     Args:
@@ -56,6 +56,7 @@ def generic_run_training_epochs(state: TrainerState, step_fn: Callable[[object, 
         epoch_loss = 0.0
         for batch in dataloader:
             loss = step_fn(policy_model, ref_model, optimizer, batch, beta)
-            epoch_loss += loss.item()
+            loss_val = float(loss.item() if hasattr(loss, "item") else loss)
+            epoch_loss += loss_val
         final_loss = epoch_loss / max(1, len(dataloader))
     return final_loss

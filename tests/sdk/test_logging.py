@@ -5,6 +5,11 @@ import pytest
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.logging import log_metrics
 
+try:
+    import tensorflow as tf
+except ImportError:
+    tf = None
+
 
 def test_log_metrics_jax() -> None:
     """Test logging with jax.
@@ -38,6 +43,7 @@ def test_log_metrics_pytorch() -> None:
         raise AssertionError
 
 
+@pytest.mark.skipif(tf is None, reason="TensorFlow is not installed")
 def test_log_metrics_keras() -> None:
     """Test logging with keras.
 

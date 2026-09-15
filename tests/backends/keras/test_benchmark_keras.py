@@ -28,7 +28,7 @@ class MockTf:
 
         @staticmethod
         def set_seed(*_args: object, **_kwargs: object) -> None:
-            pass
+            """Execute set seed helper."""
 
         @staticmethod
         def uniform(*_args: object, **_kwargs: object) -> object:
@@ -67,6 +67,7 @@ class MockTf:
 
         @staticmethod
         def list_physical_devices(_d: str) -> list:
+            """Execute list physical devices helper."""
             return [1]
 
         class MockExperimental:
@@ -84,21 +85,24 @@ class MockTf:
 
             @staticmethod
             def reset_memory_stats(_device: str) -> None:
-                pass
+                """Execute reset memory stats helper."""
 
         experimental = MockExperimental
 
     config = MockConfig
 
     class device:
+        """Test class for device."""
+
         def __init__(self, d):
+            """Initialize __init__."""
             self.d = d
 
         def __enter__(self):
-            pass
+            """Initialize __enter__."""
 
         def __exit__(self, *a):
-            pass
+            """Initialize __exit__."""
 
 
 def test_benchmark_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,9 +163,11 @@ class MockKeras:
     """Provide class docstring."""
 
     class MockKerasConfig:
+        """Test class for MockKerasConfig."""
+
         @staticmethod
         def set_floatx(dtype):
-            pass
+            """Execute set floatx helper."""
 
     config = MockKerasConfig
 
@@ -285,64 +291,87 @@ def test_benchmark_keras_real_mem(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_keras_coverage(monkeypatch):
+    """Test benchmark keras coverage functionality."""
     import gemma_4_sql.backends.keras.benchmark as bm
 
     class MockOut:
+        """Test class for MockOut."""
+
         def numpy(self):
-            pass
+            """Execute numpy helper."""
 
     class MockModel:
+        """Test class for MockModel."""
+
         def __call__(self, x):
+            """Initialize __call__."""
             return MockOut()
 
         def generate(self, *a, **k):
+            """Execute generate helper."""
             return MockOut()
 
     class MockTF:
+        """Test class for MockTF."""
+
         class random:
+            """Test class for random."""
+
             @staticmethod
             def set_seed(s):
-                pass
+                """Execute set seed helper."""
 
             @staticmethod
             def uniform(*a, **k):
+                """Execute uniform helper."""
                 return "dummy"
 
         int32 = "int32"
 
         class device:
+            """Test class for device."""
+
             def __init__(self, d):
+                """Initialize __init__."""
                 self.d = d
 
             def __enter__(self):
-                pass
+                """Initialize __enter__."""
 
             def __exit__(self, *a):
-                pass
+                """Initialize __exit__."""
 
         @staticmethod
         def function(*a, **k):
+            """Execute function helper."""
             return lambda f: f
 
         class config:
+            """Test class for config."""
+
             @staticmethod
             def list_physical_devices(d):
+                """Execute list physical devices helper."""
                 return [1] if d == "GPU" else []
 
             class experimental:
+                """Test class for experimental."""
+
                 @staticmethod
                 def reset_memory_stats(d):
+                    """Execute reset memory stats helper."""
                     if "err" in d:
                         raise ValueError()
 
                 @staticmethod
                 def get_memory_info(d):
+                    """Execute get memory info helper."""
                     if "err" in d:
                         raise ValueError()
                     return {"peak": 1024 * 1024 * 100}
 
         class Tensor:
-            pass
+            """Test class for Tensor."""
 
     monkeypatch.setattr(bm, "tf", MockTF)
     monkeypatch.setattr(bm, "keras", type("Keras", (), {"KerasTensor": MockTF.Tensor}))
@@ -355,57 +384,77 @@ def test_benchmark_keras_coverage(monkeypatch):
 
 
 def test_benchmark_keras_coverage2(monkeypatch):
+    """Test benchmark keras coverage2 functionality."""
     import gemma_4_sql.backends.keras.benchmark as bm
 
     class MockModelNoNumpy:
+        """Test class for MockModelNoNumpy."""
+
         def __call__(self, x):
+            """Initialize __call__."""
             return x
 
         def generate(self, *a, **k):
+            """Execute generate helper."""
             return "out"
 
     class MockTF:
+        """Test class for MockTF."""
+
         class random:
+            """Test class for random."""
+
             @staticmethod
             def set_seed(s):
-                pass
+                """Execute set seed helper."""
 
             @staticmethod
             def uniform(*a, **k):
+                """Execute uniform helper."""
                 return "dummy"
 
         int32 = "int32"
 
         class device:
+            """Test class for device."""
+
             def __init__(self, d):
+                """Initialize __init__."""
                 self.d = d
 
             def __enter__(self):
-                pass
+                """Initialize __enter__."""
 
             def __exit__(self, *a):
-                pass
+                """Initialize __exit__."""
 
         @staticmethod
         def function(*a, **k):
+            """Execute function helper."""
             return lambda f: f
 
         class config:
+            """Test class for config."""
+
             @staticmethod
             def list_physical_devices(d):
+                """Execute list physical devices helper."""
                 return []
 
             class experimental:
+                """Test class for experimental."""
+
                 @staticmethod
                 def reset_memory_stats(d):
-                    pass
+                    """Execute reset memory stats helper."""
 
                 @staticmethod
                 def get_memory_info(d):
+                    """Execute get memory info helper."""
                     return {"peak": 10}
 
         class Tensor:
-            pass
+            """Test class for Tensor."""
 
     monkeypatch.setattr(bm, "tf", MockTF)
     monkeypatch.setattr(bm, "keras", type("Keras", (), {"KerasTensor": MockTF.Tensor}))
@@ -428,27 +477,37 @@ def test_benchmark_keras_coverage2(monkeypatch):
 
     # Cover False branch of hasattr(model, 'generate')
     class MockModelNoGenerate:
+        """Test class for MockModelNoGenerate."""
+
         def __call__(self, x):
+            """Initialize __call__."""
             return x
 
     bm._run_benchmark_pass(MockModelNoGenerate(), 1, 2, 1, "generate", 128, "cpu")
 
 
 def test_benchmark_keras_coverage3(monkeypatch):
+    """Test benchmark keras coverage3 functionality."""
     import gemma_4_sql.backends.keras.benchmark as bm
 
     class config:
+        """Test class for config."""
+
         @staticmethod
         def list_physical_devices(d):
+            """Execute list physical devices helper."""
             return [1] if d in ("GPU", "TPU") else []
 
         class experimental:
+            """Test class for experimental."""
+
             @staticmethod
             def reset_memory_stats(d):
-                pass
+                """Execute reset memory stats helper."""
 
             @staticmethod
             def get_memory_info(d):
+                """Execute get memory info helper."""
                 return {"peak": 10}
 
     monkeypatch.setattr(bm, "tf", type("MockTF", (), {"config": config()}))
@@ -465,50 +524,70 @@ def test_benchmark_keras_coverage3(monkeypatch):
 
 
 def test_keras_benchmark_126_127(monkeypatch):
+    """Test keras benchmark 126 127 functionality."""
     import gemma_4_sql.backends.keras.benchmark as bm
 
     class MockModel:
+        """Test class for MockModel."""
+
         def __call__(self, x):
+            """Initialize __call__."""
             return x
 
     class MockTF:
+        """Test class for MockTF."""
+
         class random:
+            """Test class for random."""
+
             @staticmethod
             def set_seed(s):
-                pass
+                """Execute set seed helper."""
 
             @staticmethod
             def uniform(*a, **k):
+                """Execute uniform helper."""
                 return "dummy"
 
         int32 = "int32"
 
         class device:
+            """Test class for device."""
+
             def __init__(self, d):
+                """Initialize __init__."""
                 self.d = d
 
             def __enter__(self):
-                pass
+                """Initialize __enter__."""
 
             def __exit__(self, *a):
-                pass
+                """Initialize __exit__."""
 
         @staticmethod
         def function(*a, **k):
+            """Execute function helper."""
             return lambda f: f
 
         class config:
+            """Test class for config."""
+
             @staticmethod
             def list_physical_devices(d):
+                """Execute list physical devices helper."""
                 return [1]
 
             class experimental:
+                """Test class for experimental."""
+
                 @staticmethod
                 def reset_memory_stats(d):
+                    """Execute reset memory stats helper."""
                     raise ValueError("dummy")
 
                 @staticmethod
                 def get_memory_info(d):
+                    """Execute get memory info helper."""
                     raise ValueError("dummy")
 
     monkeypatch.setattr(bm, "tf", MockTF)
@@ -520,6 +599,7 @@ def test_keras_benchmark_126_127(monkeypatch):
 
 
 def test_keras_benchmark_missing_deps(monkeypatch):
+    """Test keras benchmark missing deps functionality."""
     import gemma_4_sql.backends.keras.benchmark as bm
 
     monkeypatch.setattr(bm, "keras", None)

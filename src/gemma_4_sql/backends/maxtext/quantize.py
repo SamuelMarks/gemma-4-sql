@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
-jax = None
-jnp = None
-with catch_optional_imports():
-    import jax
-    import jax.numpy as jnp
-Gemma4Model = None
-with catch_optional_imports():
-    from maxtext.models.gemma4 import Gemma4Model
+
+try:
+    import jax as _jax
+    import jax.numpy as _jnp
+    from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model
+
+    jax: Any = _jax
+    jnp: Any = _jnp
+    Gemma4Model: Any = _Gemma4Model
+except (ImportError, AttributeError):
+    jax = None
+    jnp = None
+    Gemma4Model = None
 
 
 def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
@@ -29,6 +32,9 @@ def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If MaxText dependencies are missing.
     """
     status = "completed"
     memory_reduction = 0.0

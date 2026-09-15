@@ -5,6 +5,11 @@ import pytest
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.dpo import run_dpo
 
+try:
+    import keras
+except ImportError:
+    keras = None
+
 
 def test_run_dpo_jax() -> None:
     """Initialize function test_run_dpo_jax.
@@ -48,6 +53,7 @@ def test_run_dpo_pytorch() -> None:
         raise AssertionError
 
 
+@pytest.mark.skipif(keras is None, reason="Keras is not installed")
 def test_run_dpo_keras() -> None:
     """Initialize function test_run_dpo_keras.
 

@@ -13,7 +13,7 @@ from gemma_4_sql.cli_train import dpo_cmd, peft_cmd, posttrain_cmd, pretrain_cmd
 from gemma_4_sql.constants import DEFAULT_POSTTRAIN_DATASET, DEFAULT_PRETRAIN_DATASET, DEFAULT_SFT_DATASET
 
 
-def _add_etl_subparser(subparsers: argparse._SubParsersAction, name: str, help_text: str, default_dataset: str, cmd_func: object) -> None:
+def _add_etl_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser], name: str, help_text: str, default_dataset: str, cmd_func: object) -> None:
     """Execute function.
 
     Args:
@@ -35,7 +35,7 @@ def _add_etl_subparser(subparsers: argparse._SubParsersAction, name: str, help_t
     parser.set_defaults(func=cmd_func)
 
 
-def _add_etl_parsers(subparsers: argparse._SubParsersAction) -> None:
+def _add_etl_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Execute the add etl parsers operation."""
     parser_etl = subparsers.add_parser("etl", help="Run ETL to prepare SQL training datasets.")
     etl_subparsers = parser_etl.add_subparsers(dest="etl_command", required=True)
@@ -44,7 +44,7 @@ def _add_etl_parsers(subparsers: argparse._SubParsersAction) -> None:
     _add_etl_subparser(etl_subparsers, "posttrain", "Run ETL for post-training SQL datasets.", DEFAULT_POSTTRAIN_DATASET, etl_posttrain_cmd)
 
 
-def _add_peft_quantize_parsers(subparsers: argparse._SubParsersAction) -> None:
+def _add_peft_quantize_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Execute the add peft quantize parsers operation."""
     parser_dpo = subparsers.add_parser("dpo", help="Run Direct Preference Optimization (DPO).")
     parser_dpo.add_argument("--model", default="gemma-4", help="Model name.")
@@ -70,7 +70,7 @@ def _add_peft_quantize_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_quantize.set_defaults(func=quantize_cmd)
 
 
-def _add_training_subparser(subparsers: argparse._SubParsersAction, name: str, help_text: str, backend: str, cmd_func: object) -> None:
+def _add_training_subparser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser], name: str, help_text: str, backend: str, cmd_func: object) -> None:
     """Execute function."""
     parser = subparsers.add_parser(name, help=help_text)
     parser.add_argument("--model", default="gemma-4", help="Model name.")
@@ -83,7 +83,7 @@ def _add_training_subparser(subparsers: argparse._SubParsersAction, name: str, h
     parser.set_defaults(func=cmd_func)
 
 
-def _add_training_parsers(subparsers: argparse._SubParsersAction) -> None:
+def _add_training_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Execute the add training parsers operation."""
     _add_training_subparser(subparsers, "train", "Train a new model from scratch.", "jax", train_cmd)
     _add_training_subparser(subparsers, "pretrain", "Pretrain an existing model.", "maxtext", pretrain_cmd)
@@ -92,7 +92,7 @@ def _add_training_parsers(subparsers: argparse._SubParsersAction) -> None:
     _add_peft_quantize_parsers(subparsers)
 
 
-def _add_evaluate_parsers(subparsers: argparse._SubParsersAction) -> None:
+def _add_evaluate_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Execute the add evaluate parsers operation."""
     parser_evaluate = subparsers.add_parser("evaluate", help="Evaluate a trained model.")
     parser_evaluate.add_argument("--model", default="gemma-4", help="Model name.")
@@ -117,7 +117,7 @@ def _add_evaluate_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_chat.set_defaults(func=chat_cmd)
 
 
-def _add_serve_export_parsers(subparsers: argparse._SubParsersAction) -> None:
+def _add_serve_export_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Execute function."""
     parser_serve = subparsers.add_parser("serve", help="Serve a model using continuous batching.")
     parser_serve.add_argument("--model", default="gemma-4", help="Model name.")
@@ -134,7 +134,7 @@ def _add_serve_export_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_export.set_defaults(func=export_cmd)
 
 
-def _add_generate_agent_parsers(subparsers: argparse._SubParsersAction) -> None:
+def _add_generate_agent_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Execute function."""
     parser_generate = subparsers.add_parser("generate", help="Generate SQL from text using a trained model.")
     parser_generate.add_argument("--model", default="gemma-4", help="Model name.")
@@ -142,6 +142,10 @@ def _add_generate_agent_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_generate.add_argument("--backend", default="jax", help="Backend to use.")
     parser_generate.add_argument("--beam-width", type=int, default=3, help="Number of beams for generation.")
     parser_generate.add_argument("--max-length", type=int, default=50, help="Maximum generation length.")
+    parser_generate.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature.")
+    parser_generate.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling threshold.")
+    parser_generate.add_argument("--seed", type=int, default=42, help="Random seed for generation.")
+    parser_generate.add_argument("--test-mode", action="store_true", help="Run generation in fast test mode.")
     parser_generate.add_argument("--show-confidence", action="store_true", help="Display the model's confidence score.")
     parser_generate.set_defaults(func=generate_cmd)
 
@@ -155,10 +159,11 @@ def _add_generate_agent_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_agent.add_argument("--max-retries", type=int, default=3, help="Max retries.")
     parser_agent.add_argument("--min-confidence", type=float, default=0.0, help="Min confidence.")
     parser_agent.add_argument("--backend", default="jax", help="Backend to use.")
+    parser_agent.add_argument("--test-mode", action="store_true", help="Run agent loop in fast test mode.")
     parser_agent.set_defaults(func=agent_cmd)
 
 
-def _add_inference_parsers(subparsers: argparse._SubParsersAction) -> None:
+def _add_inference_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Execute the add inference parsers operation."""
     _add_serve_export_parsers(subparsers)
     _add_generate_agent_parsers(subparsers)
@@ -177,7 +182,7 @@ def _add_inference_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_log.set_defaults(func=log_metrics_cmd)
 
 
-def _add_tokenize_execute_parsers(subparsers: argparse._SubParsersAction) -> None:
+def _add_tokenize_execute_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Execute function."""
     parser_tokenize = subparsers.add_parser("tokenize", help="Encode or decode text using SQLTokenizer.")
     parser_tokenize.add_argument("--encode", type=str, help="Text to encode.")
@@ -195,7 +200,7 @@ def _add_tokenize_execute_parsers(subparsers: argparse._SubParsersAction) -> Non
     parser_execute.set_defaults(func=db_execute_cmd)
 
 
-def _add_misc_parsers(subparsers: argparse._SubParsersAction) -> None:
+def _add_misc_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Execute the add misc parsers operation."""
     _add_tokenize_execute_parsers(subparsers)
 
@@ -206,6 +211,7 @@ def _add_misc_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_embed.add_argument("--ddl", default="", help="Optional DDL to setup the schema.")
     parser_embed.add_argument("--backend", default="jax", help="Backend to use.")
     parser_embed.add_argument("--max-retries", type=int, default=3, help="Max self-correction attempts.")
+    parser_embed.add_argument("--test-mode", action="store_true", help="Run embed-duckdb in fast test mode.")
     parser_embed.set_defaults(func=embed_duckdb_cmd)
 
     parser_benchmark = subparsers.add_parser("benchmark", help="Benchmark a model on target hardware.")
@@ -220,8 +226,21 @@ def _add_misc_parsers(subparsers: argparse._SubParsersAction) -> None:
     parser_benchmark.set_defaults(func=benchmark_cmd)
 
 
-def cli(args: list[str] | None = None) -> None:
-    """Run main CLI entrypoint."""
+def cli(args: list[str] | None = None) -> int:
+    """Run main CLI entrypoint.
+
+    Standard exit codes:
+        0: Successful execution.
+        1: General runtime error.
+        2: Command-line parsing / usage error.
+        3: Database execution failure.
+
+    Args:
+        args: Optional list of command-line argument strings.
+
+    Returns:
+        Integer exit code.
+    """
     parser = argparse.ArgumentParser(description="CLI for gemma-4-sql dataset generation and model training.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     _add_etl_parsers(subparsers)
@@ -230,8 +249,11 @@ def cli(args: list[str] | None = None) -> None:
     _add_inference_parsers(subparsers)
     _add_misc_parsers(subparsers)
     parsed_args = parser.parse_args(args)
-    parsed_args.func(parsed_args)
+    res = parsed_args.func(parsed_args)
+    return int(res) if isinstance(res, int) else 0
 
 
 if __name__ == "__main__":
-    cli()
+    import sys
+
+    sys.exit(cli())

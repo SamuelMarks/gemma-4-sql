@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import jax
 import jax.numpy as jnp
@@ -63,7 +63,7 @@ def _convert_to_block(x: jax.Array, chunk_size: int) -> jax.Array:
     return x.reshape(batch_size, num_blocks, chunk_size, num_heads, head_dim)
 
 
-def _extract_block_context(x: jax.Array, attn: object) -> jax.Array:
+def _extract_block_context(x: jax.Array, attn: Any) -> jax.Array:
     """Extract the left context block for block-wise attention.
 
     Returns:
@@ -94,7 +94,7 @@ def _rel_shift(x: jax.Array, context_size: int) -> jax.Array:
     return x.reshape((batch_size, num_heads, num_blocks, block_size, context_size))
 
 
-def _compute_audio_attention_outputs(attn: object, qkv: tuple[jax.Array, jax.Array, jax.Array], pos_emb: jax.Array, mask: jax.Array | None) -> jax.Array:
+def _compute_audio_attention_outputs(attn: Any, qkv: tuple[jax.Array, jax.Array, jax.Array], pos_emb: jax.Array, mask: jax.Array | None) -> jax.Array:
     """Compute the multi-head attention outputs for audio.
 
     Returns:

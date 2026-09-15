@@ -5,21 +5,20 @@ from __future__ import annotations
 import typing
 
 from gemma_4_sql.backends.common_data import _load_duckdb_dataset
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import ETLConfig
+from gemma_4_sql.type_hints import ETLConfig, JSONDict
 
 if typing.TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
-datasets = None
-with catch_optional_imports():
-    import datasets
+    from gemma_4_sql.type_hints import JSONValue
+
+try:
+    import datasets as _datasets
+
+    datasets: typing.Any = _datasets
+except (ImportError, AttributeError):
+    datasets = None
 duckdb = None
-with catch_optional_imports():
-    pass
 mx = None
-with catch_optional_imports():
-    pass
 
 
 def _pad_batch(batch_inputs: list[list[int]], batch_targets: list[list[int]]) -> JSONDict:
@@ -41,6 +40,8 @@ def _pad_batch(batch_inputs: list[list[int]], batch_targets: list[list[int]]) ->
 
 class MLXDataLoader:
     """Simple DataLoader for MLX that yields padded batches."""
+
+    ds: typing.Any
 
     def __init__(self, ds: object, tok: SQLTokenizer, bs: int) -> None:
         """Execute logic.
@@ -87,21 +88,31 @@ def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, d
 
     Returns:
         The loaded dataset.
+
+    Raises:
+        DependencyMissingError: If Datasets dependency is missing.
     """
     if duckdb_path and duckdb_table:
         return _load_duckdb_dataset(duckdb_path, duckdb_table)
+    if datasets is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Datasets dependency is missing.")
     return datasets.load_dataset(dataset_name, split=split)
 
 
 def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     """Build an MLX-specific dataloader.
 
-
     Args:
+        config: ETL configuration parameters.
         **kwargs: Overrides for ETL configuration (e.g., duckdb_path, duckdb_table).
-    Returns:
-        object: The resulting output from the operation.
 
+    Returns:
+        A dictionary containing the loaded dataloader and metadata.
+
+    Raises:
+        DependencyMissingError: If datasets dependency is missing.
     """
     dataset_name = config.dataset_name
     split = config.split
@@ -118,4 +129,4 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)
     tokenizer = SQLTokenizer(model_name=tokenizer_name)
     dataloader = MLXDataLoader(hf_dataset, tokenizer, batch_size)
-    return {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "mlx", "distributed": distributed, "loader": dataloader}
+    return typing.cast(JSONDict, {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "mlx", "distributed": distributed, "loader": dataloader})

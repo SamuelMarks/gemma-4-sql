@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import jax
 import jax.numpy as jnp
@@ -80,8 +80,6 @@ __all__ = [
     "_rel_shift",
 ]
 if TYPE_CHECKING:
-    from jaxtyping import Array
-
     from gemma_4_sql.type_hints import JSONValue
 _linear_sig = inspect.signature(nnx.Linear.__init__)
 _LINEAR_SUPPORTS_METADATA = "kernel_metadata" in _linear_sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in _linear_sig.parameters.values())
@@ -121,7 +119,9 @@ class Gemma4Model(nnx.Module):
             object: The resulting output from the operation.
 
         """
-        ple = self.embed_tokens_per_layer(input_ids) * self.config.hidden_size_per_layer_input**0.5
+        if self.config.hidden_size_per_layer_input is None:
+            return input_ids
+        ple = self.embed_tokens_per_layer(input_ids) * float(self.config.hidden_size_per_layer_input) ** 0.5
         (batch_size, seq_len, _) = ple.shape
         return ple.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
 
@@ -162,11 +162,11 @@ class Gemma4Model(nnx.Module):
         if self.config.hidden_size_per_layer_input:
             if per_layer_inputs is None:
                 per_layer_inputs = self.get_per_layer_inputs(input_ids)
-            per_layer_inputs = self.project_per_layer_inputs(x, per_layer_inputs)
+            per_layer_inputs = self.project_per_layer_inputs(x, cast(Any, per_layer_inputs))
         for i, layer in enumerate(self.layers):
             layer_cache = cache[i] if cache is not None else None
-            layer_ple = per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
-            x = layer(x, positions, layer_cache, attention_mask=attention_mask, per_layer_input=layer_ple)
+            layer_ple = cast(Any, per_layer_inputs)[:, :, i, :] if per_layer_inputs is not None else None
+            x = layer(x, positions, layer_cache, attention_mask=cast(Any, attention_mask), per_layer_input=layer_ple)
         return self.norm(x)
 
 
@@ -183,7 +183,7 @@ def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = 
     snapshot_download = __import__("huggingface_hub", fromlist=["snapshot_download"]).snapshot_download
 
     if config is None:
-        config_map = {
+        config_map: dict[str, Any] = {
             "google/gemma-4-E2B": ModelConfig.gemma4_e2b,
             "google/gemma-4-E2B-it": ModelConfig.gemma4_e2b,
             "google/gemma-4-E4B": ModelConfig.gemma4_e4b,
@@ -196,13 +196,20 @@ def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = 
         if model_name not in config_map:
             msg = f"Model name '{model_name}' is unknown, please provide config argument"
             raise ValueError(msg)
-        config = config_map[model_name]()
+        resolved_config: ModelConfig = cast(ModelConfig, config_map[model_name]())
+    else:
+        resolved_config = config
     model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
-    return create_gemma4_from_pretrained(model_ckpt_path, config)
+    return create_gemma4_from_pretrained(model_ckpt_path, resolved_config)
 
 
 class Gemma4ForCausalLM(nnx.Module):
     """Gemma 4 model with a language modeling head."""
+
+    vision_tower: Any
+    multi_modal_projector: Any
+    audio_tower: Any
+    embed_audio: Any
 
     @classmethod
     def from_pretrained(cls, model_name: str, config: ModelConfig | None = None) -> object:
@@ -255,10 +262,10 @@ class Gemma4ForCausalLM(nnx.Module):
         inputs_embeds = self.model.embed_tokens(inputs.input_ids) * self.model.embed_scale
         image_features = None
         audio_features = None
-        if has_vision:
+        if has_vision and inputs.pixel_values is not None:
             vision_outputs = self.vision_tower(inputs.pixel_values)
             image_features = self.multi_modal_projector(vision_outputs)
-        if has_audio:
+        if has_audio and inputs.input_features is not None:
             audio_outputs = self.audio_tower(inputs.input_features, inputs.input_features_mask)
             audio_features = self.embed_audio(audio_outputs)
         inputs_embeds = self._merge_multimodal_features(inputs_embeds, image_features, audio_features, inputs)
@@ -295,9 +302,16 @@ class Gemma4ForCausalLM(nnx.Module):
                 object: The resulting output from the operation.
 
         """
-        attention_mask = kwargs.get("attention_mask")
-        mm_inputs = MultimodalInputs(input_ids=input_ids, pixel_values=kwargs.get("pixel_values"), image_token_mask=kwargs.get("image_token_mask"), input_features=kwargs.get("input_features"), input_features_mask=kwargs.get("input_features_mask"), audio_token_mask=kwargs.get("audio_token_mask"))
-        mm_inputs.attention_mask = attention_mask
+        attention_mask = cast(Any, kwargs.get("attention_mask"))
+        mm_inputs = MultimodalInputs(
+            input_ids=input_ids,
+            pixel_values=cast(Any, kwargs.get("pixel_values")),
+            image_token_mask=cast(Any, kwargs.get("image_token_mask")),
+            input_features=cast(Any, kwargs.get("input_features")),
+            input_features_mask=cast(Any, kwargs.get("input_features_mask")),
+            audio_token_mask=cast(Any, kwargs.get("audio_token_mask")),
+            attention_mask=attention_mask,
+        )
         (inputs_embeds, is_multimodal) = self._process_multimodal(mm_inputs)
         hidden_states = self._apply_layers_multimodal(inputs_embeds, mm_inputs, positions, cache) if is_multimodal and inputs_embeds is not None else self.model(input_ids, positions, cache, attention_mask=attention_mask)
         logits = self.lm_head(hidden_states)

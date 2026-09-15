@@ -2,24 +2,29 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.backends.mlx.etl import build_dataloader
 from gemma_4_sql.type_hints import ETLConfig, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-mx = None
-nn = None
-optim = None
-with catch_optional_imports():
-    import mlx.core as mx
-    import mlx.optimizers as optim  # pragma: no cover
-    from mlx import nn  # pragma: no cover
-load = None
-with catch_optional_imports():
-    from mlx_lm import load
+
+try:
+    import mlx.core as _mx
+    import mlx.nn as _nn
+    import mlx.optimizers as _optim
+    from mlx_lm import load as _load
+
+    mx: Any = _mx
+    nn: Any = _nn
+    optim: Any = _optim
+    load: Any = _load
+except (ImportError, AttributeError):
+    mx = None
+    nn = None
+    optim = None
+    load = None
 
 
 def _run_training_epochs(state: TrainerState) -> float:
@@ -47,7 +52,7 @@ def _run_training_epochs(state: TrainerState) -> float:
             (loss, grads) = loss_and_grad_fn(model, inputs, targets)
             optimizer.update(model, grads)
             mx.eval(model.parameters(), optimizer.state)
-            epoch_loss += loss.item()
+            epoch_loss += float(loss.item() if hasattr(loss, "item") else loss)
             batch_count += 1
         final_loss = epoch_loss / max(1, batch_count)
     return final_loss
@@ -65,15 +70,29 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
 
     Returns:
         A tuple containing the results.
-    """
-    (model, _) = load(model_name)
 
-    def loss_fn(model_t: object, inputs: object, targets: object) -> object:
-        """Docstring.
+    Raises:
+        DependencyMissingError: If MLX dependencies are missing.
+        ValueError: If dataloader is invalid.
+    """
+    if mx is None or nn is None or optim is None or load is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("MLX dependencies are missing.")
+
+    loaded = load(model_name)
+    model = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
+
+    def loss_fn(model_t: Any, inputs: Any, targets: Any) -> Any:
+        """Compute training loss.
+
+        Args:
+            model_t: Target model.
+            inputs: Inputs array.
+            targets: Targets array.
 
         Returns:
-            object: The resulting output from the operation.
-
+            Cross entropy loss.
         """
         logits = model_t(inputs)
         return nn.losses.cross_entropy(logits, targets, reduction="mean")
@@ -92,19 +111,14 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Train a Text-to-SQL model using the MLX backend.
 
     Args:
-    ----
         config: The TrainingConfig.
-        kwargs: Additional arguments.
-        model_name: The name of the model to train.
-        dataset: The dataset to train on.
-        epochs: Number of epochs to train.
-        learning_rate: The learning rate.
         **kwargs: Extra parameters like distributed_strategy.
 
     Returns:
-    -------
         A dictionary containing MLX training status and metrics.
 
+    Raises:
+        DependencyMissingError: If MLX dependencies are missing.
     """
     action = getattr(config, "action", "sft")
     model_name = getattr(config, "model_name", "gemma-4")

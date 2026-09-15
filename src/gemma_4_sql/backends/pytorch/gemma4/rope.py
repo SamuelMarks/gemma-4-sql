@@ -7,7 +7,14 @@ from torch import nn
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
-    """Rotates half the hidden dims of the input."""
+    """Rotates half the hidden dims of the input.
+
+    Args:
+        x: Input tensor.
+
+    Returns:
+        Tensor with rotated halves.
+    """
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)
@@ -21,7 +28,11 @@ def apply_rotary_pos_emb(
     position_ids: torch.Tensor,
     unsqueeze_dim: int = 1,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Apply rotary positional embeddings."""
+    """Apply rotary positional embeddings.
+
+    Returns:
+        Tuple of embedded query and key tensors.
+    """
     cos = cos[position_ids].unsqueeze(unsqueeze_dim)
     sin = sin[position_ids].unsqueeze(unsqueeze_dim)
 
@@ -32,6 +43,10 @@ def apply_rotary_pos_emb(
 
 class Gemma4RotaryEmbedding(nn.Module):
     """Gemma 4 Rotary Embedding."""
+
+    inv_freq: torch.Tensor
+    cos_cached: torch.Tensor
+    sin_cached: torch.Tensor
 
     def __init__(self, dim: int, max_position_embeddings: int = 2048, base: float = 10000.0, device: torch.device | None = None):
         """Initialize Gemma4RotaryEmbedding."""
@@ -55,7 +70,11 @@ class Gemma4RotaryEmbedding(nn.Module):
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
     def forward(self, x: torch.Tensor, seq_len: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass."""
+        """Forward pass.
+
+        Returns:
+            Tuple of cached cosine and sine embeddings.
+        """
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
 
@@ -67,6 +86,8 @@ class Gemma4RotaryEmbedding(nn.Module):
 
 class Gemma4RotaryEmbedding2D(nn.Module):
     """Gemma 4 2D Rotary Embedding for Vision patches."""
+
+    inv_freq: torch.Tensor
 
     def __init__(self, dim: int, max_position_embeddings: int = 2048, base: float = 10000.0, device: torch.device | None = None):
         """Initialize Gemma4RotaryEmbedding2D."""
@@ -82,7 +103,11 @@ class Gemma4RotaryEmbedding2D(nn.Module):
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, x: torch.Tensor, height: int, width: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass for 2D RoPE."""
+        """Forward pass for 2D RoPE.
+
+        Returns:
+            Tuple of 2D cosine and sine embeddings.
+        """
         device = x.device
         dtype = x.dtype
 

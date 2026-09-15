@@ -332,15 +332,18 @@ def test_run_dpo_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_pytorch_dpo_loss_missing(monkeypatch):
+    """Test pytorch dpo loss missing functionality."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     monkeypatch.setattr(pt_dpo, "torch", type("Torch", (), {"nn": type("NN", (), {"functional": type("F", (), {"logsigmoid": lambda x: x})()})}))
 
 
 def test_pytorch_dpo_load_err(monkeypatch):
+    """Test pytorch dpo load err functionality."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     def mock_load(n):
+        """Execute mock load helper."""
         raise ValueError("err")
 
     monkeypatch.setattr(pt_dpo, "AutoModelForCausalLM", type("Auto", (), {"from_pretrained": mock_load}), raising=False)
@@ -349,6 +352,7 @@ def test_pytorch_dpo_load_err(monkeypatch):
 
 
 def test_pytorch_dpo_loss_exec2(monkeypatch):
+    """Test pytorch dpo loss exec2 functionality."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     monkeypatch.setattr(pt_dpo, "generic_dpo_loss", lambda *a, **k: (1, 2, 3))
@@ -357,9 +361,11 @@ def test_pytorch_dpo_loss_exec2(monkeypatch):
 
 
 def test_pytorch_dpo_load_err3(monkeypatch):
+    """Test pytorch dpo load err3 functionality."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     def mock_load(n):
+        """Execute mock load helper."""
         raise ValueError("err")
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.dpo.__import__", lambda *a, **k: type("Module", (), {"Gemma4ForCausalLM": type("Auto", (), {"from_pretrained": mock_load})}), raising=False)
@@ -368,9 +374,11 @@ def test_pytorch_dpo_load_err3(monkeypatch):
 
 
 def xtest_pytorch_dpo_load_err3_old(monkeypatch):
+    """Execute xtest pytorch dpo load err3 old helper."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     def mock_load(n):
+        """Execute mock load helper."""
         raise ValueError("err")
 
     import sys
@@ -381,6 +389,7 @@ def xtest_pytorch_dpo_load_err3_old(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "transformers":
             return sys.modules["transformers"]
         return orig_import(name, *a, **k)
@@ -392,19 +401,26 @@ def xtest_pytorch_dpo_load_err3_old(monkeypatch):
 
 
 def xtest_pytorch_dpo_rewards(monkeypatch):
+    """Execute xtest pytorch dpo rewards helper."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     class MockTensor:
+        """Test class for MockTensor."""
+
         def __sub__(self, o):
+            """Initialize __sub__."""
             return self
 
         def __mul__(self, o):
+            """Initialize __mul__."""
             return self
 
         def mean(self):
+            """Execute mean helper."""
             return 1.0
 
         def detach(self):
+            """Execute detach helper."""
             return self
 
     monkeypatch.setattr(pt_dpo, "functional", type("F", (), {"logsigmoid": lambda x: MockTensor()}))
@@ -412,6 +428,7 @@ def xtest_pytorch_dpo_rewards(monkeypatch):
 
 
 def test_pytorch_dpo_rewards_exec(monkeypatch):
+    """Test pytorch dpo rewards exec functionality."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     monkeypatch.setattr(pt_dpo, "generic_dpo_loss", lambda *a, **k: (1, 2, 3))
@@ -420,25 +437,34 @@ def test_pytorch_dpo_rewards_exec(monkeypatch):
 
 
 def test_pytorch_dpo_loss_real(monkeypatch):
+    """Test pytorch dpo loss real functionality."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     class MockTensor:
+        """Test class for MockTensor."""
+
         def __sub__(self, o):
+            """Initialize __sub__."""
             return self
 
         def __rmul__(self, o):
+            """Initialize __rmul__."""
             return self
 
         def __mul__(self, o):
+            """Initialize __mul__."""
             return self
 
         def __neg__(self):
+            """Initialize __neg__."""
             return self
 
         def mean(self):
+            """Execute mean helper."""
             return 1.0
 
         def detach(self):
+            """Execute detach helper."""
             return self
 
     monkeypatch.setattr(pt_dpo, "functional", type("F", (), {"logsigmoid": lambda x: MockTensor()}))
@@ -446,6 +472,7 @@ def test_pytorch_dpo_loss_real(monkeypatch):
 
 
 def test_pytorch_dpo_loss_missing_inner(monkeypatch):
+    """Test pytorch dpo loss missing inner functionality."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     monkeypatch.setattr(pt_dpo, "functional", None)
@@ -454,28 +481,68 @@ def test_pytorch_dpo_loss_missing_inner(monkeypatch):
 
 
 def test_pytorch_dpo_loss_exec3(monkeypatch):
+    """Test pytorch dpo loss exec3 functionality."""
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
 
     class MockTensor:
+        """Test class for MockTensor."""
+
         def __sub__(self, o):
+            """Initialize __sub__."""
             return self
 
         def __mul__(self, o):
+            """Initialize __mul__."""
             return self
 
         def mean(self):
+            """Execute mean helper."""
             return 1.0
 
         def detach(self):
+            """Execute detach helper."""
             return self
 
         def __neg__(self):
+            """Initialize __neg__."""
             return self
 
         def __rmul__(self, o):
+            """Initialize __rmul__."""
             return self
 
     monkeypatch.setattr(pt_dpo, "functional", type("F", (), {"logsigmoid": lambda x: MockTensor()}))
     monkeypatch.setattr(pt_dpo, "torch", type("Torch", (), {"nn": type("NN", (), {"functional": type("F", (), {"logsigmoid": lambda x: MockTensor()})()})}))
     res = pt_dpo.dpo_loss(MockTensor(), MockTensor(), MockTensor(), MockTensor())
     assert len(res) == 3
+
+
+def test_pytorch_run_dpo_step_branches(monkeypatch):
+    """Test _run_dpo_step when optimizer and loss lack zero_grad, backward, and step."""
+    import gemma_4_sql.backends.pytorch.dpo as pt_dpo
+
+    monkeypatch.setattr(pt_dpo, "functional", None)
+
+    class MockTorch:
+        """Test class for MockTorch."""
+
+        @staticmethod
+        def no_grad():
+            """Execute no grad helper."""
+            return type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})()
+
+    monkeypatch.setattr(pt_dpo, "torch", MockTorch())
+
+    class SimpleOpt:
+        """Test class for SimpleOpt."""
+
+    class SimpleModel:
+        """Test class for SimpleModel."""
+
+        def __call__(self, x):
+            """Initialize __call__."""
+            return 1.0
+
+    batch = {"chosen_inputs": 1, "rejected_inputs": 2}
+    loss = pt_dpo._run_dpo_step(SimpleModel(), SimpleModel(), SimpleOpt(), batch, 0.1)
+    assert loss is not None

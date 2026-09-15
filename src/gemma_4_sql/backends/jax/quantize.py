@@ -3,29 +3,35 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 MIN_NDIM_FOR_QUANTIZATION = 2
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, TensorType
+    from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
-jax = None
-jnp = None
-with catch_optional_imports():
-    import jax
-    import jax.numpy as jnp
-Gemma4ForCausalLM = None
-Gemma4Config = None
-nnx = None
-with catch_optional_imports():
-    from flax import nnx
 
-    from .gemma4 import Gemma4Config, Gemma4ForCausalLM
+try:
+    import jax as _jax
+    import jax.numpy as _jnp
+    from flax import nnx as _nnx
+
+    from .gemma4 import Gemma4Config as _Gemma4Config
+    from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
+
+    jax: Any = _jax
+    jnp: Any = _jnp
+    nnx: Any = _nnx
+    Gemma4Config: Any = _Gemma4Config
+    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+except (ImportError, AttributeError):
+    jax = None
+    jnp = None
+    nnx = None
+    Gemma4Config = None
+    Gemma4ForCausalLM = None
 
 
-def quantize_int8(tensor: TensorType) -> tuple[TensorType, TensorType]:
+def quantize_int8(tensor: Any) -> tuple[Any, Any]:
     """Quantize a tensor to int8.
 
     Args:
@@ -33,26 +39,40 @@ def quantize_int8(tensor: TensorType) -> tuple[TensorType, TensorType]:
 
     Returns:
         A tuple containing the results.
+
+    Raises:
+        DependencyMissingError: If JAX is required but missing.
     """
+    if jnp is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("JAX is required for quantize_int8.")
     scale = jnp.max(jnp.abs(tensor)) / 127.0
-    quantized = jnp.round(tensor / scale).astype(jnp.int8)
-    return (quantized, scale)
+    q_tensor = jnp.round(tensor / scale).astype(jnp.int8)
+    return (q_tensor, scale)
 
 
-def _apply_quantization_to_model(model: object, method: str) -> tuple[str, float, int]:
-    """Apply quantization to the model graph.
+def _apply_quantization_to_model(model: Any, method: str) -> tuple[str, float, int]:
+    """Apply quantization to the model graph and preserve scale factors.
+
+    Args:
+        model: The model object to quantize.
+        method: The quantization method string.
 
     Returns:
-        object: The resulting output from the operation.
-
+        A tuple of status string, memory reduction factor, and count of quantized parameters.
     """
     quantized_params = 0
     if method in {"int8", "awq"}:
-        for _path, param in nnx.graph.iter_graph(model):
+        scales: dict[str, object] = {}
+        for path, param in nnx.graph.iter_graph(model):
             if isinstance(param, nnx.Param) and hasattr(param.value, "ndim") and (param.value.ndim >= MIN_NDIM_FOR_QUANTIZATION):
-                (q_tensor, _scale) = quantize_int8(param.value)
+                (q_tensor, scale) = quantize_int8(param.value)
                 param.value = q_tensor
+                param.quant_scale = scale
+                scales[str(path)] = scale
                 quantized_params += 1
+        model._quant_scales = scales
         status = f"quantized_{method}"
         memory_reduction = 0.5 if method == "int8" else 0.7
         logger.info("Quantized %d parameters using %s", quantized_params, method)
@@ -66,14 +86,14 @@ def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
     """Quantize a JAX model.
 
     Args:
-    ----
         model_name: The name of the model to quantize.
         method: The quantization method ('int8', 'awq', 'gptq', 'gguf').
 
     Returns:
-    -------
         A dictionary containing quantization status and metadata.
 
+    Raises:
+        DependencyMissingError: If JAX quantization dependencies are missing.
     """
     if jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None:
         from gemma_4_sql.exceptions import DependencyMissingError

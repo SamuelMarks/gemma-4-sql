@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import jax
 import jax.numpy as jnp
@@ -47,7 +47,7 @@ def default_rope_params(_positions: Array, head_dim: int, rope_theta: int = 1000
     return (rotational_frequency, attention_factor)
 
 
-rope_functions = {"default": default_rope_params}
+rope_functions: dict[str, Any] = {"default": default_rope_params}
 
 
 def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
@@ -77,7 +77,7 @@ def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
 class RoPE(nnx.Module):
     """Implementation of RoPE."""
 
-    def __init__(self, *, rope_type: str, **rope_kwargs: object) -> None:
+    def __init__(self, *, rope_type: str, **rope_kwargs: Any) -> None:
         """Initialize the instance parameters.
 
         Args:

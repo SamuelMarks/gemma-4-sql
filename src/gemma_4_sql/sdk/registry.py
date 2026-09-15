@@ -18,6 +18,9 @@ def get_backend(name: str) -> BackendProtocol:
 
     Returns:
         The execution result.
+
+    Raises:
+        ValueError: If the backend name is unknown.
     """
     if not ENTRY_POINTS:
         eps_all = importlib.metadata.entry_points()

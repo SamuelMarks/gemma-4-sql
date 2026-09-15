@@ -31,7 +31,11 @@ class Gemma4AudioCrossAttention(nn.Module):
         )
 
     def forward(self, hidden_states: torch.Tensor, audio_states: torch.Tensor) -> torch.Tensor:
-        """Forward pass for audio cross-attention."""
+        """Forward pass for audio cross-attention.
+
+        Returns:
+            Attention output tensor.
+        """
         q = self.q_proj(hidden_states)
         k = self.k_proj(audio_states)
         v = self.v_proj(audio_states)

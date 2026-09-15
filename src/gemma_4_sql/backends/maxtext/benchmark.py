@@ -4,42 +4,53 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
-jax = None
-jnp = None
-with catch_optional_imports():
-    import jax
-    import jax.numpy as jnp
-Gemma4Model = None
-with catch_optional_imports():
-    from maxtext.models.gemma4 import Gemma4Model
+
+try:
+    import jax as _jax
+    import jax.numpy as _jnp
+    from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model
+
+    jax: Any = _jax
+    jnp: Any = _jnp
+    Gemma4Model: Any = _Gemma4Model
+except (ImportError, AttributeError):
+    jax = None
+    jnp = None
+    Gemma4Model = None
 
 
-def _get_device(hardware: str) -> object:
-    """Get the jax device for the hardware."""
+def _get_device(hardware: str) -> Any:
+    """Get the jax device for the hardware.
+
+    Args:
+        hardware: Target hardware string.
+
+    Returns:
+        Matched JAX device or default CPU device.
+    """
     try:
-        if hardware == "tpu" and jax.devices("tpu"):
+        if hardware == "tpu" and jax is not None and jax.devices("tpu"):
             return jax.devices("tpu")[0]
-        if hardware == "gpu" and jax.devices("gpu"):
+        if hardware == "gpu" and jax is not None and jax.devices("gpu"):
             return jax.devices("gpu")[0]
     except RuntimeError:
         pass
-    return jax.devices("cpu")[0]
+    return jax.devices("cpu")[0] if jax is not None else None
 
 
-def _run_benchmark_pass(model: object, params: dict[str, object] | object, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, device: object) -> tuple[float, float, float]:
+def _run_benchmark_pass(model: Any, params: Any, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, device: Any) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
     Args:
         model: The model.
-        params: A mapping representing params.
+        params: Model parameters.
         batch_size: The number of items to process in a single batch.
         num_runs: The integer value for num runs.
         warmup_steps: Number of warmup steps.
@@ -51,20 +62,38 @@ def _run_benchmark_pass(model: object, params: dict[str, object] | object, batch
         A tuple containing the results.
     """
 
-    @jax.jit
-    def forward_pass(params: dict[str, object] | object, inputs: object) -> object:
-        """Execute logic."""
+    def forward_pass(params: Any, inputs: Any) -> Any:
+        """Execute model forward pass.
+
+        Args:
+            params: Model parameters.
+            inputs: Dummy inputs array.
+
+        Returns:
+            Forward pass model output.
+        """
         return model.apply(params, inputs)
 
-    @jax.jit
-    def generate_pass(params: dict[str, object] | object, inputs: object) -> object:
-        """Execute simple generation."""
+    def generate_pass(params: Any, inputs: Any) -> Any:
+        """Execute simple generation pass.
+
+        Args:
+            params: Model parameters.
+            inputs: Input sequence array.
+
+        Returns:
+            Generated sequence array.
+        """
         seq = inputs
         for _ in range(max_new_tokens):
             logits = model.apply(params, seq)
             token = jnp.argmax(logits[..., -1, :], axis=-1, keepdims=True)
             seq = jnp.concatenate([seq, token], axis=-1)
         return seq
+
+    if jax is not None and hasattr(jax, "jit"):
+        forward_pass = jax.jit(forward_pass)
+        generate_pass = jax.jit(generate_pass)
 
     with jax.default_device(device):
         dummy_inputs = jax.random.randint(jax.random.PRNGKey(42), (batch_size, 32), 1, 256000, dtype=jnp.int32)
@@ -108,16 +137,13 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """Benchmark a model using the MaxText backend.
 
     Args:
-    ----
         model_name: The name of the model to benchmark.
         hardware: Target hardware for the benchmark (e.g., 'tpu-v5p', 'gpu').
         batch_size: Batch size to use during benchmarking.
         **kwargs: Additional args like `num_runs`.
 
     Returns:
-    -------
         A dictionary containing benchmark metrics and status.
-
     """
 
     def _run() -> tuple[float, float, float]:

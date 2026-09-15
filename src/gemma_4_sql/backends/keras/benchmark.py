@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
-keras = None
-tf = None
-with catch_optional_imports():
-    import keras
-    import tensorflow as tf  # pragma: no cover
+
+try:
+    import keras as _keras
+    import tensorflow as _tf
+
+    keras: Any = _keras
+    tf: Any = _tf
+except (ImportError, AttributeError):
+    keras = None
+    tf = None
 
 
 def _load_keras_model(model_name: str, dtype: str) -> object:
@@ -30,8 +34,13 @@ def _load_keras_model(model_name: str, dtype: str) -> object:
         The execution result.
 
     Raises:
-        ValueError: if model cannot be loaded.
+        DependencyMissingError: If Keras dependencies are missing.
+        ValueError: If model cannot be loaded.
     """
+    if keras is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Keras dependencies are missing.")
     try:
         keras.config.set_floatx(dtype)
         gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
@@ -42,7 +51,16 @@ def _load_keras_model(model_name: str, dtype: str) -> object:
 
 
 def _get_device_str(hardware: str) -> str:
-    """Map hardware string to device string."""
+    """Map hardware string to device string.
+
+    Args:
+        hardware: Target hardware string.
+
+    Returns:
+        TensorFlow device string specification.
+    """
+    if tf is None:
+        return "/CPU:0"
     if hardware == "cpu":
         return "/CPU:0"
     if hardware == "gpu" and tf.config.list_physical_devices("GPU"):
@@ -52,7 +70,7 @@ def _get_device_str(hardware: str) -> str:
     return "/CPU:0"
 
 
-def _run_benchmark_pass(model: keras.Model, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, hardware: str) -> tuple[float, float, float]:
+def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, hardware: str) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
     Args:
@@ -66,7 +84,15 @@ def _run_benchmark_pass(model: keras.Model, batch_size: int, num_runs: int, warm
 
     Returns:
         A tuple containing the results.
+
+    Raises:
+        DependencyMissingError: If TensorFlow dependencies are missing.
     """
+    if tf is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("TensorFlow dependencies are missing.")
+
     tf.random.set_seed(42)
     device_str = _get_device_str(hardware)
 
@@ -74,8 +100,15 @@ def _run_benchmark_pass(model: keras.Model, batch_size: int, num_runs: int, warm
         dummy_inputs = tf.random.uniform((batch_size, 32), minval=1, maxval=256000, dtype=tf.int32)
 
         @tf.function(jit_compile=True)
-        def forward_pass(inputs: keras.KerasTensor | tf.Tensor) -> object:
-            """Run forward pass."""
+        def forward_pass(inputs: Any) -> object:
+            """Run forward pass.
+
+            Args:
+                inputs: Model inputs.
+
+            Returns:
+                Output tensor.
+            """
             return model(inputs)
 
         # Reset memory stats if on GPU
@@ -134,16 +167,16 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """Benchmark a model using the Keras backend.
 
     Args:
-    ----
         model_name: The name of the model to benchmark.
         hardware: Target hardware for the benchmark (e.g., 'gpu', 'tpu', 'cpu').
         batch_size: Batch size to use during benchmarking.
         **kwargs: Additional args like `num_runs`.
 
     Returns:
-    -------
         A dictionary containing benchmark metrics and status.
 
+    Raises:
+        DependencyMissingError: If Keras dependencies are missing.
     """
 
     def _run() -> tuple[float, float, float]:

@@ -4,22 +4,26 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue, ModelType
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
-mlx = None
-AutoModelForCausalLM = None
-with catch_optional_imports():
-    import mlx
-    from transformers import AutoModelForCausalLM  # pragma: no cover
+
+try:
+    import mlx as _mlx
+    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
+
+    mlx: Any = _mlx
+    AutoModelForCausalLM: Any = _AutoModelForCausalLM
+except (ImportError, AttributeError):
+    mlx = None
+    AutoModelForCausalLM = None
 
 
-def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[ModelType, str]:
+def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[Any, str]:
     """Load the model and determine device.
 
     Args:
@@ -29,9 +33,16 @@ def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: boo
 
     Returns:
         A tuple containing the results.
+
+    Raises:
+        DependencyMissingError: If Transformers AutoModelForCausalLM is missing.
     """
     if test_mode:
         return (None, "cpu")
+    if AutoModelForCausalLM is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Transformers AutoModelForCausalLM is missing.")
     model = AutoModelForCausalLM.from_pretrained(model_name)
     device = "cuda" if hasattr(mlx, "cuda") and mlx.cuda.is_available() and (hardware != "cpu") else "cpu"
     if hasattr(model, "to"):
@@ -51,45 +62,52 @@ def _sync_cuda(device: str) -> None:
         mlx.cuda.synchronize()
 
 
-def _run_forward_pass(model: object, dummy_inputs: object) -> None:
+def _run_forward_pass(model: Any, dummy_inputs: Any) -> None:
     """Run a single forward pass.
 
     Args:
         model: The model.
-        device: The string representing the device.
-
-    Returns:
-        The computed float value.
+        dummy_inputs: Inputs tensor.
     """
     if model is not None and hasattr(mlx, "no_grad"):
         with mlx.no_grad():
             _ = model(dummy_inputs)
 
 
-def _get_memory_mb(model: object, device: str) -> float:
+def _get_memory_mb(model: Any, device: str) -> float:
     """Get max memory allocated in MB.
 
     Args:
         model: The model.
         device: The string representing the device.
-        batch_size: The number of items to process in a single batch.
-        num_runs: The integer value for num runs.
 
     Returns:
-        A tuple containing the results.
+        Memory usage in MB.
     """
     if model is not None and device == "cuda" and hasattr(mlx, "cuda") and hasattr(mlx.cuda, "max_memory_allocated"):
         return float(mlx.cuda.max_memory_allocated() / (1024 * 1024))
     return 8192.0
 
 
-def _run_benchmark_pass(model: object, device: str, batch_size: int, num_runs: int) -> tuple[float, float, float]:
+def _run_benchmark_pass(model: Any, device: str, batch_size: int, num_runs: int) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model: The model.
+        device: Target device string.
+        batch_size: Batch size for benchmark.
+        num_runs: Number of benchmark iterations.
 
+    Returns:
+        A tuple of (tokens_per_sec, latency_ms, memory_mb).
+
+    Raises:
+        DependencyMissingError: If MLX dependencies are missing.
     """
+    if mlx is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("MLX dependencies are missing.")
     dummy_inputs = mlx.zeros((batch_size, 32), dtype=getattr(mlx, "long", None))
     if model is not None and hasattr(dummy_inputs, "to"):
         dummy_inputs = dummy_inputs.to(device)
@@ -111,16 +129,13 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """Benchmark a model using the MLX backend.
 
     Args:
-    ----
         model_name: The name of the model to benchmark.
         hardware: Target hardware for the benchmark (e.g., 'gpu', 'tpu', 'cpu').
         batch_size: Batch size to use during benchmarking.
         **kwargs: Additional args like `num_runs`.
 
     Returns:
-    -------
         A dictionary containing benchmark metrics and status.
-
     """
 
     def _run() -> tuple[float, float, float]:

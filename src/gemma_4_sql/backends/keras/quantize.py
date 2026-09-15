@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
-keras = None
-with catch_optional_imports():
-    import keras
+
+try:
+    import keras as _keras
+
+    keras: Any = _keras
+except (ImportError, AttributeError):
+    keras = None
 
 
 def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
@@ -24,6 +26,9 @@ def quantize_model(model_name: str, method: str = "int8") -> JSONDict:
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If Keras dependencies are missing.
     """
     memory_reduction = 0.0
     status = "completed"

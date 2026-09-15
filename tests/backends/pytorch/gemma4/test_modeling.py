@@ -158,11 +158,14 @@ def test_gemma4_for_causal_lm():
 
 
 def test_attention_edge_cases(monkeypatch):
+    """Test attention edge cases functionality."""
     import torch
 
     import gemma_4_sql.backends.pytorch.gemma4.attention as attn
 
     class MockConfig:
+        """Test class for MockConfig."""
+
         hidden_size = 32
         num_attention_heads = 4
         num_key_value_heads = 2
@@ -186,11 +189,14 @@ def test_attention_edge_cases(monkeypatch):
 
 
 def test_audio_layers_edge_cases(monkeypatch):
+    """Test audio layers edge cases functionality."""
     import torch
 
     import gemma_4_sql.backends.pytorch.gemma4.audio_layers as al
 
     class MockConfig:
+        """Test class for MockConfig."""
+
         audio_hidden_size = 32
         hidden_size = 32
 
@@ -270,10 +276,14 @@ def test_pytorch_native_pipeline_integration(tmp_path, monkeypatch):
     assert "sql" in gen_res
 
     class MockLoader:
+        """Test class for MockLoader."""
+
         def __iter__(self):
+            """Initialize __iter__."""
             yield {"inputs": torch.tensor([[1, 2]], dtype=torch.long), "targets": torch.tensor([[2, 3]], dtype=torch.long)}
 
         def __len__(self):
+            """Initialize __len__."""
             return 1
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.train.build_dataloader", lambda c: {"loader": MockLoader()})

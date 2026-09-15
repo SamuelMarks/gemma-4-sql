@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 logger = logging.getLogger(__name__)
-mx = None
-with catch_optional_imports():
-    import mlx.core as mx
+
+try:
+    import mlx.core as _mx
+
+    mx: Any = _mx
+except (ImportError, AttributeError):
+    mx = None
 
 
 def _generate_query(prompt: str) -> str:

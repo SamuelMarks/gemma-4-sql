@@ -46,10 +46,16 @@ def generate_cmd(args: argparse.Namespace) -> None:
         beam_width=args.beam_width,
         max_length=args.max_length,
         show_confidence=getattr(args, "show_confidence", False),
+        temperature=getattr(args, "temperature", 1.0),
+        top_p=getattr(args, "top_p", 1.0),
+        seed=getattr(args, "seed", 42),
+        test_mode=getattr(args, "test_mode", False),
     )
     sql_output = (res or {}).get("sql", "")
     if sql_output:
         print(str(sql_output))
+    if getattr(args, "show_confidence", False) and res and "confidence_score" in res:
+        print(f"Confidence: {float(str(res['confidence_score'])):.4f}")
 
 
 def agent_cmd(args: argparse.Namespace) -> None:
@@ -75,6 +81,7 @@ def agent_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
         context=context,
         db_kwargs=db_kwargs,
+        test_mode=getattr(args, "test_mode", False),
     )
     if res is not None:
         print(json.dumps(res, indent=2))

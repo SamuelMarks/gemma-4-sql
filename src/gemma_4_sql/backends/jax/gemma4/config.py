@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, cast
 
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec
@@ -31,7 +32,7 @@ class VisionShardConfig:
     emb_pos_activation: PartitionSpec | None = None
 
     @staticmethod
-    def no_sharding() -> object:
+    def no_sharding() -> VisionShardConfig:
         """Return an unpartitioned default VisionShardConfig.
 
         Returns:
@@ -88,7 +89,7 @@ class ShardConfig:
     cache: PartitionSpec | None = None
 
     @staticmethod
-    def no_sharding() -> object:
+    def no_sharding() -> ShardConfig:
         """Return empty sharding config.
 
         Returns:
@@ -98,7 +99,7 @@ class ShardConfig:
         return ShardConfig()
 
     @staticmethod
-    def default(*, use_fsdp: bool, use_tp: bool) -> object:
+    def default(*, use_fsdp: bool = False, use_tp: bool = False) -> ShardConfig:
         """Return standard sharding patterns.
 
         Returns:
@@ -160,7 +161,7 @@ class ModelConfigPresets:
         kwargs = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return cls(**kwargs)
+        return cast(Any, cls)(**kwargs)
 
     @classmethod
     def gemma4_e2b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
@@ -173,7 +174,7 @@ class ModelConfigPresets:
         kwargs = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return cls(num_hidden_layers=35, hidden_size=1024, intermediate_size=4096, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
+        return cast(Any, cls)(num_hidden_layers=35, hidden_size=1024, intermediate_size=4096, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
 
     @classmethod
     def gemma4_e4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
@@ -186,7 +187,7 @@ class ModelConfigPresets:
         kwargs = {}
         if use_fsdp or use_tp:  # pragma: no cover
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return cls(num_hidden_layers=42, hidden_size=2560, intermediate_size=10240, num_attention_heads=10, num_key_value_heads=1, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
+        return cast(Any, cls)(num_hidden_layers=42, hidden_size=2560, intermediate_size=10240, num_attention_heads=10, num_key_value_heads=1, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
 
     @classmethod
     def gemma4_26b_a4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
@@ -199,7 +200,7 @@ class ModelConfigPresets:
         kwargs = {}
         if use_fsdp or use_tp:  # pragma: no cover
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return cls(num_hidden_layers=30, hidden_size=2816, intermediate_size=2112, moe_intermediate_size=704, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=128, num_experts_per_tok=2, vocab_size=262144, **kwargs)
+        return cast(Any, cls)(num_hidden_layers=30, hidden_size=2816, intermediate_size=2112, moe_intermediate_size=704, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=128, num_experts_per_tok=2, vocab_size=262144, **kwargs)
 
     @classmethod
     def gemma4_31b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
@@ -212,7 +213,7 @@ class ModelConfigPresets:
         kwargs = {}
         if use_fsdp or use_tp:  # pragma: no cover
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return cls(num_hidden_layers=60, hidden_size=5376, intermediate_size=21504, num_attention_heads=32, num_key_value_heads=16, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
+        return cast(Any, cls)(num_hidden_layers=60, hidden_size=5376, intermediate_size=21504, num_attention_heads=32, num_key_value_heads=16, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
 
 
 @dataclass

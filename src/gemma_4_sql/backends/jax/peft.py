@@ -3,26 +3,31 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
-jax = None
-jnp = None
-optax = None
-with catch_optional_imports():
-    import jax
-    import optax
-Gemma4ForCausalLM = None
-Gemma4Config = None
-nnx = None
-with catch_optional_imports():
-    from flax import nnx
 
-    from .gemma4 import Gemma4Config, Gemma4ForCausalLM
+try:
+    import jax as _jax
+    import optax as _optax
+    from flax import nnx as _nnx
+
+    from .gemma4 import Gemma4Config as _Gemma4Config
+    from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
+
+    jax: Any = _jax
+    optax: Any = _optax
+    nnx: Any = _nnx
+    Gemma4Config: Any = _Gemma4Config
+    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+except (ImportError, AttributeError):
+    jax = None
+    optax = None
+    nnx = None
+    Gemma4Config = None
+    Gemma4ForCausalLM = None
 
 
 def apply_lora(
@@ -44,6 +49,9 @@ def apply_lora(
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If JAX PEFT dependencies are missing.
     """
     status = "completed"
     if optax is None or jax is None or nnx is None or Gemma4ForCausalLM is None:

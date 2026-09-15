@@ -22,7 +22,11 @@ class Gemma4MoERouter(nn.Module):
         self.router_jitter_noise = config.router_jitter_noise
 
     def forward(self, hidden_states: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Forward pass for the router."""
+        """Forward pass for the router.
+
+        Returns:
+            Tuple of routing weights, selected experts indices, and router logits.
+        """
         if self.training and self.router_jitter_noise > 0:
             jitter = torch.empty_like(hidden_states).uniform_(-self.router_jitter_noise, self.router_jitter_noise)
             hidden_states = hidden_states * (1.0 + jitter)
@@ -37,7 +41,16 @@ class Gemma4MoERouter(nn.Module):
 
 
 def calculate_load_balancing_loss(router_logits: torch.Tensor, num_experts: int, top_k: int) -> torch.Tensor:
-    """Calculate the auxiliary load balancing loss."""
+    """Calculate the auxiliary load balancing loss.
+
+    Args:
+        router_logits: Raw logits from router gate.
+        num_experts: Total number of experts.
+        top_k: Top-k chosen experts count.
+
+    Returns:
+        Auxiliary load balancing loss tensor.
+    """
     router_probs = F.softmax(router_logits, dim=-1)
     router_probs_mean = router_probs.mean(dim=0)
 
@@ -64,7 +77,11 @@ class Gemma4MoE(nn.Module):
         self.experts = nn.ModuleList([Gemma4MLP(config) for _ in range(self.num_experts)])
 
     def forward(self, hidden_states: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass for MoE layer."""
+        """Forward pass for MoE layer.
+
+        Returns:
+            Tuple of combined hidden states and auxiliary load balancing loss.
+        """
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
 

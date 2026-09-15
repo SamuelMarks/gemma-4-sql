@@ -4,25 +4,33 @@ from __future__ import annotations
 
 import logging
 import operator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.tokenization import SQLTokenizer
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
-jax = None
-jnp = None
-with catch_optional_imports():
-    import jax
-    import jax.numpy as jnp
-Gemma4Model = None
-with catch_optional_imports():
-    from maxtext.models.gemma4 import Gemma4Model
+
+try:
+    import jax as _jax
+    import jax.numpy as _jnp
+
+    jax: Any = _jax
+    jnp: Any = _jnp
+except (ImportError, AttributeError):
+    jax = None
+    jnp = None
+
+try:
+    from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model
+
+    Gemma4Model: Any = _Gemma4Model
+except (ImportError, AttributeError):
+    Gemma4Model = None
 
 
-def _beam_search_step(seq: jnp.ndarray, score: float, model_apply_fn: object, beam_width: int) -> list[tuple[jnp.ndarray, float]]:
+def _beam_search_step(seq: Any, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
     """Helper to process a single sequence and expand it into multiple beams.
 
     Args:
@@ -55,7 +63,7 @@ def _beam_search_step(seq: jnp.ndarray, score: float, model_apply_fn: object, be
     return new_beams
 
 
-def maxtext_beam_search(model_apply_fn: object, input_ids: jnp.ndarray, beam_width: int, max_length: int, eos_token_id: int) -> tuple[jnp.ndarray, float]:
+def maxtext_beam_search(model_apply_fn: Any, input_ids: Any, beam_width: int, max_length: int, eos_token_id: int) -> tuple[Any, float]:
     """Maxtext native beam search implementation (XLA compiled via JIT).
 
     Returns:
@@ -114,7 +122,6 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     """Generate a SQL query from a natural language prompt using MaxText.
 
     Args:
-    ----
         model_name: The name of the model to use.
         prompt: The natural language prompt.
         beam_width: Number of beams for search.
@@ -122,9 +129,10 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
         **kwargs: Extra arguments.
 
     Returns:
-    -------
         A dictionary containing the generated SQL.
 
+    Raises:
+        DependencyMissingError: If MaxText dependencies are missing.
     """
     tokenizer = SQLTokenizer(model_name=None)
     input_tokens = tokenizer.encode(prompt)

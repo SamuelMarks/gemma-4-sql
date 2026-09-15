@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-mx = None
-with catch_optional_imports():
-    import mlx.core as mx
+
+try:
+    import mlx.core as _mx
+
+    mx: Any = _mx
+except (ImportError, AttributeError):
+    mx = None
 
 
 def export_model(model_name: str, export_path: str) -> JSONDict:
@@ -23,6 +25,10 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        RuntimeError: If MLX is not installed.
+        ValueError: If loading the model fails.
     """
     Path(export_path).mkdir(parents=True, exist_ok=True)
     if mx is None:
@@ -39,4 +45,4 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     mx.save_safetensors(str(file_path), tensors)
     status = "exported_with_safetensors"
 
-    return {"backend": "mlx", "model": model_name, "export_path": export_path, "file_path": file_path, "status": status, "format": "safetensors"}
+    return {"backend": "mlx", "model": model_name, "export_path": export_path, "file_path": str(file_path), "status": status, "format": "safetensors"}

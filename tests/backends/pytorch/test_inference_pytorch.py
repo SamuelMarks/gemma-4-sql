@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typing
+from collections import UserDict
 
 import pytest
 
@@ -205,30 +206,44 @@ def test_inference_sequences_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.pytorch.inference as pt_inf
 
     class MockTokenizerNoShape:
+        """Test class for MockTokenizerNoShape."""
+
         @classmethod
         def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            """Execute from pretrained helper."""
             return cls()
 
         def __call__(self, _prompt: str, return_tensors: str = "pt") -> object:
-            class Inputs(dict):
+            """Initialize __call__."""
+
+            class Inputs(UserDict):
+                """Test class for Inputs."""
+
                 def __init__(self) -> None:
+                    """Initialize __init__."""
                     super().__init__({"input_ids": [1, 2]})
 
                 def to(self, _dev: object) -> object:
+                    """Execute to helper."""
                     return self
 
             return Inputs()
 
         def decode(self, _tokens: object, skip_special_tokens: bool = True) -> str:
+            """Execute decode helper."""
             return "prompt SELECT * FROM fallback"
 
     class MockModelOutputs:
+        """Test class for MockModelOutputs."""
+
         def __init__(self) -> None:
+            """Initialize __init__."""
             self.device = "cpu"
             self.sequences = ["prompt SELECT * FROM fallback"]
             self.sequences_scores = [torch.tensor(0.9)]
 
         def generate(self, **kwargs: object) -> object:
+            """Execute generate helper."""
             return self
 
     monkeypatch.setattr(pt_inf, "AutoTokenizer", MockTokenizerNoShape)
@@ -239,15 +254,22 @@ def test_inference_sequences_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test fallback when generated text doesn't start with prompt
     class MockModelOutputsNoPrefix:
+        """Test class for MockModelOutputsNoPrefix."""
+
         def __init__(self) -> None:
+            """Initialize __init__."""
             self.device = "cpu"
             self.sequences = ["SELECT * FROM no_prefix"]
 
         def generate(self, **kwargs: object) -> object:
+            """Execute generate helper."""
             return self
 
     class MockTokenizerNoPrefix(MockTokenizerNoShape):
+        """Test class for MockTokenizerNoPrefix."""
+
         def decode(self, _tokens: object, skip_special_tokens: bool = True) -> str:
+            """Execute decode helper."""
             return "SELECT * FROM no_prefix"
 
     monkeypatch.setattr(pt_inf, "AutoTokenizer", MockTokenizerNoPrefix)
@@ -266,14 +288,19 @@ def test_inference_pytorch_native_with_autotokenizer(monkeypatch: pytest.MonkeyP
     tiny_cfg = Gemma4Config(vocab_size=128, hidden_size=64, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=32, intermediate_size=128)
 
     class MockNativeTokenizer:
+        """Test class for MockNativeTokenizer."""
+
         @classmethod
         def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            """Execute from pretrained helper."""
             return cls()
 
         def __call__(self, _prompt: str, return_tensors: str = "pt") -> object:
+            """Initialize __call__."""
             return type("Inputs", (), {"input_ids": torch.tensor([[1, 2]], dtype=torch.long)})()
 
         def decode(self, _tokens: object, skip_special_tokens: bool = True) -> str:
+            """Execute decode helper."""
             return "SELECT * FROM native_table"
 
     monkeypatch.setattr(pt_inf, "AutoTokenizer", MockNativeTokenizer)
@@ -283,8 +310,11 @@ def test_inference_pytorch_native_with_autotokenizer(monkeypatch: pytest.MonkeyP
 
     # Test AutoTokenizer raising ValueError
     class MockErrorTokenizer:
+        """Test class for MockErrorTokenizer."""
+
         @classmethod
         def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            """Execute from pretrained helper."""
             raise ValueError("tokenizer load error")
 
     monkeypatch.setattr(pt_inf, "AutoTokenizer", MockErrorTokenizer)
@@ -303,31 +333,45 @@ def test_inference_token_slicing(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.pytorch.inference as pt_inf
 
     class MockTokenizerWithShape:
+        """Test class for MockTokenizerWithShape."""
+
         @classmethod
         def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            """Execute from pretrained helper."""
             return cls()
 
         def __call__(self, _prompt: str, return_tensors: str = "pt") -> object:
-            class Inputs(dict):
+            """Initialize __call__."""
+
+            class Inputs(UserDict):
+                """Test class for Inputs."""
+
                 def __init__(self) -> None:
+                    """Initialize __init__."""
                     super().__init__({"input_ids": torch.tensor([[1, 2]])})
                     self.input_ids = torch.tensor([[1, 2]])
 
                 def to(self, _dev: object) -> object:
+                    """Execute to helper."""
                     return self
 
             return Inputs()
 
         def decode(self, _tokens: object, skip_special_tokens: bool = True) -> str:
+            """Execute decode helper."""
             return "SELECT * FROM sliced_tokens"
 
     class MockModelSlicing:
+        """Test class for MockModelSlicing."""
+
         def __init__(self) -> None:
+            """Initialize __init__."""
             self.device = "cpu"
             self.sequences = [torch.tensor([1, 2, 3, 4])]
             self.sequences_scores = [torch.tensor(0.95)]
 
         def generate(self, **kwargs: object) -> object:
+            """Execute generate helper."""
             return self
 
     monkeypatch.setattr(pt_inf, "AutoTokenizer", MockTokenizerWithShape)
@@ -335,3 +379,81 @@ def test_inference_token_slicing(monkeypatch: pytest.MonkeyPatch) -> None:
     res = pt_inf.generate_sql("model", "prompt", test_mode=False)
     assert res["status"] == "success"
     assert res["sql"] == "SELECT * FROM sliced_tokens"
+
+
+def test_inference_pytorch_with_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test PyTorch inference loading adapter_path."""
+    import sys
+
+    import torch
+
+    import gemma_4_sql.backends.pytorch.inference as pt_inf
+
+    class MockTokenizerWithShape:
+        """Test class for MockTokenizerWithShape."""
+
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            """Execute from pretrained helper."""
+            return cls()
+
+        def __call__(self, _prompt: str, return_tensors: str = "pt") -> object:
+            """Initialize __call__."""
+
+            class Inputs(UserDict):
+                """Test class for Inputs."""
+
+                def __init__(self) -> None:
+                    """Initialize __init__."""
+                    super().__init__({"input_ids": torch.tensor([[1, 2]])})
+                    self.input_ids = torch.tensor([[1, 2]])
+
+                def to(self, _dev: object) -> object:
+                    """Execute to helper."""
+                    return self
+
+            return Inputs()
+
+        def decode(self, _tokens: object, skip_special_tokens: bool = True) -> str:
+            """Execute decode helper."""
+            return "SELECT * FROM adapter_tokens"
+
+    class MockModelSlicing:
+        """Test class for MockModelSlicing."""
+
+        def __init__(self) -> None:
+            """Initialize __init__."""
+            self.device = "cpu"
+            self.sequences = [torch.tensor([1, 2, 3, 4])]
+            self.sequences_scores = [torch.tensor(0.95)]
+
+        def generate(self, **kwargs: object) -> object:
+            """Execute generate helper."""
+            return self
+
+    class MockPeftModel:
+        """Test class for MockPeftModel."""
+
+        @classmethod
+        def from_pretrained(cls, model: object, path: str) -> object:
+            """Execute from pretrained helper."""
+            return model
+
+    monkeypatch.setitem(sys.modules, "peft", type("PeftMod", (), {"PeftModel": MockPeftModel}))
+    monkeypatch.setattr(pt_inf, "AutoTokenizer", MockTokenizerWithShape)
+    monkeypatch.setattr(pt_inf, "AutoModelForCausalLM", type("M", (), {"from_pretrained": lambda *a, **k: MockModelSlicing()}))
+    res = pt_inf.generate_sql("model", "prompt", adapter_path="/fake/path", test_mode=False)
+    assert res["status"] == "success"
+
+    # Test adapter loading failure
+    class FailingPeftModel:
+        """Test class for FailingPeftModel."""
+
+        @classmethod
+        def from_pretrained(cls, model: object, path: str) -> object:
+            """Execute from pretrained helper."""
+            raise ValueError("bad adapter")
+
+    monkeypatch.setitem(sys.modules, "peft", type("PeftMod", (), {"PeftModel": FailingPeftModel}))
+    res_fail = pt_inf.generate_sql("model", "prompt", lora_path="/fake/bad/path", test_mode=False)
+    assert res_fail["status"] == "success"

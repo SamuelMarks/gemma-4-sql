@@ -45,9 +45,6 @@ class LayerCache(nnx.Module):
 Cache = list[LayerCache]
 
 
-Cache = list[LayerCache]
-
-
 def init_cache(config: ModelConfig, batch_size: int, max_seq_len: int) -> Cache:
     """Initialize the KV cache for all layers.
 

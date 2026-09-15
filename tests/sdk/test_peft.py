@@ -31,10 +31,20 @@ def test_apply_peft_pytorch() -> object:
         apply_peft(model_name="test-model", backend="pytorch")
 
 
+try:
+    import keras
+except ImportError:
+    keras = None
+
+
 def test_apply_peft_keras() -> object:
     """Initialize function test_apply_peft_keras."""
-    res = apply_peft(model_name="test-model", backend="keras")
-    assert res["backend"] == "keras"
+    if keras is not None:
+        res = apply_peft(model_name="test-model", backend="keras")
+        assert res["backend"] == "keras"
+    else:
+        with pytest.raises(DependencyMissingError):
+            apply_peft(model_name="test-model", backend="keras")
 
 
 def test_apply_peft_mlx() -> object:
@@ -44,8 +54,8 @@ def test_apply_peft_mlx() -> object:
         AssertionError: Description.
 
     """
-    with pytest.raises(ValueError):
-        apply_peft(model_name="test-model", backend="mlx")
+    res = apply_peft(model_name="test-model", backend="mlx")
+    assert res["backend"] == "mlx"
 
 
 def test_apply_peft_maxtext() -> object:

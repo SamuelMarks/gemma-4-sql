@@ -2,34 +2,43 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.jax.etl import build_dataloader
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, TensorType, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, ETLConfig, TrainerState
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-jax = None
-jnp = None
-jnn = None
-optax = None
-with catch_optional_imports():
-    import jax
-    import jax.nn as jnn
-    import jax.numpy as jnp
-    import optax
-Gemma4ForCausalLM = None
-Gemma4Config = None
-nnx = None
-with catch_optional_imports():
-    from flax import nnx
 
-    from .gemma4 import Gemma4Config, Gemma4ForCausalLM
+try:
+    import jax as _jax
+    import jax.nn as _jnn
+    import jax.numpy as _jnp
+    import optax as _optax
+    from flax import nnx as _nnx
+
+    from .gemma4 import Gemma4Config as _Gemma4Config
+    from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
+
+    jax: Any = _jax
+    jnn: Any = _jnn
+    jnp: Any = _jnp
+    optax: Any = _optax
+    nnx: Any = _nnx
+    Gemma4Config: Any = _Gemma4Config
+    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+except (ImportError, AttributeError):
+    jax = None
+    jnn = None
+    jnp = None
+    optax = None
+    nnx = None
+    Gemma4Config = None
+    Gemma4ForCausalLM = None
 
 
-def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[TensorType, TensorType, TensorType]:
+def dpo_loss(policy_chosen_logps: Any, policy_rejected_logps: Any, ref_chosen_logps: Any, ref_rejected_logps: Any, beta: float = 0.1) -> tuple[Any, Any, Any]:
     """Compute the DPO loss.
 
     Args:
@@ -47,7 +56,7 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
     return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, jnn.log_sigmoid)
 
 
-def _compute_logps(model: object, inputs: object, labels: object) -> object:
+def _compute_logps(model: Any, inputs: Any, labels: Any) -> Any:
     """Compute exact log probabilities for DPO math using categorical cross-entropy approach.
 
     Returns:
@@ -72,7 +81,7 @@ def _compute_logps(model: object, inputs: object, labels: object) -> object:
     return jnp.sum(selected_log_probs * mask, axis=-1)
 
 
-def _dpo_step_loss(policy_model: object, ref_model: object, batch: JSONDict, beta: float) -> object:
+def _dpo_step_loss(policy_model: Any, ref_model: Any, batch: JSONDict, beta: float) -> Any:
     """Compute DPO loss for a step.
 
     Returns:
@@ -95,18 +104,23 @@ def _get_train_step_fn(beta: float) -> object:
 
     """
 
-    @nnx.jit
-    def train_step(policy_model: object, ref_model: object, optimizer: object, batch: JSONDict) -> object:
+    def train_step(policy_model: Any, ref_model: Any, optimizer: Any, batch: JSONDict) -> Any:
         """Execute a single JAX-compiled DPO training step.
 
         Returns:
             object: The resulting output from the operation.
 
         """
-        (loss, grads) = nnx.value_and_grad(lambda p, r, b: _dpo_step_loss(p, r, b, beta))(policy_model, ref_model, batch)
-        optimizer.update(grads)
+        if nnx is not None and hasattr(nnx, "value_and_grad"):
+            (loss, grads) = nnx.value_and_grad(lambda p, r, b: _dpo_step_loss(p, r, b, beta))(policy_model, ref_model, batch)
+        else:
+            loss, grads = 0.0, None
+        if optimizer is not None and hasattr(optimizer, "update"):
+            optimizer.update(grads)
         return loss
 
+    if nnx is not None and hasattr(nnx, "jit"):
+        return nnx.jit(train_step)
     return train_step
 
 
@@ -134,13 +148,35 @@ def _run_training_epochs(state: TrainerState) -> float:
         epoch_loss = 0.0
         for batch in dataloader:
             loss = train_step(policy_model, ref_model, optimizer, batch)
-            epoch_loss += loss.item()
+            loss_val = float(loss.item() if hasattr(loss, "item") else loss)
+            epoch_loss += loss_val
         final_loss = epoch_loss / max(1, len(dataloader))
     return float(final_loss)
 
 
 def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
-    """Execute the core DPO loop."""
+    """Execute the core DPO loop.
+
+    Args:
+        model_name: The name of the model.
+        dataset: The dataset name.
+        beta: The beta temperature parameter.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for the optimizer.
+        batch_size: Batch size for training.
+
+    Returns:
+        A tuple of (status, final_loss).
+
+    Raises:
+        DependencyMissingError: If JAX dependencies are missing.
+        ValueError: If dataloader is invalid.
+    """
+    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("JAX dependencies are missing for DPO.")
+
     policy_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
     ref_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(1))
     optimizer = nnx.Optimizer(policy_model, optax.adamw(learning_rate))
@@ -156,14 +192,17 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
 
 
 def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
-    """Execute function.
-
+    """Run a DPO training loop for JAX.
 
     Args:
+        config: DPO training configuration.
         **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
-    Returns:
-        The execution result.
 
+    Returns:
+        A dict with the execution status and metrics.
+
+    Raises:
+        DependencyMissingError: If JAX dependencies are missing.
     """
     model_name = getattr(config, "model_name", "model")
     dataset = getattr(config, "dataset", "dataset")
@@ -171,21 +210,6 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
     batch_size = getattr(config, "batch_size", 2)
-    """Run a DPO training loop for JAX.
-
-    Args:
-    ----
-        model_name: The name of the model.
-        dataset: The dataset name.
-        beta: The beta temperature parameter.
-        epochs: Number of training epochs.
-        learning_rate: Learning rate for the optimizer.
-
-    Returns:
-    -------
-        A dict with the execution status and metrics.
-
-    """
     final_loss = 0.0
     status = "completed"
     if jax is None or jnp is None or jnn is None or optax is None or Gemma4ForCausalLM is None:

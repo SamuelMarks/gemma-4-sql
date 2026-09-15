@@ -114,3 +114,12 @@ def test_export_model_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: object)
     monkeypatch.setattr(m_export, "torch", None)
     with pytest.raises(RuntimeError, match="PyTorch or safetensors missing"):
         m_export.export_model("model", str(tmp_path))
+
+
+def test_export_model_adapter(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """Test export_model with export_type='adapter'."""
+    m_export = __import__("gemma_4_sql.backends.pytorch.export", fromlist=[""])
+    monkeypatch.setattr(m_export, "torch", MockTorch())
+    monkeypatch.setattr(m_export, "save_file", lambda *_args, **_kwargs: None)
+    res = m_export.export_model("model", str(tmp_path), export_type="adapter", backend_alias="pytorch_native", test_mode=True)
+    assert "adapter_model.safetensors" in str(res["file_path"])

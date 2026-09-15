@@ -3,31 +3,38 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
-load = None
-generate = None
-with catch_optional_imports():
-    from mlx_lm import generate, load
+
+try:
+    from mlx_lm import generate as _generate
+    from mlx_lm import load as _load
+
+    load: Any = _load
+    generate: Any = _generate
+except (ImportError, AttributeError):
+    load = None
+    generate = None
 
 
 def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50, **kwargs: JSONValue) -> JSONDict:
     """Generate a SQL query from a natural language prompt using MLX.
 
-        Args:
-                    **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
-    model_name: The name of the target model.
-            prompt: The input text prompt.
-            beam_width: The number of beams for beam search.
-            max_length: The maximum length of the sequence.
+    Args:
+        model_name: The name of the target model.
+        prompt: The input text prompt.
+        beam_width: The number of beams for beam search.
+        max_length: The maximum length of the sequence.
+        **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
 
-        Returns:
-            A dictionary containing the results.
+    Returns:
+        A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If MLX dependencies are missing.
     """
     confidence_score = 0.0
     if load is None or generate is None:

@@ -36,6 +36,12 @@ def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
         quantize_model("model2", "int4", backend="pytorch")
 
 
+try:
+    import keras
+except ImportError:
+    keras = None
+
+
 def test_quantize_keras() -> None:
     """Initialize function test_quantize_keras.
 
@@ -43,11 +49,15 @@ def test_quantize_keras() -> None:
         AssertionError: Description.
 
     """
-    res = quantize_model("model3", "awq", backend="keras")
-    if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["model"] == "model3":
-        raise AssertionError
+    if keras is not None:
+        res = quantize_model("model3", "awq", backend="keras")
+        if not res["backend"] == "keras":
+            raise AssertionError
+        if not res["model"] == "model3":
+            raise AssertionError
+    else:
+        with pytest.raises(DependencyMissingError):
+            quantize_model("model3", "awq", backend="keras")
 
 
 def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:

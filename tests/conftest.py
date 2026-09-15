@@ -1,9 +1,20 @@
 """Module docstring."""
 
+import os
+
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+os.environ.setdefault("XLA_PYTHON_CLIENT_ALLOCATOR", "platform")
+
 import warnings
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+try:
+    import torch  # Preload to avoid PyTorch/coverage C-tracer segfault in Python 3.12
+except ImportError:
+    torch = None
+
 import pytest
 
 """Global pytest fixtures for gemma-4-sql tests."""
@@ -157,6 +168,14 @@ class MockModel:
     def save_pretrained(self: object, *_a: object, **_k: object) -> None:
         """Execute function."""
 
+    def parameters(self: object) -> dict:
+        """Execute function.
+
+        Returns:
+            dict: Empty parameter dictionary.
+        """
+        return {}
+
 
 class MockGemma4ForCausalLM:
     """Provide class docstring."""
@@ -189,6 +208,9 @@ def _mock_external_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.gemma4_for_causal_lm_cls", MockGemma4ForCausalLM, raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", None, raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.peft.peft", None, raising=False)
+    monkeypatch.setattr("gemma_4_sql.backends.mlx.peft.load", lambda m: (MockModel(), None), raising=False)
+    monkeypatch.setattr("gemma_4_sql.backends.mlx.inference.load", lambda m: (MockModel(), MockHFTokenizer()), raising=False)
+    monkeypatch.setattr("gemma_4_sql.backends.mlx.train.load", lambda m: (MockModel(), MockHFTokenizer()), raising=False)
 
 
 class MockDBModule:
@@ -231,27 +253,3 @@ import pytest
 def _suppress_expected_errors(request):
     """Docstring."""
     yield
-
-
-import pytest
-
-from gemma_4_sql.exceptions import DependencyMissingError
-
-
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_call(item: pytest.Item) -> typing.Iterator[None]:
-    """Intercept and handle test execution outcomes.
-
-    Args:
-        item: The pytest test item being executed.
-
-    Yields:
-        None: Yields to test execution.
-    """
-    outcome = yield
-    excinfo = outcome.excinfo
-    if excinfo is not None:
-        exc_type, exc_value, _ = excinfo
-        if issubclass(exc_type, DependencyMissingError):
-            e_str = str(exc_value)
-            pytest.skip(f"Skipping due to missing dependency: {e_str}")

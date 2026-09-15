@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-SummaryWriter = None
-with catch_optional_imports():
-    from tensorboardX import SummaryWriter
+
+try:
+    from tensorboardX import SummaryWriter as _SummaryWriter
+
+    SummaryWriter: Any = _SummaryWriter
+except (ImportError, AttributeError):
+    SummaryWriter = None
 
 
 def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> JSONDict:
@@ -23,6 +25,9 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If TensorBoardX dependencies are missing.
     """
     if SummaryWriter is None:
         from gemma_4_sql.exceptions import DependencyMissingError

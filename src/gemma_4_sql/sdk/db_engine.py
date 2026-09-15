@@ -29,11 +29,13 @@ class LiveDatabaseEngine:
         """Initialize the LiveDatabaseEngine.
 
         Args:
-        **kwargs: Optional keyword arguments for advanced configuration.
-
             db_path: The file path to the database.
             ddl: The Data Definition Language (DDL) string.
             db_type: The string representing the db type.
+            **kwargs: Optional keyword arguments for advanced configuration.
+
+        Raises:
+            ValueError: If unsupported db_type is provided.
         """
         self.db_path = db_path
         self.db_type = db_type.lower()
@@ -75,8 +77,14 @@ class LiveDatabaseEngine:
         """
         if not self.read_only:
             return
-        dangerous_patterns = ["\\bDROP\\b", "\\bDELETE\\b", "\\bUPDATE\\b", "\\bINSERT\\b", "\\bALTER\\b", "\\bTRUNCATE\\b", "\\bGRANT\\b", "\\bREVOKE\\b"]
-        upper_query = query.upper()
+        # Strip comments and string literals to prevent false positives on values or remarks
+        cleaned_query = re.sub(r"/\*.*?\*/", " ", query, flags=re.DOTALL)
+        cleaned_query = re.sub(r"--[^\n]*", " ", cleaned_query)
+        cleaned_query = re.sub(r"'([^'\\]|\\.)*'", "''", cleaned_query)
+        cleaned_query = re.sub(r"\$\$.*?\$\$", "''", cleaned_query, flags=re.DOTALL)
+
+        dangerous_patterns = [r"\bDROP\b", r"\bDELETE\b", r"\bUPDATE\b", r"\bINSERT\b", r"\bALTER\b", r"\bTRUNCATE\b", r"\bGRANT\b", r"\bREVOKE\b"]
+        upper_query = cleaned_query.upper()
         for pattern in dangerous_patterns:
             if re.search(pattern, upper_query):
                 msg = f"Safety Violation: Mutating statements ({pattern}) are not allowed in read-only mode."

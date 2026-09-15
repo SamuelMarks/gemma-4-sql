@@ -7,6 +7,7 @@ name = "gemma-4-sql"
 version = "0.0.1"
 description = "Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch; Keras ; JAX; JAX / MaxText "
 readme = "README.md"
+license = "Apache-2.0 OR MIT"
 requires-python = ">=3.12"
 dynamic = ["dependencies", "optional-dependencies"]
 
@@ -26,6 +27,7 @@ keras = ["requirements-keras.txt"]
 maxtext = ["requirements-maxtext.txt"]
 pytorch = ["requirements-pytorch.txt"]
 duckdb = ["requirements-duckdb.txt"]
+mlx = ["requirements-mlx.txt"]
 all = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxtext.txt", "requirements-pytorch.txt", "requirements-duckdb.txt"]
 default = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxtext.txt", "requirements-pytorch.txt", "requirements-duckdb.txt"]
 
@@ -68,24 +70,39 @@ no_implicit_optional = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 allow_redefinition = true
+disallow_any_generics = true
 
 [[tool.mypy.overrides]]
 module = [
     "tests.*",
-    "gemma_4_sql.backends.*",
-    "gemma_4_sql.cli_parsers.*",
+    "gemma_4_sql.backends.jax.gemma4.tests.*",
 ]
 ignore_errors = true
+
+[tool.coverage.run]
+omit = [
+    "*/tests/*",
+    "tests/*",
+]
 
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
     "except \\(ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError\\):",
+    "except \\(ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError\\) as e:",
     "except \\(ImportError, RuntimeError\\):",
     "except \\(ImportError, RuntimeError\\) as e:",
     "except \\(RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError\\):",
+    "except \\(RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError\\) as e:",
+    "except \\(RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, DependencyMissingError\\):",
+    "except \\(ValueError, TypeError, RuntimeError, OSError, AttributeError, KeyError, DependencyMissingError\\) as e:",
     "except \\(ImportError, ValueError\\):",
+    "except \\(ImportError, ValueError\\) as e:",
+    "except \\(ImportError, AttributeError\\):",
+    "except \\(ImportError, AttributeError\\) as e:",
+    "except \\(ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError\\):",
+    "except \\(ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError\\) as e:",
     "except ImportError:",
     "if TYPE_CHECKING:",
     "if typing.TYPE_CHECKING:",
@@ -115,7 +132,49 @@ exclude_lines = [
     "if mlx is None or BitsAndBytesConfig is None or AutoModelForCausalLM is None:",
     "if torch is None or peft is None:",
     "if tf is None or keras is None:",
-    "if mx is not None and nn is not None:"
+    "if mx is not None and nn is not None:",
+    "import keras as _keras",
+    "import tensorflow as _tf",
+    "import torch as _torch",
+    "import transformers as _transformers",
+    "import peft as _peft",
+    "import optax as _optax",
+    "import jax as _jax",
+    "import jax.numpy as _jnp",
+    "import flax.nnx as _nnx",
+    "import mlx.core as _mx",
+    "import mlx.nn as _nn",
+    "import mlx.optimizers as _optim",
+    "from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model",
+    "from maxtext.models import gemma4 as _gemma4",
+    "Gemma4Model: Any = _Gemma4Model",
+    "gemma4: Any = _gemma4",
+    "maxtext_train: Any = _maxtext_train",
+    "keras: Any = _keras",
+
+
+    "tf: Any = _tf",
+    "torch: Any = _torch",
+    "transformers: Any = _transformers",
+    "peft: Any = _peft",
+    "optax: Any = _optax",
+    "jax: Any = _jax",
+    "jnp: Any = _jnp",
+    "nnx: Any = _nnx",
+    "mx: Any = _mx",
+    "nn: Any = _nn",
+    "optim: Any = _optim",
+    "from tensorboardX import SummaryWriter as _SummaryWriter",
+
+    "from mlx.utils.tensorboard import SummaryWriter as _SummaryWriter",
+    "from torch.utils.tensorboard import SummaryWriter as _SummaryWriter",
+    "SummaryWriter: Any = _SummaryWriter",
+    "raise DependencyMissingError\\(\"JAX dependencies are missing for training\\.\"\\)",
+    "raise DependencyMissingError\\(\"JAX dependencies are missing for DPO\\.\"\\)",
+    "raise DependencyMissingError\\(\"MaxText dependencies are missing for training\\.\"\\)",
+    "raise DependencyMissingError\\(\"PyTorch dependencies are missing\\.\"\\)",
+    "raise DependencyMissingError\\(\"Datasets dependency is missing\\.\"\\)",
+    "raise DependencyMissingError\\(\"Grain dependency is missing\\.\"\\)"
 ]
 
 [project.entry-points."gemma_4_sql.backends"]

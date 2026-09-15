@@ -1,91 +1,99 @@
-"""Module docstring."""
+"""Tests validating true missing dependency error handling across backends."""
 
-import contextlib
+from __future__ import annotations
 
-"""Provide module docstring."""
-import importlib
-import typing
+from pathlib import Path
 
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import TrainingConfig
 
 
-def safe_exec(mod_name, func_name, mock_dict, *args, **kwargs):
-    """Test function."""
-    try:
-        mod = importlib.import_module(mod_name)
-        original_attrs = {}
-        for k, v in mock_dict.items():
-            if hasattr(mod, k):
-                original_attrs[k] = getattr(mod, k)
-                setattr(mod, k, v)
-        try:
-            func = getattr(mod, func_name)
-            func(*args, **kwargs)
-        finally:
-            for k, v in original_attrs.items():
-                setattr(mod, k, v)
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-        pass
+def test_missing_jax_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test JAX DPO returns fallback when jnn is missing."""
+    import gemma_4_sql.backends.jax.dpo as jdpo
+
+    monkeypatch.setattr(jdpo, "jnn", None)
+    assert jdpo.dpo_loss({}, {}, {}, {}) == (0.0, 0.0, 0.0)
 
 
-def test_true_missing() -> object:
-    """Test function."""
-    safe_exec("gemma_4_sql.backends.jax.dpo", "dpo_loss", {"jnn": None}, {}, {})
+def test_missing_jax_train(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test JAX train raises DependencyMissingError when optax is missing."""
+    import gemma_4_sql.backends.jax.train as jtrain
 
-    class EvalLoader:
-        """Class docstring."""
-
-        def __iter__(self: typing.Any) -> object:
-            """Test function."""
-            for _ in range(12):
-                yield {"inputs": [[1]], "targets": [[1]]}
-
-    safe_exec("gemma_4_sql.backends.jax.evaluate", "evaluate_model", {}, "a", "b", dataloader=EvalLoader())
-    with contextlib.suppress(Exception):
-        safe_exec("gemma_4_sql.backends.jax.export", "export_model", {"ocp": None}, "a", "b")
-    safe_exec("gemma_4_sql.backends.jax.export", "export_model", {}, "a", "b")
-    safe_exec("gemma_4_sql.backends.jax.inference", "generate_sql", {"nnx": None}, "a", "b")
-    with contextlib.suppress(Exception):
-        safe_exec("gemma_4_sql.backends.jax.quantize", "quantize_model", {"jnp": None}, "a", "b")
-    safe_exec("gemma_4_sql.backends.jax.train", "train_model", {"optax": None}, "a", "b", dataloader=[])
-    safe_exec("gemma_4_sql.backends.jax.train", "train_model", {"nnx": None}, "a", "b", dataloader=[])
-
-    class EvalLoaderKeras:
-        """Class docstring."""
-
-        def __iter__(self: typing.Any) -> object:
-            """Test function."""
-            for _ in range(12):
-                yield ({"inputs": [[1]]}, {"targets": [[1]]})
-
-    safe_exec("gemma_4_sql.backends.keras.evaluate", "evaluate_model", {}, "a", "b", dataloader=EvalLoaderKeras())
-    safe_exec("gemma_4_sql.backends.keras.export", "export_model", {"keras_nlp": None}, "a", "b")
+    monkeypatch.setattr(jtrain, "optax", None)
     with pytest.raises(DependencyMissingError):
-        safe_exec("gemma_4_sql.backends.keras.inference", "generate_sql", {"tf": None}, "a", "b")
-    safe_exec("gemma_4_sql.backends.keras.train", "train_model", {"tf": None}, "a", "b", dataloader=[])
-    safe_exec("gemma_4_sql.backends.keras.inference", "generate_sql", {"keras_nlp": None}, "a", "b")
-    safe_exec("gemma_4_sql.backends.keras.train", "train_model", {"keras_nlp": None}, "a", "b", dataloader=[])
-    safe_exec("gemma_4_sql.backends.keras.train", "train_model", {"keras_nlp": type("MockKerasNLP", (), {"models": None})()}, "a", "b", dataloader=[])
+        jtrain.train_model(TrainingConfig(model_name="m", dataset="d"))
 
 
-def test_true_missing_part1() -> object:
-    """Test function."""
-    safe_exec("gemma_4_sql.backends.maxtext.export", "export_model", {"ocp": None}, "a", "b")
-    safe_exec("gemma_4_sql.backends.maxtext.export", "export_model", {"Gemma4Model": None}, "a", "b")
-    safe_exec("gemma_4_sql.backends.maxtext.train", "train_model", {"optax": None}, "a", "b", dataloader=[])
-    safe_exec("gemma_4_sql.backends.pytorch.export", "export_model", {"transformers": type("MockTransformers", (), {"models": type("MockModels", (), {"gemma4": None})()})()}, "a", "b")
-    safe_exec("gemma_4_sql.backends.pytorch.export", "export_model", {"safetensors": type("MockSafetensors", (), {"torch": None})()}, "a", "b")
-    safe_exec("gemma_4_sql.backends.pytorch.train", "train_model", {"torch": type("MockTorch", (), {"optim": None})()}, "a", "b", dataloader=[])
+def test_missing_pytorch_inference(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test PyTorch inference raises DependencyMissingError when torch is missing."""
+    import gemma_4_sql.backends.pytorch.inference as pinf
 
-    try:
-        mod = importlib.import_module("gemma_4_sql.sdk.db_engine")
-        original = getattr(mod, "psycopg2", None)
-        mod.psycopg2 = None
-        try:
-            mod.LiveDatabaseEngine(db_path=":memory:", db_type="postgresql").connect()
-        finally:
-            mod.psycopg2 = original
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
-        pass
+    monkeypatch.setattr(pinf, "torch", None)
+    with pytest.raises(DependencyMissingError):
+        pinf.generate_sql("m", "prompt")
+
+
+def test_missing_pytorch_peft(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test PyTorch PEFT raises DependencyMissingError when peft is missing."""
+    import gemma_4_sql.backends.pytorch.peft as ppeft
+
+    monkeypatch.setattr(ppeft, "peft", None)
+    with pytest.raises(DependencyMissingError):
+        ppeft.apply_lora("m", ["q_proj"])
+
+
+def test_missing_mlx_train(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test MLX train raises DependencyMissingError when mlx is missing."""
+    import gemma_4_sql.backends.mlx.train as mtrain
+
+    monkeypatch.setattr(mtrain, "mx", None)
+    with pytest.raises(DependencyMissingError):
+        mtrain.train_model(TrainingConfig(model_name="m", dataset="d"))
+
+
+def test_missing_mlx_inference(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test MLX inference raises DependencyMissingError when mlx is missing."""
+    import gemma_4_sql.backends.mlx.inference as minf
+
+    monkeypatch.setattr(minf, "load", None)
+    with pytest.raises(DependencyMissingError):
+        minf.generate_sql("m", "prompt")
+
+
+def test_missing_maxtext_inference(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test MaxText inference raises DependencyMissingError when Gemma4Model is missing."""
+    import gemma_4_sql.backends.maxtext.inference as minf
+
+    monkeypatch.setattr(minf, "Gemma4Model", None)
+    with pytest.raises(DependencyMissingError):
+        minf.generate_sql("m", "prompt")
+
+
+def test_missing_maxtext_peft(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test MaxText PEFT raises DependencyMissingError when jax is missing."""
+    import gemma_4_sql.backends.maxtext.peft as mpeft
+
+    monkeypatch.setattr(mpeft, "jax", None)
+    with pytest.raises(DependencyMissingError):
+        mpeft.apply_lora("m", ["q_proj"])
+
+
+def test_missing_keras_peft(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test Keras PEFT raises DependencyMissingError when keras is missing."""
+    import gemma_4_sql.backends.keras.peft as kpeft
+
+    monkeypatch.setattr(kpeft, "keras", None)
+    with pytest.raises(DependencyMissingError):
+        kpeft.apply_lora("m", ["q_proj"])
+
+
+def test_missing_keras_quantize(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test Keras quantize raises DependencyMissingError when keras is missing."""
+    import gemma_4_sql.backends.keras.quantize as kquant
+
+    monkeypatch.setattr(kquant, "keras", None)
+    with pytest.raises(DependencyMissingError):
+        kquant.quantize_model("m", "int8")

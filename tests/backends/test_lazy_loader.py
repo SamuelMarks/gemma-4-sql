@@ -1,9 +1,12 @@
+"""Tests for test lazy loader module."""
+
 import pytest
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader, catch_optional_imports
 
 
 def test_catch_optional_imports():
+    """Test catch optional imports functionality."""
     with catch_optional_imports():
         pass
 
@@ -12,6 +15,7 @@ def test_catch_optional_imports():
 
 
 def test_lazy_loader(monkeypatch):
+    """Test lazy loader functionality."""
     import sys
 
     monkeypatch.setitem(sys.modules, "my_fake_module", type("Fake", (), {}))
@@ -28,6 +32,7 @@ def test_lazy_loader(monkeypatch):
 
 
 def test_lazy_loader_missing():
+    """Test lazy loader missing functionality."""
     loader = LazyLoader("this_module_does_not_exist")
     assert not loader._loaded
     mod = loader.get_module()
@@ -37,6 +42,7 @@ def test_lazy_loader_missing():
 
 
 def test_lazy_loader_get_modules():
+    """Test lazy loader get modules functionality."""
     import gemma_4_sql.backends.lazy_loader as ll
 
     ll.get_jax()

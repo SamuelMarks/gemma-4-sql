@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -11,11 +11,8 @@ from jax import Array
 
 from .config import ShardConfig
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue
 
-
-def _make_linear(*args: object, **kwargs: JSONValue) -> object:
+def _make_linear(*args: Any, **kwargs: Any) -> Any:
     """Docstring for _make_linear.
 
     Args:
@@ -29,7 +26,7 @@ def _make_linear(*args: object, **kwargs: JSONValue) -> object:
     return nnx.Linear(*args, **kwargs)
 
 
-def _make_embed(*args: object, **kwargs: JSONValue) -> object:
+def _make_embed(*args: Any, **kwargs: Any) -> Any:
     """Docstring for _make_embed.
 
     Args:
@@ -57,6 +54,8 @@ class Gemma4RMSNorm(nnx.Module):
 
     """
 
+    scale: nnx.Param[Array] | None
+
     def __init__(self, dim: int, eps: float = 1e-06, *, with_scale: bool = True, rngs: nnx.Rngs, **kwargs: object) -> None:
         """Docstring for __init__.
         Args:
@@ -64,9 +63,9 @@ class Gemma4RMSNorm(nnx.Module):
         """
         self.eps = eps
         self.with_scale = with_scale
-        self.dtype = kwargs.get("dtype", jnp.float32)
+        self.dtype: Any = kwargs.get("dtype", jnp.float32)
         if self.with_scale:
-            self.scale = nnx.Param(jax.nn.initializers.zeros(rngs.params(), dim, dtype=self.dtype))
+            self.scale = nnx.Param(jax.nn.initializers.zeros(rngs.params(), (dim,), dtype=self.dtype))
         else:
             self.scale = None
 
@@ -80,7 +79,7 @@ class Gemma4RMSNorm(nnx.Module):
         """
         xf32 = x.astype(jnp.float32)
         normed = xf32 * jax.lax.rsqrt(jnp.square(xf32).mean(-1, keepdims=True) + self.eps)
-        if self.with_scale:
+        if self.with_scale and self.scale is not None:
             scale_val = jnp.asarray(self.scale[...], dtype=jnp.float32)
             out = normed * (1.0 + scale_val)
         else:
@@ -88,7 +87,7 @@ class Gemma4RMSNorm(nnx.Module):
         return out.astype(self.dtype)
 
 
-class ConstVar(nnx.Variable):
+class ConstVar(nnx.Variable[Any]):
     """Constant variable that should not be updated during training.
 
     This is used to store static tensors like inverse timescales for RoPE
@@ -97,7 +96,7 @@ class ConstVar(nnx.Variable):
     """
 
 
-class StatVar(nnx.Variable):
+class StatVar(nnx.Variable[Any]):
     """Statistical variable for tracking metrics like min/max values.
 
     This is used by layers like Gemma4ClippableLinear to track the bounds

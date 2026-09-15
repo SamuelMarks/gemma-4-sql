@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
-torch = None
-peft = None
-LoraConfig = None
-get_peft_model = None
-AutoModelForCausalLM = None
-with catch_optional_imports():
-    import peft
-    import torch
-    from peft import LoraConfig, get_peft_model
-    from transformers import AutoModelForCausalLM
+
+try:
+    import peft as _peft
+    import torch as _torch
+    from peft import LoraConfig as _LoraConfig
+    from peft import get_peft_model as _get_peft_model
+    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
+
+    peft: Any = _peft
+    torch: Any = _torch
+    LoraConfig: Any = _LoraConfig
+    get_peft_model: Any = _get_peft_model
+    AutoModelForCausalLM: Any = _AutoModelForCausalLM
+except (ImportError, AttributeError):
+    peft = None
+    torch = None
+    LoraConfig = None
+    get_peft_model = None
+    AutoModelForCausalLM = None
 
 
 def apply_lora(
@@ -41,6 +48,9 @@ def apply_lora(
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If PyTorch PEFT dependencies are missing.
     """
     if peft is None or torch is None or AutoModelForCausalLM is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -53,6 +63,8 @@ def apply_lora(
         model = get_peft_model(model, lora_config)
         if hasattr(model, "print_trainable_parameters"):  # pragma: no cover
             model.print_trainable_parameters()
+        if "output_dir" in kwargs and hasattr(model, "save_pretrained"):
+            model.save_pretrained(str(kwargs["output_dir"]))
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to apply LoRA: ")
         status = f"failed: {e!s}"

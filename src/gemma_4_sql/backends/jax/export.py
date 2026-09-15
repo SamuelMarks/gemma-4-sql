@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-jax = None
-jnp = None
-ocp = None
-with catch_optional_imports():
-    import jax
-    import jax.numpy as jnp
-    import orbax.checkpoint as ocp
+
+try:
+    import jax as _jax
+    import jax.numpy as _jnp
+    import orbax.checkpoint as _ocp
+
+    jax: Any = _jax
+    jnp: Any = _jnp
+    ocp: Any = _ocp
+except (ImportError, AttributeError):
+    jax = None
+    jnp = None
+    ocp = None
 
 
 def export_model(model_name: str, export_path: str) -> JSONDict:
@@ -27,6 +31,10 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
 
     Returns:
         A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If JAX export dependencies are missing.
+        ValueError: If loading the model fails.
     """
     Path(export_path).mkdir(parents=True, exist_ok=True)
     if jax is None or jnp is None or ocp is None:
@@ -52,4 +60,4 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     checkpointer.save(file_path, weights)
     status = "exported_with_orbax"
 
-    return {"backend": "jax", "model": model_name, "export_path": export_path, "file_path": file_path, "status": status, "format": "orbax/saved_model"}
+    return {"backend": "jax", "model": model_name, "export_path": export_path, "file_path": str(file_path), "status": status, "format": "orbax/saved_model"}

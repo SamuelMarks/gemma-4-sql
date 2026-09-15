@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -21,7 +22,7 @@ def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array)
         The resulting tensor array.
     """
 
-    def merge_modalities(i_emb: object, t_emb: object, mask: object) -> object:
+    def merge_modalities(i_emb: Any, t_emb: Any, mask: Any) -> Any:
         """Merge image and text embeddings using the provided token mask.
 
         Returns:
@@ -46,3 +47,4 @@ class MultimodalInputs:
     input_features: Array | None = None
     input_features_mask: Array | None = None
     audio_token_mask: Array | None = None
+    attention_mask: Array | None = None

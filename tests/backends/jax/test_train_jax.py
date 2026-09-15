@@ -516,3 +516,20 @@ def test_train_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     importlib.reload(mdl)
     monkeypatch.undo()
     importlib.reload(mdl)
+
+
+def test_jax_train_branches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test JAX train step without nnx jit/grad and missing deps in _execute_train."""
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    class MockEmptyNNX:
+        """Test class for MockEmptyNNX."""
+
+    monkeypatch.setattr(tr, "nnx", MockEmptyNNX())
+    step_fn = tr._get_train_step_fn()
+    loss = step_fn(None, None, {})
+    assert loss == pytest.approx(0.0)
+
+    monkeypatch.setattr(tr, "jax", None)
+    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing for training"):
+        tr._execute_train("dat", 1, 1e-4)

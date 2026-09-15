@@ -15,11 +15,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def db_execute_cmd(args: argparse.Namespace) -> None:
+def db_execute_cmd(args: argparse.Namespace) -> int:
     """Execute a SQL query against the LiveDatabaseEngine.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code 0 on success, or 3 on database failure.
     """
     db_kwargs = {}
     if getattr(args, "db_kwargs", ""):
@@ -33,6 +36,7 @@ def db_execute_cmd(args: argparse.Namespace) -> None:
         "error": error,
     }
     print(json.dumps(output, indent=2))
+    return 0 if success else 3
 
 
 def embed_duckdb_cmd(args: argparse.Namespace) -> None:
@@ -53,6 +57,7 @@ def embed_duckdb_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
         db_path=args.db_path,
         max_retries=args.max_retries,
+        test_mode=getattr(args, "test_mode", False),
     )
     if args.prompt:
         rows = conn.execute("SELECT ask_gemma(?)", [args.prompt]).fetchall()

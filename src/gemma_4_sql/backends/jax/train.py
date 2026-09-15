@@ -2,32 +2,40 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.jax.etl import build_dataloader
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.type_hints import ETLConfig, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-jax = None
-jnp = None
-optax = None
-with catch_optional_imports():
-    import jax
-    import jax.numpy as jnp
-    import optax
-Gemma4ForCausalLM = None
-Gemma4Config = None
-nnx = None
-with catch_optional_imports():
-    from flax import nnx
 
-    from .gemma4 import Gemma4Config, Gemma4ForCausalLM
+try:
+    import jax as _jax
+    import jax.numpy as _jnp
+    import optax as _optax
+    from flax import nnx as _nnx
+
+    from .gemma4 import Gemma4Config as _Gemma4Config
+    from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
+
+    jax: Any = _jax
+    jnp: Any = _jnp
+    optax: Any = _optax
+    nnx: Any = _nnx
+    Gemma4Config: Any = _Gemma4Config
+    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+except (ImportError, AttributeError):
+    jax = None
+    jnp = None
+    optax = None
+    nnx = None
+    Gemma4Config = None
+    Gemma4ForCausalLM = None
 
 
-def _loss_fn(model: object, batch: JSONDict) -> object:
+def _loss_fn(model: Any, batch: JSONDict) -> Any:
     """Compute the cross-entropy loss for the model on a given batch.
 
     Args:
@@ -50,8 +58,7 @@ def _get_train_step_fn() -> object:
         The execution result.
     """
 
-    @nnx.jit
-    def train_step(model: object, optimizer: object, batch: JSONDict) -> object:
+    def train_step(model: Any, optimizer: Any, batch: JSONDict) -> Any:
         """Execute a single JAX-compiled training step.
 
         Args:
@@ -62,10 +69,16 @@ def _get_train_step_fn() -> object:
         Returns:
             The execution result.
         """
-        (loss, grads) = nnx.value_and_grad(_loss_fn)(model, batch)
-        optimizer.update(grads)
+        if nnx is not None and hasattr(nnx, "value_and_grad"):
+            (loss, grads) = nnx.value_and_grad(_loss_fn)(model, batch)
+        else:
+            loss, grads = 0.0, None
+        if optimizer is not None and hasattr(optimizer, "update"):
+            optimizer.update(grads)
         return loss
 
+    if nnx is not None and hasattr(nnx, "jit"):
+        return nnx.jit(train_step)
     return train_step
 
 
@@ -77,7 +90,7 @@ def _run_training_epochs(state: TrainerState) -> float:
 
     """
 
-    def process_batch(batch: dict) -> float:
+    def process_batch(batch: dict[str, Any]) -> float:
         """Execute function.
 
         Returns:
@@ -87,13 +100,32 @@ def _run_training_epochs(state: TrainerState) -> float:
         batch["inputs"] = jax.device_put(batch["inputs"], state.params)
         batch["targets"] = jax.device_put(batch["targets"], state.params)
         loss = state.train_step(state.policy_model, state.optimizer, batch)
-        return float(loss.item())
+        return float(loss.item() if hasattr(loss, "item") else loss)
 
     return generic_run_training_epochs(state.epochs, state.dataloader, process_batch)
 
 
 def _execute_train(dataset: str, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
-    """Execute the core training loop for JAX."""
+    """Execute the core training loop for JAX.
+
+    Args:
+        dataset: Dataset identifier.
+        epochs: Number of training epochs.
+        learning_rate: Training learning rate.
+        batch_size: Training batch size.
+
+    Returns:
+        A tuple of (status, final_loss).
+
+    Raises:
+        DependencyMissingError: If JAX dependencies are missing.
+        ValueError: If dataloader is invalid.
+    """
+    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("JAX dependencies are missing for training.")
+
     model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
     mesh = jax.sharding.Mesh(jax.devices(), ("data",))
     sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("data"))
@@ -113,20 +145,15 @@ def _execute_train(dataset: str, epochs: int, learning_rate: float, batch_size: 
 def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     """Train a Text-to-SQL model using the JAX backend.
 
-        Args:
-                **kwargs: Extra runtime options such as 'test_mode' and 'distributed_strategy'.
-    ----
-            config: The TrainingConfig.
-            kwargs: Additional arguments.
-            model_name: The name of the model to train.
-            dataset: The dataset to train on.
-            epochs: Number of epochs to train.
-            learning_rate: The learning rate.
+    Args:
+        config: The TrainingConfig.
+        **kwargs: Extra runtime options such as 'test_mode' and 'distributed_strategy'.
 
-        Returns:
-        -------
-            A dictionary containing JAX training status and metrics.
+    Returns:
+        A dictionary containing JAX training status and metrics.
 
+    Raises:
+        DependencyMissingError: If JAX dependencies are missing.
     """
     action = getattr(config, "action", "sft")
     model_name = getattr(config, "model_name", "gemma-4")
@@ -136,7 +163,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     final_loss = 0.45
     status = "completed"
-    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None:
+    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("JAX dependencies are missing for training.")

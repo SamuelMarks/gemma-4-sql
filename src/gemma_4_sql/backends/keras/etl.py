@@ -5,21 +5,22 @@ from __future__ import annotations
 import typing
 
 from gemma_4_sql.backends.common_data import _get_grain_classes, _load_duckdb_dataset
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig
 
 if typing.TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
-datasets = None
-with catch_optional_imports():
-    import datasets
-grain = None
-with catch_optional_imports():
-    import grain.python as grain
+
+try:
+    import datasets as _datasets
+    import grain.python as _grain
+
+    datasets: typing.Any = _datasets
+    grain: typing.Any = _grain
+except (ImportError, AttributeError):
+    datasets = None
+    grain = None
 duckdb = None
-with catch_optional_imports():
-    pass
 
 
 def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, duckdb_table: str | None) -> object:
@@ -33,9 +34,16 @@ def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, d
 
     Returns:
         The loaded dataset.
+
+    Raises:
+        DependencyMissingError: If datasets dependency is missing.
     """
     if duckdb_path and duckdb_table:
         return _load_duckdb_dataset(duckdb_path, duckdb_table)
+    if datasets is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Datasets dependency is missing.")
     return datasets.load_dataset(dataset_name, split=split)
 
 
@@ -48,7 +56,14 @@ def _get_sampler(source_len: int, distributed: bool) -> object:
 
     Returns:
         A Grain IndexSampler.
+
+    Raises:
+        DependencyMissingError: If Grain dependency is missing.
     """
+    if grain is None:
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError("Grain dependency is missing.")
     shard_options = getattr(grain, "JAXDistributedSharding", lambda: None)() if distributed else getattr(grain, "NoSharding", lambda: None)()
     return grain.IndexSampler(num_records=source_len, shard_options=shard_options, shuffle=False, num_epochs=1)
 
@@ -56,12 +71,15 @@ def _get_sampler(source_len: int, distributed: bool) -> object:
 def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     """Build a Keras-specific Grain dataloader.
 
-        Args:
-                    **kwargs: Overrides for ETL configuration (e.g., duckdb_path, duckdb_table).
-    config: The configuration parameters.
+    Args:
+        config: The configuration parameters.
+        **kwargs: Overrides for ETL configuration (e.g., duckdb_path, duckdb_table).
 
-        Returns:
-            A dictionary containing the results.
+    Returns:
+        A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If grain or datasets are missing.
     """
     dataset_name = config.dataset_name
     split = config.split

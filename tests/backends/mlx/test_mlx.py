@@ -7,45 +7,61 @@ from gemma_4_sql.type_hints import TrainingConfig
 
 
 def test_get_trainer():
+    """Test get trainer functionality."""
     assert mx_backend.get_trainer() == "mlx_trainer"
 
 
 def test_benchmark_mlx_mocked(monkeypatch):
+    """Test benchmark mlx mocked functionality."""
     import gemma_4_sql.backends.mlx.benchmark as bm
 
     class MockModel:
+        """Test class for MockModel."""
+
         def __init__(self):
+            """Initialize __init__."""
             self.eval_called = False
             self.to_called = False
 
         def to(self, device):
+            """Execute to helper."""
             self.to_called = True
 
         def eval(self):
+            """Execute eval helper."""
             self.eval_called = True
 
         def __call__(self, x):
+            """Initialize __call__."""
             return x
 
     class MockMLX:
+        """Test class for MockMLX."""
+
         @staticmethod
         def no_grad():
+            """Execute no grad helper."""
             import contextlib
 
             @contextlib.contextmanager
             def _scope():
+                """Execute  scope helper."""
                 yield
 
             return _scope()
 
         @staticmethod
         def zeros(*args, **kwargs):
+            """Execute zeros helper."""
             return MockDummyInputs()
 
         long = "long"
 
     class MockDummyInputs:
+        """Test class for MockDummyInputs."""
+
         def to(self, device):
+            """Execute to helper."""
             return self
 
     monkeypatch.setattr(bm, "mlx", MockMLX)
@@ -55,6 +71,7 @@ def test_benchmark_mlx_mocked(monkeypatch):
     assert res["status"] != "failed"
 
     def fail_load(*args, **kwargs):
+        """Execute fail load helper."""
         raise ValueError("Failed to load")
 
     monkeypatch.setattr(bm, "_load_mlx_model_and_device", fail_load)
@@ -67,12 +84,13 @@ def test_benchmark_mlx_mocked(monkeypatch):
 
 
 def test_mlx_dpo_functional(monkeypatch):
-
     # Simple coverage to bump numbers, MLX DPO mostly covered by other file
+    """Test mlx dpo functional functionality."""
     assert True
 
 
 def test_mlx_etl_functional(monkeypatch):
+    """Test mlx etl functional functionality."""
     import gemma_4_sql.backends.mlx.etl as metl
 
     batch_inputs = [[1, 2], [3]]
@@ -82,10 +100,13 @@ def test_mlx_etl_functional(monkeypatch):
     assert len(res["inputs"][1]) == 2
 
     class MockTokenizer:
+        """Test class for MockTokenizer."""
+
         def __init__(self, **kwargs):
-            pass
+            """Initialize __init__."""
 
         def encode(self, x, **kwargs):
+            """Execute encode helper."""
             return [1]
 
     loader = metl.MLXDataLoader([{"sql_prompt": "hi", "sql": "select"}], MockTokenizer(), 1)
@@ -99,10 +120,14 @@ def test_mlx_etl_functional(monkeypatch):
 
 
 def test_mlx_export_functional(monkeypatch):
+    """Test mlx export functional functionality."""
     import gemma_4_sql.backends.mlx.export as mexp
 
     class MockModel:
+        """Test class for MockModel."""
+
         def parameters(self):
+            """Execute parameters helper."""
             return {"a": 1}
 
     import sys
@@ -115,6 +140,7 @@ def test_mlx_export_functional(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return sys.modules["mlx_lm"]
         return orig_import(name, *a, **k)
@@ -130,6 +156,7 @@ def test_mlx_export_functional(monkeypatch):
 
 
 def test_mlx_inference_functional(monkeypatch):
+    """Test mlx inference functional functionality."""
     import sys
 
     import gemma_4_sql.backends.mlx.inference as minf
@@ -140,6 +167,7 @@ def test_mlx_inference_functional(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return sys.modules["mlx_lm"]
         return orig_import(name, *a, **k)
@@ -151,6 +179,7 @@ def test_mlx_inference_functional(monkeypatch):
 
 
 def test_mlx_logging_functional(monkeypatch):
+    """Test mlx logging functional functionality."""
     import gemma_4_sql.backends.mlx.logging as mlog
 
     res = mlog.log_metrics({"a": 1}, 1)
@@ -158,13 +187,17 @@ def test_mlx_logging_functional(monkeypatch):
 
 
 def test_mlx_peft_functional(monkeypatch):
+    """Test mlx peft functional functionality."""
     import gemma_4_sql.backends.mlx.peft as mpeft
 
     monkeypatch.setattr(mpeft, "nn", type("NN", (), {}))
     import gemma_4_sql.backends.mlx.peft as mpeft
 
     class MockModel:
+        """Test class for MockModel."""
+
         def parameters(self):
+            """Execute parameters helper."""
             return {"a": 1}
 
     import sys
@@ -176,6 +209,7 @@ def test_mlx_peft_functional(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return sys.modules["mlx_lm"]
         if name == "mlx.utils":
@@ -189,14 +223,71 @@ def test_mlx_peft_functional(monkeypatch):
     assert "completed" in res.get("status", "success")
 
 
-def test_mlx_quantize_functional(monkeypatch):
+def test_mlx_peft_missing_deps(monkeypatch):
+    """Test MLX apply_lora raises DependencyMissingError when load is missing."""
+    import gemma_4_sql.backends.mlx.peft as mpeft
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(mpeft, "load", None)
+    with pytest.raises(DependencyMissingError):
+        mpeft.apply_lora("m", [])
+
+
+def test_mlx_native_quantize(monkeypatch):
+    """Test native MLX quantization with nn.quantize."""
+    import sys
+
     import gemma_4_sql.backends.mlx.quantize as mquant
 
-    res = mquant.quantize_model("m")
-    assert "completed" in res.get("status", "success") or "quantized" in res.get("status", "success")
+    mock_nn = type("MockNN", (), {"quantize": lambda *a, **k: None})
+    monkeypatch.setitem(sys.modules, "mlx.nn", mock_nn)
+    monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": lambda *a, **k: (object(), None)}))
+    import builtins
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *a, **k):
+        """Execute mock import helper."""
+        if name == "mlx":
+            return type("M", (), {"nn": mock_nn})
+        if name == "mlx_lm":
+            return sys.modules["mlx_lm"]
+        return orig_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+    res = mquant.quantize_model("m", "int4")
+    assert res["status"] == "quantized_int4"
+
+
+def test_mlx_quantize_functional(monkeypatch):
+    """Test mlx quantize functional functionality."""
+    import sys
+    from unittest.mock import MagicMock
+
+    import gemma_4_sql.backends.mlx.quantize as mquant
+
+    # Mock successful native quantize
+    mock_model = MagicMock()
+    mock_nn = MagicMock()
+    monkeypatch.setitem(sys.modules, "mlx.nn", mock_nn)
+    monkeypatch.setitem(sys.modules, "mlx", type("M", (), {"nn": mock_nn}))
+    monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": lambda n: (mock_model, None)}))
+
+    res = mquant.quantize_model("m", "int4")
+    assert res["status"] == "quantized_int4"
+    assert res["memory_reduction_factor"] == pytest.approx(0.75)
+    mock_nn.quantize.assert_called_once_with(mock_model, group_size=64, bits=4)
+
+    # When nn does not have quantize attribute
+    mock_nn_no_quant = type("MockNNNoQuant", (), {})()
+    monkeypatch.setitem(sys.modules, "mlx.nn", mock_nn_no_quant)
+    monkeypatch.setitem(sys.modules, "mlx", type("M", (), {"nn": mock_nn_no_quant}))
+    res_noq = mquant.quantize_model("m", "int8")
+    assert res_noq["status"] == "quantized_int8"
 
 
 def test_mlx_train_functional(monkeypatch):
+    """Test mlx train functional functionality."""
     import gemma_4_sql.backends.mlx.train as mtrain
 
     monkeypatch.setattr(mtrain, "nn", type("NN", (), {}))
@@ -205,6 +296,8 @@ def test_mlx_train_functional(monkeypatch):
     import gemma_4_sql.backends.mlx.train as mtrain
 
     class MockState:
+        """Test class for MockState."""
+
         dataloader = ({"inputs": [1], "targets": [1]},)
         epochs = 1
         policy_model = type("Model", (), {"parameters": dict})
@@ -222,28 +315,28 @@ def test_mlx_train_functional(monkeypatch):
 
 
 def test_mlx_dpo_edge_cases(monkeypatch):
-    import sys
-
+    """Test mlx dpo edge cases functionality."""
     import gemma_4_sql.backends.mlx.dpo as mdpo
+    from gemma_4_sql.exceptions import DependencyMissingError
     from gemma_4_sql.type_hints import DPOConfig
 
-    monkeypatch.setitem(sys.modules, "mlx", None)
-    monkeypatch.setitem(sys.modules, "mlx.core", None)
-    monkeypatch.setitem(sys.modules, "mlx.nn", None)
-    monkeypatch.setitem(sys.modules, "mlx.optimizers", None)
-
-    with pytest.raises(ValueError):
+    monkeypatch.setattr(mdpo, "mx", None)
+    with pytest.raises(DependencyMissingError):
         mdpo.run_dpo(DPOConfig(model_name="x", dataset="y"))
 
 
 def test_mlx_etl_edge_cases(monkeypatch):
+    """Test mlx etl edge cases functionality."""
     import gemma_4_sql.backends.mlx.etl as metl
 
     class MockTokenizer:
+        """Test class for MockTokenizer."""
+
         def __init__(self, **kwargs):
-            pass
+            """Initialize __init__."""
 
         def encode(self, x, **kwargs):
+            """Execute encode helper."""
             return [1]
 
     monkeypatch.setattr(metl, "datasets", type("DS", (), {"load_dataset": lambda n, split: [{"sql_prompt": "a", "sql": "b"}]}))
@@ -256,6 +349,7 @@ def test_mlx_etl_edge_cases(monkeypatch):
 
 
 def test_mlx_inference_test_mode(monkeypatch):
+    """Test mlx inference test mode functionality."""
     import sys
 
     import gemma_4_sql.backends.mlx.inference as minf
@@ -266,6 +360,7 @@ def test_mlx_inference_test_mode(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return sys.modules["mlx_lm"]
         return orig_import(name, *a, **k)
@@ -277,6 +372,7 @@ def test_mlx_inference_test_mode(monkeypatch):
 
 
 def test_mlx_inference_exception(monkeypatch):
+    """Test mlx inference exception functionality."""
     import sys
 
     import gemma_4_sql.backends.mlx.inference as minf
@@ -287,6 +383,7 @@ def test_mlx_inference_exception(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return sys.modules["mlx_lm"]
         return orig_import(name, *a, **k)
@@ -294,6 +391,7 @@ def test_mlx_inference_exception(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", mock_import)
 
     def mock_generate(*args, **kwargs):
+        """Execute mock generate helper."""
         raise ValueError("failed to generate")
 
     import importlib
@@ -306,6 +404,7 @@ def test_mlx_inference_exception(monkeypatch):
 
 
 def test_mlx_dpo_missing_functional(monkeypatch):
+    """Test mlx dpo missing functional functionality."""
     import sys
 
     monkeypatch.setitem(sys.modules, "mlx.nn", type("NN", (), {}))
@@ -317,6 +416,7 @@ def test_mlx_dpo_missing_functional(monkeypatch):
 
 
 def test_mlx_quant_mock_functional(monkeypatch):
+    """Test mlx quant mock functional functionality."""
     import gemma_4_sql.backends.mlx.quantize as mquant
 
     res = mquant.quantize_model("m")
@@ -324,6 +424,7 @@ def test_mlx_quant_mock_functional(monkeypatch):
 
 
 def test_mlx_train_inner_exceptions(monkeypatch):
+    """Test mlx train inner exceptions functionality."""
     import gemma_4_sql.backends.mlx.train as mtrain
 
     monkeypatch.setattr(mtrain, "build_dataloader", lambda c: {"loader": [{"inputs": [1], "targets": [1]}]})
@@ -332,6 +433,8 @@ def test_mlx_train_inner_exceptions(monkeypatch):
 
     # force exception inside _run_training_epochs
     class MockState:
+        """Test class for MockState."""
+
         dataloader = ({"inputs": [1], "targets": [1]},)
         epochs = 1
         policy_model = type("Model", (), {"parameters": dict})
@@ -350,6 +453,7 @@ def test_mlx_train_inner_exceptions(monkeypatch):
 
 
 def test_mlx_train_loss_fn(monkeypatch):
+    """Test mlx train loss fn functionality."""
     import gemma_4_sql.backends.mlx.train as mtrain
 
     monkeypatch.setattr(mtrain, "nn", type("NN", (), {"losses": type("L", (), {"cross_entropy": lambda a, b, reduction: 1.0})}))
@@ -361,6 +465,7 @@ def test_mlx_train_loss_fn(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return sys.modules["mlx_lm"]
         return orig_import(name, *a, **k)
@@ -374,6 +479,7 @@ def test_mlx_train_loss_fn(monkeypatch):
     monkeypatch.setattr(mtrain, "_run_training_epochs", lambda s: 1.0)
 
     def patch_init(self, **kwargs):
+        """Execute patch init helper."""
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -383,6 +489,7 @@ def test_mlx_train_loss_fn(monkeypatch):
 
 
 def test_mlx_quantize_mock_fail(monkeypatch):
+    """Test mlx quantize mock fail functionality."""
     import gemma_4_sql.backends.mlx.quantize as mquant
 
     monkeypatch.setattr(mquant, "quantize_model_wrapper", lambda **k: k["quantize_fn"]())
@@ -392,6 +499,7 @@ def test_mlx_quantize_mock_fail(monkeypatch):
 
 
 def test_mlx_train_loss_fn_exec(monkeypatch):
+    """Test mlx train loss fn exec functionality."""
     import gemma_4_sql.backends.mlx.train as mtrain
 
     monkeypatch.setattr(mtrain, "nn", type("NN", (), {"losses": type("L", (), {"cross_entropy": lambda a, b, reduction: 1.0})}))
@@ -399,7 +507,10 @@ def test_mlx_train_loss_fn_exec(monkeypatch):
     monkeypatch.setattr(mtrain, "optim", type("Opt", (), {"AdamW": lambda **kw: type("O", (), {"update": lambda *args: None, "state": {}})()}))
 
     def value_and_grad(model, loss_fn):
+        """Execute value and grad helper."""
+
         def fn(m, i, t):
+            """Execute fn helper."""
             loss = loss_fn(m, i, t)
             return (type("Loss", (), {"item": lambda self=None: loss})(), None)
 
@@ -410,6 +521,7 @@ def test_mlx_train_loss_fn_exec(monkeypatch):
     monkeypatch.setattr(mtrain, "build_dataloader", lambda c: {"loader": [{"inputs": [1], "targets": [1]}]})
 
     def patch_init(self, **kwargs):
+        """Execute patch init helper."""
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -419,6 +531,7 @@ def test_mlx_train_loss_fn_exec(monkeypatch):
 
 
 def test_mlx_dpo_missing_functional_inner(monkeypatch):
+    """Test mlx dpo missing functional inner functionality."""
     import sys
 
     monkeypatch.setitem(sys.modules, "mlx.nn", type("NN", (), {"functional": None}))
@@ -430,11 +543,13 @@ def test_mlx_dpo_missing_functional_inner(monkeypatch):
 
 
 def test_mlx_quant_missing_attr(monkeypatch):
+    """Test mlx quant missing attr functionality."""
     import gemma_4_sql.backends.mlx.quantize as mquant
 
     monkeypatch.setattr(mquant, "quantize_model_wrapper", lambda **k: k["quantize_fn"]())
 
     def mock_load(n):
+        """Execute mock load helper."""
         raise ValueError("err")
 
     import sys
@@ -445,6 +560,7 @@ def test_mlx_quant_missing_attr(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return type("MLXLM", (), {"load": lambda n: (None, None)})
         if name == "mlx":
@@ -464,11 +580,13 @@ def test_mlx_quant_missing_attr(monkeypatch):
 
 
 def test_mlx_quantize_mock_functional2(monkeypatch):
+    """Test mlx quantize mock functional2 functionality."""
     import gemma_4_sql.backends.mlx.quantize as mquant
 
     monkeypatch.setattr(mquant, "quantize_model_wrapper", lambda **k: k["apply_fn"]())
 
     def mock_load(n):
+        """Execute mock load helper."""
         raise ValueError("err")
 
     import sys
@@ -479,6 +597,7 @@ def test_mlx_quantize_mock_functional2(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return type("MLXLM", (), {"load": lambda n: (None, None)})
         if name == "mlx":
@@ -499,20 +618,27 @@ def test_mlx_quantize_mock_functional2(monkeypatch):
 
 
 def test_peft_mlx_success(monkeypatch):
+    """Test peft mlx success functionality."""
     import gemma_4_sql.backends.mlx.peft as mpeft
 
     class MockModel:
+        """Test class for MockModel."""
+
         def parameters(self):
+            """Execute parameters helper."""
             return {"a": 1}
 
     def mock_load(n):
+        """Execute mock load helper."""
         return (MockModel(), None)
 
     def mock_tree_map(fn, params):
+        """Execute mock tree map helper."""
         return fn(params)
 
     import sys
 
+    monkeypatch.setattr(mpeft, "load", mock_load)
     monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": mock_load}))
     monkeypatch.setitem(sys.modules, "mlx.utils", type("MLXU", (), {"tree_map": mock_tree_map}))
 
@@ -521,6 +647,7 @@ def test_peft_mlx_success(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return sys.modules["mlx_lm"]
         if name == "mlx.utils":
@@ -534,11 +661,13 @@ def test_peft_mlx_success(monkeypatch):
 
 
 def test_quantize_mlx_error(monkeypatch):
+    """Test quantize mlx error functionality."""
     import gemma_4_sql.backends.mlx.quantize as mquant
 
     monkeypatch.setattr(mquant, "quantize_model_wrapper", lambda **k: k["apply_fn"]())
 
     def mock_load(n):
+        """Execute mock load helper."""
         raise ValueError("err")
 
     import sys
@@ -550,6 +679,7 @@ def test_quantize_mlx_error(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "mlx_lm":
             return sys.modules["mlx_lm"]
         if name == "transformers":

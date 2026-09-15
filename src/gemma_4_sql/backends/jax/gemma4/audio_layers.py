@@ -109,13 +109,11 @@ class Gemma4AudioCausalConv1d(nnx.Module):
     """Causal 1D convolution layer for audio processing."""
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__.
+        """Initialize the causal 1D convolution layer.
 
         Args:
-            x: The input x.
-
-        Returns:
-            The execution result.
+            config: Audio configuration parameters.
+            rngs: JAX NNX random number generators.
         """
         self.kernel_size = config.conv_kernel_size
         self.left_pad = self.kernel_size - 1
@@ -125,8 +123,10 @@ class Gemma4AudioCausalConv1d(nnx.Module):
         """Apply causal 1D convolution.
 
         Args:
-            config: The configuration parameters.
-            rngs: The rngs.
+            x: Input array of shape (batch, sequence, hidden_size).
+
+        Returns:
+            Convolved array of shape (batch, sequence, hidden_size).
         """
         x = jnp.pad(x, ((0, 0), (self.left_pad, 0), (0, 0)))
         return self.conv(x)
@@ -136,7 +136,12 @@ class Gemma4AudioLightConv1d(nnx.Module):
     """Lightweight 1D convolution module for audio."""
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize lightweight 1D convolution module.
+
+        Args:
+            config: Audio configuration parameters.
+            rngs: JAX NNX random number generators.
+        """
         self.linear_start = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 2, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
         self.linear_end = Gemma4ClippableLinear(config.hidden_size, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
         self.depthwise_conv1d = Gemma4AudioCausalConv1d(config, rngs=rngs)
@@ -147,9 +152,11 @@ class Gemma4AudioLightConv1d(nnx.Module):
     def __call__(self, x: jax.Array) -> jax.Array:
         """Apply lightweight 1D convolution.
 
-        Returns:
-            object: The resulting output from the operation.
+        Args:
+            x: Input array of shape (batch, sequence, hidden_size).
 
+        Returns:
+            The resulting array.
         """
         residual = x
         x = self.pre_layer_norm(x)

@@ -73,5 +73,5 @@ def test_mlx_serve_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
         None.
     """
     monkeypatch.setattr(mlx_serve, "mx", None)
-    with pytest.raises(DependencyMissingError, match="MLX dependencies are missing for serve."):
+    with pytest.raises(DependencyMissingError, match=r"MLX dependencies are missing for serve\."):
         serve_model("dummy_mlx_model", port=8080, test_mode=False)

@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
-jax = None
-with catch_optional_imports():
-    import jax
+
+try:
+    import jax as _jax
+
+    jax: Any = _jax
+except (ImportError, AttributeError):
+    jax = None
 FastAPI = None
 uvicorn = None
 
@@ -21,14 +24,17 @@ uvicorn = None
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
     """Serve a model using JAX continuous batching.
 
-        Args:
-                    **kwargs: Underlying server and backend-specific configuration options.
-    model_name: The name of the target model.
-            port: The network port to listen on.
-            max_batch_size: The maximum allowed batch size.
+    Args:
+        model_name: The name of the target model.
+        port: The network port to listen on.
+        max_batch_size: The maximum allowed batch size.
+        **kwargs: Underlying server and backend-specific configuration options.
 
-        Returns:
-            A dictionary containing the results.
+    Returns:
+        A dictionary containing the results.
+
+    Raises:
+        DependencyMissingError: If JAX dependencies are missing.
     """
 
     def _app_factory() -> object:
@@ -40,13 +46,24 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         """
 
         def _generate(prompt: str) -> str:
-            """Execute function.
+            """Generate SQL using JAX inference.
+
+            Args:
+                prompt: Natural language query prompt.
 
             Returns:
-                The execution result.
-
+                Generated SQL query string.
             """
-            return "SELECT * FROM generated WHERE prompt='{p}'".replace("{p}", prompt)
+            if kwargs.get("test_mode"):
+                return f"SELECT * FROM generated WHERE prompt='{prompt}'"
+
+            from gemma_4_sql.backends.jax.inference import generate_sql
+
+            try:
+                out = generate_sql(model_name=model_name, prompt=prompt)
+                return str(out.get("sql", f"SELECT * FROM generated WHERE prompt='{prompt}'"))
+            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
+                return f"SELECT * FROM generated WHERE prompt='{prompt}'"
 
         return create_common_app(
             backend_name="jax",

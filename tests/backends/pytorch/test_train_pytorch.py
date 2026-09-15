@@ -349,6 +349,15 @@ def test_train_model_pytorch_missing() -> object:
     tr.torch = orig_torch
 
 
+def test_execute_train_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _execute_train directly raises DependencyMissingError when torch is None."""
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(tr, "torch", None)
+    with pytest.raises(DependencyMissingError, match="PyTorch dependencies are missing"):
+        tr._execute_train("mod", "ds", 1, 1e-4, "none")
+
+
 @pytest.mark.usefixtures("_mock_torch_env")
 def test_train_model_pytorch_error(monkeypatch: object) -> object:
     """Initialize function test_train_model_pytorch_error.
@@ -490,6 +499,7 @@ def test_train_model_real(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def xtest_pytorch_train_device(monkeypatch):
+    """Execute xtest pytorch train device helper."""
     import gemma_4_sql.backends.pytorch.train as pt_train
 
     monkeypatch.setattr(pt_train, "torch", type("Torch", (), {"cuda": type("Cuda", (), {"set_device": lambda x: None, "is_available": lambda: True, "device_count": lambda: 1})()}))
@@ -502,6 +512,7 @@ def xtest_pytorch_train_device(monkeypatch):
 
 
 def xtest_pytorch_train_device_missing_init(monkeypatch):
+    """Execute xtest pytorch train device missing init helper."""
     import gemma_4_sql.backends.pytorch.train as pt_train
 
     monkeypatch.setattr(pt_train, "dist", type("Dist", (), {"is_initialized": lambda: False}), raising=False)
@@ -509,6 +520,7 @@ def xtest_pytorch_train_device_missing_init(monkeypatch):
 
 
 def xtest_pytorch_train_device3(monkeypatch):
+    """Execute xtest pytorch train device3 helper."""
     import gemma_4_sql.backends.pytorch.train as pt_train
 
     monkeypatch.setattr(pt_train, "torch", type("Torch", (), {"cuda": type("Cuda", (), {"set_device": lambda x: None, "is_available": lambda: True, "device_count": lambda: 1})()}))
@@ -521,6 +533,7 @@ def xtest_pytorch_train_device3(monkeypatch):
 
 
 def xtest_pytorch_train_device_error(monkeypatch):
+    """Execute xtest pytorch train device error helper."""
     import gemma_4_sql.backends.pytorch.train as pt_train
 
     monkeypatch.setattr(pt_train, "torch", type("Torch", (), {"cuda": type("Cuda", (), {"set_device": lambda x: None, "is_available": lambda: True, "device_count": lambda: 1})()}))
@@ -533,6 +546,7 @@ def xtest_pytorch_train_device_error(monkeypatch):
 
 
 def xtest_pytorch_train_device_real(monkeypatch):
+    """Execute xtest pytorch train device real helper."""
     import gemma_4_sql.backends.pytorch.train as pt_train
 
     monkeypatch.setattr(pt_train, "torch", type("Torch", (), {"cuda": type("Cuda", (), {"set_device": lambda x: None, "is_available": lambda: True, "device_count": lambda: 1})()}))
@@ -544,6 +558,7 @@ def xtest_pytorch_train_device_real(monkeypatch):
 
 
 def test_pytorch_train_device_err(monkeypatch):
+    """Test pytorch train device err functionality."""
     import gemma_4_sql.backends.pytorch.train as pt_train
 
     monkeypatch.setattr(pt_train, "torch", type("Torch", (), {"cuda": type("Cuda", (), {"set_device": lambda x: None, "is_available": lambda: True, "device_count": lambda: 1})()}))
@@ -554,6 +569,7 @@ def test_pytorch_train_device_err(monkeypatch):
 
 
 def xtest_pytorch_train_device_real2(monkeypatch):
+    """Execute xtest pytorch train device real2 helper."""
     import gemma_4_sql.backends.pytorch.train as pt_train
 
     monkeypatch.setattr(pt_train, "torch", type("Torch", (), {"cuda": type("Cuda", (), {"set_device": lambda x: None, "is_available": lambda: True, "device_count": lambda: 1})()}))
@@ -564,6 +580,7 @@ def xtest_pytorch_train_device_real2(monkeypatch):
 
 
 def xtest_pytorch_train_device4(monkeypatch):
+    """Execute xtest pytorch train device4 helper."""
     import gemma_4_sql.backends.pytorch.train as pt_train
 
     monkeypatch.setattr(pt_train, "torch", type("Torch", (), {"cuda": type("Cuda", (), {"set_device": lambda x: None, "is_available": lambda: True, "device_count": lambda: 1})()}))
@@ -593,19 +610,24 @@ def xtest_pytorch_train_device4(monkeypatch):
 
 
 def test_pytorch_setup_distributed(monkeypatch):
+    """Test pytorch setup distributed functionality."""
     import gemma_4_sql.backends.pytorch.train as pt_train
 
     class MockDist:
+        """Test class for MockDist."""
+
         @staticmethod
         def is_initialized():
+            """Execute is initialized helper."""
             return False
 
         @staticmethod
         def init_process_group(*a):
-            pass
+            """Execute init process group helper."""
 
         @staticmethod
         def get_rank():
+            """Execute get rank helper."""
             return 0
 
     import sys
@@ -616,6 +638,7 @@ def test_pytorch_setup_distributed(monkeypatch):
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Execute mock import helper."""
         if name == "torch.distributed":
             return sys.modules["torch.distributed"]
         return orig_import(name, *a, **k)
@@ -623,23 +646,30 @@ def test_pytorch_setup_distributed(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", mock_import)
 
     class MockCuda:
+        """Test class for MockCuda."""
+
         @staticmethod
         def is_available():
+            """Execute is available helper."""
             return True
 
         @staticmethod
         def device_count():
+            """Execute device count helper."""
             return 1
 
         @staticmethod
         def set_device(d):
-            pass
+            """Execute set device helper."""
 
     class MockTorch:
+        """Test class for MockTorch."""
+
         cuda = MockCuda
 
         @staticmethod
         def device(x):
+            """Execute device helper."""
             return x
 
     monkeypatch.setattr(pt_train, "torch", MockTorch)

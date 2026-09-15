@@ -110,12 +110,22 @@ class SQLiteAdapter(DatabaseAdapter):
                     if getattr(cursor, "description", None) is not None:
                         results = await cursor.fetchall()
                         return (True, results, None)
+                    if hasattr(async_conn, "commit"):
+                        res_c = async_conn.commit()
+                        if asyncio.iscoroutine(res_c):
+                            await res_c
                     return (True, [], None)
                 finally:
                     if hasattr(cursor, "close"):
                         res = cursor.close()
                         if asyncio.iscoroutine(res):
                             await res
+            except Exception:
+                if hasattr(async_conn, "rollback"):
+                    res_r = async_conn.rollback()
+                    if asyncio.iscoroutine(res_r):
+                        await res_r
+                raise
             finally:
                 if hasattr(async_conn, "close"):
                     res = async_conn.close()
@@ -145,6 +155,10 @@ class SQLiteAdapter(DatabaseAdapter):
                 try:
                     if getattr(cursor, "description", None) is not None:
                         return await cursor.fetchall()
+                    if hasattr(async_conn, "commit"):
+                        res_c = async_conn.commit()
+                        if asyncio.iscoroutine(res_c):
+                            await res_c
                     return []
                 finally:
                     if hasattr(cursor, "close"):

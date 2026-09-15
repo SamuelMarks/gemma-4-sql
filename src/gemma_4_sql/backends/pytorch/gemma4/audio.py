@@ -21,7 +21,11 @@ class Gemma4AudioModel(nn.Module):
         self.audio_projector = nn.Linear(config.audio_config.hidden_size, config.hidden_size, bias=False)
 
     def forward(self, audio_values: torch.Tensor) -> torch.Tensor:
-        """Forward pass for audio model."""
+        """Forward pass for audio model.
+
+        Returns:
+            Projected audio representations.
+        """
         hidden_states = self.feature_extractor(audio_values)
 
         for layer in self.layers:

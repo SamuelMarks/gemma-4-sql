@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-jax = None
-jnp = None
-ocp = None
-with catch_optional_imports():
-    import jax
-    import jax.numpy as jnp
-    import orbax.checkpoint as ocp
+
+try:
+    import jax as _jax
+    import jax.numpy as _jnp
+    import orbax.checkpoint as _ocp
+
+    jax: Any = _jax
+    jnp: Any = _jnp
+    ocp: Any = _ocp
+except (ImportError, AttributeError):
+    jax = None
+    jnp = None
+    ocp = None
 
 
 def export_model(model_name: str, export_path: str) -> JSONDict:
@@ -49,4 +53,4 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
         with Path.open(file_path, "w", encoding="utf-8") as f:
             json.dump({"model_name": model_name, "type": "maxtext"}, f)
         status = "mock_exported"
-    return {"backend": "maxtext", "model": model_name, "export_path": export_path, "file_path": file_path, "status": status, "format": "maxtext/checkpoint"}
+    return {"backend": "maxtext", "model": model_name, "export_path": export_path, "file_path": str(file_path), "status": status, "format": "maxtext/checkpoint"}

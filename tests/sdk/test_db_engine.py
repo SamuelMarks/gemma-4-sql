@@ -1,5 +1,6 @@
 """Tests for db engine."""
 
+from unittest import mock
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -71,14 +72,13 @@ def test_base_methods() -> None:
         DatabaseAdapter()
 
 
-import contextlib
 import typing
 
 import pytest
 
 
 class MockConn:
-    pass
+    """Test class for MockConn."""
 
 
 def test_db_engine_insert_no_description() -> object:
@@ -102,11 +102,35 @@ def test_db_engine_insert_no_description() -> object:
 def test_db_engine_safety() -> None:
     """Execute function."""
     engine = LiveDatabaseEngine(db_path=":memory:", db_type="sqlite", read_only=True)
-    engine.conn.execute("CREATE TABLE t (id INT)")
-    with contextlib.suppress(PermissionError):
-        (_success, _res, _err) = engine.execute_with_feedback("INSERT INTO t VALUES (1)")
-    with contextlib.suppress(PermissionError):
+    engine.conn.execute("CREATE TABLE t (id INT, status TEXT)")
+    (success, _res, err) = engine.execute_with_feedback("INSERT INTO t VALUES (1, 'active')")
+    assert success is False
+    assert "Safety Violation" in str(err)
+    with pytest.raises(PermissionError):
         engine.execute_query("DROP TABLE t")
+
+
+def test_db_engine_safety_literal_keywords() -> None:
+    """Test that reserved keywords in string literals and comments do not trigger PermissionError."""
+    engine = LiveDatabaseEngine(db_path=":memory:", db_type="sqlite", read_only=False)
+    engine.conn.execute("CREATE TABLE audits (id INT, action TEXT)")
+    engine.conn.execute("INSERT INTO audits VALUES (1, 'UPDATE')")
+    engine.read_only = True
+    engine.adapter.read_only = True
+
+    # Query with 'UPDATE' in string literal
+    (success, res, err) = engine.execute_with_feedback("SELECT * FROM audits WHERE action = 'UPDATE'")
+    assert success is True
+    assert err is None
+    assert len(res) == 1
+
+    # Query with comment containing DELETE keyword
+    res2 = engine.execute_query("-- comment containing DELETE\nSELECT id FROM audits")
+    assert len(res2) == 1
+
+    # Actual mutating statement should still raise PermissionError
+    with pytest.raises(PermissionError):
+        engine.execute_query("UPDATE audits SET action = 'NEW'")
 
 
 def test_db_engine_safety_bypass() -> None:
@@ -370,6 +394,7 @@ def test_duckdb_readonly_file() -> None:
 
 
 def xtest_postgres_missing(monkeypatch):
+    """Execute xtest postgres missing helper."""
     import gemma_4_sql.sdk.adapters.postgres_adapter as p_ad
 
     monkeypatch.setattr(p_ad, "psycopg2", None)
@@ -383,6 +408,7 @@ def xtest_postgres_missing(monkeypatch):
 
 
 def xtest_snowflake_missing(monkeypatch):
+    """Execute xtest snowflake missing helper."""
     import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
 
     monkeypatch.setattr(s_ad, "snowflake_connector", None)
@@ -393,21 +419,27 @@ def xtest_snowflake_missing(monkeypatch):
 
 
 def xtest_postgres_setup_schema(monkeypatch):
+    """Execute xtest postgres setup schema helper."""
     import gemma_4_sql.sdk.adapters.postgres_adapter as p_ad
 
     class MockCursor:
+        """Test class for MockCursor."""
+
         def execute(self, ddl):
-            pass
+            """Execute execute helper."""
 
         def close(self):
-            pass
+            """Execute close helper."""
 
     class MockConn:
+        """Test class for MockConn."""
+
         def cursor(self):
+            """Execute cursor helper."""
             return MockCursor()
 
         def commit(self):
-            pass
+            """Execute commit helper."""
 
     monkeypatch.setattr(p_ad.PostgresAdapter, "connect", lambda self: MockConn())
     ad = p_ad.PostgresAdapter("path", {})
@@ -416,21 +448,27 @@ def xtest_postgres_setup_schema(monkeypatch):
 
 
 def xtest_snowflake_setup_schema(monkeypatch):
+    """Execute xtest snowflake setup schema helper."""
     import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
 
     class MockCursor:
+        """Test class for MockCursor."""
+
         def execute(self, ddl):
-            pass
+            """Execute execute helper."""
 
         def close(self):
-            pass
+            """Execute close helper."""
 
     class MockConn:
+        """Test class for MockConn."""
+
         def cursor(self):
+            """Execute cursor helper."""
             return MockCursor()
 
         def commit(self):
-            pass
+            """Execute commit helper."""
 
     monkeypatch.setattr(s_ad.SnowflakeAdapter, "connect", lambda self: MockConn())
     ad = s_ad.SnowflakeAdapter("path", {})
@@ -439,11 +477,14 @@ def xtest_snowflake_setup_schema(monkeypatch):
 
 
 def xtest_duckdb_setup_schema(monkeypatch):
+    """Execute xtest duckdb setup schema helper."""
     import gemma_4_sql.sdk.adapters.duckdb_adapter as d_ad
 
     class MockConn:
+        """Test class for MockConn."""
+
         def execute(self, ddl):
-            pass
+            """Execute execute helper."""
 
     monkeypatch.setattr(d_ad.DuckDBAdapter, "connect", lambda self: MockConn())
     ad = d_ad.DuckDBAdapter("path", {})
@@ -452,17 +493,21 @@ def xtest_duckdb_setup_schema(monkeypatch):
 
 
 def test_sqlite_setup_schema(monkeypatch):
+    """Test sqlite setup schema functionality."""
     import gemma_4_sql.sdk.adapters.sqlite_adapter as s_ad
 
     class MockConn:
+        """Test class for MockConn."""
+
         def __enter__(self):
+            """Initialize __enter__."""
             return self
 
         def __exit__(self, *a):
-            pass
+            """Initialize __exit__."""
 
         def executescript(self, ddl):
-            pass
+            """Execute executescript helper."""
 
     ad = s_ad.SQLiteAdapter(":memory:", {})
     ad.conn = MockConn()
@@ -470,74 +515,99 @@ def test_sqlite_setup_schema(monkeypatch):
 
 
 def test_base_setup_schema_async(monkeypatch):
+    """Test base setup schema async functionality."""
     import gemma_4_sql.sdk.adapters.base as b_ad
 
     class Base(b_ad.DatabaseAdapter):
+        """Test class for Base."""
+
         def error_classes(self):
+            """Execute error classes helper."""
             return (ValueError,)
 
         def connect(self):
-            return None
+            """Execute connect helper."""
+            return
 
         async def connect_async(self):
-            return None
+            """Execute connect async helper."""
+            return
 
         def execute_query(self, sql):
+            """Execute execute query helper."""
             return []
 
         async def execute_query_async(self, sql):
+            """Execute execute query async helper."""
             return []
 
         def setup_schema(self, ddl):
+            """Execute setup schema helper."""
             return []
 
         async def setup_schema_async(self, ddl):
+            """Execute setup schema async helper."""
             return []
 
         def get_schema_info(self):
+            """Execute get schema info helper."""
             return {}
 
         async def get_schema_info_async(self):
+            """Execute get schema info async helper."""
             return {}
 
     ad = Base("path", {})
 
     class MockConn:
+        """Test class for MockConn."""
+
         def close(self):
-            pass
+            """Execute close helper."""
 
     ad.conn = MockConn()
     ad.close()
 
 
 def test_base_connect_async(monkeypatch):
+    """Test base connect async functionality."""
     import asyncio
 
     import gemma_4_sql.sdk.adapters.base as b_ad
 
     class Base(b_ad.DatabaseAdapter):
+        """Test class for Base."""
+
         def error_classes(self):
+            """Execute error classes helper."""
             return (ValueError,)
 
         def connect(self):
+            """Execute connect helper."""
             return "conn"
 
         def execute_query(self, sql):
+            """Execute execute query helper."""
             return []
 
         async def execute_query_async(self, sql):
+            """Execute execute query async helper."""
             return []
 
         def setup_schema(self, ddl):
+            """Execute setup schema helper."""
             return []
 
         async def setup_schema_async(self, ddl):
+            """Execute setup schema async helper."""
             return []
 
         def get_schema_info(self):
+            """Execute get schema info helper."""
             return {}
 
         async def get_schema_info_async(self):
+            """Execute get schema info async helper."""
             return {}
 
     ad = Base("path", {})
@@ -546,34 +616,46 @@ def test_base_connect_async(monkeypatch):
 
 
 def xtest_base_execute_with_feedback(monkeypatch):
+    """Execute xtest base execute with feedback helper."""
     import gemma_4_sql.sdk.adapters.base as b_ad
 
     class Base(b_ad.DatabaseAdapter):
+        """Test class for Base."""
+
         def error_classes(self):
+            """Execute error classes helper."""
             return (ValueError,)
 
         def connect(self):
-            return None
+            """Execute connect helper."""
+            return
 
         async def connect_async(self):
-            return None
+            """Execute connect async helper."""
+            return
 
         def execute_query(self, sql):
+            """Execute execute query helper."""
             return []
 
         async def execute_query_async(self, sql):
+            """Execute execute query async helper."""
             return []
 
         def setup_schema(self, ddl):
+            """Execute setup schema helper."""
             return []
 
         async def setup_schema_async(self, ddl):
+            """Execute setup schema async helper."""
             return []
 
         def get_schema_info(self):
+            """Execute get schema info helper."""
             return {}
 
         async def get_schema_info_async(self):
+            """Execute get schema info async helper."""
             return {}
 
     ad = Base("path", {})
@@ -583,6 +665,7 @@ def xtest_base_execute_with_feedback(monkeypatch):
 
 
 def test_postgres_missing_real(monkeypatch):
+    """Test postgres missing real functionality."""
     import gemma_4_sql.sdk.adapters.postgres_adapter as p_ad
 
     monkeypatch.setattr(p_ad, "psycopg2", None)
@@ -591,6 +674,7 @@ def test_postgres_missing_real(monkeypatch):
 
 
 def test_snowflake_missing_real(monkeypatch):
+    """Test snowflake missing real functionality."""
     import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
 
     monkeypatch.setattr(s_ad, "snowflake", None)
@@ -599,21 +683,27 @@ def test_snowflake_missing_real(monkeypatch):
 
 
 def test_postgres_setup_schema_real(monkeypatch):
+    """Test postgres setup schema real functionality."""
     import gemma_4_sql.sdk.adapters.postgres_adapter as p_ad
 
     class MockCursor:
+        """Test class for MockCursor."""
+
         def execute(self, ddl):
-            pass
+            """Execute execute helper."""
 
         def close(self):
-            pass
+            """Execute close helper."""
 
     class MockConn:
+        """Test class for MockConn."""
+
         def cursor(self):
+            """Execute cursor helper."""
             return MockCursor()
 
         def commit(self):
-            pass
+            """Execute commit helper."""
 
     monkeypatch.setattr(p_ad.PostgresAdapter, "connect", lambda self: MockConn())
     ad = p_ad.PostgresAdapter("path", {})
@@ -621,21 +711,27 @@ def test_postgres_setup_schema_real(monkeypatch):
 
 
 def test_snowflake_setup_schema_real(monkeypatch):
+    """Test snowflake setup schema real functionality."""
     import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
 
     class MockCursor:
+        """Test class for MockCursor."""
+
         def execute(self, ddl):
-            pass
+            """Execute execute helper."""
 
         def close(self):
-            pass
+            """Execute close helper."""
 
     class MockConn:
+        """Test class for MockConn."""
+
         def cursor(self):
+            """Execute cursor helper."""
             return MockCursor()
 
         def commit(self):
-            pass
+            """Execute commit helper."""
 
     monkeypatch.setattr(s_ad.SnowflakeAdapter, "connect", lambda self: MockConn())
     ad = s_ad.SnowflakeAdapter("path", {})
@@ -692,11 +788,14 @@ async def test_snowflake_async_operations(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_duckdb_setup_schema_real(monkeypatch):
+    """Test duckdb setup schema real functionality."""
     import gemma_4_sql.sdk.adapters.duckdb_adapter as d_ad
 
     class MockConn:
+        """Test class for MockConn."""
+
         def execute(self, ddl):
-            pass
+            """Execute execute helper."""
 
     monkeypatch.setattr(d_ad.DuckDBAdapter, "connect", lambda self: MockConn())
     ad = d_ad.DuckDBAdapter("path", {})
@@ -704,35 +803,47 @@ def test_duckdb_setup_schema_real(monkeypatch):
 
 
 def test_base_execute_with_feedback_real(monkeypatch):
+    """Test base execute with feedback real functionality."""
     import gemma_4_sql.sdk.adapters.base as b_ad
 
     class Base(b_ad.DatabaseAdapter):
+        """Test class for Base."""
+
         @property
         def error_classes(self):
+            """Execute error classes helper."""
             return (ValueError,)
 
         def connect(self):
-            return None
+            """Execute connect helper."""
+            return
 
         async def connect_async(self):
-            return None
+            """Execute connect async helper."""
+            return
 
         def execute_query(self, sql):
+            """Execute execute query helper."""
             return []
 
         async def execute_query_async(self, sql):
+            """Execute execute query async helper."""
             return []
 
         def setup_schema(self, ddl):
+            """Execute setup schema helper."""
             return []
 
         async def setup_schema_async(self, ddl):
+            """Execute setup schema async helper."""
             return []
 
         def get_schema_info(self):
+            """Execute get schema info helper."""
             return {}
 
         async def get_schema_info_async(self):
+            """Execute get schema info async helper."""
             return {}
 
     ad = Base("path", {})
@@ -743,6 +854,7 @@ def test_base_execute_with_feedback_real(monkeypatch):
 
 
 def test_postgres_missing_async(monkeypatch):
+    """Test postgres missing async functionality."""
     import gemma_4_sql.sdk.adapters.postgres_adapter as p_ad
 
     monkeypatch.setattr(p_ad, "asyncpg", None)
@@ -753,32 +865,43 @@ def test_postgres_missing_async(monkeypatch):
 
 
 def test_base_setup_schema(monkeypatch):
+    """Test base setup schema functionality."""
     import gemma_4_sql.sdk.adapters.base as b_ad
 
     class Base(b_ad.DatabaseAdapter):
+        """Test class for Base."""
+
         @property
         def error_classes(self):
+            """Execute error classes helper."""
             return (ValueError,)
 
         def connect(self):
-            return None
+            """Execute connect helper."""
+            return
 
         async def connect_async(self):
-            return None
+            """Execute connect async helper."""
+            return
 
         def execute_query(self, sql):
+            """Execute execute query helper."""
             return []
 
         async def execute_query_async(self, sql):
+            """Execute execute query async helper."""
             return []
 
         async def setup_schema_async(self, ddl):
+            """Execute setup schema async helper."""
             return []
 
         def get_schema_info(self):
+            """Execute get schema info helper."""
             return {}
 
         async def get_schema_info_async(self):
+            """Execute get schema info async helper."""
             return {}
 
     ad = Base("path", {})
@@ -807,3 +930,163 @@ async def test_compare_queries_async() -> None:
     engine = LiveDatabaseEngine(":memory:", db_type="sqlite")
     assert await engine.compare_queries_async("SELECT 1", "SELECT 1") is True
     assert await engine.compare_queries_async("SELECT 1", "SELECT 2") is False
+
+
+def test_postgres_adapter_server_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test PostgresAdapter handles server unreachable errors cleanly.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.adapters.postgres_adapter as p_ad
+
+    class MockOperationalError(Exception):
+        """Mock operational error."""
+
+    # Connection error on init
+    monkeypatch.setattr(p_ad, "psycopg2", type("PG", (), {"Error": MockOperationalError, "connect": mock.MagicMock(side_effect=MockOperationalError("server closed the connection"))}))
+    with pytest.raises(MockOperationalError):
+        p_ad.PostgresAdapter("postgresql://localhost:5432/db", {})
+
+    # Connection succeeds but server fails during query
+    mock_conn = mock.MagicMock()
+    mock_conn.cursor.side_effect = MockOperationalError("connection dropped")
+    monkeypatch.setattr(p_ad, "psycopg2", type("PG", (), {"Error": MockOperationalError, "connect": lambda *a, **k: mock_conn}))
+    ad = p_ad.PostgresAdapter("postgresql://localhost:5432/db", {})
+    success, rows, err = ad.execute_with_feedback("SELECT 1")
+    assert success is False
+    assert rows == []
+    assert err is not None
+    assert "connection dropped" in err
+
+
+@pytest.mark.asyncio
+async def test_postgres_adapter_async_server_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test PostgresAdapter async handles server unreachable errors cleanly.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.adapters.postgres_adapter as p_ad
+
+    class MockAsyncpgError(Exception):
+        """Mock asyncpg error."""
+
+    monkeypatch.setattr(p_ad, "psycopg2", type("PG", (), {"Error": Exception, "connect": lambda *a, **k: mock.MagicMock()}))
+    monkeypatch.setattr(p_ad, "asyncpg", type("APG", (), {"PostgresError": MockAsyncpgError, "connect": mock.AsyncMock(side_effect=MockAsyncpgError("connection refused"))}))
+
+    ad = p_ad.PostgresAdapter("postgresql://localhost:5432/db", {})
+    success, rows, err = await ad.execute_with_feedback_async("SELECT 1")
+    assert success is False
+    assert rows == []
+    assert err is not None
+    assert "connection refused" in err
+
+
+def test_postgres_adapter_connected_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test PostgresAdapter connected execution returning rows.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.adapters.postgres_adapter as p_ad
+
+    mock_cursor = mock.MagicMock()
+    mock_cursor.fetchall.return_value = [("Alice", 100)]
+    mock_conn = mock.MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+
+    monkeypatch.setattr(p_ad, "psycopg2", type("PG", (), {"Error": Exception, "connect": lambda *a, **k: mock_conn}))
+    ad = p_ad.PostgresAdapter("postgresql://localhost:5432/db", {})
+
+    rows = ad.execute_query("SELECT name, score FROM users")
+    assert rows == [("Alice", 100)]
+
+    success, feedback_rows, err = ad.execute_with_feedback("SELECT name, score FROM users")
+    assert success is True
+    assert feedback_rows == [("Alice", 100)]
+    assert err is None
+
+
+def test_snowflake_adapter_server_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test SnowflakeAdapter handles server unreachable errors cleanly.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
+
+    class MockSnowflakeError(Exception):
+        """Mock snowflake error."""
+
+    # Connection error on init
+    monkeypatch.setattr(s_ad, "snowflake", type("SF", (), {"connector": type("SFC", (), {"Error": MockSnowflakeError, "connect": mock.MagicMock(side_effect=MockSnowflakeError("network is unreachable"))})}))
+    with pytest.raises(MockSnowflakeError):
+        s_ad.SnowflakeAdapter("account/db/schema", {})
+
+    # Connection succeeds but server drops during query
+    mock_conn = mock.MagicMock()
+    mock_conn.cursor.side_effect = MockSnowflakeError("query timeout / network dropped")
+    monkeypatch.setattr(s_ad, "snowflake", type("SF", (), {"connector": type("SFC", (), {"Error": MockSnowflakeError, "connect": lambda *a, **k: mock_conn})}))
+    ad = s_ad.SnowflakeAdapter("account/db/schema", {})
+    success, rows, err = ad.execute_with_feedback("SELECT 1")
+    assert success is False
+    assert rows == []
+    assert err is not None
+    assert "query timeout" in err
+
+
+def test_snowflake_adapter_connected_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test SnowflakeAdapter connected execution returning rows.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
+
+    mock_cursor = mock.MagicMock()
+    mock_cursor.fetchall.return_value = [("Sales", 5000)]
+    mock_conn = mock.MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+
+    monkeypatch.setattr(s_ad, "snowflake", type("SF", (), {"connector": type("SFC", (), {"Error": Exception, "connect": lambda *a, **k: mock_conn})}))
+    ad = s_ad.SnowflakeAdapter("account/db/schema", {})
+
+    rows = ad.execute_query("SELECT department, budget FROM depts")
+    assert rows == [("Sales", 5000)]
+
+    success, feedback_rows, err = ad.execute_with_feedback("SELECT department, budget FROM depts")
+    assert success is True
+    assert feedback_rows == [("Sales", 5000)]
+    assert err is None
+
+
+def test_snowflake_adapter_connect_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test SnowflakeAdapter raises ImportError when connect function cannot be resolved.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
+
+    monkeypatch.setattr(s_ad, "snowflake", type("SF", (), {}))
+    with pytest.raises(ImportError, match="snowflake connect function could not be resolved"):
+        s_ad.SnowflakeAdapter("acc/db/schema", {})

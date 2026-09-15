@@ -118,6 +118,12 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     if "SELECT * FROM generated WHERE prompt='test'" not in sql_val:
         raise AssertionError
 
+    srv.serve_model("foo", test_mode=False)
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", lambda *a, **k: {"sql": "SELECT 1", "status": "success"})
+    generate_func2 = app_instance.router.routes[-1].endpoint
+    result2 = await generate_func2(request)
+    assert result2 is not None
+
 
 def test_serve_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""

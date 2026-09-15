@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
-torch = None
-with catch_optional_imports():
-    import torch
-AutoModelForCausalLM = None
-AutoTokenizer = None
-with catch_optional_imports():
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+try:
+    import torch as _torch
+    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
+    from transformers import AutoTokenizer as _AutoTokenizer
+
+    torch: Any = _torch
+    AutoModelForCausalLM: Any = _AutoModelForCausalLM
+    AutoTokenizer: Any = _AutoTokenizer
+except (ImportError, AttributeError):
+    torch = None
+    AutoModelForCausalLM = None
+    AutoTokenizer = None
 
 
 def _run_generation(
@@ -65,7 +67,7 @@ def _run_generation(
             tokens = sql_tok.encode(prompt)
             input_ids = torch.tensor([tokens], dtype=torch.long)
 
-        model = NativeGemma4.from_pretrained(model_name, config=kwargs.get("config"))
+        model = NativeGemma4.from_pretrained(model_name, config=cast(Any, kwargs.get("config")))
         model.eval()
         with torch.no_grad():
             output_ids = model.generate(input_ids, max_new_tokens=max_length)
@@ -79,8 +81,15 @@ def _run_generation(
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+    if "adapter_path" in kwargs or "lora_path" in kwargs:
+        adapter_path = str(kwargs.get("adapter_path") or kwargs.get("lora_path"))
+        try:
+            peft_pkg = __import__("peft", fromlist=["PeftModel"])
+            model = peft_pkg.PeftModel.from_pretrained(model, adapter_path)
+        except (ImportError, ValueError, RuntimeError, OSError) as e:
+            logger.warning("Could not load adapter from %s: %s", adapter_path, e)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    outputs = model.generate(**inputs, max_new_tokens=max_length, num_beams=beam_width, early_stopping=True, output_scores=True, return_dict_in_generate=True)
+    outputs = cast(Any, model).generate(**inputs, max_new_tokens=max_length, num_beams=beam_width, early_stopping=True, output_scores=True, return_dict_in_generate=True)
     sequences = outputs.sequences
     input_length = inputs.input_ids.shape[-1] if hasattr(inputs, "input_ids") and hasattr(inputs.input_ids, "shape") else 0
     if input_length > 0 and hasattr(sequences[0], "__getitem__") and len(sequences[0]) >= input_length:
@@ -97,7 +106,6 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     """Generate a SQL query from a natural language prompt using PyTorch.
 
     Args:
-    ----
         model_name: The name of the model to use.
         prompt: The natural language prompt.
         beam_width: Number of beams for search.
@@ -105,9 +113,10 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
         **kwargs: Additional parameters.
 
     Returns:
-    -------
         A dictionary containing the generated SQL.
 
+    Raises:
+        DependencyMissingError: If PyTorch dependencies are missing.
     """
     backend_alias = str(kwargs.get("backend_alias", kwargs.get("backend", "pytorch")))
     confidence_score = 0.0

@@ -32,6 +32,7 @@ def test_etl_pretrain(monkeypatch: pytest.MonkeyPatch) -> None:
     jax_agent = get_backend("jax")
 
     def raise_err(*a, **k):
+        """Execute raise err helper."""
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("Mocked missing JAX")

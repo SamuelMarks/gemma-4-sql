@@ -396,7 +396,7 @@ def test_cli_export(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixtu
 def test_cli_generate(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Execute logic."""
     monkeypatch.setattr("gemma_4_sql.cli_serve.evaluate", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
-    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
+    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "confidence_score": 0.95, "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_train.run_dpo", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_serve.run_agentic_loop", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_benchmark.benchmark", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
@@ -420,9 +420,10 @@ def test_cli_generate(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFix
     monkeypatch.setattr("gemma_4_sql.cli_etl.etl_posttrain", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_train.apply_peft", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     "Test the CLI generate command."
-    args = ["generate", "--model", "test-model", "--prompt", "Find all users", "--backend", "maxtext", "--beam-width", "5", "--max-length", "100"]
+    args = ["generate", "--model", "test-model", "--prompt", "Find all users", "--backend", "maxtext", "--beam-width", "5", "--max-length", "100", "--show-confidence"]
     cli(args)
-    capsys.readouterr()
+    captured = capsys.readouterr()
+    assert "Confidence: 0.9500" in captured.out
 
 
 def test_cli_agent(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1083,6 +1084,7 @@ def test_dependency_missing_error() -> None:
 
 
 def test_cli_serve_branches(monkeypatch):
+    """Test cli serve branches functionality."""
     import argparse
 
     import gemma_4_sql.cli_serve as cli_s

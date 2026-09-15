@@ -363,3 +363,13 @@ def test_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(m_etl, "_load_duckdb_dataset", lambda *args, **kwargs: (_ for _ in ()).throw(ImportError("duckdb is required")))
     with pytest.raises(ImportError):
         m_etl.build_dataloader(ETLConfig(dataset_name="dataset", split="train", batch_size=1, duckdb_path="test.db", duckdb_table="tbl"))
+
+
+def test_maxtext_etl_missing_grain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_sampler raises DependencyMissingError when grain is None."""
+    import gemma_4_sql.backends.maxtext.etl as m_etl
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(m_etl, "grain", None)
+    with pytest.raises(DependencyMissingError, match="Grain dependency is missing"):
+        m_etl._get_sampler(10, False)

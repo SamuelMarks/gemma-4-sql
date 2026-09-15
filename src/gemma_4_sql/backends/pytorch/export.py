@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
-torch = None
-save_file = None
-with catch_optional_imports():
-    import torch
-    from safetensors.torch import save_file
+
+try:
+    import torch as _torch
+    from safetensors.torch import save_file as _save_file
+
+    torch: Any = _torch
+    save_file: Any = _save_file
+except (ImportError, AttributeError):
+    torch = None
+    save_file = None
 
 
 def _is_rank_zero() -> bool:
@@ -38,9 +41,18 @@ def _is_rank_zero() -> bool:
 def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = True, backend_alias: str = "pytorch", **kwargs: object) -> tuple[Path, str]:
     """Save a real PyTorch model using safetensors.
 
-    Returns:
-        object: The resulting output from the operation.
+    Args:
+        model_name: Model identifier or path.
+        export_path: Destination path.
+        is_rank_zero: Whether the current process is rank 0.
+        backend_alias: Target backend alias.
+        **kwargs: Additional model and export keyword arguments.
 
+    Returns:
+        A tuple of (file_path, status).
+
+    Raises:
+        ValueError: If loading the model fails.
     """
     try:
         if backend_alias == "pytorch_native":
@@ -48,7 +60,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
             from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
 
             cfg = kwargs.get("config") or (Gemma4Config(vocab_size=128, hidden_size=64, num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1, head_dim=32, intermediate_size=128) if kwargs.get("test_mode") else Gemma4Config())
-            model = NativeGemma4(cfg)
+            model = NativeGemma4(cast(Any, cfg))
             tensors = {k: v.clone() if k == "lm_head.weight" else v for k, v in model.state_dict().items()}
         else:
             gemma4_for_causal_lm_cls = __import__("transformers.models.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
@@ -58,8 +70,11 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
         msg = f"Failed to load model {model_name}"
         raise ValueError(msg) from e
     file_path = Path(export_path) / "model.safetensors"
-    if is_rank_zero:  # pragma: no cover
-        save_file(tensors, file_path)
+    if kwargs.get("export_type") == "adapter" and hasattr(model, "save_pretrained"):
+        model.save_pretrained(export_path)
+        file_path = Path(export_path) / "adapter_model.safetensors"
+    elif is_rank_zero and save_file is not None:  # pragma: no cover
+        save_file(tensors, str(file_path))
     status = "exported_with_safetensors" if is_rank_zero else "skipped_non_rank_zero"
     return (file_path, status)
 
@@ -74,6 +89,9 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
 
     Returns:
         Dictionary indicating status and file path.
+
+    Raises:
+        RuntimeError: If PyTorch or safetensors are missing.
     """
     if torch is None or save_file is None:
         raise RuntimeError("PyTorch or safetensors missing, cannot export model.")
@@ -84,4 +102,4 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
     save_kwargs.pop("backend_alias", None)
     save_kwargs.pop("backend", None)
     (file_path, status) = _save_real_model(model_name, export_path, is_rank_zero=is_rank_0, backend_alias=backend_alias, **save_kwargs)
-    return {"backend": backend_alias, "model": model_name, "export_path": export_path, "file_path": file_path, "status": status, "format": "safetensors"}
+    return {"backend": backend_alias, "model": model_name, "export_path": export_path, "file_path": str(file_path), "status": status, "format": "safetensors"}

@@ -223,28 +223,59 @@ def test_rag_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
         assert rag.cosine_similarity is None
 
 
-def test_rag_no_relevant_tables(monkeypatch):
+def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test semantic search when similarity is lower than MIN_SIMILARITY.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
     import gemma_4_sql.sdk.rag as rg
 
     monkeypatch.setattr(rg, "MIN_SIMILARITY", 100.0)
     schema = {"users": ["id"], "orders": ["id"]}
 
     class MockModel:
-        def encode(self, x):
+        """Mock SentenceTransformer model."""
+
+        def encode(self, _x: object) -> list[list[float]]:
+            """Return mock embedding.
+
+            Args:
+                _x: Input object.
+
+            Returns:
+                Mock embedding list.
+            """
             return [[1.0]]
 
     monkeypatch.setattr(rg, "SentenceTransformer", lambda *a, **k: MockModel())
 
     class MockSim:
-        def argsort(self):
+        """Mock similarity array."""
+
+        def argsort(self) -> list[int]:
+            """Return sort order.
+
+            Returns:
+                Index list.
+            """
             return [0, 1]
 
-        def __getitem__(self, i):
+        def __getitem__(self, _i: int) -> float:
+            """Return similarity score.
+
+            Args:
+                _i: Index.
+
+            Returns:
+                Similarity float.
+            """
             return 0.5
 
-    monkeypatch.setattr(rg, "cosine_similarity", lambda a, b: [MockSim()])
-    res = rg._semantic_search("hi", schema, ["users", "orders"], 2)
-    assert len(res) > 0
+    monkeypatch.setattr(rg, "cosine_similarity", lambda _a, _b: [MockSim()])
+    res = rg._semantic_search("hi", schema, ["users", "orders"], 2, min_similarity=0.9)
+    assert len(res) == 2
+    assert res == ["users", "orders"]
 
 
 from unittest.mock import MagicMock, patch
@@ -254,11 +285,11 @@ import pytest
 
 
 def test_rag_semantic_no_relevant() -> None:
-    """Test rag semantic no relevant."""
+    """Test rag semantic when all similarity scores are below threshold."""
     mock_st = MagicMock()
     mock_st.return_value.encode.return_value = np.array([[1.0]])
 
-    with patch("gemma_4_sql.sdk.rag.SentenceTransformer", mock_st), patch("gemma_4_sql.sdk.rag.cosine_similarity", return_value=np.array([[0.0, 0.0]])):
+    with patch("gemma_4_sql.sdk.rag.SentenceTransformer", mock_st), patch("gemma_4_sql.sdk.rag.cosine_similarity", lambda _a, _b: np.array([[0.0, 0.0]])):
         schema = {"t1": ["c1"], "t2": ["c2"]}
         res = retrieve_relevant_schema("prompt", schema)
         assert "Table: t1" in res
@@ -294,3 +325,81 @@ def test_extract_schema_entities_edge_cases() -> None:
     ddl = "CREATE TABLE t (col1 INT, , @invalid INT, col2 TEXT, );\nCREATE TABLE t2 (a INT,);"
     schema = extract_schema_entities(ddl)
     assert schema == {"t": ["col1", "col2"], "t2": ["a"]}
+
+
+def test_extract_schema_entities_quoted_identifiers() -> None:
+    """Test extract_schema_entities with double-quoted, backtick, and bracket-quoted identifiers."""
+    ddl = """
+    CREATE TABLE "public"."customers" (
+        "id" INT PRIMARY KEY,
+        "email" VARCHAR(255),
+        "created_at" TIMESTAMP
+    );
+    CREATE TABLE `orders` (
+        `order_id` INT,
+        `total` DECIMAL(12, 2),
+        CONSTRAINT chk_total CHECK (`total` >= 0)
+    );
+    CREATE TABLE [inventory] (
+        [item_id] INT,
+        [count] INT
+    );
+    """
+    schema = extract_schema_entities(ddl)
+    assert schema == {
+        "customers": ["id", "email", "created_at"],
+        "orders": ["order_id", "total"],
+        "inventory": ["item_id", "count"],
+    }
+
+
+def test_semantic_search_empty_tables() -> None:
+    """Test that _semantic_search handles empty table lists without error."""
+    from gemma_4_sql.sdk.rag import _semantic_search
+
+    res = _semantic_search("find user", {}, [], top_k_tables=2)
+    assert res == []
+
+
+def test_rag_complex_ddl_and_ranking_boundaries() -> None:
+    """Test extract_schema_entities with complex DDL, mixed casings, and multiple foreign keys."""
+    ddl = """
+    CREATE TABLE UserAccounts (
+        UserID INT NOT NULL,
+        UserName VARCHAR(50),
+        CONSTRAINT pk_user PRIMARY KEY (UserID)
+    );
+    CREATE TABLE Orders_Archive (
+        OrderID INT,
+        CustID INT,
+        SellerID INT,
+        Amount NUMERIC(10, 2),
+        FOREIGN KEY (CustID) REFERENCES UserAccounts(UserID),
+        FOREIGN KEY (SellerID) REFERENCES UserAccounts(UserID)
+    );
+    """
+    schema = extract_schema_entities(ddl)
+    assert "UserAccounts" in schema
+    assert schema["UserAccounts"] == ["UserID", "UserName"]
+    assert "Orders_Archive" in schema
+    assert schema["Orders_Archive"] == ["OrderID", "CustID", "SellerID", "Amount"]
+
+    res = retrieve_relevant_schema("Find UserAccounts with high Amount", schema, top_k_tables=1)
+    assert "UserAccounts" in res
+
+
+def test_semantic_search_missing_sentence_transformers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _semantic_search falls back to keyword search when sentence_transformers is missing.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    from gemma_4_sql.sdk import rag
+
+    monkeypatch.setattr(rag, "SentenceTransformer", None)
+    schema = {"users": ["id", "name"], "orders": ["id", "user_id"]}
+    res = rag._semantic_search("users", schema, ["users", "orders"], 1)
+    assert res == ["users"]

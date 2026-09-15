@@ -18,11 +18,19 @@ class Gemma4RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(dim))
 
     def _norm(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply normalization."""
+        """Apply normalization.
+
+        Returns:
+            Normalized tensor.
+        """
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass."""
+        """Forward pass for RMSNorm.
+
+        Returns:
+            Normalized and scaled tensor.
+        """
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
 
@@ -39,5 +47,9 @@ class Gemma4MLP(nn.Module):
         self.act_fn = nn.GELU(approximate="tanh")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass."""
+        """Forward pass for MLP.
+
+        Returns:
+            Projected output tensor.
+        """
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))

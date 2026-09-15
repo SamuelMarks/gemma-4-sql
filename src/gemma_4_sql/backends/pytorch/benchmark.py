@@ -4,23 +4,34 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue, ModelType
+    from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
-torch = None
-AutoModelForCausalLM = None
-with catch_optional_imports():
-    import torch
-    from transformers import AutoModelForCausalLM
+
+try:
+    import torch as _torch
+    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
+
+    torch: Any = _torch
+    AutoModelForCausalLM: Any = _AutoModelForCausalLM
+except (ImportError, AttributeError):
+    torch = None
+    AutoModelForCausalLM = None
 
 
 def _get_device(hardware: str) -> str:
-    """Get the correct device based on hardware string."""
+    """Get the correct device based on hardware string.
+
+    Args:
+        hardware: Target hardware string.
+
+    Returns:
+        Device identifier string (cpu, cuda, or mps).
+    """
     if hardware == "cpu":
         return "cpu"
     if getattr(torch, "cuda", None) and getattr(torch.cuda, "is_available", lambda: False)():
@@ -30,7 +41,7 @@ def _get_device(hardware: str) -> str:
     return "cpu"
 
 
-def _load_pytorch_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False, dtype: str = "bfloat16", backend_alias: str = "pytorch") -> tuple[ModelType, str]:
+def _load_pytorch_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False, dtype: str = "bfloat16", backend_alias: str = "pytorch") -> tuple[Any, str]:
     """Load the model and determine device.
 
     Args:
@@ -164,16 +175,16 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """Benchmark a model using the PyTorch backend.
 
     Args:
-    ----
         model_name: The name of the model to benchmark.
         hardware: Target hardware for the benchmark (e.g., 'gpu', 'tpu', 'cpu').
         batch_size: Batch size to use during benchmarking.
         **kwargs: Additional args like `num_runs`.
 
     Returns:
-    -------
         A dictionary containing benchmark metrics and status.
 
+    Raises:
+        DependencyMissingError: If PyTorch dependencies are missing.
     """
     backend_alias = str(kwargs.get("backend_alias", "pytorch"))
 

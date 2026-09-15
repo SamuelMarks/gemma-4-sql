@@ -57,8 +57,8 @@ class SiglipAttention(nnx.Module):
         self.num_heads = config.num_attention_heads
         self.head_dim = config.hidden_size // config.num_attention_heads
         (hs, _shd) = (config.hidden_size, config.shd_cfg)
-        km = {}
-        bm = {}
+        km: dict[str, object] = {}
+        bm: dict[str, object] = {}
         self.q_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
         self.k_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
         self.v_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
@@ -242,8 +242,19 @@ class Gemma4MultiModalProjector(nnx.Module):
     """
 
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize the vision projector.
+
+        Args:
+            config: Gemma 4 model configuration.
+            rngs: JAX NNX random number generators.
+
+        Raises:
+            ValueError: If vision_config is missing in config.
+        """
         self.text_config = config
+        if config.vision_config is None:
+            msg = "Vision config is required for Gemma4VisionProjector"
+            raise ValueError(msg)
         self.vision_config = config.vision_config
         (vhs, ths) = (config.vision_config.hidden_size, config.hidden_size)
         self.patches_per_img = config.vision_config.image_size // config.vision_config.patch_size
