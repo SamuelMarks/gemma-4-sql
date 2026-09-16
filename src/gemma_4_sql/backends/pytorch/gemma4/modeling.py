@@ -14,12 +14,69 @@ from .decoder_layer import Gemma4DecoderLayer
 from .layers import Gemma4RMSNorm
 from .vision import Gemma4VisionModel
 
+__all__ = [
+    "Gemma4Config",
+    "Gemma4ForCausalLM",
+    "Gemma4MultiModalProjector",
+    "merge_modality_embeddings",
+]
+
+
+def merge_modality_embeddings(
+    modality_features: torch.Tensor,
+    text_embeddings: torch.Tensor,
+    token_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Merge projected multimodal feature embeddings into text embeddings at placeholder positions.
+
+    Maintains algorithmic and mathematical parity with the JAX implementation
+    (batched_merge_modalities in backends/jax/gemma4/multimodal.py).
+
+    Mathematical Formulation:
+        Given text embeddings T in R^{B x L x D}, multimodal features M in R^{B x K x D},
+        and binary token mask P in {0, 1}^{B x L}:
+            idx_{b, t} = clip(cumsum(P_{b, :})_{t} - 1, 0, K - 1)
+            aligned_{b, t} = M_{b, idx_{b, t}}
+            output_{b, t} = aligned_{b, t} if P_{b, t} == 1 else T_{b, t}
+
+        If no placeholder tokens are marked in token_mask (or token_mask is None or empty),
+        the multimodal features are concatenated with the text embeddings:
+            output = cat([modality_features, text_embeddings], dim=1)
+
+    Args:
+        modality_features: Projected multimodal feature tensor of shape (B, K, D).
+        text_embeddings: Text token embedding tensor of shape (B, L, D).
+        token_mask: Optional boolean or integer mask tensor of shape (B, L).
+
+    Returns:
+        Tensor of merged embeddings of shape (B, L, D) or (B, K + L, D).
+    """
+    if token_mask is None or not token_mask.any():
+        return torch.cat([modality_features, text_embeddings], dim=1)
+
+    batch_size, seq_len, hidden_dim = text_embeddings.shape
+    num_features = modality_features.shape[1]
+
+    mask_long = token_mask.long()
+    indices = torch.cumsum(mask_long, dim=1) - 1
+    safe_indices = torch.clamp(indices, min=0, max=num_features - 1)
+
+    batch_idx = torch.arange(batch_size, device=modality_features.device).unsqueeze(1).expand(-1, seq_len)
+    aligned_features = modality_features[batch_idx, safe_indices]
+
+    mask_expanded = token_mask.bool().unsqueeze(-1).expand(-1, -1, hidden_dim)
+    return torch.where(mask_expanded, aligned_features, text_embeddings)
+
 
 class Gemma4MultiModalProjector(nn.Module):
     """Multimodal projector for Gemma 4."""
 
     def __init__(self, config: Gemma4Config):
-        """Initialize Gemma4MultiModalProjector."""
+        """Initialize Gemma4MultiModalProjector.
+
+        Args:
+            config: Gemma 4 configuration object.
+        """
         super().__init__()
         self.linear_1 = nn.Linear(config.vision_config.hidden_size, config.hidden_size, bias=True)
         self.act = nn.GELU(approximate="tanh")
@@ -27,6 +84,9 @@ class Gemma4MultiModalProjector(nn.Module):
 
     def forward(self, image_features: torch.Tensor) -> torch.Tensor:
         """Forward pass for multimodal projector.
+
+        Args:
+            image_features: Tensor of vision model outputs.
 
         Returns:
             Projected multimodal features.
@@ -41,7 +101,11 @@ class Gemma4ForCausalLM(nn.Module):
     """Gemma 4 model for causal language modeling."""
 
     def __init__(self, config: Gemma4Config):
-        """Initialize Gemma4ForCausalLM."""
+        """Initialize Gemma4ForCausalLM.
+
+        Args:
+            config: Gemma 4 configuration object.
+        """
         super().__init__()
         self.config = config
         self.vocab_size = config.vocab_size
@@ -67,8 +131,20 @@ class Gemma4ForCausalLM(nn.Module):
         past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | Cache | None = None,
         pixel_values: torch.Tensor | None = None,
         audio_values: torch.Tensor | None = None,
+        image_token_mask: torch.Tensor | None = None,
+        audio_token_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, tuple[tuple[torch.Tensor, torch.Tensor], ...] | Cache | None]:
-        """Forward pass of the model.
+        """Forward pass of the Gemma 4 multimodal model.
+
+        Args:
+            input_ids: Input token ID tensor of shape (batch_size, sequence_length).
+            attention_mask: Optional attention mask tensor.
+            position_ids: Optional position ID tensor.
+            past_key_values: Optional cached key-value states.
+            pixel_values: Optional image pixel values tensor.
+            audio_values: Optional raw audio waveform tensor.
+            image_token_mask: Optional boolean mask for image placeholder tokens.
+            audio_token_mask: Optional boolean mask for audio placeholder tokens.
 
         Returns:
             Tuple containing output logits and updated past key values.
@@ -78,15 +154,37 @@ class Gemma4ForCausalLM(nn.Module):
         if pixel_values is not None:
             vision_outputs = self.vision_model(pixel_values)
             image_features = self.multi_modal_projector(vision_outputs)
+            if image_token_mask is None:
+                image_token_id = getattr(self.config, "image_token_id", 255999)
+                image_token_mask = input_ids == image_token_id
 
-            # Very simplified interleaving: assume image tokens are placed at the end of the sequence for now
-            # A real implementation would find the `<image>` token in `input_ids` and splice `image_features` there.
-            hidden_states = torch.cat([image_features, hidden_states], dim=1)
+            hidden_states = merge_modality_embeddings(
+                modality_features=image_features,
+                text_embeddings=hidden_states,
+                token_mask=image_token_mask,
+            )
 
         if audio_values is not None:
             audio_features = self.audio_model(audio_values)
-            # Very simplified interleaving
-            hidden_states = torch.cat([audio_features, hidden_states], dim=1)
+            if audio_token_mask is None:
+                audio_token_id = getattr(self.config, "audio_token_id", 255998)
+                audio_token_mask = input_ids == audio_token_id
+
+            hidden_states = merge_modality_embeddings(
+                modality_features=audio_features,
+                text_embeddings=hidden_states,
+                token_mask=audio_token_mask,
+            )
+
+        curr_seq_len = hidden_states.shape[1]
+        if position_ids is None:
+            position_ids = torch.arange(0, curr_seq_len, dtype=torch.long, device=hidden_states.device).unsqueeze(0).expand(hidden_states.shape[0], -1)
+
+        if attention_mask is not None and attention_mask.dim() == 2 and attention_mask.shape[1] != curr_seq_len:
+            diff = curr_seq_len - attention_mask.shape[1]
+            if diff > 0:
+                prefix_mask = torch.ones((attention_mask.shape[0], diff), dtype=attention_mask.dtype, device=attention_mask.device)
+                attention_mask = torch.cat([prefix_mask, attention_mask], dim=1)
 
         next_decoder_cache: tuple[tuple[torch.Tensor, torch.Tensor], ...] = ()
 
@@ -167,27 +265,40 @@ class Gemma4ForCausalLM(nn.Module):
         """
         from pathlib import Path
 
-        cfg = config or Gemma4Config()
-        model = cls(cfg)
+        from safetensors.torch import load_file
+
         path = Path(str(model_name_or_path))
-        target_file: Path | None = None
-        if path.is_file() and (path.suffix == ".safetensors" or path.name.endswith(".safetensors")):
-            target_file = path
+        if config is None:
+            config_json_path = (path if path.is_dir() else path.parent) / "config.json"
+            if config_json_path.is_file():
+                import json
+
+                with open(config_json_path) as f:
+                    config_dict = json.load(f)
+                config = Gemma4Config(**config_dict)
+            else:
+                config = Gemma4Config()
+
+        model = cls(config)
+        weights_file: Path | None = None
+        if path.is_file():
+            weights_file = path
         elif path.is_dir():
             st_path = path / "model.safetensors"
             if st_path.is_file():
-                target_file = st_path
-        if target_file is not None:
+                weights_file = st_path
+
+        if weights_file is not None and weights_file.exists():
             try:
                 from safetensors import SafetensorError
-                from safetensors.torch import load_file
 
-                state_dict = load_file(str(target_file))
+                state_dict = load_file(str(weights_file))
                 model.load_state_dict(state_dict, strict=False)
             except (SafetensorError, ValueError, RuntimeError, OSError, KeyError, AttributeError) as exc:
                 import logging
 
                 logging.getLogger(__name__).debug("Failed to load safetensors: %s", exc)
+
         return model
 
     def save_pretrained(self, save_directory: str) -> str:

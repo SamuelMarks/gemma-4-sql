@@ -108,11 +108,6 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: app_instance)
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
 
-    import gemma_4_sql.backends.common_serve
-
-    gemma_4_sql.backends.common_serve.Request = mock.MagicMock()
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
-
     srv.serve_model("foo", test_mode=True)
     generate_func = app_instance.router.routes[-1].endpoint
 
@@ -126,6 +121,19 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     generate_func2 = app_instance.router.routes[-1].endpoint
     result2 = await generate_func2(request)
     assert result2 is not None
+
+    from gemma_4_sql.exceptions import InferenceError
+
+    monkeypatch.setattr("gemma_4_sql.backends.maxtext.inference.generate_sql", lambda *a, **k: {"sql": ""})
+    with pytest.raises(InferenceError, match="returned empty SQL"):
+        await generate_func2(request)
+
+    def mock_raise(*a: object, **k: object) -> dict[str, object]:
+        raise RuntimeError("MaxText failure")
+
+    monkeypatch.setattr("gemma_4_sql.backends.maxtext.inference.generate_sql", mock_raise)
+    with pytest.raises(InferenceError, match="MaxText generation failed"):
+        await generate_func2(request)
 
 
 def test_serve_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,5 +1,6 @@
 """Tests for JAX inference logic."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -477,4 +478,58 @@ def test_jax_inference_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: objec
 
     # Second run hits _MODEL_CACHE
     res2 = jax_inf.generate_sql(str(model_dir), "select", beam_width=1, max_length=1)
+    assert res2["status"] == "success"
+
+
+def test_inference_jax_multimodal_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test JAX multimodal generation with audio_path, image_path, and TypeError fallback in model forward.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    import jax.numpy as jnp
+
+    img_file = tmp_path / "test.png"
+    img_file.write_bytes(b"\x89PNG\r\n\x1a\n")
+    aud_file = tmp_path / "test.wav"
+    aud_file.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+
+    # Model that raises TypeError when kwargs are passed (covering 225-226)
+    def mock_model_forward(seq: object, pos: object, **kwargs: object) -> object:
+        if kwargs:
+            raise TypeError("Forward got unexpected keyword arguments")
+        return jnp.zeros((1, 1, 10))
+
+    monkeypatch.setattr(inf, "Gemma4ForCausalLM", lambda *a, **k: mock_model_forward)
+
+    # 1. With image_path and audio_path (and pixel_values is None)
+    res = inf.generate_sql(
+        "model",
+        "Select users",
+        beam_width=1,
+        max_length=1,
+        image_path=str(img_file),
+        audio_path=str(aud_file),
+        modality="multimodal",
+    )
+    assert res["status"] == "success"
+
+    # 2. With pixel_values and audio_values already supplied (covering 171->175, 175->179)
+    pv = jnp.zeros((1, 3, 224, 224))
+    av = jnp.zeros((1, 1600))
+    res2 = inf.generate_sql(
+        "model",
+        "Select users",
+        beam_width=1,
+        max_length=1,
+        image_path=str(img_file),
+        audio_path=str(aud_file),
+        pixel_values=pv,
+        audio_values=av,
+        modality="multimodal",
+    )
     assert res2["status"] == "success"

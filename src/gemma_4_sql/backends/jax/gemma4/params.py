@@ -5,7 +5,7 @@ Provides parameter matching and checkpoint utilities.
 
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
@@ -242,7 +242,14 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
         raise ValueError(msg)
     gemma4 = nnx.eval_shape(lambda: model_lib.Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0)))
     (graph_def, abs_state) = nnx.split(gemma4)
-    jax_state = dict(abs_state.to_pure_dict() if hasattr(abs_state, "to_pure_dict") else getattr(abs_state, "to_flat_dict", lambda: dict(abs_state))())
+    state_any: Any = abs_state
+    if hasattr(state_any, "to_pure_dict"):
+        state_dict_raw: Any = state_any.to_pure_dict()
+    elif hasattr(state_any, "to_flat_dict"):
+        state_dict_raw = state_any.to_flat_dict()
+    else:
+        state_dict_raw = dict(state_any)
+    jax_state = dict(cast(Any, state_dict_raw))
     mapping = _get_key_and_transform_mapping()
     moe_pattern = re.compile("^model\\.layers\\.(\\d+)\\.block_sparse_moe\\.experts\\.(\\d+)\\.(gate_proj|up_proj|down_proj)\\.weight$")
     expert_tensors: dict[int, dict[str, dict[int, jax.Array]]] = {}
@@ -252,5 +259,5 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
     _stack_and_assign_expert_tensors(expert_tensors, mapping, jax_state)
     _fix_jax_state_embeddings(jax_state, gemma4, cfg)
     if hasattr(nnx, "State"):
-        return nnx.merge(graph_def, abs_state)
-    return nnx.merge(graph_def, jax_state)
+        return cast(Any, nnx.merge(graph_def, abs_state))
+    return cast(Any, nnx.merge(graph_def, cast(Any, jax_state)))

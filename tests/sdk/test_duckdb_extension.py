@@ -50,6 +50,7 @@ def test_embed_in_duckdb_success() -> None:
             return mock_cursor
 
         conn.execute = mock_execute
+        conn.cursor = lambda: conn
         registered_func = None
 
         def mock_create_function(_name: object, func: object, _args: object, _ret: object) -> object:

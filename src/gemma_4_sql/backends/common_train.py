@@ -15,7 +15,7 @@ def generic_run_training_epochs(
     dataloader: Iterable[T_Batch],
     process_batch_fn: Callable[[T_Batch], float],
 ) -> float:
-    """A generic training loop for iterating over epochs and batches.
+    """Run a generic training loop across epochs and batches.
 
     Args:
         epochs: The integer value for epochs.

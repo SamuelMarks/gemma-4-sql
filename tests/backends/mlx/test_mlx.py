@@ -64,8 +64,8 @@ def test_benchmark_mlx_mocked(monkeypatch):
             """Execute to helper."""
             return self
 
-    monkeypatch.setattr(bm, "mlx", MockMLX)
-    monkeypatch.setattr(bm, "AutoModelForCausalLM", type("MockAuto", (), {"from_pretrained": lambda x: MockModel()}))
+    monkeypatch.setattr(bm, "mx", MockMLX)
+    monkeypatch.setattr(bm, "load", lambda x: MockModel())
 
     res = bm.benchmark_model("test_model", "gpu", 1, num_runs=2, test_mode=True)
     assert res["status"] != "failed"
@@ -78,7 +78,7 @@ def test_benchmark_mlx_mocked(monkeypatch):
     res2 = bm.benchmark_model("test_model", "gpu", 1)
     assert "failed" in res2["status"]
 
-    monkeypatch.setattr(bm, "mlx", None)
+    monkeypatch.setattr(bm, "mx", None)
     res_missing = bm.benchmark_model("test", "gpu", 1)
     assert res_missing["status"] == "mocked_missing_mlx"
 
@@ -119,7 +119,7 @@ def test_mlx_etl_functional(monkeypatch):
     assert res["status"] == "loaded"
 
 
-def test_mlx_export_functional(monkeypatch):
+def test_mlx_export_functional(monkeypatch, tmp_path):
     """Test mlx export functional functionality."""
     import gemma_4_sql.backends.mlx.export as mexp
 
@@ -147,12 +147,53 @@ def test_mlx_export_functional(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
 
-    res = mexp.export_model("model", "path")
+    res = mexp.export_model("model", str(tmp_path / "path"))
     assert res["status"] == "exported_with_safetensors"
+
+    class MockModelNoConfig:
+        """Model without config."""
+
+        def parameters(self):
+            """Return parameters."""
+            return {"w": [1.0]}
+
+    monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": staticmethod(lambda *a, **k: (MockModelNoConfig(), None))})())
+    res_no_cfg = mexp.export_model("model_no_cfg", str(tmp_path / "path_no_cfg"))
+    assert res_no_cfg["status"] == "exported_with_safetensors"
+
+    class MockModelDictConfig:
+        """Model with dict config."""
+
+        def __init__(self):
+            """Initialize model."""
+            self.config = {"model_type": "gemma4"}
+
+        def parameters(self):
+            """Return parameters."""
+            return {"w": [1.0]}
+
+    monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": staticmethod(lambda *a, **k: (MockModelDictConfig(), None))})())
+    res_dict_cfg = mexp.export_model("model_dict_cfg", str(tmp_path / "path_dict_cfg"))
+    assert res_dict_cfg["status"] == "exported_with_safetensors"
+
+    class MockModelObjConfig:
+        """Model with object config."""
+
+        def __init__(self):
+            """Initialize model."""
+            self.config = type("Config", (), {"model_type": "gemma4"})()
+
+        def parameters(self):
+            """Return parameters."""
+            return {"w": [1.0]}
+
+    monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": staticmethod(lambda *a, **k: (MockModelObjConfig(), None))})())
+    res_obj_cfg = mexp.export_model("model_obj_cfg", str(tmp_path / "path_obj_cfg"))
+    assert res_obj_cfg["status"] == "exported_with_safetensors"
 
     monkeypatch.setattr(mexp, "mx", None)
     with pytest.raises(RuntimeError):
-        mexp.export_model("m", "p")
+        mexp.export_model("m", str(tmp_path / "p"))
 
 
 def test_mlx_inference_functional(monkeypatch):
@@ -283,7 +324,7 @@ def test_mlx_quantize_functional(monkeypatch):
     monkeypatch.setitem(sys.modules, "mlx.nn", mock_nn_no_quant)
     monkeypatch.setitem(sys.modules, "mlx", type("M", (), {"nn": mock_nn_no_quant}))
     res_noq = mquant.quantize_model("m", "int8")
-    assert res_noq["status"] == "quantized_int8"
+    assert "failed" in res_noq["status"]
 
 
 def test_mlx_train_functional(monkeypatch):
@@ -354,7 +395,15 @@ def test_mlx_inference_test_mode(monkeypatch):
 
     import gemma_4_sql.backends.mlx.inference as minf
 
-    monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": lambda n: (None, None), "generate": lambda m, t, prompt, max_tokens, verbose: "select 1"}))
+    def mock_model(inputs):
+        import mlx.core as mx
+
+        logits = mx.zeros((1, inputs.shape[-1], 100))
+        logits[0, -1, 83] = 5.0
+        return logits
+
+    monkeypatch.setattr(minf, "load", lambda n: (mock_model, None))
+    monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": lambda n: (mock_model, None)}))
     import builtins
 
     orig_import = builtins.__import__
@@ -366,9 +415,9 @@ def test_mlx_inference_test_mode(monkeypatch):
         return orig_import(name, *a, **k)
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
-    res = minf.generate_sql("model", "prompt", test_mode=True)
-    assert "status" in res
-    assert res["sql"] == "SELECT * FROM mlx_table"
+    res = minf.generate_sql("model", "prompt", max_length=2)
+    assert res["status"] == "success"
+    assert "S" in res["sql"]
 
 
 def test_mlx_inference_exception(monkeypatch):
@@ -417,6 +466,15 @@ def test_mlx_dpo_missing_functional(monkeypatch):
 
 def test_mlx_quant_mock_functional(monkeypatch):
     """Test mlx quant mock functional functionality."""
+    import sys
+    from unittest.mock import MagicMock
+
+    mock_model = MagicMock()
+    mock_nn = MagicMock()
+    monkeypatch.setitem(sys.modules, "mlx.nn", mock_nn)
+    monkeypatch.setitem(sys.modules, "mlx", type("M", (), {"nn": mock_nn}))
+    monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": lambda n: (mock_model, None)}))
+
     import gemma_4_sql.backends.mlx.quantize as mquant
 
     res = mquant.quantize_model("m")
@@ -601,7 +659,7 @@ def test_mlx_quantize_mock_functional2(monkeypatch):
         if name == "mlx_lm":
             return type("MLXLM", (), {"load": lambda n: (None, None)})
         if name == "mlx":
-            return type("MLX", (), {"core": type("Core", (), {})})
+            return type("MLX", (), {"core": type("Core", (), {}), "nn": type("NN", (), {"quantize": lambda *a, **k: None})})
         if name == "transformers":
             return type("Transformers", (), {"BitsAndBytesConfig": lambda **k: None, "AutoModelForCausalLM": type("Auto", (), {"from_pretrained": lambda *a, **k: None})})
         return orig_import(name, *a, **k)
@@ -612,8 +670,6 @@ def test_mlx_quantize_mock_functional2(monkeypatch):
 
     monkeypatch.setattr(mlx, "core", type("Core", (), {}), raising=False)
     mquant.mlx = mlx
-    mquant.BitsAndBytesConfig = type("BB", (), {"__init__": lambda self, **k: None})
-    mquant.AutoModelForCausalLM = type("Auto", (), {})
     mquant.quantize_model("m")
 
 
@@ -688,5 +744,5 @@ def test_quantize_mlx_error(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
 
-    res = mquant.quantize_model("m")
-    assert "failed" in str(res) or isinstance(res, tuple)
+    with pytest.raises(RuntimeError, match="MLX quantization failed"):
+        mquant.quantize_model("m")

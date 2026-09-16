@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 
@@ -79,15 +79,42 @@ def _create_base_format_transform(base_map: type) -> type:
             self.tokenizer = tokenizer
 
         def map(self, element: JSONDict) -> JSONDict:
-            """Execute function.
+            """Execute data mapping transformation with multimodal support.
+
+            Args:
+                element: Input dictionary element from dataset.
 
             Returns:
-                The execution result.
-
+                Dictionary with tokenized inputs, targets, and optional multimodal features.
             """
-            prompt = element.get("sql_prompt", element.get("question", ""))
-            target = element.get("sql", element.get("query", ""))
-            return {"inputs": self.tokenizer.encode(str(prompt)), "targets": self.tokenizer.encode(str(target))}
+            from gemma_4_sql.backends.common_multimodal import (
+                format_multimodal_prompt,
+                process_audio,
+                process_image,
+            )
+
+            prompt = str(element.get("sql_prompt", element.get("question", "")))
+            target = str(element.get("sql", element.get("query", "")))
+
+            image_input = element.get("image_bytes") or element.get("image_url") or element.get("image")
+            audio_input = element.get("audio_clip") or element.get("audio")
+
+            formatted = format_multimodal_prompt(
+                prompt,
+                has_image=image_input is not None,
+                has_audio=audio_input is not None,
+            )
+            res: dict[str, Any] = {
+                "inputs": self.tokenizer.encode(str(formatted["prompt"])),
+                "targets": self.tokenizer.encode(str(target)),
+            }
+            if image_input is not None:
+                img_data = process_image(cast(Any, image_input))
+                res["pixel_values"] = img_data["pixel_values"]
+            if audio_input is not None:
+                aud_data = process_audio(cast(Any, audio_input))
+                res["audio_values"] = aud_data["audio_values"]
+            return res
 
     return BaseFormatTransform
 

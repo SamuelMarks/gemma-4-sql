@@ -60,13 +60,19 @@ def test_jax_etl_import_error() -> None:
         TypeError: Description.
 
     """
+    import importlib
 
-    with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
+    try:
+        with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
+            if "gemma_4_sql.backends.jax.etl" in sys.modules:
+                del sys.modules["gemma_4_sql.backends.jax.etl"]
+            etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
+            with pytest.raises(DependencyMissingError, match=r"Missing grain or datasets\. Cannot load test\."):
+                etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
+    finally:
         if "gemma_4_sql.backends.jax.etl" in sys.modules:
             del sys.modules["gemma_4_sql.backends.jax.etl"]
-        etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-        with pytest.raises(DependencyMissingError, match=r"Missing grain or datasets\. Cannot load test\."):
-            etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
+        importlib.import_module("gemma_4_sql.backends.jax.etl")
 
 
 class MockTokenizerForJax:

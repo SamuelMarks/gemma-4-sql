@@ -520,7 +520,10 @@ def test_train_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_jax_train_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test JAX train step without nnx jit/grad and missing deps in _execute_train."""
+    from unittest import mock
+
     from gemma_4_sql.exceptions import DependencyMissingError
+    from gemma_4_sql.type_hints import TrainerState
 
     class MockEmptyNNX:
         """Test class for MockEmptyNNX."""
@@ -529,6 +532,56 @@ def test_jax_train_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     step_fn = tr._get_train_step_fn()
     loss = step_fn(None, None, {})
     assert loss == pytest.approx(0.0)
+
+    # Test nnx with value_and_grad and optimizer update (lines 73 and 77)
+    class MockNNXWithGrad:
+        """Mock NNX with value_and_grad."""
+
+        def value_and_grad(self, fn: object) -> object:
+            """Return mock value and grad function."""
+            return lambda m, b: (0.123, "grads")
+
+    monkeypatch.setattr(tr, "nnx", MockNNXWithGrad())
+    step_fn2 = tr._get_train_step_fn()
+    mock_opt = mock.MagicMock()
+    loss2 = step_fn2(None, mock_opt, {})
+    assert loss2 == pytest.approx(0.123)
+    mock_opt.update.assert_called_once_with("grads")
+
+    # Test _loss_fn directly
+    mock_model = lambda x: [[0.1, 0.9]]
+    mock_batch = {"inputs": [1], "targets": [1]}
+    monkeypatch.setattr(tr.optax, "softmax_cross_entropy_with_integer_labels", lambda l, t: [0.5])
+    monkeypatch.setattr(tr.jnp, "mean", lambda x: 0.5)
+    assert tr._loss_fn(mock_model, mock_batch) == 0.5
+
+    # Test _run_training_epochs
+    mock_optimizer = mock.MagicMock()
+    mock_optimizer.update = mock.MagicMock()
+    state = TrainerState(
+        dataloader=[{"inputs": [1], "targets": [1]}],
+        epochs=1,
+        policy_model=mock_model,
+        optimizer=mock_optimizer,
+        train_step=lambda m, o, b: 0.42,
+        params=None,
+    )
+    monkeypatch.setattr(tr.jax, "device_put", lambda x, s: x)
+    assert tr._run_training_epochs(state) == 0.42
+
+    # Test _execute_train dataloader is None ValueError
+    monkeypatch.setattr(tr, "build_dataloader", lambda cfg: {"loader": None})
+    monkeypatch.setattr(tr, "Gemma4ForCausalLM", lambda *a, **k: mock.MagicMock())
+    monkeypatch.setattr(tr, "nnx", mock.MagicMock())
+    with pytest.raises(ValueError, match="Invalid dataloader"):
+        tr._execute_train("test_data", 1, 1e-4)
+
+    # Test _execute_train successful run
+    monkeypatch.setattr(tr, "build_dataloader", lambda cfg: {"loader": [{"inputs": [1], "targets": [1]}]})
+    monkeypatch.setattr(tr, "_run_training_epochs", lambda st: 0.25)
+    status, final_loss = tr._execute_train("test_data", 1, 1e-4)
+    assert status == "completed"
+    assert final_loss == 0.25
 
     monkeypatch.setattr(tr, "jax", None)
     with pytest.raises(DependencyMissingError, match="JAX dependencies are missing for training"):

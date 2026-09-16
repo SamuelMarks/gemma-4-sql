@@ -1,6 +1,11 @@
 """Tests for MaxText training pipeline."""
 
+from __future__ import annotations
+
+from pathlib import Path
+
 import pytest
+from typing_extensions import Self
 
 import gemma_4_sql.backends.maxtext.train as tr
 from gemma_4_sql.backends.maxtext.train import train_model
@@ -387,28 +392,28 @@ def test_train_model_maxtext_integration(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_train_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    m_train = __import__("gemma_4_sql.backends.maxtext.train", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "maxtext.train", type("M", (), {})())
-    monkeypatch.setitem(sys.modules, "maxtext", type("M", (), {})())
-    builtins = __import__("builtins", fromlist=[""])
-    orig_import = builtins.__import__
+    """Test successful import of all MaxText training dependencies."""
+    import importlib
+    import sys
+    import types
 
-    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
-        """Execute function.
+    import gemma_4_sql.backends.maxtext.train as m_train
 
-        Returns:
-            object: Description of return.
+    mock_mod = types.ModuleType("maxtext")
+    mock_train = types.ModuleType("maxtext.train")
+    mock_models = types.ModuleType("maxtext.models")
+    mock_gemma4 = types.ModuleType("maxtext.models.gemma4")
+    mock_gemma4.Gemma4Model = type("MockModel", (), {})  # type: ignore[attr-defined]
 
-        """
-        if name == "maxtext.models.gemma4" and "Gemma4Model" in fromlist:
-            return type("M", (), {"Gemma4Model": "mocked_gemma4"})
-        return orig_import(name, globals, locals, fromlist, level)
+    monkeypatch.setitem(sys.modules, "maxtext", mock_mod)
+    monkeypatch.setitem(sys.modules, "maxtext.train", mock_train)
+    monkeypatch.setitem(sys.modules, "maxtext.models", mock_models)
+    monkeypatch.setitem(sys.modules, "maxtext.models.gemma4", mock_gemma4)
 
-    monkeypatch.setattr("builtins.__import__", mock_import)
     importlib.reload(m_train)
+    assert m_train.Gemma4Model is not None
+    assert m_train.maxtext_train is not None
+
     monkeypatch.undo()
     importlib.reload(m_train)
 
@@ -430,3 +435,271 @@ def test_maxtext_train_step_nojit_and_missing_deps(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(m_train, "jax", None)
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing for training"):
         m_train._execute_train("mod", "ds", 1, 1e-4, False)
+
+
+def test_initialize_jax_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test JAX distributed coordination service initialization."""
+    # test_mode returns False
+    assert not tr._initialize_jax_distributed(test_mode=True)
+
+    # jax is None returns False
+    monkeypatch.setattr(tr, "jax", None)
+    assert not tr._initialize_jax_distributed(test_mode=False)
+
+    # jax has distributed and initialize succeeds
+    calls: list[dict[str, object]] = []
+
+    class MockDistributed:
+        """Mock JAX distributed module."""
+
+        @staticmethod
+        def initialize(**kwargs: object) -> None:
+            """Execute initialize."""
+            calls.append(kwargs)
+
+    class MockJaxDist:
+        """Mock JAX module with distributed support."""
+
+        distributed = MockDistributed()
+
+    monkeypatch.setattr(tr, "jax", MockJaxDist())
+    res = tr._initialize_jax_distributed(
+        coordinator_address="10.0.0.1:1234",
+        num_processes=4,
+        process_id=1,
+        test_mode=False,
+    )
+    assert res is True
+    assert len(calls) == 1
+    assert calls[0] == {"coordinator_address": "10.0.0.1:1234", "num_processes": 4, "process_id": 1}
+
+    # error during initialize logs warning and returns False
+    class MockFailingDistributed:
+        """Mock failing distributed module."""
+
+        @staticmethod
+        def initialize(**kwargs: object) -> None:
+            """Raise exception on initialize."""
+            raise RuntimeError("Already initialized")
+
+    class MockFailingJaxDist:
+        """Mock JAX module with failing distributed initialization."""
+
+        distributed = MockFailingDistributed()
+
+    monkeypatch.setattr(tr, "jax", MockFailingJaxDist())
+    assert tr._initialize_jax_distributed(test_mode=False) is False
+
+
+def test_save_maxtext_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test saving checkpoint using Orbax CheckpointManager."""
+    from gemma_4_sql.exceptions import DependencyMissingError, ExportError
+
+    # Missing ocp
+    monkeypatch.setattr(tr, "ocp", None)
+    with pytest.raises(DependencyMissingError, match="Orbax checkpoint dependency"):
+        tr.save_maxtext_checkpoint(tmp_path, 1, {"weights": 1})
+
+    # Successful save
+    saved: list[tuple[int, object]] = []
+
+    class MockCheckpointManager:
+        """Mock Orbax CheckpointManager."""
+
+        def __init__(self, directory: object, checkpointer: object, options: object) -> None:
+            """Initialize MockCheckpointManager."""
+
+        def __enter__(self) -> Self:
+            """Enter context."""
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            """Exit context."""
+
+        def save(self, step: int, item: object) -> None:
+            """Save item."""
+            saved.append((step, item))
+
+    class MockOcp:
+        """Mock Orbax checkpoint module."""
+
+        CheckpointManagerOptions = staticmethod(lambda **kwargs: kwargs)
+        PyTreeCheckpointer = staticmethod(lambda: "pytree")
+        CheckpointManager = MockCheckpointManager
+
+    monkeypatch.setattr(tr, "ocp", MockOcp())
+    saved_path = tr.save_maxtext_checkpoint(
+        tmp_path / "ckpt",
+        step=10,
+        params={"p": 1},
+        opt_state={"opt": 2},
+    )
+    assert saved_path == (tmp_path / "ckpt").resolve()
+    assert len(saved) == 1
+    assert saved[0][0] == 10
+    assert saved[0][1] == {"params": {"p": 1}, "opt_state": {"opt": 2}}
+
+    # Failing save raises ExportError
+    class MockFailingCheckpointManager:
+        """Mock failing Orbax CheckpointManager."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            """Initialize MockFailingCheckpointManager."""
+
+        def __enter__(self) -> Self:
+            """Enter context."""
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            """Exit context."""
+
+        def save(self, step: int, item: object) -> None:
+            """Raise exception on save."""
+            raise OSError("disk full")
+
+    MockOcp.CheckpointManager = MockFailingCheckpointManager
+    with pytest.raises(ExportError, match="Failed to persist Orbax checkpoint"):
+        tr.save_maxtext_checkpoint(tmp_path / "fail_ckpt", 1, {"p": 1})
+
+
+@pytest.mark.usefixtures("_mock_maxtext_env")
+def test_execute_train_cluster_distributed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test multi-host cluster execution invoking maxtext_train.main with Gin config and Orbax checkpoint."""
+    invoked_cli: list[list[str]] = []
+    saved_ckpts: list[tuple[int, object]] = []
+
+    class MockClusterTrain:
+        """Mock MaxText cluster training entrypoint."""
+
+        @staticmethod
+        def main(args: list[str]) -> None:
+            """Capture CLI args."""
+            invoked_cli.append(args)
+
+    class MockCheckpointManager:
+        """Mock CheckpointManager."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            """Initialize."""
+
+        def __enter__(self) -> Self:
+            """Enter context."""
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            """Exit context."""
+
+        def save(self, step: int, item: object) -> None:
+            """Save item."""
+            saved_ckpts.append((step, item))
+
+    class MockOcp:
+        """Mock Orbax."""
+
+        CheckpointManagerOptions = staticmethod(lambda **kwargs: kwargs)
+        PyTreeCheckpointer = staticmethod(lambda: "pytree")
+        CheckpointManager = MockCheckpointManager
+
+    monkeypatch.setattr(tr, "maxtext_train", MockClusterTrain())
+    monkeypatch.setattr(tr, "ocp", MockOcp())
+
+    cfg = TrainingConfig(
+        model_name="gemma-4-7b",
+        dataset="spider",
+        epochs=3,
+        batch_size=4,
+        extra_kwargs={
+            "coordinator_address": "127.0.0.1:8080",
+            "num_processes": 8,
+            "process_id": 0,
+            "checkpoint_dir": str(tmp_path / "cluster_ckpt"),
+        },
+    )
+
+    status, loss = tr._execute_train(cfg, test_mode=False, local_step_mode=False)
+    assert status == "completed"
+    assert loss == 0.0
+    assert len(invoked_cli) == 1
+    assert invoked_cli[0][0] == "train.py"
+    assert Path(invoked_cli[0][1]).is_file()
+    assert len(saved_ckpts) == 1
+    assert saved_ckpts[0][0] == 3
+
+
+@pytest.mark.usefixtures("_mock_maxtext_env")
+def test_execute_train_local_step_mode_with_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test explicit local_step_mode executing lightweight loop and persisting Orbax checkpoint."""
+    saved_ckpts: list[tuple[int, object]] = []
+
+    class MockCheckpointManager:
+        """Mock CheckpointManager."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            """Initialize."""
+
+        def __enter__(self) -> Self:
+            """Enter context."""
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            """Exit context."""
+
+        def save(self, step: int, item: object) -> None:
+            """Save item."""
+            saved_ckpts.append((step, item))
+
+    class MockOcp:
+        """Mock Orbax."""
+
+        CheckpointManagerOptions = staticmethod(lambda **kwargs: kwargs)
+        PyTreeCheckpointer = staticmethod(lambda: "pytree")
+        CheckpointManager = MockCheckpointManager
+
+    monkeypatch.setattr(tr, "ocp", MockOcp())
+
+    status, loss = tr._execute_train(
+        "gemma-4",
+        dataset="dat",
+        epochs=2,
+        local_step_mode=True,
+        checkpoint_dir=str(tmp_path / "local_ckpt"),
+    )
+    assert status == "completed"
+    assert loss == 0.35
+    assert len(saved_ckpts) == 1
+    assert saved_ckpts[0][0] == 2
+
+
+@pytest.mark.usefixtures("_mock_maxtext_env")
+def test_execute_train_missing_gemma4_model_in_local_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test DependencyMissingError when Gemma4Model is None in local step loop."""
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(tr, "Gemma4Model", None)
+    monkeypatch.setattr(tr, "maxtext_train", None)
+    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing for training"):
+        tr._execute_train("gemma-4", local_step_mode=True)
+
+
+@pytest.mark.usefixtures("_mock_maxtext_env")
+def test_train_model_returns_checkpoint_dir(tmp_path: Path) -> None:
+    """Test that train_model includes checkpoint_dir in return dict when configured."""
+    cfg = TrainingConfig(
+        model_name="gemma-4",
+        dataset="ds",
+        epochs=1,
+        extra_kwargs={"checkpoint_dir": str(tmp_path / "ckpt_dir"), "test_mode": True},
+    )
+    res = tr.train_model(cfg)
+    assert res["status"] == "completed"
+    assert res["checkpoint_dir"] == str(tmp_path / "ckpt_dir")
+
+
+def test_train_model_missing_gemma_and_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test DependencyMissingError when both Gemma4Model and maxtext_train are None."""
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(tr, "Gemma4Model", None)
+    monkeypatch.setattr(tr, "maxtext_train", None)
+    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
+        tr.train_model(TrainingConfig())

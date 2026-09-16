@@ -238,8 +238,8 @@ class ModelConfig(ModelConfigPresets):
     num_experts: int = 4
     num_experts_per_tok: int = 2
     num_shared_experts: int = 1
-    dtype: jnp.dtype = jnp.float32
-    weight_dtype: jnp.dtype = jnp.float32
+    dtype: jnp.dtype[Any] = jnp.float32
+    weight_dtype: jnp.dtype[Any] = jnp.float32
     rope_max_timescale: int = 10000
     global_rope_max_timescale: int = 1000000
     local_rope_max_timescale: int | None = None

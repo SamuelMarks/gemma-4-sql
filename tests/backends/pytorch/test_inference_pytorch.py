@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import typing
 from collections import UserDict
+from pathlib import Path
 
 import pytest
 
@@ -24,20 +25,16 @@ class MockAutoTokenizer:
 
 
 def test_inference_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Test PyTorch generate_sql top-level handler."""
     monkeypatch.setattr(pt_inf, "torch", MockTorch())
     monkeypatch.setattr(pt_inf, "AutoModelForCausalLM", MockAutoModelForCausalLM)
     monkeypatch.setattr(pt_inf, "AutoTokenizer", MockAutoTokenizer)
-    res = generate_sql("mock", "hi", beam_width=1, max_length=2, test_mode=True)
-    if not res["status"] == "success":
-        raise AssertionError
-    if not res["model"] == "mock":
-        raise AssertionError
+    monkeypatch.setattr(pt_inf, "_run_generation", lambda *a, **k: ("SELECT * FROM t", 0.95))
+    res = generate_sql("mock", "hi", beam_width=1, max_length=2)
+    assert res["status"] == "success"
+    assert res["model"] == "mock"
+    assert res["sql"] == "SELECT * FROM t"
+    assert res["confidence_score"] == pytest.approx(0.95)
 
 
 def test_inference_pytorch_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -457,3 +454,274 @@ def test_inference_pytorch_with_adapter(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setitem(sys.modules, "peft", type("PeftMod", (), {"PeftModel": FailingPeftModel}))
     res_fail = pt_inf.generate_sql("model", "prompt", lora_path="/fake/bad/path", test_mode=False)
     assert res_fail["status"] == "success"
+
+
+def test_inference_pytorch_empty_sql_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test InferenceError when Hugging Face generation decodes into empty SQL."""
+    import torch
+
+    class Inputs(UserDict):
+        def __init__(self) -> None:
+            super().__init__({"input_ids": torch.tensor([[1, 2]])})
+            self.input_ids = torch.tensor([[1, 2]])
+
+        def to(self, _dev: object) -> Inputs:
+            return self
+
+    class MockEmptyTokenizer:
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            return cls()
+
+        def __call__(self, _prompt: str, return_tensors: str = "pt") -> object:
+            return Inputs()
+
+        def decode(self, _tokens: object, skip_special_tokens: bool = True) -> str:
+            return ""
+
+    class MockEmptyModel:
+        device = "cpu"
+
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            return cls()
+
+        def generate(self, **kwargs: object) -> object:
+            return type("Outputs", (), {"sequences": torch.tensor([[1, 2]]), "sequences_scores": [torch.tensor(-0.5)]})()
+
+    monkeypatch.setattr(pt_inf, "AutoTokenizer", MockEmptyTokenizer)
+    monkeypatch.setattr(pt_inf, "AutoModelForCausalLM", MockEmptyModel)
+
+    res = pt_inf.generate_sql("model", "prompt")
+    assert "failed: PyTorch generation yielded an empty SQL sequence." in res["status"]
+
+
+def test_inference_pytorch_native_empty_sequence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test InferenceError when native generation produces 0 new tokens."""
+    import torch
+
+    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config
+
+    class MockEmptyNativeModel:
+        def eval(self) -> None:
+            pass
+
+        def generate(self, input_ids: torch.Tensor, max_new_tokens: int = 128) -> torch.Tensor:
+            # Return same as input_ids (0 new tokens)
+            return input_ids
+
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            return cls()
+
+    monkeypatch.setattr(pt_inf, "AutoTokenizer", None)
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM.from_pretrained", lambda *a, **k: MockEmptyNativeModel())
+
+    tiny_cfg = Gemma4Config(vocab_size=128, hidden_size=64, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=32, intermediate_size=128)
+    res = pt_inf.generate_sql("model", "prompt", backend_alias="pytorch_native", config=tiny_cfg)
+    assert "failed: PyTorch native generation yielded an empty sequence." in res["status"]
+
+
+def test_inference_pytorch_native_empty_decoded_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test InferenceError when native generation tokens decode to whitespace."""
+    import torch
+
+    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config
+
+    class MockWhitespaceNativeModel:
+        def eval(self) -> None:
+            pass
+
+        def generate(self, input_ids: torch.Tensor, max_new_tokens: int = 128) -> torch.Tensor:
+            # 1 new token which is ASCII 32 (space)
+            return torch.cat([input_ids, torch.tensor([[32]])], dim=-1)
+
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            return cls()
+
+    monkeypatch.setattr(pt_inf, "AutoTokenizer", None)
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM.from_pretrained", lambda *a, **k: MockWhitespaceNativeModel())
+
+    tiny_cfg = Gemma4Config(vocab_size=128, hidden_size=64, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=32, intermediate_size=128)
+    res = pt_inf.generate_sql("model", "prompt", backend_alias="pytorch_native", config=tiny_cfg)
+    assert "failed: PyTorch native generation decoded into an empty SQL query string." in res["status"]
+
+
+def test_inference_pytorch_no_sequences_scores_and_negative_logprob(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test confidence scoring when sequences_scores is absent or negative log prob."""
+    import torch
+
+    class Inputs(UserDict):
+        def __init__(self) -> None:
+            super().__init__({"input_ids": torch.tensor([[1, 2]])})
+            self.input_ids = torch.tensor([[1, 2]])
+
+        def to(self, _dev: object) -> Inputs:
+            return self
+
+    class MockTokenizer:
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            return cls()
+
+        def __call__(self, _prompt: str, return_tensors: str = "pt") -> object:
+            return Inputs()
+
+        def decode(self, _tokens: object, skip_special_tokens: bool = True) -> str:
+            return "SELECT 1"
+
+    # 1. Output without sequences_scores
+    class MockModelNoScores:
+        device = "cpu"
+
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            return cls()
+
+        def generate(self, **kwargs: object) -> object:
+            return type("Outputs", (), {"sequences": torch.tensor([[1, 2, 3]])})()
+
+    monkeypatch.setattr(pt_inf, "AutoTokenizer", MockTokenizer)
+    monkeypatch.setattr(pt_inf, "AutoModelForCausalLM", MockModelNoScores)
+    res_no_scores = pt_inf.generate_sql("model", "prompt")
+    assert res_no_scores["status"] == "success"
+    assert res_no_scores["confidence_score"] == pytest.approx(0.8)
+
+    # 2. Output with negative log-prob
+    class MockModelNegativeLogProb:
+        device = "cpu"
+
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            return cls()
+
+        def generate(self, **kwargs: object) -> object:
+            return type("Outputs", (), {"sequences": torch.tensor([[1, 2, 3]]), "sequences_scores": [torch.tensor(-0.105)]})()
+
+    monkeypatch.setattr(pt_inf, "AutoModelForCausalLM", MockModelNegativeLogProb)
+    res_neg = pt_inf.generate_sql("model", "prompt")
+    assert res_neg["status"] == "success"
+    assert 0.85 <= res_neg["confidence_score"] <= 0.95
+
+
+def test_inference_pytorch_multimodal_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test multimodal inference with audio_path, image_path, pixel_values, and audio_values.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    import torch
+
+    img_file = tmp_path / "img.png"
+    img_file.write_bytes(b"\x89PNG\r\n\x1a\n")
+    aud_file = tmp_path / "aud.wav"
+    aud_file.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+
+    # 1. HF Pipeline with audio_path and image_path
+    class Inputs(UserDict):
+        """Mock inputs."""
+
+        def __init__(self) -> None:
+            """Initialize inputs."""
+            super().__init__({"input_ids": torch.tensor([[1, 2]])})
+            self.input_ids = torch.tensor([[1, 2]])
+
+        def to(self, _dev: object) -> Inputs:
+            """Transfer device."""
+            return self
+
+    class MockTokenizer:
+        """Mock tokenizer."""
+
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            """Load from pretrained."""
+            return cls()
+
+        def __call__(self, _prompt: str, return_tensors: str = "pt") -> object:
+            """Call tokenizer."""
+            return Inputs()
+
+        def decode(self, _tokens: object, skip_special_tokens: bool = True) -> str:
+            """Decode tokens."""
+            return "SELECT 1"
+
+    captured_gen_kwargs: dict[str, object] = {}
+
+    class MockHFModel:
+        """Mock HuggingFace model."""
+
+        device = "cpu"
+
+        @classmethod
+        def from_pretrained(cls, *args: object, **kwargs: object) -> object:
+            """Load from pretrained."""
+            return cls()
+
+        def generate(self, **kwargs: object) -> object:
+            """Generate tokens."""
+            captured_gen_kwargs.update(kwargs)
+            return type("Outputs", (), {"sequences": torch.tensor([[1, 2, 3]])})()
+
+    class MockNativeModel:
+        """Mock native model."""
+
+        def eval(self) -> None:
+            """Eval mode."""
+
+        def generate(self, input_ids: object, **kwargs: object) -> object:
+            """Generate tokens."""
+            return torch.tensor([[1, 2, 3, 4]])
+
+    monkeypatch.setattr(pt_inf, "AutoTokenizer", MockTokenizer)
+    monkeypatch.setattr(pt_inf, "AutoModelForCausalLM", MockHFModel)
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM.from_pretrained", lambda *a, **k: MockNativeModel())
+
+    # Native with image only (covers 81->85)
+    pt_inf._run_generation("model", "prompt", 1, 10, backend_alias="pytorch_native", test_mode=True, image_path=str(img_file), modality="vision")
+
+    # Native with audio only (covers 77->81)
+    pt_inf._run_generation("model", "prompt", 1, 10, backend_alias="pytorch_native", test_mode=True, audio_path=str(aud_file), modality="audio")
+
+    # HF with image only (covers 148->152)
+    pt_inf._run_generation("model", "Select users", 1, 10, backend_alias="hf", image_path=str(img_file), modality="vision")
+
+    # HF with audio only (covers 144->148)
+    pt_inf._run_generation("model", "Select users", 1, 10, backend_alias="hf", audio_path=str(aud_file), modality="audio")
+
+    res_hf = pt_inf._run_generation(
+        "model",
+        "Select users",
+        1,
+        10,
+        backend_alias="hf",
+        image_path=str(img_file),
+        audio_path=str(aud_file),
+        modality="multimodal",
+    )
+    assert res_hf[0] == "SELECT 1"
+    assert "pixel_values" in captured_gen_kwargs
+    assert "audio_values" in captured_gen_kwargs
+
+    # Test with pixel_values and audio_values already supplied (covers 77->81, 81->85)
+    pv = torch.zeros((1, 3, 224, 224))
+    av = torch.zeros((1, 1600))
+    res_native = pt_inf._run_generation(
+        "model",
+        "prompt",
+        1,
+        10,
+        backend_alias="pytorch_native",
+        test_mode=True,
+        image_path=str(img_file),
+        audio_path=str(aud_file),
+        pixel_values=pv,
+        audio_values=av,
+        modality="multimodal",
+    )
+    assert res_native[0] is not None

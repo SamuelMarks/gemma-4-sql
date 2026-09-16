@@ -88,10 +88,12 @@ def _dpo_step_loss(policy_model: Any, ref_model: Any, batch: JSONDict, beta: flo
         object: The resulting output from the operation.
 
     """
-    pi_ch_logps = _compute_logps(policy_model, batch["chosen_inputs"], batch["chosen_labels"])
-    pi_re_logps = _compute_logps(policy_model, batch["rejected_inputs"], batch["rejected_labels"])
-    ref_ch_logps = _compute_logps(ref_model, batch["chosen_inputs"], batch["chosen_labels"])
-    ref_re_logps = _compute_logps(ref_model, batch["rejected_inputs"], batch["rejected_labels"])
+    ch_inputs = batch.get("chosen_inputs", batch.get("chosen_input_ids"))
+    re_inputs = batch.get("rejected_inputs", batch.get("rejected_input_ids"))
+    pi_ch_logps = _compute_logps(policy_model, ch_inputs, batch["chosen_labels"])
+    pi_re_logps = _compute_logps(policy_model, re_inputs, batch["rejected_labels"])
+    ref_ch_logps = _compute_logps(ref_model, ch_inputs, batch["chosen_labels"])
+    ref_re_logps = _compute_logps(ref_model, re_inputs, batch["rejected_labels"])
     (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
     return loss
 

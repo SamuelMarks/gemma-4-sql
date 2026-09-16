@@ -15,16 +15,20 @@ try:
     import torch as _torch
     from torch import nn as _nn
     from torch import optim as _optim
-    from transformers.models.gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
 
     torch: Any = _torch
     nn: Any = _nn
     optim: Any = _optim
-    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
-except (ImportError, AttributeError):
+except (ImportError, AttributeError, RuntimeError):
     torch = None
     nn = None
     optim = None
+
+try:
+    from transformers.models.gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
+
+    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+except (ImportError, AttributeError):
     Gemma4ForCausalLM = None
 
 
@@ -204,7 +208,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     distributed_strategy = str(kwargs.get("distributed_strategy") or getattr(config, "distributed_strategy", "none"))
     backend_alias = str(kwargs.get("backend_alias") or kwargs.get("backend") or ("pytorch_native" if getattr(config, "backend", None) == "pytorch_native" else "pytorch"))
 
-    final_loss = 0.5
+    final_loss = 0.0
     status = "completed"
     if torch is None or optim is None or (nn is None) or (backend_alias != "pytorch_native" and Gemma4ForCausalLM is None):
         from gemma_4_sql.exceptions import DependencyMissingError

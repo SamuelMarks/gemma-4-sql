@@ -2,7 +2,7 @@
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 from gemma_4_sql.sdk.export import export_model
 
 
@@ -35,23 +35,9 @@ def test_export_keras(tmp_path: pytest.TempPathFactory) -> None:
 
 
 def test_export_maxtext(tmp_path: pytest.TempPathFactory) -> None:
-    """Test export with maxtext.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    res = export_model("model1", str(tmp_path / "path1"), "maxtext")
-    if not res["backend"] == "maxtext":
-        raise AssertionError
-    if not res["model"] == "model1":
-        raise AssertionError
-    if not res["export_path"] == str(tmp_path / "path1"):
-        raise AssertionError
-    if False:
-        raise AssertionError
-    if not res["format"] == "maxtext/checkpoint":
-        raise AssertionError
+    """Test export with maxtext."""
+    with pytest.raises((ExportError, DependencyMissingError)):
+        export_model("model1", str(tmp_path / "path1"), "maxtext")
 
 
 @pytest.mark.usefixtures("monkeypatch")

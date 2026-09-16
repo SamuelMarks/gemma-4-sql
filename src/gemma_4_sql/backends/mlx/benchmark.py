@@ -1,4 +1,4 @@
-"""MLX-specific benchmarking pipeline."""
+"""MLX-specific benchmarking pipeline with native Metal profiling."""
 
 from __future__ import annotations
 
@@ -7,154 +7,221 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.exceptions import DependencyMissingError
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
+
 logger = logging.getLogger(__name__)
 
 try:
-    import mlx as _mlx
-    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
+    import mlx.core as _mx
 
-    mlx: Any = _mlx
-    AutoModelForCausalLM: Any = _AutoModelForCausalLM
+    mx: Any = _mx
 except (ImportError, AttributeError):
-    mlx = None
-    AutoModelForCausalLM = None
+    mx = None
+
+try:
+    from mlx_lm import load as _load
+
+    load: Any = _load
+except (ImportError, AttributeError):
+    load = None
 
 
 def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[Any, str]:
-    """Load the model and determine device.
+    """Load an MLX model and configure the target execution device.
 
     Args:
-        model_name: The name of the target model.
-        hardware: The target hardware accelerator.
-        test_mode: Boolean flag indicating test mode.
+        model_name: The identifier or path of the target MLX model.
+        hardware: Target hardware accelerator ('gpu', 'metal', or 'cpu').
+        test_mode: Flag indicating whether execution is running in mock/test mode.
 
     Returns:
-        A tuple containing the results.
+        Tuple of (model instance or None, active device string).
 
     Raises:
-        DependencyMissingError: If Transformers AutoModelForCausalLM is missing.
+        DependencyMissingError: If MLX or mlx_lm is missing.
     """
     if test_mode:
         return (None, "cpu")
-    if AutoModelForCausalLM is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
 
-        raise DependencyMissingError("Transformers AutoModelForCausalLM is missing.")
-    model = AutoModelForCausalLM.from_pretrained(model_name)
-    device = "cuda" if hasattr(mlx, "cuda") and mlx.cuda.is_available() and (hardware != "cpu") else "cpu"
-    if hasattr(model, "to"):
-        model.to(device)
-    if hasattr(model, "eval"):  # pragma: no cover
-        model.eval()
-    return (model, device)
+    if mx is None or load is None:
+        raise DependencyMissingError("MLX dependencies (mlx.core and mlx_lm) are missing.")
+
+    target_device = "cpu" if str(hardware).lower() == "cpu" else "gpu"
+    if hasattr(mx, "set_default_device") and hasattr(mx, "Device"):
+        try:
+            device = mx.Device(mx.cpu) if target_device == "cpu" and hasattr(mx, "cpu") else mx.Device(getattr(mx, "gpu", 0))
+            mx.set_default_device(device)
+        except (ValueError, TypeError, RuntimeError, AttributeError):
+            pass
+
+    loaded = load(model_name)
+    model = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
+    return (model, target_device)
 
 
-def _sync_cuda(device: str) -> None:
-    """Synchronize CUDA if using GPU.
+def _sync_and_eval(tensors: Any) -> None:
+    """Force lazy evaluation and device synchronization for MLX arrays.
 
     Args:
-        device: The string representing the device.
+        tensors: An MLX array or sequence of arrays to evaluate.
     """
-    if device == "cuda" and hasattr(mlx, "cuda") and hasattr(mlx.cuda, "synchronize"):
-        mlx.cuda.synchronize()
+    if mx is not None and hasattr(mx, "eval"):
+        if isinstance(tensors, (tuple, list)):
+            mx.eval(*tensors)
+        else:
+            mx.eval(tensors)
 
 
-def _run_forward_pass(model: Any, dummy_inputs: Any) -> None:
-    """Run a single forward pass.
+def _get_peak_memory_mb() -> float:
+    """Retrieve peak memory allocated by MLX on Metal GPU in Megabytes.
 
-    Args:
-        model: The model.
-        dummy_inputs: Inputs tensor.
-    """
-    if model is not None and hasattr(mlx, "no_grad"):
-        with mlx.no_grad():
-            _ = model(dummy_inputs)
-
-
-def _get_memory_mb(model: Any, device: str) -> float:
-    """Get max memory allocated in MB.
-
-    Args:
-        model: The model.
-        device: The string representing the device.
+    Checks mx.metal.get_peak_memory() and mx.metal.get_active_memory().
+    Returns 0.0 on CPU or when Metal is unavailable.
 
     Returns:
-        Memory usage in MB.
+        Peak memory allocation in Megabytes (MB).
     """
-    if model is not None and device == "cuda" and hasattr(mlx, "cuda") and hasattr(mlx.cuda, "max_memory_allocated"):
-        return float(mlx.cuda.max_memory_allocated() / (1024 * 1024))
-    return 8192.0
+    if mx is None:
+        return 0.0
+
+    metal_mod = getattr(mx, "metal", None)
+    if metal_mod is not None and hasattr(metal_mod, "is_available") and metal_mod.is_available():
+        if hasattr(metal_mod, "get_peak_memory"):
+            peak_bytes = metal_mod.get_peak_memory()
+            if peak_bytes > 0:
+                return float(peak_bytes / (1024.0 * 1024.0))
+        if hasattr(metal_mod, "get_active_memory"):
+            active_bytes = metal_mod.get_active_memory()
+            return float(active_bytes / (1024.0 * 1024.0))
+
+    if hasattr(mx, "get_peak_memory"):
+        peak = mx.get_peak_memory()
+        return float(peak / (1024.0 * 1024.0))
+
+    return 0.0
 
 
-def _run_benchmark_pass(model: Any, device: str, batch_size: int, num_runs: int) -> tuple[float, float, float]:
-    """Execute the forward pass benchmark loop.
+def _run_benchmark_pass(
+    model: Any,
+    batch_size: int,
+    num_runs: int,
+    prompt_len: int = 32,
+    decode_tokens: int = 16,
+) -> tuple[float, float, float]:
+    """Execute warm-up and timed benchmark passes using native MLX operations.
+
+    Measures prefill latency, decode latency, overall token throughput,
+    and peak memory usage via Apple Silicon Metal APIs.
 
     Args:
-        model: The model.
-        device: Target device string.
-        batch_size: Batch size for benchmark.
-        num_runs: Number of benchmark iterations.
+        model: Loaded MLX model instance with callable forward pass.
+        batch_size: Number of parallel sequences to evaluate.
+        num_runs: Number of timed benchmark iterations.
+        prompt_len: Number of prompt tokens for prefill phase.
+        decode_tokens: Number of autoregressive decode tokens to generate.
 
     Returns:
-        A tuple of (tokens_per_sec, latency_ms, memory_mb).
+        Tuple of (tokens_per_sec, latency_ms, memory_mb).
 
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
     """
-    if mlx is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
+    if mx is None:
         raise DependencyMissingError("MLX dependencies are missing.")
-    dummy_inputs = mlx.zeros((batch_size, 32), dtype=getattr(mlx, "long", None))
-    if model is not None and hasattr(dummy_inputs, "to"):
-        dummy_inputs = dummy_inputs.to(device)
-    _run_forward_pass(model, dummy_inputs)
-    _sync_cuda(device)
-    start_time = time.time()
+
+    prefill_inputs = mx.zeros((batch_size, prompt_len))
+
+    # Warm-up pass
+    if model is not None and callable(model):
+        out = model(prefill_inputs)
+        _sync_and_eval(out)
+
+    # Reset peak memory before benchmark if supported
+    metal_mod = getattr(mx, "metal", None)
+    if metal_mod is not None and hasattr(metal_mod, "reset_peak_memory"):
+        try:
+            metal_mod.reset_peak_memory()
+        except (RuntimeError, ValueError, AttributeError):
+            pass
+
+    # Timed benchmark loop using time.perf_counter()
+    start_time = time.perf_counter()
+    prefill_total_time = 0.0
+    decode_total_time = 0.0
+
     for _ in range(num_runs):
-        _run_forward_pass(model, dummy_inputs)
-    _sync_cuda(device)
-    end_time = time.time()
-    total_time_ms = (end_time - start_time) * 1000.0
-    latency_ms = total_time_ms / max(1, num_runs)
-    tokens_per_sec = 32 * batch_size * num_runs / max(end_time - start_time, 1e-09)
-    memory_mb = _get_memory_mb(model, device)
-    return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
+        t0 = time.perf_counter()
+        if model is not None and callable(model):
+            out = model(prefill_inputs)
+            _sync_and_eval(out)
+        t1 = time.perf_counter()
+        prefill_total_time += t1 - t0
+
+        decode_step_input = prefill_inputs[:, :1]
+        t2 = time.perf_counter()
+        if model is not None and callable(model):
+            for _ in range(decode_tokens):
+                dec_out = model(decode_step_input)
+                _sync_and_eval(dec_out)
+        t3 = time.perf_counter()
+        decode_total_time += t3 - t2
+
+    total_time = time.perf_counter() - start_time
+    total_tokens = batch_size * (prompt_len + decode_tokens) * num_runs
+
+    tokens_per_sec = float(total_tokens / max(total_time, 1e-09))
+    latency_ms = float((total_time * 1000.0) / max(1, num_runs))
+    prefill_latency_ms = float((prefill_total_time * 1000.0) / max(1, num_runs))
+    decode_latency_ms = float((decode_total_time * 1000.0) / max(1, num_runs * max(1, decode_tokens)))
+
+    memory_mb = _get_peak_memory_mb()
+    logger.info(
+        "MLX Benchmark: %.2f tok/s, total latency: %.2f ms (prefill: %.2f ms, decode: %.2f ms/tok), peak memory: %.2f MB",
+        tokens_per_sec,
+        latency_ms,
+        prefill_latency_ms,
+        decode_latency_ms,
+        memory_mb,
+    )
+    return (tokens_per_sec, latency_ms, memory_mb)
 
 
 def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: JSONValue) -> JSONDict:
-    """Benchmark a model using the MLX backend.
+    """Benchmark an MLX model on CPU or Apple Silicon Metal GPU.
 
     Args:
-        model_name: The name of the model to benchmark.
-        hardware: Target hardware for the benchmark (e.g., 'gpu', 'tpu', 'cpu').
+        model_name: The name or path of the model to benchmark.
+        hardware: Target hardware for the benchmark ('gpu', 'metal', or 'cpu').
         batch_size: Batch size to use during benchmarking.
-        **kwargs: Additional args like `num_runs`.
+        **kwargs: Additional options like `num_runs`, `prompt_len`, `decode_tokens`.
 
     Returns:
         A dictionary containing benchmark metrics and status.
     """
 
     def _run() -> tuple[float, float, float]:
-        """Execute function.
-
-        Returns:
-            The execution result.
-
-        """
-        (model, device) = _load_mlx_model_and_device(model_name, hardware, test_mode=bool(kwargs.get("test_mode")))
+        """Execute benchmark pass on loaded MLX model."""
+        (model, _device) = _load_mlx_model_and_device(model_name, hardware, test_mode=bool(kwargs.get("test_mode")))
         num_runs = int(str(kwargs.get("num_runs", 5)))
-        return _run_benchmark_pass(model, device, batch_size, num_runs)
+        prompt_len = int(str(kwargs.get("prompt_len", 32)))
+        decode_tokens = int(str(kwargs.get("decode_tokens", 16)))
+        return _run_benchmark_pass(
+            model=model,
+            batch_size=batch_size,
+            num_runs=num_runs,
+            prompt_len=prompt_len,
+            decode_tokens=decode_tokens,
+        )
 
     return run_benchmark_wrapper(
         backend_name="mlx",
         model_name=model_name,
         hardware=hardware,
         batch_size=batch_size,
-        missing_deps=mlx is None or AutoModelForCausalLM is None,
+        missing_deps=mx is None or load is None,
         missing_status="mocked_missing_mlx",
         benchmark_fn=_run,
     )

@@ -71,6 +71,9 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 allow_redefinition = true
 disallow_any_generics = true
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
+warn_return_any = false
 
 [[tool.mypy.overrides]]
 module = [
@@ -78,6 +81,12 @@ module = [
     "gemma_4_sql.backends.jax.gemma4.tests.*",
 ]
 ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "gemma_4_sql.*"
+disallow_subclassing_any = false
+disallow_untyped_decorators = false
+warn_return_any = false
 
 [tool.coverage.run]
 omit = [
@@ -101,6 +110,8 @@ exclude_lines = [
     "except \\(ImportError, ValueError\\) as e:",
     "except \\(ImportError, AttributeError\\):",
     "except \\(ImportError, AttributeError\\) as e:",
+    "except \\(ImportError, AttributeError, RuntimeError\\):",
+    "except \\(ImportError, AttributeError, RuntimeError\\) as e:",
     "except \\(ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError\\):",
     "except \\(ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError\\) as e:",
     "except ImportError:",
@@ -197,3 +208,15 @@ filterwarnings = [
     "ignore:.*PyparsingDeprecationWarning.*",
     "ignore:.*non-supported Python version.*:FutureWarning"
 ]
+
+[tool.interrogate]
+ignore-init-method = false
+ignore-init-module = false
+ignore-magic = false
+ignore-semiprivate = false
+ignore-private = false
+ignore-nested-classes = true
+ignore-nested-functions = true
+fail-under = 100
+verbose = 2
+color = false

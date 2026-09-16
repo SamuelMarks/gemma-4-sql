@@ -57,8 +57,13 @@ class Gemma4RMSNorm(nnx.Module):
     scale: nnx.Param[Array] | None
 
     def __init__(self, dim: int, eps: float = 1e-06, *, with_scale: bool = True, rngs: nnx.Rngs, **kwargs: object) -> None:
-        """Docstring for __init__.
+        """Initialize RMS normalization layer.
+
         Args:
+            dim: Dimension of the input tensor.
+            eps: Epsilon value for numerical stability.
+            with_scale: Whether to include learnable scale parameter.
+            rngs: Random number generators for weight initialization.
             **kwargs: Additional Flax/NNX module configuration parameters like 'dtype'.
         """
         self.eps = eps
@@ -136,8 +141,12 @@ class Gemma4MLP(nnx.Module):
     """Standard SwiGLU MLP used for both shared and routed experts."""
 
     def __init__(self, hidden_size: int, intermediate_size: int, *, rngs: nnx.Rngs, **kwargs: object) -> None:
-        """Docstring for __init__.
+        """Initialize SwiGLU MLP layer.
+
         Args:
+            hidden_size: Hidden dimension of the model.
+            intermediate_size: Intermediate projection dimension.
+            rngs: Random number generators for weight initialization.
             **kwargs: Additional Flax/NNX module configuration parameters like 'dtype'.
         """
         shd = kwargs.get("shd")

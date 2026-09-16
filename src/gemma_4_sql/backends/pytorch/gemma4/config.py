@@ -61,6 +61,8 @@ class Gemma4Config:
         rms_norm_eps: float = 1e-6,
         head_dim: int = 256,
         pad_token_id: int = 0,
+        image_token_id: int = 255999,
+        audio_token_id: int = 255998,
         num_experts: int = 8,
         num_experts_per_tok: int = 2,
         router_jitter_noise: float = 0.0,
@@ -82,6 +84,8 @@ class Gemma4Config:
         self.rms_norm_eps = rms_norm_eps
         self.head_dim = head_dim
         self.pad_token_id = pad_token_id
+        self.image_token_id = image_token_id
+        self.audio_token_id = audio_token_id
 
         self.num_experts = num_experts
         self.num_experts_per_tok = num_experts_per_tok

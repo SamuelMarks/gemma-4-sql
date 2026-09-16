@@ -59,12 +59,19 @@ def test_maxtext_etl_import_error() -> None:
         AssertionError: Description.
 
     """
-    if "gemma_4_sql.backends.maxtext.etl" in sys.modules:
-        del sys.modules["gemma_4_sql.backends.maxtext.etl"]
-    with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
-        etl_maxtext = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
-        with pytest.raises(DependencyMissingError):
-            etl_maxtext.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
+    import importlib
+
+    try:
+        if "gemma_4_sql.backends.maxtext.etl" in sys.modules:
+            del sys.modules["gemma_4_sql.backends.maxtext.etl"]
+        with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
+            etl_maxtext = __import__("gemma_4_sql.backends.maxtext.etl", fromlist=[""])
+            with pytest.raises(DependencyMissingError):
+                etl_maxtext.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
+    finally:
+        if "gemma_4_sql.backends.maxtext.etl" in sys.modules:
+            del sys.modules["gemma_4_sql.backends.maxtext.etl"]
+        importlib.import_module("gemma_4_sql.backends.maxtext.etl")
 
 
 class MockDatasets:

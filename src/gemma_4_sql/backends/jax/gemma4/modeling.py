@@ -295,12 +295,14 @@ class Gemma4ForCausalLM(nnx.Module):
     def __call__(self, input_ids: Array, positions: Array, cache: Cache | None = None, **kwargs: object) -> Array:
         """Compute logits for the given sequence, optionally applying soft-capping.
 
-
         Args:
+            input_ids: Input sequence token IDs.
+            positions: Sequence position indices.
+            cache: Key-value cache for autoregressive decoding.
             **kwargs: Optional keyword arguments for advanced configuration.
-        Returns:
-                object: The resulting output from the operation.
 
+        Returns:
+            Logits tensor for the output vocabulary.
         """
         attention_mask = cast(Any, kwargs.get("attention_mask"))
         mm_inputs = MultimodalInputs(
@@ -325,17 +327,29 @@ class Gemma4ForCausalLM(nnx.Module):
 def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array, **kwargs: JSONValue) -> tuple[Array, Cache]:
     """Execute a standard forward pass returning logits and updated cache.
 
-
     Args:
+        model: Gemma4 causal language model instance.
+        cache: Key-value attention cache.
+        input_ids: Input sequence token IDs.
+        positions: Sequence position indices.
         **kwargs: Optional keyword arguments for advanced configuration.
-    Returns:
-        object: The resulting output from the operation.
 
+    Returns:
+        A tuple of (logits, updated_cache).
     """
     image_token_mask = kwargs.get("image_token_mask")
     input_features = kwargs.get("input_features")
     input_features_mask = kwargs.get("input_features_mask")
     audio_token_mask = kwargs.get("audio_token_mask")
     pixel_values = kwargs.get("pixel_values")
-    logits = model(input_ids=input_ids, positions=positions, cache=cache, pixel_values=pixel_values, image_token_mask=image_token_mask, input_features=input_features, input_features_mask=input_features_mask, audio_token_mask=audio_token_mask)
+    logits = cast(Any, model)(
+        input_ids=input_ids,
+        positions=positions,
+        cache=cache,
+        pixel_values=pixel_values,
+        image_token_mask=image_token_mask,
+        input_features=input_features,
+        input_features_mask=input_features_mask,
+        audio_token_mask=audio_token_mask,
+    )
     return (logits[:, -1, :], cache)

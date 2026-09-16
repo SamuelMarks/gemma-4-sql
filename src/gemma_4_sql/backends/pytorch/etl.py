@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typing
+from typing import Any
 
 from gemma_4_sql.backends.common_data import _load_duckdb_dataset
 from gemma_4_sql.tokenization import SQLTokenizer
@@ -55,32 +56,66 @@ def _get_pytorch_classes() -> type:
             return len(self._ds)
 
         def __getitem__(self, idx: int) -> JSONDict:
-            """Retrieve an item by its index.
+            """Retrieve an item by its index with multimodal feature extraction.
+
+            Args:
+                idx: Sample index in dataset.
 
             Returns:
-                object: The resulting output from the operation.
-
+                Dictionary containing tokenized inputs, targets, and optional pixel/audio tensors.
             """
+            from gemma_4_sql.backends.common_multimodal import (
+                format_multimodal_prompt,
+                process_audio,
+                process_image,
+            )
+
             element = self._ds[idx]
-            prompt = element.get("sql_prompt", element.get("question", ""))
-            target = element.get("sql", element.get("query", ""))
-            return {"inputs": torch.tensor(self._tok.encode(str(prompt)), dtype=torch.long), "targets": torch.tensor(self._tok.encode(str(target)), dtype=torch.long)}
+            prompt = str(element.get("sql_prompt", element.get("question", "")))
+            target = str(element.get("sql", element.get("query", "")))
+
+            image_input = element.get("image_bytes") or element.get("image_url") or element.get("image")
+            audio_input = element.get("audio_clip") or element.get("audio")
+
+            formatted = format_multimodal_prompt(
+                prompt,
+                has_image=image_input is not None,
+                has_audio=audio_input is not None,
+            )
+            item: dict[str, Any] = {
+                "inputs": torch.tensor(self._tok.encode(str(formatted["prompt"])), dtype=torch.long),
+                "targets": torch.tensor(self._tok.encode(str(target)), dtype=torch.long),
+            }
+            if image_input is not None:
+                img_data = process_image(image_input)
+                item["pixel_values"] = torch.tensor(img_data["pixel_values"], dtype=torch.float32)
+            if audio_input is not None:
+                aud_data = process_audio(audio_input)
+                item["audio_values"] = torch.tensor(aud_data["audio_values"], dtype=torch.float32)
+            return item
 
     return PyTorchDataset
 
 
 def _collate_fn(batch: list[JSONDict]) -> JSONDict:
-    """Collate batches.
+    """Collate individual items into batched tensors.
+
+    Args:
+        batch: List of dataset elements.
 
     Returns:
-        object: The resulting output from the operation.
-
+        Dictionary of batched PyTorch tensors.
     """
     inputs = [item["inputs"] for item in batch]
     targets = [item["targets"] for item in batch]
     inputs_padded = torch.nn.utils.rnn.pad_sequence(inputs, batch_first=True)
     targets_padded = torch.nn.utils.rnn.pad_sequence(targets, batch_first=True)
-    return {"inputs": inputs_padded, "targets": targets_padded}
+    res: dict[str, Any] = {"inputs": inputs_padded, "targets": targets_padded}
+    if "pixel_values" in batch[0]:
+        res["pixel_values"] = torch.stack([item["pixel_values"] for item in batch])
+    if "audio_values" in batch[0]:
+        res["audio_values"] = torch.stack([item["audio_values"] for item in batch])
+    return res
 
 
 def _get_sampler(pt_dataset: typing.Any, distributed: bool) -> object:

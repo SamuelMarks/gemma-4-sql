@@ -158,6 +158,7 @@ async def test_live_database_engine_duckdb_async() -> None:
     mock_duckdb = MagicMock()
     mock_conn = MagicMock()
     mock_duckdb.connect.return_value = mock_conn
+    mock_conn.cursor.return_value = mock_conn
     mock_cursor = MagicMock()
     mock_conn.execute.return_value = mock_cursor
     mock_cursor.fetchall.return_value = [(42,)]
@@ -1090,3 +1091,67 @@ def test_snowflake_adapter_connect_unresolvable(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(s_ad, "snowflake", type("SF", (), {}))
     with pytest.raises(ImportError, match="snowflake connect function could not be resolved"):
         s_ad.SnowflakeAdapter("acc/db/schema", {})
+
+
+def test_snowflake_adapter_setup_schema_error_rollback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test SnowflakeAdapter setup_schema triggers rollback on error.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.execute.side_effect = RuntimeError("DDL syntax error")
+    mock_conn.cursor.return_value = mock_cursor
+    mock_conn.rollback = MagicMock()
+
+    monkeypatch.setattr(s_ad.SnowflakeAdapter, "connect", lambda self: mock_conn)
+    adapter = s_ad.SnowflakeAdapter("acc/db/schema", {})
+    adapter.conn = mock_conn
+
+    with pytest.raises(RuntimeError, match="DDL syntax error"):
+        adapter.setup_schema("CREATE TABLE bad (")
+
+    mock_conn.rollback.assert_called_once()
+    mock_cursor.close.assert_called_once()
+
+
+def test_snowflake_setup_schema_no_commit_or_rollback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test SnowflakeAdapter setup_schema without commit and rollback methods.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
+
+    class NoCommitConn:
+        """Connection without commit or rollback."""
+
+        def cursor(self) -> MagicMock:
+            """Return mock cursor."""
+            return MagicMock()
+
+    adapter = s_ad.SnowflakeAdapter("acc/db/schema", {})
+    adapter.conn = NoCommitConn()
+    adapter.setup_schema("CREATE TABLE ok (id INT)")
+
+    class NoRollbackConn:
+        """Connection without rollback that raises on execute."""
+
+        def cursor(self) -> MagicMock:
+            """Return mock cursor raising error."""
+            c = MagicMock()
+            c.execute.side_effect = ValueError("ddl fail")
+            return c
+
+    adapter.conn = NoRollbackConn()
+    with pytest.raises(ValueError, match="ddl fail"):
+        adapter.setup_schema("CREATE TABLE err (")

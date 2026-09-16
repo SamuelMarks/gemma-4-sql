@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +20,9 @@ except (ImportError, AttributeError):
 def export_model(model_name: str, export_path: str) -> JSONDict:
     """Export a Text-to-SQL model using the MLX backend.
 
+    Saves model weights in safetensors format alongside configuration metadata (config.json)
+    to enable standalone re-loading with mlx_lm.
+
     Args:
         model_name: The name of the target model.
         export_path: The path where the model will be exported.
@@ -30,19 +34,36 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
         RuntimeError: If MLX is not installed.
         ValueError: If loading the model fails.
     """
-    Path(export_path).mkdir(parents=True, exist_ok=True)
+    export_dir = Path(export_path)
+    export_dir.mkdir(parents=True, exist_ok=True)
     if mx is None:
         raise RuntimeError("MLX is not installed, cannot export model.")
 
     try:
         load = __import__("mlx_lm", fromlist=["load"]).load
-        (model, _) = load(model_name)
+        (model, _tokenizer) = load(model_name)
         tensors = dict(model.parameters())
     except (ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError) as e:
         raise ValueError(f"Failed to load MLX model {model_name}") from e
 
-    file_path = Path(export_path) / "model.safetensors"
+    file_path = export_dir / "model.safetensors"
     mx.save_safetensors(str(file_path), tensors)
+
+    config_path = export_dir / "config.json"
+    if hasattr(model, "config"):
+        cfg_dict = model.config if isinstance(model.config, dict) else getattr(model.config, "__dict__", {})
+    else:
+        cfg_dict = {"model_type": "gemma4", "model_name": model_name}
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(cfg_dict, f, indent=2)
+
     status = "exported_with_safetensors"
 
-    return {"backend": "mlx", "model": model_name, "export_path": export_path, "file_path": str(file_path), "status": status, "format": "safetensors"}
+    return {
+        "backend": "mlx",
+        "model": model_name,
+        "export_path": export_path,
+        "file_path": str(file_path),
+        "status": status,
+        "format": "safetensors",
+    }

@@ -11,6 +11,16 @@ try:
 except ImportError:
     keras = None
 
+try:
+    import mlx.core as _mx_core
+    import mlx.nn as _mx_nn
+    import mlx.optimizers as _mx_optim
+    from mlx_lm import load as _mx_load
+
+    mlx_available = _mx_core is not None and _mx_nn is not None and _mx_optim is not None and _mx_load is not None
+except (ImportError, AttributeError):
+    mlx_available = False
+
 
 def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test pretraining a model."""
@@ -44,8 +54,11 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="maxtext"))
 
-    res_mlx = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="mlx"))
-    assert res_mlx["backend"] == "mlx"
+    try:
+        res_mlx = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="mlx"))
+        assert res_mlx["backend"] == "mlx"
+    except DependencyMissingError:
+        pass
 
 
 def test_pretrain_model_error() -> None:

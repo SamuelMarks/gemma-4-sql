@@ -28,6 +28,9 @@ def evaluate_cmd(args: argparse.Namespace) -> None:
         ddl=args.ddl,
         db_type=args.db_type,
         db_kwargs=db_kwargs,
+        image_path=getattr(args, "image_path", None),
+        audio_path=getattr(args, "audio_path", None),
+        modality=getattr(args, "modality", "text"),
     )
     if res is not None:
         print(json.dumps(res, indent=2))
@@ -50,6 +53,9 @@ def generate_cmd(args: argparse.Namespace) -> None:
         top_p=getattr(args, "top_p", 1.0),
         seed=getattr(args, "seed", 42),
         test_mode=getattr(args, "test_mode", False),
+        image_path=getattr(args, "image_path", None),
+        audio_path=getattr(args, "audio_path", None),
+        modality=getattr(args, "modality", "text"),
     )
     sql_output = (res or {}).get("sql", "")
     if sql_output:
@@ -74,6 +80,9 @@ def agent_cmd(args: argparse.Namespace) -> None:
         db_type=args.db_type,
         max_retries=args.max_retries,
         min_confidence=getattr(args, "min_confidence", 0.0),
+        image_path=getattr(args, "image_path", None),
+        audio_path=getattr(args, "audio_path", None),
+        modality=getattr(args, "modality", "text"),
     )
     res = run_agentic_loop(
         model_name=args.model,

@@ -15,13 +15,16 @@ def test_serve_model_routing(monkeypatch: pytest.MonkeyPatch) -> object:
     """
     for backend in ["keras", "maxtext"]:
         try:
-            res = serve_model("foo", backend=backend)
+            res = serve_model("foo", backend=backend, test_mode=True)
             assert res["backend"] == backend
         except DependencyMissingError:
             pass
 
     try:
-        res = serve_model("foo", backend="jax")
+        from unittest import mock
+
+        monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", mock.MagicMock())
+        res = serve_model("foo", backend="jax", test_mode=True)
         if not res["backend"] == "jax":
             raise AssertionError
     except DependencyMissingError:

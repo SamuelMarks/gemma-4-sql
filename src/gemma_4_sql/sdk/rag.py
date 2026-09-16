@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import math
 import operator
 import re
+from typing import Any
 
 MIN_SIMILARITY = 0.1
 logger = logging.getLogger(__name__)
@@ -15,6 +18,8 @@ try:
 except (ImportError, ValueError, AttributeError, OSError):
     SentenceTransformer = None
     cosine_similarity = None
+
+_SCHEMA_EMBEDDING_CACHE: dict[str, Any] = {}
 
 
 def _clean_identifier(identifier: str) -> str:
@@ -122,8 +127,68 @@ def _score_table(table: str, columns: list[str], prompt_words: set[str]) -> int:
     return score
 
 
+def _bm25_search(
+    prompt: str,
+    schema: dict[str, list[str]],
+    top_k_tables: int,
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> list[str]:
+    """Rank tables using Okapi BM25 scoring over table names and column descriptions.
+
+    Args:
+        prompt: Natural language query string.
+        schema: Parsed schema mapping table names to column lists.
+        top_k_tables: Maximum number of tables to select.
+        k1: BM25 term frequency saturation parameter.
+        b: BM25 length normalization parameter.
+
+    Returns:
+        List of prioritized table names.
+    """
+    prompt_tokens = [w.lower() for w in re.findall(r"\b\w+\b", prompt)]
+    if not prompt_tokens or not schema:
+        return list(schema.keys())[:top_k_tables]
+
+    doc_tokens: dict[str, list[str]] = {}
+    total_len = 0
+    for t, cols in schema.items():
+        tokens = [t.lower()] * 3 + [c.lower() for c in cols]
+        doc_tokens[t] = tokens
+        total_len += len(tokens)
+
+    avg_dl = max(1.0, float(total_len) / float(len(schema)))
+    n_docs = len(schema)
+
+    df: dict[str, int] = {}
+    for token in set(prompt_tokens):
+        df[token] = sum(1 for tokens in doc_tokens.values() if token in tokens)
+
+    scores: dict[str, float] = {}
+    for t, tokens in doc_tokens.items():
+        dl = len(tokens)
+        score = 0.0
+        for token in prompt_tokens:
+            if token not in df or df[token] == 0:
+                continue
+            tf = tokens.count(token)
+            if tf == 0:
+                continue
+            idf = math.log((n_docs - df[token] + 0.5) / (df[token] + 0.5) + 1.0)
+            num = tf * (k1 + 1.0)
+            denom = tf + k1 * (1.0 - b + b * (dl / avg_dl))
+            score += idf * (num / denom)
+        scores[t] = score
+
+    sorted_tables = sorted(scores.items(), key=operator.itemgetter(1), reverse=True)
+    selected = [t[0] for t in sorted_tables[:top_k_tables] if t[1] > 0.0]
+    if not selected:
+        selected = list(schema.keys())[:top_k_tables]
+    return selected
+
+
 def _keyword_search(prompt: str, schema: dict[str, list[str]], top_k_tables: int) -> list[str]:
-    """Perform keyword matching between prompt and schema entities.
+    """Perform keyword matching between prompt and schema entities with BM25 refinement.
 
     Args:
         prompt: Natural language question.
@@ -140,7 +205,7 @@ def _keyword_search(prompt: str, schema: dict[str, list[str]], top_k_tables: int
     sorted_tables = sorted(table_scores.items(), key=operator.itemgetter(1), reverse=True)
     relevant_tables = [t[0] for t in sorted_tables[:top_k_tables] if t[1] > 0]
     if not relevant_tables:
-        relevant_tables = list(schema.keys())[:top_k_tables]
+        relevant_tables = _bm25_search(prompt, schema, top_k_tables)
     return relevant_tables
 
 
@@ -151,7 +216,7 @@ def _semantic_search(
     top_k_tables: int,
     min_similarity: float = MIN_SIMILARITY,
 ) -> list[str]:
-    """Execute semantic vector embedding retrieval using cosine similarity.
+    """Execute semantic vector embedding retrieval using cosine similarity with caching.
 
     Args:
         prompt: Natural language query.
@@ -170,8 +235,15 @@ def _semantic_search(
     try:
         model = SentenceTransformer("all-MiniLM-L6-v2")
         table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]
+
+        schema_key = hashlib.md5(";;".join(table_docs).encode()).hexdigest()
+        if schema_key in _SCHEMA_EMBEDDING_CACHE:
+            table_embeddings = _SCHEMA_EMBEDDING_CACHE[schema_key]
+        else:
+            table_embeddings = model.encode(table_docs)
+            _SCHEMA_EMBEDDING_CACHE[schema_key] = table_embeddings
+
         prompt_embedding = model.encode([prompt])
-        table_embeddings = model.encode(table_docs)
         similarities = cosine_similarity(prompt_embedding, table_embeddings)[0]
         top_indices = similarities.argsort()[-top_k_tables:][::-1]
         relevant_tables = [table_names[i] for i in top_indices if similarities[i] > min_similarity]
@@ -188,7 +260,7 @@ def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_ta
     """Retrieve the most relevant tables and columns based on a natural language prompt.
 
     This uses semantic vector embeddings (via sentence-transformers) if available,
-    falling back to keyword matching otherwise.
+    falling back to keyword matching and BM25 ranking otherwise.
 
     Args:
         prompt: The natural language prompt.

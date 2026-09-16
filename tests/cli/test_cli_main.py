@@ -484,9 +484,13 @@ def test_cli_rag(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[
     monkeypatch.setattr("gemma_4_sql.cli_etl.etl_sft", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_etl.etl_posttrain", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
     monkeypatch.setattr("gemma_4_sql.cli_train.apply_peft", lambda *_args, **_kwargs: {"status": "completed", "metrics": {}, "sql": "SELECT 1", "history": [{"role": "assistant", "content": "hi"}], "response": "hi"})
+    monkeypatch.setattr("gemma_4_sql.cli_misc.build_rag_prompt", lambda *_args, **_kwargs: "SELECT 1")
     "Test the CLI rag command."
     args = ["rag", "--prompt", "Find users", "--ddl", "CREATE TABLE users (id INT, name VARCHAR);"]
     cli(args)
+    capsys.readouterr()
+    args_mm = ["rag", "--prompt", "Find users", "--ddl", "CREATE TABLE users (id INT, name VARCHAR);", "--image-path", "img.png", "--audio-path", "aud.wav"]
+    cli(args_mm)
     capsys.readouterr()
 
 

@@ -1,5 +1,7 @@
 """Tests for test gemma4 params module."""
 
+from pathlib import Path
+
 import jax.numpy as jnp
 import pytest
 
@@ -20,6 +22,7 @@ def test_assign_weights_permute():
     assert state["a"].shape == (2, 1)
 
 
+from typing import Any
 from typing import NoReturn as Never
 
 import jax
@@ -127,6 +130,45 @@ def test_create_gemma4_from_pretrained_missing_nnx_state(monkeypatch: pytest.Mon
         raise AssertionError
 
 
+def test_create_gemma4_from_pretrained_flat_and_plain_dict(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test state dictionary extraction using to_flat_dict and plain dict fallbacks.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary path fixture.
+
+    Returns:
+        None.
+    """
+    m_params = __import__("gemma_4_sql.backends.jax.gemma4.params", fromlist=[""])
+    (tmp_path / "model.safetensors").touch()
+
+    # 1. State with to_flat_dict
+    class MockNNXFlat(MockNNX):
+        """Mock NNX with to_flat_dict."""
+
+        def split(self, _x: object) -> object:
+            """Return state with to_flat_dict."""
+            return (None, type("StateFlat", (), {"to_flat_dict": lambda _self: {"model": {"embed_scale": jax.ShapeDtypeStruct((1,), jnp.bfloat16)}, "vision_tower": {"embeddings": {"position_ids": jax.ShapeDtypeStruct((1,), jnp.int32)}}}})())
+
+    monkeypatch.setattr(m_params, "nnx", MockNNXFlat())
+    monkeypatch.setattr(m_params, "safetensors", MockSt())
+    res_flat = create_gemma4_from_pretrained(str(tmp_path), MockConfig())
+    assert "embed_scale" in res_flat["model"]
+
+    # 2. State as plain dict
+    class MockNNXDict(MockNNX):
+        """Mock NNX with plain dict state."""
+
+        def split(self, _x: object) -> object:
+            """Return plain dict state."""
+            return (None, {"model": {"embed_scale": jax.ShapeDtypeStruct((1,), jnp.bfloat16)}, "vision_tower": {"embeddings": {"position_ids": jax.ShapeDtypeStruct((1,), jnp.int32)}}})
+
+    monkeypatch.setattr(m_params, "nnx", MockNNXDict())
+    res_dict = create_gemma4_from_pretrained(str(tmp_path), MockConfig())
+    assert "embed_scale" in res_dict["model"]
+
+
 import re
 from unittest.mock import MagicMock
 
@@ -215,3 +257,120 @@ def test_create_gemma4_vision_pos_ids():
     mock_state = {"model": {"embed_scale": jax.ShapeDtypeStruct((), jnp.float32)}, "vision_tower": {"embeddings": {"position_ids": jax.ShapeDtypeStruct((1, 14), jnp.int32)}}}
     _fix_jax_state_embeddings(mock_state, mock_model, cfg)
     assert mock_state["vision_tower"]["embeddings"]["position_ids"].shape == (1, 14)
+
+
+def test_map_to_jax_key_multiple_mappings() -> None:
+    """Test map_to_jax_key raises ValueError when multiple mappings match."""
+    from gemma_4_sql.backends.jax.gemma4.utils_params import map_to_jax_key
+
+    mapping = {
+        r"layer\.(.*)": ("l1", None),
+        r"layer\.weight": ("l2", None),
+    }
+    with pytest.raises(ValueError, match="Multiple mappings found"):
+        map_to_jax_key(mapping, "layer.weight")
+
+
+def test_assign_weights_with_sharding_and_int_keys() -> None:
+    """Test assign_weights with sharding_dict and int/string resolved keys."""
+    from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, assign_weights_from_eval_shape
+
+    class ParamContainer:
+        def __init__(self, arr: Any) -> None:
+            self.value = arr
+
+    container = ParamContainer(jnp.zeros((2,)))
+    state_dict = {"0": container}
+    shd = {"0": None}
+    assign_weights([0], jnp.ones((2,)), state_dict, "key", None, sharding_dict=shd)
+    assert (container.value == jnp.ones((2,))).all()
+
+    # Test shape mismatch in assign_weights
+    with pytest.raises(ValueError, match="Shape mismatch"):
+        assign_weights(["0"], jnp.ones((5,)), state_dict, "key", None)
+
+    # Test int resolved_key to str in assign_weights_from_eval_shape
+    state_dict2 = {"1": jnp.zeros((2,))}
+    assign_weights_from_eval_shape([1], jnp.ones((2,)), state_dict2, "key", None)
+    assert (state_dict2["1"] == jnp.ones((2,))).all()
+
+    # Test str digit resolved_key to int in assign_weights_from_eval_shape
+    state_dict3 = {0: jnp.zeros((2,))}
+    assign_weights_from_eval_shape(["0"], jnp.ones((2,)), state_dict3, "key", None)
+    assert (state_dict3[0] == jnp.ones((2,))).all()
+
+
+def test_process_moe_tensor_and_stacking(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test processing MoE expert tensors and stacking them into jax_state."""
+    import re
+    from unittest.mock import MagicMock
+
+    from gemma_4_sql.backends.jax.gemma4.params import _process_safetensors_file, _stack_and_assign_expert_tensors
+
+    class MockFile:
+        def keys(self) -> list[str]:
+            return [
+                "model.layers.0.block_sparse_moe.experts.0.gate_proj.weight",
+                "model.layers.0.block_sparse_moe.experts.1.gate_proj.weight",
+            ]
+
+        def get_tensor(self, _key: str) -> Any:
+            return jnp.ones((4, 4))
+
+    mock_safe_open = MagicMock()
+    mock_safe_open.return_value.__enter__.return_value = MockFile()
+    monkeypatch.setattr("gemma_4_sql.backends.jax.gemma4.params.safetensors.safe_open", mock_safe_open)
+
+    moe_pattern = re.compile(r"^model\.layers\.(\d+)\.block_sparse_moe\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$")
+    expert_tensors: dict[int, dict[str, dict[int, jax.Array]]] = {}
+    jax_state = {"model": {"layers": {"0": {"mlp": {"routed_experts": {"gate_proj": {"weight": jnp.zeros((2, 4, 4))}}}}}}}
+    mapping = {r"model\.layers\.(\d+)\.mlp\.routed_experts\.(.*)\.weight": (r"model\.layers\.\1\.mlp\.routed_experts\.\2\.weight", None)}
+
+    _process_safetensors_file("dummy.safetensors", moe_pattern, expert_tensors, jax_state, mapping)
+    assert 0 in expert_tensors
+    assert "gate_proj" in expert_tensors[0]
+    assert len(expert_tensors[0]["gate_proj"]) == 2
+
+    _stack_and_assign_expert_tensors(expert_tensors, mapping, jax_state)
+
+    from gemma_4_sql.backends.jax.gemma4.params import process_standard_tensor
+
+    process_standard_tensor(MockFile(), "unmapped.key", jax_state, {})
+
+
+def test_create_gemma4_from_pretrained_flow(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Test create_gemma4_from_pretrained full flow with mock files."""
+    from gemma_4_sql.backends.jax.gemma4 import Gemma4Config
+    from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
+
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir(parents=True, exist_ok=True)
+    cfg = Gemma4Config(vocab_size=10, hidden_size=16, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=8, intermediate_size=16)
+    with pytest.raises(ValueError, match="No safetensors found"):
+        create_gemma4_from_pretrained(str(empty_dir), cfg)
+
+    (tmp_path / "model.safetensors").write_bytes(b"mock")
+    monkeypatch.setattr("gemma_4_sql.backends.jax.gemma4.params._process_safetensors_file", lambda *a, **k: None)
+    res = create_gemma4_from_pretrained(str(tmp_path), cfg)
+    assert res is not None
+
+
+def test_gemma4_config_presets_fsdp_tp() -> None:
+    """Test Gemma4Config presets with use_fsdp and use_tp enabled."""
+    from gemma_4_sql.backends.jax.gemma4 import Gemma4Config
+    from gemma_4_sql.backends.jax.gemma4.config import VisionShardConfig
+
+    assert VisionShardConfig.no_sharding() is not None
+
+    cfg1 = Gemma4Config.gemma4_base(use_fsdp=False, use_tp=False)
+    assert hasattr(cfg1, "hidden_size")
+    cfg2 = Gemma4Config.gemma4_base(use_fsdp=True, use_tp=False)
+    assert hasattr(cfg2, "shd_cfg")
+    cfg3 = Gemma4Config.gemma4_base(use_fsdp=False, use_tp=True)
+    assert hasattr(cfg3, "shd_cfg")
+
+    assert Gemma4Config.gemma4_e2b(use_fsdp=False, use_tp=False) is not None
+    assert Gemma4Config.gemma4_e2b(use_fsdp=True, use_tp=True) is not None
+    assert Gemma4Config.gemma4_e4b(use_fsdp=True, use_tp=True) is not None
+    assert Gemma4Config.gemma4_26b_a4b(use_fsdp=True, use_tp=True) is not None
+    assert Gemma4Config.gemma4_31b(use_fsdp=True, use_tp=True) is not None

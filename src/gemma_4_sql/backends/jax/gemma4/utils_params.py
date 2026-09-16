@@ -102,7 +102,7 @@ def assign_weights(keys: list[str], tensor: Any, state_dict: Any, st_key: str, t
     sharding_dict = kwargs.get("sharding_dict")
     (key, *rest) = keys
     resolved_key: Any = key
-    if isinstance(state_dict, dict) and resolved_key not in state_dict:
+    if hasattr(state_dict, "__contains__") and resolved_key not in state_dict:
         if isinstance(resolved_key, str) and resolved_key.isdigit() and int(resolved_key) in state_dict:
             resolved_key = int(resolved_key)
         elif isinstance(resolved_key, int) and str(resolved_key) in state_dict:
@@ -137,7 +137,7 @@ def assign_weights_from_eval_shape(keys: list[str], tensor: Any, state_dict: Any
     """
     (key, *rest) = keys
     resolved_key: Any = key
-    if isinstance(state_dict, dict) and resolved_key not in state_dict:
+    if hasattr(state_dict, "__contains__") and resolved_key not in state_dict:
         if isinstance(resolved_key, str) and resolved_key.isdigit() and int(resolved_key) in state_dict:
             resolved_key = int(resolved_key)
         elif isinstance(resolved_key, int) and str(resolved_key) in state_dict:
@@ -182,11 +182,14 @@ def _load_weights_from_safetensors_file(filepath: str, state: dict[str, object],
 
 
 def _get_model_and_state(model_cls: Any, cfg: object) -> tuple[object, dict[str, Any]]:
-    """Helper to instantiate the model and extract its state.
+    """Instantiate the model and extract its state.
+
+    Args:
+        model_cls: Model class constructor.
+        cfg: Model configuration object.
 
     Returns:
-        The execution result.
-
+        A tuple of (model_instance, state_dict).
     """
     nnx = __import__("flax", fromlist=["nnx"]).nnx
     model = model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
@@ -197,7 +200,13 @@ def _get_model_and_state(model_cls: Any, cfg: object) -> tuple[object, dict[str,
 
 
 def _populate_state_from_files(file_dir: str, state: dict[str, Any], key_mapping: dict[str, Any]) -> None:
-    """Helper to iterate files and populate state."""
+    """Iterate directory files and populate state dictionary from safetensors.
+
+    Args:
+        file_dir: Directory containing safetensors weight files.
+        state: State dictionary to populate.
+        key_mapping: Name mapping from HF to JAX keys.
+    """
     for root, _, files in os.walk(file_dir):
         for file in files:
             if file.endswith(".safetensors"):  # pragma: no cover

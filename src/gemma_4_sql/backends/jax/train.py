@@ -130,7 +130,11 @@ def _execute_train(dataset: str, epochs: int, learning_rate: float, batch_size: 
     mesh = jax.sharding.Mesh(jax.devices(), ("data",))
     sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("data"))
     schedule = optax.warmup_cosine_decay_schedule(init_value=0.0, peak_value=learning_rate, warmup_steps=100, decay_steps=max(1, epochs * 1000), end_value=learning_rate * 0.1)
-    optimizer = nnx.Optimizer(model, optax.adamw(schedule))
+    tx = optax.chain(
+        optax.clip_by_global_norm(1.0),
+        optax.adamw(schedule),
+    )
+    optimizer = nnx.Optimizer(model, tx)
     train_step = _get_train_step_fn()
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
@@ -161,7 +165,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
 
-    final_loss = 0.45
+    final_loss = 0.0
     status = "completed"
     if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:
         from gemma_4_sql.exceptions import DependencyMissingError

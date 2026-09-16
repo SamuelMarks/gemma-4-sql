@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 def etl_pretrain_cmd(args: argparse.Namespace) -> None:
     """Run ETL for pretraining.
 
-
     Args:
-        args: Parsed command-line arguments containing command-specific options."""
+        args: Parsed command-line arguments containing command-specific options.
+    """
     config = ETLConfig(dataset_name=args.dataset, split=args.split, batch_size=args.batch_size, distributed=args.distributed, tokenizer_name=args.tokenizer, duckdb_path=args.duckdb_path, duckdb_table=args.duckdb_table)
     etl_pretrain(config, backend=args.backend)
 
@@ -26,9 +26,9 @@ def etl_pretrain_cmd(args: argparse.Namespace) -> None:
 def etl_sft_cmd(args: argparse.Namespace) -> None:
     """Run ETL for SFT.
 
-
     Args:
-        args: Parsed command-line arguments containing command-specific options."""
+        args: Parsed command-line arguments containing command-specific options.
+    """
     config = ETLConfig(dataset_name=args.dataset, split=args.split, batch_size=args.batch_size, distributed=args.distributed, tokenizer_name=args.tokenizer, duckdb_path=args.duckdb_path, duckdb_table=args.duckdb_table)
     etl_sft(config, backend=args.backend)
 
@@ -37,6 +37,7 @@ def etl_posttrain_cmd(args: argparse.Namespace) -> None:
     """Run ETL for post-training.
 
     Args:
-        args: Parsed command-line arguments containing command-specific options."""
+        args: Parsed command-line arguments containing command-specific options.
+    """
     config = ETLConfig(dataset_name=args.dataset, split=args.split, batch_size=args.batch_size, distributed=args.distributed, tokenizer_name=args.tokenizer, duckdb_path=args.duckdb_path, duckdb_table=args.duckdb_table)
     etl_posttrain(config, backend=args.backend)

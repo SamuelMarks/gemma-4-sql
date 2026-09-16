@@ -26,5 +26,8 @@ def benchmark_cmd(args: argparse.Namespace) -> None:
         mode=args.mode,
         max_new_tokens=args.max_new_tokens,
         warmup_steps=args.warmup_steps,
+        image_path=getattr(args, "image_path", None),
+        audio_path=getattr(args, "audio_path", None),
+        modality=getattr(args, "modality", "text"),
     )
     print(json.dumps(res, indent=2))

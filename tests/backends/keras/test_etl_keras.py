@@ -58,12 +58,19 @@ def test_keras_etl_import_error() -> None:
         AssertionError: Description.
 
     """
-    if "gemma_4_sql.backends.keras.etl" in sys.modules:
-        del sys.modules["gemma_4_sql.backends.keras.etl"]
-    with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
-        etl_keras = __import__("gemma_4_sql.backends.keras.etl", fromlist=[""])
-        with pytest.raises(DependencyMissingError):
-            etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
+    import importlib
+
+    try:
+        if "gemma_4_sql.backends.keras.etl" in sys.modules:
+            del sys.modules["gemma_4_sql.backends.keras.etl"]
+        with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
+            etl_keras = __import__("gemma_4_sql.backends.keras.etl", fromlist=[""])
+            with pytest.raises(DependencyMissingError):
+                etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
+    finally:
+        if "gemma_4_sql.backends.keras.etl" in sys.modules:
+            del sys.modules["gemma_4_sql.backends.keras.etl"]
+        importlib.import_module("gemma_4_sql.backends.keras.etl")
 
 
 class MockDatasets:

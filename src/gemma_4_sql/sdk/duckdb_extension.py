@@ -56,7 +56,7 @@ def embed_in_duckdb(
             A JSON string containing the generated SQL, execution results, and success status.
         """
         try:
-            cur = duck_conn.cursor() if hasattr(duck_conn, "cursor") and not hasattr(duck_conn, "_mock_return_value") else duck_conn
+            cur = duck_conn.cursor() if callable(getattr(duck_conn, "cursor", None)) else duck_conn
             tables = cur.execute(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema='main'",
             ).fetchall()

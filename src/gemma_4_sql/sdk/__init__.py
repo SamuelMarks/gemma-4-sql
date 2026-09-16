@@ -14,7 +14,7 @@ from .etl import etl_posttrain, etl_pretrain, etl_sft
 from .evaluation import evaluate
 from .export import export_model
 from .few_shot import build_few_shot_prompt
-from .inference import generate
+from .inference import generate, generate_sql
 from .logging import log_metrics
 from .models import TrainingConfig, posttrain_model, pretrain_model, sft_model, train_from_scratch
 from .peft import apply_peft
@@ -39,6 +39,7 @@ __all__ = [
     "export_model",
     "extract_schema_entities",
     "generate",
+    "generate_sql",
     "log_metrics",
     "posttrain_model",
     "pretrain_model",

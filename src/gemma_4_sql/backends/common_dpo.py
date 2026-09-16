@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 def generic_dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float, log_sigmoid_fn: Callable[[TensorType], TensorType]) -> tuple[TensorType, TensorType, TensorType]:
-    """Generic computation of the Direct Preference Optimization (DPO) loss.
+    """Compute the Direct Preference Optimization (DPO) loss generically.
 
     Args:
         policy_chosen_logps: Log probabilities of the chosen completions from the policy model.

@@ -31,7 +31,7 @@ except (ImportError, AttributeError):
 
 
 def _beam_search_step(seq: Any, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
-    """Helper to process a single sequence and expand it into multiple beams.
+    """Process a single sequence and expand it into multiple beams.
 
     Args:
         seq: The seq.

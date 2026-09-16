@@ -12,7 +12,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 try:
     import torch  # Preload to avoid PyTorch/coverage C-tracer segfault in Python 3.12
-except ImportError:
+except (ImportError, RuntimeError):
     torch = None
 
 import pytest
@@ -57,7 +57,71 @@ class MockDatasets(types.ModuleType):
         return [{"query": "SELECT 1", "sql": "SELECT 1", "question": "test", "nl": "test"}]
 
 
+class MockConftestGrain(types.ModuleType):
+    """Mock grain for test environment."""
+
+    def __init__(self) -> None:
+        """Initialize MockConftestGrain as a valid module with spec."""
+        super().__init__("grain")
+        self.__spec__ = importlib.machinery.ModuleSpec("grain", None)
+        self.python = self
+
+    class RandomAccessDataSource:
+        """Mock RandomAccessDataSource."""
+
+    class MapTransform:
+        """Mock MapTransform."""
+
+    class DataLoader:
+        """Mock DataLoader."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            """Initialize Mock DataLoader."""
+            self.data_source = args[0] if args else None
+
+        def __iter__(self) -> typing.Iterator[dict[str, typing.Any]]:
+            """Iterate mock batches."""
+            try:
+                import jax.numpy as jnp
+
+                yield {
+                    "inputs": jnp.ones((2, 10), dtype=jnp.int32),
+                    "targets": jnp.ones((2, 10), dtype=jnp.int32),
+                    "chosen_inputs": jnp.ones((2, 10), dtype=jnp.int32),
+                    "chosen_input_ids": jnp.ones((2, 10), dtype=jnp.int32),
+                    "chosen_labels": jnp.ones((2, 10), dtype=jnp.int32),
+                    "rejected_inputs": jnp.ones((2, 10), dtype=jnp.int32),
+                    "rejected_input_ids": jnp.ones((2, 10), dtype=jnp.int32),
+                    "rejected_labels": jnp.ones((2, 10), dtype=jnp.int32),
+                }
+            except (ImportError, AttributeError):
+                yield {"inputs": [1, 2], "targets": [2, 3]}
+
+    @staticmethod
+    def IndexSampler(*args: object, **kwargs: object) -> object:
+        """Mock IndexSampler."""
+        return object()
+
+    @staticmethod
+    def Batch(*args: object, **kwargs: object) -> object:
+        """Mock Batch."""
+        return object()
+
+    @staticmethod
+    def NoSharding() -> object:
+        """Mock NoSharding."""
+        return object()
+
+    @staticmethod
+    def JAXDistributedSharding(*args: object, **kwargs: object) -> object:
+        """Mock JAXDistributedSharding."""
+        return object()
+
+
 sys.modules["datasets"] = MockDatasets()
+_conftest_grain = MockConftestGrain()
+sys.modules["grain"] = _conftest_grain
+sys.modules["grain.python"] = _conftest_grain
 
 
 class MockConn:
@@ -105,6 +169,10 @@ class MockConn:
 
     def create_function(self, name: object, func: object, args: object, ret: object) -> None:
         """Execute function."""
+
+    def cursor(self: typing.Any) -> typing.Any:
+        """Return self as DB-API 2.0 cursor."""
+        return self
 
     def close(self: typing.Any) -> None:
         """Mock close."""
@@ -195,10 +263,15 @@ class MockGemma4ForCausalLM:
 def _mock_external_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     """Mock external network calls like datasets.load_dataset and duckdb.connect."""
     monkeypatch.setitem(sys.modules, "datasets", MockDatasets())
+    monkeypatch.setitem(sys.modules, "grain", MockConftestGrain())
+    monkeypatch.setitem(sys.modules, "grain.python", MockConftestGrain())
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.datasets", MockDatasets(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.datasets", MockDatasets(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.keras.etl.datasets", MockDatasets(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.datasets", MockDatasets(), raising=False)
+    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.grain", MockConftestGrain(), raising=False)
+    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.grain", MockConftestGrain(), raising=False)
+    monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.grain", MockConftestGrain(), raising=False)
     monkeypatch.setitem(sys.modules, "duckdb", MockDuckDB())
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.duckdb", MockDuckDB(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.duckdb", MockDuckDB(), raising=False)

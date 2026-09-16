@@ -155,12 +155,47 @@ def test_sql_tokenizer_fallback_edge_cases(monkeypatch: pytest.MonkeyPatch) -> N
             return "abc"
 
     encoded = tok.encode(BadString())  # type: ignore[arg-type]
-    assert encoded == [ord("a") % 128, ord("b") % 128, ord("c") % 128]
+    assert encoded == [ord("a"), ord("b"), ord("c")]
+
+    # Test when both encode and str(text).encode fail
+    class ReallyBadString:
+        """Object that fails both direct encode and str encode."""
+
+        def encode(self, _encoding: str, **kwargs: object) -> bytes:
+            raise UnicodeEncodeError("utf-8", "", 0, 1, "test")
+
+        def __str__(self) -> str:
+            class FailingStr(str):
+                def encode(self, _encoding: str, **kwargs: object) -> bytes:
+                    raise RuntimeError("Str encode failed")
+
+            return FailingStr("abc")
+
+    encoded_really_bad = tok.encode(ReallyBadString())  # type: ignore[arg-type]
+    assert encoded_really_bad == [ord("a") % 128, ord("b") % 128, ord("c") % 128]
 
     # Test decode when bytes(...) raises ValueError/TypeError
     bad_tokens = [object()]  # type: ignore[list-item]
     decoded_bad = tok.decode(bad_tokens)  # type: ignore[arg-type]
     assert decoded_bad == ""
+
+
+def test_sql_tokenizer_get_vocab() -> None:
+    """Test get_vocab for fallback byte-level and mock HF tokenizer."""
+    tok = SQLTokenizer(vocab_size=128)
+    vocab = tok.get_vocab()
+    assert isinstance(vocab, dict)
+    assert len(vocab) == 128
+    assert vocab["a"] == ord("a")
+
+    class MockVocabHFTokenizer(MockHFTokenizer):
+        def get_vocab(self) -> dict[str, int]:
+            return {"<pad>": 0, "select": 1}
+
+    tok_hf = SQLTokenizer()
+    tok_hf.hf_tokenizer = MockVocabHFTokenizer()
+    hf_vocab = tok_hf.get_vocab()
+    assert hf_vocab == {"<pad>": 0, "select": 1}
 
 
 def test_sql_tokenizer_lazy_getattr(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -17,6 +17,7 @@ def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "jax", object())
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", mock.MagicMock())
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", mock.MagicMock())
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
     if not res["backend"] == "jax":
         raise AssertionError
@@ -103,11 +104,6 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: app_instance)
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
 
-    import gemma_4_sql.backends.common_serve
-
-    gemma_4_sql.backends.common_serve.Request = mock.MagicMock()
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
-
     srv.serve_model("foo", test_mode=True)
     generate_func = app_instance.router.routes[-1].endpoint
 
@@ -118,11 +114,26 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     if "SELECT * FROM generated WHERE prompt='test'" not in sql_val:
         raise AssertionError
 
-    srv.serve_model("foo", test_mode=False)
     monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", lambda *a, **k: {"sql": "SELECT 1", "status": "success"})
+    srv.serve_model("foo", test_mode=False)
     generate_func2 = app_instance.router.routes[-1].endpoint
     result2 = await generate_func2(request)
     assert result2 is not None
+
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", lambda *a, **k: {"sql": "", "status": "success"})
+    srv.serve_model("foo", test_mode=False)
+    generate_func_empty = app_instance.router.routes[-1].endpoint
+    result_empty = await generate_func_empty(request)
+    assert result_empty is not None
+
+    def mock_raise(*a: object, **k: object) -> dict[str, object]:
+        raise RuntimeError("JAX inference warmup and generation failure")
+
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", mock_raise)
+    srv.serve_model("foo", test_mode=False)
+    generate_func3 = app_instance.router.routes[-1].endpoint
+    result3 = await generate_func3(request)
+    assert result3 is not None
 
 
 def test_serve_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:

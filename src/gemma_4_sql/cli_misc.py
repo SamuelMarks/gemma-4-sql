@@ -71,6 +71,16 @@ def rag_cmd(args: argparse.Namespace) -> None:
         print(str(retrieved))
     else:
         rag_prompt = build_rag_prompt(prompt=args.prompt, ddl=args.ddl)
+        image_path = getattr(args, "image_path", None)
+        audio_path = getattr(args, "audio_path", None)
+        if image_path is not None or audio_path is not None:
+            from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
+
+            rag_prompt = format_multimodal_prompt(
+                rag_prompt,
+                has_image=image_path is not None,
+                has_audio=audio_path is not None,
+            )["prompt"]
         print(str(rag_prompt))
 
 

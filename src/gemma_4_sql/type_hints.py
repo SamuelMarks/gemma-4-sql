@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, TypeVar, Union
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypedDict, TypeVar, Union
 
 JSONPrimitive = Union[str, int, float, bool, None]
 JSONValue = Union[JSONPrimitive, Sequence["JSONValue"], Mapping[str, "JSONValue"]]
@@ -13,6 +14,44 @@ JSONDict = dict[str, JSONValue]
 # TensorType is a generic alias for backend-specific tensors (JAX arrays, PyTorch tensors, etc.)
 TensorType = TypeVar("TensorType", bound=Any)
 ModelType = TypeVar("ModelType", bound=Any)
+
+if TYPE_CHECKING:
+    from numpy import ndarray
+    from PIL.Image import Image
+else:
+    try:
+        from PIL.Image import Image
+    except (ImportError, AttributeError):
+        Image = object
+
+    try:
+        from numpy import ndarray
+    except (ImportError, AttributeError):
+        ndarray = object
+
+# Multimodal input types
+ImageInput = Union[str, Path, bytes, Image, None]
+AudioInput = Union[str, Path, bytes, "ndarray[Any, Any]", None]
+
+
+class MultimodalInput(TypedDict, total=False):
+    """Structured multimodal input containing prompt and optional media modalities.
+
+    Attributes:
+        prompt: Natural language query or textual instruction.
+        image: Image input path, binary bytes, or tensor representation.
+        audio: Audio input path, binary bytes, or tensor representation.
+        image_token_mask: Optional boolean alignment mask indicating image tokens.
+        audio_token_mask: Optional boolean alignment mask indicating audio tokens.
+        modality: Explicit modality selector ('text', 'vision', 'audio', 'multimodal').
+    """
+
+    prompt: str
+    image: ImageInput
+    audio: AudioInput
+    image_token_mask: list[bool] | None
+    audio_token_mask: list[bool] | None
+    modality: str
 
 
 @dataclass
@@ -39,6 +78,9 @@ class ETLConfig:
     tokenizer_name: str | None = None
     duckdb_path: str | None = None
     duckdb_table: str | None = None
+    modality: str = "text"
+    image_column: str | None = None
+    audio_column: str | None = None
 
 
 @dataclass
@@ -53,6 +95,7 @@ class TrainingConfig:
     batch_size: int = 2
     backend: str = "jax"
     distributed_strategy: str = "none"
+    modality: str = "text"
     extra_kwargs: dict[str, object] = field(default_factory=dict)
 
 

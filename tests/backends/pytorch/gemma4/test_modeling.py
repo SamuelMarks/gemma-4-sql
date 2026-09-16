@@ -270,6 +270,7 @@ def test_pytorch_native_pipeline_integration(tmp_path, monkeypatch):
     assert exp_res["status"] == "exported_with_safetensors"
     assert exp_res["backend"] == "pytorch_native"
 
+    torch.manual_seed(42)
     gen_res = generate_sql("test_model", "SELECT 1", max_length=2, backend_alias="pytorch_native", config=tiny_cfg)
     assert gen_res["status"] == "success"
     assert gen_res["backend"] == "pytorch_native"

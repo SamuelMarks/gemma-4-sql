@@ -107,7 +107,17 @@ class Gemma4Attention(nn.Module):
                 attn_weights = torch.where(window_mask, attn_weights, torch.tensor(min_val, dtype=attn_weights.dtype, device=attn_weights.device))
 
             if attention_mask is not None:
-                attn_weights = attn_weights + attention_mask
+                if attention_mask.dim() == 2:
+                    min_val = torch.finfo(attn_weights.dtype).min
+                    key_mask = (attention_mask == 0) if attention_mask.dtype != torch.bool else (~attention_mask)
+                    additive_mask = torch.zeros((bsz, 1, 1, kv_seq_len), dtype=attn_weights.dtype, device=attn_weights.device)
+                    additive_mask = additive_mask.masked_fill(key_mask[:, None, None, :], min_val)
+                    if q_len > 1:
+                        causal_mask = torch.ones((q_len, kv_seq_len), dtype=torch.bool, device=attn_weights.device).tril(diagonal=kv_seq_len - q_len)
+                        additive_mask = additive_mask.masked_fill(~causal_mask[None, None, :, :], min_val)
+                    attn_weights = attn_weights + additive_mask
+                else:
+                    attn_weights = attn_weights + attention_mask
 
             attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
             attn_output = torch.matmul(attn_weights, value_states)

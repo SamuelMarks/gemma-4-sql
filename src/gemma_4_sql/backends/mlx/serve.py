@@ -19,17 +19,84 @@ try:
 except (ImportError, AttributeError):
     mx = None
 
+_mlx_model_cache: dict[str, tuple[Any, Any]] = {}
 
-def _generate_query(prompt: str) -> str:
-    """Generate query for prompt.
+
+def _load_mlx_model(model_name: str) -> tuple[Any, Any]:
+    """Load an MLX model and tokenizer into cache.
+
+    Args:
+        model_name: The name or path of the target MLX model.
+
+    Returns:
+        A tuple of (model, tokenizer).
+
+    Raises:
+        DependencyMissingError: If mlx_lm dependencies are missing.
+    """
+    if model_name in _mlx_model_cache:
+        return _mlx_model_cache[model_name]
+    try:
+        from mlx_lm import load
+
+        loaded = load(model_name)
+        if isinstance(loaded, (tuple, list)):
+            model = loaded[0]
+            tokenizer = loaded[1] if len(loaded) > 1 else None
+        else:
+            model = loaded
+            tokenizer = None
+        _mlx_model_cache[model_name] = (model, tokenizer)
+        return model, tokenizer
+    except (ImportError, ValueError, OSError, RuntimeError, AttributeError) as err:
+        logger.warning("Could not load MLX model %s: %s", model_name, err)
+        raise
+
+
+def _generate_query(prompt: str, test_mode: bool = False, model_name: str = "") -> str:
+    """Generate a SQL query for a prompt using MLX inference.
 
     Args:
         prompt: Natural language input prompt.
+        test_mode: Boolean flag indicating test mode.
+        model_name: Target model identifier.
 
     Returns:
         Generated SQL query string.
+
+    Raises:
+        InferenceError: If model inference fails during non-test execution.
     """
-    return f"SELECT * FROM generated WHERE prompt='{prompt}'"
+    if test_mode:
+        return f"SELECT * FROM generated WHERE prompt='{prompt}'"
+    from gemma_4_sql.backends.mlx.inference import generate_sql
+    from gemma_4_sql.exceptions import InferenceError
+
+    try:
+        res = generate_sql(model_name=model_name or "default", prompt=prompt)
+        sql = res.get("sql", "")
+        if sql:
+            return str(sql)
+        raise InferenceError(f"MLX inference returned empty SQL for prompt '{prompt}'")
+    except Exception as e:
+        if isinstance(e, InferenceError):
+            raise
+        logger.error("MLX serve generation encountered error: %s", e)
+        raise InferenceError(f"MLX generation failed: {e}") from e
+
+
+def _batch_generate_queries(prompts: list[str], test_mode: bool = False, model_name: str = "") -> list[str]:
+    """Generate SQL queries for a batch of prompts using MLX inference.
+
+    Args:
+        prompts: Sequence of natural language prompts.
+        test_mode: Boolean flag indicating test mode.
+        model_name: Target model identifier.
+
+    Returns:
+        List of generated SQL query strings.
+    """
+    return [_generate_query(p, test_mode=test_mode, model_name=model_name) for p in prompts]
 
 
 def _app_factory(model_name: str, test_mode: bool = False) -> object:
@@ -42,11 +109,23 @@ def _app_factory(model_name: str, test_mode: bool = False) -> object:
     Returns:
         The FastAPI application instance.
     """
+
+    def _startup() -> None:
+        """Preload model weights during server startup."""
+        logger.info("Initializing MLX serve app for model %s", model_name)
+        if not test_mode and mx is not None:
+            try:
+                _load_mlx_model(model_name)
+            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+                logger.warning("Asynchronous model preload failed for %s: %s", model_name, e)
+
     return create_common_app(
         backend_name="mlx",
         model_name=model_name,
         test_mode=test_mode,
-        generate_logic=_generate_query,
+        startup_callback=_startup,
+        generate_logic=lambda prompt: _generate_query(prompt, test_mode=test_mode, model_name=model_name),
+        batch_generate_logic=lambda prompts: _batch_generate_queries(prompts, test_mode=test_mode, model_name=model_name),
     )
 
 

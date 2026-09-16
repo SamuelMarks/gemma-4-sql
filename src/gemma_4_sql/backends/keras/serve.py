@@ -37,18 +37,82 @@ def create_app(model_name: str, *, test_mode: bool = False) -> object:
         test_mode: Boolean flag indicating test mode.
 
     Returns:
-        The execution result.
+        The FastAPI application instance.
     """
+    loaded_model: Any = None
 
     def _startup() -> None:
-        """Execute function."""
+        """Initialize Keras model on server startup."""
+        nonlocal loaded_model
         logger.info("Exporting Keras model %s to SavedModel format for TF Serving...", model_name)
+        if not test_mode:
+            try:
+                gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
+                loaded_model = gemma_causal_lm_cls.from_preset(model_name)
+            except (ImportError, ValueError, TypeError, AttributeError, RuntimeError) as e:
+                logger.warning("Could not pre-load Keras model %s: %s", model_name, e)
+
+    def _generate(prompt: str) -> str:
+        """Generate a SQL query for a single prompt.
+
+        Args:
+            prompt: Natural language input query.
+
+        Returns:
+            Generated SQL query string.
+
+        Raises:
+            InferenceError: If model inference fails during non-test execution.
+        """
+        if test_mode:
+            return f"SELECT * FROM keras_serve WHERE prompt='{prompt}'"
+        from gemma_4_sql.backends.keras.inference import generate_sql
+        from gemma_4_sql.exceptions import InferenceError
+
+        if loaded_model is not None and hasattr(loaded_model, "generate"):
+            try:
+                out = loaded_model.generate(prompt)
+                return str(out).strip()
+            except (RuntimeError, ValueError, TypeError, AttributeError) as e:
+                logger.warning("Keras loaded_model.generate failed, falling back to generate_sql: %s", e)
+
+        try:
+            out = generate_sql(model_name=model_name, prompt=prompt)
+            sql = out.get("sql", "")
+            if sql:
+                return str(sql)
+            raise InferenceError(f"Keras inference returned empty SQL for prompt '{prompt}'")
+        except Exception as e:
+            if isinstance(e, InferenceError):
+                raise
+            raise InferenceError(f"Keras generation failed: {e}") from e
+
+    def _batch_generate(prompts: list[str]) -> list[str]:
+        """Generate SQL queries for a batch of prompts.
+
+        Args:
+            prompts: List of natural language input queries.
+
+        Returns:
+            List of generated SQL query strings.
+        """
+        if test_mode:
+            return [f"SELECT * FROM keras_serve WHERE prompt='{p}'" for p in prompts]
+        if loaded_model is not None and hasattr(loaded_model, "generate"):
+            try:
+                outputs = loaded_model.generate(prompts)
+                return [str(out).strip() for out in outputs]
+            except (RuntimeError, ValueError, TypeError, AttributeError) as e:
+                logger.warning("Keras batch generation failed, falling back to individual generation: %s", e)
+        return [_generate(p) for p in prompts]
 
     return create_common_app(
         backend_name="keras",
         model_name=model_name,
         test_mode=test_mode,
         startup_callback=_startup,
+        generate_logic=_generate,
+        batch_generate_logic=_batch_generate,
     )
 
 

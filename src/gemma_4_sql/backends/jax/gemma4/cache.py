@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import jax.numpy as jnp
 from flax import nnx
@@ -28,7 +28,7 @@ class LayerCache(nnx.Module):
 
     """
 
-    def __init__(self, cache_shape: tuple[int, int, int, int], dtype: jnp.dtype, _shd: PartitionSpec | None = None) -> None:
+    def __init__(self, cache_shape: tuple[int, int, int, int], dtype: jnp.dtype[Any], _shd: PartitionSpec | None = None) -> None:
         """Docstring for __init__.
 
         Args:

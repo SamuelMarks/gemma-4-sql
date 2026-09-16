@@ -10,6 +10,14 @@ from gemma_4_sql.type_hints import TrainingConfig
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 
+__all__ = [
+    "TrainingConfig",
+    "posttrain_model",
+    "pretrain_model",
+    "sft_model",
+    "train_from_scratch",
+]
+
 
 def _route_training(config: TrainingConfig) -> JSONDict:
     """Route training request to the appropriate backend.

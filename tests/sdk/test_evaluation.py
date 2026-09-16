@@ -123,7 +123,7 @@ def test_compute_metrics() -> None:
 
 
 def test_evaluate_mock_predictions() -> None:
-    """Test evaluate with mock predictions."""
+    """Test evaluate with simulated inference predictions."""
     with patch("gemma_4_sql.sdk.evaluation.compute_metrics_async") as mock_compute:
 
         async def mock_compute_async(*args: object, **kwargs: object) -> dict:
@@ -131,18 +131,18 @@ def test_evaluate_mock_predictions() -> None:
             return {"exact_match": 1.0}
 
         mock_compute.side_effect = mock_compute_async
-        with patch("gemma_4_sql.sdk.registry.get_backend"):
-            res = evaluate("model", "dataset", mock_predictions=["s1"], mock_truths=["s1"])
+        with patch("gemma_4_sql.sdk.registry.get_backend"), patch("gemma_4_sql.sdk.evaluation._run_evaluation_inference", return_value=(["s1"], ["s1"], [1.0])):
+            res = evaluate("model", "dataset")
             assert res["metrics"]["exact_match"] == pytest.approx(1.0)
+            assert res["metrics"]["mean_confidence"] == pytest.approx(1.0)
 
 
 def test_run_evaluation_inference_no_dataloader() -> None:
-    """Test run evaluation inference no dataloader."""
+    """Test run evaluation inference raises ValueError when dataloader is missing."""
     backend_impl = MagicMock()
     backend_impl.build_dataloader.return_value = {"loader": None}
-    backend_impl.generate_sql.return_value = {"sql": "SELECT 2"}
-    preds, _truths, _scores = _run_evaluation_inference("model", "dataset", backend_impl)
-    assert preds[0] == "SELECT 2"
+    with pytest.raises(ValueError, match="Valid iterable dataloader is required for evaluation"):
+        _run_evaluation_inference("model", "dataset", backend_impl)
 
 
 @pytest.mark.asyncio
@@ -206,6 +206,113 @@ def test_evaluate_empty_confidence_scores() -> None:
     """
     from gemma_4_sql.sdk.evaluation import evaluate
 
-    res = evaluate("model", "dataset", "jax", mock_predictions=[], mock_truths=[])
-    assert res["status"] == "completed"
-    assert "mean_confidence" not in res["metrics"]
+    with patch("gemma_4_sql.sdk.registry.get_backend"), patch("gemma_4_sql.sdk.evaluation._run_evaluation_inference", return_value=([], [], [])):
+        res = evaluate("model", "dataset", "jax")
+        assert res["status"] == "completed"
+        assert "mean_confidence" not in res["metrics"]
+
+
+def test_run_evaluation_inference_max_batches() -> None:
+    """Test _run_evaluation_inference breaks after MAX_BATCHES."""
+    backend_impl = MagicMock()
+    # Provide 15 batches
+    mock_loader = [({"inputs": [[1]], "targets": [[1]]}) for _ in range(15)]
+    backend_impl.build_dataloader.return_value = {"loader": mock_loader}
+    backend_impl.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 0.9}
+
+    preds, truths, scores = _run_evaluation_inference("model", "dataset", backend_impl)
+    assert len(preds) == 10
+    assert len(truths) == 10
+    assert len(scores) == 10
+
+
+def test_evaluate_with_db_kwargs_and_ddl() -> None:
+    """Test evaluate with explicit db_kwargs dict and ddl parameter."""
+    from gemma_4_sql.sdk.evaluation import evaluate
+
+    with patch("gemma_4_sql.sdk.registry.get_backend"), patch("gemma_4_sql.sdk.evaluation._run_evaluation_inference", return_value=(["SELECT * FROM items"], ["SELECT * FROM items"], [0.95])):
+        res = evaluate(
+            "model",
+            "dataset",
+            "jax",
+            ddl="CREATE TABLE items (id INT, val TEXT);",
+            db_kwargs={"timeout": 5.0},
+        )
+        assert res["status"] == "completed"
+        assert res["metrics"]["exact_match"] == pytest.approx(1.0)
+
+
+def test_evaluate_with_audio_path() -> None:
+    """Test evaluate with audio_path preserves audio_path in returned payload."""
+    from gemma_4_sql.sdk.evaluation import evaluate
+
+    with (
+        patch("gemma_4_sql.sdk.registry.get_backend"),
+        patch(
+            "gemma_4_sql.sdk.evaluation._run_evaluation_inference",
+            return_value=(["SELECT 1"], ["SELECT 1"], [0.9]),
+        ),
+    ):
+        res = evaluate("model", "dataset", "jax", audio_path="/path/to/query.wav", modality="audio")
+        assert res["status"] == "completed"
+        assert res["audio_path"] == "/path/to/query.wav"
+        assert res["modality"] == "audio"
+
+
+def test_evaluate_with_image_path() -> None:
+    """Test evaluate with image_path preserves image_path in returned payload."""
+    from gemma_4_sql.sdk.evaluation import evaluate
+
+    with (
+        patch("gemma_4_sql.sdk.registry.get_backend"),
+        patch(
+            "gemma_4_sql.sdk.evaluation._run_evaluation_inference",
+            return_value=(["SELECT 1"], ["SELECT 1"], [0.9]),
+        ),
+    ):
+        res = evaluate("model", "dataset", "jax", image_path="/path/to/schema.png", modality="vision")
+        assert res["status"] == "completed"
+        assert res["image_path"] == "/path/to/schema.png"
+        assert res["modality"] == "vision"
+
+
+def test_collect_predictions_batch_multimodal_and_type_error() -> None:
+    """Test _run_evaluation_inference when batch contains pixel/audio values and generate_sql raises TypeError."""
+    from gemma_4_sql.sdk.evaluation import _run_evaluation_inference
+
+    backend_impl = MagicMock()
+
+    # Mock generate_sql to raise TypeError when called with kwargs, then succeed without kwargs
+    def mock_generate_sql(model_name: str, prompt: str, **kwargs: object) -> dict[str, object]:
+        if kwargs:
+            raise TypeError("generate_sql() got an unexpected keyword argument")
+        return {"sql": "SELECT 1", "confidence_score": 0.85}
+
+    backend_impl.generate_sql.side_effect = mock_generate_sql
+
+    multimodal_batch = {
+        "inputs": [[1, 2]],
+        "targets": [[2, 3]],
+        "pixel_values": [[0.1] * 10],
+        "audio_values": [[0.2] * 10],
+    }
+    backend_impl.build_dataloader.return_value = {"loader": [multimodal_batch]}
+
+    preds, _truths, scores = _run_evaluation_inference(
+        model_name="test-model",
+        dataset_name="test-data",
+        backend_impl=backend_impl,
+        image_path="/path/to/image.png",
+        audio_path="/path/to/audio.wav",
+        modality="multimodal",
+    )
+    assert preds == ["SELECT 1"]
+    assert scores == [0.85]
+
+    preds2, _truths2, _scores2 = _run_evaluation_inference(
+        model_name="test-model",
+        dataset_name="test-data",
+        backend_impl=backend_impl,
+        modality="multimodal",
+    )
+    assert preds2 == ["SELECT 1"]

@@ -7,7 +7,44 @@ on:
     branches: [main, master]
 
 jobs:
+  doc-coverage:
+    name: 100% Documentation Coverage Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install interrogate pydocstyle
+      - name: Check 100% doc coverage
+        run: |
+          interrogate -vv --fail-under=100 src/ tests/
+          pydocstyle src/
+
+  type-check:
+    name: Strict Type Checking Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install mypy
+      - name: Run strict type checking
+        run: |
+          mypy --strict src/
+
   test:
+    name: 100% Test Branch Coverage Gate
     runs-on: ubuntu-latest
     strategy:
       matrix:

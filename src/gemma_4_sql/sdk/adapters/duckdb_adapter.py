@@ -94,7 +94,7 @@ class DuckDBAdapter(DatabaseAdapter):
                     Query result rows.
                 """
                 conn_obj = cast(Any, self.conn)
-                cur = conn_obj.cursor() if hasattr(conn_obj, "cursor") and not hasattr(conn_obj, "_mock_return_value") else conn_obj
+                cur = conn_obj.cursor() if callable(getattr(conn_obj, "cursor", None)) else conn_obj
                 return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
 
             results = await loop.run_in_executor(None, _exec)
@@ -124,7 +124,7 @@ class DuckDBAdapter(DatabaseAdapter):
                     Query result rows.
                 """
                 conn_obj = cast(Any, self.conn)
-                cur = conn_obj.cursor() if hasattr(conn_obj, "cursor") and not hasattr(conn_obj, "_mock_return_value") else conn_obj
+                cur = conn_obj.cursor() if callable(getattr(conn_obj, "cursor", None)) else conn_obj
                 return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
 
             return await loop.run_in_executor(None, _exec)

@@ -31,7 +31,7 @@ class MockRequest:
 
 
 @pytest.mark.asyncio
-async def test_continuous_batching_bundle_and_resolve() -> None:
+async def test_continuous_batching_bundle_and_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that concurrent requests are bundled and resolved by batching worker."""
     batches_received: list[list[str]] = []
 
@@ -58,27 +58,40 @@ async def test_continuous_batching_bundle_and_resolve() -> None:
 
     generate_route = None
     health_route = None
+    ready_route = None
     models_route = None
     for route in app.routes:
         if getattr(route, "path", None) == "/generate":
             generate_route = route.endpoint
         elif getattr(route, "path", None) == "/health":
             health_route = route.endpoint
+        elif getattr(route, "path", None) == "/ready":
+            ready_route = route.endpoint
         elif getattr(route, "path", None) == "/v1/models":
             models_route = route.endpoint
 
     assert generate_route is not None
     assert health_route is not None
+    assert ready_route is not None
     assert models_route is not None
 
-    # Test health and models endpoints
+    # Test health, ready, and models endpoints
     health_res = await health_route()
     assert health_res.status_code == 200
     assert "healthy" in health_res.body.decode()
 
+    ready_res = await ready_route()
+    assert ready_res.status_code == 200
+    assert "ready" in ready_res.body.decode()
+
     models_res = await models_route()
     assert models_res.status_code == 200
     assert "test-model" in models_res.body.decode()
+
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.JSONResponse", None)
+    ready_res_raw = await ready_route()
+    assert ready_res_raw["status"] == "ready"
+    monkeypatch.undo()
 
     # Dispatch concurrent generation requests
     req1 = MockRequest({"prompt": "users"})
@@ -189,15 +202,28 @@ async def test_common_serve_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     res2 = await gen2(MockRequest({"prompt": "p2"}))
     assert "SINGLE: p2" in res2.body.decode()
 
-    # 3. default string template fallback
+    # 3. NotImplementedError when no generation logic is provided
     app3: Any = create_common_app(
         backend_name="custom_backend",
         model_name="m3",
         test_mode=False,
     )
     gen3 = next(r.endpoint for r in app3.routes if getattr(r, "path", None) == "/generate")
-    res3 = await gen3(MockRequest({"prompt": "p3"}))
-    assert "custom_backend_serve" in res3.body.decode()
+    with pytest.raises(NotImplementedError, match="No generation logic registered"):
+        await gen3(MockRequest({"prompt": "p3"}))
+
+    # 3b. Batch output length mismatch validation
+    app3b: Any = create_common_app(
+        backend_name="mismatch_backend",
+        model_name="m3b",
+        batch_generate_logic=lambda prompts: ["only_one_result"],
+        test_mode=False,
+    )
+    gen3b = next(r.endpoint for r in app3b.routes if getattr(r, "path", None) == "/generate")
+    task1 = asyncio.create_task(gen3b(MockRequest({"prompt": "req1"})))
+    task2 = asyncio.create_task(gen3b(MockRequest({"prompt": "req2"})))
+    with pytest.raises(ValueError, match="Batch generation returned"):
+        await asyncio.gather(task1, task2)
 
     # 4. JSONResponse is None
     import gemma_4_sql.backends.common_serve as cs
@@ -211,7 +237,7 @@ async def test_common_serve_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     gen4 = next(r.endpoint for r in app4.routes if getattr(r, "path", None) == "/generate")
     res4 = await gen4(MockRequest({"prompt": "p4"}))
-    assert res4 == {"sql": "FALLBACK p4"}
+    assert res4 == {"sql": "FALLBACK p4", "modality": "text"}
 
     h4 = next(r.endpoint for r in app4.routes if getattr(r, "path", None) == "/health")
     assert (await h4())["status"] == "healthy"
@@ -254,9 +280,67 @@ async def test_common_serve_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     sql_text7 = res7.body.decode() if hasattr(res7, "body") else str(res7)
     assert "SYNC: p7" in sql_text7
 
-    # 8. worker_task None and generate_logic None default SQL branch
+    # 8. worker_task None and generate_logic None raises NotImplementedError
     app8: Any = create_common_app(backend_name="nosync", model_name="m8", test_mode=True)
     gen8 = next(r.endpoint for r in app8.routes if getattr(r, "path", None) == "/generate")
-    res8 = await gen8(MockRequest({"prompt": "p8"}))
-    sql_text8 = res8.body.decode() if hasattr(res8, "body") else str(res8)
-    assert "nosync_serve" in sql_text8
+    with pytest.raises(NotImplementedError, match="No generation logic registered"):
+        await gen8(MockRequest({"prompt": "p8"}))
+
+    # 9. worker_task None and batch_generate_logic provided fallback branch
+    app9: Any = create_common_app(
+        backend_name="test_batch_fallback",
+        model_name="m9",
+        batch_generate_logic=lambda ps: [f"BATCH_FALLBACK: {p}" for p in ps],
+        test_mode=True,
+    )
+    gen9 = next(r.endpoint for r in app9.routes if getattr(r, "path", None) == "/generate")
+    res9 = await gen9(MockRequest({"prompt": "p9"}))
+    sql_text9 = res9.body.decode() if hasattr(res9, "body") else str(res9)
+    assert "BATCH_FALLBACK: p9" in sql_text9
+
+    # 10. item future already done when exception occurs in batch
+    app10: Any = create_common_app(
+        backend_name="test_predone_err",
+        model_name="m10",
+        max_wait_ms=50.0,
+        batch_generate_logic=lambda ps: (_ for _ in ()).throw(ValueError("forced error")),
+        test_mode=False,
+    )
+    gen10 = next(r.endpoint for r in app10.routes if getattr(r, "path", None) == "/generate")
+    task_a = asyncio.create_task(gen10(MockRequest({"prompt": "p10_a"})))
+    await asyncio.sleep(0.001)
+    task_a.cancel()
+    await asyncio.sleep(0.07)
+
+
+@pytest.mark.asyncio
+async def test_common_serve_ready_and_validation() -> None:
+    """Test /ready route, require_handlers check, and GenerateRequest schema validation."""
+    from gemma_4_sql.backends.common_serve import GenerateRequest
+
+    # 1. GenerateRequest validation
+    req = GenerateRequest.from_dict({"prompt": "SELECT 1", "max_tokens": 64, "temperature": 0.5})
+    assert req.prompt == "SELECT 1"
+    assert req.max_tokens == 64
+    assert req.temperature == 0.5
+
+    with pytest.raises(ValueError, match="Field 'prompt' must be a valid string."):
+        GenerateRequest.from_dict({"prompt": None})
+
+    # 2. require_handlers validation during app construction
+    with pytest.raises(ValueError, match="At least one generation logic callback must be provided"):
+        create_common_app(backend_name="strict_backend", model_name="m_strict", require_handlers=True)
+
+    # 3. /ready endpoint
+    app: Any = create_common_app(
+        backend_name="ready_backend",
+        model_name="m_ready",
+        generate_logic=lambda p: f"SQL: {p}",
+        test_mode=True,
+    )
+    ready_route = next(r.endpoint for r in app.routes if getattr(r, "path", None) == "/ready")
+    res = await ready_route()
+    body = res.body.decode() if hasattr(res, "body") else str(res)
+    assert "ready" in body
+    assert "ready_backend" in body
+    assert "queue_depth" in body

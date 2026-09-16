@@ -14,16 +14,20 @@ try:
     import mlx.core as _mx
     import mlx.nn as _nn
     import mlx.optimizers as _optim
-    from mlx_lm import load as _load
 
     mx: Any = _mx
     nn: Any = _nn
     optim: Any = _optim
-    load: Any = _load
 except (ImportError, AttributeError):
     mx = None
     nn = None
     optim = None
+
+try:
+    from mlx_lm import load as _load
+
+    load: Any = _load
+except (ImportError, AttributeError):
     load = None
 
 
@@ -127,7 +131,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     learning_rate = getattr(config, "learning_rate", 1e-05)
 
     distributed_strategy = str(kwargs.get("distributed_strategy", "none"))
-    final_loss = 0.5
+    final_loss = 0.0
     status = "completed"
     if mx is None or nn is None or optim is None or load is None:
         from gemma_4_sql.exceptions import DependencyMissingError

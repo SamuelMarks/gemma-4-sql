@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import operator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.tokenization import SQLTokenizer
 
@@ -56,7 +56,7 @@ def _compute_step_probs(logits: Any, beam_width: int) -> tuple[Any, Any]:
 
 
 def _beam_search_step(seq: Any, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
-    """Helper to process a single sequence and expand it into multiple beams.
+    """Process a single sequence and expand it into multiple beams.
 
     Args:
         seq: The sequence of token IDs so far.
@@ -149,6 +149,33 @@ def generate_sql(
             "confidence_score": 0.95,
         }
 
+    image_path = kwargs.get("image_path")
+    audio_path = kwargs.get("audio_path")
+    pixel_values = kwargs.get("pixel_values")
+    audio_values = kwargs.get("audio_values")
+
+    if image_path is not None or audio_path is not None:
+        from gemma_4_sql.backends.common_multimodal import (
+            format_multimodal_prompt,
+            process_audio,
+            process_image,
+        )
+
+        formatted = format_multimodal_prompt(
+            prompt,
+            has_image=image_path is not None or pixel_values is not None,
+            has_audio=audio_path is not None or audio_values is not None,
+        )
+        prompt = formatted["prompt"]
+
+        if image_path is not None and pixel_values is None:
+            img_res = process_image(cast(Any, image_path))
+            pixel_values = jnp.array([img_res["pixel_values"]], dtype=jnp.float32)
+
+        if audio_path is not None and audio_values is None:
+            aud_res = process_audio(cast(Any, audio_path))
+            audio_values = jnp.array([aud_res["audio_values"]], dtype=jnp.float32)
+
     tokenizer = SQLTokenizer(model_name=None)
     input_tokens = tokenizer.encode(prompt)
     eos_token_id = tokenizer.vocab_size - 1
@@ -178,7 +205,27 @@ def generate_sql(
                 pass
         _MODEL_CACHE[model_name] = model
 
-    (output_ids, logprob_sum) = jax_beam_search(model, input_ids, beam_width, max_length, eos_token_id)
+    def _model_forward(seq: Any, pos: Any) -> Any:
+        """Call model with optional multimodal keyword arguments.
+
+        Args:
+            seq: Token ID sequence array.
+            pos: Position index array.
+
+        Returns:
+            Model prediction logits array.
+        """
+        extra_kwargs: dict[str, Any] = {}
+        if pixel_values is not None:
+            extra_kwargs["pixel_values"] = pixel_values
+        if audio_values is not None:
+            extra_kwargs["audio_values"] = audio_values
+        try:
+            return cast(Any, model)(seq, pos, **extra_kwargs)
+        except TypeError:
+            return cast(Any, model)(seq, pos)
+
+    (output_ids, logprob_sum) = jax_beam_search(_model_forward, input_ids, beam_width, max_length, eos_token_id)
     sql = tokenizer.decode(output_ids[0].tolist())
     out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
     confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))

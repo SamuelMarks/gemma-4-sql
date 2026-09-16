@@ -25,7 +25,7 @@ def segment_ids_to_positions(segment_ids: Array) -> Array:
     return jnp.cumsum(segment_ids, axis=-1)
 
 
-def default_rope_params(_positions: Array, head_dim: int, rope_theta: int = 1000000, factor: float = 1.0) -> tuple[Array, Array]:
+def default_rope_params(_positions: Array, head_dim: int, rope_theta: int = 1000000, factor: float = 1.0) -> tuple[Array, float]:
     """Execute the default rope params operation.
 
     Args:

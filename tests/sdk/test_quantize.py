@@ -43,21 +43,22 @@ except ImportError:
 
 
 def test_quantize_keras() -> None:
-    """Initialize function test_quantize_keras.
+    """Test Keras quantization through SDK."""
+    from gemma_4_sql.exceptions import UnsupportedQuantizationMethodError
 
-    Raises:
-        AssertionError: Description.
-
-    """
     if keras is not None:
-        res = quantize_model("model3", "awq", backend="keras")
+        res = quantize_model("model3", "int8", backend="keras")
         if not res["backend"] == "keras":
             raise AssertionError
         if not res["model"] == "model3":
             raise AssertionError
+        assert res["status"] == "quantized_int8"
+
+        with pytest.raises(UnsupportedQuantizationMethodError):
+            quantize_model("model3", "awq", backend="keras")
     else:
         with pytest.raises(DependencyMissingError):
-            quantize_model("model3", "awq", backend="keras")
+            quantize_model("model3", "int8", backend="keras")
 
 
 def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:

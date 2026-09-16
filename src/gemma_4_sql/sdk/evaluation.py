@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.tokenization import SQLTokenizer
 
 MAX_BATCHES = 10
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from gemma_4_sql.sdk.protocols import BackendProtocol
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 
@@ -120,44 +122,66 @@ def _run_evaluation_inference(
     model_name: str,
     dataset_name: str,
     backend_impl: BackendProtocol,
+    image_path: str | Path | None = None,
+    audio_path: str | Path | None = None,
+    modality: str = "text",
+    **kwargs: object,
 ) -> tuple[list[str], list[str], list[float]]:
-    """Run inference for evaluation.
+    """Run inference for evaluation across text and multimodal benchmarks.
 
     Args:
         model_name: Target model name.
         dataset_name: Target dataset name.
         backend_impl: Backend protocol implementation.
+        image_path: Optional path to schema diagram or ERD image.
+        audio_path: Optional path to recorded query audio.
+        modality: Explicit modality selector ('text', 'vision', 'audio', 'multimodal').
+        **kwargs: Additional inference arguments.
 
     Returns:
         Tuple of (predictions, truths, confidence_scores).
+
+    Raises:
+        ValueError: If valid iterable dataloader is missing.
     """
     preds: list[str] = []
     truths: list[str] = []
     confidence_scores: list[float] = []
     ETLConfig = __import__("gemma_4_sql.type_hints", fromlist=["ETLConfig"]).ETLConfig
-    data_dict = backend_impl.build_dataloader(ETLConfig(dataset_name=dataset_name, split="test", batch_size=1))
+    data_dict = backend_impl.build_dataloader(ETLConfig(dataset_name=dataset_name, split="test", batch_size=1, modality=modality))
     dataloader = data_dict.get("loader", None)
     tokenizer = SQLTokenizer(model_name=None)
-    if dataloader is not None and hasattr(dataloader, "__iter__"):
-        for i, batch in enumerate(dataloader):
-            if i >= MAX_BATCHES:
-                break
+    if dataloader is None or not hasattr(dataloader, "__iter__"):
+        msg = "Valid iterable dataloader is required for evaluation; dataset could not be constructed."
+        raise ValueError(msg)
 
-            (input_ids, target_ids) = _process_batch_inputs(batch)
+    for i, batch in enumerate(dataloader):
+        if i >= MAX_BATCHES:
+            break
 
-            prompt_text = tokenizer.decode(input_ids)
-            truth_text = tokenizer.decode(target_ids)
+        (input_ids, target_ids) = _process_batch_inputs(batch)
+
+        prompt_text = tokenizer.decode(input_ids)
+        truth_text = tokenizer.decode(target_ids)
+
+        gen_kwargs: dict[str, Any] = {"modality": modality}
+        if image_path is not None:
+            gen_kwargs["image_path"] = str(image_path)
+        elif isinstance(batch, dict) and "pixel_values" in batch:
+            gen_kwargs["pixel_values"] = batch["pixel_values"]
+
+        if audio_path is not None:
+            gen_kwargs["audio_path"] = str(audio_path)
+        elif isinstance(batch, dict) and "audio_values" in batch:
+            gen_kwargs["audio_values"] = batch["audio_values"]
+
+        try:
+            gen_res = backend_impl.generate_sql(model_name, prompt_text, **gen_kwargs)
+        except TypeError:
             gen_res = backend_impl.generate_sql(model_name, prompt_text)
-            preds.append(str(gen_res.get("sql", "")))
-            confidence_scores.append(float(str(gen_res.get("confidence_score", 0.0))))
-            truths.append(truth_text)
-    else:
-        simulated_prompts = ["Get all users", "Find user with id 1"]
-        truths = ["SELECT * FROM users", "SELECT * FROM users WHERE id = 1"]
-        for prompt in simulated_prompts:
-            gen_res = backend_impl.generate_sql(model_name, prompt)
-            preds.append(str(gen_res.get("sql", "SELECT 1")))
-            confidence_scores.append(float(str(gen_res.get("confidence_score", 0.0))))
+        preds.append(str(gen_res.get("sql", "")))
+        confidence_scores.append(float(str(gen_res.get("confidence_score", 0.0))))
+        truths.append(truth_text)
     return (preds, truths, confidence_scores)
 
 
@@ -177,7 +201,7 @@ def evaluate(
         backend: The backend framework ('jax', 'keras', 'pytorch', etc.).
         db_path: Path to the database for execution accuracy.
         ddl: Optional DDL to set up the schema.
-        **kwargs: Evaluation overrides, mock_predictions, mock_truths, db_type, etc.
+        **kwargs: Additional options such as db_type and db_kwargs.
 
     Returns:
         Evaluation results dictionary containing status and metrics.
@@ -185,27 +209,43 @@ def evaluate(
     db_type = kwargs.get("db_type", "sqlite")
     db_kwargs = kwargs.get("db_kwargs")
     db_kwargs_dict = db_kwargs if isinstance(db_kwargs, dict) else {}
+    image_path = kwargs.get("image_path")
+    audio_path = kwargs.get("audio_path")
+    modality = str(kwargs.get("modality", "text"))
+
     engine = LiveDatabaseEngine(db_path=db_path, ddl=ddl, db_type=str(db_type), db_kwargs=db_kwargs_dict)
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend(backend)
 
-    mock_preds = kwargs.get("mock_predictions")
-    mock_truths = kwargs.get("mock_truths")
-    if isinstance(mock_preds, list) and isinstance(mock_truths, list):
-        preds = [str(x) for x in mock_preds]
-        truths = [str(x) for x in mock_truths]
-        confidence_scores = [1.0] * len(preds)
-    else:
-        (preds, truths, confidence_scores) = _run_evaluation_inference(model_name, dataset_name, backend_impl)
+    eval_kwargs = dict(kwargs)
+    eval_kwargs.pop("image_path", None)
+    eval_kwargs.pop("audio_path", None)
+    eval_kwargs.pop("modality", None)
+
+    (preds, truths, confidence_scores) = _run_evaluation_inference(
+        model_name,
+        dataset_name,
+        backend_impl,
+        image_path=str(image_path) if image_path else None,
+        audio_path=str(audio_path) if audio_path else None,
+        modality=modality,
+        **eval_kwargs,
+    )
 
     metrics = asyncio.run(compute_metrics_async(engine, preds, truths))
     if confidence_scores:
         metrics["mean_confidence"] = sum(confidence_scores) / len(confidence_scores)
     engine.close()
-    return {
+    res: JSONDict = {
         "backend": backend,
         "model": model_name,
         "dataset": dataset_name,
+        "modality": modality,
         "status": "completed",
         "metrics": metrics,
     }
+    if image_path:
+        res["image_path"] = str(image_path)
+    if audio_path:
+        res["audio_path"] = str(audio_path)
+    return res

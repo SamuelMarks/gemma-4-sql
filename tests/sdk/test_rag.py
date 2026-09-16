@@ -403,3 +403,19 @@ def test_semantic_search_missing_sentence_transformers(monkeypatch: pytest.Monke
     schema = {"users": ["id", "name"], "orders": ["id", "user_id"]}
     res = rag._semantic_search("users", schema, ["users", "orders"], 1)
     assert res == ["users"]
+
+
+def test_rag_bm25_search() -> None:
+    """Test Okapi BM25 table ranking calculation."""
+    from gemma_4_sql.sdk.rag import _bm25_search
+
+    schema = {
+        "customers": ["customer_id", "email", "address"],
+        "orders": ["order_id", "customer_id", "total_price"],
+        "order_items": ["item_id", "order_id", "product_name"],
+    }
+    ranked = _bm25_search("Find email and address in customers", schema, top_k_tables=1)
+    assert ranked == ["customers"]
+
+    empty = _bm25_search("", schema, top_k_tables=2)
+    assert len(empty) == 2

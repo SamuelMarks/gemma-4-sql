@@ -17,6 +17,7 @@ def benchmark(
     mode: str = "prefill",
     max_new_tokens: int = 128,
     warmup_steps: int = 5,
+    **kwargs: object,
 ) -> JSONDict:
     """Benchmarks a model on specific hardware.
 
@@ -29,6 +30,7 @@ def benchmark(
         mode: The mode.
         max_new_tokens: Max new tokens.
         warmup_steps: Number of warmup steps.
+        **kwargs: Additional parameters including multimodal options.
 
     Returns:
         A dictionary containing the results.
@@ -43,4 +45,5 @@ def benchmark(
         max_new_tokens=max_new_tokens,
         warmup_steps=warmup_steps,
         backend_alias=backend,
+        **kwargs,
     )

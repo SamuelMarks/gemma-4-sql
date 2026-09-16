@@ -74,7 +74,12 @@ class SnowflakeAdapter(DatabaseAdapter):
         cursor = conn_obj.cursor()
         try:
             cursor.execute(ddl)
-            conn_obj.commit()
+            if hasattr(conn_obj, "commit"):
+                conn_obj.commit()
+        except Exception:
+            if hasattr(conn_obj, "rollback"):
+                conn_obj.rollback()
+            raise
         finally:
             cursor.close()
 

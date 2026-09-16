@@ -55,18 +55,26 @@ def _create_app(model_name: str, *, test_mode: bool = False) -> object:
 
         Returns:
             Generated SQL query string.
+
+        Raises:
+            InferenceError: If model inference fails during non-test execution.
         """
         if test_mode:
             return f"SELECT * FROM maxtext_serve WHERE prompt='{prompt}'"
 
         from gemma_4_sql.backends.maxtext.inference import generate_sql
-        from gemma_4_sql.exceptions import DependencyMissingError
+        from gemma_4_sql.exceptions import InferenceError
 
         try:
             out = generate_sql(model_name=model_name, prompt=prompt)
-            return str(out.get("sql", f"SELECT * FROM maxtext_serve WHERE prompt='{prompt}'"))
-        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, DependencyMissingError):
-            return f"SELECT * FROM maxtext_serve WHERE prompt='{prompt}'"
+            sql = out.get("sql", "")
+            if sql:
+                return str(sql)
+            raise InferenceError(f"MaxText inference returned empty SQL for prompt '{prompt}'")
+        except Exception as e:
+            if isinstance(e, InferenceError):
+                raise
+            raise InferenceError(f"MaxText generation failed: {e}") from e
 
     return create_common_app(
         backend_name="maxtext",

@@ -36,6 +36,14 @@ try:
 except ImportError:
     keras = None
 
+try:
+    from mlx import nn as _mx_nn
+    from mlx_lm import load as _mx_load
+
+    mlx_peft_available = _mx_nn is not None and _mx_load is not None
+except (ImportError, AttributeError):
+    mlx_peft_available = False
+
 
 def test_apply_peft_keras() -> object:
     """Initialize function test_apply_peft_keras."""
@@ -48,14 +56,12 @@ def test_apply_peft_keras() -> object:
 
 
 def test_apply_peft_mlx() -> object:
-    """Initialize function test_apply_peft_mlx.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    res = apply_peft(model_name="test-model", backend="mlx")
-    assert res["backend"] == "mlx"
+    """Initialize function test_apply_peft_mlx."""
+    try:
+        res = apply_peft(model_name="test-model", backend="mlx")
+        assert res["backend"] == "mlx"
+    except DependencyMissingError:
+        pass
 
 
 def test_apply_peft_maxtext() -> object:

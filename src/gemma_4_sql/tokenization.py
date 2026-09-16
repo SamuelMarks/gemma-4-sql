@@ -42,6 +42,16 @@ class SQLTokenizer:
             except (ImportError, OSError, ValueError, TypeError, RuntimeError, AttributeError):
                 self.hf_tokenizer = None
 
+    def get_vocab(self) -> dict[str, int]:
+        """Return the vocabulary mapping tokens or bytes to token IDs.
+
+        Returns:
+            A dictionary mapping token strings or byte representations to integer IDs.
+        """
+        if self.hf_tokenizer is not None and hasattr(self.hf_tokenizer, "get_vocab"):
+            return dict(self.hf_tokenizer.get_vocab())
+        return {chr(b) if 32 <= b <= 126 else f"<byte_{b}>": b for b in range(min(256, self.vocab_size))}
+
     def encode(self, text: str) -> list[int]:
         """Encode a string into a list of token IDs.
 
@@ -56,7 +66,10 @@ class SQLTokenizer:
         try:
             return list(text.encode("utf-8"))
         except (UnicodeEncodeError, AttributeError):
-            return [ord(c) % self.vocab_size for c in str(text)]
+            try:
+                return list(str(text).encode("utf-8", errors="replace"))
+            except (UnicodeEncodeError, AttributeError, RuntimeError):
+                return [ord(c) % self.vocab_size for c in str(text)]
 
     def decode(self, tokens: list[int]) -> str:
         """Decode a list of token IDs back into a string.
@@ -68,7 +81,7 @@ class SQLTokenizer:
             The decoded text string.
         """
         if self.hf_tokenizer is not None:
-            return cast("str", self.hf_tokenizer.decode(tokens))
+            return str(self.hf_tokenizer.decode(tokens))
         try:
             return bytes([int(t) % 256 for t in tokens]).decode("utf-8", errors="replace")
         except (ValueError, TypeError):

@@ -9,7 +9,14 @@ repos:
     rev: v1.15.0
     hooks:
       - id: mypy
-        additional_dependencies: [pytest, click]
+        args: [ --strict ]
+        additional_dependencies: [pytest, click, types-setuptools, types-requests]
+#  - repo: https://github.com/econchick/interrogate
+#    rev: v1.7.0
+#    hooks:
+#      - id: interrogate
+#        args: [ -vv, --fail-under=100, src/, tests/ ]
+#        pass_filenames: false
   - repo: local
     hooks:
       - id: tests

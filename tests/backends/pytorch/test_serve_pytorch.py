@@ -353,3 +353,73 @@ async def test_serve_pytorch_coverage(monkeypatch):
     import json
 
     assert json.loads(res.body.decode()) == {"sql": ""}
+
+
+def test_serve_model_pytorch_native_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test PyTorch serving with native continuous batching fallback."""
+    monkeypatch.setattr(srv, "AsyncEngineArgs", None)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", mock.MagicMock())
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
+
+    res = srv.serve_model("foo", port=8000, max_batch_size=32, native_fallback=True, test_mode=True)
+    assert res["backend"] == "pytorch"
+    assert res["status"] == "running_pytorch_serve"
+    assert res["mode"] == "continuous_batching"
+
+
+def test_pytorch_native_serve_generate_branches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test PyTorch native app generation logic with successful inference, empty sql, and exceptions.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    captured_logic: dict[str, typing.Callable[..., object]] = {}
+
+    def mock_create_common_app(**kwargs: object) -> dict[str, object]:
+        captured_logic["generate"] = typing.cast(typing.Callable[..., object], kwargs.get("generate_logic"))
+        captured_logic["batch_generate"] = typing.cast(typing.Callable[..., object], kwargs.get("batch_generate_logic"))
+        return {"backend": "pytorch", "status": "running_pytorch_serve"}
+
+    monkeypatch.setattr(srv, "create_common_app", mock_create_common_app)
+
+    # 1. Successful inference returning SQL
+    monkeypatch.setattr(
+        "gemma_4_sql.backends.pytorch.inference.generate_sql",
+        lambda *a, **k: {"sql": "SELECT 1"},
+    )
+    srv._create_native_app("test-model", 16, test_mode=False)
+    gen = captured_logic["generate"]
+    batch_gen = captured_logic["batch_generate"]
+    assert gen("test prompt") == "SELECT 1"
+    assert batch_gen(["p1", "p2"]) == ["SELECT 1", "SELECT 1"]
+
+    # 2. Inference returning empty SQL
+    monkeypatch.setattr(
+        "gemma_4_sql.backends.pytorch.inference.generate_sql",
+        lambda *a, **k: {"sql": None},
+    )
+    srv._create_native_app("test-model", 16, test_mode=False)
+    gen = captured_logic["generate"]
+    assert "SELECT * FROM pytorch_native" in str(gen("test prompt"))
+
+    # 3. Inference raising RuntimeError
+    def mock_raise(*a: object, **k: object) -> dict[str, object]:
+        raise RuntimeError("Inference failed")
+
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.generate_sql", mock_raise)
+    srv._create_native_app("test-model", 16, test_mode=False)
+    gen = captured_logic["generate"]
+    assert "SELECT * FROM pytorch_native" in str(gen("test prompt"))
+
+    # Test test_mode=True
+    srv._create_native_app("test-model", 16, test_mode=True)
+    gen_tm = captured_logic["generate"]
+    assert "SELECT * FROM pytorch_native" in str(gen_tm("test prompt"))
+
+    # 4. Native serve with test_mode=False to hit logger.info
+    monkeypatch.setattr(srv, "AsyncEngineArgs", None)
+    res = srv.serve_model("test-model", port=8000, native_fallback=True, test_mode=False)
+    assert res["status"] == "running_pytorch_serve"

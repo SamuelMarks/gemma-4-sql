@@ -1,5 +1,7 @@
 """Tests for SDK Agent module."""
 
+from __future__ import annotations
+
 import pytest
 
 from gemma_4_sql.sdk.agent import run_agentic_loop
@@ -81,8 +83,6 @@ def test_agentic_loop_invalid_backend() -> None:
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from gemma_4_sql.sdk.agent import AgentContext, _process_single_prompt
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 
@@ -91,10 +91,25 @@ from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 async def test_process_single_prompt_coverage() -> None:
     """Test process single prompt coverage."""
     backend_impl = MagicMock()
-    backend_impl.generate_sql.side_effect = [{"sql": "SELECT 1", "confidence_score": 0.4}, {"sql": "INVALID", "confidence_score": 0.9}, {"sql": "SELECT 1", "confidence_score": 0.9}]
+    backend_impl.generate_sql.side_effect = [
+        {"sql": "SELECT 1", "confidence_score": 0.4},
+        {"sql": "INVALID", "confidence_score": 0.9},
+        {"sql": "INVALID", "confidence_score": 0.9},
+        {"sql": "INVALID", "confidence_score": 0.9},
+        {"sql": "SELECT 1", "confidence_score": 0.9},
+        {"sql": "SELECT 1", "confidence_score": 0.9},
+    ]
     engine = MagicMock()
-    engine.execute_with_feedback_async = AsyncMock(side_effect=[(False, [], "syntax error"), (True, [(1,)], None)])
-    ctx = AgentContext(min_confidence=0.5)
+    engine.execute_with_feedback_async = AsyncMock(
+        side_effect=[
+            (False, [], "syntax error near foo"),
+            (False, [], "column foo does not exist"),
+            (False, [], "no such table: bar"),
+            (False, [], ""),
+            (True, [(1,)], None),
+        ]
+    )
+    ctx = AgentContext(min_confidence=0.5, max_retries=6)
     res = await _process_single_prompt("jax", backend_impl, "model", "prompt", engine, ctx)
     assert res["success"] is True
 
@@ -260,3 +275,54 @@ async def test_agent_from_running_event_loop(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _: SimpleBackend())
     res = ag.run_agentic_loop("m", "p", "jax", ag.AgentContext())
     assert res["success"] is True
+
+
+def test_agent_multimodal_context_and_table_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test agent passes multimodal context and formats table name hint on relation errors.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+
+    Returns:
+        None.
+    """
+    import gemma_4_sql.sdk.agent as ag
+
+    passed_kwargs: dict[str, object] = {}
+
+    class MockBackend:
+        """Mock backend capturing keyword arguments."""
+
+        def generate_sql(self, m: str, p: str, **k: object) -> dict[str, object]:
+            """Capture kwargs and return SQL."""
+            passed_kwargs.update(k)
+            # Second attempt succeeds
+            if "Previous attempt failed" in p:
+                assert "[Hint: check available table names]" in p
+                return {"sql": "SELECT 1;", "confidence_score": 0.95}
+            return {"sql": "SELECT * FROM missing_tbl;", "confidence_score": 0.9}
+
+    class MockEngine:
+        """Mock DB engine failing on missing table then succeeding."""
+
+        async def execute_with_feedback_async(self, sql: str) -> tuple[bool, list[tuple[object, ...]], str | None]:
+            """Return feedback."""
+            if "missing_tbl" in sql:
+                return (False, [], "Error: relation missing_tbl does not exist")
+            return (True, [(1,)], None)
+
+        def close(self) -> None:
+            """Close engine."""
+
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _: MockBackend())
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.LiveDatabaseEngine", lambda **_: MockEngine())
+
+    context = ag.AgentContext(
+        audio_path="/path/to/audio.wav",
+        multimodal_context={"dummy": "embedding"},
+        max_retries=2,
+    )
+    res = ag.run_agentic_loop("m", "p", "jax", context)
+    assert res["success"] is True
+    assert passed_kwargs["audio_path"] == "/path/to/audio.wav"
+    assert passed_kwargs["multimodal_context"] == {"dummy": "embedding"}

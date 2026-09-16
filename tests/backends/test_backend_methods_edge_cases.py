@@ -115,12 +115,13 @@ def test_keras_train_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_maxtext_export_missing_deps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test MaxText export returns mock_exported status when ocp is missing."""
+    """Test MaxText export raises DependencyMissingError when ocp is missing."""
     import gemma_4_sql.backends.maxtext.export as mexp
+    from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(mexp, "ocp", None)
-    res = mexp.export_model("foo", str(tmp_path / "maxtext_export"))
-    assert res["status"] == "mock_exported"
+    with pytest.raises(DependencyMissingError, match="MaxText export dependencies"):
+        mexp.export_model("foo", str(tmp_path / "maxtext_export"))
 
 
 def test_maxtext_train_missing_optax(monkeypatch: pytest.MonkeyPatch) -> None:

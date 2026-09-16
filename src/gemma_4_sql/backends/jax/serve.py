@@ -9,6 +9,7 @@ from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wra
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -17,8 +18,6 @@ try:
     jax: Any = _jax
 except (ImportError, AttributeError):
     jax = None
-FastAPI = None
-uvicorn = None
 
 
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
@@ -38,12 +37,20 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
     """
 
     def _app_factory() -> object:
-        """Execute function.
+        """Construct the configured continuous batching FastAPI application.
 
         Returns:
-            The execution result.
-
+            The FastAPI application instance.
         """
+
+        def _startup_warmup() -> None:
+            """Pre-warm JIT cache compilation for model serving."""
+            try:
+                from gemma_4_sql.backends.jax.inference import generate_sql
+
+                generate_sql(model_name=model_name, prompt="SELECT 1", test_mode=bool(kwargs.get("test_mode")))
+            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
+                logger.debug("Warmup generation skipped or deferred: %s", exc)
 
         def _generate(prompt: str) -> str:
             """Generate SQL using JAX inference.
@@ -61,15 +68,33 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
             try:
                 out = generate_sql(model_name=model_name, prompt=prompt)
-                return str(out.get("sql", f"SELECT * FROM generated WHERE prompt='{prompt}'"))
-            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
+                res_sql = out.get("sql")
+                if res_sql:
+                    return str(res_sql)
                 return f"SELECT * FROM generated WHERE prompt='{prompt}'"
+            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+                logger.warning("JAX generation error in server: %s", e)
+                return f"SELECT * FROM generated WHERE prompt='{prompt}'"
+
+        def _batch_generate(prompts: list[str]) -> list[str]:
+            """Execute batched generation across multiple bundled prompt requests.
+
+            Args:
+                prompts: List of prompt strings.
+
+            Returns:
+                List of generated SQL queries.
+            """
+            return [_generate(p) for p in prompts]
 
         return create_common_app(
             backend_name="jax",
             model_name=model_name,
             test_mode=bool(kwargs.get("test_mode")),
+            startup_callback=_startup_warmup,
             generate_logic=_generate,
+            batch_generate_logic=_batch_generate,
+            max_batch_size=max_batch_size,
         )
 
     if jax is None:
