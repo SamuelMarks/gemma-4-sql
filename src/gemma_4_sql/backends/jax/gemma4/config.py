@@ -70,6 +70,19 @@ class ShardMode(Enum):
     TP = "tp"
 
 
+def _make_spec(*partitions: Any) -> PartitionSpec:
+    """Instantiate PartitionSpec in typed context.
+
+    Args:
+        *partitions: Partition axis names.
+
+    Returns:
+        PartitionSpec: Created PartitionSpec instance.
+    """
+    spec_cls: Any = PartitionSpec
+    return cast(PartitionSpec, spec_cls(*partitions))
+
+
 @dataclass(frozen=True)
 class ShardConfig:
     """Sharding configuration mappings."""
@@ -109,19 +122,19 @@ class ShardConfig:
         fsdp = ShardMode.FSDP.value if use_fsdp else None
         tp = ShardMode.TP.value if use_tp else None
         return ShardConfig(
-            attn_kernel=PartitionSpec(tp, fsdp),
-            attn_bias=PartitionSpec(tp),
-            attn_qk_activation=PartitionSpec(fsdp, tp),
-            fc1_kernel=PartitionSpec(fsdp, tp),
-            fc1_bias=PartitionSpec(tp),
-            fc2_kernel=PartitionSpec(tp, fsdp),
-            fc2_bias=PartitionSpec(tp),
-            moe_fc1_kernel=PartitionSpec(fsdp, None, tp),
-            moe_fc2_kernel=PartitionSpec(fsdp, tp, None),
-            activation=PartitionSpec(fsdp, None, tp),
-            norm=PartitionSpec(tp),
-            emb_kernel=PartitionSpec(None, tp),
-            cache=PartitionSpec(fsdp, None, tp, None),
+            attn_kernel=_make_spec(tp, fsdp),
+            attn_bias=_make_spec(tp),
+            attn_qk_activation=_make_spec(fsdp, tp),
+            fc1_kernel=_make_spec(fsdp, tp),
+            fc1_bias=_make_spec(tp),
+            fc2_kernel=_make_spec(tp, fsdp),
+            fc2_bias=_make_spec(tp),
+            moe_fc1_kernel=_make_spec(fsdp, None, tp),
+            moe_fc2_kernel=_make_spec(fsdp, tp, None),
+            activation=_make_spec(fsdp, None, tp),
+            norm=_make_spec(tp),
+            emb_kernel=_make_spec(None, tp),
+            cache=_make_spec(fsdp, None, tp, None),
         )
 
 

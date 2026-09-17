@@ -127,6 +127,7 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result_empty is not None
 
     def mock_raise(*a: object, **k: object) -> dict[str, object]:
+        """Simulate inference failure for error handling verification."""
         raise RuntimeError("JAX inference warmup and generation failure")
 
     monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", mock_raise)

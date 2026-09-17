@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import UserDict
 from pathlib import Path
 from typing import Any
 
@@ -170,7 +171,7 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
         def __call__(self, text: str, **kwargs: Any) -> Any:
             """Simulate tokenization."""
 
-            class MockInputs(dict):
+            class MockInputs(UserDict):
                 def __init__(self) -> None:
                     super().__init__({"input_ids": torch.tensor([[1, 2]], dtype=torch.long)})
                     self.input_ids = self["input_ids"]

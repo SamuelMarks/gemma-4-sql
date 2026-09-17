@@ -121,7 +121,7 @@ def test_static_cache_validation_errors() -> None:
     with pytest.raises(ValueError, match="key_states and value_states must be 4D tensors"):
         cache.update(invalid_3d, valid_4d, 0)
 
-    with pytest.raises(ValueError, match="layer_idx .* out of range"):
+    with pytest.raises(ValueError, match=r"layer_idx .* out of range"):
         cache.update(valid_4d, valid_4d, 5)
 
     batch_too_large = torch.randn(4, 2, 5, 64)
@@ -129,5 +129,5 @@ def test_static_cache_validation_errors() -> None:
         cache.update(batch_too_large, batch_too_large, 0)
 
     seq_too_large = torch.randn(2, 2, 20, 64)
-    with pytest.raises(ValueError, match="Sequence length .* exceeds max_cache_len"):
+    with pytest.raises(ValueError, match=r"Sequence length .* exceeds max_cache_len"):
         cache.update(seq_too_large, seq_too_large, 0)

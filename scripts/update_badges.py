@@ -38,17 +38,20 @@ def main() -> None:
     import subprocess
 
     out = ""
-    res = subprocess.run(["uv", "run", "--all-extras", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-report=term", "tests/core/", "tests/sdk/", "tests/cli/", "src/"], capture_output=True, text=True, check=False)
+    print("[update_badges] Running batch 1/4 (core, sdk, cli)...", flush=True)
+    res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-report=term", "tests/core/", "tests/sdk/", "tests/cli/", "src/"], capture_output=True, text=True, check=False)
     out += res.stdout
-    res = subprocess.run(["uv", "run", "--all-extras", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/pytorch/", "tests/backends/keras/"], capture_output=True, text=True, check=False)
+    print("[update_badges] Running batch 2/4 (pytorch, keras)...", flush=True)
+    res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/pytorch/", "tests/backends/keras/"], capture_output=True, text=True, check=False)
     out += res.stdout
-    res = subprocess.run(["uv", "run", "--all-extras", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/jax/", "tests/backends/maxtext/"], capture_output=True, text=True, check=False)
+    print("[update_badges] Running batch 3/4 (jax, maxtext)...", flush=True)
+    res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/jax/", "tests/backends/maxtext/"], capture_output=True, text=True, check=False)
     out += res.stdout
+    print("[update_badges] Running batch 4/4 (mlx, backend modules)...", flush=True)
     res = subprocess.run(
         [
-            "uv",
-            "run",
-            "--all-extras",
+            sys.executable,
+            "-m",
             "pytest",
             "--cov=src/gemma_4_sql",
             "--cov-branch",
@@ -69,6 +72,7 @@ def main() -> None:
         check=False,
     )
     out += res.stdout
+    print("[update_badges] Calculating coverage and updating badges...", flush=True)
 
     cov_out_str = out
     cov_matches = re.findall(r"TOTAL\s+\d+\s+\d+\s+\d+\s+\d+\s+(\d+)%", cov_out_str)

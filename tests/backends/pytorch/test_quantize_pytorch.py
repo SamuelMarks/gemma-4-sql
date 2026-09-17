@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import struct
 from pathlib import Path
 from typing import Any
@@ -143,7 +144,7 @@ def test_gguf_metadata_types_and_tensor_branches(tmp_path: Path, monkeypatch: py
         k2 = b"custom.float"
         f.write(struct.pack("<Q", len(k2)) + k2)
         f.write(struct.pack("<I", 6))
-        f.write(struct.pack("<f", 3.14))
+        f.write(struct.pack("<f", math.pi))
 
         # KV 3: UNKNOWN (99)
         k3 = b"custom.unknown"
@@ -160,7 +161,7 @@ def test_gguf_metadata_types_and_tensor_branches(tmp_path: Path, monkeypatch: py
         k5 = b"custom.float64"
         f.write(struct.pack("<Q", len(k5)) + k5)
         f.write(struct.pack("<I", 12))
-        f.write(struct.pack("<d", 2.7182818284))
+        f.write(struct.pack("<d", math.e))
 
         # KV 6: ARRAY of INT32 (arr_type 4)
         k6 = b"custom.arr_int"
@@ -200,7 +201,7 @@ def test_gguf_metadata_types_and_tensor_branches(tmp_path: Path, monkeypatch: py
 
     parsed = validate_gguf_file(custom_gguf)
     assert parsed["metadata"]["custom.uint"] == 42
-    assert abs(parsed["metadata"]["custom.float"] - 3.14) < 1e-4
+    assert abs(parsed["metadata"]["custom.float"] - math.pi) < 1e-4
     assert parsed["metadata"]["custom.unknown"] == "unknown"
 
     # Test _write_gguf_file with np is None and unaligned raw bytes

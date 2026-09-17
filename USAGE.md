@@ -4,14 +4,17 @@ This guide covers the primary workflows for using `gemma-4-sql` via the Command 
 
 ## Installation
 
-The core package now installs everything by default, including all backends (PyTorch, JAX, Keras, MaxText) and DuckDB support:
+The core package installs standard backends (PyTorch, JAX, Keras, MaxText) and DuckDB support:
 
 ```bash
-# Install everything (all backends + DuckDB)
+# Install everything (all standard backends + DuckDB)
 pip install .
 
 # You can also use the default/all extras explicitly:
 pip install ".[all]"
+
+# For Apple Silicon (macOS Metal acceleration via MLX):
+pip install ".[mlx]"
 ```
 
 ## Development
@@ -150,13 +153,25 @@ print(f"Exported to: {result['path']}")
 
 To save compute and memory footprints, you can inject LoRA adapters (PEFT) and quantize models.
 
+*   **JAX (`--backend jax`)**: Injects object-oriented `nnx.LoRALinear` adapters into Flax NNX modules; supports Activation-aware Weight Quantization (`--method awq`) and uniform INT8 (`--method int8`).
+*   **MaxText (`--backend maxtext`)**: Performs functional parameter PyTree surgery decomposing projection matrices; supports Google AQT (`aqt.jax.v2`) numerical INT8 and INT4 quantization (`--method aqt` or `--method int8`).
+*   **PyTorch (`--backend pytorch`)**: Interfaces with Hugging Face `peft` and AWQ / BitsAndBytes / GGUF.
+*   **MLX (`--backend mlx`)**: Utilizes MLX LoRA layers and 4-bit / 8-bit group quantization.
+
 ### CLI
 
 ```bash
-# Apply LoRA adapters
+# Apply LoRA adapters (Flax NNX for JAX, functional PyTree for MaxText)
 gemma-4-sql peft --model gemma-4 --target-modules q_proj,v_proj --lora-r 16 --backend jax
+gemma-4-sql peft --model gemma-4 --target-modules q_proj,v_proj --lora-r 16 --backend maxtext
 
-# Quantize the model
+# Quantize using AWQ on JAX (Flax NNX)
+gemma-4-sql quantize --model gemma-4 --method awq --backend jax
+
+# Quantize using Google AQT on MaxText
+gemma-4-sql quantize --model gemma-4 --method aqt --backend maxtext
+
+# Quantize using INT8 on PyTorch
 gemma-4-sql quantize --model gemma-4 --method int8 --backend pytorch
 ```
 
@@ -166,11 +181,14 @@ gemma-4-sql quantize --model gemma-4 --method int8 --backend pytorch
 from gemma_4_sql.sdk.peft import apply_peft
 from gemma_4_sql.sdk.quantize import quantize_model
 
-# Apply PEFT
-peft_config = apply_peft(model_name="gemma-4", target_modules=["q_proj", "v_proj"], lora_r=16, backend="jax")
+# Apply PEFT via Flax NNX (JAX) or functional PyTree (MaxText)
+peft_jax = apply_peft(model_name="gemma-4", target_modules=["q_proj", "v_proj"], lora_r=16, backend="jax")
+peft_maxtext = apply_peft(model_name="gemma-4", target_modules=["q_proj", "v_proj"], lora_r=16, backend="maxtext")
 
-# Quantize
-quantized = quantize_model(model_name="gemma-4", method="int8", backend="pytorch")
+# Quantize: AWQ for JAX, Google AQT for MaxText, int8 for PyTorch
+quantized_jax = quantize_model(model_name="gemma-4", method="awq", backend="jax")
+quantized_maxtext = quantize_model(model_name="gemma-4", method="aqt", backend="maxtext")
+quantized_pytorch = quantize_model(model_name="gemma-4", method="int8", backend="pytorch")
 ```
 
 ---
@@ -229,9 +247,10 @@ gemma-4-sql execute \
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.evaluation import evaluate
 
-# Instantiate the live engine
-engine = LiveDatabaseEngine(db_type="sqlite", db_path=":memory:", ddl="CREATE TABLE t (id INT);")
+# Instantiate the live engine (set read_only=False to allow INSERT/schema setup)
+engine = LiveDatabaseEngine(db_type="sqlite", db_path=":memory:", ddl="CREATE TABLE t (id INT);", read_only=False)
 engine.execute_query("INSERT INTO t VALUES (1);")
+rows = engine.execute_query("SELECT * FROM t;")
 
 # Run evaluation on an entire dataset
 metrics = evaluate(model_name="gemma-4", dataset_name="test-data", db_type="duckdb", backend="jax")
@@ -248,7 +267,7 @@ For real-world inference, models often generate malformed SQL. The **Agentic Loo
 ```bash
 gemma-4-sql agent --model gemma-4 \
     --prompt "Show the total sales for 2024" \
-    --db-path "sqlite:///my_database.db" \
+    --db-path "my_database.db" \
     --max-retries 3 \
     --backend jax
 ```
@@ -328,6 +347,9 @@ gemma-4-sql benchmark --model gemma-4 --hardware gpu --batch-size 32 --backend p
 
 # Benchmark MaxText backend on TPU
 gemma-4-sql benchmark --model gemma-4 --hardware tpu --batch-size 128 --backend maxtext
+
+# Benchmark MLX backend on Apple Silicon (Metal GPU)
+gemma-4-sql benchmark --model gemma-4 --hardware gpu --batch-size 16 --backend mlx
 ```
 
 ### SDK
@@ -335,8 +357,13 @@ gemma-4-sql benchmark --model gemma-4 --hardware tpu --batch-size 128 --backend 
 ```python
 from gemma_4_sql.sdk.benchmark import benchmark
 
+# Benchmark MaxText on TPU
 metrics = benchmark(model_name="gemma-4", hardware="tpu", batch_size=128, backend="maxtext")
-print(f"Tokens/sec: {metrics['tokens_per_sec']}")
+print(f"TPU Tokens/sec: {metrics['tokens_per_sec']}")
+
+# Benchmark MLX on Apple Silicon GPU
+mlx_metrics = benchmark(model_name="gemma-4", hardware="gpu", batch_size=16, backend="mlx")
+print(f"MLX Tokens/sec: {mlx_metrics['tokens_per_sec']}")
 ```
 
 ---
@@ -362,7 +389,7 @@ gemma-4-sql tokenize --encode "SELECT * FROM users" --hf-model "google/gemma-2b"
 
 ## 13. Logging (TensorBoard Integration)
 
-Gemma-4-SQL provides native integration with TensorBoard across all backend topologies (`jax`, `maxtext`, `keras`, `pytorch`). You can log arbitrary metrics (loss, accuracy, execution accuracy) during training, pretraining, or evaluation.
+Gemma-4-SQL provides native integration with TensorBoard across all backend topologies (`jax`, `maxtext`, `keras`, `pytorch`, `mlx`). You can log arbitrary metrics (loss, accuracy, execution accuracy) during training, pretraining, or evaluation.
 
 ### CLI
 
@@ -382,5 +409,74 @@ from gemma_4_sql.sdk.logging import log_metrics
 # Log metrics directly to TensorBoard via the Keras backend
 result = log_metrics(metrics={"loss": 0.5, "execution_accuracy": 0.88}, step=100, log_dir="./runs/experiment_1", backend="keras")
 print(f"Status: {result['status']}")
+```
+
+---
+
+## 14. Multimodal Text-to-SQL (Vision & Audio)
+
+`gemma-4-sql` supports multimodal generation and self-correction, enabling models to ingest database Entity-Relationship Diagrams (ERDs), table screenshots, or spoken natural language queries.
+
+All core CLI commands (`generate`, `agent`, `evaluate`, `chat`, `few-shot`, `etl`, `train`, `benchmark`) accept `--image-path`, `--audio-path`, and `--modality`.
+
+### CLI
+
+```bash
+# Vision: Generate SQL grounded on an ERD / schema screenshot
+gemma-4-sql generate \
+    --model gemma-4 \
+    --prompt "List customer orders over $100" \
+    --image-path "./schemas/ecommerce_erd.png" \
+    --modality vision \
+    --backend jax
+
+# Audio: Generate SQL from a spoken natural language query
+gemma-4-sql generate \
+    --model gemma-4 \
+    --prompt "" \
+    --audio-path "./queries/query_recording.wav" \
+    --modality audio \
+    --backend jax
+
+# Multimodal Agentic Self-Correction Loop with an ERD image
+gemma-4-sql agent \
+    --model gemma-4 \
+    --prompt "Find top 5 revenue products" \
+    --image-path "./schemas/sales_schema.png" \
+    --db-path "ecommerce.db" \
+    --max-retries 3 \
+    --backend jax
+```
+
+### SDK
+
+```python
+from gemma_4_sql.sdk.agent import AgentContext, run_agentic_loop
+from gemma_4_sql.sdk.inference import generate
+
+# Generate SQL with visual diagram context
+result = generate(
+    model_name="gemma-4",
+    prompt="How many orders shipped last week?",
+    image_path="./schemas/warehouse_erd.png",
+    modality="vision",
+    backend="jax",
+)
+print("Generated SQL:", result["sql"])
+
+# Run multimodal agentic self-repair preserving visual embeddings
+context = AgentContext(
+    db_path="warehouse.db",
+    image_path="./schemas/warehouse_erd.png",
+    modality="vision",
+    max_retries=3,
+)
+agent_res = run_agentic_loop(
+    model_name="gemma-4",
+    prompt="How many orders shipped last week?",
+    context=context,
+    backend="jax",
+)
+print("Verified SQL:", agent_res["final_sql"])
 ```
 

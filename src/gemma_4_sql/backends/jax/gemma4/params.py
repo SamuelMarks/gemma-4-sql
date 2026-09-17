@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
-import safetensors.flax as safetensors
+import safetensors
 from etils import epath
 from flax import nnx
 

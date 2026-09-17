@@ -2,6 +2,7 @@
 coverage.json
 mise.toml
 logs
+test_logs/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -20,7 +20,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 def test_quantize_mlx_missing_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test quantize_model raises DependencyMissingError when mlx is missing."""
     monkeypatch.setattr(mquant, "mlx", None)
-    with pytest.raises(DependencyMissingError, match="MLX dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"MLX dependencies are missing\."):
         quantize_model("model", "int8")
 
 
@@ -34,8 +34,9 @@ def test_quantize_mlx_unsupported_method() -> None:
 
 def test_calibrate_awq_scales() -> None:
     """Test AWQ activation grid search scale calibration."""
-    w = np.random.randn(16, 32).astype(np.float32)
-    x = np.random.randn(8, 32).astype(np.float32)
+    rng = np.random.default_rng(42)
+    w = rng.standard_normal((16, 32), dtype=np.float32)
+    x = rng.standard_normal((8, 32), dtype=np.float32)
     scales = calibrate_awq_scales(w, x)
     assert len(scales) == 32
     assert all(s > 0 for s in scales)
@@ -46,8 +47,9 @@ def test_calibrate_awq_scales() -> None:
 
 def test_calibrate_gptq_weights() -> None:
     """Test GPTQ second-order Hessian error compensation."""
-    w = np.random.randn(8, 16).astype(np.float32)
-    x = np.random.randn(32, 16).astype(np.float32)
+    rng = np.random.default_rng(42)
+    w = rng.standard_normal((8, 16), dtype=np.float32)
+    x = rng.standard_normal((32, 16), dtype=np.float32)
     w_gptq = calibrate_gptq_weights(w, x, damp_percent=0.05)
     assert w_gptq.shape == w.shape
     # Ensure some weights are quantized / non-identical to float originals
@@ -101,8 +103,9 @@ def test_quantize_mlx_no_silent_fallback_on_quantize_failure(monkeypatch: pytest
 
 def test_calibrate_awq_and_gptq_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test 1D activations, LinAlgError in pinv, np is None fallback, and model passed explicitly."""
-    w = np.random.randn(8, 16).astype(np.float32)
-    x_1d = np.random.randn(16).astype(np.float32)
+    rng = np.random.default_rng(42)
+    w = rng.standard_normal((8, 16), dtype=np.float32)
+    x_1d = rng.standard_normal(16, dtype=np.float32)
 
     # 1D activations
     scales = calibrate_awq_scales(w, x_1d)

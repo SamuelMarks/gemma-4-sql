@@ -70,6 +70,8 @@ result = conn.execute("SELECT ask_gemma('What is the total revenue for 2024?')")
 print(result[0][0])
 ```
 
+*Note on Backends:* The `backend` parameter defaults to `"jax"` but supports any registered execution engine: `"jax"`, `"pytorch"`, `"keras"`, `"maxtext"`, or `"mlx"`.
+
 ### Command Line Usage
 
 You can also test the DuckDB UDF directly from the command line:
@@ -78,5 +80,6 @@ You can also test the DuckDB UDF directly from the command line:
 gemma-4-sql embed-duckdb \
   --db-path test.duckdb \
   --prompt "Show all users" \
-  --ddl "CREATE TABLE users (id INTEGER, name VARCHAR);"
+  --ddl "CREATE TABLE users (id INTEGER, name VARCHAR);" \
+  --backend jax
 ```

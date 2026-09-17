@@ -196,7 +196,7 @@ def test_create_maxtext_lora_optimizer() -> None:
     opt_state = tx.init(params)
 
     # Apply all-ones gradient update
-    grads = jax.tree.map(lambda x: jnp.ones_like(x), params)
+    grads = jax.tree.map(jnp.ones_like, params)
     updates, opt_state = tx.update(grads, opt_state, params)
     new_params = optax.apply_updates(params, updates)
 

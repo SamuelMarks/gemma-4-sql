@@ -14,7 +14,7 @@ Create a new Python module for your backend. If you are adding it to this reposi
 ### 2. Implement the `BackendProtocol`
 Your backend must implement the functional interface defined in `src/gemma_4_sql/sdk/protocols.py`. You don't need to inherit from any base classes; Python's structural typing (duck typing) will ensure compatibility.
 
-Create the necessary files (e.g., `train.py`, `inference.py`, `etl.py`) and implement the required functions.
+Create the necessary files (e.g., `train.py`, `inference.py`, `etl.py`, `dpo.py`, `peft.py`, `quantize.py`, `serve.py`, `benchmark.py`, `export.py`, `logging.py`) and implement the required functions.
 
 **CRITICAL RULE: Lazy Import Heavy Dependencies!**
 To prevent dependency conflicts and keep the CLI fast, **never** import heavy ML libraries at the top level of your files. Import them *inside* the functions instead:
@@ -22,21 +22,31 @@ To prevent dependency conflicts and keep the CLI fast, **never** import heavy ML
 ```python
 # src/gemma_4_sql/backends/mlx/train.py
 from typing import Any
+from gemma_4_sql.type_hints import TrainingConfig, JSONDict
 
 
-def train_model(
-    action: str,
-    model_name: str,
-    dataset: str,
-    epochs: int,
-    learning_rate: float,
-) -> dict[str, Any]:
+def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     # ✅ IMPORT HEAVY LIBRARIES HERE
     import mlx.core as mx
     import mlx.nn as nn
 
+    action = getattr(config, "action", "sft")
+    model_name = getattr(config, "model_name", "gemma-4")
+    dataset = getattr(config, "dataset", "dummy")
+    epochs = getattr(config, "epochs", 1)
+    learning_rate = getattr(config, "learning_rate", 1e-4)
+
     # Implementation details...
-    return {"status": "success", "backend": "mlx"}
+    return {
+        "status": "completed",
+        "backend": "mlx",
+        "action": action,
+        "model": model_name,
+        "dataset": dataset,
+        "epochs": epochs,
+        "learning_rate": learning_rate,
+        "final_loss": 0.0,
+    }
 ```
 
 ### 3. Expose the API in `__init__.py`

@@ -16,7 +16,7 @@ from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizati
 def test_quantize_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test Keras quantize when dependencies are missing."""
     monkeypatch.setattr(kr_quantize, "keras", None)
-    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"Keras dependencies are missing\."):
         quantize_model("model", "int8")
 
 

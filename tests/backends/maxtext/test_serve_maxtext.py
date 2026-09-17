@@ -129,6 +129,7 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
         await generate_func2(request)
 
     def mock_raise(*a: object, **k: object) -> dict[str, object]:
+        """Simulate MaxText inference failure for testing error handling."""
         raise RuntimeError("MaxText failure")
 
     monkeypatch.setattr("gemma_4_sql.backends.maxtext.inference.generate_sql", mock_raise)

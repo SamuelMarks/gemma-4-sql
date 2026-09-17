@@ -324,7 +324,7 @@ async def test_common_serve_ready_and_validation() -> None:
     assert req.max_tokens == 64
     assert req.temperature == 0.5
 
-    with pytest.raises(ValueError, match="Field 'prompt' must be a valid string."):
+    with pytest.raises(ValueError, match=r"Field 'prompt' must be a valid string\."):
         GenerateRequest.from_dict({"prompt": None})
 
     # 2. require_handlers validation during app construction
@@ -344,3 +344,29 @@ async def test_common_serve_ready_and_validation() -> None:
     assert "ready" in body
     assert "ready_backend" in body
     assert "queue_depth" in body
+
+
+@pytest.mark.asyncio
+async def test_generate_request_multimodal_payload_validation() -> None:
+    """Test GenerateRequest deserialization with multimodal and alternate field aliases."""
+    from gemma_4_sql.backends.common_serve import GenerateRequest
+
+    payload = {
+        "prompt": "Find top customers from schema diagram",
+        "max_tokens": 256,
+        "temperature": 0.7,
+        "image": "aW1hZ2VfZGF0YQ==",
+        "audio": "YXVkaW9fZGF0YQ==",
+        "image_path": "/tmp/schema.png",
+        "audio_path": "/tmp/query.wav",
+        "modality": "multimodal",
+    }
+    req = GenerateRequest.from_dict(payload)
+    assert req.prompt == "Find top customers from schema diagram"
+    assert req.max_tokens == 256
+    assert abs(req.temperature - 0.7) < 1e-6
+    assert req.image_base64 == "aW1hZ2VfZGF0YQ=="
+    assert req.audio_base64 == "YXVkaW9fZGF0YQ=="
+    assert req.image_path == "/tmp/schema.png"
+    assert req.audio_path == "/tmp/query.wav"
+    assert req.modality == "multimodal"

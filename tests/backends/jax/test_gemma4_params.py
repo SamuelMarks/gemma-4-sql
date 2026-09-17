@@ -374,3 +374,22 @@ def test_gemma4_config_presets_fsdp_tp() -> None:
     assert Gemma4Config.gemma4_e4b(use_fsdp=True, use_tp=True) is not None
     assert Gemma4Config.gemma4_26b_a4b(use_fsdp=True, use_tp=True) is not None
     assert Gemma4Config.gemma4_31b(use_fsdp=True, use_tp=True) is not None
+
+
+def test_shard_config_variants() -> None:
+    """Test ShardConfig default and no_sharding factory methods."""
+    from gemma_4_sql.backends.jax.gemma4.config import ShardConfig, _make_spec
+
+    spec = _make_spec("data", "model")
+    assert spec is not None
+    no_shd = ShardConfig.no_sharding()
+    assert no_shd.attn_kernel is None
+
+    default_none = ShardConfig.default(use_fsdp=False, use_tp=False)
+    assert default_none.attn_kernel is not None
+
+    default_both = ShardConfig.default(use_fsdp=True, use_tp=True)
+    assert default_both.attn_kernel is not None
+    assert default_both.fc1_kernel is not None
+    assert default_both.emb_kernel is not None
+    assert default_both.cache is not None

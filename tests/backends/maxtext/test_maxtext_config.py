@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,7 @@ from gemma_4_sql.type_hints import TrainingConfig
 def test_to_float_and_to_int() -> None:
     """Test safe conversion helpers for float and int values."""
     assert _to_float(None, 2.5) == 2.5
-    assert _to_float(3.14, 1.0) == 3.14
+    assert _to_float(math.pi, 1.0) == math.pi
     assert _to_float("4.5", 1.0) == 4.5
     assert _to_float(10, 1.0) == 10.0
     assert _to_float([], 9.9) == 9.9
@@ -121,10 +122,10 @@ def test_build_maxtext_hyperparameters_validation_failures() -> None:
     with pytest.raises(ValueError, match="learning_rate_schedule_steps must be positive"):
         build_maxtext_hyperparameters(base_cfg, learning_rate_schedule_steps=-5)
 
-    with pytest.raises(ValueError, match="warmup_steps_fraction must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"warmup_steps_fraction must be between 0\.0 and 1\.0"):
         build_maxtext_hyperparameters(base_cfg, warmup_steps_fraction=1.5)
 
-    with pytest.raises(ValueError, match="warmup_steps_fraction must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"warmup_steps_fraction must be between 0\.0 and 1\.0"):
         build_maxtext_hyperparameters(base_cfg, warmup_steps_fraction=-0.1)
 
     with pytest.raises(ValueError, match="opt_type cannot be empty"):
@@ -193,3 +194,42 @@ def test_build_maxtext_cli_args(tmp_path: Path) -> None:
     auto_path = Path(auto_args[1])
     assert auto_path.is_file()
     auto_path.unlink(missing_ok=True)
+
+
+def test_maxtext_hyperparameters_extra_kwargs() -> None:
+    """Test build_maxtext_hyperparameters with extra_kwargs in TrainingConfig."""
+    cfg = TrainingConfig(
+        model_name="gemma-4-7b",
+        dataset="custom_spider",
+        epochs=3,
+        extra_kwargs={
+            "per_device_batch_size": 4,
+            "global_batch_size": 16,
+            "steps": 3000,
+            "run_name": "custom_experiment",
+            "checkpoint_period": 250,
+            "base_output_directory": "/gs/bucket/output",
+        },
+    )
+    hp = build_maxtext_hyperparameters(cfg)
+    assert hp.model_architecture == "gemma4_7b"
+    assert hp.per_device_batch_size == 4.0
+    assert hp.global_batch_size == 16
+    assert hp.steps == 3000
+    assert hp.run_name == "custom_experiment"
+    assert hp.checkpoint_period == 250
+    assert hp.base_output_directory == "/gs/bucket/output"
+
+
+def test_build_maxtext_cli_args_overrides(tmp_path: Path) -> None:
+    """Test build_maxtext_cli_args with keyword parameter overrides passed into gin generation."""
+    cfg = TrainingConfig(model_name="gemma-4", dataset="bench_ds")
+    cli_args = build_maxtext_cli_args(cfg, opt_type="adamw", steps=500, run_name="test_run_override")
+    assert len(cli_args) == 2
+    gin_path = Path(cli_args[1])
+    assert gin_path.is_file()
+    content = gin_path.read_text(encoding="utf-8")
+    assert 'opt_type = "adamw"' in content
+    assert "steps = 500" in content
+    assert 'run_name = "test_run_override"' in content
+    gin_path.unlink(missing_ok=True)

@@ -13,6 +13,8 @@ try:
 except (ImportError, RuntimeError):
     torch = None
 
+import math
+
 from gemma_4_sql.backends.pytorch.gguf import (
     extract_pytorch_state_dict,
     quantize_tensor_f16,
@@ -27,7 +29,7 @@ from gemma_4_sql.exceptions import ExportError
 
 def test_quantize_tensor_f16() -> None:
     """Test F16 quantization."""
-    data = [1.0, -2.5, 0.0, 3.14159]
+    data = [1.0, -2.5, 0.0, math.pi]
     res = quantize_tensor_f16(data)
     assert len(res) == len(data) * 2  # 2 bytes per float16
     unpacked = struct.unpack(f"<{len(data)}e", res)
@@ -350,7 +352,7 @@ def test_gguf_write_metadata_types_and_payloads(tmp_path: Path) -> None:
     """
     target_file = tmp_path / "metadata_test.gguf"
     metadata: dict[str, object] = {
-        "float_val": 3.14159,
+        "float_val": math.pi,
         "list_val": ["a", "b", "c"],
         "tuple_val": (1, 2),
         "int_val": 42,
@@ -463,3 +465,23 @@ def test_gguf_branches_and_edge_cases(tmp_path: Path) -> None:
     p_q4k = tmp_path / "model_q4k.gguf"
     write_gguf_v3(p_q4k, {}, {"token_embd.weight": [1.0] * 256}, out_type="q4_k_m")
     assert p_q4k.exists()
+
+
+def test_gguf_export_corrupted_file_validation(tmp_path: Path) -> None:
+    """Test validate_gguf_file on empty or corrupted files."""
+    import struct
+
+    corrupted = tmp_path / "corrupted.gguf"
+    corrupted.write_bytes(b"BAD_MAGIC_HEADER")
+    with pytest.raises(ValueError, match="Corrupt GGUF magic header"):
+        validate_gguf_file(corrupted)
+
+    empty_f = tmp_path / "empty.gguf"
+    empty_f.write_bytes(b"")
+    with pytest.raises(ValueError, match="Corrupt GGUF magic header"):
+        validate_gguf_file(empty_f)
+
+    truncated = tmp_path / "truncated.gguf"
+    truncated.write_bytes(b"GGUF\x00")
+    with pytest.raises((ValueError, struct.error)):
+        validate_gguf_file(truncated)

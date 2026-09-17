@@ -20,8 +20,8 @@ gemma-4-sql etl pretrain --dataset my-custom-dataset --batch-size 256 --backend 
 
 Execute the `train` command. This will instantiate an uninitialized model and begin the optimization loop.
 
-#### Using JAX
-*Recommended for rapid local testing on single GPUs or small TPU slices.*
+#### Using JAX (Flax NNX)
+*Recommended for rapid experimentation on single GPUs, Apple Silicon, or small TPU slices using the built-in Flax NNX Gemma 4 implementation.*
 ```bash
 gemma-4-sql train \
     --model gemma-4 \
@@ -31,8 +31,8 @@ gemma-4-sql train \
     --backend jax
 ```
 
-#### Using JAX (MaxText)
-*Recommended for Google Cloud TPU Pods (e.g., v4-128, v5e). MaxText scales purely via XLA.*
+#### Using MaxText (AI-Hypercomputer)
+*Recommended for Google Cloud TPU Pods (e.g., v4-128, v5e). Leverages Google's MaxText framework with dynamic Gin configurations and multi-dimensional device meshes.*
 ```bash
 gemma-4-sql train \
     --model gemma-4 \
@@ -89,12 +89,12 @@ gemma-4-sql etl pretrain --dataset my-custom-dataset --batch-size 128 --backend 
 
 Use the `pretrain` command. This loads existing weights and continues the learning process.
 
-**JAX:**
+**JAX (Flax NNX):**
 ```bash
 gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend jax
 ```
 
-**JAX (MaxText):**
+**MaxText (AI-Hypercomputer):**
 ```bash
 gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend maxtext
 ```
@@ -126,12 +126,12 @@ gemma-4-sql etl posttrain --dataset my_custom_dpo_dataset --batch-size 32 --back
 
 ### Step 2: Supervised Fine-Tuning (SFT)
 
-**JAX:**
+**JAX (Flax NNX):**
 ```bash
 gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset my-custom-sft-dataset --backend jax
 ```
 
-**JAX (MaxText):**
+**MaxText (AI-Hypercomputer):**
 ```bash
 gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset my-custom-sft-dataset --backend maxtext
 ```
@@ -191,6 +191,13 @@ gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu --batch-size 128 --b
 **Using Keras (with TPUStrategy):**
 ```bash
 gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu --batch-size 128 --backend keras
+```
+
+### Benchmarking on Apple Silicon (M1/M2/M3/M4 Metal GPU)
+
+**Using MLX (Metal acceleration for macOS):**
+```bash
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware gpu --batch-size 16 --backend mlx
 ```
 
 ### Benchmarking on CPU (Intel/AMD for Edge or Local testing)
