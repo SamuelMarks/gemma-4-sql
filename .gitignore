@@ -162,7 +162,10 @@ checkpoints/
 models/
 datasets/
 out/
+path/
 path1/
+quantized_awq/
+quantized_gptq/
 
 # Temporary scratchpads and fix scripts
 fix_*.py

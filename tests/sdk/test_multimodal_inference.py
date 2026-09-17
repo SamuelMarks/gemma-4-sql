@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import base64
+import io
 import struct
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -77,7 +79,7 @@ def test_load_image_bytes(tmp_path: Path) -> None:
     long_b64 = base64.b64encode(raw * 20).decode("utf-8")
     assert len(load_image_bytes(long_b64)) > 0
 
-    # PIL Image if available
+    # PIL Image if available (or mocked fallback)
     try:
         from PIL import Image
 
@@ -85,7 +87,24 @@ def test_load_image_bytes(tmp_path: Path) -> None:
         loaded_pil = load_image_bytes(pil_img)
         assert len(loaded_pil) > 0
     except ImportError:
-        pass
+
+        class _MockPILInstance:
+            """Mock PIL Image instance for load_image_bytes testing."""
+
+            def save(self, buf: io.BytesIO, format: str = "PNG") -> None:
+                """Mock save writing dummy PNG bytes."""
+                buf.write(b"\x89PNG\r\n\x1a\n")
+
+        class _MockPILClass:
+            """Mock PIL Image class."""
+
+            Image = _MockPILInstance
+
+        monkeypatch_load = pytest.MonkeyPatch()
+        monkeypatch_load.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILClass)
+        loaded_pil = load_image_bytes(_MockPILInstance())
+        assert len(loaded_pil) > 0
+        monkeypatch_load.undo()
 
     # Error conditions
     with pytest.raises(ValueError, match="image_input cannot be None"):
@@ -100,14 +119,16 @@ def test_load_image_bytes(tmp_path: Path) -> None:
 
 def test_process_image(tmp_path: Path) -> None:
     """Test image resizing, normalization, and patch extraction."""
-    import io
+    valid_png: bytes
+    try:
+        from PIL import Image as PILImage
 
-    from PIL import Image as PILImage
-
-    buf = io.BytesIO()
-    img = PILImage.new("RGB", (32, 32), color=(255, 0, 0))
-    img.save(buf, format="PNG")
-    valid_png = buf.getvalue()
+        buf = io.BytesIO()
+        img = PILImage.new("RGB", (32, 32), color=(255, 0, 0))
+        img.save(buf, format="PNG")
+        valid_png = buf.getvalue()
+    except ImportError:
+        valid_png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
 
     res = process_image(valid_png, target_size=(224, 224), patch_size=14)
     assert "pixel_values" in res
@@ -417,15 +438,59 @@ def test_multimodal_edge_cases() -> None:
     # Image available but numpy is None (covers 126->131)
     import io
 
-    from PIL import Image as PILImage
+    try:
+        from PIL import Image as PILImage
 
-    buf = io.BytesIO()
-    PILImage.new("RGB", (14, 14)).save(buf, format="PNG")
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(cm, "np", None)
-    res_img_no_np = cm.process_image(buf.getvalue(), target_size=(14, 14), patch_size=14)
-    assert res_img_no_np["num_patches"] == 1
-    monkeypatch.undo()
+        buf = io.BytesIO()
+        PILImage.new("RGB", (14, 14)).save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(cm, "np", None)
+        res_img_no_np = cm.process_image(png_bytes, target_size=(14, 14), patch_size=14)
+        assert res_img_no_np["num_patches"] == 1
+        monkeypatch.undo()
+    except ImportError:
+
+        class _MockPILResampling:
+            """Mock PIL Resampling constants."""
+
+            BILINEAR = 2
+
+        class _MockPILImage:
+            """Mock PIL Image module."""
+
+            Resampling = _MockPILResampling
+
+            @staticmethod
+            def open(_buf: Any) -> Any:
+                """Mock open context manager."""
+
+                class _MockOpened:
+                    """Mock opened image."""
+
+                    def __enter__(self) -> Any:
+                        """Enter context manager."""
+                        return self
+
+                    def __exit__(self, *args: object) -> None:
+                        """Exit context manager."""
+
+                    def convert(self, _mode: str) -> Any:
+                        """Mock mode conversion."""
+                        return self
+
+                    def resize(self, _size: tuple[int, int], _resample: Any = None) -> Any:
+                        """Mock image resize."""
+                        return self
+
+                return _MockOpened()
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(cm, "Image", _MockPILImage)
+        monkeypatch.setattr(cm, "np", None)
+        res_img_no_np = cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
+        assert res_img_no_np["num_patches"] == 1
+        monkeypatch.undo()
 
     # Corrupted WAV header triggering struct.error
     corrupt_wav = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 40
@@ -437,8 +502,24 @@ def test_multimodal_edge_cases() -> None:
 
     # PIL open raising OSError handled gracefully
     corrupted_img = b"corrupted"
-    res_corrupt = cm.process_image(corrupted_img, target_size=(14, 14), patch_size=14)
-    assert res_corrupt["num_patches"] == 1
+    if cm.Image is None:
+
+        class _MockFailingPIL:
+            """Mock PIL Image raising OSError on open."""
+
+            @staticmethod
+            def open(_buf: Any) -> Any:
+                """Raise OSError to simulate corrupted image open."""
+                raise OSError("Corrupted image")
+
+        monkeypatch_pil = pytest.MonkeyPatch()
+        monkeypatch_pil.setattr(cm, "Image", _MockFailingPIL)
+        res_corrupt = cm.process_image(corrupted_img, target_size=(14, 14), patch_size=14)
+        assert res_corrupt["num_patches"] == 1
+        monkeypatch_pil.undo()
+    else:
+        res_corrupt = cm.process_image(corrupted_img, target_size=(14, 14), patch_size=14)
+        assert res_corrupt["num_patches"] == 1
 
     # Audio file not found
     with pytest.raises(FileNotFoundError, match="Audio file not found"):

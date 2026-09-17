@@ -303,7 +303,8 @@ def test_apply_awq_quantization_success(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert reduction == 0.75
     assert status == "quantized_awq"
 
-    # Test with default calib_data and default export path
+    # Test with default calib_data and default export path in isolated tmp directory
+    monkeypatch.chdir(tmp_path)
     _apply_awq_quantization(model_name="gemma-4-sql")
 
     # Test through top-level quantize_model
@@ -388,7 +389,8 @@ def test_apply_gptq_quantization_success(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert status == "quantized_gptq"
     assert (out_dir / "model.safetensors").exists()
 
-    # Test with default export_path
+    # Test with default export_path in isolated tmp directory
+    monkeypatch.chdir(tmp_path)
     _apply_gptq_quantization(model_name="gemma-4-sql")
 
     # Test through top-level quantize_model

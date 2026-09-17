@@ -7,7 +7,7 @@ import pytest
 from gemma_4_sql.type_hints import DPOConfig, TrainingConfig
 
 
-def test_mlx_export_fail(monkeypatch):
+def test_mlx_export_fail(monkeypatch, tmp_path):
     """Test mlx export fail functionality."""
     import gemma_4_sql.backends.mlx.export as mexp
 
@@ -35,7 +35,7 @@ def test_mlx_export_fail(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", mock_import)
     monkeypatch.setattr(mexp, "mx", type("MX", (), {}))
     with pytest.raises(ValueError):
-        mexp.export_model("model", "path")
+        mexp.export_model("model", str(tmp_path / "path"))
 
 
 def test_mlx_inference_fail(monkeypatch):
