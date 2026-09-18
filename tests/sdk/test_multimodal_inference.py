@@ -198,6 +198,20 @@ def test_process_audio() -> None:
         process_audio(mono_wav, sample_rate=0)
 
 
+def test_parse_wav_no_data_chunk() -> None:
+    """Test WAV parsing fallback when data chunk is absent."""
+    wav_no_data = bytearray(b"RIFF")
+    wav_no_data.extend(struct.pack("<I", 36))
+    wav_no_data.extend(b"WAVEfmt ")
+    wav_no_data.extend(struct.pack("<IHHIIHH", 16, 1, 1, 16000, 32000, 2, 16))
+    wav_no_data.extend(b"JUNK")
+    wav_no_data.extend(struct.pack("<I", 4))
+    wav_no_data.extend(b"test")
+    res = process_audio(bytes(wav_no_data))
+    assert res["sample_rate"] == 16000
+    assert len(res["audio_values"]) > 0
+
+
 def test_format_multimodal_prompt() -> None:
     """Test formatting prompt with multimodal placeholder tokens and masks."""
     # Text only

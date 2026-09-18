@@ -9,7 +9,6 @@ from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
-import safetensors
 from etils import epath
 from flax import nnx
 
@@ -17,6 +16,13 @@ from . import modeling as model_lib
 from .utils_params import assign_weights_from_eval_shape, map_to_jax_key, stoi
 
 logger = logging.getLogger(__name__)
+
+try:
+    import safetensors as _safetensors
+
+    safetensors: Any = _safetensors
+except ImportError:
+    safetensors = None
 
 
 def _get_text_mappings(transform_cls: Any) -> dict[str, tuple[str, object]]:

@@ -182,7 +182,9 @@ def _apply_awq_quantization(
     """
     try:
         from awq import AutoAWQForCausalLM
-        from transformers import AutoTokenizer
+        from transformers import AutoTokenizer as _AutoTokenizer
+
+        tok_cls: Any = _AutoTokenizer
     except (ImportError, AttributeError) as exc:
         raise DependencyMissingError(f"AutoAWQ is required for AWQ quantization: {exc!s}") from exc
 
@@ -199,7 +201,7 @@ def _apply_awq_quantization(
         "version": "GEMM",
     }
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = tok_cls.from_pretrained(model_name)
     model = AutoAWQForCausalLM.from_pretrained(model_name)
     model.quantize(tokenizer, quant_config=quant_config, calib_data=calib_data)
 
@@ -239,7 +241,11 @@ def _apply_gptq_quantization(
     """
     try:
         from optimum.gptq import GPTQQuantizer
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
+        from transformers import AutoTokenizer as _AutoTokenizer
+
+        tok_cls: Any = _AutoTokenizer
+        model_cls: Any = _AutoModelForCausalLM
     except (ImportError, AttributeError) as exc:
         raise DependencyMissingError(f"Optimum is required for GPTQ quantization: {exc!s}") from exc
 
@@ -250,9 +256,9 @@ def _apply_gptq_quantization(
         damp_percent=damp_percent,
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = tok_cls.from_pretrained(model_name)
     model_kwargs = {"torch_dtype": torch.float16} if torch and hasattr(torch, "float16") else {}
-    model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+    model = model_cls.from_pretrained(model_name, **model_kwargs)
 
     quantized_model = quantizer.quantize_model(model, tokenizer)
 

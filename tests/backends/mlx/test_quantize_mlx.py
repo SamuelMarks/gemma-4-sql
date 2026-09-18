@@ -130,6 +130,7 @@ def test_calibrate_awq_and_gptq_edge_cases(monkeypatch: pytest.MonkeyPatch) -> N
     mock_nn = MagicMock()
     monkeypatch.setitem(sys.modules, "mlx.nn", mock_nn)
     monkeypatch.setitem(sys.modules, "mlx", type("M", (), {"nn": mock_nn}))
+    monkeypatch.setitem(sys.modules, "mlx_lm", type("MLXLM", (), {"load": lambda _n: mock_model}))
     res = quantize_model("model", "int8", model=mock_model)
     assert res["status"] == "quantized_int8"
 

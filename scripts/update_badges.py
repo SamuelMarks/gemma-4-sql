@@ -37,6 +37,12 @@ def main() -> None:
     io.StringIO()
     import subprocess
 
+    cov_path = Path(".coverage")
+    if cov_path.exists():
+        cov_path.unlink()
+    for extra_cov in Path(".").glob(".coverage.*"):
+        extra_cov.unlink()
+
     out = ""
     print("[update_badges] Running batch 1/4 (core, sdk, cli)...", flush=True)
     res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-report=term", "tests/core/", "tests/sdk/", "tests/cli/", "src/"], capture_output=True, text=True, check=False)
