@@ -64,11 +64,13 @@ jobs:
           ruff check .
           ruff format --check .
       - name: Run tests
+        env:
+          KERAS_BACKEND: torch
         run: |
           pytest --cov=src/gemma_4_sql --cov-branch --cov-report=xml --cov-report=term tests/core/ tests/sdk/ tests/cli/ src/
           pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-report=xml --cov-report=term tests/backends/pytorch/ tests/backends/keras/
           pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-report=xml --cov-report=term tests/backends/jax/ tests/backends/maxtext/
-          pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-report=xml --cov-report=term tests/backends/mlx/ tests/backends/test_*.py
+          pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-fail-under=100 --cov-report=xml --cov-report=term tests/backends/mlx/ tests/backends/test_*.py
 
   test-gpu:
     runs-on: ubuntu-latest

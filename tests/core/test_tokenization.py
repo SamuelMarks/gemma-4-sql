@@ -230,3 +230,27 @@ def test_sql_tokenizer_empty_and_special_sql_chars() -> None:
     enc_long = tok.encode(long_query)
     assert len(enc_long) > 0
     assert tok.decode(enc_long) == long_query
+
+
+def test_sql_tokenizer_unicode_multibyte() -> None:
+    """Test SQLTokenizer handling of multi-byte UTF-8, emojis, and non-ASCII SQL comments."""
+    tok = SQLTokenizer()
+    text = "SELECT * FROM users WHERE name = '田中' AND bio = '🚀 Data Scientist! 🎉'; -- 数据库查询"
+    encoded = tok.encode(text)
+    assert len(encoded) > len(text)
+    decoded = tok.decode(encoded)
+    assert decoded == text
+
+
+def test_sql_tokenizer_custom_vocab_bounds() -> None:
+    """Test SQLTokenizer with small custom vocab_size and token clamping behavior."""
+    tok_small = SQLTokenizer(vocab_size=64)
+    assert tok_small.vocab_size == 64
+    encoded = tok_small.encode("ABCabc123")
+    for tid in encoded:
+        assert 0 <= tid < 256
+
+    # Test decode with negative and large IDs
+    out_of_bound_ids = [-5, 0, 65, 255, 300]
+    decoded = tok_small.decode(out_of_bound_ids)
+    assert isinstance(decoded, str)

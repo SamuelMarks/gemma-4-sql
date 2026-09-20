@@ -1155,3 +1155,29 @@ def test_snowflake_setup_schema_no_commit_or_rollback(monkeypatch: pytest.Monkey
     adapter.conn = NoRollbackConn()
     with pytest.raises(ValueError, match="ddl fail"):
         adapter.setup_schema("CREATE TABLE err (")
+
+
+def test_db_engine_execute_query_with_params() -> None:
+    """Test LiveDatabaseEngine execute_query passing parameters to adapter."""
+    mock_adapter_cls = MagicMock()
+    mock_adapter = MagicMock()
+    mock_adapter.execute_query.return_value = [{"id": 1, "name": "alice"}]
+    mock_adapter_cls.return_value = mock_adapter
+
+    with patch.dict(_ADAPTERS, {"sqlite": mock_adapter_cls}):
+        engine = LiveDatabaseEngine(db_type="sqlite")
+        res = engine.execute_query("SELECT * FROM users WHERE id = ?", (1,))
+        assert res == [{"id": 1, "name": "alice"}]
+        mock_adapter.execute_query.assert_called_with("SELECT * FROM users WHERE id = ?", (1,))
+
+
+def test_db_engine_setup_schema_delegation() -> None:
+    """Test LiveDatabaseEngine setup_schema delegates correctly to adapter."""
+    mock_adapter_cls = MagicMock()
+    mock_adapter = MagicMock()
+    mock_adapter_cls.return_value = mock_adapter
+
+    with patch.dict(_ADAPTERS, {"sqlite": mock_adapter_cls}):
+        engine = LiveDatabaseEngine(db_type="sqlite")
+        engine.setup_schema("CREATE TABLE test (id INT);")
+        mock_adapter.setup_schema.assert_called_with("CREATE TABLE test (id INT);")

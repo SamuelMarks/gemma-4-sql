@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("KERAS_BACKEND", "torch")
+
 from typing import Any
 
 import keras

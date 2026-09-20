@@ -6,6 +6,7 @@ import os
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ.setdefault("KERAS_BACKEND", "torch")
 
 
 def test_import_jax() -> None:

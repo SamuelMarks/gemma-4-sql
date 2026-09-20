@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("KERAS_BACKEND", "torch")
+
 from .benchmark import benchmark_model
 from .dpo import run_dpo
 from .etl import build_dataloader

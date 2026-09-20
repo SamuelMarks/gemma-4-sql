@@ -38,49 +38,53 @@ def main() -> None:
     import subprocess
 
     cov_path = Path(".coverage")
-    if cov_path.exists():
-        cov_path.unlink()
-    for extra_cov in Path(".").glob(".coverage.*"):
-        extra_cov.unlink()
+    if cov_path.exists() and "--force-run" not in sys.argv:
+        print("[update_badges] Reading existing .coverage...", flush=True)
+        res = subprocess.run([sys.executable, "-m", "coverage", "report"], capture_output=True, text=True, check=False)
+        cov_out_str = res.stdout
+    else:
+        if cov_path.exists():
+            cov_path.unlink()
+        for extra_cov in Path(".").glob(".coverage.*"):
+            extra_cov.unlink()
 
-    out = ""
-    print("[update_badges] Running batch 1/4 (core, sdk, cli)...", flush=True)
-    res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-report=term", "tests/core/", "tests/sdk/", "tests/cli/", "src/"], capture_output=True, text=True, check=False)
-    out += res.stdout
-    print("[update_badges] Running batch 2/4 (pytorch, keras)...", flush=True)
-    res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/pytorch/", "tests/backends/keras/"], capture_output=True, text=True, check=False)
-    out += res.stdout
-    print("[update_badges] Running batch 3/4 (jax, maxtext)...", flush=True)
-    res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/jax/", "tests/backends/maxtext/"], capture_output=True, text=True, check=False)
-    out += res.stdout
-    print("[update_badges] Running batch 4/4 (mlx, backend modules)...", flush=True)
-    res = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "--cov=src/gemma_4_sql",
-            "--cov-branch",
-            "--cov-append",
-            "--cov-report=term",
-            "tests/backends/mlx/",
-            "tests/backends/test_backend_imports.py",
-            "tests/backends/test_backend_methods_edge_cases.py",
-            "tests/backends/test_backends.py",
-            "tests/backends/test_common.py",
-            "tests/backends/test_common_serve_batching.py",
-            "tests/backends/test_lazy_loader.py",
-            "tests/backends/test_missing_backends_edge_cases.py",
-            "tests/backends/test_true_missing_backends.py",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    out += res.stdout
+        out = ""
+        print("[update_badges] Running batch 1/4 (core, sdk, cli)...", flush=True)
+        res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-report=term", "tests/core/", "tests/sdk/", "tests/cli/", "src/"], capture_output=True, text=True, check=False)
+        out += res.stdout
+        print("[update_badges] Running batch 2/4 (pytorch, keras)...", flush=True)
+        res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/pytorch/", "tests/backends/keras/"], capture_output=True, text=True, check=False)
+        out += res.stdout
+        print("[update_badges] Running batch 3/4 (jax, maxtext)...", flush=True)
+        res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/jax/", "tests/backends/maxtext/"], capture_output=True, text=True, check=False)
+        out += res.stdout
+        print("[update_badges] Running batch 4/4 (mlx, backend modules)...", flush=True)
+        res = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--cov=src/gemma_4_sql",
+                "--cov-branch",
+                "--cov-append",
+                "--cov-report=term",
+                "tests/backends/mlx/",
+                "tests/backends/test_backend_imports.py",
+                "tests/backends/test_backend_methods_edge_cases.py",
+                "tests/backends/test_backends.py",
+                "tests/backends/test_common.py",
+                "tests/backends/test_common_serve_batching.py",
+                "tests/backends/test_lazy_loader.py",
+                "tests/backends/test_missing_backends_edge_cases.py",
+                "tests/backends/test_true_missing_backends.py",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        out += res.stdout
+        cov_out_str = out
     print("[update_badges] Calculating coverage and updating badges...", flush=True)
-
-    cov_out_str = out
     cov_matches = re.findall(r"TOTAL\s+\d+\s+\d+\s+\d+\s+\d+\s+(\d+)%", cov_out_str)
     if not cov_matches:
         cov_matches = re.findall(r"TOTAL\s+\d+\s+\d+\s+(\d+)%", cov_out_str)

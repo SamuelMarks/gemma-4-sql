@@ -316,3 +316,24 @@ def test_collect_predictions_batch_multimodal_and_type_error() -> None:
         modality="multimodal",
     )
     assert preds2 == ["SELECT 1"]
+
+
+def test_evaluate_syntax_variations() -> None:
+    """Test SQL normalization helper with case-insensitive and whitespace-variant SQL strings."""
+    from gemma_4_sql.sdk.evaluation import normalize_sql
+
+    sql1 = "  SELECT   id,  name  FROM users;  "
+    sql2 = "select id, name from users;"
+    assert normalize_sql(sql1) == normalize_sql(sql2)
+
+
+def test_evaluate_empty_metrics() -> None:
+    """Test compute_metrics with empty prediction and ground-truth sequences."""
+    from unittest.mock import MagicMock
+
+    from gemma_4_sql.sdk.evaluation import compute_metrics
+
+    mock_engine = MagicMock()
+    metrics = compute_metrics(mock_engine, [], [])
+    assert metrics.get("exact_match") == 0.0
+    assert metrics.get("execution_accuracy") == 0.0

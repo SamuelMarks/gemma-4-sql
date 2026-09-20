@@ -249,7 +249,10 @@ def inject_lora(
             curr._tracker.unlock()
 
         try:
-            for attr_name in list(vars(curr).keys()):
+            attrs = list(vars(curr).keys())
+            if hasattr(curr, "_modules") and isinstance(curr._modules, dict):
+                attrs.extend(curr._modules.keys())
+            for attr_name in set(attrs):
                 if attr_name.startswith("_"):
                     continue
                 val = getattr(curr, attr_name, None)
@@ -328,7 +331,10 @@ def merge_lora_weights(model: Any) -> Any:
             curr._tracker.unlock()
 
         try:
-            for attr_name in list(vars(curr).keys()):
+            attrs = list(vars(curr).keys())
+            if hasattr(curr, "_modules") and isinstance(curr._modules, dict):
+                attrs.extend(curr._modules.keys())
+            for attr_name in set(attrs):
                 if attr_name.startswith("_"):
                     continue
                 val = getattr(curr, attr_name, None)

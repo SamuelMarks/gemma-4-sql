@@ -21,7 +21,7 @@ repos:
     hooks:
       - id: tests
         name: Run tests
-        entry: bash -c "uv run --all-extras pytest"
+        entry: bash -c "uv run --all-extras pytest --cov=src/gemma_4_sql --cov-branch -q"
         language: system
         pass_filenames: false
         always_run: true
