@@ -23,10 +23,15 @@ def test_export_model_jax_unified(tmp_path: Path) -> None:
 
 def test_export_model_pytorch_unified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Test unified model export using PyTorch backend."""
+    import sys
+
     import gemma_4_sql.backends.pytorch.export as pt_export
 
     monkeypatch.setattr(pt_export, "save_file", lambda tensors, path: None)
     monkeypatch.setattr("safetensors.torch.save_file", lambda tensors, path: None, raising=False)
+    be = get_backend("pytorch")
+    if hasattr(be, "export_model") and be.export_model.__module__ in sys.modules:
+        monkeypatch.setattr(sys.modules[be.export_model.__module__], "save_file", lambda tensors, path: None, raising=False)
     export_dir = tmp_path / "pytorch_unified_export"
     res = export_model("test_model", str(export_dir), backend="pytorch", backend_alias="pytorch_native", test_mode=True)
     assert res["backend"] == "pytorch_native"

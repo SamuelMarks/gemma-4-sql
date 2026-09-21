@@ -1,11 +1,13 @@
 """Provide module docstring."""
 
+from __future__ import annotations
+
 import sys
 from importlib import import_module
 from unittest import mock
 
 
-def exec_import(mod_name: object, mock_dict: object, func_name: object = None, *args: object, **kwargs: object) -> object:
+def exec_import(mod_name: str, mock_dict: dict[str, object], func_name: str | None = None, *args: object, **kwargs: object) -> None:
     """Initialize function exec_import.
 
     Args:
@@ -17,6 +19,11 @@ def exec_import(mod_name: object, mock_dict: object, func_name: object = None, *
     kwargs: Description of kwargs.
 
     """
+    orig_mod = sys.modules.get(mod_name)
+    parent_name, _, child_name = mod_name.rpartition(".")
+    parent_mod = sys.modules.get(parent_name) if parent_name else None
+    orig_child = getattr(parent_mod, child_name, None) if parent_mod is not None else None
+
     with mock.patch.dict(sys.modules, mock_dict):
         if mod_name in sys.modules:
             del sys.modules[mod_name]
@@ -26,6 +33,13 @@ def exec_import(mod_name: object, mock_dict: object, func_name: object = None, *
                 getattr(mod, func_name)(*args, **kwargs)
         except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
             pass
+        finally:
+            if orig_mod is not None:
+                sys.modules[mod_name] = orig_mod
+            elif mod_name in sys.modules:
+                del sys.modules[mod_name]
+            if parent_mod is not None and orig_child is not None:
+                setattr(parent_mod, child_name, orig_child)
 
 
 def test_missing_jax() -> object:

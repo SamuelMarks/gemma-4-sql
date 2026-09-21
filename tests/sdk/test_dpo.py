@@ -53,14 +53,27 @@ def test_run_dpo_pytorch() -> None:
         raise AssertionError
 
 
-@pytest.mark.skipif(keras is None, reason="Keras is not installed")
-def test_run_dpo_keras() -> None:
-    """Initialize function test_run_dpo_keras.
+def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Initialize function test_run_dpo_keras."""
+    import gemma_4_sql.backends.keras as kb
+    import gemma_4_sql.backends.keras.dpo as kdpo
 
-    Raises:
-        AssertionError: Description.
+    monkeypatch.setattr(kdpo, "tf", None)
+    with pytest.raises(DependencyMissingError):
+        run_dpo(model_name="model3", dataset="data3", backend="keras", beta=0.3)
 
-    """
+    mock_dpo = lambda *args, **kwargs: {
+        "backend": "keras",
+        "action": "dpo",
+        "model": "model3",
+        "dataset": "data3",
+        "beta": 0.3,
+    }
+    monkeypatch.setattr(kdpo, "keras", object())
+    monkeypatch.setattr(kdpo, "tf", object())
+    monkeypatch.setattr(kdpo, "run_dpo", mock_dpo)
+    monkeypatch.setattr(kb, "run_dpo", mock_dpo)
+
     res = run_dpo(model_name="model3", dataset="data3", backend="keras", beta=0.3)
     if not res["backend"] == "keras":
         raise AssertionError

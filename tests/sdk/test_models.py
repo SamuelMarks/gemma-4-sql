@@ -38,15 +38,24 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="pytorch"))
 
-    if keras is not None:
-        res = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
-        if not res["backend"] == "keras":
-            raise AssertionError
-        if not res["action"] == "pretrain":
-            raise AssertionError
-    else:
-        with pytest.raises(DependencyMissingError):
-            pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
+    import gemma_4_sql.backends.keras as kb
+    import gemma_4_sql.backends.keras.train as ktrain
+
+    monkeypatch.setattr(ktrain, "tf", None)
+    with pytest.raises(DependencyMissingError):
+        pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
+
+    mock_train = lambda *args, **kwargs: {"backend": "keras", "action": "pretrain", "model": "my-model"}
+    monkeypatch.setattr(ktrain, "keras", object())
+    monkeypatch.setattr(ktrain, "tf", object())
+    monkeypatch.setattr(ktrain, "train_model", mock_train)
+    monkeypatch.setattr(kb, "train_model", mock_train)
+
+    res_k = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
+    if not res_k["backend"] == "keras":
+        raise AssertionError
+    if not res_k["action"] == "pretrain":
+        raise AssertionError
 
     import gemma_4_sql.backends.maxtext.train as mx_train
 

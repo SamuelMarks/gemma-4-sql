@@ -29,11 +29,19 @@ def test_benchmark_jax() -> None:
 
 def test_benchmark_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test benchmark invocation for Keras backend with fallback when missing."""
-    if keras is None:
-        import gemma_4_sql.backends.keras.benchmark as kbm
+    import gemma_4_sql.backends.keras as kb
+    import gemma_4_sql.backends.keras.benchmark as kbm
 
-        monkeypatch.setattr(kbm, "keras", object())
-        monkeypatch.setattr(kbm, "benchmark_model", lambda *args, **kwargs: {"backend": "keras", "status": "completed"})
+    monkeypatch.setattr(kbm, "tf", None)
+    with pytest.raises(DependencyMissingError):
+        benchmark("gemma-4", "gpu", 1, "keras")
+
+    mock_bench = lambda *args, **kwargs: {"backend": "keras", "status": "completed"}
+    monkeypatch.setattr(kbm, "keras", object())
+    monkeypatch.setattr(kbm, "tf", object())
+    monkeypatch.setattr(kbm, "benchmark_model", mock_bench)
+    monkeypatch.setattr(kb, "benchmark_model", mock_bench)
+
     res = benchmark("gemma-4", "gpu", 1, "keras")
     assert res["backend"] == "keras"
 
