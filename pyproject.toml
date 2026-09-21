@@ -176,6 +176,8 @@ exclude_lines = [
     "nn: Any = _nn",
     "optim: Any = _optim",
     "from tensorboardX import SummaryWriter as _SummaryWriter",
+    "from PIL import Image as _Image",
+    "Image: Any = _Image",
 
     "from mlx.utils.tensorboard import SummaryWriter as _SummaryWriter",
     "from torch.utils.tensorboard import SummaryWriter as _SummaryWriter",

@@ -497,6 +497,13 @@ def test_multimodal_edge_cases() -> None:
                         """Mock image resize."""
                         return self
 
+                    def __array__(self, *args: object, **kwargs: object) -> Any:
+                        """Provide numpy array representation."""
+                        current_np = getattr(cm, "np", None)
+                        if current_np is not None:
+                            return current_np.zeros((14, 14, 3), dtype=current_np.float32)
+                        return [[[0.0, 0.0, 0.0] for _ in range(14)] for _ in range(14)]
+
                 return _MockOpened()
 
         monkeypatch = pytest.MonkeyPatch()
@@ -505,6 +512,15 @@ def test_multimodal_edge_cases() -> None:
         res_img_no_np = cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
         assert res_img_no_np["num_patches"] == 1
         monkeypatch.undo()
+
+        current_np = getattr(cm, "np", None)
+        if current_np is not None:
+            monkeypatch_with_np = pytest.MonkeyPatch()
+            monkeypatch_with_np.setattr(cm, "Image", _MockPILImage)
+            monkeypatch_with_np.setattr(cm, "np", current_np)
+            res_img_with_np = cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
+            assert res_img_with_np["num_patches"] == 1
+            monkeypatch_with_np.undo()
 
     # Corrupted WAV header triggering struct.error
     corrupt_wav = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 40
