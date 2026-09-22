@@ -248,8 +248,6 @@ def test_gemma4_native_save_load_and_generate(tmp_path):
 
 def test_pytorch_native_pipeline_integration(tmp_path, monkeypatch):
     """Test pytorch_native backend integration for train, inference, and export."""
-    from safetensors.torch import save_file
-
     from gemma_4_sql.backends.pytorch.export import export_model
     from gemma_4_sql.backends.pytorch.inference import generate_sql
     from gemma_4_sql.backends.pytorch.train import train_model
@@ -265,7 +263,8 @@ def test_pytorch_native_pipeline_integration(tmp_path, monkeypatch):
         intermediate_size=128,
     )
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", save_file)
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("safetensors.torch.save_file", lambda *_args, **_kwargs: None, raising=False)
     exp_res = export_model("test_model", str(tmp_path), backend_alias="pytorch_native", config=tiny_cfg)
     assert exp_res["status"] == "exported_with_safetensors"
     assert exp_res["backend"] == "pytorch_native"

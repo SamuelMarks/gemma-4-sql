@@ -11,8 +11,10 @@ from gemma_4_sql.type_hints import TrainingConfig
 
 try:
     import keras
+    import tensorflow as tf
 except ImportError:
     keras = None
+    tf = None
 
 
 def test_jax_dpo_missing_jnn(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -95,7 +97,7 @@ def test_keras_inference_missing_tf(monkeypatch: pytest.MonkeyPatch) -> None:
         kinf.generate_sql("foo", "bar")
 
 
-@pytest.mark.skipif(keras is None, reason="Keras is not installed")
+@pytest.mark.skipif(keras is None or tf is None, reason="Keras or TensorFlow is not installed")
 def test_keras_inference_test_mode() -> None:
     """Test Keras inference handles missing keras_nlp gracefully."""
     import gemma_4_sql.backends.keras.inference as kinf
