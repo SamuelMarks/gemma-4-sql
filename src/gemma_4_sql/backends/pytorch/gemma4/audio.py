@@ -25,6 +25,7 @@ class Gemma4AudioModel(nn.Module):
 
         Returns:
             Projected audio representations.
+
         """
         hidden_states = self.feature_extractor(audio_values)
 

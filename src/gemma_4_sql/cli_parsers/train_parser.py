@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from typing import Callable
+from typing import Any, Callable
 
 from gemma_4_sql.cli_misc import quantize_cmd
 from gemma_4_sql.cli_train import dpo_cmd, peft_cmd, posttrain_cmd, pretrain_cmd, sft_cmd, train_cmd
 
 
 def add_training_subparser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     name: str,
     help_text: str,
     backend: str,
@@ -27,6 +27,7 @@ def add_training_subparser(
 
     Returns:
         The configured ArgumentParser instance for this training command.
+
     """
     parser = subparsers.add_parser(name, help=help_text)
     parser.add_argument("--model", default="gemma-4", help="Model name.")
@@ -43,11 +44,12 @@ def add_training_subparser(
     return parser
 
 
-def add_peft_quantize_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_peft_quantize_parsers(subparsers: Any) -> None:
     """Register DPO, PEFT/LoRA, and Quantize subcommand parsers.
 
     Args:
         subparsers: Subparser collection to attach the commands to.
+
     """
     parser_dpo = subparsers.add_parser("dpo", help="Run Direct Preference Optimization (DPO).")
     parser_dpo.add_argument("--model", default="gemma-4", help="Model name.")
@@ -78,11 +80,12 @@ def add_peft_quantize_parsers(subparsers: argparse._SubParsersAction[argparse.Ar
     parser_quantize.set_defaults(func=quantize_cmd)
 
 
-def add_training_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_training_parsers(subparsers: Any) -> None:
     """Register all model training, adaptation, and optimization subparsers.
 
     Args:
         subparsers: Subparser collection to attach training parsers to.
+
     """
     add_training_subparser(subparsers, "train", "Train a new model from scratch.", "jax", train_cmd)
     add_training_subparser(subparsers, "pretrain", "Pretrain an existing model.", "maxtext", pretrain_cmd)

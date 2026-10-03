@@ -188,6 +188,32 @@ def test_attention_edge_cases(monkeypatch):
     assert res is not None
 
 
+def test_attention_edge_cases2(monkeypatch):
+    """Test manual attention fallback with sliding_window=None."""
+    import torch
+
+    import gemma_4_sql.backends.pytorch.gemma4.attention as attn
+
+    class MockConfig:
+        hidden_size = 32
+        num_attention_heads = 4
+        num_key_value_heads = 2
+        head_dim = 8
+        rope_theta = 10000.0
+        max_position_embeddings = 128
+        sliding_window = None
+        is_global = False
+        global_attn_layers = (1,)
+
+    config = MockConfig()
+    attention = attn.Gemma4Attention(config, layer_idx=0)
+
+    hidden_states = torch.randn(1, 2, 32)
+    position_ids = torch.tensor([[0, 1]], dtype=torch.long)
+    res = attention(hidden_states, position_ids=position_ids)
+    assert res is not None
+
+
 def test_audio_layers_edge_cases(monkeypatch):
     """Test audio layers edge cases functionality."""
     import torch
@@ -209,7 +235,7 @@ def test_audio_layers_edge_cases(monkeypatch):
     assert res is not None
 
 
-def test_gemma4_native_save_load_and_generate(tmp_path):
+def test_gemma4_native_save_load_and_generate(tmp_path, monkeypatch):
     """Test save_pretrained, from_pretrained, and generate with DynamicCache."""
     config = Gemma4Config(
         vocab_size=128,
@@ -244,6 +270,15 @@ def test_gemma4_native_save_load_and_generate(tmp_path):
     empty_dir.mkdir()
     model_empty = Gemma4ForCausalLM.from_pretrained(str(empty_dir), config=config)
     assert model_empty is not None
+
+    # Test Exception in load_file
+    def mock_load_file_exc(*args, **kwargs):
+        raise RuntimeError("Custom exception")
+
+    monkeypatch.setattr("safetensors.torch.load_file", mock_load_file_exc, raising=False)
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.load_file", mock_load_file_exc, raising=False)
+    model_exc = Gemma4ForCausalLM.from_pretrained(save_file, config=config)
+    assert model_exc is not None
 
 
 def test_pytorch_native_pipeline_integration(tmp_path, monkeypatch):

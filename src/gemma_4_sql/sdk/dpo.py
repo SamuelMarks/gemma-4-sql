@@ -32,10 +32,10 @@ def run_dpo(
 
     Returns:
         A dictionary containing the results.
+
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     DPOConfig = __import__("gemma_4_sql.type_hints", fromlist=["DPOConfig"]).DPOConfig
-    test_mode = bool(kwargs.get("test_mode"))
     return get_backend(backend).run_dpo(
         DPOConfig(
             model_name=model_name,
@@ -44,6 +44,5 @@ def run_dpo(
             epochs=epochs,
             learning_rate=learning_rate,
             batch_size=batch_size,
-            test_mode=test_mode,
         )
     )

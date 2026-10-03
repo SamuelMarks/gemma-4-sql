@@ -8,6 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from gemma_4_sql.backends.pytorch.quantize import _export_gguf, validate_gguf_file
+from gemma_4_sql.exceptions import ExportError
+
 try:
     import torch
 except (ImportError, RuntimeError):
@@ -16,6 +19,7 @@ except (ImportError, RuntimeError):
 import math
 
 from gemma_4_sql.backends.pytorch.gguf import (
+    _flatten_values,
     extract_pytorch_state_dict,
     quantize_tensor_f16,
     quantize_tensor_q4_0,
@@ -23,8 +27,15 @@ from gemma_4_sql.backends.pytorch.gguf import (
     quantize_tensor_q8_0,
     write_gguf_v3,
 )
-from gemma_4_sql.backends.pytorch.quantize import _export_gguf, validate_gguf_file
-from gemma_4_sql.exceptions import ExportError
+
+
+def test_flatten_values_torch():
+    """Test _flatten_values with a torch tensor."""
+    import torch
+
+    t = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    res = _flatten_values(t)
+    assert res == [1.0, 2.0, 3.0, 4.0]
 
 
 def test_quantize_tensor_f16() -> None:
@@ -103,9 +114,15 @@ def test_extract_pytorch_state_dict_from_dict() -> None:
 
 def test_extract_pytorch_state_dict_from_model() -> None:
     """Test extracting state dict from a model object with state_dict() method."""
-    mock_model = MagicMock()
-    mock_model.state_dict.return_value = {"model.embed_tokens.weight": [1.0]}
-    extracted = extract_pytorch_state_dict(mock_model)
+    from torch import nn
+
+    class DummyModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.model = nn.ModuleDict({"embed_tokens": nn.Embedding(2, 4)})
+
+    real_model = DummyModel()
+    extracted = extract_pytorch_state_dict(real_model)
     assert "token_embd.weight" in extracted
 
 
@@ -202,26 +219,10 @@ def test_flatten_values_edge_cases() -> None:
     assert _flatten_values(42.5) == [42.5]
     assert _flatten_values(np.array([[1.0, 2.0], [3.0, 4.0]])) == [1.0, 2.0, 3.0, 4.0]
 
-    class MockTorchTensor:
-        """Mock torch tensor for flatten test."""
+    import torch
 
-        def detach(self) -> MockTorchTensor:
-            """Return self."""
-            return self
-
-        def cpu(self) -> MockTorchTensor:
-            """Return self."""
-            return self
-
-        def flatten(self) -> MockTorchTensor:
-            """Return self."""
-            return self
-
-        def numpy(self) -> np.ndarray:
-            """Return numpy array."""
-            return np.array([5.0, 6.0])
-
-    assert _flatten_values(MockTorchTensor()) == [5.0, 6.0]
+    t = torch.tensor([5.0, 6.0], dtype=torch.float32)
+    assert _flatten_values(t) == [5.0, 6.0]
 
 
 def test_quantize_fallbacks_without_numpy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -376,48 +377,33 @@ def test_gguf_write_metadata_types_and_payloads(tmp_path: Path) -> None:
 
 
 def test_extract_pytorch_state_dict_callable_object() -> None:
-    """Test extract_pytorch_state_dict from an object with a state_dict callable.
+    """Test extract_pytorch_state_dict from an object with a state_dict callable."""
+    from torch import nn
 
-    Returns:
-        None.
-    """
+    class CallableModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.model = nn.ModuleDict({"embed_tokens": nn.Embedding(2, 4)})
 
-    class MockModel:
-        """Mock model with state_dict callable."""
-
-        def state_dict(self) -> dict[str, list[float]]:
-            """Return mock state dict."""
-            return {"model.embed_tokens.weight": [1.0, 2.0]}
-
-    extracted = extract_pytorch_state_dict(MockModel())
+    extracted = extract_pytorch_state_dict(CallableModel())
     assert "token_embd.weight" in extracted
 
 
 def test_extract_state_dict_local_hf_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test extract_pytorch_state_dict from a local model directory using transformers.
+    """Test extract_pytorch_state_dict from a local model directory using transformers."""
+    from torch import nn
 
-    Args:
-        tmp_path: Temporary path fixture.
-        monkeypatch: Pytest monkeypatch fixture.
-
-    Returns:
-        None.
-    """
     local_dir = tmp_path / "local_hf_model"
     local_dir.mkdir()
 
-    class MockMod:
-        """Mock model."""
-
-        def state_dict(self) -> dict[str, list[float]]:
-            """Return state dict."""
-            return {
-                "embed_tokens.weight": [1.0],
-                "layers.notanint.weight": [1.0],
-            }
+    class HFModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.embed_tokens = nn.Embedding(2, 4)
+            self.layers = nn.ModuleDict({"notanint": nn.Linear(4, 4)})
 
     mock_auto = MagicMock()
-    mock_auto.from_pretrained.return_value = MockMod()
+    mock_auto.from_pretrained.return_value = HFModel()
     monkeypatch.setattr("transformers.AutoModelForCausalLM", mock_auto)
     res = extract_pytorch_state_dict(str(local_dir))
     assert "token_embd.weight" in res

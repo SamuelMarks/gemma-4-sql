@@ -1,0 +1,4 @@
+{
+  "typeCheckingMode": "strict",
+  "include": ["src/gemma_4_sql"]
+}

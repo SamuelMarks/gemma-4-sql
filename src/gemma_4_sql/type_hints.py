@@ -2,36 +2,164 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, TypeVar, Union
+from typing import TYPE_CHECKING, Any, Callable, Protocol, TypedDict, Union
+
+__all__ = [
+    "AudioInput",
+    "DPOConfig",
+    "ETLConfig",
+    "ImageInput",
+    "JSONDict",
+    "JSONPrimitive",
+    "JSONValue",
+    "ModelType",
+    "MultimodalInput",
+    "TensorType",
+    "TrainerState",
+    "TrainingConfig",
+]
 
 JSONPrimitive = Union[str, int, float, bool, None]
 JSONValue = Union[JSONPrimitive, Sequence["JSONValue"], Mapping[str, "JSONValue"]]
 JSONDict = dict[str, JSONValue]
 
-# TensorType is a generic alias for backend-specific tensors (JAX arrays, PyTorch tensors, etc.)
-TensorType = TypeVar("TensorType", bound=Any)
-ModelType = TypeVar("ModelType", bound=Any)
+
+class TensorType(Protocol):
+    """Protocol defining the required interface for a tensor object."""
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Provide the shape of the tensor."""
+        ...
+
+    @property
+    def ndim(self) -> int:
+        """Provide the number of dimensions of the tensor."""
+        ...
+
+    @property
+    def dtype(self) -> Any:
+        """Provide the data type of the tensor."""
+        ...
+
+    def reshape(self, *args: Any, **kwargs: Any) -> TensorType:
+        """Reshape the tensor."""
+        ...
+
+    def transpose(self, *args: Any, **kwargs: Any) -> TensorType:
+        """Transpose the tensor."""
+        ...
+
+    def astype(self, *args: Any, **kwargs: Any) -> TensorType:
+        """Cast the tensor to a different data type."""
+        ...
+
+    def __getitem__(self, item: Any) -> TensorType:
+        """Provide an item from the tensor."""
+        ...
+
+    def __sub__(self, other: Any) -> TensorType:
+        """Subtract another tensor from this tensor."""
+        ...
+
+    def __neg__(self) -> TensorType:
+        """Negate the tensor."""
+        ...
+
+
+class ModelType(Protocol):
+    """Protocol defining the required interface for a model object."""
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Call the model."""
+        ...
+
+    def generate(self, *args: Any, **kwargs: Any) -> Any:
+        """Generate output from the model."""
+        ...
+
+    def compile(self, *args: Any, **kwargs: Any) -> Any:
+        """Compile the model."""
+        ...
+
+    def fit(self, *args: Any, **kwargs: Any) -> Any:
+        """Train the model."""
+        ...
+
+    def parameters(self) -> Any:
+        """Provide the model's parameters."""
+        ...
+
+    def train(self, mode: bool = True) -> Any:
+        """Set the model's training mode."""
+        ...
+
+    def apply(self, *args: Any, **kwargs: Any) -> Any:
+        """Apply a function to the model."""
+        ...
+
+    def load_weights(self, *args: Any, **kwargs: Any) -> Any:
+        """Load weights into the model."""
+        ...
+
+    def freeze(self) -> Any:
+        """Freeze the model's parameters."""
+        ...
+
+    def named_modules(self) -> Any:
+        """Provide the model's named modules."""
+        ...
+
+    @property
+    def sampler(self) -> Any:
+        """Provide the model's sampler."""
+        ...
+
+    @property
+    def preprocessor(self) -> Any:
+        """Provide the model's preprocessor."""
+        ...
+
+    @property
+    def model(self) -> Any:
+        """Provide the underlying model object."""
+        ...
+
+    @property
+    def _quant_scales(self) -> Any:
+        """Provide the quantization scales."""
+        ...
+
+    @property
+    def _is_quantized(self) -> bool:
+        """Provide whether the model is quantized."""
+        ...
+
+    @property
+    def _quant_method(self) -> str:
+        """Provide the quantization method used."""
+        ...
+
+    def encode(self, *args: Any, **kwargs: Any) -> Any:
+        """Encode the input."""
+        ...
+
 
 if TYPE_CHECKING:
     from numpy import ndarray
-    from PIL.Image import Image
-else:
-    try:
-        from PIL.Image import Image
-    except (ImportError, AttributeError):
-        Image = object
 
+else:
     try:
         from numpy import ndarray
     except (ImportError, AttributeError):
         ndarray = object
 
 # Multimodal input types
-ImageInput = Union[str, Path, bytes, Image, None]
-AudioInput = Union[str, Path, bytes, "ndarray[Any, Any]", None]
+ImageInput = Union[str, Path, bytes, object, None]
+AudioInput = Union[str, Path, bytes, object, None]
 
 
 class MultimodalInput(TypedDict, total=False):
@@ -44,6 +172,7 @@ class MultimodalInput(TypedDict, total=False):
         image_token_mask: Optional boolean alignment mask indicating image tokens.
         audio_token_mask: Optional boolean alignment mask indicating audio tokens.
         modality: Explicit modality selector ('text', 'vision', 'audio', 'multimodal').
+
     """
 
     prompt: str
@@ -64,7 +193,6 @@ class DPOConfig:
     epochs: int = 1
     learning_rate: float = 1e-05
     batch_size: int = 2
-    test_mode: bool = False
 
 
 @dataclass
@@ -103,19 +231,19 @@ class TrainingConfig:
 class TrainerState:
     """State config for training loops."""
 
-    dataloader: Any = None
+    dataloader: Iterable[object] | None = None
     epochs: int = 1
-    train_step: Any = None
-    params: Any = None
-    opt_state: Any = None
-    policy_params: Any = None
-    ref_params: Any = None
-    policy_model: Any = None
-    ref_model: Any = None
-    optimizer: Any = None
-    criterion: Any = None
-    device: Any = None
-    dummy_batch: Any = None
+    train_step: Callable[..., Any] | None = None
+    params: object = None
+    opt_state: object = None
+    policy_params: object = None
+    ref_params: object = None
+    policy_model: object = None
+    ref_model: object = None
+    optimizer: object = None
+    criterion: Callable[..., Any] | None = None
+    device: str | object | None = None
+    dummy_batch: dict[str, Any] | None = None
     beta: float = 0.1
     dataset: str = ""
     learning_rate: float = 0.0

@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from flax import nnx
 
 if TYPE_CHECKING:
-    from jaxtyping import Array
+    from jax import Array
 
 
 def segment_ids_to_positions(segment_ids: Array) -> Array:
@@ -21,6 +21,7 @@ def segment_ids_to_positions(segment_ids: Array) -> Array:
 
     Returns:
         The resulting tensor array.
+
     """
     return jnp.cumsum(segment_ids, axis=-1)
 
@@ -40,7 +41,7 @@ def default_rope_params(_positions: Array, head_dim: int, rope_theta: int = 1000
 
     """
     fraction = jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim
-    timescale = rope_theta**fraction
+    timescale = float(rope_theta) ** fraction
     rotational_frequency = 1.0 / timescale
     rotational_frequency /= factor
     attention_factor = 1.0
@@ -50,7 +51,7 @@ def default_rope_params(_positions: Array, head_dim: int, rope_theta: int = 1000
 rope_functions: dict[str, Any] = {"default": default_rope_params}
 
 
-def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
+def apply_rope(x: Any, sin: Any, cos: Any) -> Any:
     """Execute the apply rope operation.
 
     Args:
@@ -101,6 +102,6 @@ class RoPE(nnx.Module):
 
         """
         (rotational_frequency, attention_factor) = self.rope_fn(positions)
-        sinusoid_inp = jnp.einsum("BT,k->BTk", positions, rotational_frequency, precision=jax.lax.Precision.HIGHEST)
+        sinusoid_inp = jnp.einsum("BT,k->BTk", positions, rotational_frequency, precision=getattr(jax.lax.Precision, "HIGHEST", None))
         (sin, cos) = (jnp.sin(sinusoid_inp) * attention_factor, jnp.cos(sinusoid_inp) * attention_factor)
         return (sin, cos)

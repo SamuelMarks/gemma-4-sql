@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing
 
-from gemma_4_sql.backends.common_data import _load_duckdb_dataset
+from gemma_4_sql.backends.common_data import load_duckdb_dataset
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig, JSONDict
 
@@ -15,7 +15,7 @@ try:
     import datasets as _datasets
 
     datasets: typing.Any = _datasets
-except (ImportError, AttributeError):
+except (ImportError, AttributeError):  # pragma: no cover
     datasets = None
 duckdb = None
 mx = None
@@ -30,6 +30,7 @@ def _pad_batch(batch_inputs: list[list[int]], batch_targets: list[list[int]]) ->
 
     Returns:
         A dictionary containing the results.
+
     """
     max_len_in = max(len(x) for x in batch_inputs)
     max_len_tgt = max(len(x) for x in batch_targets)
@@ -50,6 +51,7 @@ class MLXDataLoader:
             ds: The ds.
             tok: The tok.
             bs: The integer value for bs.
+
         """
         self.ds = ds
         self.tok = tok
@@ -62,8 +64,8 @@ class MLXDataLoader:
             object: The yielded item during generation.
 
         """
-        batch_inputs = []
-        batch_targets = []
+        batch_inputs: list[list[int]] = []
+        batch_targets: list[list[int]] = []
         for item in self.ds:
             prompt = item.get("sql_prompt", item.get("question", ""))
             target = item.get("sql", item.get("query", ""))
@@ -91,9 +93,10 @@ def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, d
 
     Raises:
         DependencyMissingError: If Datasets dependency is missing.
+
     """
     if duckdb_path and duckdb_table:
-        return _load_duckdb_dataset(duckdb_path, duckdb_table)
+        return load_duckdb_dataset(duckdb_path, duckdb_table)
     if datasets is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -113,6 +116,7 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
 
     Raises:
         DependencyMissingError: If datasets dependency is missing.
+
     """
     dataset_name = config.dataset_name
     split = config.split

@@ -49,6 +49,7 @@ class Gemma4Attention(nn.Module):
 
         Returns:
             Tuple containing attention output states and updated key-value cache.
+
         """
         bsz, q_len, _ = hidden_states.size()
 
@@ -90,7 +91,7 @@ class Gemma4Attention(nn.Module):
         # SDPA fallback
         is_causal = attention_mask is None and q_len > 1
 
-        if attention_mask is None and self.sliding_window is None:
+        if attention_mask is None and (not hasattr(self, "sliding_window") or self.sliding_window is None):
             attn_output = nn.functional.scaled_dot_product_attention(
                 query_states,
                 key_states,
@@ -100,10 +101,11 @@ class Gemma4Attention(nn.Module):
         else:
             attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
 
-            if not self.is_global and self.sliding_window is not None:
+            if not self.is_global and (not hasattr(self, "sliding_window") or self.sliding_window is not None):
                 min_val = torch.finfo(attn_weights.dtype).min
+                sw = getattr(self, "sliding_window", 4096)
                 window_mask = torch.ones_like(attn_weights, dtype=torch.bool).tril(diagonal=0)
-                window_mask = torch.logical_and(window_mask, torch.ones_like(attn_weights, dtype=torch.bool).triu(diagonal=-self.sliding_window + 1))
+                window_mask = torch.logical_and(window_mask, torch.ones_like(attn_weights, dtype=torch.bool).triu(diagonal=-sw + 1))
                 attn_weights = torch.where(window_mask, attn_weights, torch.tensor(min_val, dtype=attn_weights.dtype, device=attn_weights.device))
 
             if attention_mask is not None:

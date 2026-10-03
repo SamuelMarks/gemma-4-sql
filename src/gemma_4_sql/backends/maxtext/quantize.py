@@ -13,7 +13,7 @@ Implements:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from jax import Array
@@ -40,9 +40,9 @@ except (ImportError, AttributeError):
     aqt = None
 
 try:
-    from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model
+    import maxtext.models.gemma4 as _gemma4
 
-    Gemma4Model: Any = _Gemma4Model
+    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     Gemma4Model = None
 
@@ -78,6 +78,7 @@ def quantize_tensor_aqt(
     Raises:
         DependencyMissingError: If JAX is missing.
         ValueError: If bits is non-positive.
+
     """
     if jax is None or jnp is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -116,6 +117,7 @@ def apply_aqt_quantization(
     Raises:
         DependencyMissingError: If JAX is missing.
         ValueError: If method is unsupported.
+
     """
     if jax is None or jnp is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -135,23 +137,23 @@ def apply_aqt_quantization(
     clipping_bound = float((1 << (bits - 1)) - 1)
     targets = tuple(quant_targets) if quant_targets is not None else DEFAULT_AQT_TARGETS
 
-    if not isinstance(params, dict):
-        return params, {"method": method, "memory_reduction_factor": reduction}, 0
-
     injected_count = 0
 
     def _traverse(curr: dict[str, Any], current_path: str = "") -> dict[str, Any]:
         """Traverse parameters recursively to quantize targeted kernels."""
         nonlocal injected_count
+        if not isinstance(curr, dict):
+            return curr
         res: dict[str, Any] = {}
         for k, v in curr.items():
             sub_path = f"{current_path}.{k}" if current_path else k
             if isinstance(v, dict):
+                v_dict = cast(dict[str, Any], v)
                 # Check if this leaf dictionary is a target projection module
-                if "kernel" in v and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in targets):
-                    kernel = v["kernel"]
+                if "kernel" in v_dict and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in targets):
+                    kernel = v_dict["kernel"]
                     q_kernel, scale = quantize_tensor_aqt(kernel, bits=bits)
-                    new_v = dict(v)
+                    new_v: dict[str, Any] = dict(v_dict)
                     new_v["kernel"] = q_kernel
                     new_v["kernel_scale"] = scale
                     new_v["aqt_config"] = {
@@ -162,7 +164,7 @@ def apply_aqt_quantization(
                     res[k] = new_v
                     injected_count += 1
                 else:
-                    res[k] = _traverse(v, sub_path)
+                    res[k] = _traverse(cast(dict[str, Any], v), sub_path)
             else:
                 res[k] = v
         return res
@@ -198,6 +200,7 @@ def quantize_model(
 
     Raises:
         DependencyMissingError: If MaxText dependencies are missing.
+
     """
     if jax is None or jnp is None or (Gemma4Model is None and "params" not in kwargs):
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -212,6 +215,10 @@ def quantize_model(
         if "params" in kwargs and kwargs["params"] is not None:
             params = kwargs["params"]
         else:
+            if Gemma4Model is None:
+                from gemma_4_sql.exceptions import DependencyMissingError
+
+                raise DependencyMissingError("MaxText dependency missing.")
             model = Gemma4Model(model_name)
             rng = jax.random.PRNGKey(0)
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
@@ -219,9 +226,9 @@ def quantize_model(
 
         if isinstance(params, dict):
             quant_targets = kwargs.get("quant_targets")
-            targets_list = list(quant_targets) if isinstance(quant_targets, (list, tuple)) else None
+            targets_list: list[str] | None = list(cast(list[str], quant_targets)) if isinstance(quant_targets, (list, tuple)) else None
             _quantized_params, meta, count = apply_aqt_quantization(
-                params=params,
+                params=cast(dict[str, Any], params),
                 method=method,
                 quant_targets=targets_list,
             )

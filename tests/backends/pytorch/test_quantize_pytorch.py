@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from torch import nn
 
 import gemma_4_sql.backends.pytorch.quantize as pt_quantize
 from gemma_4_sql.backends.pytorch.quantize import (
@@ -21,42 +22,47 @@ from gemma_4_sql.backends.pytorch.quantize import (
 from gemma_4_sql.exceptions import DependencyMissingError
 
 
-class MockTorch:
-    """Mock PyTorch module for testing."""
+class TinyModel(nn.Module):
+    """A tiny real PyTorch model for testing."""
 
-    float16 = "float16"
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__()
+        self.linear = nn.Linear(4, 4)
+        self.config = type("Config", (), {"quantization_config": None})()
+        self.quantized = False
+        self.saved_path: str | None = None
+
+    def quantize(self, tokenizer: Any, quant_config: Any = None, calib_data: Any = None) -> None:
+        self.quantized = True
+        assert quant_config["w_bit"] == 4
+        assert calib_data is not None
+
+    def save_quantized(self, save_path: str) -> None:
+        self.saved_path = save_path
+
+    @classmethod
+    def from_pretrained(cls, _name: str, **kwargs: Any) -> Any:
+        return cls()
 
 
-class MockBitsAndBytesConfig:
-    """Mock BitsAndBytesConfig."""
+class DummyBitsAndBytesConfig:
+    """Dummy config since BitsAndBytes isn't installed."""
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        """Initialize mock config."""
-
-
-class MockAutoModelForCausalLM:
-    """Mock AutoModelForCausalLM."""
-
-    @staticmethod
-    def from_pretrained(_model_name: str, **_kwargs: object) -> object:
-        """Return dummy model."""
-        return object()
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
 
 
 def test_quantize_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test PyTorch quantize raises DependencyMissingError when PyTorch is absent."""
-    monkeypatch.setattr(pt_quantize, "torch", None)
+    """Test PyTorch quantize raises DependencyMissingError when dependencies are absent."""
     monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", None)
-    monkeypatch.setattr(pt_quantize, "AutoModelForCausalLM", None)
     with pytest.raises(DependencyMissingError, match=r"PyTorch quantization dependencies are missing\."):
         quantize_model("model", "int8")
 
 
 def test_quantize_pytorch_bnb_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test standard BitsAndBytes int8 and int4 quantization methods."""
-    monkeypatch.setattr(pt_quantize, "torch", MockTorch())
-    monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", MockBitsAndBytesConfig)
-    monkeypatch.setattr(pt_quantize, "AutoModelForCausalLM", MockAutoModelForCausalLM)
+    monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", DummyBitsAndBytesConfig)
+    monkeypatch.setattr(pt_quantize, "AutoModelForCausalLM", object())
 
     res_int8 = quantize_model("model", "int8")
     assert res_int8["backend"] == "pytorch"
@@ -71,24 +77,19 @@ def test_quantize_pytorch_bnb_methods(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_quantize_pytorch_bnb_in_memory_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test BitsAndBytes quantization attached directly to an in-memory model instance."""
-    from unittest.mock import MagicMock
+    monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", DummyBitsAndBytesConfig)
 
-    monkeypatch.setattr(pt_quantize, "torch", MockTorch())
-    monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", MockBitsAndBytesConfig)
+    real_model = TinyModel()
 
-    mock_model = MagicMock()
-    mock_model.config = MagicMock()
-
-    res = quantize_model("dummy_name", "int8", model=mock_model)
+    res = quantize_model("dummy_name", "int8", model=real_model)
     assert res["status"] == "quantized_int8"
-    assert getattr(mock_model, "_is_quantized", False) is True
-    assert getattr(mock_model, "_quant_method", "") == "int8"
-    assert hasattr(mock_model.config, "quantization_config")
+    assert getattr(real_model, "_is_quantized", False) is True
+    assert getattr(real_model, "_quant_method", "") == "int8"
+    assert real_model.config.quantization_config is not None
 
 
 def test_quantize_pytorch_error_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test error branch during quantization wrapper execution."""
-    monkeypatch.setattr(pt_quantize, "torch", MockTorch())
     monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", Exception)
     res = quantize_model("model", "int8")
     assert "failed" in str(res["status"])
@@ -252,42 +253,17 @@ def test_apply_awq_quantization_success(monkeypatch: pytest.MonkeyPatch, tmp_pat
     """Test _apply_awq_quantization execution, calibration, and serialization."""
     import sys
 
-    class MockAWQModel:
-        """Mock AutoAWQForCausalLM instance."""
-
-        quantized: bool = False
-        saved_path: str | None = None
-
-        def quantize(self, _tokenizer: Any, quant_config: Any = None, calib_data: Any = None) -> None:
-            """Simulate model quantization with calibration data."""
-            self.quantized = True
-            assert quant_config["w_bit"] == 4
-            assert calib_data is not None
-
-        def save_quantized(self, save_path: str) -> None:
-            """Simulate saving quantized model."""
-            self.saved_path = save_path
-
-        @classmethod
-        def from_pretrained(cls, _name: str) -> MockAWQModel:
-            """Simulate loading model."""
-            return cls()
-
     class MockTokenizer:
-        """Mock Hugging Face AutoTokenizer."""
-
         saved_path: str | None = None
 
         def save_pretrained(self, save_path: str) -> None:
-            """Simulate saving tokenizer."""
             self.saved_path = save_path
 
         @classmethod
-        def from_pretrained(cls, _name: str) -> MockTokenizer:
-            """Simulate loading tokenizer."""
+        def from_pretrained(cls, _name: str) -> Any:
             return cls()
 
-    mock_awq_module = type("MockAWQModule", (), {"AutoAWQForCausalLM": MockAWQModel})
+    mock_awq_module = type("MockAWQModule", (), {"AutoAWQForCausalLM": TinyModel})
     mock_transformers_module = type("MockTransformersModule", (), {"AutoTokenizer": MockTokenizer})
     monkeypatch.setitem(sys.modules, "awq", mock_awq_module)
     monkeypatch.setitem(sys.modules, "transformers", mock_transformers_module)
@@ -326,42 +302,26 @@ def test_apply_gptq_quantization_success(monkeypatch: pytest.MonkeyPatch, tmp_pa
     import sys
 
     class MockGPTQQuantizer:
-        """Mock GPTQQuantizer from Optimum."""
-
         bits: int
         dataset: str
 
         def __init__(self, bits: int = 4, dataset: str = "c4", **kwargs: object) -> None:
-            """Initialize mock quantizer."""
             self.bits = bits
             self.dataset = dataset
 
         def quantize_model(self, model: Any, _tokenizer: Any) -> Any:
-            """Simulate model quantization."""
             return model
 
         def save(self, _model: Any, save_dir: str) -> None:
-            """Simulate artifact serialization."""
             Path(save_dir).mkdir(parents=True, exist_ok=True)
             (Path(save_dir) / "model.safetensors").write_bytes(b"dummy_weights")
 
     class MockTokenizer:
-        """Mock AutoTokenizer."""
-
         def save_pretrained(self, _save_path: str) -> None:
-            """Simulate saving tokenizer."""
+            pass
 
         @classmethod
-        def from_pretrained(cls, _name: str) -> MockTokenizer:
-            """Simulate loading tokenizer."""
-            return cls()
-
-    class MockModel:
-        """Mock AutoModelForCausalLM."""
-
-        @classmethod
-        def from_pretrained(cls, _name: str, **_kwargs: object) -> MockModel:
-            """Simulate loading causal LM."""
+        def from_pretrained(cls, _name: str) -> Any:
             return cls()
 
     mock_optimum_gptq = type("MockOptimumGPTQ", (), {"GPTQQuantizer": MockGPTQQuantizer})
@@ -372,7 +332,7 @@ def test_apply_gptq_quantization_success(monkeypatch: pytest.MonkeyPatch, tmp_pa
     mock_transformers = type(
         "MockTransformers",
         (),
-        {"AutoModelForCausalLM": MockModel, "AutoTokenizer": MockTokenizer},
+        {"AutoModelForCausalLM": TinyModel, "AutoTokenizer": MockTokenizer},
     )
     monkeypatch.setitem(sys.modules, "transformers", mock_transformers)
 

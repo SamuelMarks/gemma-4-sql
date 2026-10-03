@@ -35,6 +35,7 @@ class LayerCache(nnx.Module):
             cache_shape: A sequence of cache shape.
             dtype: The dtype.
             _shd: The  shd.
+
         """
         self.k_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))
         self.v_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))
@@ -60,7 +61,7 @@ def init_cache(config: ModelConfig, batch_size: int, max_seq_len: int) -> Cache:
 
     """
     cache_size = 2 ** math.ceil(math.log2(max(max_seq_len, 1)))
-    caches = []
+    caches: list[LayerCache] = []
     for i in range(config.num_hidden_layers):
         attn_type = GEMMA4_ATTENTION_PATTERN[i % len(GEMMA4_ATTENTION_PATTERN)]
         if attn_type == AttentionType.GLOBAL:
@@ -71,9 +72,6 @@ def init_cache(config: ModelConfig, batch_size: int, max_seq_len: int) -> Cache:
             hd = config.head_dim
         caches.append(LayerCache((batch_size, cache_size, num_kv, hd), config.dtype, config.shd_cfg.cache))
     return caches
-
-
-GEMMA4_ATTENTION_PATTERN = (AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.GLOBAL)
 
 
 GEMMA4_ATTENTION_PATTERN = (AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.GLOBAL)

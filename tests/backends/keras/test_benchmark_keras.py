@@ -1,611 +1,198 @@
-"""Tests for Keras Benchmark."""
+"""Tests for Keras benchmark."""
+
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import gemma_4_sql.backends.keras.benchmark as bm
+from gemma_4_sql.backends.keras.benchmark import _get_device_str, _load_keras_model, _run_benchmark_pass, benchmark_model
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
-class MockTfTensor:
-    """Provide class docstring."""
+def test_get_device_str_no_tf():
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", None):
+        assert _get_device_str("gpu") == "/CPU:0"
 
-    def numpy(self) -> float:
-        """Execute function.
 
-        Returns:
-            object: Description of return.
+def test_get_device_str_with_tf():
+    mock_tf = MagicMock()
+    mock_tf.config.list_physical_devices.return_value = ["GPU:0"]
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf):
+        assert _get_device_str("cpu") == "/CPU:0"
+        assert _get_device_str("gpu") == "/GPU:0"
+        mock_tf.config.list_physical_devices.return_value = []
+        assert _get_device_str("gpu") == "/CPU:0"
+        mock_tf.config.list_physical_devices.return_value = ["TPU:0"]
+        assert _get_device_str("tpu") == "/TPU:0"
+        assert _get_device_str("unknown") == "/CPU:0"
 
-        """
-        return 0.0
 
+def test_load_keras_model_missing_deps():
+    with patch("gemma_4_sql.backends.keras.benchmark.keras", None), pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
+        _load_keras_model("test", "bfloat16")
 
-class MockTf:
-    """Provide class docstring."""
 
-    int32 = "int32"
+def test_load_keras_model_import_error():
+    mock_keras = MagicMock()
+    with patch("gemma_4_sql.backends.keras.benchmark.keras", mock_keras), patch("builtins.__import__", side_effect=ImportError), pytest.raises(ValueError, match="Failed to load actual model"):
+        _load_keras_model("test", "bfloat16")
 
-    class MockRandom:
-        """Provide class docstring."""
 
-        @staticmethod
-        def set_seed(*_args: object, **_kwargs: object) -> None:
-            """Execute set seed helper."""
+def test_load_keras_model_success():
+    mock_keras = MagicMock()
+    mock_gemma_causal_lm_cls = MagicMock()
+    mock_model = MagicMock()
+    mock_gemma_causal_lm_cls.GemmaCausalLM.from_preset.return_value = mock_model
 
-        @staticmethod
-        def uniform(*_args: object, **_kwargs: object) -> object:
-            """Execute function.
+    with patch("gemma_4_sql.backends.keras.benchmark.keras", mock_keras), patch("builtins.__import__", return_value=mock_gemma_causal_lm_cls):
+        model = _load_keras_model("test", "bfloat16")
+        assert model == mock_model
+        mock_keras.config.set_floatx.assert_called_with("bfloat16")
 
-            Returns:
-                object: Description of return.
 
-            """
-            return MockTfTensor()
+def test_run_benchmark_pass_missing_tf():
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", None), pytest.raises(DependencyMissingError, match="TensorFlow dependencies are missing"):
+        _run_benchmark_pass(None, 1, 1, 1, "prefill", 10, "cpu")
 
-    random = MockRandom
 
-    def zeros(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function.
+def test_run_benchmark_pass_prefill():
+    mock_tf = MagicMock()
+    mock_tf.random.uniform.return_value = MagicMock()
+    mock_model = MagicMock()
 
-        Returns:
-            object: Description of return.
+    def mock_function(*args, **kwargs):
+        def decorator(f):
+            return f
 
-        """
-        return MockTfTensor()
+        return decorator
 
-    def function(self, fn: object = None, **_kwargs: object) -> object:
-        """Execute function.
+    mock_tf.function = mock_function
+    mock_out = MagicMock()
+    mock_out.numpy.return_value = None
+    mock_model.return_value = mock_out
 
-        Returns:
-            object: Description of return.
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf), patch("gemma_4_sql.backends.keras.benchmark._get_device_str", return_value="/CPU:0"):
+        tps, lat, mem = _run_benchmark_pass(mock_model, 1, 1, 1, "prefill", 10, "cpu")
+        assert isinstance(tps, float)
+        assert isinstance(lat, float)
+        assert mem == 6000.0
 
-        """
-        if fn is None:
-            return lambda x: x
-        return fn
 
-    class MockConfig:
-        """Provide class docstring."""
+def test_run_benchmark_pass_generate_gpu():
+    mock_tf = MagicMock()
+    mock_tf.random.uniform.return_value = MagicMock()
+    mock_tf.config.experimental.get_memory_info.return_value = {"peak": 1024 * 1024}  # 1MB
+    mock_model = MagicMock()
 
-        @staticmethod
-        def list_physical_devices(_d: str) -> list:
-            """Execute list physical devices helper."""
-            return [1]
+    def mock_function(*args, **kwargs):
+        def decorator(f):
+            return f
 
-        class MockExperimental:
-            """Provide class docstring."""
+        return decorator
 
-            @staticmethod
-            def get_memory_info(_device: str) -> dict:
-                """Execute function.
+    mock_tf.function = mock_function
+    mock_out = MagicMock()
+    mock_out.numpy.return_value = None
+    mock_model.generate.return_value = mock_out
 
-                Returns:
-                    object: Description of return.
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf), patch("gemma_4_sql.backends.keras.benchmark._get_device_str", return_value="/GPU:0"):
+        tps, lat, mem = _run_benchmark_pass(mock_model, 1, 1, 1, "generate", 10, "gpu")
+        assert isinstance(tps, float)
+        assert isinstance(lat, float)
+        assert mem == 1.0
 
-                """
-                return {"current": 1024 * 1024 * 100}
 
-            @staticmethod
-            def reset_memory_stats(_device: str) -> None:
-                """Execute reset memory stats helper."""
+def test_run_benchmark_pass_generate_gpu_value_error():
+    mock_tf = MagicMock()
+    mock_tf.random.uniform.return_value = MagicMock()
+    mock_tf.config.experimental.get_memory_info.side_effect = ValueError
+    mock_tf.config.experimental.reset_memory_stats.side_effect = ValueError
+    mock_model = MagicMock()
 
-        experimental = MockExperimental
+    def mock_function(*args, **kwargs):
+        def decorator(f):
+            return f
 
-    config = MockConfig
+        return decorator
 
-    class device:
-        """Test class for device."""
+    mock_tf.function = mock_function
 
-        def __init__(self, d):
-            """Initialize __init__."""
-            self.d = d
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf), patch("gemma_4_sql.backends.keras.benchmark._get_device_str", return_value="/GPU:0"):
+        _tps, _lat, mem = _run_benchmark_pass(mock_model, 1, 1, 1, "generate", 10, "gpu")
+        assert mem == 6000.0
 
-        def __enter__(self):
-            """Initialize __enter__."""
 
-        def __exit__(self, *a):
-            """Initialize __exit__."""
+def test_run_benchmark_pass_branches():
+    mock_tf = MagicMock()
+    mock_tf.random.uniform.return_value = MagicMock()
 
+    def mock_function(*args, **kwargs):
+        def decorator(f):
+            return f
 
-def test_benchmark_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+        return decorator
 
-    Raises:
-        AssertionError: Description.
+    mock_tf.function = mock_function
 
-    """
-    monkeypatch.setattr(bm, "keras", None)
-    from gemma_4_sql.exceptions import DependencyMissingError
+    # Case 1: mode="prefill", out does NOT have numpy
+    mock_model = MagicMock()
 
-    with pytest.raises(DependencyMissingError, match=r"Keras dependencies are missing\."):
-        bm.benchmark_model("model", "gpu", 1)
+    class OutNoNumpy:
+        pass
 
+    mock_model.return_value = OutNoNumpy()
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf), patch("gemma_4_sql.backends.keras.benchmark._get_device_str", return_value="/CPU:0"):
+        _run_benchmark_pass(mock_model, 1, 1, 1, "prefill", 10, "cpu")
 
-def test_benchmark_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+    # Case 2: mode="generate", model does NOT have generate
+    class ModelNoGenerate:
+        def __call__(self, *args, **kwargs):
+            return OutNoNumpy()
 
-    Raises:
-        AssertionError: Description.
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf), patch("gemma_4_sql.backends.keras.benchmark._get_device_str", return_value="/CPU:0"):
+        _run_benchmark_pass(ModelNoGenerate(), 1, 1, 1, "generate", 10, "cpu")
 
-    """
-    monkeypatch.setattr(bm, "tf", MockTf())
-    monkeypatch.setattr(bm, "keras", MockKeras())
-    res = bm.benchmark_model("model", "gpu", 1, test_mode=True, num_runs=2)
-    if "failed" not in res["status"]:
-        raise AssertionError
+    # Case 3: mode="generate", model has generate, out does NOT have numpy
+    mock_model = MagicMock()
+    mock_model.generate.return_value = OutNoNumpy()
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf), patch("gemma_4_sql.backends.keras.benchmark._get_device_str", return_value="/CPU:0"):
+        _run_benchmark_pass(mock_model, 1, 1, 1, "generate", 10, "cpu")
 
+    # Case 4: GPU without reset_memory_stats value error
+    mock_tf.config.experimental.reset_memory_stats = MagicMock()
+    mock_tf.config.experimental.get_memory_info.return_value = {"current": 2048 * 1024}  # 2MB
+    mock_model = MagicMock()
+    mock_out = MagicMock()
+    mock_out.numpy.return_value = None
+    mock_model.return_value = mock_out
+    with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf), patch("gemma_4_sql.backends.keras.benchmark._get_device_str", return_value="/GPU:0"):
+        _tps, _lat, mem = _run_benchmark_pass(mock_model, 1, 1, 1, "prefill", 10, "gpu")
+        assert mem == 2.0
 
-def test_benchmark_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
 
-    Raises:
-        AssertionError: Description.
+def test_benchmark_model_missing_deps():
+    with patch("gemma_4_sql.backends.keras.benchmark.keras", None), pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
+        benchmark_model("test", "cpu", 1)
 
-    """
-    monkeypatch.setattr(bm, "tf", MockTf())
-    monkeypatch.setattr(bm, "keras", object())
 
-    def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+def test_benchmark_model_success():
+    mock_keras = MagicMock()
+    mock_tf = MagicMock()
 
-        Raises:
-            ValueError: Description.
+    def mock_run_benchmark_wrapper(backend_name, model_name, hardware, batch_size, missing_deps, missing_status, benchmark_fn):
+        benchmark_fn()
+        return {"status": "ok"}
 
-        """
-        msg = "err"
-        raise ValueError(msg)
+    with (
+        patch("gemma_4_sql.backends.keras.benchmark.keras", mock_keras),
+        patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf),
+        patch("gemma_4_sql.backends.keras.benchmark.run_benchmark_wrapper", mock_run_benchmark_wrapper),
+        patch("gemma_4_sql.backends.keras.benchmark._load_keras_model") as mock_load,
+        patch("gemma_4_sql.backends.keras.benchmark._run_benchmark_pass") as mock_pass,
+    ):
+        mock_load.return_value = MagicMock()
+        mock_pass.return_value = (1.0, 1.0, 1.0)
 
-    monkeypatch.setattr(MockTf, "zeros", raise_err)
-    res = bm.benchmark_model("model", "gpu", 1, test_mode=True)
-    if "failed" not in str(res["status"]):
-        raise AssertionError
-
-
-class MockKeras:
-    """Provide class docstring."""
-
-    class MockKerasConfig:
-        """Test class for MockKerasConfig."""
-
-        @staticmethod
-        def set_floatx(dtype):
-            """Execute set floatx helper."""
-
-    config = MockKerasConfig
-
-    def mock_input(*_args: object, **_kwargs: object) -> None:
-        """Execute function."""
-        return
-
-    Input = mock_input
-
-    class MockLayers:
-        """Provide class docstring."""
-
-        class Embedding:
-            """Provide class docstring."""
-
-            def __init__(self, *args: object, **kwargs: object) -> None:
-                """Execute function."""
-
-            def __call__(self, x: object) -> object:
-                """Execute function.
-
-                Returns:
-                    object: Description of return.
-
-                """
-                return x
-
-        class Dense:
-            """Provide class docstring."""
-
-            def __init__(self, *args: object, **kwargs: object) -> None:
-                """Execute function."""
-
-            def __call__(self, x: object) -> object:
-                """Execute function.
-
-                Returns:
-                    object: Description of return.
-
-                """
-                return x
-
-    layers = MockLayers
-
-    def mock_model(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return lambda x: x
-
-    Model = mock_model
-
-
-def test_benchmark_keras_real_no_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    import sys
-
-    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
-    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": type("MockGemma", (), {"from_preset": lambda *a, **k: MockKeras.Model()})}))
-
-    builtins = __import__("builtins", fromlist=[""])
-    orig_import = builtins.__import__
-
-    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
-        """Test function."""
-        if name == "keras_nlp.models":
-            return sys.modules["keras_nlp.models"]
-        return orig_import(name, _globals, _locals, fromlist, level)
-
-    monkeypatch.setattr("builtins.__import__", mock_import)
-
-    monkeypatch.setattr(bm, "tf", MockTf())
-    monkeypatch.setattr(bm, "keras", MockKeras())
-    res = bm.benchmark_model("model", "gpu", 1)
-    if "failed" in str(res.get("status", "")):
-        raise AssertionError(f"Expected success, got {res}")
-
-
-def test_benchmark_keras_real_mem(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    import sys
-
-    monkeypatch.setitem(sys.modules, "keras_nlp", type("MockKerasNLP", (), {}))
-    monkeypatch.setitem(sys.modules, "keras_nlp.models", type("MockModels", (), {"GemmaCausalLM": type("MockGemma", (), {"from_preset": lambda *a, **k: MockKeras.Model()})}))
-
-    builtins = __import__("builtins", fromlist=[""])
-    orig_import = builtins.__import__
-
-    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
-        """Test function."""
-        if name == "keras_nlp.models":
-            return sys.modules["keras_nlp.models"]
-        return orig_import(name, _globals, _locals, fromlist, level)
-
-    monkeypatch.setattr("builtins.__import__", mock_import)
-
-    mock_tf = MockTf()
-
-    def mock_get_memory_info(_x: str) -> dict:
-        """Test function."""
-        msg = "No memory info"
-        raise ValueError(msg)
-
-    mock_tf.config = type("MockConfig", (), {"experimental": type("MockExp", (), {"get_memory_info": mock_get_memory_info})})()
-    monkeypatch.setattr(bm, "tf", mock_tf)
-    monkeypatch.setattr(bm, "keras", MockKeras())
-    bm.benchmark_model("model", "gpu", 1)
-
-
-def test_benchmark_keras_coverage(monkeypatch):
-    """Test benchmark keras coverage functionality."""
-    import gemma_4_sql.backends.keras.benchmark as bm
-
-    class MockOut:
-        """Test class for MockOut."""
-
-        def numpy(self):
-            """Execute numpy helper."""
-
-    class MockModel:
-        """Test class for MockModel."""
-
-        def __call__(self, x):
-            """Initialize __call__."""
-            return MockOut()
-
-        def generate(self, *a, **k):
-            """Execute generate helper."""
-            return MockOut()
-
-    class MockTF:
-        """Test class for MockTF."""
-
-        class random:
-            """Test class for random."""
-
-            @staticmethod
-            def set_seed(s):
-                """Execute set seed helper."""
-
-            @staticmethod
-            def uniform(*a, **k):
-                """Execute uniform helper."""
-                return "dummy"
-
-        int32 = "int32"
-
-        class device:
-            """Test class for device."""
-
-            def __init__(self, d):
-                """Initialize __init__."""
-                self.d = d
-
-            def __enter__(self):
-                """Initialize __enter__."""
-
-            def __exit__(self, *a):
-                """Initialize __exit__."""
-
-        @staticmethod
-        def function(*a, **k):
-            """Execute function helper."""
-            return lambda f: f
-
-        class config:
-            """Test class for config."""
-
-            @staticmethod
-            def list_physical_devices(d):
-                """Execute list physical devices helper."""
-                return [1] if d == "GPU" else []
-
-            class experimental:
-                """Test class for experimental."""
-
-                @staticmethod
-                def reset_memory_stats(d):
-                    """Execute reset memory stats helper."""
-                    if "err" in d:
-                        raise ValueError()
-
-                @staticmethod
-                def get_memory_info(d):
-                    """Execute get memory info helper."""
-                    if "err" in d:
-                        raise ValueError()
-                    return {"peak": 1024 * 1024 * 100}
-
-        class Tensor:
-            """Test class for Tensor."""
-
-    monkeypatch.setattr(bm, "tf", MockTF)
-    monkeypatch.setattr(bm, "keras", type("Keras", (), {"KerasTensor": MockTF.Tensor}))
-
-    bm._run_benchmark_pass(MockModel(), 1, 1, 1, "prefill", 128, "cpu")
-    bm._run_benchmark_pass(MockModel(), 1, 1, 1, "generate", 128, "gpu")
-
-    # cover exceptions in GPU memory
-    bm._run_benchmark_pass(MockModel(), 1, 1, 1, "generate", 128, "errGPU")
-
-
-def test_benchmark_keras_coverage2(monkeypatch):
-    """Test benchmark keras coverage2 functionality."""
-    import gemma_4_sql.backends.keras.benchmark as bm
-
-    class MockModelNoNumpy:
-        """Test class for MockModelNoNumpy."""
-
-        def __call__(self, x):
-            """Initialize __call__."""
-            return x
-
-        def generate(self, *a, **k):
-            """Execute generate helper."""
-            return "out"
-
-    class MockTF:
-        """Test class for MockTF."""
-
-        class random:
-            """Test class for random."""
-
-            @staticmethod
-            def set_seed(s):
-                """Execute set seed helper."""
-
-            @staticmethod
-            def uniform(*a, **k):
-                """Execute uniform helper."""
-                return "dummy"
-
-        int32 = "int32"
-
-        class device:
-            """Test class for device."""
-
-            def __init__(self, d):
-                """Initialize __init__."""
-                self.d = d
-
-            def __enter__(self):
-                """Initialize __enter__."""
-
-            def __exit__(self, *a):
-                """Initialize __exit__."""
-
-        @staticmethod
-        def function(*a, **k):
-            """Execute function helper."""
-            return lambda f: f
-
-        class config:
-            """Test class for config."""
-
-            @staticmethod
-            def list_physical_devices(d):
-                """Execute list physical devices helper."""
-                return []
-
-            class experimental:
-                """Test class for experimental."""
-
-                @staticmethod
-                def reset_memory_stats(d):
-                    """Execute reset memory stats helper."""
-
-                @staticmethod
-                def get_memory_info(d):
-                    """Execute get memory info helper."""
-                    return {"peak": 10}
-
-        class Tensor:
-            """Test class for Tensor."""
-
-    monkeypatch.setattr(bm, "tf", MockTF)
-    monkeypatch.setattr(bm, "keras", type("Keras", (), {"KerasTensor": MockTF.Tensor}))
-
-    # cpu string
-    assert bm._get_device_str("cpu")
-    # missing deps
-    monkeypatch.setattr(bm, "keras", None)
-    import pytest
-
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    with pytest.raises(DependencyMissingError):
-        bm.benchmark_model("m", "cpu", 1)
-
-    monkeypatch.setattr(bm, "keras", type("Keras", (), {"KerasTensor": MockTF.Tensor}))
-    # Cover False branch of hasattr(out, 'numpy')
-    bm._run_benchmark_pass(MockModelNoNumpy(), 1, 2, 1, "prefill", 128, "cpu")
-    bm._run_benchmark_pass(MockModelNoNumpy(), 1, 2, 1, "generate", 128, "cpu")
-
-    # Cover False branch of hasattr(model, 'generate')
-    class MockModelNoGenerate:
-        """Test class for MockModelNoGenerate."""
-
-        def __call__(self, x):
-            """Initialize __call__."""
-            return x
-
-    bm._run_benchmark_pass(MockModelNoGenerate(), 1, 2, 1, "generate", 128, "cpu")
-
-
-def test_benchmark_keras_coverage3(monkeypatch):
-    """Test benchmark keras coverage3 functionality."""
-    import gemma_4_sql.backends.keras.benchmark as bm
-
-    class config:
-        """Test class for config."""
-
-        @staticmethod
-        def list_physical_devices(d):
-            """Execute list physical devices helper."""
-            return [1] if d in ("GPU", "TPU") else []
-
-        class experimental:
-            """Test class for experimental."""
-
-            @staticmethod
-            def reset_memory_stats(d):
-                """Execute reset memory stats helper."""
-
-            @staticmethod
-            def get_memory_info(d):
-                """Execute get memory info helper."""
-                return {"peak": 10}
-
-    monkeypatch.setattr(bm, "tf", type("MockTF", (), {"config": config()}))
-    assert bm._get_device_str("tpu") == "/TPU:0"
-
-    # 51 -> 161 (DependencyMissingError)
-    monkeypatch.setattr(bm, "keras", None)
-    import pytest
-
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    with pytest.raises(DependencyMissingError):
-        bm.benchmark_model("m", "gpu", 1)
-
-
-def test_keras_benchmark_126_127(monkeypatch):
-    """Test keras benchmark 126 127 functionality."""
-    import gemma_4_sql.backends.keras.benchmark as bm
-
-    class MockModel:
-        """Test class for MockModel."""
-
-        def __call__(self, x):
-            """Initialize __call__."""
-            return x
-
-    class MockTF:
-        """Test class for MockTF."""
-
-        class random:
-            """Test class for random."""
-
-            @staticmethod
-            def set_seed(s):
-                """Execute set seed helper."""
-
-            @staticmethod
-            def uniform(*a, **k):
-                """Execute uniform helper."""
-                return "dummy"
-
-        int32 = "int32"
-
-        class device:
-            """Test class for device."""
-
-            def __init__(self, d):
-                """Initialize __init__."""
-                self.d = d
-
-            def __enter__(self):
-                """Initialize __enter__."""
-
-            def __exit__(self, *a):
-                """Initialize __exit__."""
-
-        @staticmethod
-        def function(*a, **k):
-            """Execute function helper."""
-            return lambda f: f
-
-        class config:
-            """Test class for config."""
-
-            @staticmethod
-            def list_physical_devices(d):
-                """Execute list physical devices helper."""
-                return [1]
-
-            class experimental:
-                """Test class for experimental."""
-
-                @staticmethod
-                def reset_memory_stats(d):
-                    """Execute reset memory stats helper."""
-                    raise ValueError("dummy")
-
-                @staticmethod
-                def get_memory_info(d):
-                    """Execute get memory info helper."""
-                    raise ValueError("dummy")
-
-    monkeypatch.setattr(bm, "tf", MockTF)
-    monkeypatch.setattr(bm, "keras", type("Keras", (), {}))
-
-    # This should trigger the ValueError
-    res = bm._run_benchmark_pass(MockModel(), 1, 1, 1, "prefill", 128, "gpu")
-    assert res[2] == pytest.approx(6000.0)
-
-
-def test_keras_benchmark_missing_deps(monkeypatch):
-    """Test keras benchmark missing deps functionality."""
-    import gemma_4_sql.backends.keras.benchmark as bm
-
-    monkeypatch.setattr(bm, "keras", None)
-    import pytest
-
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    with pytest.raises(DependencyMissingError):
-        bm.benchmark_model("m", "cpu", 1)
+        res = benchmark_model("test", "cpu", 1, dtype="float32", mode="generate", max_new_tokens=10, warmup_steps=1, num_runs=2)
+        assert res == {"status": "ok"}
+        mock_load.assert_called_once_with("test", dtype="float32")
+        mock_pass.assert_called_once()

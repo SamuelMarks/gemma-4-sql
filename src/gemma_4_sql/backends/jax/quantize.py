@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.type_hints import ModelType, TensorType
+
 MIN_NDIM_FOR_QUANTIZATION = 2
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -31,7 +33,7 @@ except (ImportError, AttributeError):
     Gemma4ForCausalLM = None
 
 
-def quantize_int8(tensor: Any) -> tuple[Any, Any]:
+def quantize_int8(tensor: TensorType) -> tuple[Any, Any]:
     """Quantize a tensor to uniform symmetric int8.
 
     Applies the transformation:
@@ -46,6 +48,7 @@ def quantize_int8(tensor: Any) -> tuple[Any, Any]:
 
     Raises:
         DependencyMissingError: If JAX is required but missing.
+
     """
     if jnp is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -57,7 +60,7 @@ def quantize_int8(tensor: Any) -> tuple[Any, Any]:
     return (q_tensor, scale)
 
 
-def compute_channel_activation_statistics(activations: Any) -> Any:
+def compute_channel_activation_statistics(activations: TensorType) -> Any:
     """Compute per-channel average absolute activation magnitude across tokens.
 
     For input activations X of shape (..., channels), computes:
@@ -71,6 +74,7 @@ def compute_channel_activation_statistics(activations: Any) -> Any:
 
     Raises:
         DependencyMissingError: If JAX is required but missing.
+
     """
     if jnp is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -99,6 +103,7 @@ def compute_salient_mask(activation_magnitude: Any, salient_ratio: float = 0.01)
     Raises:
         DependencyMissingError: If JAX is required but missing.
         ValueError: If salient_ratio is not within (0.0, 1.0].
+
     """
     if jnp is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -115,8 +120,8 @@ def compute_salient_mask(activation_magnitude: Any, salient_ratio: float = 0.01)
 
 
 def quantize_awq(
-    tensor: Any,
-    channel_activations: Any | None = None,
+    tensor: TensorType,
+    channel_activations: TensorType | None = None,
     salient_ratio: float = 0.01,
 ) -> tuple[Any, Any, Any, Any]:
     """Quantize a weight tensor using Activation-aware Weight Quantization (AWQ).
@@ -142,6 +147,7 @@ def quantize_awq(
 
     Raises:
         DependencyMissingError: If JAX is required but missing.
+
     """
     if jnp is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -179,7 +185,7 @@ def quantize_awq(
     return (q_tensor, scale, salient_weights, salient_mask_1d)
 
 
-def dequantize_awq(q_tensor: Any, scale: Any, salient_weights: Any) -> Any:
+def dequantize_awq(q_tensor: TensorType, scale: TensorType, salient_weights: TensorType) -> Any:
     """Dequantize an AWQ-quantized tensor back into floating-point representation.
 
     Computes:
@@ -195,12 +201,13 @@ def dequantize_awq(q_tensor: Any, scale: Any, salient_weights: Any) -> Any:
 
     Raises:
         DependencyMissingError: If JAX is required but missing.
+
     """
     if jnp is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("JAX is required for dequantize_awq.")
-    return (q_tensor.astype(salient_weights.dtype) * scale) + salient_weights
+    return (q_tensor.astype(salient_weights.dtype) * scale) + salient_weights  # type: ignore # Justified: Dynamic backend protocol typing
 
 
 def _set_param_metadata(param: Any, key: str, value: Any) -> None:
@@ -210,6 +217,7 @@ def _set_param_metadata(param: Any, key: str, value: Any) -> None:
         param: Target parameter object.
         key: Metadata key name.
         value: Metadata value to store.
+
     """
     if hasattr(param, "set_metadata"):
         param.set_metadata(key, value)
@@ -218,7 +226,7 @@ def _set_param_metadata(param: Any, key: str, value: Any) -> None:
 
 
 def _apply_quantization_to_model(
-    model: Any,
+    model: ModelType,
     method: str,
     calibration_samples: list[Any] | None = None,
     salient_ratio: float = 0.01,
@@ -233,6 +241,7 @@ def _apply_quantization_to_model(
 
     Returns:
         A tuple of (status string, memory reduction factor, count of quantized parameters).
+
     """
     quantized_params = 0
     if method == "int8":
@@ -245,7 +254,7 @@ def _apply_quantization_to_model(
                 _set_param_metadata(param, "quant_scale", scale_float)
                 scales[str(path)] = scale_float
                 quantized_params += 1
-        model._quant_scales = scales
+        model._quant_scales = scales  # type: ignore # Justified: Dynamic backend protocol typing
         status = "quantized_int8"
         memory_reduction = 0.5
         logger.info("Quantized %d parameters using uniform int8", quantized_params)
@@ -266,7 +275,7 @@ def _apply_quantization_to_model(
                 _set_param_metadata(param, "salient_mask", salient_mask)
                 scales[str(path)] = scale_float
                 quantized_params += 1
-        model._quant_scales = scales
+        model._quant_scales = scales  # type: ignore # Justified: Dynamic backend protocol typing
         status = "quantized_awq"
         memory_reduction = 0.7
         logger.info("Quantized %d parameters using AWQ (salient_ratio=%.3f)", quantized_params, salient_ratio)
@@ -297,6 +306,7 @@ def quantize_model(
 
     Raises:
         DependencyMissingError: If JAX quantization dependencies are missing.
+
     """
     if jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None:
         from gemma_4_sql.exceptions import DependencyMissingError

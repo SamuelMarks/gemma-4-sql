@@ -22,6 +22,7 @@ class Gemma4RMSNorm(nn.Module):
 
         Returns:
             Normalized tensor.
+
         """
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
 
@@ -30,6 +31,7 @@ class Gemma4RMSNorm(nn.Module):
 
         Returns:
             Normalized and scaled tensor.
+
         """
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
@@ -51,5 +53,6 @@ class Gemma4MLP(nn.Module):
 
         Returns:
             Projected output tensor.
+
         """
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from jax import Array
@@ -39,8 +41,8 @@ except (ImportError, AttributeError):
     Gemma4DecoderLayer = None
     Gemma4ForCausalLM = None
 
-_ModuleBase: type = nnx.Module if nnx is not None else object
-_ParamBase: type = nnx.Param if nnx is not None else object
+_ModuleBase: Any = nnx.Module if nnx is not None else object
+_ParamBase: Any = nnx.Param if nnx is not None else object
 
 if nnx is not None and hasattr(nnx, "Param"):
     _ParamCls: Any = nnx.Param
@@ -126,6 +128,7 @@ class NNXLoRALinear(_ModuleBase):
         Raises:
             DependencyMissingError: If JAX or Flax NNX dependencies are missing.
             ValueError: If rank r is less than or equal to 0.
+
         """
         if nnx is None or jax is None or jnp is None:
             from gemma_4_sql.exceptions import DependencyMissingError
@@ -172,28 +175,31 @@ class NNXLoRALinear(_ModuleBase):
 
     @property
     def W(self) -> Array:
-        """Return the base weight array W with shape (in_features, out_features).
+        """Provide the base weight array W with shape (in_features, out_features).
 
         Returns:
             The base weight array value.
+
         """
         return getattr(self.kernel, "value", self.kernel)
 
     @property
     def A(self) -> Array:
-        """Return the down-projection adapter A with shape (in_features, r).
+        """Provide the down-projection adapter A with shape (in_features, r).
 
         Returns:
             The down-projection adapter array value.
+
         """
         return getattr(self.lora_a, "value", self.lora_a)
 
     @property
     def B(self) -> Array:
-        """Return the up-projection adapter B with shape (r, out_features).
+        """Provide the up-projection adapter B with shape (r, out_features).
 
         Returns:
             The up-projection adapter array value.
+
         """
         return getattr(self.lora_b, "value", self.lora_b)
 
@@ -202,6 +208,7 @@ class NNXLoRALinear(_ModuleBase):
 
         Args:
             mode: True to enable training dropout, False for inference mode.
+
         """
         if self.dropout is not None:
             if mode:
@@ -234,6 +241,7 @@ class NNXLoRALinear(_ModuleBase):
 
         Returns:
             An NNXLoRALinear instance sharing base kernel and bias with the source linear.
+
         """
         kernel_val = getattr(linear.kernel, "value", linear.kernel)
         in_features, out_features = kernel_val.shape
@@ -267,6 +275,7 @@ class NNXLoRALinear(_ModuleBase):
 
         Returns:
             Output array of shape (..., out_features).
+
         """
         kernel_val = getattr(self.kernel, "value", self.kernel)
         base = jnp.dot(x, kernel_val)
@@ -287,7 +296,7 @@ class NNXLoRALinear(_ModuleBase):
 
 
 def inject_lora_to_layer(
-    layer: Any,
+    layer: object,
     target_modules: list[str],
     lora_r: int = 8,
     lora_alpha: float = 16.0,
@@ -310,6 +319,7 @@ def inject_lora_to_layer(
 
     Returns:
         The number of adapted projection modules injected into the layer.
+
     """
     injected_count = 0
 
@@ -355,7 +365,7 @@ def inject_lora_to_layer(
 
 
 def inject_lora(
-    model: Any,
+    model: ModelType,
     target_modules: list[str],
     lora_r: int = 8,
     lora_alpha: float = 16.0,
@@ -381,6 +391,7 @@ def inject_lora(
 
     Raises:
         DependencyMissingError: If JAX or Flax NNX dependencies are missing.
+
     """
     if nnx is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -396,10 +407,10 @@ def inject_lora(
     total_injected = 0
 
     # If the model is a Gemma4ForCausalLM or contains layers sequence
-    layers = None
+    layers: list[Any] | None = None
     if hasattr(model, "model") and hasattr(model.model, "layers"):
-        layers = model.model.layers
-    elif hasattr(model, "layers") and isinstance(model.layers, (list, tuple)):
+        layers = cast(list[Any], model.model.layers)
+    elif hasattr(model, "layers") and isinstance(model.layers, list):
         layers = model.layers
 
     if layers is not None:
@@ -439,11 +450,11 @@ def inject_lora(
             elif isinstance(val, nnx.Module) or hasattr(val, "__dict__"):
                 _traverse(val)
             elif isinstance(val, (list, tuple)):
-                for item in val:
+                for item in cast(list[Any], val):
                     if isinstance(item, nnx.Module):
                         _traverse(item)
             elif isinstance(val, dict):
-                for item in val.values():
+                for item in cast(dict[str, Any], val).values():
                     if isinstance(item, nnx.Module):
                         _traverse(item)
 
@@ -454,7 +465,7 @@ def inject_lora(
 
 
 def create_lora_optimizer(
-    model: Any,
+    model: ModelType,
     tx: Any = None,
 ) -> Any:
     """Create a Flax NNX Optimizer configured to update only LoRA adapter parameters.
@@ -470,6 +481,7 @@ def create_lora_optimizer(
 
     Raises:
         DependencyMissingError: If Flax NNX or Optax dependencies are missing.
+
     """
     if nnx is None or optax is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -482,7 +494,7 @@ def create_lora_optimizer(
     return nnx.Optimizer(model, tx, wrt=LoRAParam)
 
 
-def count_parameters(model: Any) -> tuple[int, int]:
+def count_parameters(model: ModelType) -> tuple[int, int]:
     """Count total and trainable LoRA parameters in a Flax NNX model.
 
     Args:
@@ -493,6 +505,7 @@ def count_parameters(model: Any) -> tuple[int, int]:
 
     Raises:
         DependencyMissingError: If JAX or Flax NNX dependencies are missing.
+
     """
     if nnx is None or jax is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -528,6 +541,7 @@ def apply_lora(
 
     Raises:
         DependencyMissingError: If JAX PEFT dependencies are missing.
+
     """
     status = "completed"
     if optax is None or jax is None or nnx is None or Gemma4ForCausalLM is None:
@@ -550,7 +564,7 @@ def apply_lora(
             model = Gemma4ForCausalLM(config, rngs=rngs)
 
         model, injected_count = inject_lora(
-            model=model,
+            model=model,  # type: ignore # Justified: Dynamic backend protocol typing
             target_modules=target_modules,
             lora_r=lora_r,
             lora_alpha=lora_alpha,

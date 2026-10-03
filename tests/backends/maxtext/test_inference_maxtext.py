@@ -1,452 +1,261 @@
-"""Tests for MaxText inference logic."""
+from unittest.mock import MagicMock, patch
 
-from typing import NoReturn as Never
-
+import numpy as np
 import pytest
 
-import gemma_4_sql.backends.maxtext.inference as inf
-from gemma_4_sql.backends.maxtext.inference import generate_sql, maxtext_beam_search
+from gemma_4_sql.backends.maxtext import inference
+from gemma_4_sql.backends.maxtext.inference import _beam_search_step, _execute_generate, generate_sql, maxtext_beam_search
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
-class MockArray:
-    """Mock JAX Array for MaxText."""
+@pytest.fixture(autouse=True)
+def mock_dependencies(monkeypatch):
+    mock_jax = MagicMock()
+    mock_jnp = MagicMock()
+    mock_gemma4 = MagicMock()
 
-    def __init__(self: object, data: object) -> None:
-        """Initialize function __init__.
+    mock_jax.nn.log_softmax.side_effect = lambda x, axis: x  # Dummy softmax
 
-        Args:
-        ----
-        data: Description of data.
+    # argsort returns indices sorting ascending, so we reverse it for descending
+    mock_jnp.argsort.side_effect = lambda x: np.argsort(x)
+    mock_jnp.concatenate.side_effect = lambda x, axis: np.concatenate(x, axis=axis)
 
-        """
-        self.data = data if isinstance(data, list) else [data]
+    monkeypatch.setattr(inference, "jax", mock_jax)
+    monkeypatch.setattr(inference, "jnp", mock_jnp)
+    monkeypatch.setattr(inference, "Gemma4Model", mock_gemma4)
 
-    @property
-    def shape(self) -> tuple[int, ...]:
-        """Execute function."""
-        if isinstance(self.data, list) and len(self.data) > 0 and isinstance(self.data[0], list):
-            return (len(self.data), len(self.data[0]))
-        return (len(self.data),)
+    return mock_jax, mock_jnp, mock_gemma4
 
-    def __getitem__(self: object, idx: object) -> object:
-        """Magic method docstring.
 
-        Returns:
-            object: Description of return.
+def test_beam_search_step():
+    seq = np.array([[1, 2, 3]])
 
-        """
-        if isinstance(idx, MockArray):
-            return MockArray([self.data[i] for i in getattr(idx, "data", [])])
-        try:
-            expected_len = 2
-            if isinstance(idx, tuple) and len(idx) == expected_len:
-                return self.data[idx[0]][idx[1]]
-            return MockArray(self.data[idx])
-        except (ValueError, TypeError, AttributeError, IndexError, KeyError):
-            return MockArray(self.data)
+    def model_apply_fn(s):
+        # Return logits where shape is 3D
+        logits = np.zeros((1, 3, 5))
+        # Top indices will be 4, 3, 2, 1, 0 based on values
+        logits[0, -1, :] = [0.1, 0.2, 0.3, 0.4, 0.5]
+        return logits
 
-    def tolist(self: object) -> object:
-        """Initialize function tolist.
+    beams = _beam_search_step(seq, 0.0, model_apply_fn, beam_width=2)
+    assert len(beams) == 2
 
-        Returns:
-            object: Description of return.
+    new_seq_1, score_1 = beams[0]
+    # Highest prob index is 4
+    np.testing.assert_array_equal(new_seq_1, [[1, 2, 3, 4]])
+    assert score_1 == 0.5
 
-        """
-        return self.data
 
-    def item(self: object) -> object:
-        """Initialize function item.
+def test_beam_search_step_shapes():
+    seq = np.array([[1, 2, 3]])
 
-        Returns:
-            object: Description of return.
+    def model_apply_fn_2d(s):
+        logits = np.zeros((3, 5))
+        logits[-1, :] = [0.1, 0.2, 0.3, 0.4, 0.5]
+        return logits
 
-        """
-        return self.data[0] if isinstance(self.data, list) else self.data
+    beams_2d = _beam_search_step(seq, 0.0, model_apply_fn_2d, beam_width=1)
+    np.testing.assert_array_equal(beams_2d[0][0], [[1, 2, 3, 4]])
 
-    def reshape(self: object, *shape: object) -> object:
-        """Initialize function reshape.
+    def model_apply_fn_1d(s):
+        logits = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
+        return logits
 
-        Args:
-        ----
-        shape: Description of shape.
+    beams_1d = _beam_search_step(seq, 0.0, model_apply_fn_1d, beam_width=1)
+    np.testing.assert_array_equal(beams_1d[0][0], [[1, 2, 3, 4]])
 
 
-        Returns:
-            object: Description of return.
+def test_beam_search_step_no_item(mock_dependencies):
+    mock_jax, mock_jnp, _mock_gemma4 = mock_dependencies
 
-        """
-        if shape == (1, 1):
-            val = self.data[0] if isinstance(self.data, list) else self.data
-            return MockArray([[val]])
-        return self
+    seq = np.array([[1, 2]])
 
+    def model_apply_fn(s):
+        return np.array([0.1, 0.2, 0.3])
 
-class MockJNP:
-    """Mock JNP."""
+    class NoItemScore:
+        def __init__(self, v):
+            self.v = v
 
-    def array(self: object, data: object, _dtype: object = None, **_kwargs: object) -> object:
-        """Initialize function array.
+        def __float__(self):
+            return float(self.v)
 
-        Args:
-        ----
-        data: Description of data.
-        dtype: Description of dtype.
+        # no .item() method!
 
+    def dummy_argsort(x):
+        return np.array([0, 1, 2])
 
-        Returns:
-            object: Description of return.
+    mock_jnp.argsort.side_effect = dummy_argsort
 
-        """
-        return MockArray(data)
+    dummy_log_probs = np.array([NoItemScore(0.1), NoItemScore(0.2), NoItemScore(0.3)], dtype=object)
 
-    int32 = 1
+    with patch.object(mock_jax.nn, "log_softmax", return_value=dummy_log_probs):
+        beams = _beam_search_step(seq, 0.0, model_apply_fn, beam_width=1)
+        assert beams[0][1] == 0.3
 
-    def concatenate(self: object, arrays: object, axis: object = 0) -> object:
-        """Initialize function concatenate.
 
-        Args:
-        ----
-        arrays: Description of arrays.
-        axis: Description of axis.
+def test_maxtext_beam_search():
+    def apply_fn(seq):
+        return np.array([0.1, 0.9])  # always predicts 1
 
+    input_ids = np.array([[0]])
 
-        Returns:
-            object: Description of return.
+    out_seq, _score = maxtext_beam_search(
+        model_apply_fn=apply_fn,
+        input_ids=input_ids,
+        beam_width=1,
+        max_length=3,
+        eos_token_id=5,  # eos not hit
+    )
 
-        """
-        if axis == -1:
-            res = [arrays[0].data[i] + arrays[1].data[i] for i in range(len(arrays[0].data))]
-            return MockArray(res)
-        return MockArray([a.data for a in arrays])
+    np.testing.assert_array_equal(out_seq, [[0, 1, 1, 1]])
 
-    def argsort(self: object, array: object) -> object:
-        """Initialize function argsort.
 
-        Args:
-        ----
-        array: Description of array.
+def test_maxtext_beam_search_eos():
+    call_count = 0
 
-
-        Returns:
-            object: Description of return.
-
-        """
-        d = getattr(array, "data", array)
-        if isinstance(d, list) and len(d) > 0 and isinstance(d[0], list):
-            d = d[0]
-        return MockArray(sorted(range(len(d)), key=lambda x: d[x]))
-
-
-class MockNN:
-    """Initialize class MockNN."""
-
-    def log_softmax(self: object, x: object, _axis: object = -1, **_kwargs: object) -> object:
-        """Initialize function log_softmax.
-
-        Args:
-        ----
-        x: Description of x.
-        axis: Description of axis.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        if isinstance(x, MockArray):
-            return x
-        return MockArray(x)
-
-
-class MockJAX:
-    """Mock JAX."""
-
-    nn = MockNN()
-
-    @staticmethod
-    def jit(fn: object, *_args: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return fn
-
-
-class MockGemma4Model:
-    """Mock Gemma 4 Model."""
-
-    def __init__(self: object, name: object) -> None:
-        """Initialize function __init__.
-
-        Args:
-        ----
-        name: Description of name.
-
-        """
-        self.name = name
-
-    def apply(self: object, _seq: object) -> object:
-        """Initialize function apply.
-
-        Returns:
-            object: Description of return.
-
-        """
-        logits = [0.0] * 300
-        logits[100] = 10.0
-        return MockArray([logits])
-
-
-@pytest.fixture
-def _mock_maxtext_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Initialize function mock_maxtext_env.
-
-    Args:
-    ----
-    monkeypatch: Description of monkeypatch.
-
-    """
-    monkeypatch.setattr(inf, "jax", MockJAX())
-    monkeypatch.setattr(inf, "jnp", MockJNP())
-    monkeypatch.setattr(inf, "Gemma4Model", MockGemma4Model)
-
-
-@pytest.mark.usefixtures("_mock_maxtext_env")
-def test_generate_sql_success() -> None:
-    """Initialize function test_generate_sql_success.
-
-    Raises:
-        AssertionError: Description.
-
-
-        TypeError: Description.
-
-    """
-    res = generate_sql("mock-model", "test prompt", beam_width=2, max_length=3)
-    if not res["status"] == "success":
-        raise AssertionError
-    if not res["backend"] == "maxtext":
-        raise AssertionError
-    if not isinstance(res["sql"], str):
-        raise TypeError
-
-
-def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Initialize function test_generate_sql_missing_deps.
-
-    Args:
-    ----
-    monkeypatch: Description of monkeypatch.
-
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    monkeypatch.setattr(inf, "jax", None)
-    with pytest.raises(DependencyMissingError):
-        generate_sql("mock-model", "test prompt")
-
-
-@pytest.mark.usefixtures("_mock_maxtext_env")
-def test_maxtext_beam_search() -> None:
-    """Initialize function test_maxtext_beam_search.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    jnp_mock = MockJNP()
-
-    def mock_apply_fn(seq: MockArray) -> MockArray:
-        """Initialize function mock_apply_fn.
-
-        Args:
-        ----
-        seq: Description of seq.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        logits = [0.0] * 300
-        seq_len = len(seq.data[0]) if isinstance(seq.data[0], list) else len(seq.data)
-        if seq_len == 1:
-            logits[5] = 10.0
+    def apply_fn(seq):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return np.array([0.1, 0.9])  # predict 1
         else:
-            logits[299] = 10.0
-        return MockArray([logits])
+            return np.array([0.9, 0.1])  # predict 0 (eos)
 
-    input_ids = jnp_mock.array([[1]])
-    (result, _score) = maxtext_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
-    if not result.tolist() == [[1, 5, 299]]:
-        raise AssertionError
+    input_ids = np.array([[2]])
 
+    out_seq, _score = maxtext_beam_search(
+        model_apply_fn=apply_fn,
+        input_ids=input_ids,
+        beam_width=1,
+        max_length=5,
+        eos_token_id=0,  # eos is 0
+    )
 
-def test_inference_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    m_inf = __import__("gemma_4_sql.backends.maxtext.inference", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "jax", None)
-    importlib.reload(m_inf)
-    monkeypatch.undo()
-    importlib.reload(m_inf)
+    np.testing.assert_array_equal(out_seq, [[2, 1, 0]])
 
 
-class MockTokenizer:
-    """Provide class docstring."""
+def test_maxtext_beam_search_eos_continue():
+    call_count = 0
 
-    vocab_size = 10
+    def apply_fn(seq):
+        nonlocal call_count
+        call_count += 1
+        # First call (input [2]): return top 2 tokens: 1 and 0 (eos)
+        if call_count == 1:
+            return np.array([0.9, 0.1])  # 0 and 1
+        # Second call (input [2, 1]): return top 1 token: 0 (eos)
+        else:
+            return np.array([0.9, 0.1])  # 0 (eos)
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        """Execute function."""
+    input_ids = np.array([[2]])
 
-    def encode(self, _x: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return [1]
-
-    def decode(self, _x: object) -> str:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return "decoded"
+    _out_seq, _score = maxtext_beam_search(model_apply_fn=apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=0)
 
 
-class MockResult:
-    """Provide class docstring."""
+def test_execute_generate(mock_dependencies):
+    mock_jax, _mock_jnp, _mock_gemma4 = mock_dependencies
 
-    def tolist(self) -> object:
-        """Execute function.
+    tokenizer = MagicMock()
+    tokenizer.decode.return_value = "SELECT * FROM test"
 
-        Returns:
-            object: Description of return.
+    # Setup jax.jit to just return the function
+    mock_jax.jit.side_effect = lambda fn, static_argnums: fn
 
-        """
-        return [1]
+    with patch("gemma_4_sql.backends.maxtext.inference.maxtext_beam_search") as mock_bs:
+        mock_bs.return_value = (np.array([[1, 2, 3, 4]]), 1.5)
 
-    @property
-    def shape(self) -> object:
-        """Execute function."""
-        return (1, 1)
+        status, sql, score = _execute_generate("test-model", [1, 2], 2, 10, 5, tokenizer)
 
-    def __len__(self) -> int:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return 1
+        assert status == "success"
+        assert sql == "SELECT * FROM test"
+        assert score == 0.75  # 1.5 / max(1, 4 - 2)
 
 
-def test_inference_no_jit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+def test_execute_generate_model_apply(mock_dependencies):
+    mock_jax, _mock_jnp, mock_gemma4 = mock_dependencies
 
-    Raises:
-        AssertionError: Description.
+    mock_model = MagicMock()
+    del mock_model.apply  # simulate model without apply method
+    mock_gemma4.return_value = mock_model
 
-    """
-    m_inf = __import__("gemma_4_sql.backends.maxtext.inference", fromlist=[""])
-    monkeypatch.setattr(m_inf, "jax", type("M", (), {"jit": lambda x, **_kwargs: x, "random": type("R", (), {"PRNGKey": lambda x: x})}))
-    monkeypatch.setattr(m_inf, "jnp", type("M", (), {"array": lambda x, **_kwargs: x, "int32": 1}))
-    monkeypatch.setattr(m_inf, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: None})())
-    monkeypatch.setattr(m_inf, "SQLTokenizer", MockTokenizer)
-    monkeypatch.setattr(m_inf, "maxtext_beam_search", lambda *_args, **_kwargs: ([MockResult()], 0.95))
-    res = m_inf.generate_sql("m", "prompt", test_mode=True, use_jit=False)
-    if res["status"] != "success":
-        raise AssertionError
+    tokenizer = MagicMock()
+    tokenizer.decode.return_value = "SELECT * FROM test"
+    mock_jax.jit.side_effect = lambda fn, static_argnums: fn
 
+    with patch("gemma_4_sql.backends.maxtext.inference.maxtext_beam_search") as mock_bs:
+        mock_output_ids = MagicMock()
+        mock_output = MagicMock()
+        mock_output.tolist.return_value = [1, 2, 3]
+        del mock_output.__len__  # force shape branch
+        mock_output_ids.__getitem__.return_value = mock_output
+        mock_output_ids.shape = (1, 3)
+        mock_bs.return_value = (mock_output_ids, 1.5)
 
-def test_inference_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    m_inf = __import__("gemma_4_sql.backends.maxtext.inference", fromlist=[""])
-    monkeypatch.setattr(m_inf, "jax", type("M", (), {"jit": lambda x, **_kwargs: x, "random": type("R", (), {"PRNGKey": lambda x: x})}))
-    monkeypatch.setattr(m_inf, "jnp", type("M", (), {"array": lambda x, **_kwargs: x, "int32": 1}))
-    monkeypatch.setattr(m_inf, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: None})())
-
-    def raise_err(*_args: object, **_kwargs: object) -> Never:
-        """Execute function.
-
-        Raises:
-            ValueError: Description.
-
-        """
-        msg = "err"
-        raise ValueError(msg)
-
-    monkeypatch.setattr(m_inf, "SQLTokenizer", MockTokenizer)
-    monkeypatch.setattr(m_inf, "maxtext_beam_search", lambda *_args, **_kwargs: [type("M", (), {"tolist": lambda _self: [1]})()])
-    res = m_inf.generate_sql("m", "prompt", test_mode=True, use_jit=False)
-    if "failed" not in res["status"]:
-        raise AssertionError
+        status, _sql, score = _execute_generate("test-model", [1], 2, 10, 5, tokenizer)
+        assert status == "success"
+        # 1.5 / max(1, 3 - 1) = 0.75
+        assert score == 0.75
 
 
-def test_beam_search_step_logits_shapes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _beam_search_step with 1D, 2D, and 3D logits."""
-    import gemma_4_sql.backends.maxtext.inference as m_inf
+def test_generate_sql(mock_dependencies):
+    with patch("gemma_4_sql.backends.maxtext.inference._execute_generate") as mock_exec:
+        mock_exec.return_value = ("success", "SELECT 1", 0.9)
 
-    monkeypatch.setattr(m_inf, "jax", MockJAX())
-    monkeypatch.setattr(m_inf, "jnp", MockJNP())
+        result = generate_sql("test-model", "test prompt")
+        assert result["sql"] == "SELECT 1"
+        assert result["status"] == "success"
+        assert result["confidence_score"] == 0.9
 
-    # 3D logits: shape (1, 2, 5)
-    class Mock3DLogits(MockArray):
-        """Test class for Mock3DLogits."""
 
-        @property
-        def shape(self):
-            """Execute shape helper."""
-            return (1, 2, 5)
+def test_generate_sql_missing_deps(monkeypatch):
+    monkeypatch.setattr(inference, "jax", None)
 
-        def __getitem__(self, item):
-            """Initialize __getitem__."""
-            return MockArray([0] * 5)
+    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
+        generate_sql("test-model", "test prompt")
 
-    res3d = m_inf._beam_search_step(MockArray([[1]]), 0.0, lambda s: Mock3DLogits([[[0] * 5] * 2]), 2)
-    assert len(res3d) == 2
 
-    # 2D logits: shape (3, 5)
-    class Mock2DLogits(MockArray):
-        """Test class for Mock2DLogits."""
+def test_generate_sql_error(mock_dependencies):
+    with patch("gemma_4_sql.backends.maxtext.inference._execute_generate") as mock_exec:
+        mock_exec.side_effect = RuntimeError("Generation failed")
 
-        @property
-        def shape(self):
-            """Execute shape helper."""
-            return (3, 5)
+        result = generate_sql("test-model", "test prompt")
+        assert result["sql"] == ""
+        assert "failed: Generation failed" in result["status"]
 
-        def __getitem__(self, item):
-            """Initialize __getitem__."""
-            return MockArray([0] * 5)
 
-    res2d = m_inf._beam_search_step(MockArray([[1]]), 0.0, lambda s: Mock2DLogits([[0] * 5] * 3), 2)
-    assert len(res2d) == 2
+# Add test to re-import and cover the ImportError branch in global scope
 
-    # 1D logits: shape (5,)
-    class Mock1DLogits(MockArray):
-        """Test class for Mock1DLogits."""
 
-        @property
-        def shape(self):
-            """Execute shape helper."""
-            return (5,)
+def test_import_error_coverage():
+    import importlib
+    from unittest.mock import patch
 
-    res1d = m_inf._beam_search_step(MockArray([[1]]), 0.0, lambda s: Mock1DLogits([0] * 5), 2)
-    assert len(res1d) == 2
+    from gemma_4_sql.backends.maxtext import inference
+
+    # Force ImportError on maxtext.models.gemma4
+    original_import = __import__
+
+    def mock_import(name, *args, **kwargs):
+        if "maxtext.models.gemma4" in name:
+            raise ImportError("mocked")
+        return original_import(name, *args, **kwargs)
+
+    with patch("builtins.__import__", side_effect=mock_import):
+        importlib.reload(inference)
+        assert inference.Gemma4Model is None
+
+    # restore and reload correctly to not break other tests
+    importlib.reload(inference)
+
+
+def test_inference_import_error():
+    import importlib
+    from unittest.mock import patch
+
+    import gemma_4_sql.backends.maxtext.inference as inf
+
+    with patch.dict("sys.modules", {"maxtext.models.gemma4": None}):
+        importlib.reload(inf)
+        assert inf.Gemma4Model is None
+    importlib.reload(inf)

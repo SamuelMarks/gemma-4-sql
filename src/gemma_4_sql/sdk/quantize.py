@@ -18,6 +18,7 @@ def quantize_model(model_name: str, method: str = "int8", backend: str = "pytorc
 
     Returns:
         A dictionary containing the results.
+
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     return get_backend(backend).quantize_model(model_name, method)

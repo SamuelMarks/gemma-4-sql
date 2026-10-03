@@ -34,6 +34,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
     Raises:
         DependencyMissingError: If JAX dependencies are missing.
+
     """
 
     def _app_factory() -> object:
@@ -41,6 +42,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
         Returns:
             The FastAPI application instance.
+
         """
 
         def _startup_warmup() -> None:
@@ -48,7 +50,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
             try:
                 from gemma_4_sql.backends.jax.inference import generate_sql
 
-                generate_sql(model_name=model_name, prompt="SELECT 1", test_mode=bool(kwargs.get("test_mode")))
+                generate_sql(model_name=model_name, prompt="SELECT 1")
             except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
                 logger.debug("Warmup generation skipped or deferred: %s", exc)
 
@@ -60,10 +62,8 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
             Returns:
                 Generated SQL query string.
-            """
-            if kwargs.get("test_mode"):
-                return f"SELECT * FROM generated WHERE prompt='{prompt}'"
 
+            """
             from gemma_4_sql.backends.jax.inference import generate_sql
 
             try:
@@ -84,13 +84,13 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
             Returns:
                 List of generated SQL queries.
+
             """
             return [_generate(p) for p in prompts]
 
         return create_common_app(
             backend_name="jax",
             model_name=model_name,
-            test_mode=bool(kwargs.get("test_mode")),
             startup_callback=_startup_warmup,
             generate_logic=_generate,
             batch_generate_logic=_batch_generate,
@@ -110,11 +110,10 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         missing_deps=False,
         missing_status="mocked_missing_jax",
         app_factory=_app_factory,
-        test_mode=bool(kwargs.get("test_mode")),
     )
 
     # Maintain JAX specific log message behavior from original logic for backwards compatibility tests
-    if result["status"] == "running_jax_serve" and not kwargs.get("test_mode"):
+    if result["status"] == "running_jax_serve":
         logger.info("Starting JAX server on port %d with max_batch_size %d", port, max_batch_size)
 
     return result

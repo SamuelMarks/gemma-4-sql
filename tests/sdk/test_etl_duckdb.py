@@ -15,8 +15,8 @@ def test_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     jax_etl = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
 
     sys.modules["gemma_4_sql.backends.common_data"].duckdb = None
-    monkeypatch.setattr(jax_etl, "_load_duckdb_dataset", lambda *args, **kwargs: (_ for _ in ()).throw(ImportError("duckdb is required")))
-    with pytest.raises(ImportError):
+    monkeypatch.setattr(jax_etl, "load_duckdb_dataset", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("duckdb is required")))
+    with pytest.raises(RuntimeError):
         jax_etl._load_hf_or_duckdb(dataset_name="dummy", split="train", duckdb_path=":memory:", duckdb_table="users")
 
 

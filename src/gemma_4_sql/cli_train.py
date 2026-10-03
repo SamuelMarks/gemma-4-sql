@@ -24,6 +24,7 @@ def train_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     batch_size = getattr(args, "batch_size", 2)
     distributed_strategy = getattr(args, "distributed_strategy", "none")
@@ -45,6 +46,7 @@ def pretrain_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     batch_size = getattr(args, "batch_size", 2)
     distributed_strategy = getattr(args, "distributed_strategy", "none")
@@ -66,6 +68,7 @@ def sft_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     batch_size = getattr(args, "batch_size", 2)
     distributed_strategy = getattr(args, "distributed_strategy", "none")
@@ -87,6 +90,7 @@ def posttrain_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     batch_size = getattr(args, "batch_size", 2)
     distributed_strategy = getattr(args, "distributed_strategy", "none")
@@ -108,6 +112,7 @@ def dpo_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     batch_size = getattr(args, "batch_size", 2)
     epochs = getattr(args, "epochs", 1)
@@ -129,6 +134,7 @@ def peft_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     target_modules = args.target_modules.split(",") if args.target_modules else None
     res = apply_peft(

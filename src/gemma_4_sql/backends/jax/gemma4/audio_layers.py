@@ -25,6 +25,7 @@ class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):
             channels: The integer value for channels.
             norm_eps: The float value for norm eps.
             rngs: The rngs.
+
         """
         self.conv = nnx.Conv(in_channels, channels, kernel_size=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)), use_bias=False, rngs=rngs)
         self.norm = nnx.LayerNorm(channels, epsilon=norm_eps, use_bias=False, rngs=rngs)
@@ -114,6 +115,7 @@ class Gemma4AudioCausalConv1d(nnx.Module):
         Args:
             config: Audio configuration parameters.
             rngs: JAX NNX random number generators.
+
         """
         self.kernel_size = config.conv_kernel_size
         self.left_pad = self.kernel_size - 1
@@ -127,6 +129,7 @@ class Gemma4AudioCausalConv1d(nnx.Module):
 
         Returns:
             Convolved array of shape (batch, sequence, hidden_size).
+
         """
         x = jnp.pad(x, ((0, 0), (self.left_pad, 0), (0, 0)))
         return self.conv(x)
@@ -141,6 +144,7 @@ class Gemma4AudioLightConv1d(nnx.Module):
         Args:
             config: Audio configuration parameters.
             rngs: JAX NNX random number generators.
+
         """
         self.linear_start = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 2, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
         self.linear_end = Gemma4ClippableLinear(config.hidden_size, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
@@ -157,6 +161,7 @@ class Gemma4AudioLightConv1d(nnx.Module):
 
         Returns:
             The resulting array.
+
         """
         residual = x
         x = self.pre_layer_norm(x)

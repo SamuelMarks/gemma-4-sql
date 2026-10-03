@@ -1,241 +1,148 @@
-"""Module docstring."""
-
-from gemma_4_sql.exceptions import DependencyMissingError
-
-"""Provide module docstring."""
-
-import contextlib
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from gemma_4_sql.backends.pytorch import etl
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ETLConfig
 
-"Tests for PyTorch-specific ETL pipeline."
 
+def test_get_pytorch_classes():
+    MagicMock()
+    mock_torch = MagicMock()
+    mock_torch.tensor.side_effect = lambda x, dtype=None: x
+    mock_torch.long = "mock_long"
+    mock_torch.float32 = "mock_float32"
+    mock_dataset_cls = type("Dataset", (object,), {})
+
+    with patch("gemma_4_sql.backends.pytorch.etl.Dataset", mock_dataset_cls), patch("gemma_4_sql.backends.pytorch.etl.torch", mock_torch):
+        PyTorchDataset = etl._get_pytorch_classes()
+
+        mock_hf_ds = [{"sql_prompt": "prompt1", "sql": "query1"}, {"question": "prompt2", "query": "query2", "image_bytes": b"img", "audio_clip": b"aud"}]
+
+        mock_tok = MagicMock()
+        mock_tok.encode.side_effect = lambda x: f"encoded_{x}"
 
-def test_build_dataloader_pytorch_mocked() -> None:
-    """Test PyTorch build_dataloader when libraries are missing via direct assignment.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    etl_mod = __import__("gemma_4_sql.backends.pytorch.etl", fromlist=[""])
-    orig_torch = etl_mod.torch
-    try:
-        etl_mod.torch = None
-        with pytest.raises(DependencyMissingError, match=r"Missing PyTorch or datasets\. Cannot load dummy/data\."):
-            etl_mod.build_dataloader(ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False))
-    finally:
-        etl_mod.torch = orig_torch
-
-
-def test_build_dataloader_pytorch_lightweight(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test PyTorch build_dataloader lightweight fallback when duckdb is provided but torch is missing."""
-    pt_etl = __import__("gemma_4_sql.backends.pytorch.etl", fromlist=[""])
-    monkeypatch.setattr(pt_etl, "duckdb", MockDuckdb())
-    monkeypatch.setattr(pt_etl, "torch", None)
-    monkeypatch.setattr(pt_etl, "SQLTokenizer", MockTokenizer)
-
-    with pytest.raises(DependencyMissingError):
-        pt_etl.build_dataloader(ETLConfig(dataset_name="dataset", split="split", batch_size=2, duckdb_path="test.db", duckdb_table="tbl"))
-
-
-class MockConn:
-    """Provide class docstring."""
-
-    def execute(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self
-
-    def fetchdf(self) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-
-        class MockDF:
-            """Provide class docstring."""
-
-            def to_dict(self, orient: object = "records") -> object:
-                """Execute function.
-
-                Returns:
-                    object: Description of return.
-
-                """
-                return [{"a": 1}]
-
-        return MockDF()
-
-    def close(self) -> None:
-        """Execute function."""
-
-
-class MockDuckdb:
-    """Provide class docstring."""
-
-    def connect(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockConn()
-
-
-class MockTokenizer:
-    """Provide class docstring."""
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        """Execute function."""
-
-    def encode(self, _x: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return [1]
-
-
-def test_duckdb_execution(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    pt_etl = __import__("gemma_4_sql.backends.pytorch.etl", fromlist=[""])
-    monkeypatch.setattr(pt_etl, "duckdb", MockDuckdb())
-    monkeypatch.setattr(pt_etl, "datasets", object())
-    monkeypatch.setattr(pt_etl, "torch", object())
-    monkeypatch.setattr(pt_etl, "Dataset", object)
-    monkeypatch.setattr(pt_etl, "DataLoader", object)
-    monkeypatch.setattr(pt_etl, "SQLTokenizer", MockTokenizer)
-    with contextlib.suppress(TypeError):
-        pt_etl.build_dataloader(ETLConfig(dataset_name="dataset", split="split", duckdb_path="test.db", duckdb_table="tbl"))
-
-
-def test_pytorch_etl_exception(monkeypatch):
-    """Test pytorch etl exception functionality."""
-    import gemma_4_sql.backends.pytorch.etl as pt_etl
-
-    def mock_tok(x):
-        """Execute mock tok helper."""
-        raise ValueError("err")
-
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.SQLTokenizer", type("Tok", (), {"encode": lambda self, x: mock_tok(x), "__init__": lambda self, **k: None}))
-
-    def fail_load(*a, **k):
-        """Execute fail load helper."""
-        raise ValueError("err")
-
-    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", fail_load)
-    try:
-        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
-    except ValueError:
-        res = None
-    assert res is None or res.get("loader") is None
-
-
-def test_pytorch_etl_exception2(monkeypatch):
-    """Test pytorch etl exception2 functionality."""
-    import gemma_4_sql.backends.pytorch.etl as pt_etl
-
-    def mock_tok(x):
-        """Execute mock tok helper."""
-        raise ValueError("err")
-
-    import sys
-
-    monkeypatch.setitem(sys.modules, "gemma_4_sql.tokenization", type("TokModule", (), {"SQLTokenizer": type("Tok", (), {"encode": mock_tok, "__init__": lambda self, **k: None})}))
-    import builtins
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *a, **k):
-        """Execute mock import helper."""
-        if name == "gemma_4_sql.tokenization":
-            return sys.modules["gemma_4_sql.tokenization"]
-        return orig_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
-    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", lambda *a, **k: (_ for _ in ()).throw(ValueError("err")))
-
-    try:
-        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
-    except ValueError:
-        res = None
-    assert res is None or res.get("loader") is None
-
-
-def test_pytorch_etl_except(monkeypatch):
-    """Test pytorch etl except functionality."""
-    import gemma_4_sql.backends.pytorch.etl as pt_etl
-
-    monkeypatch.setattr(pt_etl, "SQLTokenizer", type("Tok", (), {"encode": lambda self, x: 1, "__init__": lambda self, **k: None}))
-    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", lambda *a, **k: (_ for _ in ()).throw(ValueError("err")))
-    try:
-        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
-    except ValueError:
-        res = None
-    assert res is None
-
-
-def test_pytorch_etl_return_none(monkeypatch):
-    """Test pytorch etl return none functionality."""
-    import gemma_4_sql.backends.pytorch.etl as pt_etl
-
-    monkeypatch.setattr(pt_etl, "SQLTokenizer", type("Tok", (), {"encode": lambda self, x: 1, "__init__": lambda self, **k: None}))
-    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", lambda *a, **k: (_ for _ in ()).throw(ValueError("err")))
-    try:
-        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
-    except ValueError:
-        res = None
-    assert res is None or res.get("loader") is None
-
-
-def test_pytorch_etl_except2(monkeypatch):
-    """Test pytorch etl except2 functionality."""
-    import gemma_4_sql.backends.pytorch.etl as pt_etl
-
-    monkeypatch.setattr(pt_etl, "SQLTokenizer", type("Tok", (), {"encode": lambda self, x: 1, "__init__": lambda self, **k: None}))
-    monkeypatch.setattr(pt_etl, "_load_hf_or_duckdb", lambda *a, **k: (_ for _ in ()).throw(ValueError("err")))
-    try:
-        res = pt_etl.build_dataloader(pt_etl.ETLConfig(dataset_name="x", split="train", batch_size=1))
-    except ValueError:
-        res = None
-    assert res is None or res.get("loader") is None
-
-
-def test_pytorch_etl_sampler_err(monkeypatch):
-    """Test pytorch etl sampler err functionality."""
-    import gemma_4_sql.backends.pytorch.etl as pt_etl
-
-    def mock_dist(*a, **k):
-        """Execute mock dist helper."""
-        raise ValueError("err")
-
-    import sys
-
-    monkeypatch.setitem(sys.modules, "torch.utils.data.distributed", type("Dist", (), {"DistributedSampler": mock_dist}))
-    import builtins
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *a, **k):
-        """Execute mock import helper."""
-        if name == "torch.utils.data.distributed":
-            return sys.modules["torch.utils.data.distributed"]
-        return orig_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
-    res = pt_etl._get_sampler([], True)
-    assert res is None
+        ds = PyTorchDataset(mock_hf_ds, mock_tok)
+        assert len(ds) == 2
+
+        # Test item without image/audio
+        item1 = ds[0]
+        assert "inputs" in item1
+        assert "targets" in item1
+        assert "pixel_values" not in item1
+        assert "audio_values" not in item1
+
+        # Test item with image/audio
+        with patch("gemma_4_sql.backends.common_multimodal.process_image") as mock_img, patch("gemma_4_sql.backends.common_multimodal.process_audio") as mock_aud:
+            mock_img.return_value = {"pixel_values": "mock_pixel_vals"}
+            mock_aud.return_value = {"audio_values": "mock_audio_vals"}
+
+            item2 = ds[1]
+            assert item2["pixel_values"] == "mock_pixel_vals"
+            assert item2["audio_values"] == "mock_audio_vals"
+
+
+def test_get_pytorch_classes_no_dataset():
+    # If Dataset is None, it should inherit from object
+    with patch("gemma_4_sql.backends.pytorch.etl.Dataset", None):
+        PyTorchDataset = etl._get_pytorch_classes()
+        assert issubclass(PyTorchDataset, object)
+
+
+def test_collate_fn():
+    mock_torch = MagicMock()
+    mock_torch.nn.utils.rnn.pad_sequence.side_effect = lambda x, batch_first: f"padded_{x}"
+    mock_torch.stack.side_effect = lambda x: f"stacked_{x}"
+
+    batch = [
+        {"inputs": "i1", "targets": "t1", "pixel_values": "p1", "audio_values": "a1"},
+        {"inputs": "i2", "targets": "t2", "pixel_values": "p2", "audio_values": "a2"},
+    ]
+
+    with patch("gemma_4_sql.backends.pytorch.etl.torch", mock_torch):
+        res = etl._collate_fn(batch)
+        assert res["inputs"] == "padded_['i1', 'i2']"
+        assert res["targets"] == "padded_['t1', 't2']"
+        assert res["pixel_values"] == "stacked_['p1', 'p2']"
+        assert res["audio_values"] == "stacked_['a1', 'a2']"
+
+    # Batch without image/audio
+    batch2 = [
+        {"inputs": "i1", "targets": "t1"},
+        {"inputs": "i2", "targets": "t2"},
+    ]
+    with patch("gemma_4_sql.backends.pytorch.etl.torch", mock_torch):
+        res2 = etl._collate_fn(batch2)
+        assert "pixel_values" not in res2
+
+
+def test_get_sampler():
+    assert etl._get_sampler(None, False) is None
+
+    # Test valid distributed
+    class MockDistributedSampler:
+        def __init__(self, ds):
+            self.ds = ds
+
+    with patch("builtins.__import__", return_value=MagicMock(DistributedSampler=MockDistributedSampler)):
+        sampler = etl._get_sampler("my_ds", True)
+        assert isinstance(sampler, MockDistributedSampler)
+        assert sampler.ds == "my_ds"
+
+    # Test import error / value error fallback
+    class MockFailingSampler:
+        def __init__(self, ds):
+            raise ValueError("mock error")
+
+    with patch("builtins.__import__", return_value=MagicMock(DistributedSampler=MockFailingSampler)):
+        assert etl._get_sampler("my_ds", True) is None
+
+
+def test_load_hf_or_duckdb():
+    with patch("gemma_4_sql.backends.pytorch.etl.load_duckdb_dataset") as mock_load:
+        mock_load.return_value = "duckdb_ds"
+        assert etl._load_hf_or_duckdb("ds", "split", "path", "table") == "duckdb_ds"
+
+    # Test missing datasets
+    with patch("gemma_4_sql.backends.pytorch.etl.datasets", None), pytest.raises(DependencyMissingError):
+        etl._load_hf_or_duckdb("ds", "split", None, None)
+
+    # Test normal hf
+    mock_datasets = MagicMock()
+    mock_datasets.load_dataset.return_value = "hf_ds"
+    with patch("gemma_4_sql.backends.pytorch.etl.datasets", mock_datasets):
+        assert etl._load_hf_or_duckdb("ds", "split", None, None) == "hf_ds"
+
+
+def test_build_dataloader():
+    config = ETLConfig(dataset_name="dummy_ds", split="train", batch_size=4, tokenizer_name="dummy_tok", distributed=True, duckdb_path=None, duckdb_table=None)
+
+    # Test missing deps
+    with patch("gemma_4_sql.backends.pytorch.etl.datasets", None), pytest.raises(DependencyMissingError):
+        etl.build_dataloader(config)
+
+    mock_datasets = MagicMock()
+    mock_torch = MagicMock()
+    mock_dataset_cls = MagicMock()
+    mock_dataloader_cls = MagicMock()
+
+    with (
+        patch("gemma_4_sql.backends.pytorch.etl.datasets", mock_datasets),
+        patch("gemma_4_sql.backends.pytorch.etl.torch", mock_torch),
+        patch("gemma_4_sql.backends.pytorch.etl.Dataset", mock_dataset_cls),
+        patch("gemma_4_sql.backends.pytorch.etl.DataLoader", mock_dataloader_cls),
+        patch("gemma_4_sql.backends.pytorch.etl._load_hf_or_duckdb", return_value="hf_ds"),
+        patch("gemma_4_sql.backends.pytorch.etl.SQLTokenizer"),
+        patch("gemma_4_sql.backends.pytorch.etl._get_pytorch_classes") as mock_get_cls,
+        patch("gemma_4_sql.backends.pytorch.etl._get_sampler", return_value="sampler"),
+    ):
+        mock_pt_cls = MagicMock()
+        mock_pt_ds = MagicMock()
+        mock_pt_cls.return_value = mock_pt_ds
+        mock_get_cls.return_value = mock_pt_cls
+        mock_dataloader_cls.return_value = "mock_dl"
+
+        res = etl.build_dataloader(config)
+        assert res["status"] == "loaded"
+        assert res["loader"] == "mock_dl"

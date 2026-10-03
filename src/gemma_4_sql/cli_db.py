@@ -23,8 +23,9 @@ def db_execute_cmd(args: argparse.Namespace) -> int:
 
     Returns:
         Exit code 0 on success, or 3 on database failure.
+
     """
-    db_kwargs = {}
+    db_kwargs: dict[str, object] = {}
     if getattr(args, "db_kwargs", ""):
         db_kwargs = json.loads(args.db_kwargs)
     engine = LiveDatabaseEngine(db_path=args.db_path, ddl=args.ddl, db_type=args.db_type, db_kwargs=db_kwargs)
@@ -44,6 +45,7 @@ def embed_duckdb_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     duckdb = LazyLoader("duckdb").get_module()
     if duckdb is None:
@@ -57,7 +59,6 @@ def embed_duckdb_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
         db_path=args.db_path,
         max_retries=args.max_retries,
-        test_mode=getattr(args, "test_mode", False),
     )
     if args.prompt:
         rows = conn.execute("SELECT ask_gemma(?)", [args.prompt]).fetchall()

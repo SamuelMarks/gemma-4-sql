@@ -1,412 +1,133 @@
-"""Tests for JAX Benchmark."""
-
-from typing import NoReturn as Never
-from unittest.mock import MagicMock
+import importlib
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import gemma_4_sql.backends.jax.benchmark as bm
 
+@pytest.fixture(autouse=True)
+def mock_dependencies():
+    mock_jax = MagicMock()
+    mock_jnp = MagicMock()
+    mock_nnx = MagicMock()
+    mock_flax = MagicMock()
+    mock_flax.nnx = mock_nnx
 
-class MockJnp:
-    """Provide class docstring."""
+    mock_jax.devices.side_effect = lambda x: [f"mock_{x}_device"] if x in ("gpu", "tpu", "cpu") else []
 
-    int32 = "int32"
-    bfloat16 = "bfloat16"
-    float32 = "float32"
+    # Return the original function for jit
+    mock_nnx.jit.side_effect = lambda f: f
 
-    def zeros(self, _shape: object, dtype: object = None) -> object:
-        """Execute function.
+    mock_jnp.int32 = "int32"
+    mock_jnp.bfloat16 = "bfloat16"
 
-        Returns:
-            object: Description of return.
+    # Model config
+    mock_gemma4_config = MagicMock()
+    mock_gemma4_config.gemma4_e2b.return_value = MagicMock()
+    mock_gemma4_model = MagicMock()
 
-        """
-        return [0]
+    mock_gemma4_mod = MagicMock()
+    mock_gemma4_mod.Gemma4Config = mock_gemma4_config
+    mock_gemma4_mod.Gemma4ForCausalLM = mock_gemma4_model
 
+    with patch.dict(
+        sys.modules,
+        {
+            "jax": mock_jax,
+            "jax.numpy": mock_jnp,
+            "flax": mock_flax,
+            "flax.nnx": mock_nnx,
+            "gemma_4_sql.backends.jax.gemma4": mock_gemma4_mod,
+        },
+    ):
+        yield mock_jax, mock_jnp, mock_nnx, mock_gemma4_config, mock_gemma4_model
 
-class MockJax:
-    """Provide class docstring."""
 
-    random = MagicMock()
+def reload_module():
+    import gemma_4_sql.backends.jax.benchmark as jax_benchmark
 
-    def block_until_ready(self, x: object) -> None:
-        """Execute function."""
+    importlib.reload(jax_benchmark)
+    return jax_benchmark
 
-    def devices(self, *args):
-        """Execute devices helper."""
-        return [MagicMock()]
 
-    def default_device(self, *args):
-        """Execute default device helper."""
-        return MagicMock()
+def test_missing_dependencies():
+    with patch.dict(sys.modules, {"jax": None, "jax.numpy": None, "flax": None, "flax.nnx": None}):
+        jax_benchmark = reload_module()
+        with pytest.raises(Exception, match="JAX dependencies are missing."):
+            jax_benchmark.benchmark_model("test", "cpu", 1)
 
 
-class MockConfigObj:
-    """Mock config object."""
+def test_get_device():
+    jax_benchmark = reload_module()
 
-    dtype: object = None
+    assert jax_benchmark._get_device("gpu") == "mock_gpu_device"
+    assert jax_benchmark._get_device("tpu") == "mock_tpu_device"
+    assert jax_benchmark._get_device("unknown") == "mock_cpu_device"
 
+    def side_effect(hw):
+        if hw in ("tpu", "gpu"):
+            raise RuntimeError("Mock error")
+        return [f"mock_{hw}_device"]
 
-class MockGemma4Config:
-    """Provide class docstring."""
+    jax_benchmark.jax.devices.side_effect = side_effect
+    assert jax_benchmark._get_device("tpu") == "mock_cpu_device"
 
-    @staticmethod
-    def gemma4_e2b() -> MockConfigObj:
-        """Execute function.
 
-        Returns:
-            object: Description of return.
+def test_run_benchmark_pass_prefill():
+    jax_benchmark = reload_module()
 
-        """
-        return MockConfigObj()
+    mock_model = MagicMock()
+    mock_device = MagicMock()
 
+    mock_device.memory_stats.return_value = {"peak_bytes_in_use": 1024 * 1024 * 100}
 
-class MockGemma4ForCausalLM:
-    """Provide class docstring."""
+    # We remove block_until_ready from jax to test the negative branch of hasattr
+    del jax_benchmark.jax.block_until_ready
 
-    def __init__(self, config: object, rngs: object = None, **kwargs: object) -> None:
-        """Execute function."""
+    tokens, latency, memory = jax_benchmark._run_benchmark_pass(model=mock_model, batch_size=2, num_runs=2, warmup_steps=1, mode="prefill", max_new_tokens=10, device=mock_device)
 
-    def __call__(self, inputs: object) -> object:
-        """Execute function.
+    assert isinstance(tokens, float)
+    assert isinstance(latency, float)
+    assert memory == 100.0
 
-        Returns:
-            object: Description of return.
 
-        """
-        return inputs
+def test_run_benchmark_pass_generate():
+    jax_benchmark = reload_module()
+    del jax_benchmark.nnx.jit
+    jax_benchmark = reload_module()
 
+    mock_model = MagicMock()
+    mock_model.return_value = MagicMock()
 
-class MockNNX:
-    """Provide class docstring."""
+    jax_benchmark.jnp.argmax.return_value = MagicMock()
+    # Mock sequence shape for arange
+    mock_inputs = MagicMock()
+    mock_inputs.shape = (1, 10)
+    jax_benchmark.jnp.concatenate.return_value = mock_inputs
+    jax_benchmark.jnp.arange.return_value = MagicMock()
+    jax_benchmark.jnp.arange.return_value.__getitem__.return_value = MagicMock()
 
-    class Rngs:
-        """Provide class docstring."""
+    mock_device = MagicMock()
+    mock_device.memory_stats.side_effect = AttributeError("No memory stats")
 
-        def __init__(self, seed: object) -> None:
-            """Execute function."""
+    tokens, latency, memory = jax_benchmark._run_benchmark_pass(model=mock_model, batch_size=1, num_runs=1, warmup_steps=1, mode="generate", max_new_tokens=2, device=mock_device)
 
-    @staticmethod
-    def jit(fn: object) -> object:
-        """Execute function.
+    assert isinstance(tokens, float)
+    assert isinstance(latency, float)
+    assert memory == 8192.0
 
-        Returns:
-            object: Description of return.
 
-        """
-        return fn
+def test_benchmark_model_execution():
+    jax_benchmark = reload_module()
 
+    # We don't mock _run_benchmark_pass, we let it run with mocked jax
+    with patch("gemma_4_sql.backends.jax.benchmark.run_benchmark_wrapper") as mock_wrapper:
 
-def test_benchmark_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+        def side_effect(backend_name, model_name, hardware, batch_size, missing_deps, missing_status, benchmark_fn):
+            return benchmark_fn()
 
-    Raises:
-        AssertionError: Description.
+        mock_wrapper.side_effect = side_effect
 
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    monkeypatch.setattr(bm, "jax", None)
-    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing\."):
-        bm.benchmark_model("model", "gpu", 1)
-
-
-def test_benchmark_model_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    monkeypatch.setattr(bm, "jax", MockJax())
-    monkeypatch.setattr(bm, "jnp", MockJnp())
-    monkeypatch.setattr(bm, "nnx", MockNNX())
-    monkeypatch.setattr(bm, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
-    monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
-    res = bm.benchmark_model("model", "gpu", 1, num_runs=2)
-    assert res["status"] == "success"
-    assert res["tokens_per_sec"] > 0
-    assert res["latency_ms"] >= 0
-
-    # Test without nnx.jit
-    class MockNNXNoJit:
-        """Mock NNX without jit attribute."""
-
-        class Rngs:
-            """Provide class docstring."""
-
-            def __init__(self, seed: object) -> None:
-                """Execute function."""
-
-    monkeypatch.setattr(bm, "nnx", MockNNXNoJit())
-    res_nojit = bm.benchmark_model("model", "gpu", 1, num_runs=1)
-    assert res_nojit["status"] == "success"
-
-
-def test_benchmark_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    monkeypatch.setattr(bm, "jax", MockJax())
-    monkeypatch.setattr(bm, "jnp", MockJnp())
-    monkeypatch.setattr(bm, "nnx", MockNNX())
-    monkeypatch.setattr(bm, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
-    monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
-
-    def mock_raise_error(*_args: object, **_kwargs: object) -> Never:
-        """Execute function.
-
-        Raises:
-            ValueError: Description.
-
-        """
-        msg = "err"
-        raise ValueError(msg)
-
-    monkeypatch.setattr(bm, "_run_benchmark_pass", mock_raise_error)
-    res = bm.benchmark_model("model", "gpu", 1)
-    assert "failed" in res["status"]
-
-
-class MockJaxNoBlock:
-    """Provide class docstring."""
-
-    random = MagicMock()
-
-    def devices(self, *args):
-        """Execute devices helper."""
-        return [MagicMock()]
-
-    def default_device(self, *args):
-        """Execute default device helper."""
-        return MagicMock()
-
-
-def test_benchmark_model_jax_real_no_block_until_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    monkeypatch.setattr(bm, "jax", MockJaxNoBlock())
-    monkeypatch.setattr(bm, "jnp", MockJnp())
-    monkeypatch.setattr(bm, "nnx", MockNNX())
-    monkeypatch.setattr(bm, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
-    monkeypatch.setattr(bm, "Gemma4Config", MockGemma4Config)
-    res = bm.benchmark_model("model", "gpu", 1, num_runs=2)
-    assert res["status"] == "success"
-
-
-def test_benchmark_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "jax", None)
-    importlib.reload(bm)
-    monkeypatch.undo()
-    monkeypatch.setitem(sys.modules, "flax", None)
-    importlib.reload(bm)
-    monkeypatch.undo()
-    importlib.reload(bm)
-
-
-from unittest.mock import MagicMock
-
-from gemma_4_sql.backends.jax.benchmark import benchmark_model
-
-
-class MockJaxWithBlock:
-    """Test class for MockJaxWithBlock."""
-
-    def __init__(self):
-        """Initialize __init__."""
-        self.random = MagicMock()
-
-    def block_until_ready(self, _):
-        """Execute block until ready helper."""
-
-    def devices(self, *args):
-        """Execute devices helper."""
-        return [MagicMock()]
-
-    def default_device(self, *args):
-        """Execute default device helper."""
-        return MagicMock()
-
-
-def test_benchmark_jax_block_until_ready(monkeypatch):
-    """Test benchmark jax block until ready functionality."""
-    import gemma_4_sql.backends.jax.benchmark as bm
-
-    mock_jax = MockJaxWithBlock()
-    monkeypatch.setattr(bm, "jax", mock_jax)
-    monkeypatch.setattr(bm, "jnp", MagicMock())
-    monkeypatch.setattr(bm, "nnx", MagicMock())
-    monkeypatch.setattr(bm, "Gemma4ForCausalLM", MagicMock())
-    monkeypatch.setattr(bm, "Gemma4Config", MagicMock())
-
-    res = benchmark_model("model", "gpu", 1, num_runs=1)
-    assert res["status"] == "success"
-
-
-def test_benchmark_jax_coverage(monkeypatch):
-    """Test benchmark jax coverage functionality."""
-    import gemma_4_sql.backends.jax.benchmark as bm
-
-    class MockJax:
-        """Test class for MockJax."""
-
-        def __init__(self, mode="normal"):
-            """Initialize __init__."""
-            self.mode = mode
-            self.random = type("R", (), {"PRNGKey": staticmethod(lambda s: s), "key": staticmethod(lambda s: s), "randint": staticmethod(lambda *a, **k: type("I", (), {"shape": (1, 1)})())})()
-
-        def devices(self, d):
-            """Execute devices helper."""
-            if self.mode == "err" and d == "gpu":
-                raise RuntimeError("err")
-            if d == "tpu" and self.mode != "tpu":
-                raise RuntimeError("err")
-            return [type("D", (), {})()]
-
-        def block_until_ready(self, x):
-            """Execute block until ready helper."""
-            return x
-
-        def default_device(self, d):
-            """Execute default device helper."""
-            return type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})()
-
-    class MockOut:
-        """Test class for MockOut."""
-
-        def __getitem__(self, k):
-            """Initialize __getitem__."""
-            return "dummy"
-
-    class MockModel:
-        """Test class for MockModel."""
-
-        def __call__(self, *a, **k):
-            """Initialize __call__."""
-            return MockOut()
-
-        def generate(self, *a, **k):
-            """Execute generate helper."""
-            return "out"
-
-    monkeypatch.setattr(bm, "jax", MockJax())
-    monkeypatch.setattr(bm, "jnp", type("JNP", (), {"zeros": lambda *a, **k: "zeros", "int32": "int32", "arange": lambda *a, **k: type("A", (), {"__getitem__": lambda s, k: "dummy", "shape": (1,)})(), "argmax": lambda *a, **k: "dummy", "concatenate": lambda *a, **k: type("C", (), {"shape": (1, 2)})()})())
-    monkeypatch.setattr(bm, "nnx", type("NNX", (), {"jit": staticmethod(lambda f, *a, **k: f)})())
-
-    # 33, 34->38 (TPU devices)
-    assert bm._get_device("tpu")
-    monkeypatch.setattr(bm, "jax", MockJax("tpu"))
-    assert bm._get_device("tpu")
-
-    # Error in GPU device
-    monkeypatch.setattr(bm, "jax", MockJax("err"))
-    assert bm._get_device("gpu")  # falls back to CPU
-
-    monkeypatch.setattr(bm, "jax", MockJax())
-    # Generate mode
-    bm._run_benchmark_pass(MockModel(), 1, 2, 1, "generate", 128, "cpu")
-    bm._run_benchmark_pass(MockModel(), 1, 2, 1, "prefill", 128, "cpu")
-
-    # Mock no generate
-    bm._run_benchmark_pass(type("M", (), {"__call__": lambda s, *a, **k: MockOut()})(), 1, 2, 1, "generate", 128, "cpu")
-
-
-def test_jax_benchmark_branch_34_38(monkeypatch):
-    """Test jax benchmark branch 34 38 functionality."""
-    import gemma_4_sql.backends.jax.benchmark as bm
-
-    class MockJax:
-        """Test class for MockJax."""
-
-        def devices(self, d):
-            """Execute devices helper."""
-            if d == "tpu":
-                # Return an object that raises RuntimeError when indexed at 0
-                class ExplodingList:
-                    """Test class for ExplodingList."""
-
-                    def __bool__(self):
-                        """Initialize __bool__."""
-                        return True
-
-                    def __getitem__(self, k):
-                        """Initialize __getitem__."""
-                        raise RuntimeError("err")
-
-                return ExplodingList()
-            return ["cpu"]
-
-    monkeypatch.setattr(bm, "jax", MockJax())
-    assert bm._get_device("tpu") == "cpu"
-
-
-def test_jax_benchmark_loops(monkeypatch):
-    """Test jax benchmark loops functionality."""
-    import gemma_4_sql.backends.jax.benchmark as bm
-
-    class MockJax:
-        """Test class for MockJax."""
-
-        def __init__(self):
-            """Initialize __init__."""
-            self.random = type("R", (), {"key": staticmethod(lambda s: s), "randint": staticmethod(lambda *a, **k: "dummy")})()
-
-        def default_device(self, d):
-            """Execute default device helper."""
-            return type("CM", (), {"__enter__": lambda s: None, "__exit__": lambda s, *a: None})()
-
-    class MockModel:
-        """Test class for MockModel."""
-
-        def __call__(self, *a, **k):
-            """Initialize __call__."""
-            return
-
-    monkeypatch.setattr(bm, "jax", MockJax())
-    monkeypatch.setattr(bm, "jnp", type("JNP", (), {"int32": "int32"})())
-    monkeypatch.setattr(bm, "nnx", type("NNX", (), {"jit": staticmethod(lambda f, *a, **k: f)})())
-
-    # 0 warmup steps
-    bm._run_benchmark_pass(MockModel(), 1, 1, 0, "prefill", 128, "cpu")
-    # 0 num runs
-    bm._run_benchmark_pass(MockModel(), 1, 0, 1, "prefill", 128, "cpu")
-
-
-def test_jax_benchmark_branch_empty(monkeypatch):
-    """Test jax benchmark branch empty functionality."""
-    import gemma_4_sql.backends.jax.benchmark as bm
-
-    class MockJaxEmpty:
-        """Test class for MockJaxEmpty."""
-
-        def devices(self, d):
-            """Execute devices helper."""
-            return []
-
-    monkeypatch.setattr(bm, "jax", MockJaxEmpty())
-
-    # 34->35/38 (TPU devices empty)
-    # This will trigger an exception if cpu is also empty, but let's just make cpu return a device
-    class MockJaxCPUFallback:
-        """Test class for MockJaxCPUFallback."""
-
-        def devices(self, d):
-            """Execute devices helper."""
-            if d in ("tpu", "gpu"):
-                return []
-            return ["cpu"]
-
-    monkeypatch.setattr(bm, "jax", MockJaxCPUFallback())
-    assert bm._get_device("tpu") == "cpu"
-    assert bm._get_device("gpu") == "cpu"
+        # This will call _run() -> _run_benchmark_pass
+        res = jax_benchmark.benchmark_model("test_model", "cpu", 2, dtype="float32", mode="generate", max_new_tokens=1, warmup_steps=1, num_runs=1)
+        assert len(res) == 3

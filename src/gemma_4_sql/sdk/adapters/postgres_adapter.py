@@ -22,7 +22,7 @@ class PostgresAdapter(DatabaseAdapter):
 
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
-        """Return the exception classes."""
+        """Provide the exception classes."""
         classes: list[type[Exception]] = []
         if psycopg2 is not None:
             err = getattr(psycopg2, "Error", None)
@@ -44,6 +44,7 @@ class PostgresAdapter(DatabaseAdapter):
 
         Raises:
             ImportError: If psycopg2 is not installed.
+
         """
         if psycopg2 is None:
             msg = "psycopg2 is required. Install with `pip install psycopg2-binary`."
@@ -71,7 +72,7 @@ class PostgresAdapter(DatabaseAdapter):
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL to set up schema."""
-        conn_obj = cast(Any, self.conn)
+        conn_obj = self.conn
         cursor = conn_obj.cursor()
         try:
             cursor.execute(ddl)
@@ -88,6 +89,7 @@ class PostgresAdapter(DatabaseAdapter):
 
         Returns:
             A tuple of success boolean, result tuples, and optional error message.
+
         """
         try:
             async_conn = cast(Any, await self.connect_async())
@@ -111,6 +113,7 @@ class PostgresAdapter(DatabaseAdapter):
 
         Returns:
             A list of result tuples.
+
         """
         try:
             async_conn = cast(Any, await self.connect_async())

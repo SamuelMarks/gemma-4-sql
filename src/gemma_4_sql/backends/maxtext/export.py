@@ -22,9 +22,9 @@ except (ImportError, AttributeError):
     ocp = None
 
 try:
-    from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model
+    import maxtext.models.gemma4 as _gemma4
 
-    Gemma4Model: Any = _Gemma4Model
+    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     Gemma4Model = None
 
@@ -43,6 +43,7 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
     Raises:
         DependencyMissingError: If required export dependencies (JAX, Orbax, or MaxText) are missing.
         ExportError: If model weight initialization or Orbax checkpoint persistence fails.
+
     """
     from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 

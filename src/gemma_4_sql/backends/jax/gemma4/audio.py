@@ -11,10 +11,10 @@ from flax import nnx
 from .audio_attention import (
     Gemma4AudioAttention,
     Gemma4AudioRelPositionalEncoding,
-    _compute_audio_attention_outputs,
-    _convert_to_block,
-    _extract_block_context,
-    _rel_shift,
+    compute_audio_attention_outputs,
+    convert_to_block,
+    extract_block_context,
+    rel_shift,
 )
 from .audio_layers import (
     Gemma4AudioCausalConv1d,
@@ -35,10 +35,10 @@ __all__ = [
     "Gemma4AudioRelPositionalEncoding",
     "Gemma4AudioSubSampleConvProjection",
     "Gemma4AudioSubSampleConvProjectionLayer",
-    "_compute_audio_attention_outputs",
-    "_convert_to_block",
-    "_extract_block_context",
-    "_rel_shift",
+    "compute_audio_attention_outputs",
+    "convert_to_block",
+    "extract_block_context",
+    "rel_shift",
 ]
 
 
@@ -55,6 +55,7 @@ class Gemma4AudioLayer(nnx.Module):
         Args:
             config: The configuration parameters.
             rngs: The rngs.
+
         """
         self.feed_forward1 = Gemma4AudioFeedForward(config, rngs=rngs)
         self.feed_forward2 = Gemma4AudioFeedForward(config, rngs=rngs)
@@ -111,7 +112,7 @@ class Gemma4AudioModel(nnx.Module):
         num_blocks = (seq_len + chunk_size - 1) // chunk_size
         padded_seq_len = num_blocks * chunk_size
         pad_amount = padded_seq_len - seq_len
-        mask_4d = jnp.pad(mask_4d, ((0, 0), (0, pad_amount), (0, 0), (0, pad_amount)))
+        mask_4d = jnp.pad(mask_4d, ((0, 0), (0, 0), (0, pad_amount), (0, pad_amount)))
         mask_5d = mask_4d.reshape(batch_size, 1, num_blocks, chunk_size, padded_seq_len)
         mask_5d = jnp.pad(mask_5d, ((0, 0), (0, 0), (0, 0), (0, 0), (max_past_horizon, max_future_horizon)))
         block_starts = jnp.arange(num_blocks) * chunk_size

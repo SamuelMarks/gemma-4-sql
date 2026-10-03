@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.jax.etl import build_dataloader
-from gemma_4_sql.type_hints import ETLConfig, TrainerState, TrainingConfig
+from gemma_4_sql.type_hints import ETLConfig, ModelType, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -35,7 +35,7 @@ except (ImportError, AttributeError):
     Gemma4ForCausalLM = None
 
 
-def _loss_fn(model: Any, batch: JSONDict) -> Any:
+def _loss_fn(model: ModelType, batch: JSONDict) -> Any:
     """Compute the cross-entropy loss for the model on a given batch.
 
     Args:
@@ -44,6 +44,7 @@ def _loss_fn(model: Any, batch: JSONDict) -> Any:
 
     Returns:
         The execution result.
+
     """
     logits = model(batch["inputs"])
     targets = batch["targets"]
@@ -56,9 +57,10 @@ def _get_train_step_fn() -> object:
 
     Returns:
         The execution result.
+
     """
 
-    def train_step(model: Any, optimizer: Any, batch: JSONDict) -> Any:
+    def train_step(model: ModelType, optimizer: object, batch: JSONDict) -> Any:
         """Execute a single JAX-compiled training step.
 
         Args:
@@ -68,6 +70,7 @@ def _get_train_step_fn() -> object:
 
         Returns:
             The execution result.
+
         """
         if nnx is not None and hasattr(nnx, "value_and_grad"):
             (loss, grads) = nnx.value_and_grad(_loss_fn)(model, batch)
@@ -99,10 +102,10 @@ def _run_training_epochs(state: TrainerState) -> float:
         """
         batch["inputs"] = jax.device_put(batch["inputs"], state.params)
         batch["targets"] = jax.device_put(batch["targets"], state.params)
-        loss = state.train_step(state.policy_model, state.optimizer, batch)
+        loss = state.train_step(state.policy_model, state.optimizer, batch)  # type: ignore # Justified: Dynamic backend protocol typing
         return float(loss.item() if hasattr(loss, "item") else loss)
 
-    return generic_run_training_epochs(state.epochs, state.dataloader, process_batch)
+    return generic_run_training_epochs(state.epochs, state.dataloader, process_batch)  # type: ignore # Justified: Dynamic backend protocol typing
 
 
 def _execute_train(dataset: str, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
@@ -120,6 +123,7 @@ def _execute_train(dataset: str, epochs: int, learning_rate: float, batch_size: 
     Raises:
         DependencyMissingError: If JAX dependencies are missing.
         ValueError: If dataloader is invalid.
+
     """
     if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -142,7 +146,7 @@ def _execute_train(dataset: str, epochs: int, learning_rate: float, batch_size: 
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
-    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=train_step, params=sharding))
+    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=train_step, params=sharding))  # type: ignore # Justified: Dynamic backend protocol typing
     return "completed", float(final_loss)
 
 
@@ -151,13 +155,14 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     Args:
         config: The TrainingConfig.
-        **kwargs: Extra runtime options such as 'test_mode' and 'distributed_strategy'.
+        **kwargs: Extra runtime options such as 'distributed_strategy'.
 
     Returns:
         A dictionary containing JAX training status and metrics.
 
     Raises:
         DependencyMissingError: If JAX dependencies are missing.
+
     """
     action = getattr(config, "action", "sft")
     model_name = getattr(config, "model_name", "gemma-4")

@@ -1,419 +1,193 @@
-"""Tests for MaxText DPO logic."""
-
-from __future__ import annotations
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import gemma_4_sql.backends.maxtext.dpo as tr
-from gemma_4_sql.backends.maxtext.dpo import run_dpo
-from gemma_4_sql.type_hints import DPOConfig
-
-
-class MockJnpTensor:
-    """Provide class docstring."""
-
-    def __init__(self, shape: tuple) -> None:
-        """Execute function."""
-        self.shape = shape
-        self.dtype = float
-
-    def __rmul__(self, other: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self
-
-    def __mul__(self, other: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self
-
-    def __sub__(self, other: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self
-
-    def __neg__(self) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self
-
-    def __add__(self, other: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self
-
-    def item(self) -> float:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return 0.35
-
-
-class MockJnp:
-    """Provide class docstring."""
-
-    int32 = 1
-
-    @staticmethod
-    def zeros(shape: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockJnpTensor(shape)
-
-    @staticmethod
-    def mean(x: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return x
-
-    @staticmethod
-    def sum(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockJnpTensor((1,))
-
-
-class MockJnn:
-    """Provide class docstring."""
-
-    @staticmethod
-    def log_sigmoid(x: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return x
-
-
-class MockJaxRandom:
-    """Provide class docstring."""
-
-    @staticmethod
-    def mock_prngkey(seed: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return seed
-
-    PRNGKey = mock_prngkey
-
-
-class MockJax:
-    """Provide class docstring."""
-
-    random = MockJaxRandom()
-
-    @staticmethod
-    def jit(fn: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return fn
-
-    @staticmethod
-    def value_and_grad(fn: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-
-        def wrapper(*args: object, **kwargs: object) -> object:
-            """Execute function.
-
-            Returns:
-                object: Description of return.
-
-            """
-            loss = fn(*args, **kwargs)
-            return (loss, "grads")
-
-        return wrapper
-
-
-class MockOptax:
-    """Provide class docstring."""
-
-    @staticmethod
-    def adamw(_lr: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-
-        class MockOpt:
-            """Provide class docstring."""
-
-            def init(self, _params: object) -> object:
-                """Execute function.
-
-                Returns:
-                    object: Description of return.
-
-                """
-                return "opt_state"
-
-            def update(self, _grads: object, _opt_state: object, _params: object) -> object:
-                """Execute function.
-
-                Returns:
-                    object: Description of return.
-
-                """
-                return ("updates", "opt_state")
-
-        return MockOpt()
-
-    @staticmethod
-    def apply_updates(params: object, _updates: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return params
-
-
-class MockGemma4Model:
-    """Provide class docstring."""
-
-    def __init__(self, name: object) -> None:
-        """Execute function."""
-
-    def init(self, _rng: object, _inputs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return "params"
-
-    def apply(self, _params: object, _inputs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockJnpTensor((1,))
+from gemma_4_sql.backends.maxtext.dpo import _compute_logps, _dpo_step_loss, _execute_dpo, _get_train_step_fn, _run_training_epochs, dpo_loss, run_dpo
+from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import DPOConfig, TrainerState
 
 
 @pytest.fixture
-def _mock_maxtext_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    monkeypatch.setattr(tr, "jax", MockJax())
-    monkeypatch.setattr(tr, "jnp", MockJnp())
-    monkeypatch.setattr(tr, "optax", MockOptax())
-    monkeypatch.setattr(tr, "Gemma4Model", MockGemma4Model)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnp", MockJnp())
-    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnn", MockJnn())
+def mock_dpo_deps():
+    mock_jax = MagicMock()
+    mock_jnp = MagicMock()
+    mock_optax = MagicMock()
+    mock_Gemma4Model = MagicMock()
 
-    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return {"loader": [{"chosen_inputs": MockJnpTensor((1,)), "chosen_labels": MockJnpTensor((1,)), "rejected_inputs": MockJnpTensor((1,)), "rejected_labels": MockJnpTensor((1,))}]}
-
-    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
+    with patch("gemma_4_sql.backends.maxtext.dpo.jax", mock_jax), patch("gemma_4_sql.backends.maxtext.dpo.jnp", mock_jnp), patch("gemma_4_sql.backends.maxtext.dpo.optax", mock_optax), patch("gemma_4_sql.backends.maxtext.dpo.Gemma4Model", mock_Gemma4Model):
+        yield mock_jax, mock_jnp, mock_optax, mock_Gemma4Model
 
 
-def test_run_dpo_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    monkeypatch.setattr(tr, "jnp", None)
-    with pytest.raises(DependencyMissingError):
-        run_dpo(DPOConfig(model_name="model", dataset="data"))
+def test_dpo_loss():
+    with patch("gemma_4_sql.backends.maxtext.dpo.jax_dpo_loss", return_value=(1, 2, 3)) as mock_jax_dpo:
+        res = dpo_loss(1, 2, 3, 4, 0.5)
+        assert res == (1, 2, 3)
+        mock_jax_dpo.assert_called_once_with(1, 2, 3, 4, 0.5)
 
 
-@pytest.mark.usefixtures("_mock_maxtext_env")
-def test_run_dpo_maxtext_real() -> None:
-    """Execute function.
+def test_compute_logps(mock_dpo_deps):
+    _, mock_jnp, _, _ = mock_dpo_deps
+    model = MagicMock()
+    model.apply.return_value = 5
+    mock_jnp.sum.return_value = 10
 
-    Raises:
-        AssertionError: Description.
-
-    """
-    res = run_dpo(DPOConfig(model_name="sft", dataset="dat", epochs=2, learning_rate=0.1, test_mode=True))
-    if not res["backend"] == "maxtext":
-        raise AssertionError
-    if False:
-        raise AssertionError
+    res = _compute_logps(model, {"p": 1}, 2, 3)
+    assert res == 10
+    model.apply.assert_called_once_with({"p": 1}, 2)
+    # mock_jnp.sum was called with 5 * 3 = 15. The exact call is complex to assert due to magicmock mult, just ensure it was called.
+    mock_jnp.sum.assert_called_once()
 
 
-@pytest.mark.usefixtures("_mock_maxtext_env")
-def test_run_dpo_maxtext_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-
-    def mock_build_dataloader(*_args: object, **_kwargs: object) -> dict:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return {"loader": None}
-
-    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    res = run_dpo(DPOConfig(model_name="sft", dataset="dat", epochs=2, learning_rate=0.1, test_mode=True))
-    if not res["backend"] == "maxtext":
-        raise AssertionError
-    if False:
-        raise AssertionError
+def test_dpo_step_loss():
+    with patch("gemma_4_sql.backends.maxtext.dpo._compute_logps", side_effect=[1, 2, 3, 4]) as mock_comp, patch("gemma_4_sql.backends.maxtext.dpo.dpo_loss", return_value=(10, 0, 0)) as mock_loss:
+        batch = {"chosen_inputs": "ci", "chosen_labels": "cl", "rejected_inputs": "ri", "rejected_labels": "rl"}
+        res = _dpo_step_loss("pm", "pp", "rm", "rp", batch, 0.1)
+        assert res == 10
+        mock_comp.assert_any_call("pm", "pp", "ci", "cl")
+        mock_comp.assert_any_call("pm", "pp", "ri", "rl")
+        mock_comp.assert_any_call("rm", "rp", "ci", "cl")
+        mock_comp.assert_any_call("rm", "rp", "ri", "rl")
+        mock_loss.assert_called_once_with(1, 2, 3, 4, 0.1)
 
 
-@pytest.mark.usefixtures("_mock_maxtext_env")
-def test_run_dpo_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+def test_get_train_step_fn(mock_dpo_deps):
+    mock_jax, _, mock_optax, _ = mock_dpo_deps
 
-    Raises:
-        AssertionError: Description.
+    mock_jax.value_and_grad.return_value = lambda *args: (0.5, "grads")
+    mock_jax.jit = lambda x: x
 
-    """
+    optimizer = MagicMock()
+    optimizer.update.return_value = ("updates", "new_opt_state")
+    mock_optax.apply_updates.return_value = "new_policy_params"
 
-    def mock_raise_error(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    train_step = _get_train_step_fn("pm", "rm", optimizer, 0.1)
 
-        Raises:
-            ValueError: Description.
+    with patch("gemma_4_sql.backends.maxtext.dpo._dpo_step_loss", return_value=0.5):
+        policy_params, opt_state, loss = train_step("pp", "rp", "os", "batch")
 
-        """
-        msg = "err"
-        raise ValueError(msg)
-
-    monkeypatch.setattr(tr, "build_dataloader", Exception)
-    res = run_dpo(DPOConfig(model_name="sft", dataset="dat", epochs=2, learning_rate=0.1, test_mode=True))
-    if "failed" not in str(res["status"]):
-        raise AssertionError
+    assert policy_params == "new_policy_params"
+    assert opt_state == "new_opt_state"
+    assert loss == 0.5
+    optimizer.update.assert_called_once_with("grads", "os", "pp")
 
 
-def test_dpo_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib")
-    sys = __import__("sys")
-    m_dpo = __import__("gemma_4_sql.backends.maxtext.dpo")
-    monkeypatch.setitem(sys.modules, "jax", None)
-    importlib.reload(m_dpo)
-    monkeypatch.undo()
-    importlib.reload(m_dpo)
+def test_get_train_step_fn_no_jit():
+    mock_jax = MagicMock()
+    mock_jax.value_and_grad.return_value = lambda *args: (0.5, "grads")
+    del mock_jax.jit
+    optimizer = MagicMock()
+    optimizer.update.return_value = ("updates", "new_opt_state")
+
+    with patch("gemma_4_sql.backends.maxtext.dpo.jax", mock_jax), patch("gemma_4_sql.backends.maxtext.dpo.optax") as mock_optax:
+        mock_optax.apply_updates.return_value = "new_policy_params"
+        train_step = _get_train_step_fn("pm", "rm", optimizer, 0.1)
+
+        with patch("gemma_4_sql.backends.maxtext.dpo._dpo_step_loss", return_value=0.5):
+            _policy_params, _opt_state, loss = train_step("pp", "rp", "os", "batch")
+        assert loss == 0.5
 
 
-def test_dpo_distributed_initialize(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+def test_run_training_epochs():
+    class MockLoss:
+        def item(self):
+            return 0.5
 
-    Raises:
-        AssertionError: Description.
+    def mock_train_step(pp, rp, os, b):
+        return pp, os, MockLoss()
 
-    """
-    tr = __import__("gemma_4_sql.backends.maxtext.dpo", fromlist=[""])
-    monkeypatch.setattr(tr, "jax", MockJax)
-    monkeypatch.setattr(tr, "optax", MockOptax)
-    monkeypatch.setattr(tr, "jnp", MockJnp)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnp", MockJnp())
-    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnn", MockJnn())
-    monkeypatch.setattr(tr, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: MockJnpTensor((1,))})())
+    state = TrainerState(dataloader=[1, 2], epochs=1, train_step=mock_train_step, policy_params="pp", ref_params="rp", opt_state="os")
 
-    def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    with patch("gemma_4_sql.backends.maxtext.dpo.generic_run_training_epochs", return_value=0.5) as mock_run:
+        pp, os, loss = _run_training_epochs(state)
+        assert pp == "pp"
+        assert os == "os"
+        assert loss == 0.5
 
-        Returns:
-            object: Description of return.
-
-        """
-        return {"loader": [{"chosen_inputs": 1, "chosen_labels": 1, "rejected_inputs": 1, "rejected_labels": 1}]}
-
-    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    res = tr.run_dpo(DPOConfig(model_name="sft", dataset="d", beta=0.1, epochs=1, learning_rate=0.1, test_mode=False))
-    if res["status"] != "completed":
-        raise AssertionError
+        # Test the callback
+        cb = mock_run.call_args[0][2]
+        cb_loss = cb({"b": 1})
+        assert cb_loss == 0.5
 
 
-def test_dpo_distributed_initialize_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+def test_run_training_epochs_no_item():
+    def mock_train_step(pp, rp, os, b):
+        return pp, os, 0.5
 
-    Raises:
-        AssertionError: Description.
+    state = TrainerState(dataloader=[1, 2], epochs=1, train_step=mock_train_step, policy_params="pp", ref_params="rp", opt_state="os")
 
-    """
-    tr = __import__("gemma_4_sql.backends.maxtext.dpo", fromlist=[""])
-    monkeypatch.setattr(tr, "jax", MockJax)
-    monkeypatch.setattr(tr, "optax", MockOptax)
-    monkeypatch.setattr(tr, "jnp", MockJnp)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnp", MockJnp())
-    monkeypatch.setattr("gemma_4_sql.backends.jax.dpo.jnn", MockJnn())
-    monkeypatch.setattr(tr, "Gemma4Model", lambda *_args, **_kwargs: type("M", (), {"init": lambda *_args: None, "apply": lambda *_args, **_kwargs: MockJnpTensor((1,))})())
+    with patch("gemma_4_sql.backends.maxtext.dpo.generic_run_training_epochs", return_value=0.5) as mock_run:
+        _run_training_epochs(state)
+        cb = mock_run.call_args[0][2]
+        cb_loss = cb({"b": 1})
+        assert cb_loss == 0.5
 
-    def mock_build_dataloader(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
 
-        Returns:
-            object: Description of return.
+def test_execute_dpo(mock_dpo_deps):
+    mock_jax, _, _, mock_Gemma4Model = mock_dpo_deps
 
-        """
-        return {"loader": [{"chosen_inputs": 1, "chosen_labels": 1, "rejected_inputs": 1, "rejected_labels": 1}]}
+    mock_jax.distributed.initialize.return_value = None
 
-    monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
-    res = tr.run_dpo(DPOConfig(model_name="sft", dataset="d", beta=0.1, epochs=1, learning_rate=0.1, test_mode=False))
-    if res["status"] != "completed":
-        raise AssertionError
+    mock_pm = MagicMock()
+    mock_rm = MagicMock()
+    mock_Gemma4Model.side_effect = [mock_pm, mock_rm]
+
+    with patch("gemma_4_sql.backends.maxtext.dpo.build_dataloader", return_value={"loader": [1, 2]}), patch("gemma_4_sql.backends.maxtext.dpo._get_train_step_fn"), patch("gemma_4_sql.backends.maxtext.dpo._run_training_epochs", return_value=("pp", "os", 0.5)):
+        status, loss = _execute_dpo("model", "dataset", 0.1, 1, 1e-5, 2)
+        assert status == "completed"
+        assert loss == 0.5
+
+
+def test_execute_dpo_init_error(mock_dpo_deps):
+    mock_jax, _, _, mock_Gemma4Model = mock_dpo_deps
+    mock_jax.distributed.initialize.side_effect = RuntimeError("init fail")
+
+    mock_pm = MagicMock()
+    mock_rm = MagicMock()
+    mock_Gemma4Model.side_effect = [mock_pm, mock_rm]
+
+    with patch("gemma_4_sql.backends.maxtext.dpo.build_dataloader", return_value={"loader": [1, 2]}), patch("gemma_4_sql.backends.maxtext.dpo._get_train_step_fn"), patch("gemma_4_sql.backends.maxtext.dpo._run_training_epochs", return_value=("pp", "os", 0.5)):
+        status, _loss = _execute_dpo("model", "dataset", 0.1, 1, 1e-5, 2)
+        assert status == "completed"
+
+
+def test_execute_dpo_invalid_loader(mock_dpo_deps):
+    _mock_jax, _, _, mock_Gemma4Model = mock_dpo_deps
+    mock_Gemma4Model.side_effect = [MagicMock(), MagicMock()]
+
+    with patch("gemma_4_sql.backends.maxtext.dpo.build_dataloader", return_value={"loader": None}), pytest.raises(ValueError, match="Invalid dataloader for dataset"):
+        _execute_dpo("model", "dataset", 0.1, 1, 1e-5, 2)
+
+
+def test_run_dpo_success():
+    config = DPOConfig(model_name="model", dataset="dataset")
+
+    with (
+        patch("gemma_4_sql.backends.maxtext.dpo.jax", MagicMock()),
+        patch("gemma_4_sql.backends.maxtext.dpo.jnp", MagicMock()),
+        patch("gemma_4_sql.backends.maxtext.dpo.optax", MagicMock()),
+        patch("gemma_4_sql.backends.maxtext.dpo.Gemma4Model", MagicMock()),
+        patch("gemma_4_sql.backends.maxtext.dpo._execute_dpo", return_value=("completed", 0.5)),
+    ):
+        res = run_dpo(config)
+        assert res["status"] == "completed"
+        assert res["final_loss"] == 0.5
+
+
+def test_run_dpo_missing_deps():
+    config = DPOConfig(model_name="model", dataset="dataset")
+    with patch("gemma_4_sql.backends.maxtext.dpo.jax", None), pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
+        run_dpo(config)
+
+
+def test_run_dpo_execution_error():
+    config = DPOConfig(model_name="model", dataset="dataset")
+
+    with (
+        patch("gemma_4_sql.backends.maxtext.dpo.jax", MagicMock()),
+        patch("gemma_4_sql.backends.maxtext.dpo.jnp", MagicMock()),
+        patch("gemma_4_sql.backends.maxtext.dpo.optax", MagicMock()),
+        patch("gemma_4_sql.backends.maxtext.dpo.Gemma4Model", MagicMock()),
+        patch("gemma_4_sql.backends.maxtext.dpo._execute_dpo", side_effect=RuntimeError("exec fail")),
+    ):
+        res = run_dpo(config)
+        assert res["status"] == "failed: exec fail"

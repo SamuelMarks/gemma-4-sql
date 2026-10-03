@@ -28,6 +28,7 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
 
     Raises:
         DependencyMissingError: If TensorBoardX dependencies are missing.
+
     """
     if SummaryWriter is None:
         from gemma_4_sql.exceptions import DependencyMissingError

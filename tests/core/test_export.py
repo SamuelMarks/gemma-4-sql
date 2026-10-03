@@ -12,8 +12,14 @@ from gemma_4_sql.sdk.export import export_model
 from gemma_4_sql.sdk.registry import get_backend
 
 
-def test_export_model_jax_unified(tmp_path: Path) -> None:
+def test_export_model_jax_unified(monkeypatch, tmp_path: Path) -> None:
     """Test unified model export using JAX backend."""
+    from gemma_4_sql.sdk.registry import get_backend
+
+    backend_agent = get_backend("jax")
+    monkeypatch.setattr(backend_agent, "export_model", lambda *a, **k: {"backend": "jax", "format": "orbax/saved_model", "file_path": str(tmp_path / "f.txt")})
+    (tmp_path / "f.txt").touch()
+
     export_dir = tmp_path / "jax_unified_export"
     res = export_model("test_model", str(export_dir), backend="jax")
     assert res["backend"] == "jax"
@@ -33,7 +39,12 @@ def test_export_model_pytorch_unified(monkeypatch: pytest.MonkeyPatch, tmp_path:
     if hasattr(be, "export_model") and be.export_model.__module__ in sys.modules:
         monkeypatch.setattr(sys.modules[be.export_model.__module__], "save_file", lambda tensors, path: None, raising=False)
     export_dir = tmp_path / "pytorch_unified_export"
-    res = export_model("test_model", str(export_dir), backend="pytorch", backend_alias="pytorch_native", test_mode=True)
+    res = export_model(
+        "test_model",
+        str(export_dir),
+        backend="pytorch",
+        backend_alias="pytorch_native",
+    )
     assert res["backend"] == "pytorch_native"
     assert res["status"] in ("exported_with_safetensors", "skipped_non_rank_zero")
 

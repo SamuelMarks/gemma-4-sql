@@ -42,6 +42,7 @@ class Gemma4DecoderLayer(nn.Module):
 
         Returns:
             Tuple of hidden states, updated key-value cache, and router loss if MoE.
+
         """
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)

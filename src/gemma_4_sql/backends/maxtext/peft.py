@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from gemma_4_sql.exceptions import DependencyMissingError
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -29,9 +31,9 @@ except (ImportError, AttributeError):
     optax = None
 
 try:
-    from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model
+    import maxtext.models.gemma4 as _gemma4
 
-    Gemma4Model: Any = _Gemma4Model
+    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     Gemma4Model = None
 
@@ -65,6 +67,7 @@ def transform_params_to_lora(
     Raises:
         DependencyMissingError: If JAX is missing.
         ValueError: If rank r is less than or equal to 0.
+
     """
     if jax is None or jnp is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -72,9 +75,6 @@ def transform_params_to_lora(
         raise DependencyMissingError("JAX dependencies are missing.")
     if lora_r <= 0:
         raise ValueError(f"LoRA rank r must be positive, got {lora_r}")
-
-    if not target_modules or not isinstance(params, dict):
-        return params, 0
 
     if rng is None:
         rng = jax.random.PRNGKey(0)
@@ -84,13 +84,16 @@ def transform_params_to_lora(
     def _inject(curr: dict[str, Any], current_path: str = "") -> dict[str, Any]:
         """Inject LoRA factors into matching parameter dictionaries."""
         nonlocal injected_count, rng
+        if not isinstance(curr, dict):
+            return curr
         res: dict[str, Any] = {}
         for k, v in curr.items():
             sub_path = f"{current_path}.{k}" if current_path else k
             if isinstance(v, dict):
+                v_dict = cast(dict[str, Any], v)
                 # Check if this leaf dictionary represents a target projection module containing 'kernel'
-                if "kernel" in v and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in target_modules):
-                    kernel = v["kernel"]
+                if "kernel" in v_dict and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in target_modules):
+                    kernel: Any = v_dict["kernel"]
                     d_in, d_out = kernel.shape
                     scale_init = 1.0 / math.sqrt(lora_r)
                     rng, sub_rng = jax.random.split(rng)
@@ -102,14 +105,14 @@ def transform_params_to_lora(
                         maxval=scale_init,
                     )
                     lora_b = jnp.zeros((lora_r, d_out), dtype=kernel.dtype)
-                    new_v = dict(v)
+                    new_v: dict[str, Any] = dict(v_dict)
                     new_v["lora_a"] = lora_a
                     new_v["lora_b"] = lora_b
                     new_v["lora_scale"] = jnp.array(float(lora_alpha) / float(lora_r), dtype=jnp.float32)
                     res[k] = new_v
                     injected_count += 1
                 else:
-                    res[k] = _inject(v, sub_path)
+                    res[k] = _inject(v_dict, sub_path)
             else:
                 res[k] = v
         return res
@@ -126,17 +129,23 @@ def segregate_adapter_params(params: dict[str, Any]) -> tuple[dict[str, Any], di
 
     Returns:
         A tuple of (trainable_lora_params, frozen_base_params).
+
     """
     trainable: dict[str, Any] = {}
     frozen: dict[str, Any] = {}
 
     def _split(src: dict[str, Any], dst_trainable: dict[str, Any], dst_frozen: dict[str, Any]) -> None:
-        """Split parameters into trainable adapter and frozen base sets."""
+        """Split parameters into trainable and frozen PyTrees recursively."""
+        if not isinstance(src, dict):
+            # If a scalar or array is passed directly, treat it as frozen base weight unless the caller knows otherwise.
+            # But the signature says dict[str, Any], so this shouldn't happen for valid inputs.
+            return
         for k, v in src.items():
             if isinstance(v, dict):
+                v_dict = cast(dict[str, Any], v)
                 sub_t: dict[str, Any] = {}
                 sub_f: dict[str, Any] = {}
-                _split(v, sub_t, sub_f)
+                _split(v_dict, sub_t, sub_f)
                 if sub_t:
                     dst_trainable[k] = sub_t
                 if sub_f:
@@ -146,14 +155,13 @@ def segregate_adapter_params(params: dict[str, Any]) -> tuple[dict[str, Any], di
             else:
                 dst_frozen[k] = v
 
-    if isinstance(params, dict):
-        _split(params, trainable, frozen)
+    _split(params, trainable, frozen)
     return trainable, frozen
 
 
 def create_maxtext_lora_optimizer(
     params: dict[str, Any],
-    base_optimizer: Any = None,
+    base_optimizer: object = None,
 ) -> Any:
     """Create an Optax multi_transform optimizer updating only LoRA parameters.
 
@@ -169,6 +177,7 @@ def create_maxtext_lora_optimizer(
 
     Raises:
         DependencyMissingError: If Optax or JAX dependencies are missing.
+
     """
     if optax is None or jax is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -204,22 +213,23 @@ def merge_lora_weights(params: dict[str, Any]) -> dict[str, Any]:
 
     Returns:
         A new parameter dictionary with folded base weights and adapters removed.
+
     """
+    res: dict[str, Any] = {}
     if not isinstance(params, dict):
         return params
-
-    res: dict[str, Any] = {}
     for k, v in params.items():
         if isinstance(v, dict):
-            if "kernel" in v and "lora_a" in v and "lora_b" in v:
-                scale = float(v.get("lora_scale", 1.0))
-                delta_w = scale * (v["lora_a"] @ v["lora_b"])
-                merged_kernel = v["kernel"] + delta_w
-                new_module = {module_k: module_v for module_k, module_v in v.items() if module_k not in ("lora_a", "lora_b", "lora_scale")}
+            v_dict = cast(dict[str, Any], v)
+            if "kernel" in v_dict and "lora_a" in v_dict and "lora_b" in v_dict:
+                scale = float(v_dict.get("lora_scale", 1.0))
+                delta_w = scale * (v_dict["lora_a"] @ v_dict["lora_b"])
+                merged_kernel = v_dict["kernel"] + delta_w
+                new_module = {module_k: module_v for module_k, module_v in v_dict.items() if module_k not in ("lora_a", "lora_b", "lora_scale")}
                 new_module["kernel"] = merged_kernel
                 res[k] = new_module
             else:
-                res[k] = merge_lora_weights(v)
+                res[k] = merge_lora_weights(v_dict)
         else:
             res[k] = v
     return res
@@ -234,6 +244,7 @@ def save_maxtext_adapters(params: dict[str, Any], save_path: str | Path) -> None
 
     Raises:
         DependencyMissingError: If NumPy is missing.
+
     """
     if np is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -249,15 +260,16 @@ def save_maxtext_adapters(params: dict[str, Any], save_path: str | Path) -> None
 
     def _collect(curr: dict[str, Any], current_path: str = "") -> None:
         """Collect adapter arrays from parameter tree into flat dict."""
+        if not isinstance(curr, dict):
+            return
         for k, v in curr.items():
             sub_path = f"{current_path}.{k}" if current_path else k
             if isinstance(v, dict):
-                _collect(v, sub_path)
+                _collect(cast(dict[str, Any], v), sub_path)
             elif k in ("lora_a", "lora_b", "lora_scale"):
                 adapters[sub_path] = np.asarray(v)
 
-    if isinstance(params, dict):
-        _collect(params)
+    _collect(params)
 
     np.savez(path, **adapters)
 
@@ -275,6 +287,7 @@ def load_maxtext_adapters(params: dict[str, Any], load_path: str | Path) -> dict
     Raises:
         DependencyMissingError: If NumPy is missing.
         FileNotFoundError: If the load path does not exist.
+
     """
     if np is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -313,6 +326,7 @@ def count_maxtext_parameters(params: dict[str, Any]) -> tuple[int, int]:
 
     Returns:
         A tuple of (total_parameter_count, trainable_lora_parameter_count).
+
     """
     trainable_count = 0
     total_count = 0
@@ -320,17 +334,18 @@ def count_maxtext_parameters(params: dict[str, Any]) -> tuple[int, int]:
     def _count(curr: dict[str, Any]) -> None:
         """Count parameters recursively in parameter dictionary."""
         nonlocal trainable_count, total_count
+        if not isinstance(curr, dict):
+            return
         for k, v in curr.items():
             if isinstance(v, dict):
-                _count(v)
+                _count(cast(dict[str, Any], v))
             elif hasattr(v, "size"):
                 size = int(v.size)
                 total_count += size
                 if k in ("lora_a", "lora_b"):
                     trainable_count += size
 
-    if isinstance(params, dict):
-        _count(params)
+    _count(params)
 
     return total_count, trainable_count
 
@@ -358,38 +373,38 @@ def apply_lora(
 
     Raises:
         DependencyMissingError: If MaxText dependencies are missing.
+
     """
     status = "completed"
     if jax is None or jnp is None or (Gemma4Model is None and "params" not in kwargs):
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MaxText dependencies are missing.")
 
     injected_count = 0
     try:
+        params: dict[str, Any]
         if "params" in kwargs and kwargs["params"] is not None and isinstance(kwargs["params"], dict):
-            params = kwargs["params"]
+            params = cast(dict[str, Any], kwargs["params"])
         else:
+            if Gemma4Model is None:
+                raise DependencyMissingError("MaxText dependency missing.")
             model = Gemma4Model(model_name)
             rng = jax.random.PRNGKey(0)
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-            params = model.init(rng, dummy_input)
+            params_any: Any = model.init(rng, dummy_input)
+            params = cast(dict[str, Any], params_any) if isinstance(params_any, dict) else {}
 
-        if isinstance(params, dict):
-            params, injected_count = transform_params_to_lora(
-                params=params,
-                target_modules=target_modules,
-                lora_r=lora_r,
-                lora_alpha=lora_alpha,
-                lora_dropout=lora_dropout,
-            )
-        else:
-            injected_count = len(target_modules)
+        params, injected_count = transform_params_to_lora(
+            params=params,
+            target_modules=target_modules,
+            lora_r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+        )
 
-        if "output_dir" in kwargs and kwargs["output_dir"] is not None and isinstance(params, dict):
+        if "output_dir" in kwargs and kwargs["output_dir"] is not None:
             save_maxtext_adapters(params, str(kwargs["output_dir"]))
 
-        if "merge" in kwargs and kwargs["merge"] and isinstance(params, dict):
+        if kwargs.get("merge"):
             params = merge_lora_weights(params)
 
         logger.info("MaxText LoRA applied to %d modules", injected_count)

@@ -163,3 +163,28 @@ def test_run_benchmark_wrapper_paths() -> None:
             benchmark_fn=lambda: (0.0, 0.0, 0.0),
             raise_if_missing=True,
         )
+
+
+def test_sdk_benchmark(monkeypatch: object) -> None:
+    from unittest.mock import patch
+
+    from gemma_4_sql.sdk.benchmark import benchmark
+
+    class FakeBackend:
+        def benchmark_model(self, *args, **kwargs):
+            return {"status": "success"}
+
+    class FakeRegistry:
+        def get_backend(x):
+            return FakeBackend()
+
+    original_import = __import__
+
+    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "gemma_4_sql.sdk.registry":
+            return FakeRegistry
+        return original_import(name, globals, locals, fromlist, level)
+
+    with patch("builtins.__import__", side_effect=mock_import):
+        res = benchmark("m", "cpu", 1, "pytorch")
+        assert res["status"] == "success"

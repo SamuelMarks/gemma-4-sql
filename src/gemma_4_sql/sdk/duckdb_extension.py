@@ -22,7 +22,6 @@ def embed_in_duckdb(
     backend: str = "jax",
     db_path: str = ":memory:",
     max_retries: int = 3,
-    test_mode: bool = False,
 ) -> None:
     """Register a scalar function in DuckDB to ask natural language questions.
 
@@ -35,10 +34,10 @@ def embed_in_duckdb(
         backend: The backend framework to use.
         db_path: The file path to the database.
         max_retries: The integer value for max retries.
-        test_mode: Whether to run in fast test mode.
 
     Raises:
         ImportError: If duckdb is missing.
+
     """
     if duckdb is None:
         msg = "duckdb is required. Install with `pip install duckdb`."
@@ -54,6 +53,7 @@ def embed_in_duckdb(
 
         Returns:
             A JSON string containing the generated SQL, execution results, and success status.
+
         """
         try:
             cur = duck_conn.cursor() if callable(getattr(duck_conn, "cursor", None)) else duck_conn
@@ -76,7 +76,6 @@ def embed_in_duckdb(
                 backend=backend,
                 context=context,
                 db_kwargs={"existing_conn": cur},
-                test_mode=test_mode,
             )
             res: JSONDict = loop_res[0] if isinstance(loop_res, list) else loop_res
             return json.dumps({

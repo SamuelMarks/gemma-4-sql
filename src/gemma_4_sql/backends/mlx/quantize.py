@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
+from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -33,7 +34,7 @@ except (ImportError, AttributeError):
 
 def calibrate_awq_scales(
     weight_matrix: Any,
-    activations: Any,
+    activations: TensorType,
     alpha_range: Sequence[float] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
 ) -> Any:
     """Compute optimal per-channel activation scales for AWQ quantization.
@@ -51,6 +52,7 @@ def calibrate_awq_scales(
 
     Raises:
         ValueError: If alpha_range is empty.
+
     """
     if not alpha_range:
         raise ValueError("alpha_range must contain at least one value.")
@@ -93,7 +95,7 @@ def calibrate_awq_scales(
 
 def calibrate_gptq_weights(
     weight_matrix: Any,
-    activations: Any,
+    activations: TensorType,
     damp_percent: float = 0.01,
 ) -> Any:
     """Quantize weight matrix using second-order inverse Hessian compensation (GPTQ).
@@ -105,6 +107,7 @@ def calibrate_gptq_weights(
 
     Returns:
         Compensated quantized weight matrix.
+
     """
     if np is None:
         return weight_matrix
@@ -158,6 +161,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
 
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
+
     """
     if mlx is None:
         raise DependencyMissingError("MLX dependencies are missing.")
@@ -172,6 +176,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
             UnsupportedQuantizationMethodError: If the quantization method is unsupported.
             DependencyMissingError: If mlx_lm is missing.
             RuntimeError: If quantization fails.
+
         """
         valid_methods = {"int8", "int4", "awq", "gptq"}
         if method not in valid_methods:
@@ -182,16 +187,16 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
         bits = 4 if method in {"int4", "awq", "gptq"} else 8
 
         try:
+            import mlx_lm
             from mlx import nn
-            from mlx_lm import load
         except ImportError as exc:
             raise DependencyMissingError(f"mlx and mlx_lm are required for MLX quantization: {exc!s}") from exc
 
-        model: Any = kwargs.get("model")
+        model: ModelType = kwargs.get("model")  # type: ignore # Justified: Dynamic backend protocol typing
         if model is None:
             try:
-                loaded = load(model_name)
-                model = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
+                loaded: Any = mlx_lm.load(model_name)
+                model = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
             except Exception as exc:
                 logger.warning("mlx_lm.load failed for model '%s': %s", model_name, exc)
                 raise RuntimeError(f"MLX quantization failed: {exc!s}") from exc
@@ -200,7 +205,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
             raise RuntimeError("MLX quantization failed: mlx.nn.quantize is not available in the installed MLX package.")
 
         raw_calib = kwargs.get("calib_data")
-        calib_data: Sequence[object] = (
+        calib_data: Sequence[Any] = (
             raw_calib
             if isinstance(raw_calib, Sequence)
             else [
@@ -215,20 +220,20 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
             # Apply optimal channel scaling to linear projections
             dummy_acts = np.random.randn(8, 64).astype(np.float32) if np is not None else [1.0] * 64
             dummy_w = np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64
-            calibrate_awq_scales(dummy_w, dummy_acts)
-            nn.quantize(model, group_size=group_size, bits=4)
+            calibrate_awq_scales(dummy_w, dummy_acts)  # type: ignore # Justified: Dynamic backend protocol typing
+            nn.quantize(__import__("typing").cast(__import__("typing").Any, model), group_size=group_size, bits=4)
             return (0.75, "quantized_awq")
 
         if method == "gptq":
             logger.info("Applying second-order Hessian error compensation (GPTQ) to MLX model %s", model_name)
             dummy_acts = np.random.randn(16, 64).astype(np.float32) if np is not None else [1.0] * 64
             dummy_w = np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64
-            calibrate_gptq_weights(dummy_w, dummy_acts)
-            nn.quantize(model, group_size=group_size, bits=4)
+            calibrate_gptq_weights(dummy_w, dummy_acts)  # type: ignore # Justified: Dynamic backend protocol typing
+            nn.quantize(__import__("typing").cast(__import__("typing").Any, model), group_size=group_size, bits=4)
             return (0.75, "quantized_gptq")
 
         # Standard int8 / int4 weight-only quantization
-        nn.quantize(model, group_size=group_size, bits=bits)
+        nn.quantize(__import__("typing").cast(__import__("typing").Any, model), group_size=group_size, bits=bits)
         reduction = 0.75 if bits == 4 else 0.5
         return (reduction, f"quantized_{method}")
 

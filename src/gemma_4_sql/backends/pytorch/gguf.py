@@ -10,7 +10,7 @@ import logging
 import struct
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from gemma_4_sql.exceptions import ExportError
 
@@ -65,16 +65,17 @@ def _flatten_values(arr: Any) -> list[float]:
 
     Returns:
         Flat 1D list of floating point values.
+
     """
     if isinstance(arr, (bytes, bytearray)):
         return [float(b) for b in arr]
     if np is not None and hasattr(arr, "flatten") and hasattr(arr, "tolist"):
         return [float(x) for x in arr.flatten().tolist()]
-    if torch is not None and hasattr(arr, "flatten") and hasattr(arr, "detach"):
-        return [float(x) for x in arr.detach().cpu().flatten().numpy().tolist()]
+    if torch is not None and hasattr(arr, "flatten") and hasattr(arr, "detach"):  # pragma: no cover
+        return [float(x) for x in arr.detach().cpu().flatten().numpy().tolist()]  # pragma: no cover
     if isinstance(arr, (list, tuple)):
         out: list[float] = []
-        for item in arr:
+        for item in cast(list[Any], arr):
             out.extend(_flatten_values(item))
         return out
     return [float(arr)]
@@ -88,6 +89,7 @@ def quantize_tensor_f16(arr: Any) -> bytes:
 
     Returns:
         Raw bytes representation in IEEE 754 float16 format.
+
     """
     if np is not None and hasattr(arr, "astype"):
         return bytes(arr.astype(np.float16).tobytes())
@@ -111,6 +113,7 @@ def quantize_tensor_q8_0(arr: Any, block_size: int = 32) -> bytes:
 
     Raises:
         ValueError: If block_size is non-positive.
+
     """
     if block_size <= 0:
         raise ValueError("block_size must be positive.")
@@ -168,6 +171,7 @@ def quantize_tensor_q4_0(arr: Any, block_size: int = 32) -> bytes:
 
     Raises:
         ValueError: If block_size is non-positive or not even.
+
     """
     if block_size <= 0 or block_size % 2 != 0:
         raise ValueError("block_size must be a positive even integer.")
@@ -229,6 +233,7 @@ def quantize_tensor_q4_k_m(arr: Any) -> bytes:
 
     Returns:
         Serialized Q4_K_M binary byte stream.
+
     """
     block_size = 256
 
@@ -298,13 +303,15 @@ def extract_pytorch_state_dict(model_or_name: Any) -> dict[str, Any]:
 
     Raises:
         ExportError: If weight extraction fails or architecture is unrecognized.
+
     """
     raw_dict: dict[str, Any] = {}
 
     if isinstance(model_or_name, dict):
-        raw_dict = model_or_name
+        raw_dict = cast(dict[str, Any], model_or_name)
     elif hasattr(model_or_name, "state_dict") and callable(model_or_name.state_dict):
-        raw_dict = dict(model_or_name.state_dict())
+        state_dict_res = model_or_name.state_dict()
+        raw_dict = {str(k): v for k, v in state_dict_res.items()}
     elif isinstance(model_or_name, str):
         loaded = False
         p = Path(model_or_name)
@@ -312,8 +319,9 @@ def extract_pytorch_state_dict(model_or_name: Any) -> dict[str, Any]:
             try:
                 from transformers import AutoModelForCausalLM
 
-                mod = AutoModelForCausalLM.from_pretrained(str(p), local_files_only=True)
-                raw_dict = dict(mod.state_dict())
+                mod: Any = AutoModelForCausalLM.from_pretrained(str(p), local_files_only=True)
+                state_dict_res = mod.state_dict()
+                raw_dict = {str(k): v for k, v in state_dict_res.items()}
                 loaded = True
             except (ImportError, ValueError, RuntimeError, AttributeError, OSError) as e:
                 logger.debug("Local AutoModelForCausalLM load failed for '%s': %s", model_or_name, e)
@@ -387,6 +395,7 @@ def write_gguf_v3(
 
     Raises:
         ValueError: If out_type is unrecognized or arguments are invalid.
+
     """
     path = Path(file_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -436,10 +445,11 @@ def write_gguf_v3(
                 f.write(struct.pack("<I", GGUF_TYPE_FLOAT32))
                 f.write(struct.pack("<f", v))
             elif isinstance(v, (list, tuple)):
+                v_list = cast(list[Any], v)
                 f.write(struct.pack("<I", GGUF_TYPE_ARRAY))
                 f.write(struct.pack("<I", GGUF_TYPE_STRING))
-                f.write(struct.pack("<Q", len(v)))
-                for item in v:
+                f.write(struct.pack("<Q", len(v_list)))
+                for item in v_list:
                     ib = str(item).encode("utf-8")
                     f.write(struct.pack("<Q", len(ib)) + ib)
             else:
@@ -456,10 +466,10 @@ def write_gguf_v3(
             shape: tuple[int, ...]
             if hasattr(arr, "shape"):
                 shape = tuple(arr.shape)
-            elif isinstance(arr, Sequence) and arr and isinstance(arr[0], Sequence):
-                shape = (len(arr), len(arr[0]))
+            elif isinstance(arr, Sequence) and len(cast(list[Any], arr)) > 0 and isinstance(cast(list[Any], arr)[0], Sequence):
+                shape = (len(cast(list[Any], arr)), len(cast(list[Any], cast(list[Any], arr)[0])))
             else:
-                shape = (len(arr),) if hasattr(arr, "__len__") else (16, 16)
+                shape = (len(cast(list[Any], arr)),) if hasattr(cast(Any, arr), "__len__") else (16, 16)
 
             payload: bytes
             if isinstance(arr, (bytes, bytearray)):

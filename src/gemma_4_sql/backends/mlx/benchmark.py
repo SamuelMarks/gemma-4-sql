@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -18,34 +19,31 @@ try:
     import mlx.core as _mx
 
     mx: Any = _mx
-except (ImportError, AttributeError):
+except (ImportError, AttributeError):  # pragma: no cover
     mx = None
 
 try:
-    from mlx_lm import load as _load
+    import mlx_lm
 
-    load: Any = _load
-except (ImportError, AttributeError):
+    load: Any = getattr(mlx_lm, "load", None)
+except (ImportError, AttributeError):  # pragma: no cover
     load = None
 
 
-def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False) -> tuple[Any, str]:
+def _load_mlx_model_and_device(model_name: str, hardware: str) -> tuple[Any, str]:
     """Load an MLX model and configure the target execution device.
 
     Args:
         model_name: The identifier or path of the target MLX model.
         hardware: Target hardware accelerator ('gpu', 'metal', or 'cpu').
-        test_mode: Flag indicating whether execution is running in mock/test mode.
 
     Returns:
         Tuple of (model instance or None, active device string).
 
     Raises:
         DependencyMissingError: If MLX or mlx_lm is missing.
-    """
-    if test_mode:
-        return (None, "cpu")
 
+    """
     if mx is None or load is None:
         raise DependencyMissingError("MLX dependencies (mlx.core and mlx_lm) are missing.")
 
@@ -57,9 +55,11 @@ def _load_mlx_model_and_device(model_name: str, hardware: str, *, test_mode: boo
         except (ValueError, TypeError, RuntimeError, AttributeError):
             pass
 
-    loaded = load(model_name)
-    model = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
-    return (model, target_device)
+    from typing import cast
+
+    loaded: Any = load.__call__(model_name) if load is not None else None
+    model_any: Any = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
+    return (model_any, target_device)
 
 
 def _sync_and_eval(tensors: Any) -> None:
@@ -67,6 +67,7 @@ def _sync_and_eval(tensors: Any) -> None:
 
     Args:
         tensors: An MLX array or sequence of arrays to evaluate.
+
     """
     if mx is not None and hasattr(mx, "eval"):
         if isinstance(tensors, (tuple, list)):
@@ -83,6 +84,7 @@ def _get_peak_memory_mb() -> float:
 
     Returns:
         Peak memory allocation in Megabytes (MB).
+
     """
     if mx is None:
         return 0.0
@@ -105,7 +107,7 @@ def _get_peak_memory_mb() -> float:
 
 
 def _run_benchmark_pass(
-    model: Any,
+    model: ModelType,
     batch_size: int,
     num_runs: int,
     prompt_len: int = 32,
@@ -128,6 +130,7 @@ def _run_benchmark_pass(
 
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
+
     """
     if mx is None:
         raise DependencyMissingError("MLX dependencies are missing.")
@@ -200,11 +203,12 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
 
     Returns:
         A dictionary containing benchmark metrics and status.
+
     """
 
     def _run() -> tuple[float, float, float]:
         """Execute benchmark pass on loaded MLX model."""
-        (model, _device) = _load_mlx_model_and_device(model_name, hardware, test_mode=bool(kwargs.get("test_mode")))
+        (model, _device) = _load_mlx_model_and_device(model_name, hardware)
         num_runs = int(str(kwargs.get("num_runs", 5)))
         prompt_len = int(str(kwargs.get("prompt_len", 32)))
         decode_tokens = int(str(kwargs.get("decode_tokens", 16)))

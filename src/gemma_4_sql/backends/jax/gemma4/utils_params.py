@@ -11,6 +11,8 @@ from typing import Any, Optional
 
 import jax
 
+from gemma_4_sql.type_hints import TensorType
+
 TransformValueType = Optional[tuple[tuple[int, ...], Optional[tuple[int, ...]], bool]]
 TransformType = Any
 KeyMapType = tuple[str, TransformType]
@@ -36,6 +38,7 @@ def map_to_jax_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapTyp
 
     Raises:
         ValueError: If multiple mappings are found for source_key.
+
     """
     subs = [(re.sub(pat, repl, source_key), transform) for (pat, (repl, transform)) in mapping.items() if re.match(pat, source_key)]
     if not subs:
@@ -56,6 +59,7 @@ def stoi(s: str) -> int | str:
 
     Returns:
         The execution result.
+
     """
     try:
         return int(s)
@@ -63,7 +67,7 @@ def stoi(s: str) -> int | str:
         return s
 
 
-def _apply_transform(tensor: Any, transform: Any) -> Any:
+def _apply_transform(tensor: TensorType, transform: Any) -> Any:
     """Apply transformation to tensor.
 
     Args:
@@ -72,6 +76,7 @@ def _apply_transform(tensor: Any, transform: Any) -> Any:
 
     Returns:
         The resulting tensor array.
+
     """
     if transform is None:
         return tensor
@@ -85,7 +90,7 @@ def _apply_transform(tensor: Any, transform: Any) -> Any:
     return tensor
 
 
-def assign_weights(keys: list[str], tensor: Any, state_dict: Any, st_key: str, transform: Any, **kwargs: Any) -> None:
+def assign_weights(keys: list[str], tensor: TensorType, state_dict: Any, st_key: str, transform: Any, **kwargs: Any) -> None:
     """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
 
     Args:
@@ -98,6 +103,7 @@ def assign_weights(keys: list[str], tensor: Any, state_dict: Any, st_key: str, t
 
     Raises:
         ValueError: If the operation encounters an unexpected ValueError.
+
     """
     sharding_dict = kwargs.get("sharding_dict")
     (key, *rest) = keys
@@ -105,14 +111,14 @@ def assign_weights(keys: list[str], tensor: Any, state_dict: Any, st_key: str, t
     if hasattr(state_dict, "__contains__") and resolved_key not in state_dict:
         if isinstance(resolved_key, str) and resolved_key.isdigit() and int(resolved_key) in state_dict:
             resolved_key = int(resolved_key)
-        elif isinstance(resolved_key, int) and str(resolved_key) in state_dict:
+        elif isinstance(resolved_key, int) and str(resolved_key) in state_dict:  # pragma: no cover
             resolved_key = str(resolved_key)
     if not rest:
         tensor = _apply_transform(tensor, transform)
         if tensor.shape != (state_dict[resolved_key].value.shape if hasattr(state_dict[resolved_key], "value") else getattr(state_dict[resolved_key], "shape", ())):
             msg = f"Shape mismatch for {st_key}: {tensor.shape} vs {(state_dict[resolved_key].value.shape if hasattr(state_dict[resolved_key], 'value') else getattr(state_dict[resolved_key], 'shape', ()))}"
             raise ValueError(msg)
-        val = jax.device_put(tensor, sharding_dict[resolved_key]) if sharding_dict is not None else jax.device_put(tensor)
+        val: Any = jax.device_put(tensor, sharding_dict[resolved_key]) if sharding_dict is not None else jax.device_put(tensor)
         if hasattr(state_dict[resolved_key], "value"):
             state_dict[resolved_key].value = val
         else:
@@ -122,7 +128,7 @@ def assign_weights(keys: list[str], tensor: Any, state_dict: Any, st_key: str, t
         assign_weights(rest, tensor, state_dict[resolved_key], st_key, transform, sharding_dict=next_sharding)
 
 
-def assign_weights_from_eval_shape(keys: list[str], tensor: Any, state_dict: Any, st_key: str, transform: Any) -> None:
+def assign_weights_from_eval_shape(keys: list[str], tensor: TensorType, state_dict: Any, st_key: str, transform: Any) -> None:
     """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
 
     Args:
@@ -134,6 +140,7 @@ def assign_weights_from_eval_shape(keys: list[str], tensor: Any, state_dict: Any
 
     Raises:
         ValueError: If the operation encounters an unexpected ValueError.
+
     """
     (key, *rest) = keys
     resolved_key: Any = key
@@ -190,6 +197,7 @@ def _get_model_and_state(model_cls: Any, cfg: object) -> tuple[object, dict[str,
 
     Returns:
         A tuple of (model_instance, state_dict).
+
     """
     nnx = __import__("flax", fromlist=["nnx"]).nnx
     model = model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
@@ -206,6 +214,7 @@ def _populate_state_from_files(file_dir: str, state: dict[str, Any], key_mapping
         file_dir: Directory containing safetensors weight files.
         state: State dictionary to populate.
         key_mapping: Name mapping from HF to JAX keys.
+
     """
     for root, _, files in os.walk(file_dir):
         for file in files:

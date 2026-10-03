@@ -27,6 +27,7 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
 
     Returns:
         A dictionary containing the results.
+
     """
     return log_metrics_wrapper(
         backend_name="pytorch",

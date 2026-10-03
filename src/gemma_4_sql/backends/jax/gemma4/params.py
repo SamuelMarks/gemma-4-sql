@@ -9,8 +9,9 @@ from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
-from etils import epath
 from flax import nnx
+
+from gemma_4_sql.exceptions import DependencyMissingError
 
 from . import modeling as model_lib
 from .utils_params import assign_weights_from_eval_shape, map_to_jax_key, stoi
@@ -33,6 +34,7 @@ def _get_text_mappings(transform_cls: Any) -> dict[str, tuple[str, object]]:
 
     Returns:
         A tuple containing the results.
+
     """
     return {
         "^model\\.embed_tokens\\.weight$": ("model\\.embed_tokens\\.embedding", transform_cls.EMBED),
@@ -85,6 +87,7 @@ def _get_audio_mappings(transform_cls: Any) -> dict[str, tuple[str, object]]:
 
     Returns:
         A tuple containing the results.
+
     """
     return {
         "^audio_tower\\.subsample_conv_projection\\.layer(\\d+)\\.conv\\.weight$": ("audio_tower\\.subsample_conv_projection\\.layer\\1\\.conv\\.kernel", transform_cls.CONV2D),
@@ -113,6 +116,7 @@ def _get_vision_mappings(transform_cls: Any) -> dict[str, tuple[str, object]]:
 
     Returns:
         A tuple containing the results.
+
     """
     return {
         "^vision_tower\\.vision_model\\.embeddings\\.patch_embedding\\.bias$": ("vision_tower\\.embeddings\\.patch_embedding\\.bias", transform_cls.BIAS),
@@ -153,7 +157,7 @@ def _get_key_and_transform_mapping() -> object:
         EMBED = None
         LINEAR_3D = ((0, 2, 1), None, False)
 
-    mapping = {}
+    mapping: dict[str, Any] = {}
     mapping.update(_get_text_mappings(Transform))
     mapping.update(_get_audio_mappings(Transform))
     mapping.update(_get_vision_mappings(Transform))
@@ -180,12 +184,14 @@ def process_standard_tensor(sf: Any, torch_key: str, jax_state: Any, mapping: di
         OSError: If the operation encounters an unexpected OSError.
         RuntimeError: If the operation encounters an unexpected RuntimeError.
         TypeError: If the operation encounters an unexpected TypeError.
+
     """
     tensor = jnp.array(sf.get_tensor(torch_key))
     (jax_key, transform) = map_to_jax_key(mapping, torch_key)
     if jax_key is None:
         return
     keys = [str(stoi(k)) for k in jax_key.split("\\.")]
+
     try:
         transform_val = getattr(transform, "value", transform) if transform is not None else None
         assign_weights_from_eval_shape(keys, tensor, jax_state, torch_key, transform_val)
@@ -227,8 +233,8 @@ def _fix_jax_state_embeddings(jax_state: Any, gemma4: Any, cfg: model_lib.ModelC
 
     if cfg.vision_config:
         pos_ids = jax_state.get("vision_tower", {}).get("embeddings", {}).get("position_ids")
-        if pos_ids is not None and isinstance(pos_ids, jax.ShapeDtypeStruct):  # pragma: no cover
-            jax_state["vision_tower"]["embeddings"]["position_ids"] = jnp.expand_dims(jnp.arange(gemma4.vision_tower.embeddings.num_patches), 0)
+        if pos_ids is not None and isinstance(pos_ids, getattr(jax, "ShapeDtypeStruct", type(None))):  # pragma: no cover
+            jax_state["vision_tower"]["embeddings"]["position_ids"] = jnp.expand_dims(jnp.arange(getattr(cfg.vision_config, "num_patches", 256)), 0)
 
 
 def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> object:
@@ -242,7 +248,15 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
 
     """
     gc = __import__("gc")
-    files = list(epath.Path(file_dir).expanduser().glob("*.safetensors"))
+    epath_any: Any = getattr(__import__("sys").modules.get("etils", None), "epath", None)
+    if epath_any is None:
+        try:
+            from etils import epath
+
+            epath_any = epath
+        except ImportError:
+            raise DependencyMissingError("etils dependency missing")
+    files = list(epath_any.Path(file_dir).expanduser().glob("*.safetensors"))
     if not files:
         msg = f"No safetensors found in {file_dir}"
         raise ValueError(msg)
@@ -255,7 +269,7 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
         state_dict_raw = state_any.to_flat_dict()
     else:
         state_dict_raw = dict(state_any)
-    jax_state = dict(cast(Any, state_dict_raw))
+    jax_state = dict(state_dict_raw)
     mapping = _get_key_and_transform_mapping()
     moe_pattern = re.compile("^model\\.layers\\.(\\d+)\\.block_sparse_moe\\.experts\\.(\\d+)\\.(gate_proj|up_proj|down_proj)\\.weight$")
     expert_tensors: dict[int, dict[str, dict[int, jax.Array]]] = {}
@@ -265,5 +279,5 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
     _stack_and_assign_expert_tensors(expert_tensors, mapping, jax_state)
     _fix_jax_state_embeddings(jax_state, gemma4, cfg)
     if hasattr(nnx, "State"):
-        return cast(Any, nnx.merge(graph_def, abs_state))
-    return cast(Any, nnx.merge(graph_def, cast(Any, jax_state)))
+        return nnx.merge(graph_def, abs_state)
+    return nnx.merge(graph_def, cast(Any, jax_state))

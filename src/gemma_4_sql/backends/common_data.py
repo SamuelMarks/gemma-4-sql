@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _create_hf_data_source(base_ds: type) -> type:
+def _create_hf_data_source(base_ds: Any) -> Any:
     """Execute function.
 
     Args:
@@ -23,6 +23,7 @@ def _create_hf_data_source(base_ds: type) -> type:
 
     Returns:
         The execution result.
+
     """
 
     class HFDataSource(base_ds):
@@ -35,6 +36,7 @@ def _create_hf_data_source(base_ds: type) -> type:
 
             Args:
                 hf_ds: The hf ds.
+
             """
             self._ds = hf_ds
 
@@ -59,7 +61,7 @@ def _create_hf_data_source(base_ds: type) -> type:
     return HFDataSource
 
 
-def _create_base_format_transform(base_map: type) -> type:
+def _create_base_format_transform(base_map: Any) -> Any:
     """Execute function.
 
     Returns:
@@ -75,6 +77,7 @@ def _create_base_format_transform(base_map: type) -> type:
 
             Args:
                 tokenizer: The SQL tokenizer instance.
+
             """
             self.tokenizer = tokenizer
 
@@ -86,6 +89,7 @@ def _create_base_format_transform(base_map: type) -> type:
 
             Returns:
                 Dictionary with tokenized inputs, targets, and optional multimodal features.
+
             """
             from gemma_4_sql.backends.common_multimodal import (
                 format_multimodal_prompt,
@@ -105,7 +109,7 @@ def _create_base_format_transform(base_map: type) -> type:
                 has_audio=audio_input is not None,
             )
             res: dict[str, Any] = {
-                "inputs": self.tokenizer.encode(str(formatted["prompt"])),
+                "inputs": self.tokenizer.encode(str(formatted.get("prompt", prompt))),
                 "targets": self.tokenizer.encode(str(target)),
             }
             if image_input is not None:
@@ -119,7 +123,7 @@ def _create_base_format_transform(base_map: type) -> type:
     return BaseFormatTransform
 
 
-def _get_grain_classes(grain_module: object) -> tuple[type, type]:
+def get_grain_classes(grain_module: object) -> tuple[Any, Any]:
     """Dynamically construct Grain classes.
 
     Args:
@@ -137,7 +141,7 @@ def _get_grain_classes(grain_module: object) -> tuple[type, type]:
     return (_create_hf_data_source(base_ds), _create_base_format_transform(base_map))
 
 
-def _load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
+def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
     """Load a dataset from a DuckDB database.
 
     Args:
@@ -150,6 +154,7 @@ def _load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
     Raises:
         RuntimeError: If DuckDB is not available or query fails.
         ValueError: If the table name is invalid or unsafe.
+
     """
     duckdb_module = LazyLoader("duckdb").get_module()
     if duckdb_module is None:

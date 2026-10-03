@@ -36,6 +36,7 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
     Raises:
         DependencyMissingError: If JAX export dependencies (jax, orbax.checkpoint, flax) are missing.
         ExportError: If model state extraction or checkpoint saving fails.
+
     """
     from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 
@@ -53,7 +54,7 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
 
             cfg = kwargs.get("config")
             if cfg is None:
-                if kwargs.get("test_mode") or model_name.startswith(("test", "model")):
+                if model_name.startswith(("test", "model")):
                     cfg = Gemma4Config(
                         vocab_size=128,
                         hidden_size=64,

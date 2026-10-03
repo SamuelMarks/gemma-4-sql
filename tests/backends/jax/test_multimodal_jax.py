@@ -41,16 +41,25 @@ def test_jax_grain_multimodal_map(tmp_path: Path) -> None:
     assert len(mapped["inputs"]) > 0
 
 
-def test_jax_inference_multimodal(tmp_path: Path) -> None:
+def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test JAX generate_sql processing image and audio paths and formatting prompt."""
     dummy_img = tmp_path / "erd.png"
     dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
 
-    # In test_mode, generate_sql returns immediately with success
+    class MockJAXModel:
+        """Mock JAX causal model for beam search."""
+
+        def __call__(self, input_ids: Any, positions: Any = None, **kwargs: Any) -> Any:
+            import jax.numpy as jnp
+
+            batch, seq = input_ids.shape
+            return jnp.ones((batch, seq, 100), dtype=jnp.float32)
+
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference._MODEL_CACHE", {"mock-jax-model": MockJAXModel()})
+
     res = generate_sql(
         "mock-jax-model",
         "Find highest salary",
-        test_mode=True,
         image_path=str(dummy_img),
         modality="vision",
     )
@@ -89,4 +98,24 @@ def test_jax_inference_multimodal_live(tmp_path: Path, monkeypatch: pytest.Monke
         modality="multimodal",
     )
     assert res["status"] == "success"
+
+    res_img_only = generate_sql(
+        "mock_live",
+        "Select all products",
+        beam_width=1,
+        max_length=2,
+        image_path=str(dummy_img),
+        modality="vision",
+    )
+    assert res_img_only["status"] == "success"
+
+    res_aud_only = generate_sql(
+        "mock_live",
+        "Select all products",
+        beam_width=1,
+        max_length=2,
+        audio_path=str(dummy_audio),
+        modality="audio",
+    )
+    assert res_aud_only["status"] == "success"
     assert res["prompt"].startswith("<audio> <image>") or "<image>" in res["prompt"]

@@ -9,17 +9,18 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import types
-    from collections.abc import Iterator
+    from collections.abc import Generator
 logger = logging.getLogger(__name__)
 OPTIONAL_IMPORT_ERRORS = (ImportError,)
 
 
 @contextmanager
-def catch_optional_imports() -> Iterator[None]:
+def catch_optional_imports() -> Generator[None, None, None]:
     """Context manager to gracefully catch missing optional backend dependencies.
 
     Yields:
         The yielded output.
+
     """
     with suppress(*OPTIONAL_IMPORT_ERRORS):
         yield
@@ -33,13 +34,14 @@ class LazyLoader:
 
         Args:
             module_name: The string representing the module name.
+
         """
         self.module_name = module_name
         self._module: types.ModuleType | None = None
         self._loaded = False
 
     def get_module(self) -> types.ModuleType | None:
-        """Get the module if available, otherwise return None.
+        """Provide the module if available, otherwise return None.
 
         Returns:
             types.ModuleType: The resulting output from the operation.
@@ -73,7 +75,7 @@ _MAXTEXT_GEMMA4_LOADER = LazyLoader("maxtext.models.gemma4")
 
 
 def get_jax() -> types.ModuleType | None:
-    """Get the jax module.
+    """Provide the jax module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -83,7 +85,7 @@ def get_jax() -> types.ModuleType | None:
 
 
 def get_jnp() -> types.ModuleType | None:
-    """Get the jax.numpy module.
+    """Provide the jax.numpy module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -93,7 +95,7 @@ def get_jnp() -> types.ModuleType | None:
 
 
 def get_flax_nnx() -> types.ModuleType | None:
-    """Get the flax.nnx module.
+    """Provide the flax.nnx module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -103,7 +105,7 @@ def get_flax_nnx() -> types.ModuleType | None:
 
 
 def get_tensorflow() -> types.ModuleType | None:
-    """Get the tensorflow module.
+    """Provide the tensorflow module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -113,7 +115,7 @@ def get_tensorflow() -> types.ModuleType | None:
 
 
 def get_keras() -> types.ModuleType | None:
-    """Get the keras module.
+    """Provide the keras module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -123,7 +125,7 @@ def get_keras() -> types.ModuleType | None:
 
 
 def get_torch() -> types.ModuleType | None:
-    """Get the torch module.
+    """Provide the torch module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -133,7 +135,7 @@ def get_torch() -> types.ModuleType | None:
 
 
 def get_mlx() -> types.ModuleType | None:
-    """Get the mlx module.
+    """Provide the mlx module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -143,7 +145,7 @@ def get_mlx() -> types.ModuleType | None:
 
 
 def get_duckdb() -> types.ModuleType | None:
-    """Get the duckdb module.
+    """Provide the duckdb module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -153,7 +155,7 @@ def get_duckdb() -> types.ModuleType | None:
 
 
 def get_transformers() -> types.ModuleType | None:
-    """Get the transformers module.
+    """Provide the transformers module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -163,7 +165,7 @@ def get_transformers() -> types.ModuleType | None:
 
 
 def get_safetensors() -> types.ModuleType | None:
-    """Get the safetensors module.
+    """Provide the safetensors module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.
@@ -173,7 +175,7 @@ def get_safetensors() -> types.ModuleType | None:
 
 
 def get_maxtext_gemma4() -> types.ModuleType | None:
-    """Get the maxtext.models.gemma4 module.
+    """Provide the maxtext.models.gemma4 module.
 
     Returns:
         types.ModuleType: The resulting output from the operation.

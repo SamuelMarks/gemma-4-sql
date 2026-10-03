@@ -15,6 +15,7 @@ def translate_jax_to_pytorch(jax_params: dict[str, Any]) -> dict[str, torch.Tens
 
     Returns:
         PyTorch state dictionary with mapped keys and weights.
+
     """
     pytorch_state_dict: dict[str, torch.Tensor] = {}
 
@@ -22,7 +23,7 @@ def translate_jax_to_pytorch(jax_params: dict[str, Any]) -> dict[str, torch.Tens
         if hasattr(value, "__array__"):
             import numpy as np
 
-            tensor = torch.from_numpy(np.array(value))
+            tensor = torch.tensor(np.array(value).tolist())
         else:
             tensor = torch.tensor(value)
 

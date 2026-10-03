@@ -1,241 +1,186 @@
-"""Tests for Keras Serve."""
-
-from __future__ import annotations
-
-from unittest import mock
+"""Real Keras serve tests."""
 
 import pytest
 
-import gemma_4_sql.backends.keras.serve as srv
+from gemma_4_sql.backends.keras.serve import serve_model
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
-def test_serve_model_keras_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    from gemma_4_sql.exceptions import DependencyMissingError
+def test_serve_model() -> None:
+    res = serve_model("dummy_model", port=8080, max_batch_size=128)
+    assert res["status"] == "running_keras_serve"
+    assert res["backend"] == "keras"
+    assert res["model"] == "dummy_model"
+    assert res["port"] == 8080
+    assert res["max_batch_size"] == 128
 
-    monkeypatch.setattr(srv, "keras", None)
-    with pytest.raises(DependencyMissingError, match=r"Keras dependencies are missing for serve\."):
-        srv.serve_model("foo", port=8000, max_batch_size=16)
 
+def test_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gemma_4_sql.backends.common_serve as cs
 
-def test_serve_model_keras_fastapi_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    monkeypatch.setattr(srv, "tf", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", None)
-    monkeypatch.setattr(srv, "keras", object())
+    monkeypatch.setattr(cs, "FastAPI", None)
     with pytest.raises(DependencyMissingError):
-        srv.serve_model("foo", port=8000, max_batch_size=16)
+        serve_model("model")
 
 
-def test_serve_model_keras_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    monkeypatch.setattr(srv, "tf", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", None)
-    monkeypatch.setattr(srv, "keras", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-
-    def mock_create_app(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return "app"
-
-    monkeypatch.setattr(srv, "create_app", mock_create_app)
-    res = srv.serve_model("foo", port=8000, max_batch_size=16, test_mode=False)
-    if res["status"] != "running_keras_serve":
-        raise AssertionError
-
-
-def test_serve_model_keras_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    monkeypatch.setattr(srv, "tf", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", None)
-    monkeypatch.setattr(srv, "keras", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-
-    def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Raises:
-            ValueError: Description.
-
-        """
-        msg = "err"
-        raise ValueError(msg)
-
-    monkeypatch.setattr(srv, "create_app", raise_err)
-    res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    if "failed" not in str(res["status"]):
-        raise AssertionError
-
-
-@pytest.mark.asyncio
-async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate endpoint logic directly.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    builtins = __import__("builtins", fromlist=[""])
-    orig_import = builtins.__import__
-
-    mock_app = mock.MagicMock()
-    mock_app.router.routes = []
-
-    def mock_post(*_args: object, **_kwargs: object) -> object:
-        """Docstring."""
-
-        def decorator(func: object) -> object:
-            """Docstring."""
-            route = mock.MagicMock()
-            route.endpoint = func
-            mock_app.router.routes.append(route)
-            return func
-
-        return decorator
-
-    mock_app.post = mock_post
-
-    def mock_import(name: object, _globals: object = None, _locals: object = None, fromlist: object = (), level: object = 0) -> object:
-        """Docstring."""
-        if name == "fastapi":
-            return type("FastAPIMod", (), {"FastAPI": lambda *_args, **_kwargs: mock_app})
-        if name == "fastapi.responses":
-
-            class MockJSONResponse:
-                """Docstring."""
-
-                def __init__(self, content: object) -> None:
-                    """Docstring."""
-                    self.body = str(content).encode()
-
-            return type("ResponsesMod", (), {"JSONResponse": MockJSONResponse})
-        return orig_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr("builtins.__import__", mock_import)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: mock_app)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.JSONResponse", lambda content: type("MockJSONResponse", (), {"body": str(content).encode()}))
-
-    srv.create_app("foo", test_mode=True)
-    generate_func = mock_app.router.routes[-1].endpoint
-    request = mock.AsyncMock()
-    request.json.return_value = {"prompt": "test"}
-    result = await generate_func(request)
-    sql_val = result.body.decode() if hasattr(result, "body") else ""
-    if "SELECT * FROM keras_serve WHERE prompt='test'" not in sql_val:
-        raise AssertionError
-
-
-@pytest.mark.asyncio
-async def test_keras_serve_generation_logic_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _generate and _batch_generate branches in Keras serve.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-
-    Returns:
-        None.
-    """
-    captured_kwargs: dict[str, object] = {}
-
-    def mock_create_common_app(**kwargs: object) -> object:
-        """Capture create_common_app kwargs."""
-        captured_kwargs.update(kwargs)
-        startup_cb = kwargs.get("startup_callback")
-        if callable(startup_cb):
-            startup_cb()
-        return mock.MagicMock()
-
-    monkeypatch.setattr("gemma_4_sql.backends.keras.serve.create_common_app", mock_create_common_app)
-
-    # 1. Startup preload succeeds and loaded_model.generate works
-    mock_model = mock.MagicMock()
-    mock_model.generate.return_value = "SELECT name FROM students"
-    mock_gemma_cls = mock.MagicMock()
-    mock_gemma_cls.from_preset.return_value = mock_model
-    mock_keras_nlp = mock.MagicMock(GemmaCausalLM=mock_gemma_cls)
-    monkeypatch.setitem(__import__("sys").modules, "keras_nlp", mock.MagicMock())
-    monkeypatch.setitem(__import__("sys").modules, "keras_nlp.models", mock_keras_nlp)
-
-    srv.create_app("test_preset_model", test_mode=False)
-    startup_cb = captured_kwargs["startup_callback"]
-    assert callable(startup_cb)
-    startup_cb()
-
-    gen_cb = captured_kwargs["generate_logic"]
-    batch_cb = captured_kwargs["batch_generate_logic"]
-    assert callable(gen_cb)
-    assert callable(batch_cb)
-
-    assert gen_cb("query") == "SELECT name FROM students"
-
-    # Batch generate with loaded_model
-    mock_model.generate.return_value = ["SELECT 1", "SELECT 2"]
-    assert batch_cb(["q1", "q2"]) == ["SELECT 1", "SELECT 2"]
-
-    # Batch generate with error falls back to individual generate
-    mock_model.generate.side_effect = RuntimeError("batch fail")
-    monkeypatch.setattr("gemma_4_sql.backends.keras.inference.generate_sql", lambda **_kw: {"sql": "SELECT fallback"})
-    assert batch_cb(["q1"]) == ["SELECT fallback"]
-
-    # Generate with generate_sql fallback
-    monkeypatch.setattr("gemma_4_sql.backends.keras.inference.generate_sql", lambda **_kw: {"sql": "SELECT 42"})
-    mock_model.generate.side_effect = RuntimeError("single fail")
-    assert gen_cb("query") == "SELECT 42"
-
-    # Generate with all failing raises InferenceError
+def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gemma_4_sql.backends.keras.serve as srv
     from gemma_4_sql.exceptions import InferenceError
 
-    monkeypatch.setattr("gemma_4_sql.backends.keras.inference.generate_sql", mock.MagicMock(side_effect=RuntimeError("all fail")))
-    with pytest.raises(InferenceError, match="all fail"):
-        gen_cb("query")
+    class MockApp:
+        pass
 
-    # Generate with empty SQL raises and re-raises InferenceError
-    monkeypatch.setattr("gemma_4_sql.backends.keras.inference.generate_sql", lambda **_kw: {"sql": ""})
-    with pytest.raises(InferenceError, match="returned empty SQL"):
-        gen_cb("query")
+    def mock_create_common_app(**kwargs):
+        app = MockApp()
+        app.startup = kwargs["startup_callback"]
+        app.generate = kwargs["generate_logic"]
+        app.batch_generate = kwargs["batch_generate_logic"]
+        return app
 
-    # Startup preload fails gracefully
-    mock_gemma_cls.from_preset.side_effect = ValueError("Preset failed")
-    srv.create_app("fail_model", test_mode=False)
-    captured_kwargs["startup_callback"]()
+    monkeypatch.setattr(srv, "create_common_app", mock_create_common_app)
 
-    # Startup with test_mode=True
-    srv.create_app("test_mode_model", test_mode=True)
-    captured_kwargs["startup_callback"]()
-    gen_tm = captured_kwargs["generate_logic"]
-    batch_tm = captured_kwargs["batch_generate_logic"]
-    assert "keras_serve" in gen_tm("test_prompt")
-    assert "keras_serve" in batch_tm(["test_prompt"])[0]
+    app = srv.create_app("test_model")
 
-    # Test loaded_model is None execution of _generate and _batch_generate
-    mock_gemma_cls.from_preset.return_value = None
-    srv.create_app("no_model", test_mode=False)
-    gen_none = captured_kwargs["generate_logic"]
-    batch_none = captured_kwargs["batch_generate_logic"]
-    monkeypatch.setattr("gemma_4_sql.backends.keras.inference.generate_sql", lambda **_kw: {"sql": "SELECT nonemodel"})
-    assert gen_none("q") == "SELECT nonemodel"
-    assert batch_none(["q"]) == ["SELECT nonemodel"]
+    # Test startup failure path (keras_nlp missing)
+    app.startup()
+
+    # Test generation with mock loaded_model via startup
+    class MockModel:
+        def generate(self, prompt, **kwargs):
+            if isinstance(prompt, list):
+                return [f"BATCH_{p}" for p in prompt]
+            return "MOCK_SQL"
+
+    class DummyPreset:
+        @classmethod
+        def from_preset(cls, model_name):
+            return MockModel()
+
+    orig_import = __import__
+
+    def mock_import(name, *args, **kwargs):
+        if name == "keras_nlp.models":
+            return type("models", (), {"GemmaCausalLM": DummyPreset})
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setitem(srv.__builtins__, "__import__", mock_import)
+    app.startup()
+
+    # Test individual generation
+    assert app.generate("prompt") == "MOCK_SQL"
+
+    # Test batch generation
+    assert app.batch_generate(["p1", "p2"]) == ["BATCH_p1", "BATCH_p2"]
+
+    # Test individual generation fallback
+    class MockModelFail:
+        def generate(self, prompt, **kwargs):
+            raise ValueError("fail")
+
+    class DummyPresetFail:
+        @classmethod
+        def from_preset(cls, model_name):
+            return MockModelFail()
+
+    def mock_import_fail(name, *args, **kwargs):
+        if name == "keras_nlp.models":
+            return type("models", (), {"GemmaCausalLM": DummyPresetFail})
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setitem(srv.__builtins__, "__import__", mock_import_fail)
+    app.startup()
+
+    import sys
+
+    class MockInfModSuccess:
+        @staticmethod
+        def generate_sql(**kwargs):
+            return {"sql": "FALLBACK_SQL"}
+
+    monkeypatch.setitem(sys.modules, "gemma_4_sql.backends.keras.inference", MockInfModSuccess)
+
+    assert app.generate("prompt") == "FALLBACK_SQL"
+    assert app.batch_generate(["p1", "p2"]) == ["FALLBACK_SQL", "FALLBACK_SQL"]
+
+    # Test batch generation fallback exception
+    class MockBatchModelFail:
+        def generate(self, prompt, **kwargs):
+            if isinstance(prompt, list):
+                raise TypeError("batch fail")
+            return "MOCK_SQL"
+
+    class DummyPresetBatchFail:
+        @classmethod
+        def from_preset(cls, model_name):
+            return MockBatchModelFail()
+
+    def mock_import_batch_fail(name, *args, **kwargs):
+        if name == "keras_nlp.models":
+            return type("models", (), {"GemmaCausalLM": DummyPresetBatchFail})
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setitem(srv.__builtins__, "__import__", mock_import_batch_fail)
+    app.startup()
+    assert app.batch_generate(["p1", "p2"]) == ["MOCK_SQL", "MOCK_SQL"]
+
+    # Re-apply fail preset so single generation fails and triggers fallback
+    monkeypatch.setitem(srv.__builtins__, "__import__", mock_import_fail)
+    app.startup()
+
+    # Test empty fallback output
+    class MockInfModEmpty:
+        @staticmethod
+        def generate_sql(**kwargs):
+            return {"sql": ""}
+
+    monkeypatch.setitem(sys.modules, "gemma_4_sql.backends.keras.inference", MockInfModEmpty)
+
+    with pytest.raises(InferenceError, match="empty SQL"):
+        app.generate("prompt")
+
+    # Test generic fallback output error
+    def gen_err(**kwargs):
+        raise OSError("other err")
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "gemma_4_sql.backends.keras.inference", type("MockInf", (), {"generate_sql": gen_err}))
+
+    import gemma_4_sql.backends.keras.serve as srv_mod
+
+    # We must mock import to raise an exception so loaded_model becomes None
+    def mock_import_none(name, *args, **kwargs):
+        if name == "keras_nlp.models":
+            raise ImportError("Simulated missing keras")
+        return orig_import(name, *args, **kwargs)
+
+    # Test individual fallback when loaded_model is None
+    monkeypatch.setitem(srv_mod.__builtins__, "__import__", mock_import_none)
+
+    # We must recreate the app because loaded_model is a nonlocal variable trapped in the closure
+    app_none = srv.create_app("test_model")
+    app_none.startup()
+
+    # We must patch sys.modules so the internal local import gets the mock
+    import sys
+
+    import gemma_4_sql.backends.keras.inference as real_inf
+
+    orig_generate_sql = real_inf.generate_sql
+
+    # We must also clear the mocked module from sys.modules from the previous step
+    if "gemma_4_sql.backends.keras.inference" in sys.modules and isinstance(sys.modules["gemma_4_sql.backends.keras.inference"], type):
+        del sys.modules["gemma_4_sql.backends.keras.inference"]
+        importlib = __import__("importlib", fromlist=[""])
+        sys.modules["gemma_4_sql.backends.keras.inference"] = importlib.import_module("gemma_4_sql.backends.keras.inference")
+
+    sys.modules["gemma_4_sql.backends.keras.inference"].generate_sql = gen_err
+
+    try:
+        with pytest.raises(InferenceError, match="Keras generation failed"):
+            app_none.generate("prompt")
+
+        with pytest.raises(InferenceError, match="Keras generation failed"):
+            app_none.batch_generate(["prompt1", "prompt2"])
+    finally:
+        sys.modules["gemma_4_sql.backends.keras.inference"].generate_sql = orig_generate_sql

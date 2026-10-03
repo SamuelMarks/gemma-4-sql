@@ -3,7 +3,7 @@
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.sdk.models import pretrain_model
+from gemma_4_sql.sdk.models import pretrain_model, train_from_scratch
 from gemma_4_sql.type_hints import TrainingConfig
 
 try:
@@ -45,7 +45,9 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
 
-    mock_train = lambda *args, **kwargs: {"backend": "keras", "action": "pretrain", "model": "my-model"}
+    def mock_train(*args, **kwargs):
+        return {"backend": "keras", "action": "pretrain", "model": "my-model"}
+
     monkeypatch.setattr(ktrain, "keras", object())
     monkeypatch.setattr(ktrain, "tf", object())
     monkeypatch.setattr(ktrain, "train_model", mock_train)
@@ -74,9 +76,6 @@ def test_pretrain_model_error() -> None:
     """Test pretraining a model with an unknown backend."""
     with pytest.raises(ValueError, match=r".*"):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="unknown"))
-
-
-import pytest
 
 
 def test_chat_no_sql(monkeypatch):
@@ -201,11 +200,6 @@ def test_models_defaults(monkeypatch):
     c2 = mod.posttrain_model()
     assert c2.action == "posttrain"
     assert c2.backend == "keras"
-
-
-import pytest
-
-from gemma_4_sql.sdk.models import train_from_scratch
 
 
 def test_train_from_scratch_pytorch(monkeypatch: object) -> object:

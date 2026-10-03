@@ -34,16 +34,18 @@ class SQLiteAdapter(DatabaseAdapter):
             db_path: Database path or ':memory:'.
             db_kwargs: Optional database connection keyword arguments.
             read_only: Read-only enforcement flag.
+
         """
         self._actual_path = f"file:mem_{id(self)}?mode=memory&cache=shared" if db_path == ":memory:" else db_path
         super().__init__(db_path, db_kwargs or {}, read_only=read_only)
 
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
-        """Return the exception classes for SQLite errors.
+        """Provide the exception classes for SQLite errors.
 
         Returns:
             Tuple of handled SQLite exception types.
+
         """
         return (sqlite3.Error,)
 
@@ -52,6 +54,7 @@ class SQLiteAdapter(DatabaseAdapter):
 
         Returns:
             A sqlite3.Connection instance.
+
         """
         kwargs = dict(self.db_kwargs)
         if self.db_path == ":memory:":
@@ -68,6 +71,7 @@ class SQLiteAdapter(DatabaseAdapter):
 
         Raises:
             ImportError: If aiosqlite is missing for async database connections.
+
         """
         if aiosqlite is None:
             msg = "aiosqlite is required."
@@ -83,8 +87,9 @@ class SQLiteAdapter(DatabaseAdapter):
 
         Args:
             ddl: DDL string containing SQL statements to execute.
+
         """
-        conn_obj = cast(Any, self.conn)
+        conn_obj = self.conn
         with conn_obj:
             conn_obj.executescript(ddl)
 
@@ -101,6 +106,7 @@ class SQLiteAdapter(DatabaseAdapter):
 
         Returns:
             A tuple of (success, fetched rows, optional error message).
+
         """
         try:
             async_conn = cast(Any, await self.connect_async())
@@ -147,6 +153,7 @@ class SQLiteAdapter(DatabaseAdapter):
 
         Returns:
             List of result rows.
+
         """
         try:
             async_conn = cast(Any, await self.connect_async())

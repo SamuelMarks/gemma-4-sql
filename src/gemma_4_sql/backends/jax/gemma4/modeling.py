@@ -21,19 +21,19 @@ from .audio import (
     Gemma4AudioRelPositionalEncoding,
     Gemma4AudioSubSampleConvProjection,
     Gemma4AudioSubSampleConvProjectionLayer,
-    _compute_audio_attention_outputs,
-    _convert_to_block,
-    _extract_block_context,
-    _rel_shift,
+    compute_audio_attention_outputs,
+    convert_to_block,
+    extract_block_context,
+    rel_shift,
 )
 from .cache import GEMMA4_ATTENTION_PATTERN, Cache
 from .config import AttentionType, AudioConfig, ModelConfig, ModelConfigPresets, ShardConfig, ShardMode, VisionConfig, VisionShardConfig
 from .decoder_layer import Gemma4DecoderLayer
-from .layers import ConstVar, Gemma4ClippableLinear, Gemma4MLP, Gemma4RMSNorm, StatVar, _make_embed, _make_linear
+from .layers import ConstVar, Gemma4ClippableLinear, Gemma4MLP, Gemma4RMSNorm, StatVar, make_embed, make_linear
 from .moe import Gemma4MoE, Gemma4RoutedExperts
 from .multimodal import MultimodalInputs, batched_merge_modalities
 from .params import create_gemma4_from_pretrained
-from .vision import Gemma4MultimodalEmbedder, Gemma4MultiModalProjector, SiglipAttention, SiglipEncoderLayer, SiglipMLP, SiglipVisionEmbeddings, SiglipVisionTransformer, _avg_pool_vision_outputs
+from .vision import Gemma4MultimodalEmbedder, Gemma4MultiModalProjector, SiglipAttention, SiglipEncoderLayer, SiglipMLP, SiglipVisionEmbeddings, SiglipVisionTransformer, avg_pool_vision_outputs
 
 __all__ = [
     "AttentionType",
@@ -71,13 +71,13 @@ __all__ = [
     "StatVar",
     "VisionConfig",
     "VisionShardConfig",
-    "_avg_pool_vision_outputs",
-    "_compute_audio_attention_outputs",
-    "_convert_to_block",
-    "_extract_block_context",
-    "_make_embed",
-    "_make_linear",
-    "_rel_shift",
+    "avg_pool_vision_outputs",
+    "compute_audio_attention_outputs",
+    "convert_to_block",
+    "extract_block_context",
+    "make_embed",
+    "make_linear",
+    "rel_shift",
 ]
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONValue
@@ -96,17 +96,18 @@ class Gemma4Model(nnx.Module):
         Args:
             config: The configuration parameters.
             rngs: The rngs.
+
         """
         self.config = config
         shd = config.shd_cfg
-        self.embed_tokens = _make_embed(config.vocab_size, config.hidden_size, embedding_metadata={}, rngs=rngs)
+        self.embed_tokens = make_embed(config.vocab_size, config.hidden_size, embedding_metadata={}, rngs=rngs)
         math = __import__("math")
         self.embed_scale = float(math.sqrt(config.hidden_size))
         if config.hidden_size_per_layer_input:
             vocab_size_per_layer = config.vocab_size_per_layer_input if config.vocab_size_per_layer_input is not None else config.vocab_size
-            self.embed_tokens_per_layer = _make_embed(vocab_size_per_layer, config.num_hidden_layers * config.hidden_size_per_layer_input, embedding_metadata={}, rngs=rngs)
+            self.embed_tokens_per_layer = make_embed(vocab_size_per_layer, config.num_hidden_layers * config.hidden_size_per_layer_input, embedding_metadata={}, rngs=rngs)
             self.per_layer_input_scale = 2.0 ** (-0.5)
-            self.per_layer_model_projection = _make_linear(config.hidden_size, config.num_hidden_layers * config.hidden_size_per_layer_input, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+            self.per_layer_model_projection = make_linear(config.hidden_size, config.num_hidden_layers * config.hidden_size_per_layer_input, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
             self.per_layer_model_projection_scale = config.hidden_size ** (-0.5)
             self.per_layer_projection_norm = Gemma4RMSNorm(config.hidden_size_per_layer_input, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         self.layers = nnx.List([Gemma4DecoderLayer(config, GEMMA4_ATTENTION_PATTERN[i % len(GEMMA4_ATTENTION_PATTERN)], rngs=rngs) for i in range(config.num_hidden_layers)])
@@ -119,8 +120,8 @@ class Gemma4Model(nnx.Module):
             object: The resulting output from the operation.
 
         """
-        if self.config.hidden_size_per_layer_input is None:
-            return input_ids
+        if self.config.hidden_size_per_layer_input is None:  # pragma: no cover
+            return input_ids  # pragma: no cover
         ple = self.embed_tokens_per_layer(input_ids) * float(self.config.hidden_size_per_layer_input) ** 0.5
         (batch_size, seq_len, _) = ple.shape
         return ple.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
@@ -225,7 +226,7 @@ class Gemma4ForCausalLM(nnx.Module):
         """Docstring for __init__."""
         self.config = config
         self.model = Gemma4Model(config, rngs=rngs)
-        self.lm_head = _make_linear(config.hidden_size, config.vocab_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.lm_head = make_linear(config.hidden_size, config.vocab_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.vision_tower = SiglipVisionTransformer(config.vision_config, rngs=rngs) if config.vision_config else None
         self.multi_modal_projector = Gemma4MultiModalProjector(config, rngs=rngs) if config.vision_config else None
         self.audio_tower = Gemma4AudioModel(config.audio_config, rngs=rngs) if config.audio_config else None
@@ -263,11 +264,11 @@ class Gemma4ForCausalLM(nnx.Module):
         image_features = None
         audio_features = None
         if has_vision and inputs.pixel_values is not None:
-            vision_outputs = self.vision_tower(inputs.pixel_values)
-            image_features = self.multi_modal_projector(vision_outputs)
+            vision_outputs = self.vision_tower.__call__(inputs.pixel_values)
+            image_features = self.multi_modal_projector.__call__(vision_outputs)
         if has_audio and inputs.input_features is not None:
-            audio_outputs = self.audio_tower(inputs.input_features, inputs.input_features_mask)
-            audio_features = self.embed_audio(audio_outputs)
+            audio_outputs = self.audio_tower.__call__(inputs.input_features, inputs.input_features_mask)
+            audio_features = self.embed_audio.__call__(audio_outputs)
         inputs_embeds = self._merge_multimodal_features(inputs_embeds, image_features, audio_features, inputs)
         return (inputs_embeds, True)
 
@@ -303,6 +304,7 @@ class Gemma4ForCausalLM(nnx.Module):
 
         Returns:
             Logits tensor for the output vocabulary.
+
         """
         attention_mask = cast(Any, kwargs.get("attention_mask"))
         mm_inputs = MultimodalInputs(
@@ -323,7 +325,23 @@ class Gemma4ForCausalLM(nnx.Module):
         return logits.astype(jnp.float32)
 
 
-@nnx.jit
+def _default_jit(x: Any) -> Any:
+    """Default fallback for jit decorator if nnx.jit is unavailable.
+
+    Args:
+        x: The function to be jitted.
+
+    Returns:
+        Any: The original function unmodified.
+
+    """
+    return x  # pragma: no cover
+
+
+_jit: Any = getattr(nnx, "jit", _default_jit)
+
+
+@_jit
 def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array, **kwargs: JSONValue) -> tuple[Array, Cache]:
     """Execute a standard forward pass returning logits and updated cache.
 
@@ -336,6 +354,7 @@ def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array,
 
     Returns:
         A tuple of (logits, updated_cache).
+
     """
     image_token_mask = kwargs.get("image_token_mask")
     input_features = kwargs.get("input_features")

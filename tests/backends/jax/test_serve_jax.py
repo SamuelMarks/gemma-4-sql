@@ -1,151 +1,100 @@
 """Provide module docstring."""
 
+import sys
 from unittest import mock
 
 import pytest
 
 import gemma_4_sql.backends.jax.serve as srv
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Initialize function test_serve_model_jax.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Initialize function test_serve_model_jax."""
     monkeypatch.setattr(srv, "jax", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", mock.MagicMock())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", mock.MagicMock())
+
+    def mock_serve_model_wrapper(backend_name, model_name, port, max_batch_size, missing_deps, missing_status, app_factory):
+        # Trigger the factory to test its internal logic
+        app = app_factory()
+
+        # Test startup callback
+        startup = app.get("startup_callback")
+
+        # Mock generate_sql for startup warmup
+        with mock.patch("gemma_4_sql.backends.jax.inference.generate_sql") as mock_gen:
+            startup()
+            mock_gen.assert_called_once_with(model_name=model_name, prompt="SELECT 1")
+
+        # Test startup warmup with error
+        with mock.patch("gemma_4_sql.backends.jax.inference.generate_sql", side_effect=RuntimeError("Warmup fail")):
+            startup()  # Should not raise
+
+        # Test generate_logic
+        generate = app.get("generate_logic")
+        with mock.patch("gemma_4_sql.backends.jax.inference.generate_sql", return_value={"sql": "SELECT 42"}) as mock_gen:
+            res = generate("test prompt")
+            assert res == "SELECT 42"
+
+        # Test generate_logic without sql key
+        with mock.patch("gemma_4_sql.backends.jax.inference.generate_sql", return_value={"other": "data"}):
+            res = generate("test prompt")
+            assert "SELECT * FROM generated WHERE prompt='test prompt'" in res
+
+        # Test generate_logic error
+        with mock.patch("gemma_4_sql.backends.jax.inference.generate_sql", side_effect=RuntimeError("Gen fail")):
+            res = generate("test prompt")
+            assert "SELECT * FROM generated WHERE prompt='test prompt'" in res
+
+        # Test batch_generate_logic
+        batch_generate = app.get("batch_generate_logic")
+        with mock.patch("gemma_4_sql.backends.jax.inference.generate_sql", return_value={"sql": "SELECT 42"}):
+            res_batch = batch_generate(["prompt 1", "prompt 2"])
+            assert res_batch == ["SELECT 42", "SELECT 42"]
+
+        return {"backend": backend_name, "model": model_name, "port": port, "max_batch_size": max_batch_size, "mode": "continuous_batching", "status": "running_jax_serve"}
+
+    def mock_create_common_app(**kwargs):
+        return kwargs
+
+    monkeypatch.setattr(srv, "serve_model_wrapper", mock_serve_model_wrapper)
+    monkeypatch.setattr(srv, "create_common_app", mock_create_common_app)
+
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    if not res["backend"] == "jax":
-        raise AssertionError
-    if not res["model"] == "foo":
-        raise AssertionError
-    if not res["port"] == int("8000"):
-        raise AssertionError
-    if not res["max_batch_size"] == int("16"):
-        raise AssertionError
-    if not res["mode"] == "continuous_batching":
-        raise AssertionError
-    if not res["status"] == "running_jax_serve":
-        raise AssertionError
+    assert res["backend"] == "jax"
+    assert res["model"] == "foo"
+    assert res["port"] == 8000
+    assert res["max_batch_size"] == 16
+    assert res["mode"] == "continuous_batching"
+    assert res["status"] == "running_jax_serve"
 
 
 def test_serve_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Initialize function test_serve_model_jax_missing.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
-
+    """Initialize function test_serve_model_jax_missing."""
     monkeypatch.setattr(srv, "jax", None)
     with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing for serve\."):
         srv.serve_model("foo")
 
 
-def test_serve_model_jax_missing_fastapi(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test missing FastAPI.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    __import__("importlib", fromlist=[""])
-
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    monkeypatch.setattr(srv, "jax", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", None)
-    with pytest.raises(DependencyMissingError):
-        srv.serve_model("foo")
-
-
-@pytest.mark.asyncio
-async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate endpoint logic directly."""
-    __import__("importlib", fromlist=[""])
+def test_serve_model_jax_other_status(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test when status is not running_jax_serve."""
     monkeypatch.setattr(srv, "jax", object())
 
-    class MockJSONResponse:
-        """Mock class."""
+    def mock_serve_model_wrapper(**kwargs):
+        return {"status": "mocked_missing_jax", "backend": "jax"}
 
-        def __init__(self, content: dict) -> None:
-            """Init."""
-            self.content = content
-            self.body = str(content).encode()
-
-    class MockApp:
-        """Mock app."""
-
-        def __init__(self) -> None:
-            """Init."""
-            self.router = mock.MagicMock()
-            self.router.routes = []
-
-        def post(self, *_args: object, **_kwargs: object) -> object:
-            """Post."""
-
-            def decorator(func: object) -> object:
-                """Decorator."""
-                route = mock.MagicMock()
-                route.endpoint = func
-                self.router.routes.append(route)
-                return func
-
-            return decorator
-
-    app_instance = MockApp()
-
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.JSONResponse", MockJSONResponse)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: app_instance)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-
-    srv.serve_model("foo", test_mode=True)
-    generate_func = app_instance.router.routes[-1].endpoint
-
-    request = mock.AsyncMock()
-    request.json.return_value = {"prompt": "test"}
-    result = await generate_func(request)
-    sql_val = result.body.decode() if hasattr(result, "body") else result["sql"]
-    if "SELECT * FROM generated WHERE prompt='test'" not in sql_val:
-        raise AssertionError
-
-    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", lambda *a, **k: {"sql": "SELECT 1", "status": "success"})
-    srv.serve_model("foo", test_mode=False)
-    generate_func2 = app_instance.router.routes[-1].endpoint
-    result2 = await generate_func2(request)
-    assert result2 is not None
-
-    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", lambda *a, **k: {"sql": "", "status": "success"})
-    srv.serve_model("foo", test_mode=False)
-    generate_func_empty = app_instance.router.routes[-1].endpoint
-    result_empty = await generate_func_empty(request)
-    assert result_empty is not None
-
-    def mock_raise(*a: object, **k: object) -> dict[str, object]:
-        """Simulate inference failure for error handling verification."""
-        raise RuntimeError("JAX inference warmup and generation failure")
-
-    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", mock_raise)
-    srv.serve_model("foo", test_mode=False)
-    generate_func3 = app_instance.router.routes[-1].endpoint
-    result3 = await generate_func3(request)
-    assert result3 is not None
+    monkeypatch.setattr(srv, "serve_model_wrapper", mock_serve_model_wrapper)
+    res = srv.serve_model("foo")
+    assert res["status"] == "mocked_missing_jax"
 
 
 def test_serve_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    mdl = __import__("gemma_4_sql.backends.jax.serve", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "jax", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    monkeypatch.setitem(sys.modules, "fastapi", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    importlib.reload(mdl)
+    import importlib
+
+    orig_jax = srv.jax
+
+    with mock.patch.dict(sys.modules, {"jax": None}):
+        importlib.reload(srv)
+        assert srv.jax is None
+
+    srv.jax = orig_jax

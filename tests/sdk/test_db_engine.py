@@ -1,5 +1,6 @@
 """Tests for db engine."""
 
+import typing
 from unittest import mock
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -70,11 +71,6 @@ def test_base_methods() -> None:
     """Test base methods."""
     with pytest.raises(TypeError, match="Can't instantiate abstract class DatabaseAdapter"):
         DatabaseAdapter()
-
-
-import typing
-
-import pytest
 
 
 class MockConn:

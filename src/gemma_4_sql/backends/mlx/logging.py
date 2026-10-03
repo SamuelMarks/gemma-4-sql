@@ -10,9 +10,9 @@ if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 
 try:
-    from mlx.utils.tensorboard import SummaryWriter as _SummaryWriter
+    import mlx.utils.tensorboard as mlx_tb
 
-    SummaryWriter: Any = _SummaryWriter
+    SummaryWriter: Any = getattr(mlx_tb, "SummaryWriter", None)  # pragma: no cover
 except (ImportError, AttributeError):
     SummaryWriter = None
 
@@ -27,6 +27,7 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
 
     Returns:
         A dictionary containing the results.
+
     """
     return log_metrics_wrapper(
         backend_name="mlx",

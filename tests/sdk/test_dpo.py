@@ -62,13 +62,15 @@ def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         run_dpo(model_name="model3", dataset="data3", backend="keras", beta=0.3)
 
-    mock_dpo = lambda *args, **kwargs: {
-        "backend": "keras",
-        "action": "dpo",
-        "model": "model3",
-        "dataset": "data3",
-        "beta": 0.3,
-    }
+    def mock_dpo(*args, **kwargs):
+        return {
+            "backend": "keras",
+            "action": "dpo",
+            "model": "model3",
+            "dataset": "data3",
+            "beta": 0.3,
+        }
+
     monkeypatch.setattr(kdpo, "keras", object())
     monkeypatch.setattr(kdpo, "tf", object())
     monkeypatch.setattr(kdpo, "run_dpo", mock_dpo)

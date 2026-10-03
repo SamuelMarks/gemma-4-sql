@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 
-from .layers import Gemma4RMSNorm, _make_linear
+from .layers import Gemma4RMSNorm, make_linear
 from .rope import RoPE, apply_rope
 
 MASK_PENALTY = -10000.0
@@ -30,6 +30,7 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
 
     Returns:
         The execution result.
+
     """
     (q, k, v) = qkv
     (head_dim, soft_cap, num_kv_heads, num_heads) = config_params
@@ -38,14 +39,14 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
         num_rep = num_heads // num_kv_heads
         k = jnp.repeat(k, num_rep, axis=2)
         v = jnp.repeat(v, num_rep, axis=2)
-    scores = jnp.einsum("bqhd,bkhd->bhqk", q, k) * scale
+    scores: Any = jnp.einsum("bqhd,bkhd->bhqk", q, k) * scale
     if soft_cap is not None:
         scores /= soft_cap
         scores = jnp.tanh(scores) * soft_cap
     if attention_mask is not None:  # pragma: no cover
         scores = scores + attention_mask
     weights = jax.nn.softmax(scores, axis=-1)
-    out = jnp.einsum("bhqk,bkhd->bqhd", weights, v)
+    out: Any = jnp.einsum("bhqk,bkhd->bqhd", weights, v)
     return out.reshape((out.shape[0], out.shape[1], -1))
 
 
@@ -60,6 +61,7 @@ def _prepare_qkv_for_attention(qkv: tuple[jax.Array, jax.Array, jax.Array], posi
 
     Returns:
         A tuple containing the results.
+
     """
     (q, k, v) = qkv
     (_batch_size, seq_len, _, _) = q.shape
@@ -99,10 +101,10 @@ class Gemma4Attention(nnx.Module):
         """Execute function."""
         if getattr(attention_type, "name", str(attention_type).upper()) == "GLOBAL":
             rope_factor = config.global_rope_proportion
-            rope_theta = config.global_rope_max_timescale if config.global_rope_max_timescale is not None else config.rope_max_timescale
+            rope_theta = getattr(config, "global_rope_max_timescale", None) if getattr(config, "global_rope_max_timescale", None) is not None else config.rope_max_timescale
         else:
             rope_factor = config.local_rope_proportion
-            rope_theta = config.local_rope_max_timescale if config.local_rope_max_timescale is not None else config.rope_max_timescale
+            rope_theta = getattr(config, "local_rope_max_timescale", None) if getattr(config, "local_rope_max_timescale", None) is not None else config.rope_max_timescale
         self.rope = RoPE(rope_type="default", head_dim=self.head_dim, rope_theta=rope_theta, factor=rope_factor)
 
     def __init__(self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
@@ -113,13 +115,13 @@ class Gemma4Attention(nnx.Module):
         self.hidden_size = config.hidden_size
         self.dtype = config.dtype
         shd = config.shd_cfg
-        self.q_proj = _make_linear(self.hidden_size, self.num_heads * self.head_dim, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.k_proj = _make_linear(self.hidden_size, self.num_kv_heads * self.head_dim, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.q_proj = make_linear(self.hidden_size, self.num_heads * self.head_dim, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.k_proj = make_linear(self.hidden_size, self.num_kv_heads * self.head_dim, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         if not self.share_kv:
-            self.v_proj = _make_linear(self.hidden_size, self.num_kv_heads * self.head_dim, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+            self.v_proj = make_linear(self.hidden_size, self.num_kv_heads * self.head_dim, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         else:
             self.v_proj = None
-        self.o_proj = _make_linear(self.num_heads * self.head_dim, self.hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.o_proj = make_linear(self.num_heads * self.head_dim, self.hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.q_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         self.k_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         self.v_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
@@ -136,10 +138,10 @@ class Gemma4Attention(nnx.Module):
         (batch_size, seq_len, _) = x.shape
         q = self.q_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
         k = self.k_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
-        v = k if self.share_kv else self.v_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
-        q = self.q_norm(q)
-        k = self.k_norm(k)
-        v = self.v_norm(v)
+        v = k if self.share_kv else self.v_proj.__call__(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim)) if self.v_proj is not None else k
+        q = self.q_norm.__call__(q) if hasattr(self, "q_norm") and getattr(self, "q_norm", None) is not None else q
+        k = self.k_norm.__call__(k) if hasattr(self, "k_norm") and getattr(self, "k_norm", None) is not None else k
+        v = self.v_norm.__call__(v) if hasattr(self, "v_norm") and getattr(self, "v_norm", None) is not None else v
         (q, k, v, mask, window) = _prepare_qkv_for_attention((q, k, v), positions, self.rope, cache)
         if getattr(self.attention_type, "name", str(self.attention_type).upper()) == "LOCAL_SLIDING":  # pragma: no cover
             mask &= window < self.config.sliding_window_size

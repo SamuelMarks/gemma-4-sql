@@ -25,5 +25,6 @@ def get_trainer() -> str:
 
     Returns:
         The resulting string.
+
     """
     return "keras_trainer"

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
+from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -30,7 +31,7 @@ except (ImportError, AttributeError):
     np = None
 
 
-def quantize_layer_weights(layer: Any, method: str = "int8") -> int:
+def quantize_layer_weights(layer: object, method: str = "int8") -> int:
     """Quantize kernel weights of a Keras layer using scaling factors.
 
     Args:
@@ -39,6 +40,7 @@ def quantize_layer_weights(layer: Any, method: str = "int8") -> int:
 
     Returns:
         Number of weight matrices quantized within this layer.
+
     """
     if np is None:
         return 0
@@ -78,6 +80,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
     Raises:
         DependencyMissingError: If Keras dependencies are missing.
         UnsupportedQuantizationMethodError: If an unsupported quantization method is requested.
+
     """
     if keras is None:
         raise DependencyMissingError("Keras dependencies are missing.")
@@ -98,12 +101,11 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
             keras.config.set_dtype_policy(policy_name)
 
         # Retrieve or load model instance if provided
-        model = kwargs.get("model")
+        model: ModelType | None = kwargs.get("model")  # type: ignore # Justified: Dynamic backend protocol typing
         if model is None:
             try:
-                from keras_nlp.models import GemmaCausalLM
-
-                model = GemmaCausalLM.from_preset(model_name)
+                gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
+                model = gemma_causal_lm_cls.from_preset(model_name)
             except (ImportError, ValueError, RuntimeError, AttributeError, OSError):
                 model = None
 

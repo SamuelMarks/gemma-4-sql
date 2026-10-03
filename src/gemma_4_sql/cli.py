@@ -100,6 +100,7 @@ def build_root_parser() -> argparse.ArgumentParser:
 
     Returns:
         The root ArgumentParser with all registered command parsers.
+
     """
     parser = argparse.ArgumentParser(description="CLI for gemma-4-sql dataset generation and model training.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -125,6 +126,7 @@ def cli(args: Sequence[str] | None = None) -> int:
 
     Returns:
         Integer exit code (0 for success, non-zero on failure).
+
     """
     parser = build_root_parser()
     parsed_args = parser.parse_args(args)

@@ -1,124 +1,288 @@
-"""Provide module docstring."""
+from unittest.mock import MagicMock, patch
 
-import pytest
-
-pytest.importorskip("jax")
-pytest.importorskip("flax")
-
-import jax
 import jax.numpy as jnp
+import pytest
 from flax import nnx
 
-from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM, init_cache, modeling
+from gemma_4_sql.backends.jax.gemma4.config import (
+    AudioConfig,
+    ModelConfig,
+    VisionConfig,
+)
+from gemma_4_sql.backends.jax.gemma4.modeling import (
+    Gemma4ForCausalLM,
+    Gemma4Model,
+    _download_and_load_pretrained,
+    forward,
+)
 
-orig_jit = jax.jit
-jax.jit = lambda f, *_args, **_kwargs: f
 
-
-def test_modeling_coverage() -> None:
-    """Execute function."""
-    config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=16, num_experts=1, num_experts_per_tok=1)
+def test_gemma4_model():
     rngs = nnx.Rngs(0)
+    config = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_hidden_layers=2,
+    )
+    model = Gemma4Model(config, rngs=rngs)
+
+    input_ids = jnp.array([[1, 2, 3]])
+    positions = jnp.array([[0, 1, 2]])
+    out = model(input_ids, positions)
+    assert out.shape == (1, 3, 64)
+
+
+def test_gemma4_model_per_layer_input():
+    rngs = nnx.Rngs(0)
+    config = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_hidden_layers=2,
+        hidden_size_per_layer_input=32,
+        vocab_size_per_layer_input=500,
+    )
+    model = Gemma4Model(config, rngs=rngs)
+
+    input_ids = jnp.array([[1, 2, 3]])
+    positions = jnp.array([[0, 1, 2]])
+
+    # Check get_per_layer_inputs directly
+    pli = model.get_per_layer_inputs(input_ids)
+    assert pli.shape == (1, 3, 2, 32)
+
+    # Check project_per_layer_inputs directly
+    x = jnp.ones((1, 3, 64))
+    proj = model.project_per_layer_inputs(x, pli)
+    assert proj.shape == (1, 3, 2, 32)
+
+    # Test full model call
+    out = model(input_ids, positions)
+    assert out.shape == (1, 3, 64)
+
+    # Test with provided per_layer_inputs
+    out2 = model(input_ids, positions, per_layer_inputs=pli)
+    assert out2.shape == (1, 3, 64)
+
+
+@patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained")
+@patch("huggingface_hub.snapshot_download")
+def test_download_and_load_pretrained(mock_download, mock_create):
+    mock_download.return_value = "/path/to/model"
+    mock_create.return_value = MagicMock()
+
+    _download_and_load_pretrained("google/gemma-4-E2B")
+    mock_download.assert_called_once()
+    mock_create.assert_called_once()
+
+    with pytest.raises(ValueError, match="Model name 'unknown' is unknown"):
+        _download_and_load_pretrained("unknown")
+
+
+@patch("gemma_4_sql.backends.jax.gemma4.modeling._download_and_load_pretrained")
+def test_gemma4_for_causal_lm_from_pretrained(mock_download):
+    mock_download.return_value = MagicMock()
+    Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B")
+    mock_download.assert_called_once()
+
+
+def test_gemma4_for_causal_lm():
+    rngs = nnx.Rngs(0)
+    config = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_hidden_layers=2,
+        vocab_size=1000,
+    )
     model = Gemma4ForCausalLM(config, rngs=rngs)
-    cache = init_cache(config, 1, 10)
-    input_ids = jnp.array([[1, 2]])
-    positions = jnp.array([[0, 1]])
-    model(input_ids, positions, cache=cache)
-    vision_config = modeling.VisionConfig(hidden_size=64, num_hidden_layers=1, num_attention_heads=4, image_size=14, patch_size=14)
-    config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, vision_config=vision_config, hidden_size_per_layer_input=64)
-    model_v = Gemma4ForCausalLM(config, rngs=rngs)
-    pixel_values = jnp.zeros((1, 14, 14, 3))
-    image_token_mask = jnp.array([[False, True]])
-    model_v(input_ids, positions, pixel_values=pixel_values, image_token_mask=image_token_mask)
-    model_v(input_ids, positions, pixel_values=pixel_values)
-    model_v.model(input_ids, positions, per_layer_inputs=None)
-    config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, num_experts=4, num_experts_per_tok=2)
-    model_moe = Gemma4ForCausalLM(config, rngs=rngs)
-    model_moe(input_ids, positions)
 
-    # Coverage for per_layer_inputs condition in Gemma4Model
-    per_layer_inputs = jnp.zeros((1, 2, 1, 64))
-    model_v.model(input_ids, positions, per_layer_inputs=per_layer_inputs)
-    # Coverage for get_per_layer_inputs when hidden_size_per_layer_input is None
-    assert model.model.get_per_layer_inputs(input_ids) is input_ids
-
-    audio_config = modeling.AudioConfig(hidden_size=64, num_hidden_layers=1, num_attention_heads=4, use_clipped_linears=True)
-    config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, audio_config=audio_config)
-    model_a = Gemma4ForCausalLM(config, rngs=rngs)
-    input_features = jnp.zeros((1, 48, 128))
-    input_features_mask = jnp.ones((1, 48))
-    audio_token_mask = jnp.array([[False, True]])
-    model_a(input_ids, positions, input_features=input_features, input_features_mask=input_features_mask, audio_token_mask=audio_token_mask)
-    model_a(input_ids, positions, input_features=input_features, input_features_mask=None, audio_token_mask=audio_token_mask)
-    config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, final_logit_softcapping=1.0)
-    model_s = Gemma4ForCausalLM(config, rngs=rngs)
-    cache = init_cache(config, 1, 10)
-    modeling.forward(model_s, cache, input_ids, positions)
-    config_g = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=7, num_attention_heads=4, num_key_value_heads=2, head_dim=16, num_global_key_value_heads=1, global_head_dim=32)
-    init_cache(config_g, 1, 10)
-    config_s = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=7, num_attention_heads=4, num_key_value_heads=2, head_dim=16, share_kv_projections=True)
-    Gemma4ForCausalLM(config_s, rngs=rngs)
-
-    # Coverage for LOCAL_SLIDING
-    from gemma_4_sql.backends.jax.gemma4.attention import Gemma4Attention
-    from gemma_4_sql.backends.jax.gemma4.modeling import AttentionType
-
-    local_config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16, sliding_window_size=2)
-    local_attn = Gemma4Attention(local_config, AttentionType.LOCAL_SLIDING, rngs=rngs)
-    local_attn(jnp.zeros((1, 4, 64)), jnp.array([[0, 1, 2, 3]]), attention_mask=jnp.zeros((1, 1, 4, 4)))
-
-    jax.jit = orig_jit
+    input_ids = jnp.array([[1, 2, 3]])
+    positions = jnp.array([[0, 1, 2]])
+    logits = model(input_ids, positions)
+    assert logits.shape == (1, 3, 1000)
 
 
-def test_preset_configs_and_sharding() -> None:
-    """Execute function."""
-    model_config_cls = __import__("gemma_4_sql.backends.jax.gemma4.modeling", fromlist=["ModelConfig"]).ModelConfig
-    model_config_cls.gemma4_base(use_fsdp=True, use_tp=True)
-    model_config_cls.gemma4_e2b(use_fsdp=True, use_tp=True)
-    model_config_cls.gemma4_e4b(use_fsdp=True, use_tp=True)
-    model_config_cls.gemma4_26b_a4b(use_fsdp=True, use_tp=True)
-    model_config_cls.gemma4_31b(use_fsdp=True, use_tp=True)
-
-
-def test_mlp_attention_sharding() -> None:
-    """Execute function."""
-    gemma4_attention_cls = __import__("gemma_4_sql.backends.jax.gemma4.modeling", fromlist=["Gemma4Attention"]).Gemma4Attention
-    gemma4_mlp_cls = __import__("gemma_4_sql.backends.jax.gemma4.modeling", fromlist=["Gemma4MLP"]).Gemma4MLP
+def test_gemma4_for_causal_lm_softcapping():
     rngs = nnx.Rngs(0)
-    gemma4_mlp_cls(hidden_size=64, intermediate_size=128, dtype=jnp.float32, shd=None, rngs=rngs)
-    config = Gemma4Config(vocab_size=100, hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=4, num_key_value_heads=2, head_dim=16)
-    gemma4_attention_cls(config, "local", rngs=rngs)
+    config = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_hidden_layers=2,
+        vocab_size=1000,
+        final_logit_softcapping=30.0,
+    )
+    model = Gemma4ForCausalLM(config, rngs=rngs)
+
+    input_ids = jnp.array([[1, 2, 3]])
+    positions = jnp.array([[0, 1, 2]])
+    logits = model(input_ids, positions)
+    assert logits.shape == (1, 3, 1000)
 
 
-def test_download_and_load_pretrained() -> None:
-    """Execute function."""
-    from unittest.mock import patch
+def test_gemma4_for_causal_lm_multimodal():
+    rngs = nnx.Rngs(0)
+    config = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_hidden_layers=2,
+        vocab_size=1000,
+        vision_config=VisionConfig(hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=2, image_size=224),
+        audio_config=AudioConfig(hidden_size=64, num_hidden_layers=1, num_attention_heads=2),
+    )
+    model = Gemma4ForCausalLM(config, rngs=rngs)
 
-    import pytest
+    input_ids = jnp.array([[1, 2, 3]])
+    positions = jnp.array([[0, 1, 2]])
 
-    from gemma_4_sql.backends.jax.gemma4.modeling import _download_and_load_pretrained
+    # Fake MultimodalInputs
+    pixel_values = jnp.ones((1, 224, 224, 3))
+    image_token_mask = jnp.array([[False, True, False]])
+    input_features = jnp.ones((1, 10, 128))
+    input_features_mask = jnp.ones((1, 10))
+    audio_token_mask = jnp.array([[False, False, True]])
 
-    with pytest.raises(ValueError, match="is unknown, please provide config argument"):
-        _download_and_load_pretrained("unknown_model_name")
+    # Try forward with missing some masks to trigger edge cases if any
+    logits1 = model(input_ids, positions, pixel_values=pixel_values, image_token_mask=image_token_mask)
+    assert logits1.shape == (1, 3, 1000)
 
-    config = Gemma4Config(vocab_size=10, hidden_size=16, intermediate_size=32, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=8)
-    with patch("huggingface_hub.snapshot_download"), patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained"):
-        _download_and_load_pretrained("google/gemma-4-E2B", config=config)
+    logits2 = model(input_ids, positions, input_features=input_features, input_features_mask=input_features_mask, audio_token_mask=audio_token_mask)
+    assert logits2.shape == (1, 3, 1000)
+
+    logits3 = model(input_ids, positions, pixel_values=pixel_values, image_token_mask=image_token_mask, input_features=input_features, input_features_mask=input_features_mask, audio_token_mask=audio_token_mask)
+    assert logits3.shape == (1, 3, 1000)
 
 
-def test_from_pretrained() -> None:
-    """Execute function."""
-    from unittest.mock import patch
+def test_gemma4_for_causal_lm_multimodal_per_layer_inputs():
+    rngs = nnx.Rngs(0)
+    config = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_hidden_layers=2,
+        vocab_size=1000,
+        vision_config=VisionConfig(hidden_size=64, intermediate_size=128, num_hidden_layers=1, num_attention_heads=2, image_size=224),
+        audio_config=AudioConfig(hidden_size=64, num_hidden_layers=1, num_attention_heads=2),
+        hidden_size_per_layer_input=32,
+        vocab_size_per_layer_input=500,
+    )
+    model = Gemma4ForCausalLM(config, rngs=rngs)
 
-    from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
+    input_ids = jnp.array([[1, 2, 3]])
+    positions = jnp.array([[0, 1, 2]])
+    pixel_values = jnp.ones((1, 224, 224, 3))
+    image_token_mask = jnp.array([[False, True, False]])
 
-    config = Gemma4Config(vocab_size=10, hidden_size=16, intermediate_size=32, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=8)
+    logits = model(input_ids, positions, pixel_values=pixel_values, image_token_mask=image_token_mask)
+    assert logits.shape == (1, 3, 1000)
 
-    with patch("gemma_4_sql.backends.jax.gemma4.modeling._download_and_load_pretrained") as mock_dl:
-        Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B", config)
-        mock_dl.assert_called_once_with("google/gemma-4-E2B", config)
 
-    with patch("huggingface_hub.snapshot_download") as mock_snap, patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained") as mock_create:
-        Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B", None)
-        mock_snap.assert_called_once()
-        mock_create.assert_called_once()
+def test_forward_function():
+    rngs = nnx.Rngs(0)
+    config = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_hidden_layers=2,
+        vocab_size=1000,
+    )
+    model = Gemma4ForCausalLM(config, rngs=rngs)
+
+    [MagicMock()] * 2
+    input_ids = jnp.array([[1, 2, 3]])
+    positions = jnp.array([[0, 1, 2]])
+
+    # We only have a fake cache, wait cache might be used in attention.
+    # Let's pass cache=None to avoid errors, or just use a valid cache if required.
+    # We will pass cache=None since Gemma4Model handles cache=None by passing None to layers.
+    # Actually `forward` takes `cache`, we can just pass None.
+
+    out_logits, out_cache = forward(model, None, input_ids, positions)
+    assert out_logits.shape == (1, 1000)
+    assert out_cache is None
+
+
+def test_gemma4_model_with_cache():
+    rngs = nnx.Rngs(0)
+    config = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_hidden_layers=2,
+    )
+    model = Gemma4Model(config, rngs=rngs)
+
+    input_ids = jnp.array([[1, 2, 3]])
+    positions = jnp.array([[0, 1, 2]])
+
+    class DummyCache:
+        def __init__(self):
+            import jax.numpy as jnp
+            from flax import nnx
+
+            self.k_cache = nnx.Cache(jnp.zeros((1, 10, 2, 16)))
+            self.v_cache = nnx.Cache(jnp.zeros((1, 10, 2, 16)))
+            self.cur_ind = nnx.Cache(jnp.array(0))
+            self.size = 10
+
+    cache = [DummyCache(), DummyCache()]
+
+    print("TYPE IS:", type(cache[0].k_cache))
+    out = model(input_ids, positions, cache=cache)
+    assert out.shape == (1, 3, 64)
+
+
+@patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained")
+@patch("huggingface_hub.snapshot_download")
+def test_download_and_load_pretrained_with_config(mock_download, mock_create):
+    mock_download.return_value = "/path/to/model"
+    mock_create.return_value = MagicMock()
+
+    config = ModelConfig()
+    _download_and_load_pretrained("some-model", config=config)
+    mock_download.assert_called_once()
+    mock_create.assert_called_once()
+
+
+def test_gemma4_model_missing_masks():
+    import jax.numpy as jnp
+    from flax import nnx
+
+    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
+    from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4Model
+
+    rngs = nnx.Rngs(0)
+    config = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_hidden_layers=2,
+    )
+    model = Gemma4Model(config, rngs=rngs)
+
+    input_ids = jnp.array([[1, 2, 3]])
+    positions = jnp.array([[0, 1, 2]])
+    # Call without attention_mask
+    out = model(input_ids, positions)
+    assert out.shape == (1, 3, 64)

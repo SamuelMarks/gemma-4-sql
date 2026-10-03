@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
+from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -32,13 +33,14 @@ def _extract_flat_scores(scores: object) -> list[float]:
 
     Returns:
         Flattened list of floating-point values.
+
     """
     flat: list[float] = []
     stack = [scores]
     while stack:
         curr = stack.pop(0)
         if isinstance(curr, (list, tuple)):
-            stack.extend(curr)
+            stack.extend(cast(list[Any], curr))
         elif isinstance(curr, (int, float)):
             flat.append(float(curr))
     return flat
@@ -58,6 +60,7 @@ def compute_keras_confidence(scores: Any, num_tokens: int) -> float:
 
     Returns:
         Confidence score between 0.0 and 1.0.
+
     """
     if num_tokens <= 0:
         return 0.0
@@ -67,7 +70,7 @@ def compute_keras_confidence(scores: Any, num_tokens: int) -> float:
         scores = scores.tolist()
 
     if isinstance(scores, (list, tuple)):
-        flat_scores = _extract_flat_scores(scores)
+        flat_scores = _extract_flat_scores(cast(list[Any], scores))
         if not flat_scores:
             return 0.5
         avg = sum(flat_scores) / max(1, len(flat_scores))
@@ -85,7 +88,7 @@ def compute_keras_confidence(scores: Any, num_tokens: int) -> float:
     return max(0.1, min(0.95, 1.0 / (1.0 + math.exp(-0.1 * num_tokens))))
 
 
-def configure_beam_sampler(model: Any, beam_width: int) -> Any:
+def configure_beam_sampler(model: ModelType, beam_width: int) -> Any:
     """Configure KerasNLP BeamSampler on a causal language model.
 
     Args:
@@ -94,13 +97,16 @@ def configure_beam_sampler(model: Any, beam_width: int) -> Any:
 
     Returns:
         The instantiated sampler, or None if unavailable.
+
     """
     sampler = None
     try:
         import keras_nlp
 
-        if hasattr(keras_nlp, "samplers") and hasattr(keras_nlp.samplers, "BeamSampler"):
-            sampler = keras_nlp.samplers.BeamSampler(num_beams=beam_width)
+        samplers: Any = getattr(keras_nlp, "samplers", None)
+        beam_sampler_cls: Any = getattr(samplers, "BeamSampler", None)
+        if beam_sampler_cls is not None:
+            sampler = beam_sampler_cls(num_beams=beam_width)
     except (ImportError, AttributeError, ValueError) as e:
         logger.warning("KerasNLP BeamSampler could not be imported: %s", e)
 
@@ -108,7 +114,7 @@ def configure_beam_sampler(model: Any, beam_width: int) -> Any:
         if hasattr(model, "compile"):
             model.compile(sampler=sampler)
         elif hasattr(model, "sampler"):
-            model.sampler = sampler
+            model.sampler = sampler  # type: ignore # Runtime injection
 
     return sampler
 
@@ -137,6 +143,7 @@ def generate_sql(
 
     Raises:
         DependencyMissingError: If Keras or TensorFlow dependencies are missing.
+
     """
     if keras is None or tf is None:
         raise DependencyMissingError("Keras dependencies are missing.")
@@ -156,16 +163,17 @@ def generate_sql(
 
         scores: Any = None
         if isinstance(output, dict):
-            raw_text = str(output.get("text", ""))
-            scores = output.get("scores") or output.get("token_probabilities")
-        elif isinstance(output, (tuple, list)) and len(output) >= 2:
-            raw_text = str(output[0])
-            scores = output[1]
+            output_dict = cast(dict[str, Any], output)
+            raw_text = str(output_dict.get("text", ""))
+            scores = output_dict.get("scores") or output_dict.get("token_probabilities")
+        elif isinstance(output, (tuple, list)) and len(cast(list[Any], output)) >= 2:
+            raw_text = str(cast(list[Any], output)[0])
+            scores = cast(list[Any], output)[1]
         elif isinstance(output, str):
             raw_text = output
             scores = getattr(output, "scores", None) or getattr(model, "last_scores", None)
         else:
-            raw_text = str(output)
+            raw_text = str(cast(Any, output))
 
         sql = raw_text.replace(prompt, "").strip()
         if not sql:

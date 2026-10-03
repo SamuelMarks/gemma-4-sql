@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 try:
     import jax as _jax
-    from maxtext.models import gemma4 as _gemma4
+    import maxtext.models.gemma4 as _gemma4
 
     jax: Any = _jax
     gemma4: Any = _gemma4
@@ -29,15 +29,15 @@ with catch_optional_imports():
     pass
 
 
-def _create_app(model_name: str, *, test_mode: bool = False) -> object:
+def _create_app(model_name: str) -> object:
     """Create the FastAPI application for the MaxText server.
 
     Args:
         model_name: The name of the target model.
-        test_mode: Boolean flag indicating test mode.
 
     Returns:
         The execution result.
+
     """
 
     def _startup() -> None:
@@ -58,10 +58,8 @@ def _create_app(model_name: str, *, test_mode: bool = False) -> object:
 
         Raises:
             InferenceError: If model inference fails during non-test execution.
-        """
-        if test_mode:
-            return f"SELECT * FROM maxtext_serve WHERE prompt='{prompt}'"
 
+        """
         from gemma_4_sql.backends.maxtext.inference import generate_sql
         from gemma_4_sql.exceptions import InferenceError
 
@@ -79,7 +77,6 @@ def _create_app(model_name: str, *, test_mode: bool = False) -> object:
     return create_common_app(
         backend_name="maxtext",
         model_name=model_name,
-        test_mode=test_mode,
         startup_callback=_startup,
         generate_logic=_generate,
     )
@@ -99,6 +96,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
     Raises:
         DependencyMissingError: If MaxText dependencies are missing.
+
     """
     if gemma4 is None or jax is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -111,6 +109,5 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         max_batch_size=max_batch_size,
         missing_deps=False,
         missing_status="",
-        app_factory=lambda: _create_app(model_name, test_mode=bool(kwargs.get("test_mode"))),
-        test_mode=bool(kwargs.get("test_mode")),
+        app_factory=lambda: _create_app(model_name),
     )

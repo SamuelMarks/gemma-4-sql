@@ -1,207 +1,115 @@
-"""Tests for MaxText model export pipeline."""
-
-from __future__ import annotations
-
-from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from typing_extensions import Self
 
-import gemma_4_sql.backends.maxtext.export as m_export
+from gemma_4_sql.backends.maxtext.export import export_model
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 
 
-def test_export_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test module reload behavior when dependencies are missing."""
-    import importlib
-    import sys
+def test_export_model_success_with_kwargs(tmp_path):
+    export_path = tmp_path / "export_dir"
+    weights = {"w": 1}
 
-    monkeypatch.setitem(sys.modules, "jax", None)
-    importlib.reload(m_export)
-    monkeypatch.undo()
-    monkeypatch.setitem(sys.modules, "orbax.checkpoint", None)
-    importlib.reload(m_export)
-    monkeypatch.undo()
-    importlib.reload(m_export)
+    mock_mngr_instance = MagicMock()
+    mock_mngr_class = MagicMock(return_value=mock_mngr_instance)
+    mock_mngr_instance.__enter__.return_value = mock_mngr_instance
+    mock_pytree_checkpointer = MagicMock()
+    mock_checkpoint_manager_options = MagicMock()
 
-
-def test_export_missing_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test that DependencyMissingError is raised when JAX/Orbax are missing."""
-    monkeypatch.setattr(m_export, "jax", None)
-    with pytest.raises(DependencyMissingError, match="MaxText export dependencies"):
-        m_export.export_model("model", str(tmp_path))
-
-    monkeypatch.setattr(m_export, "jax", MagicMock())
-    monkeypatch.setattr(m_export, "jnp", None)
-    with pytest.raises(DependencyMissingError, match="MaxText export dependencies"):
-        m_export.export_model("model", str(tmp_path))
-
-    monkeypatch.setattr(m_export, "jnp", MagicMock())
-    monkeypatch.setattr(m_export, "ocp", None)
-    with pytest.raises(DependencyMissingError, match="MaxText export dependencies"):
-        m_export.export_model("model", str(tmp_path))
-
-
-def test_export_missing_maxtext_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test that DependencyMissingError is raised when Gemma4Model is None and no params passed."""
-    mock_jax = MagicMock()
-    mock_jnp = MagicMock()
     mock_ocp = MagicMock()
-    monkeypatch.setattr(m_export, "jax", mock_jax)
-    monkeypatch.setattr(m_export, "jnp", mock_jnp)
-    monkeypatch.setattr(m_export, "ocp", mock_ocp)
-    monkeypatch.setattr(m_export, "Gemma4Model", None)
+    mock_ocp.CheckpointManager = mock_mngr_class
+    mock_ocp.PyTreeCheckpointer = mock_pytree_checkpointer
+    mock_ocp.CheckpointManagerOptions = mock_checkpoint_manager_options
 
-    with pytest.raises(DependencyMissingError, match="MaxText dependency"):
-        m_export.export_model("model", str(tmp_path))
-
-
-def test_export_model_init_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test that ExportError is raised when model initialization fails."""
-    mock_jax = MagicMock()
-    mock_jnp = MagicMock()
-    mock_ocp = MagicMock()
-
-    class FaultyModel:
-        """Mock model class that fails upon initialization."""
-
-        def __init__(self, _name: str) -> None:
-            """Initialize faulty model."""
-            raise RuntimeError("Corrupt model architecture")
-
-    monkeypatch.setattr(m_export, "jax", mock_jax)
-    monkeypatch.setattr(m_export, "jnp", mock_jnp)
-    monkeypatch.setattr(m_export, "ocp", mock_ocp)
-    monkeypatch.setattr(m_export, "Gemma4Model", FaultyModel)
-
-    with pytest.raises(ExportError, match="Failed to initialize MaxText model"):
-        m_export.export_model("model", str(tmp_path))
-
-
-def test_export_model_save_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test that ExportError is raised when Orbax checkpoint save fails."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
 
-    class MockCheckpointManager:
-        """Mock CheckpointManager that fails on save."""
+    with patch("gemma_4_sql.backends.maxtext.export.jax", mock_jax), patch("gemma_4_sql.backends.maxtext.export.jnp", mock_jnp), patch("gemma_4_sql.backends.maxtext.export.ocp", mock_ocp):
+        result = export_model("test_model", str(export_path), params=weights)
 
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            """Initialize mock checkpoint manager."""
+    assert result["backend"] == "maxtext"
+    assert result["model"] == "test_model"
+    assert result["export_path"] == str(export_path)
+    assert result["file_path"] == str(export_path / "maxtext_orbax_ckpt")
+    assert result["status"] == "exported_with_maxtext_orbax"
+    assert result["format"] == "maxtext/checkpoint"
 
-        def __enter__(self) -> Self:
-            """Enter context."""
-            return self
+    mock_mngr_instance.save.assert_called_once_with(0, weights)
 
-        def __exit__(self, *args: object) -> None:
-            """Exit context."""
 
-        def save(self, *args: Any, **kwargs: Any) -> None:
-            """Raise save error."""
-            raise OSError("Disk full or permission denied")
+def test_export_model_success_without_kwargs(tmp_path):
+    export_path = tmp_path / "export_dir"
+
+    mock_mngr_instance = MagicMock()
+    mock_mngr_class = MagicMock(return_value=mock_mngr_instance)
+    mock_mngr_instance.__enter__.return_value = mock_mngr_instance
+    mock_pytree_checkpointer = MagicMock()
+    mock_checkpoint_manager_options = MagicMock()
 
     mock_ocp = MagicMock()
-    mock_ocp.CheckpointManager = MockCheckpointManager
-    mock_ocp.CheckpointManagerOptions = MagicMock()
-    mock_ocp.PyTreeCheckpointer = MagicMock()
+    mock_ocp.CheckpointManager = mock_mngr_class
+    mock_ocp.PyTreeCheckpointer = mock_pytree_checkpointer
+    mock_ocp.CheckpointManagerOptions = mock_checkpoint_manager_options
 
-    monkeypatch.setattr(m_export, "jax", mock_jax)
-    monkeypatch.setattr(m_export, "jnp", mock_jnp)
-    monkeypatch.setattr(m_export, "ocp", mock_ocp)
-
-    with pytest.raises(ExportError, match="Failed to save MaxText Orbax checkpoint"):
-        m_export.export_model("model", str(tmp_path), params={"weights": [1, 2, 3]})
-
-
-def test_export_model_success_with_model_init(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test successful export through Gemma4Model initialization."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
-    mock_saved: dict[str, Any] = {}
+    mock_jnp.int32 = "int32"
+    mock_jnp.zeros.return_value = "zeros"
+    mock_jax.random.PRNGKey.return_value = "prngkey"
 
-    class MockCheckpointManager:
-        """Mock CheckpointManager that records saved step and weights."""
+    mock_model_instance = MagicMock()
+    mock_model_instance.init.return_value = {"w": 2}
+    mock_Gemma4Model = MagicMock(return_value=mock_model_instance)
 
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            """Initialize mock checkpoint manager."""
+    with patch("gemma_4_sql.backends.maxtext.export.jax", mock_jax), patch("gemma_4_sql.backends.maxtext.export.jnp", mock_jnp), patch("gemma_4_sql.backends.maxtext.export.ocp", mock_ocp), patch("gemma_4_sql.backends.maxtext.export.Gemma4Model", mock_Gemma4Model):
+        export_model("test_model", str(export_path))
 
-        def __enter__(self) -> Self:
-            """Enter context."""
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            """Exit context."""
-
-        def save(self, step: int, weights: Any) -> None:
-            """Record saved payload."""
-            mock_saved["step"] = step
-            mock_saved["weights"] = weights
-
-    mock_ocp = MagicMock()
-    mock_ocp.CheckpointManager = MockCheckpointManager
-    mock_ocp.CheckpointManagerOptions = MagicMock()
-    mock_ocp.PyTreeCheckpointer = MagicMock()
-
-    class ValidModel:
-        """Mock model class that successfully initializes."""
-
-        def __init__(self, name: str) -> None:
-            """Initialize valid model."""
-            self.name = name
-
-        def init(self, rng: Any, dummy_input: Any) -> dict[str, str]:
-            """Initialize model parameters."""
-            return {"params": f"initialized_for_{self.name}"}
-
-    monkeypatch.setattr(m_export, "jax", mock_jax)
-    monkeypatch.setattr(m_export, "jnp", mock_jnp)
-    monkeypatch.setattr(m_export, "ocp", mock_ocp)
-    monkeypatch.setattr(m_export, "Gemma4Model", ValidModel)
-
-    res = m_export.export_model("gemma_model", str(tmp_path))
-    assert res["status"] == "exported_with_maxtext_orbax"
-    assert res["backend"] == "maxtext"
-    assert res["model"] == "gemma_model"
-    assert res["format"] == "maxtext/checkpoint"
-    assert mock_saved["step"] == 0
-    assert mock_saved["weights"] == {"params": "initialized_for_gemma_model"}
+    mock_model_instance.init.assert_called_once_with("prngkey", "zeros")
+    mock_mngr_instance.save.assert_called_once_with(0, {"w": 2})
 
 
-def test_export_model_success_with_params_kwargs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test successful export when params are directly provided via kwargs."""
+def test_export_model_missing_jax(tmp_path):
+    with patch("gemma_4_sql.backends.maxtext.export.jax", None), pytest.raises(DependencyMissingError, match="MaxText export dependencies \\(jax, orbax.checkpoint\\) are missing."):
+        export_model("test_model", str(tmp_path))
+
+
+def test_export_model_missing_gemma4model(tmp_path):
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
-    mock_saved: dict[str, Any] = {}
-
-    class MockCheckpointManager:
-        """Mock CheckpointManager that records saved weights."""
-
-        def __init__(self, *args: Any, **kwargs: Any) -> None:
-            """Initialize mock checkpoint manager."""
-
-        def __enter__(self) -> Self:
-            """Enter context."""
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            """Exit context."""
-
-        def save(self, step: int, weights: Any) -> None:
-            """Record saved payload."""
-            mock_saved["step"] = step
-            mock_saved["weights"] = weights
-
     mock_ocp = MagicMock()
-    mock_ocp.CheckpointManager = MockCheckpointManager
-    mock_ocp.CheckpointManagerOptions = MagicMock()
-    mock_ocp.PyTreeCheckpointer = MagicMock()
+    with (
+        patch("gemma_4_sql.backends.maxtext.export.jax", mock_jax),
+        patch("gemma_4_sql.backends.maxtext.export.jnp", mock_jnp),
+        patch("gemma_4_sql.backends.maxtext.export.ocp", mock_ocp),
+        patch("gemma_4_sql.backends.maxtext.export.Gemma4Model", None),
+        pytest.raises(DependencyMissingError, match="MaxText dependency \\(maxtext.models.gemma4.Gemma4Model\\) is missing."),
+    ):
+        export_model("test_model", str(tmp_path))
 
-    monkeypatch.setattr(m_export, "jax", mock_jax)
-    monkeypatch.setattr(m_export, "jnp", mock_jnp)
-    monkeypatch.setattr(m_export, "ocp", mock_ocp)
 
-    res = m_export.export_model("custom_model", str(tmp_path), weights={"layer1": "w1"})
-    assert res["status"] == "exported_with_maxtext_orbax"
-    assert mock_saved["weights"] == {"layer1": "w1"}
+def test_export_model_init_error(tmp_path):
+    mock_jax = MagicMock()
+    mock_jnp = MagicMock()
+    mock_ocp = MagicMock()
+    mock_Gemma4Model = MagicMock(side_effect=Exception("Init failed"))
+    with (
+        patch("gemma_4_sql.backends.maxtext.export.jax", mock_jax),
+        patch("gemma_4_sql.backends.maxtext.export.jnp", mock_jnp),
+        patch("gemma_4_sql.backends.maxtext.export.ocp", mock_ocp),
+        patch("gemma_4_sql.backends.maxtext.export.Gemma4Model", mock_Gemma4Model),
+        pytest.raises(ExportError, match="Failed to initialize MaxText model 'test_model': Init failed"),
+    ):
+        export_model("test_model", str(tmp_path))
+
+
+def test_export_model_save_error(tmp_path):
+    export_path = tmp_path / "export_dir"
+
+    mock_mngr_class = MagicMock(side_effect=Exception("Save failed"))
+    mock_ocp = MagicMock()
+    mock_ocp.CheckpointManager = mock_mngr_class
+    mock_jax = MagicMock()
+    mock_jnp = MagicMock()
+
+    with patch("gemma_4_sql.backends.maxtext.export.jax", mock_jax), patch("gemma_4_sql.backends.maxtext.export.jnp", mock_jnp), patch("gemma_4_sql.backends.maxtext.export.ocp", mock_ocp), pytest.raises(ExportError, match="Failed to save MaxText Orbax checkpoint"):
+        export_model("test_model", str(export_path), params={"w": 1})

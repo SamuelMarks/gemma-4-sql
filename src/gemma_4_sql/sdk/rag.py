@@ -9,12 +9,17 @@ import operator
 import re
 from typing import Any
 
+from gemma_4_sql.type_hints import ModelType
+
 MIN_SIMILARITY = 0.1
 logger = logging.getLogger(__name__)
 
 try:
-    from sentence_transformers import SentenceTransformer
-    from sklearn.metrics.pairwise import cosine_similarity
+    import sentence_transformers as _st
+    import sklearn.metrics.pairwise as _smp
+
+    SentenceTransformer: Any = _st.SentenceTransformer  # pragma: no cover
+    cosine_similarity: Any = _smp.cosine_similarity  # pragma: no cover
 except (ImportError, ValueError, AttributeError, OSError):
     SentenceTransformer = None
     cosine_similarity = None
@@ -30,6 +35,7 @@ def _clean_identifier(identifier: str) -> str:
 
     Returns:
         The unquoted identifier string.
+
     """
     return identifier.strip("\"'`[]")
 
@@ -45,6 +51,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
 
     Returns:
         A dictionary mapping table names to lists of column names.
+
     """
     schema: dict[str, list[str]] = {}
     pattern = re.compile(
@@ -117,6 +124,7 @@ def _score_table(table: str, columns: list[str], prompt_words: set[str]) -> int:
 
     Returns:
         The relevance score integer.
+
     """
     score = 0
     if table.lower() in prompt_words:
@@ -145,6 +153,7 @@ def _bm25_search(
 
     Returns:
         List of prioritized table names.
+
     """
     prompt_tokens = [w.lower() for w in re.findall(r"\b\w+\b", prompt)]
     if not prompt_tokens or not schema:
@@ -197,13 +206,14 @@ def _keyword_search(prompt: str, schema: dict[str, list[str]], top_k_tables: int
 
     Returns:
         A list of table names sorted by relevance score.
+
     """
     prompt_words = set(re.findall(r"\b\w+\b", prompt.lower()))
-    table_scores = {}
+    table_scores: dict[str, float] = {}
     for table, columns in schema.items():
         table_scores[table] = _score_table(table, columns, prompt_words)
-    sorted_tables = sorted(table_scores.items(), key=operator.itemgetter(1), reverse=True)
-    relevant_tables = [t[0] for t in sorted_tables[:top_k_tables] if t[1] > 0]
+    sorted_tables: list[tuple[str, float]] = sorted(table_scores.items(), key=operator.itemgetter(1), reverse=True)
+    relevant_tables: list[str] = [t[0] for t in sorted_tables[:top_k_tables] if t[1] > 0]
     if not relevant_tables:
         relevant_tables = _bm25_search(prompt, schema, top_k_tables)
     return relevant_tables
@@ -227,13 +237,14 @@ def _semantic_search(
 
     Returns:
         A list of relevant table names.
+
     """
     if not table_names:
         return []
     if SentenceTransformer is None or cosine_similarity is None:
         return _keyword_search(prompt, schema, top_k_tables)
     try:
-        model = SentenceTransformer("all-MiniLM-L6-v2")
+        model: ModelType = SentenceTransformer("all-MiniLM-L6-v2")
         table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]
 
         schema_key = hashlib.md5(";;".join(table_docs).encode()).hexdigest()
@@ -243,10 +254,10 @@ def _semantic_search(
             table_embeddings = model.encode(table_docs)
             _SCHEMA_EMBEDDING_CACHE[schema_key] = table_embeddings
 
-        prompt_embedding = model.encode([prompt])
-        similarities = cosine_similarity(prompt_embedding, table_embeddings)[0]
-        top_indices = similarities.argsort()[-top_k_tables:][::-1]
-        relevant_tables = [table_names[i] for i in top_indices if similarities[i] > min_similarity]
+        prompt_embedding: Any = model.encode([prompt])
+        similarities: Any = cosine_similarity(prompt_embedding, table_embeddings)[0]
+        top_indices: Any = similarities.argsort()[-top_k_tables:][::-1]
+        relevant_tables: list[str] = [table_names[i] for i in top_indices if similarities[i] > min_similarity]
         if not relevant_tables:
             relevant_tables = table_names[:top_k_tables]
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
@@ -269,6 +280,7 @@ def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_ta
 
     Returns:
         A formatted string describing the relevant schema parts.
+
     """
     table_names = list(schema.keys())
     if not table_names:
@@ -290,6 +302,7 @@ def build_rag_prompt(prompt: str, ddl: str | None = None) -> str:
 
     Returns:
         The augmented prompt string.
+
     """
     if not ddl:
         return prompt

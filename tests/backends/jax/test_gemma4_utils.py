@@ -186,9 +186,6 @@ def test_create_model_from_safe_tensors_no_safetensors(monkeypatch: pytest.Monke
         raise AssertionError
 
 
-import pytest
-
-
 def test_utils_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
     """Execute function."""
     importlib = __import__("importlib", fromlist=[""])

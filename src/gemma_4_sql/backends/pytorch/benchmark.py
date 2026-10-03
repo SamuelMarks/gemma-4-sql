@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -24,13 +25,14 @@ except (ImportError, AttributeError):
 
 
 def _get_device(hardware: str) -> str:
-    """Get the correct device based on hardware string.
+    """Provide the correct device based on hardware string.
 
     Args:
         hardware: Target hardware string.
 
     Returns:
         Device identifier string (cpu, cuda, or mps).
+
     """
     if hardware == "cpu":
         return "cpu"
@@ -41,24 +43,21 @@ def _get_device(hardware: str) -> str:
     return "cpu"
 
 
-def _load_pytorch_model_and_device(model_name: str, hardware: str, *, test_mode: bool = False, dtype: str = "bfloat16", backend_alias: str = "pytorch") -> tuple[Any, str]:
+def _load_pytorch_model_and_device(model_name: str, hardware: str, *, dtype: str = "bfloat16", backend_alias: str = "pytorch") -> tuple[Any, str]:
     """Load the model and determine device.
 
     Args:
         model_name: The name of the target model.
         hardware: The target hardware accelerator.
-        test_mode: Boolean flag indicating test mode.
         dtype: The string representing dtype.
         backend_alias: The alias used (pytorch, pytorch_hf, pytorch_native).
 
     Returns:
         A tuple containing the results.
+
     """
     device = _get_device(hardware)
     torch_dtype = getattr(torch, dtype, None) if hasattr(torch, dtype) else getattr(torch, "float32", None)
-
-    if test_mode:
-        torch_dtype = getattr(torch, "float32", None)
 
     if backend_alias == "pytorch_native":
         from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4Config, Gemma4ForCausalLM
@@ -77,7 +76,7 @@ def _load_pytorch_model_and_device(model_name: str, hardware: str, *, test_mode:
 
     if hasattr(model, "eval"):
         model.eval()
-    if hasattr(torch, "compile") and not test_mode:
+    if hasattr(torch, "compile"):
         try:
             model = torch.compile(model)
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
@@ -90,6 +89,7 @@ def _sync_cuda(device: str) -> None:
 
     Args:
         device: The string representing the device.
+
     """
     if device == "cuda" and hasattr(torch, "cuda") and hasattr(torch.cuda, "synchronize"):
         torch.cuda.synchronize()
@@ -97,8 +97,8 @@ def _sync_cuda(device: str) -> None:
         torch.mps.synchronize()
 
 
-def _get_memory_mb(model: torch.nn.Module, device: str) -> float:
-    """Get max memory allocated in MB.
+def _get_memory_mb(model: ModelType, device: str) -> float:
+    """Provide max memory allocated in MB.
 
     Args:
         model: The model.
@@ -106,6 +106,7 @@ def _get_memory_mb(model: torch.nn.Module, device: str) -> float:
 
     Returns:
         The max memory.
+
     """
     if device == "cuda" and hasattr(torch, "cuda") and hasattr(torch.cuda, "max_memory_allocated"):
         return float(torch.cuda.max_memory_allocated() / (1024 * 1024))
@@ -114,7 +115,7 @@ def _get_memory_mb(model: torch.nn.Module, device: str) -> float:
     return 8192.0
 
 
-def _run_benchmark_pass(model: torch.nn.Module, device: str, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int) -> tuple[float, float, float]:
+def _run_benchmark_pass(model: ModelType, device: str, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
     Args:
@@ -128,6 +129,7 @@ def _run_benchmark_pass(model: torch.nn.Module, device: str, batch_size: int, nu
 
     Returns:
         The resulting output from the operation.
+
     """
     if hasattr(torch, "manual_seed"):
         torch.manual_seed(42)
@@ -185,6 +187,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
 
     Raises:
         DependencyMissingError: If PyTorch dependencies are missing.
+
     """
     backend_alias = str(kwargs.get("backend_alias", "pytorch"))
 
@@ -200,7 +203,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         max_new_tokens = int(str(kwargs.get("max_new_tokens", 128)))
         warmup_steps = int(str(kwargs.get("warmup_steps", 5)))
 
-        (model, device) = _load_pytorch_model_and_device(model_name, hardware, test_mode=bool(kwargs.get("test_mode")), dtype=dtype, backend_alias=backend_alias)
+        (model, device) = _load_pytorch_model_and_device(model_name, hardware, dtype=dtype, backend_alias=backend_alias)
         num_runs = int(str(kwargs.get("num_runs", 5)))
         return _run_benchmark_pass(model, device, batch_size, num_runs, warmup_steps, mode, max_new_tokens)
 

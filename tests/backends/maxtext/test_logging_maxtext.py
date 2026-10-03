@@ -1,45 +1,38 @@
-"""Tests for MaxText logging."""
-
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gemma_4_sql.backends.maxtext import logging as maxtext_logging
+from gemma_4_sql.backends.maxtext.logging import log_metrics
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
-def test_log_metrics_no_tb() -> None:
-    """Test MaxText logging when TB is missing.
+def test_log_metrics_success():
+    metrics = {"loss": 0.5, "accuracy": 0.9}
+    step = 10
+    log_dir = "test_logs"
 
-    Raises:
-        AssertionError: Description.
+    mock_writer_instance = MagicMock()
+    mock_SummaryWriter = MagicMock(return_value=mock_writer_instance)
 
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
+    with patch("gemma_4_sql.backends.maxtext.logging.SummaryWriter", new=mock_SummaryWriter):
+        result = log_metrics(metrics, step, log_dir)
 
-    maxtext_logging.SummaryWriter = None
-    metrics = {"loss": 0.5, "acc": 0.9}
-    with pytest.raises(DependencyMissingError):
-        maxtext_logging.log_metrics(metrics, step=10, log_dir="test_logs")
+    assert result == {
+        "backend": "maxtext",
+        "action": "log_metrics",
+        "step": step,
+        "metrics": metrics,
+        "status": "success",
+        "log_dir": log_dir,
+    }
+
+    mock_SummaryWriter.assert_called_once_with(log_dir=log_dir)
+    assert mock_writer_instance.add_scalar.call_count == 2
+    mock_writer_instance.add_scalar.assert_any_call("loss", 0.5, step)
+    mock_writer_instance.add_scalar.assert_any_call("accuracy", 0.9, step)
+    mock_writer_instance.close.assert_called_once()
 
 
-def test_log_metrics_with_tb() -> None:
-    """Test MaxText logging when TB is available.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    mock_writer_cls = MagicMock()
-    mock_writer = mock_writer_cls.return_value
-    maxtext_logging.SummaryWriter = mock_writer_cls
-    metrics = {"loss": 0.5, "acc": 0.9}
-    res = maxtext_logging.log_metrics(metrics, step=10, log_dir="test_logs")
-    if not res["backend"] == "maxtext":
-        raise AssertionError
-    if not res["status"] == "success":
-        raise AssertionError
-    mock_writer_cls.assert_called_once_with(log_dir="test_logs")
-    if not mock_writer.add_scalar.call_count == int("2"):
-        raise AssertionError
-    mock_writer.close.assert_called_once()
-    maxtext_logging.SummaryWriter = None
+def test_log_metrics_missing_dependency():
+    with patch("gemma_4_sql.backends.maxtext.logging.SummaryWriter", new=None), pytest.raises(DependencyMissingError, match="TensorBoardX dependencies are missing."):
+        log_metrics({"loss": 0.5}, 10)

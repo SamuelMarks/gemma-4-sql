@@ -1,246 +1,76 @@
-"""Module docstring."""
+"""Tests for Keras ETL."""
 
-from gemma_4_sql.exceptions import DependencyMissingError
-
-"""Provide module docstring."""
-
-import sys
-from unittest import mock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from gemma_4_sql.backends.keras.etl import _get_sampler, _load_hf_or_duckdb, build_dataloader
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ETLConfig
 
 
-@pytest.fixture(autouse=True)
-def _clean_sys_modules() -> object:
-    """Initialize function clean_sys_modules.
-
-    Yields:
-        object: Description of yield.
-
-    """
-    sys = __import__("sys", fromlist=[""])
-    keys = list(sys.modules.keys())
-    yield
-    for k in list(sys.modules.keys()):
-        if k not in keys and "gemma_4_sql" in k:
-            del sys.modules[k]
+def test_load_hf_or_duckdb_duckdb():
+    with patch("gemma_4_sql.backends.keras.etl.load_duckdb_dataset", return_value="duckdb") as mock_duckdb:
+        res = _load_hf_or_duckdb("ds", "train", "path", "table")
+        assert res == "duckdb"
+        mock_duckdb.assert_called_once_with("path", "table")
 
 
-"Tests for Keras ETL module."
+def test_load_hf_or_duckdb_missing_datasets():
+    with patch("gemma_4_sql.backends.keras.etl.datasets", None), pytest.raises(DependencyMissingError, match="Datasets dependency is missing"):
+        _load_hf_or_duckdb("ds", "train", None, None)
 
 
-def test_keras_etl_mocked() -> None:
-    """Test Keras ETL when libraries are missing via direct assignment.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    etl_keras = __import__("gemma_4_sql.backends.keras.etl", fromlist=[""])
-    original_datasets = getattr(etl_keras, "datasets", None)
-    original_grain = getattr(etl_keras, "grain", None)
-    try:
-        etl_keras.datasets = None
-        etl_keras.grain = None
-        with pytest.raises(DependencyMissingError):
-            etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-    finally:
-        etl_keras.datasets = original_datasets
-        etl_keras.grain = original_grain
+def test_load_hf_or_duckdb_hf():
+    mock_datasets = MagicMock()
+    mock_datasets.load_dataset.return_value = "hf"
+    with patch("gemma_4_sql.backends.keras.etl.datasets", mock_datasets):
+        res = _load_hf_or_duckdb("ds", "train", None, None)
+        assert res == "hf"
+        mock_datasets.load_dataset.assert_called_once_with("ds", split="train")
 
 
-def test_keras_etl_import_error() -> None:
-    """Test Keras ETL ImportError fallback.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    import importlib
-
-    try:
-        if "gemma_4_sql.backends.keras.etl" in sys.modules:
-            del sys.modules["gemma_4_sql.backends.keras.etl"]
-        with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
-            etl_keras = __import__("gemma_4_sql.backends.keras.etl", fromlist=[""])
-            with pytest.raises(DependencyMissingError):
-                etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-    finally:
-        if "gemma_4_sql.backends.keras.etl" in sys.modules:
-            del sys.modules["gemma_4_sql.backends.keras.etl"]
-        importlib.import_module("gemma_4_sql.backends.keras.etl")
+def test_get_sampler_missing_grain():
+    with patch("gemma_4_sql.backends.keras.etl.grain", None), pytest.raises(DependencyMissingError, match="Grain dependency is missing"):
+        _get_sampler(10, False)
 
 
-class MockDatasets:
-    """Initialize class MockDatasets."""
+def test_get_sampler_success():
+    mock_grain = MagicMock()
+    mock_grain.JAXDistributedSharding.return_value = "dist"
+    mock_grain.NoSharding.return_value = "no"
+    mock_grain.IndexSampler.return_value = "sampler"
+    with patch("gemma_4_sql.backends.keras.etl.grain", mock_grain):
+        res1 = _get_sampler(10, True)
+        assert res1 == "sampler"
+        mock_grain.IndexSampler.assert_called_with(num_records=10, shard_options="dist", shuffle=False, num_epochs=1)
 
-    @staticmethod
-    def load_dataset(*_args: object, **_kwargs: object) -> list[dict]:
-        """Initialize function load_dataset.
-
-        Args:
-        ----
-        name: Description of name.
-        split: Description of split.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        return [{"question": "Q1", "query": "A1"}]
+        res2 = _get_sampler(10, False)
+        assert res2 == "sampler"
+        mock_grain.IndexSampler.assert_called_with(num_records=10, shard_options="no", shuffle=False, num_epochs=1)
 
 
-class MockGrain:
-    """Initialize class MockGrain."""
-
-    class RandomAccessDataSource:
-        """Initialize class RandomAccessDataSource."""
-
-    class MapTransform:
-        """Initialize class MapTransform."""
-
-    @staticmethod
-    def no_sharding() -> str:
-        """Initialize function nosharding.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return "no_sharding"
-
-    @staticmethod
-    def jax_distributed_sharding() -> str:
-        """Initialize function jaxdistributedsharding.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return "jax_distributed_sharding"
-
-    @staticmethod
-    def index_sampler(*_args: object, **kwargs: object) -> str:
-        """Initialize function indexsampler.
-
-        Args:
-        ----
-        args: Description of args.
-        kwargs: Description of kwargs.
+def test_build_dataloader_missing_deps():
+    with patch("gemma_4_sql.backends.keras.etl.datasets", None), pytest.raises(DependencyMissingError, match="Missing grain or datasets"):
+        build_dataloader(ETLConfig(dataset_name="a", split="b", batch_size=2))
 
 
-        Returns:
-            object: Description of return.
+def test_build_dataloader_success():
+    mock_datasets = MagicMock()
+    mock_grain = MagicMock()
+    mock_grain.DataLoader.return_value = "loader"
+    mock_grain.Batch = MagicMock()
 
-        """
-        return kwargs.get("shard_options", "sampler")
-
-    @staticmethod
-    def batch(batch_size: int) -> str:
-        """Initialize function batch.
-
-        Args:
-        ----
-        batch_size: Description of batch_size.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        return f"batch_{batch_size}"
-
-    class DataLoader:
-        """Initialize class DataLoader."""
-
-        def __init__(self: object, data_source: object, sampler: object, operations: object) -> None:
-            """Initialize function __init__.
-
-            Args:
-            ----
-            data_source: Description of data_source.
-            sampler: Description of sampler.
-            operations: Description of operations.
-
-            """
-            self.data_source = data_source
-            self.sampler = sampler
-            self.operations = operations
-
-
-MockGrain.NoSharding = staticmethod(MockGrain.no_sharding)
-MockGrain.JAXDistributedSharding = staticmethod(MockGrain.jax_distributed_sharding)
-MockGrain.IndexSampler = staticmethod(MockGrain.index_sampler)
-MockGrain.Batch = staticmethod(MockGrain.batch)
-
-
-def test_keras_etl_loaded() -> None:
-    """Test Keras ETL when libraries are present.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    etl_keras = __import__("gemma_4_sql.backends.keras.etl", fromlist=[""])
-    original_datasets = getattr(etl_keras, "datasets", None)
-    original_grain = getattr(etl_keras, "grain", None)
-    try:
-        etl_keras.datasets = MockDatasets()
-        etl_keras.grain = MockGrain()
-        res = etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10, distributed=False))
-        if not res["status"] == "loaded":
-            raise AssertionError
-        if res["distributed"] is not False:
-            raise AssertionError
-        if not res["loader"].sampler == "no_sharding":
-            raise AssertionError
-        res_dist = etl_keras.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10, distributed=True))
-        if not res_dist["status"] == "loaded":
-            raise AssertionError
-        if res_dist["distributed"] is not True:
-            raise AssertionError
-        if not res_dist["loader"].sampler == "jax_distributed_sharding":
-            raise AssertionError
-        loader = res["loader"]
-        if not len(loader.data_source) == 1:
-            raise AssertionError
-        if not loader.data_source[0] == {"question": "Q1", "query": "A1"}:
-            raise AssertionError
-        loader.operations[0]
-    finally:
-        etl_keras.datasets = original_datasets
-        etl_keras.grain = original_grain
-
-
-def test_etl_keras_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    mdl = __import__("gemma_4_sql.backends.keras.etl", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "keras", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    monkeypatch.setitem(sys.modules, "duckdb", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    monkeypatch.setitem(sys.modules, "tensorflow", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    importlib.reload(mdl)
-
-
-def test_keras_etl_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test missing datasets and grain dependencies in Keras ETL."""
-    import gemma_4_sql.backends.keras.etl as k_etl
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    monkeypatch.setattr(k_etl, "datasets", None)
-    with pytest.raises(DependencyMissingError, match="Datasets dependency is missing"):
-        k_etl._load_hf_or_duckdb("ds", "train", None, None)
-
-    monkeypatch.setattr(k_etl, "grain", None)
-    with pytest.raises(DependencyMissingError, match="Grain dependency is missing"):
-        k_etl._get_sampler(10, False)
+    with (
+        patch("gemma_4_sql.backends.keras.etl.datasets", mock_datasets),
+        patch("gemma_4_sql.backends.keras.etl.grain", mock_grain),
+        patch("gemma_4_sql.backends.keras.etl._load_hf_or_duckdb", return_value=[1, 2]),
+        patch("gemma_4_sql.backends.keras.etl.get_grain_classes", return_value=(list, MagicMock)),
+        patch("gemma_4_sql.backends.keras.etl.SQLTokenizer"),
+        patch("gemma_4_sql.backends.keras.etl._get_sampler"),
+    ):
+        config = ETLConfig(dataset_name="ds", split="train", batch_size=2, distributed=False, tokenizer_name="tok")
+        res = build_dataloader(config)
+        assert res["loader"] == "loader"
+        assert res["status"] == "loaded"
+        assert res["dataset"] == "ds"

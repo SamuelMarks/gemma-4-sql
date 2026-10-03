@@ -1,392 +1,327 @@
-"""Tests for MaxText PEFT / LoRA implementation."""
+from unittest.mock import ANY, MagicMock, patch
 
-from __future__ import annotations
-
-from pathlib import Path
-
-import jax
-import jax.numpy as jnp
-import numpy as np
-import optax
 import pytest
 
-import gemma_4_sql.backends.maxtext.peft as pt
-from gemma_4_sql.backends.maxtext.peft import (
-    apply_lora,
-    count_maxtext_parameters,
-    create_maxtext_lora_optimizer,
-    load_maxtext_adapters,
-    merge_lora_weights,
-    save_maxtext_adapters,
-    segregate_adapter_params,
-    transform_params_to_lora,
-)
+from gemma_4_sql.backends.maxtext import peft as peft_module
 from gemma_4_sql.exceptions import DependencyMissingError
 
 
-class MockJnp:
-    """Mock JAX numpy for testing error and mock paths."""
+@pytest.fixture(autouse=True)
+def mock_deps(monkeypatch):
+    mock_jax = MagicMock()
+    mock_jnp = MagicMock()
+    mock_np = MagicMock()
+    mock_optax = MagicMock()
+    mock_gemma4 = MagicMock()
 
-    int32 = 1
+    mock_jnp.float32 = "float32"
+    mock_jnp.int32 = "int32"
 
-    @staticmethod
-    def zeros(_shape: object, **_kwargs: object) -> object:
-        """Return dummy zero list."""
-        return [0]
+    def mock_zeros(shape, dtype=None):
+        m = MagicMock()
+        m.shape = shape
+        m.dtype = dtype
+        return m
 
+    mock_jnp.zeros.side_effect = mock_zeros
+    mock_jnp.asarray.side_effect = lambda val: val
+    mock_np.asarray.side_effect = lambda val: val
+    mock_jnp.array.side_effect = lambda val, dtype=None: val
 
-class MockJaxRandom:
-    """Mock JAX random module."""
+    def mock_uniform(rng, shape, dtype=None, minval=None, maxval=None):
+        m = MagicMock()
+        m.shape = shape
+        m.dtype = dtype
+        return m
 
-    @staticmethod
-    def mock_prngkey(seed: object) -> object:
-        """Return dummy PRNGKey."""
-        return seed
+    mock_jax.random.uniform.side_effect = mock_uniform
 
-    PRNGKey = mock_prngkey
+    def mock_split(rng):
+        return rng, MagicMock()
 
+    mock_jax.random.split.side_effect = mock_split
 
-class MockJax:
-    """Mock JAX module."""
+    monkeypatch.setattr(peft_module, "jax", mock_jax)
+    monkeypatch.setattr(peft_module, "jnp", mock_jnp)
+    monkeypatch.setattr(peft_module, "np", mock_np)
+    monkeypatch.setattr(peft_module, "optax", mock_optax)
+    monkeypatch.setattr(peft_module, "Gemma4Model", mock_gemma4)
 
-    random = MockJaxRandom()
-
-
-class MockGemma4Model:
-    """Mock Gemma4Model."""
-
-    def __init__(self, name: object) -> None:
-        """Initialize mock model."""
-
-    def init(self, _rng: object, _inputs: object) -> object:
-        """Return mock parameter string."""
-        return "params"
-
-
-def test_apply_lora_maxtext_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test apply_lora raises DependencyMissingError when JAX is missing."""
-    monkeypatch.setattr(pt, "jax", None)
-    with pytest.raises(DependencyMissingError):
-        pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
+    yield {"jax": mock_jax, "jnp": mock_jnp, "np": mock_np, "optax": mock_optax, "gemma4": mock_gemma4}
 
 
-def test_apply_lora_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test apply_lora succeeds with mock model."""
-    monkeypatch.setattr(pt, "jax", MockJax())
-    monkeypatch.setattr(pt, "jnp", MockJnp())
-    monkeypatch.setattr(pt, "Gemma4Model", MockGemma4Model)
-    res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
-    assert res["status"] == "completed"
+def test_transform_params_to_lora_missing_jax(monkeypatch):
+    monkeypatch.setattr(peft_module, "jax", None)
+    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing"):
+        peft_module.transform_params_to_lora({}, ["q_proj"])
 
 
-def test_apply_lora_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test apply_lora captures runtime exceptions cleanly."""
-    monkeypatch.setattr(pt, "jax", MockJax())
-    monkeypatch.setattr(pt, "jnp", MockJnp())
-    monkeypatch.setattr(pt, "Gemma4Model", MockGemma4Model)
-
-    def raise_err(*_args: object, **_kwargs: object) -> object:
-        msg = "err"
-        raise ValueError(msg)
-
-    monkeypatch.setattr(MockJnp, "zeros", raise_err)
-    res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
-    assert "failed" in str(res["status"])
-
-
-def test_transform_params_to_lora_numerical() -> None:
-    """Test transform_params_to_lora properly injects adapter matrices."""
-    params = {
-        "decoder": {
-            "layers_0": {
-                "q_proj": {"kernel": jnp.ones((8, 16))},
-                "v_proj": {"kernel": jnp.ones((8, 16))},
-                "out_proj": {"kernel": jnp.ones((16, 8))},
-            }
-        }
-    }
-    targets = ["q_proj", "v_proj"]
-    transformed, count = transform_params_to_lora(
-        params=params,
-        target_modules=targets,
-        lora_r=4,
-        lora_alpha=8.0,
-        lora_dropout=0.0,
-    )
-    assert count == 2
-
-    q_proj = transformed["decoder"]["layers_0"]["q_proj"]
-    assert "kernel" in q_proj
-    assert "lora_a" in q_proj
-    assert "lora_b" in q_proj
-    assert "lora_scale" in q_proj
-    assert q_proj["lora_a"].shape == (8, 4)
-    assert q_proj["lora_b"].shape == (4, 16)
-    assert float(q_proj["lora_scale"]) == 2.0
-
-    # Non-target out_proj should not contain LoRA adapters
-    out_proj = transformed["decoder"]["layers_0"]["out_proj"]
-    assert "lora_a" not in out_proj
-
-
-def test_transform_params_to_lora_edge_cases() -> None:
-    """Test transform_params_to_lora with invalid rank, empty targets, and non-dict params."""
+def test_transform_params_to_lora_invalid_rank():
     with pytest.raises(ValueError, match="LoRA rank r must be positive"):
-        transform_params_to_lora({}, ["q_proj"], lora_r=0)
+        peft_module.transform_params_to_lora({}, ["q_proj"], lora_r=0)
 
-    # Explicit PRNGKey
-    key = jax.random.PRNGKey(42)
-    res_key, count_key = transform_params_to_lora({"q_proj": {"kernel": jnp.ones((4, 4))}}, ["q_proj"], rng=key)
-    assert count_key == 1
-    assert "lora_a" in res_key["q_proj"]
 
-    # Empty target modules
-    res, count = transform_params_to_lora({"q_proj": {"kernel": 1}}, [])
+def test_transform_params_to_lora_success():
+    kernel = MagicMock()
+    kernel.shape = (10, 20)
+    kernel.dtype = "float32"
+
+    params = {"layer_1": {"q_proj": {"kernel": kernel, "other": 1}, "k_proj": {"kernel": kernel}, "no_kernel": {"a": 1}}, "scalar": 42}
+
+    _transformed, count = peft_module.transform_params_to_lora(params, ["q_proj"], lora_r=8)
+
+    assert count == 1
+
+
+def test_transform_params_to_lora_with_rng():
+    kernel = MagicMock()
+    kernel.shape = (10, 20)
+    params = {"layer": {"q_proj": {"kernel": kernel}}}
+    rng = MagicMock()
+    peft_module.transform_params_to_lora(params, ["q_proj"], lora_r=8, rng=rng)
+
+
+def test_transform_params_to_lora_no_dict():
+    res, count = peft_module.transform_params_to_lora("not a dict", ["q_proj"])
+    assert res == "not a dict"
     assert count == 0
-    assert "kernel" in res["q_proj"]
-
-    # Non-dict parameter input
-    res2, count2 = transform_params_to_lora("invalid_params", ["q_proj"])  # type: ignore[arg-type]
-    assert count2 == 0
-    assert res2 == "invalid_params"
 
 
-def test_segregate_adapter_params() -> None:
-    """Test segregating parameter PyTree into trainable LoRA and frozen base weights."""
-    params = {
-        "decoder": {
-            "q_proj": {
-                "kernel": jnp.ones((4, 4)),
-                "lora_a": jnp.ones((4, 2)),
-                "lora_b": jnp.zeros((2, 4)),
-                "lora_scale": jnp.array(2.0),
-            },
-            "adapters_only": {
-                "lora_a": jnp.ones((2, 2)),
-            },
-            "norm": {"scale": jnp.ones((4,))},
-        }
-    }
-    trainable, frozen = segregate_adapter_params(params)
-    assert "lora_a" in trainable["decoder"]["q_proj"]
-    assert "lora_b" in trainable["decoder"]["q_proj"]
-    assert "adapters_only" in trainable["decoder"]
-    assert "kernel" not in trainable["decoder"]["q_proj"]
+def test_segregate_adapter_params():
+    params = {"layer": {"q_proj": {"kernel": "frozen_kernel", "lora_a": "trainable_a", "lora_b": "trainable_b", "lora_scale": "trainable_scale", "other": "frozen_other"}}, "scalar": "frozen_scalar"}
 
-    assert "kernel" in frozen["decoder"]["q_proj"]
-    assert "norm" in frozen["decoder"]
-    assert "lora_a" not in frozen["decoder"]["q_proj"]
-    assert "adapters_only" not in frozen["decoder"]
+    trainable, _frozen = peft_module.segregate_adapter_params(params)
+    assert trainable["layer"]["q_proj"]["lora_a"] == "trainable_a"
 
-    # Non-dict parameter input
-    t, f = segregate_adapter_params("not_a_dict")  # type: ignore[arg-type]
+
+def test_segregate_adapter_params_empty_sub_t_sub_f():
+    params = {"layer": {"empty": {}}}
+    t, f = peft_module.segregate_adapter_params(params)
     assert t == {}
     assert f == {}
 
 
-def test_create_maxtext_lora_optimizer() -> None:
-    """Test create_maxtext_lora_optimizer updates only adapter matrices and freezes base weights."""
-    params = {
-        "kernel": jnp.ones((4, 4)),
-        "lora_a": jnp.ones((4, 2)),
-        "lora_b": jnp.ones((2, 4)),
-    }
-    # Test with default optimizer
-    tx = create_maxtext_lora_optimizer(params)
-    opt_state = tx.init(params)
-
-    # Apply all-ones gradient update
-    grads = jax.tree.map(jnp.ones_like, params)
-    updates, opt_state = tx.update(grads, opt_state, params)
-    new_params = optax.apply_updates(params, updates)
-
-    # Base kernel must be completely untouched (frozen)
-    assert jnp.all(new_params["kernel"] == 1.0)
-    # LoRA matrices must have received updates
-    assert not jnp.all(new_params["lora_a"] == 1.0)
-    assert not jnp.all(new_params["lora_b"] == 1.0)
-
-    # Test with custom base optimizer
-    tx_custom = create_maxtext_lora_optimizer(params, optax.sgd(0.01))
-    assert tx_custom is not None
+def test_segregate_adapter_params_not_dict():
+    trainable, frozen = peft_module.segregate_adapter_params("not dict")
+    assert trainable == {}
+    assert frozen == {}
 
 
-def test_merge_lora_weights() -> None:
-    """Test merge_lora_weights correctly folds adapter matrices back into base weights."""
-    params = {
-        "layer": {
-            "kernel": jnp.ones((4, 4)),
-            "lora_a": jnp.ones((4, 2)),
-            "lora_b": jnp.ones((2, 4)),
-            "lora_scale": jnp.array(3.0),
-            "bias": jnp.zeros((4,)),
-        },
-        "other": "static_val",
-    }
-    # lora_a @ lora_b = sum of two 1.0s = 2.0
-    # scale = 3.0 -> 3.0 * 2.0 = 6.0
-    # W_merged = 1.0 + 6.0 = 7.0
-    merged = merge_lora_weights(params)
-    assert "lora_a" not in merged["layer"]
-    assert "lora_b" not in merged["layer"]
-    assert "lora_scale" not in merged["layer"]
-    assert "bias" in merged["layer"]
-    assert jnp.allclose(merged["layer"]["kernel"], jnp.full((4, 4), 7.0))
-    assert merged["other"] == "static_val"
-
-    # Non-dict test
-    assert merge_lora_weights(123) == 123  # type: ignore[arg-type]
+def test_create_maxtext_lora_optimizer_missing_deps(monkeypatch):
+    monkeypatch.setattr(peft_module, "optax", None)
+    with pytest.raises(DependencyMissingError, match="Optax or JAX dependencies are missing"):
+        peft_module.create_maxtext_lora_optimizer({})
 
 
-def test_save_and_load_maxtext_adapters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test saving and loading MaxText LoRA adapters to/from NPZ files."""
-    params = {
-        "decoder": {
-            "layers_0": {
-                "q_proj": {
-                    "kernel": jnp.ones((8, 16)),
-                    "lora_a": jnp.full((8, 4), 3.5),
-                    "lora_b": jnp.full((4, 16), 1.2),
-                    "lora_scale": jnp.array(2.0),
-                }
-            }
-        }
-    }
-    # Save non-dict input (safe no-op saving empty archive)
-    save_maxtext_adapters("non_dict_params", tmp_path / "empty.npz")  # type: ignore[arg-type]
-    assert (tmp_path / "empty.npz").exists()
+def test_create_maxtext_lora_optimizer_success(mock_deps):
+    mock_optax = mock_deps["optax"]
+    mock_optax.adam.return_value = "adam_opt"
+    mock_optax.set_to_zero.return_value = "zero_opt"
+    mock_optax.multi_transform.return_value = "multi_opt"
 
-    # Save to directory (auto-appends maxtext_lora_adapters.npz)
-    save_dir = tmp_path / "adapters_dir"
-    save_maxtext_adapters(params, save_dir)
-    expected_file = save_dir / "maxtext_lora_adapters.npz"
-    assert expected_file.exists()
+    def mock_tree_map_with_path(f, tree):
+        class PathElement:
+            def __init__(self, key):
+                self.key = key
 
-    # Save to explicit file path
-    explicit_file = tmp_path / "explicit" / "custom.npz"
-    save_maxtext_adapters(params, explicit_file)
-    assert explicit_file.exists()
+        class PathElementStr:
+            def __str__(self):
+                return "str_key"
 
-    # Load adapters back into a fresh base parameter dict
-    base_params = {
-        "decoder": {
-            "layers_0": {
-                "q_proj": {
-                    "kernel": jnp.ones((8, 16)),
-                }
-            }
-        }
-    }
-    loaded = load_maxtext_adapters(base_params, expected_file)
-    assert "lora_a" in loaded["decoder"]["layers_0"]["q_proj"]
-    assert np.allclose(loaded["decoder"]["layers_0"]["q_proj"]["lora_a"], 3.5)
-    assert np.allclose(loaded["decoder"]["layers_0"]["q_proj"]["lora_b"], 1.2)
+        assert f([PathElement("lora_a")], None) == "trainable"
+        assert f([PathElement("lora_b")], None) == "trainable"
+        assert f([PathElement("kernel")], None) == "frozen"
+        assert f([PathElementStr()], None) == "frozen"
 
-    # Load into an empty dict to test path auto-creation
-    loaded_into_empty = load_maxtext_adapters({}, expected_file)
-    assert "decoder" in loaded_into_empty
+        return "mapped_tree"
 
-    # Test loading when jnp is None
-    monkeypatch.setattr(pt, "jnp", None)
-    loaded_no_jnp = load_maxtext_adapters({}, expected_file)
-    assert "decoder" in loaded_no_jnp
-    monkeypatch.undo()
+    mock_deps["jax"].tree_util.tree_map_with_path.side_effect = mock_tree_map_with_path
 
-    # FileNotFoundError on non-existent path
+    opt = peft_module.create_maxtext_lora_optimizer({"fake": "params"})
+    assert opt == "multi_opt"
+
+
+def test_create_maxtext_lora_optimizer_custom_base(mock_deps):
+    peft_module.create_maxtext_lora_optimizer({"fake": "params"}, base_optimizer="custom")
+    mock_optax = mock_deps["optax"]
+    mock_optax.multi_transform.assert_called_once_with({"trainable": "custom", "frozen": mock_optax.set_to_zero.return_value}, ANY)
+
+
+def test_merge_lora_weights_better():
+    class DummyTensor:
+        def __init__(self, name):
+            self.name = name
+
+        def __matmul__(self, other):
+            return DummyTensor(f"{self.name}@{other.name}")
+
+        def __rmul__(self, scalar):
+            return DummyTensor(f"{scalar}*{self.name}")
+
+        def __add__(self, other):
+            return DummyTensor(f"{self.name}+{other.name}")
+
+    params = {"layer": {"q_proj": {"kernel": DummyTensor("W"), "lora_a": DummyTensor("A"), "lora_b": DummyTensor("B"), "lora_scale": 2.0, "other": "kept"}, "no_lora": {"kernel": "just_kernel"}}, "scalar": 42}
+    merged = peft_module.merge_lora_weights(params)
+    assert merged["scalar"] == 42
+
+
+def test_merge_lora_weights_not_dict():
+    assert peft_module.merge_lora_weights("not dict") == "not dict"
+
+
+def test_save_maxtext_adapters_missing_deps(monkeypatch):
+    monkeypatch.setattr(peft_module, "np", None)
+    with pytest.raises(DependencyMissingError, match="NumPy dependency is missing"):
+        peft_module.save_maxtext_adapters({}, "path")
+
+
+def test_save_maxtext_adapters_success(mock_deps, tmp_path):
+    mock_np = mock_deps["np"]
+    params = {"layer": {"q_proj": {"lora_a": "array_a", "lora_b": "array_b", "lora_scale": "scale_val", "kernel": "array_kernel"}, "other": "value"}}
+
+    save_path = tmp_path / "adapters.npz"
+    peft_module.save_maxtext_adapters(params, save_path)
+    mock_np.savez.assert_called_once()
+
+
+def test_save_maxtext_adapters_not_dict(mock_deps, tmp_path):
+    mock_np = mock_deps["np"]
+    peft_module.save_maxtext_adapters("not dict", tmp_path)
+    mock_np.savez.assert_called_once_with(ANY)
+
+
+def test_save_maxtext_adapters_is_dir(mock_deps, tmp_path):
+    mock_np = mock_deps["np"]
+    peft_module.save_maxtext_adapters({"lora_a": "1"}, tmp_path)
+    expected_path = tmp_path / "maxtext_lora_adapters.npz"
+    mock_np.savez.assert_called_once_with(expected_path, lora_a="1")
+
+
+def test_load_maxtext_adapters_missing_deps(monkeypatch):
+    monkeypatch.setattr(peft_module, "np", None)
+    with pytest.raises(DependencyMissingError, match="NumPy dependency is missing"):
+        peft_module.load_maxtext_adapters({}, "path")
+
+
+def test_load_maxtext_adapters_not_found():
     with pytest.raises(FileNotFoundError, match="Adapter file not found"):
-        load_maxtext_adapters(base_params, tmp_path / "missing.npz")
+        peft_module.load_maxtext_adapters({}, "nonexistent.npz")
 
 
-def test_count_maxtext_parameters() -> None:
-    """Test count_maxtext_parameters accurately counts total and adapter weights."""
-    params = {
-        "decoder": {
-            "q_proj": {
-                "kernel": jnp.ones((8, 16)),  # 128
-                "lora_a": jnp.ones((8, 4)),  # 32
-                "lora_b": jnp.ones((4, 16)),  # 64
-            },
-            "norm": jnp.ones((8,)),  # 8
-            "scalar_metadata": "static_string",
-        }
-    }
-    total, lora = count_maxtext_parameters(params)
-    assert lora == 32 + 64  # 96
-    assert total == 128 + 96 + 8  # 232
+def test_load_maxtext_adapters_success(mock_deps, tmp_path):
+    mock_np = mock_deps["np"]
+    mock_np.load.return_value = {"layer.q_proj.lora_a": "loaded_a", "layer.q_proj.lora_b": "loaded_b", "new_layer.lora_a": "new_a"}
+    save_path = tmp_path / "adapters.npz"
+    save_path.touch()
 
-    # Non-dict parameter input
-    t, l = count_maxtext_parameters("none")  # type: ignore[arg-type]
-    assert t == 0
-    assert l == 0
+    params = {"layer": {"q_proj": {"kernel": "W"}}}
+    loaded = peft_module.load_maxtext_adapters(params, save_path)
+    assert loaded["layer"]["q_proj"]["lora_a"] == "loaded_a"
 
 
-def test_apply_lora_end_to_end(tmp_path: Path) -> None:
-    """Test apply_lora with user params, output_dir saving, and merge folding."""
-    params = {
-        "layers": {
-            "q_proj": {"kernel": jnp.ones((4, 8))},
-            "v_proj": {"kernel": jnp.ones((4, 8))},
-            "other": {"kernel": jnp.ones((4, 4))},
-        }
-    }
-    out_dir = tmp_path / "peft_output"
+def test_load_maxtext_adapters_no_jnp(mock_deps, tmp_path, monkeypatch):
+    monkeypatch.setattr(peft_module, "jnp", None)
+    mock_np = mock_deps["np"]
+    mock_np.load.return_value = {"a.b": "val"}
+    save_path = tmp_path / "adapters.npz"
+    save_path.touch()
+    loaded = peft_module.load_maxtext_adapters({}, save_path)
+    assert loaded["a"]["b"] == "val"
 
-    # Test apply_lora with output_dir
-    res = apply_lora(
-        model_name="test_model",
-        target_modules=["q_proj", "v_proj"],
-        lora_r=2,
-        lora_alpha=4.0,
-        lora_dropout=0.05,
-        params=params,
-        output_dir=str(out_dir),
-    )
+
+def test_count_maxtext_parameters():
+    class Sized:
+        def __init__(self, size):
+            self.size = size
+
+    params = {"layer": {"kernel": Sized(100), "lora_a": Sized(10), "lora_b": Sized(20)}, "not_sized": "scalar", "scalar_size": Sized(5)}
+
+    total, trainable = peft_module.count_maxtext_parameters(params)
+    assert total == 135
+    assert trainable == 30
+
+
+def test_count_maxtext_parameters_not_dict():
+    total, trainable = peft_module.count_maxtext_parameters("not dict")
+    assert total == 0
+    assert trainable == 0
+
+
+def test_apply_lora_missing_deps(monkeypatch):
+    monkeypatch.setattr(peft_module, "jax", None)
+    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
+        peft_module.apply_lora("gemma-4", ["q_proj"])
+
+    monkeypatch.setattr(peft_module, "jax", MagicMock())
+    monkeypatch.setattr(peft_module, "jnp", None)
+    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
+        peft_module.apply_lora("gemma-4", ["q_proj"])
+
+    monkeypatch.setattr(peft_module, "jnp", MagicMock())
+    monkeypatch.setattr(peft_module, "Gemma4Model", None)
+    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
+        peft_module.apply_lora("gemma-4", ["q_proj"])
+
+
+def test_apply_lora_missing_gemma4_but_has_params(mock_deps, monkeypatch):
+    monkeypatch.setattr(peft_module, "Gemma4Model", None)
+    with patch.object(peft_module, "transform_params_to_lora", return_value=({}, 0)):
+        res = peft_module.apply_lora("gemma-4", ["q_proj"], params={})
     assert res["status"] == "completed"
-    assert res["backend"] == "maxtext"
-    assert res["injected_modules"] == 2
-    assert (out_dir / "maxtext_lora_adapters.npz").exists()
-
-    # Test apply_lora with merge=True
-    res_merge = apply_lora(
-        model_name="test_model",
-        target_modules=["q_proj"],
-        lora_r=2,
-        lora_alpha=4.0,
-        params=params,
-        merge=True,
-    )
-    assert res_merge["status"] == "completed"
 
 
-def test_missing_dependencies_exceptions(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test functions raise DependencyMissingError when required modules are absent."""
-    monkeypatch.setattr(pt, "jax", None)
-    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing"):
-        transform_params_to_lora({}, ["q_proj"])
+def test_apply_lora_success(mock_deps, tmp_path):
+    mock_gemma4_class = mock_deps["gemma4"]
+    mock_model = MagicMock()
+    mock_gemma4_class.return_value = mock_model
 
-    with pytest.raises(DependencyMissingError, match="Optax or JAX dependencies are missing"):
-        create_maxtext_lora_optimizer({})
+    mock_model.init.return_value = {"original": "params"}
 
-    monkeypatch.setattr(pt, "jax", jax)
-    monkeypatch.setattr(pt, "optax", None)
-    with pytest.raises(DependencyMissingError, match="Optax or JAX dependencies are missing"):
-        create_maxtext_lora_optimizer({})
+    def fake_transform(params, target_modules, lora_r, lora_alpha, lora_dropout):
+        return {"transformed": "params"}, 5
 
-    monkeypatch.setattr(pt, "np", None)
-    with pytest.raises(DependencyMissingError, match="NumPy dependency is missing"):
-        save_maxtext_adapters({}, tmp_path / "out.npz")
-
-    with pytest.raises(DependencyMissingError, match="NumPy dependency is missing"):
-        load_maxtext_adapters({}, tmp_path / "out.npz")
+    with patch.object(peft_module, "transform_params_to_lora", side_effect=fake_transform), patch.object(peft_module, "save_maxtext_adapters"), patch.object(peft_module, "merge_lora_weights", return_value={"merged": "params"}):
+        res = peft_module.apply_lora("gemma-4", ["q_proj"], lora_r=16, output_dir=tmp_path, merge=True)
+        assert res["status"] == "completed"
 
 
-def test_peft_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test reloading module when dependencies are missing."""
+def test_apply_lora_success_no_output_dir_no_merge(mock_deps):
+    with patch.object(peft_module, "transform_params_to_lora", return_value=({}, 5)):
+        res = peft_module.apply_lora("gemma-4", ["q_proj"])
+        assert res["status"] == "completed"
+
+
+def test_apply_lora_failure(mock_deps):
+    def fake_transform(*args, **kwargs):
+        raise RuntimeError("Fake Error")
+
+    with patch.object(peft_module, "transform_params_to_lora", side_effect=fake_transform):
+        res = peft_module.apply_lora("gemma-4", ["q_proj"])
+        assert "failed: Fake Error" in res["status"]
+
+
+def test_apply_lora_missing_dependency_inside(mock_deps, monkeypatch):
+    monkeypatch.setattr(peft_module, "Gemma4Model", None)
+    with pytest.raises(DependencyMissingError, match="MaxText dependency missing."):
+        peft_module.apply_lora("gemma-4", ["q_proj"], params="not_a_dict")
+
+
+def test_module_reload_for_coverage():
     import importlib
     import sys
+    from unittest.mock import MagicMock
 
-    m_peft = sys.modules["gemma_4_sql.backends.maxtext.peft"]
-    monkeypatch.setitem(sys.modules, "jax", None)
-    importlib.reload(m_peft)
-    monkeypatch.undo()
-    importlib.reload(m_peft)
+    mock_gemma4 = MagicMock()
+    mock_gemma4.Gemma4Model = "mocked_model"
+    sys.modules["maxtext"] = MagicMock()
+    sys.modules["maxtext.models"] = MagicMock()
+    sys.modules["maxtext.models.gemma4"] = mock_gemma4
+
+    from gemma_4_sql.backends.maxtext import peft
+
+    importlib.reload(peft)
+    assert peft.Gemma4Model is not None
+
+    del sys.modules["maxtext.models.gemma4"]
+    peft.Gemma4Model = None

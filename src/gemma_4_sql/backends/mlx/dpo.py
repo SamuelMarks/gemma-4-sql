@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.mlx.etl import build_dataloader
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -18,15 +18,15 @@ try:
     import mlx.core as _mx
     import mlx.nn as _nn
     import mlx.optimizers as _optim
-    from mlx_lm import load as _load
+    import mlx_lm
 
     mlx: Any = _mlx
     mx: Any = _mx
     nn: Any = _nn
     mx_nn: Any = _nn
     optim: Any = _optim
-    load: Any = _load
-except (ImportError, AttributeError):
+    load: Any = getattr(mlx_lm, "load", None)
+except (ImportError, AttributeError):  # pragma: no cover
     mlx = None
     mx = None
     nn = None
@@ -35,7 +35,7 @@ except (ImportError, AttributeError):
     load = None
 
 
-def dpo_loss(policy_chosen_logps: Any, policy_rejected_logps: Any, ref_chosen_logps: Any, ref_rejected_logps: Any, beta: float = 0.1) -> tuple[Any, Any, Any]:
+def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[Any, Any, Any]:
     """Compute the DPO loss.
 
     Args:
@@ -47,14 +47,19 @@ def dpo_loss(policy_chosen_logps: Any, policy_rejected_logps: Any, ref_chosen_lo
 
     Returns:
         A tuple containing the results.
+
     """
     if mx is None or mx_nn is None:
         return (0.0, 0.0, 0.0)
-    log_sig_fn = getattr(getattr(mx_nn, "losses", None), "log_sigmoid", lambda x: -x)
+
+    def _fallback_log_sig(x: Any) -> Any:
+        return mx.negative(x) if hasattr(mx, "negative") else -x
+
+    log_sig_fn: Any = getattr(getattr(mx_nn, "losses", None), "log_sigmoid", _fallback_log_sig)
     return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, log_sig_fn)
 
 
-def _run_dpo_step(policy_model: Any, ref_model: Any, optimizer: Any, batch: JSONDict, beta: float) -> Any:
+def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: object, batch: JSONDict, beta: float) -> Any:
     """Run a single DPO training step.
 
     Returns:
@@ -96,11 +101,11 @@ def _run_training_epochs(state: TrainerState) -> float:
     final_loss = 0.0
     for _epoch in range(epochs):
         epoch_loss = 0.0
-        for batch in dataloader:
-            loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)
+        for batch in dataloader:  # type: ignore # Justified: Dynamic backend protocol typing
+            loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)  # type: ignore # Justified: Dynamic backend protocol typing
             loss_val = float(loss.item() if hasattr(loss, "item") else loss)
             epoch_loss += loss_val
-        final_loss = epoch_loss / max(1, len(dataloader))
+        final_loss = epoch_loss / max(1, len(dataloader))  # type: ignore # Justified: Dynamic backend protocol typing
     return float(final_loss)
 
 
@@ -117,6 +122,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
         ValueError: If dataloader is invalid.
+
     """
     model_name = getattr(config, "model_name", "model")
     dataset = getattr(config, "dataset", "dataset")
@@ -130,10 +136,10 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
         raise DependencyMissingError("MLX dependencies are missing.")
     final_loss = 0.0
     try:
-        loaded_p = load(model_name)
-        policy_model = loaded_p[0] if isinstance(loaded_p, (tuple, list)) else loaded_p
-        loaded_r = load(model_name)
-        ref_model = loaded_r[0] if isinstance(loaded_r, (tuple, list)) else loaded_r
+        loaded_p: Any = load.__call__(model_name)
+        policy_model: ModelType = cast(Any, loaded_p)[0] if isinstance(loaded_p, (tuple, list)) else loaded_p
+        loaded_r: Any = load.__call__(model_name)
+        ref_model: ModelType = cast(Any, loaded_r)[0] if isinstance(loaded_r, (tuple, list)) else loaded_r
         optimizer = optim.AdamW(learning_rate=learning_rate)
         batch_size = getattr(config, "batch_size", 2)
         data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))

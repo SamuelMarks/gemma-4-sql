@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONPrimitive
@@ -22,11 +22,12 @@ class SnowflakeAdapter(DatabaseAdapter):
 
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
-        """Return the exception classes."""
+        """Provide the exception classes."""
         try:
             import snowflake.connector
 
-            err_cls = getattr(getattr(snowflake.connector, "errors", None), "Error", None)
+            connector_any: type = getattr(snowflake, "connector", type(None))
+            err_cls = getattr(getattr(connector_any, "errors", None), "Error", None)
             if isinstance(err_cls, type) and issubclass(err_cls, Exception):
                 return (err_cls,)
             return (Exception,)
@@ -41,6 +42,7 @@ class SnowflakeAdapter(DatabaseAdapter):
 
         Raises:
             ImportError: If snowflake-connector-python is missing.
+
         """
         if snowflake is None:
             msg = "snowflake-connector-python is required. Install with `pip install snowflake-connector-python`."
@@ -59,6 +61,7 @@ class SnowflakeAdapter(DatabaseAdapter):
 
         Returns:
             The established connection object.
+
         """
         conn = await asyncio.to_thread(self.connect)
         self.conn = conn
@@ -69,8 +72,9 @@ class SnowflakeAdapter(DatabaseAdapter):
 
         Args:
             ddl: The DDL string to execute.
+
         """
-        conn_obj = cast(Any, self.conn)
+        conn_obj = self.conn
         cursor = conn_obj.cursor()
         try:
             cursor.execute(ddl)
@@ -96,6 +100,7 @@ class SnowflakeAdapter(DatabaseAdapter):
 
         Returns:
             Tuple of success status, result rows, and error message if failed.
+
         """
         return await asyncio.to_thread(self.execute_with_feedback, query, params)
 
@@ -112,5 +117,6 @@ class SnowflakeAdapter(DatabaseAdapter):
 
         Returns:
             List of query result tuples.
+
         """
         return await asyncio.to_thread(self.execute_query, query, params)

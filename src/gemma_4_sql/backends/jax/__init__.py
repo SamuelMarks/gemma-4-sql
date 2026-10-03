@@ -21,5 +21,6 @@ def get_trainer() -> str:
 
     Returns:
         The resulting string.
+
     """
     return "jax_trainer"

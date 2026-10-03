@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 def get_current_rss_mb() -> float:
-    """Get current resident set size (RSS) memory in megabytes.
+    """Provide current resident set size (RSS) memory in megabytes.
 
     Returns:
         Memory usage in MB.
+
     """
     try:
         import psutil
@@ -42,6 +43,7 @@ def compute_latency_statistics(latencies_ms: list[float]) -> dict[str, float]:
 
     Returns:
         Dictionary containing mean, median (p50), p90, p99, min, and max latencies.
+
     """
     if not latencies_ms:
         return {
@@ -101,6 +103,7 @@ def run_benchmark_wrapper(
 
     Raises:
         DependencyMissingError: If raise_if_missing is True and missing_deps is True.
+
     """
     if missing_deps:
         if raise_if_missing:

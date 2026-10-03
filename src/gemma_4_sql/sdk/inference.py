@@ -36,6 +36,7 @@ def generate(
 
     Returns:
         A dictionary containing the generated SQL and generation metadata.
+
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend(backend)

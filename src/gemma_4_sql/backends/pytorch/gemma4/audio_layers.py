@@ -23,6 +23,7 @@ class Gemma4AudioFeatureExtractor(nn.Module):
 
         Returns:
             Extracted audio feature embeddings.
+
         """
         if input_values.dim() == 2:
             input_values = input_values.unsqueeze(1)
@@ -62,6 +63,7 @@ class Gemma4AudioEncoderBlock(nn.Module):
 
         Returns:
             Encoded audio representations.
+
         """
         residual = hidden_states
         hidden_states = self.layer_norm1(hidden_states)

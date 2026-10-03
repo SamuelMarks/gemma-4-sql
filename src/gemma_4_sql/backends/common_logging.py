@@ -36,6 +36,7 @@ def log_metrics_wrapper(
 
     Returns:
         A dictionary containing the results and status.
+
     """
     timestamp = time.time()
     fallback_file: str | None = None

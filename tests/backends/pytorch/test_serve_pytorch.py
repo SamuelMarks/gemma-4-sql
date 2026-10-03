@@ -248,7 +248,9 @@ async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
 
     if hasattr(gemma_4_sql.backends.common_serve, "Request"):
         monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
-    res = srv.serve_model("foo", test_mode=True)
+    res = srv.serve_model(
+        "foo",
+    )
     res["app"]
     generate_func = app_instance.func
     request = mock.AsyncMock()
@@ -361,7 +363,12 @@ def test_serve_model_pytorch_native_fallback(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", mock.MagicMock())
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
 
-    res = srv.serve_model("foo", port=8000, max_batch_size=32, native_fallback=True, test_mode=True)
+    res = srv.serve_model(
+        "foo",
+        port=8000,
+        max_batch_size=32,
+        native_fallback=True,
+    )
     assert res["backend"] == "pytorch"
     assert res["status"] == "running_pytorch_serve"
     assert res["mode"] == "continuous_batching"
@@ -390,7 +397,10 @@ def test_pytorch_native_serve_generate_branches(monkeypatch: pytest.MonkeyPatch)
         "gemma_4_sql.backends.pytorch.inference.generate_sql",
         lambda *a, **k: {"sql": "SELECT 1"},
     )
-    srv._create_native_app("test-model", 16, test_mode=False)
+    srv._create_native_app(
+        "test-model",
+        16,
+    )
     gen = captured_logic["generate"]
     batch_gen = captured_logic["batch_generate"]
     assert gen("test prompt") == "SELECT 1"
@@ -401,7 +411,10 @@ def test_pytorch_native_serve_generate_branches(monkeypatch: pytest.MonkeyPatch)
         "gemma_4_sql.backends.pytorch.inference.generate_sql",
         lambda *a, **k: {"sql": None},
     )
-    srv._create_native_app("test-model", 16, test_mode=False)
+    srv._create_native_app(
+        "test-model",
+        16,
+    )
     gen = captured_logic["generate"]
     assert "SELECT * FROM pytorch_native" in str(gen("test prompt"))
 
@@ -410,16 +423,64 @@ def test_pytorch_native_serve_generate_branches(monkeypatch: pytest.MonkeyPatch)
         raise RuntimeError("Inference failed")
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.generate_sql", mock_raise)
-    srv._create_native_app("test-model", 16, test_mode=False)
+    srv._create_native_app(
+        "test-model",
+        16,
+    )
     gen = captured_logic["generate"]
     assert "SELECT * FROM pytorch_native" in str(gen("test prompt"))
 
-    # Test test_mode=True
-    srv._create_native_app("test-model", 16, test_mode=True)
+    # Test
+    srv._create_native_app(
+        "test-model",
+        16,
+    )
     gen_tm = captured_logic["generate"]
     assert "SELECT * FROM pytorch_native" in str(gen_tm("test prompt"))
 
-    # 4. Native serve with test_mode=False to hit logger.info
+    # 4. Native serve with  to hit logger.info
     monkeypatch.setattr(srv, "AsyncEngineArgs", None)
-    res = srv.serve_model("test-model", port=8000, native_fallback=True, test_mode=False)
+    res = srv.serve_model(
+        "test-model",
+        port=8000,
+        native_fallback=True,
+    )
     assert res["status"] == "running_pytorch_serve"
+
+
+def test_serve_model_pytorch_native(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gemma_4_sql.backends.pytorch.serve as srv
+
+    monkeypatch.setattr(srv, "vllm", None)
+    monkeypatch.setattr(srv, "AsyncLLMEngine", None)
+    monkeypatch.setattr(srv, "AsyncEngineArgs", mock.MagicMock())
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
+
+    app = srv.serve_model("model", native_fallback=True)
+    assert app is not None
+
+
+def test_vllm_app_request_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gemma_4_sql.backends.pytorch.serve as srv
+
+    monkeypatch.setattr(srv, "Request", None)
+    monkeypatch.setattr(srv, "JSONResponse", None)
+
+    class DummyFastAPI:
+        def __init__(self, *args, **kwargs):
+            self.router = mock.MagicMock()
+            route = mock.MagicMock()
+            route.endpoint = mock.AsyncMock()
+            self.router.routes = [route]
+
+    monkeypatch.setattr(srv, "FastAPI", DummyFastAPI)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", DummyFastAPI)
+
+    monkeypatch.setattr(srv, "AsyncLLMEngine", MockAsyncLLMEngine)
+    monkeypatch.setattr(srv, "AsyncEngineArgs", MockAsyncEngineArgs)
+    monkeypatch.setattr(srv, "random_uuid", mock_random_uuid)
+
+    app_instance = srv._create_vllm_app("model", 1)
+    import asyncio
+
+    asyncio.run(app_instance.router.routes[-1].endpoint({"prompt": "query"}))

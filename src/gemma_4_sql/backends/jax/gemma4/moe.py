@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 
-from .layers import Gemma4MLP, Gemma4RMSNorm, _make_linear
+from .layers import Gemma4MLP, Gemma4RMSNorm, make_linear
 
 if TYPE_CHECKING:
     from .config import ModelConfig
@@ -24,6 +24,7 @@ class Gemma4RoutedExperts(nnx.Module):
         Args:
             config: The configuration parameters.
             rngs: The rngs.
+
         """
         self.config = config
         e = config.num_experts
@@ -86,7 +87,7 @@ class Gemma4MoE(nnx.Module):
         self.pre_forward_scale_2 = nnx.Param(jnp.ones(config.hidden_size, dtype=config.weight_dtype))
         self.gate_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         gate_dtype = jnp.float32 if config.float32_gate_logits else config.dtype
-        self.gate: Any = _make_linear(config.hidden_size, config.num_experts, use_bias=False, dtype=gate_dtype, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.gate: Any = make_linear(config.hidden_size, config.num_experts, use_bias=False, dtype=gate_dtype, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.per_expert_scale = nnx.Param(jnp.ones(config.num_experts, dtype=config.weight_dtype))
         self.routed_experts = Gemma4RoutedExperts(config, rngs=rngs)
         self.pre_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
@@ -108,7 +109,7 @@ class Gemma4MoE(nnx.Module):
         root_size = self.config.hidden_size ** (-0.5)
         router_scale = jnp.asarray(self.pre_forward_scale_2[...], dtype=unscaled_norm.dtype)
         gate_inputs = unscaled_norm * root_size * router_scale
-        router_logits = self.gate(gate_inputs)
+        router_logits = self.gate.__call__(gate_inputs) if hasattr(self, "gate") and self.gate is not None else gate_inputs
         routing_weights = jax.nn.softmax(router_logits, axis=-1)
         (topk_weights, topk_indices) = jax.lax.top_k(routing_weights, k=self.config.num_experts_per_tok)
         topk_weights /= jnp.sum(topk_weights, axis=-1, keepdims=True)

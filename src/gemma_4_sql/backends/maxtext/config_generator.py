@@ -9,7 +9,7 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import TrainingConfig
@@ -33,6 +33,7 @@ class MaxTextHyperparameters:
         steps: Total training steps to execute.
         dataset_name: Dataset identifier used for loading and tokenization.
         checkpoint_period: Frequency in steps at which checkpoints are persisted.
+
     """
 
     model_architecture: str = "gemma4_2b"
@@ -59,6 +60,7 @@ def _to_float(val: object, default: float) -> float:
 
     Returns:
         Converted float value.
+
     """
     if val is None:
         return default
@@ -76,6 +78,7 @@ def _to_int(val: object, default: int) -> int:
 
     Returns:
         Converted int value.
+
     """
     if val is None:
         return default
@@ -95,8 +98,9 @@ def normalize_model_architecture(model_name: str) -> str:
 
     Raises:
         ValueError: If model_name is empty or cannot be parsed.
+
     """
-    if not model_name or not isinstance(model_name, str):
+    if not model_name:
         msg = "model_name must be a non-empty string."
         raise ValueError(msg)
 
@@ -118,6 +122,7 @@ def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: object) -> M
 
     Raises:
         ValueError: If any hyperparameter violates numerical or structural constraints.
+
     """
     extra = dict(getattr(config, "extra_kwargs", {}) or {})
     merged: dict[str, object] = {**extra, **kwargs}
@@ -166,7 +171,7 @@ def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: object) -> M
     if not isinstance(raw_mesh, list) or not all(isinstance(x, str) for x in raw_mesh):
         msg = "mesh_axes must be a list of strings."
         raise ValueError(msg)
-    mesh_axes = list(raw_mesh)
+    mesh_axes: list[str] = list(cast(list[str], raw_mesh))
 
     base_output_dir = str(merged.get("base_output_directory", "./maxtext_output"))
     dataset_name = str(merged.get("dataset_name", getattr(config, "dataset", "dummy")))
@@ -205,6 +210,7 @@ def generate_maxtext_gin_config(config: TrainingConfig, **kwargs: object) -> str
 
     Raises:
         ValueError: If configuration validation fails.
+
     """
     params = build_maxtext_hyperparameters(config, **kwargs)
     mesh_axes_str = "[" + ", ".join(f"'{axis}'" for axis in params.mesh_axes) + "]"
@@ -250,6 +256,7 @@ def save_maxtext_gin_config(gin_content: str, output_path: str | Path | None = N
     Raises:
         ValueError: If gin_content is empty.
         OSError: If writing to the filesystem fails.
+
     """
     if not gin_content or not gin_content.strip():
         msg = "gin_content cannot be empty."
@@ -279,6 +286,7 @@ def build_maxtext_cli_args(config: TrainingConfig, gin_config_path: str | Path |
 
     Raises:
         ValueError: If configuration generation fails.
+
     """
     if gin_config_path is None:
         gin_str = generate_maxtext_gin_config(config, **kwargs)

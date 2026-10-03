@@ -14,13 +14,14 @@ if TYPE_CHECKING:
 def _route_backend(config: ETLConfig, backend: str, **kwargs: JSONValue) -> JSONDict:
     """Routes the ETL request to the specific backend implementation.
 
-        Args:
-                    **kwargs: Additional keyword arguments passed to the specific backend implementation.
-    config: The configuration parameters.
-            backend: The backend framework to use.
+    Args:
+        config: The configuration parameters.
+        backend: The backend framework to use.
+        **kwargs: Additional keyword arguments passed to the specific backend implementation.
 
-        Returns:
+    Returns:
             A dictionary containing the results.
+
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     return get_backend(backend).build_dataloader(config, **kwargs)

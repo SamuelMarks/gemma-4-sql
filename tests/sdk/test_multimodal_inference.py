@@ -246,7 +246,7 @@ def test_format_multimodal_prompt() -> None:
     existing_res = format_multimodal_prompt("<image> Query schema", has_image=True)
     assert existing_res["prompt"].count("<image>") == 1
 
-    with pytest.raises(ValueError, match="prompt cannot be None"):
+    with pytest.raises(ValueError, match="prompt cannot be empty."):
         format_multimodal_prompt(None)  # type: ignore[arg-type]
 
 
@@ -354,7 +354,6 @@ async def test_common_serve_multimodal() -> None:
     app = create_common_app(
         backend_name="pytorch",
         model_name="gemma-4",
-        test_mode=True,
         generate_logic=lambda prompt: f"SELECT * FROM test WHERE p='{prompt}'",
     )
 

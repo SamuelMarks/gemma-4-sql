@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing
 
-from gemma_4_sql.backends.common_data import _get_grain_classes, _load_duckdb_dataset
+from gemma_4_sql.backends.common_data import get_grain_classes, load_duckdb_dataset
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig
 
@@ -37,9 +37,10 @@ def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, d
 
     Raises:
         DependencyMissingError: If datasets dependency is missing.
+
     """
     if duckdb_path and duckdb_table:
-        return _load_duckdb_dataset(duckdb_path, duckdb_table)
+        return load_duckdb_dataset(duckdb_path, duckdb_table)
     if datasets is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -48,7 +49,7 @@ def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, d
 
 
 def _get_sampler(source_len: int, distributed: bool) -> object:
-    """Get the appropriate Grain sampler for data loading.
+    """Provide the appropriate Grain sampler for data loading.
 
     Args:
         source_len: The length of the source data.
@@ -59,6 +60,7 @@ def _get_sampler(source_len: int, distributed: bool) -> object:
 
     Raises:
         DependencyMissingError: If Grain dependency is missing.
+
     """
     if grain is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -80,6 +82,7 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
 
     Raises:
         DependencyMissingError: If grain or datasets are missing.
+
     """
     dataset_name = config.dataset_name
     split = config.split
@@ -95,7 +98,7 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
         raise DependencyMissingError(f"Missing grain or datasets. Cannot load {dataset_name}.")
 
     hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)
-    (data_source_cls, transform_cls) = _get_grain_classes(grain)
+    (data_source_cls, transform_cls) = get_grain_classes(grain)
     source = data_source_cls(hf_dataset)
     tokenizer = SQLTokenizer(model_name=tokenizer_name)
     sampler = _get_sampler(len(source), distributed)

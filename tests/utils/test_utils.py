@@ -5,8 +5,6 @@ from __future__ import annotations
 import pytest
 
 from tests.utils import (
-    MockCausalModel,
-    MockIterableDataLoader,
     assert_sequences_close,
     compute_snr,
     create_dummy_weight_matrix,
@@ -54,14 +52,3 @@ def test_tensor_helpers() -> None:
 
     with pytest.raises(ValueError, match="Sequence lengths must match"):
         compute_snr([1.0], [1.0, 2.0])
-
-
-def test_mock_generators() -> None:
-    """Test mock model and dataloader generators."""
-    model = MockCausalModel("SELECT 42;")
-    assert model.generate("prompt") == "SELECT 42;"
-
-    batches = [{"x": 1}, {"x": 2}]
-    loader = MockIterableDataLoader(batches)
-    assert len(loader) == 2
-    assert list(loader) == batches

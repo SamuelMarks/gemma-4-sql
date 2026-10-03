@@ -23,6 +23,7 @@ class Cache(abc.ABC):
             seen_tokens: Initial number of tokens previously processed.
             max_batch_size: Optional upper bound on supported batch size.
             device: Optional torch device where cached tensors are resident.
+
         """
         self.seen_tokens: int = seen_tokens
         self.max_batch_size: int | None = max_batch_size
@@ -47,25 +48,28 @@ class Cache(abc.ABC):
 
         Raises:
             ValueError: If input tensor dimensions or layer index are invalid.
+
         """
 
     @abc.abstractmethod
     def get_seq_length(self, layer_idx: int = 0) -> int:
-        """Get the current sequence length of the cache.
+        """Provide the current sequence length of the cache.
 
         Args:
             layer_idx: Zero-based layer index to query.
 
         Returns:
             Current cached sequence length for the specified layer.
+
         """
 
     @abc.abstractmethod
     def get_max_length(self) -> int | None:
-        """Get the maximum length the cache can hold.
+        """Provide the maximum length the cache can hold.
 
         Returns:
             Maximum sequence length integer, or None if dynamically bounded.
+
         """
 
     @abc.abstractmethod
@@ -74,6 +78,7 @@ class Cache(abc.ABC):
 
         Args:
             beam_idx: 1D tensor of beam indices to gather.
+
         """
 
 
@@ -104,6 +109,7 @@ class DynamicCache(Cache):
 
         Raises:
             ValueError: If tensor dimensions are not 4D or layer_idx is negative.
+
         """
         if key_states.dim() != 4 or value_states.dim() != 4:
             msg = f"key_states and value_states must be 4D tensors, got {key_states.shape} and {value_states.shape}."
@@ -126,13 +132,14 @@ class DynamicCache(Cache):
         return self.key_cache[layer_idx], self.value_cache[layer_idx]
 
     def get_seq_length(self, layer_idx: int = 0) -> int:
-        """Get the sequence length of the specified layer.
+        """Provide the sequence length of the specified layer.
 
         Args:
             layer_idx: Zero-based layer index to query.
 
         Returns:
             Sequence length integer.
+
         """
         if len(self.key_cache) <= layer_idx:
             return 0
@@ -143,6 +150,7 @@ class DynamicCache(Cache):
 
         Returns:
             Always None as DynamicCache expands dynamically with sequence growth.
+
         """
         return None
 
@@ -151,6 +159,7 @@ class DynamicCache(Cache):
 
         Args:
             beam_idx: 1D integer tensor containing beam indices to select.
+
         """
         for layer_idx in range(len(self.key_cache)):
             self.key_cache[layer_idx] = self.key_cache[layer_idx].index_select(0, beam_idx)
@@ -176,9 +185,9 @@ class StaticCache(Cache):
             max_cache_len: Pre-allocated maximum sequence length.
             device: Target torch compute device.
             dtype: Floating point precision for cached activations.
+
         """
         super().__init__(seen_tokens=0, max_batch_size=max_batch_size, device=device)
-        self.max_batch_size: int = max_batch_size
         self.max_cache_len: int = max_cache_len
         self.head_dim: int = int(config.head_dim)
         self.num_key_value_heads: int = int(config.num_key_value_heads)
@@ -219,6 +228,7 @@ class StaticCache(Cache):
 
         Raises:
             ValueError: If batch size or sequence length exceeds pre-allocated capacity.
+
         """
         if key_states.dim() != 4 or value_states.dim() != 4:
             msg = f"key_states and value_states must be 4D tensors, got {key_states.shape} and {value_states.shape}."
@@ -228,7 +238,7 @@ class StaticCache(Cache):
             raise ValueError(msg)
 
         batch_size, _, seq_len, _ = key_states.shape
-        if batch_size > self.max_batch_size:
+        if self.max_batch_size is not None and batch_size > self.max_batch_size:
             msg = f"batch_size {batch_size} exceeds StaticCache max_batch_size {self.max_batch_size}."
             raise ValueError(msg)
         if self.seen_tokens + seq_len > self.max_cache_len:
@@ -244,21 +254,23 @@ class StaticCache(Cache):
         )
 
     def get_seq_length(self, layer_idx: int = 0) -> int:
-        """Get the current sequence length (seen tokens).
+        """Provide the current sequence length (seen tokens).
 
         Args:
             layer_idx: Zero-based layer index to query (unused in StaticCache).
 
         Returns:
             Current sequence length integer.
+
         """
         return self.seen_tokens
 
     def get_max_length(self) -> int | None:
-        """Get the maximum sequence length the static cache can hold.
+        """Provide the maximum sequence length the static cache can hold.
 
         Returns:
             Maximum sequence length integer.
+
         """
         return self.max_cache_len
 
@@ -267,6 +279,7 @@ class StaticCache(Cache):
 
         Args:
             beam_idx: 1D integer tensor containing beam indices to select.
+
         """
         for layer_idx in range(len(self.key_cache)):
             self.key_cache[layer_idx] = self.key_cache[layer_idx].index_select(0, beam_idx)

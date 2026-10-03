@@ -1,9 +1,11 @@
 """Tests for SDK Evaluation module."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.sdk.evaluation import evaluate
+from gemma_4_sql.sdk.evaluation import _run_evaluation_inference, compute_metrics, evaluate
 
 
 def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,13 +96,6 @@ def test_evaluate_invalid() -> None:
     """Test evaluate with invalid backend."""
     with pytest.raises(ValueError, match="Unknown backend: invalid"):
         evaluate("model1", "data1", "invalid")
-
-
-from unittest.mock import MagicMock, patch
-
-import pytest
-
-from gemma_4_sql.sdk.evaluation import _run_evaluation_inference, compute_metrics
 
 
 def test_compute_metrics() -> None:

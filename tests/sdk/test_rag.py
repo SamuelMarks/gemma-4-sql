@@ -1,5 +1,8 @@
 """Tests for RAG-based schema contextualization module."""
 
+from unittest.mock import MagicMock, patch
+
+import numpy as np
 import pytest
 
 from gemma_4_sql.sdk import rag
@@ -276,12 +279,6 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
     res = rg._semantic_search("hi", schema, ["users", "orders"], 2, min_similarity=0.9)
     assert len(res) == 2
     assert res == ["users", "orders"]
-
-
-from unittest.mock import MagicMock, patch
-
-import numpy as np
-import pytest
 
 
 def test_rag_semantic_no_relevant() -> None:

@@ -22,6 +22,7 @@ def tokenize_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     tokenizer = SQLTokenizer(model_name=args.hf_model, vocab_size=args.vocab_size)
     if args.decode:
@@ -41,6 +42,7 @@ def quantize_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     res = quantize_model(args.model, args.method, args.backend)
     print(json.dumps(res, indent=2))
@@ -51,6 +53,7 @@ def export_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     res = export_model(args.model, args.path, args.backend)
     print(json.dumps(res, indent=2))
@@ -61,6 +64,7 @@ def rag_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     if getattr(args, "action", "build") == "extract":
         schema = extract_schema_entities(args.ddl)
@@ -76,11 +80,12 @@ def rag_cmd(args: argparse.Namespace) -> None:
         if image_path is not None or audio_path is not None:
             from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
 
-            rag_prompt = format_multimodal_prompt(
+            formatted = format_multimodal_prompt(
                 rag_prompt,
                 has_image=image_path is not None,
                 has_audio=audio_path is not None,
-            )["prompt"]
+            )
+            rag_prompt = str(formatted.get("prompt", rag_prompt))
         print(str(rag_prompt))
 
 
@@ -89,8 +94,9 @@ def log_metrics_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
-    metrics_dict = {}
+    metrics_dict: dict[str, float] = {}
     if args.metrics:  # pragma: no cover
         for m in args.metrics.split(","):
             (k, v) = m.split("=")

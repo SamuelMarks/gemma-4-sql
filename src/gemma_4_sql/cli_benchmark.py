@@ -16,6 +16,7 @@ def benchmark_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     res = benchmark(
         model_name=args.model,

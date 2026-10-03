@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -33,6 +33,7 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     Raises:
         RuntimeError: If MLX is not installed.
         ValueError: If loading the model fails.
+
     """
     export_dir = Path(export_path)
     export_dir.mkdir(parents=True, exist_ok=True)
@@ -50,8 +51,9 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     mx.save_safetensors(str(file_path), tensors)
 
     config_path = export_dir / "config.json"
+    cfg_dict: dict[str, Any]
     if hasattr(model, "config"):
-        cfg_dict = model.config if isinstance(model.config, dict) else getattr(model.config, "__dict__", {})
+        cfg_dict = cast(dict[str, Any], model.config if isinstance(model.config, dict) else getattr(model.config, "__dict__", {}))
     else:
         cfg_dict = {"model_type": "gemma4", "model_name": model_name}
     with open(config_path, "w", encoding="utf-8") as f:

@@ -45,12 +45,14 @@ def apply_lora(
         lora_r: The rank of the LoRA update matrices.
         lora_alpha: The scaling factor for LoRA.
         lora_dropout: The dropout probability for LoRA layers.
+        **kwargs: Additional arbitrary configuration options.
 
     Returns:
         A dictionary containing the results.
 
     Raises:
         DependencyMissingError: If PyTorch PEFT dependencies are missing.
+
     """
     if peft is None or torch is None or AutoModelForCausalLM is None:
         from gemma_4_sql.exceptions import DependencyMissingError

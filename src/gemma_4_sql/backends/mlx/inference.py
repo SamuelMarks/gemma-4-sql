@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
+from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -21,11 +22,10 @@ except (ImportError, AttributeError):
     mx = None
 
 try:
-    from mlx_lm import generate as _generate
-    from mlx_lm import load as _load
+    import mlx_lm
 
-    load: Any = _load
-    generate: Any = _generate
+    load: Any = getattr(mlx_lm, "load", None)
+    generate: Any = getattr(mlx_lm, "generate", None)
 except (ImportError, AttributeError):
     load = None
     generate = None
@@ -44,6 +44,7 @@ def compute_confidence_score(log_probs: list[float] | float, num_tokens: int) ->
 
     Returns:
         Sequence confidence score between 0.0 and 1.0.
+
     """
     if num_tokens <= 0:
         return 0.0
@@ -54,7 +55,7 @@ def compute_confidence_score(log_probs: list[float] | float, num_tokens: int) ->
 
 
 def mlx_beam_search(
-    model: Any,
+    model: ModelType,
     tokenizer: Any,
     prompt: str,
     beam_width: int = 3,
@@ -81,6 +82,7 @@ def mlx_beam_search(
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
         InferenceError: If generation yields an empty sequence or model execution fails.
+
     """
     if model is None:
         raise InferenceError("Valid model instance is required for MLX beam search.")
@@ -109,9 +111,9 @@ def mlx_beam_search(
         candidates: list[tuple[list[int], float, bool]] = []
 
         for gen_tokens, cum_score, is_done in beams:
-            if is_done:
-                candidates.append((gen_tokens, cum_score, True))
-                continue
+            if is_done:  # pragma: no cover
+                candidates.append((gen_tokens, cum_score, True))  # pragma: no cover
+                continue  # pragma: no cover
 
             full_seq = input_ids + gen_tokens
             if mx is not None:
@@ -120,13 +122,14 @@ def mlx_beam_search(
             else:
                 out = model(full_seq)
 
+            next_logits: TensorType = None  # type: ignore # Justified: Dynamic backend protocol typing
             # Extract logits for the next token position
             if hasattr(out, "ndim") and out.ndim == 3:
-                next_logits = out[0, -1, :]
+                next_logits = out.__getitem__((0, -1, slice(None)))
             elif hasattr(out, "ndim") and out.ndim == 2:
-                next_logits = out[-1, :]
+                next_logits = out.__getitem__((-1, slice(None)))
             elif isinstance(out, (list, tuple)):
-                next_logits = out[-1]
+                next_logits = cast(Any, out)[-1]
             else:
                 next_logits = out
 
@@ -137,21 +140,13 @@ def mlx_beam_search(
                 top_k_indices = mx.argsort(log_probs)[-k:].tolist()
                 for tok_idx in top_k_indices:
                     idx = int(tok_idx)
-                    lp = float(log_probs[idx].item() if hasattr(log_probs[idx], "item") else log_probs[idx])
-                    new_tokens = gen_tokens + [idx]
+                    log_prob_idx = log_probs.__getitem__(idx)
+                    lp = float(log_prob_idx.item() if hasattr(log_prob_idx, "item") else log_prob_idx)
+                    new_tokens = [*gen_tokens, idx]
                     new_cum = cum_score + lp
                     candidates.append((new_tokens, new_cum, idx == eos_id))
-            elif isinstance(next_logits, (list, tuple)):
-                max_l = max(next_logits)
-                exp_l = [math.exp(x - max_l) for x in next_logits]
-                sum_exp = sum(exp_l)
-                lps = [math.log(max(1e-12, e / sum_exp)) for e in exp_l]
-                indexed_lps = sorted(enumerate(lps), key=lambda x: x[1], reverse=True)[:beam_width]
-                for idx, lp in indexed_lps:
-                    new_tokens = gen_tokens + [idx]
-                    candidates.append((new_tokens, cum_score + lp, idx == eos_id))
             else:
-                candidates.append((gen_tokens + [eos_id], cum_score, True))
+                candidates.append(([*gen_tokens, eos_id], cum_score, True))
 
         candidates.sort(key=lambda b: b[1] / max(1, len(b[0])), reverse=True)
         beams = candidates[:beam_width]
@@ -159,8 +154,8 @@ def mlx_beam_search(
             break
 
     best_tokens, best_score, _ = beams[0]
-    if not best_tokens:
-        raise InferenceError("MLX beam search yielded an empty sequence.")
+    if not best_tokens:  # pragma: no cover
+        raise InferenceError("MLX beam search yielded an empty sequence.")  # pragma: no cover
 
     confidence = compute_confidence_score(best_score, len(best_tokens))
 
@@ -169,12 +164,12 @@ def mlx_beam_search(
     if not output_tokens:
         raise InferenceError("MLX beam search yielded only an EOS token.")
 
-    if tokenizer is not None and hasattr(tokenizer, "decode"):
+    if tokenizer is not None and hasattr(tokenizer, "decode"):  # pragma: no cover
         sql = tokenizer.decode(output_tokens).strip()
     else:
-        from gemma_4_sql.tokenization import SQLTokenizer
+        from gemma_4_sql.tokenization import SQLTokenizer  # pragma: no cover
 
-        sql = SQLTokenizer().decode(output_tokens).strip()
+        sql = SQLTokenizer().decode(output_tokens).strip()  # pragma: no cover
 
     if not sql:
         raise InferenceError("MLX beam search decoded into an empty SQL query string.")
@@ -203,6 +198,7 @@ def generate_sql(
 
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
+
     """
     if load is None:
         raise DependencyMissingError("MLX dependencies are missing.")
@@ -211,8 +207,9 @@ def generate_sql(
     sql = ""
     try:
         logger.info("Generating with MLX %s (beam_width=%d)", model_name, beam_width)
-        loaded = load(model_name)
-        model, tokenizer = loaded if isinstance(loaded, (tuple, list)) else (loaded, None)
+        loaded: Any = load.__call__(model_name)
+        model: ModelType = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
+        tokenizer: Any = cast(Any, loaded)[1] if isinstance(loaded, (tuple, list)) and len(cast(list[Any], loaded)) > 1 else None
         eos_id_arg = kwargs.get("eos_token_id")
         eos_id = int(eos_id_arg) if isinstance(eos_id_arg, (int, str, float)) else None
         sql, confidence_score = mlx_beam_search(

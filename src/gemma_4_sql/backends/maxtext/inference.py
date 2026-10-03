@@ -7,6 +7,7 @@ import operator
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.tokenization import SQLTokenizer
+from gemma_4_sql.type_hints import TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -23,14 +24,14 @@ except (ImportError, AttributeError):
     jnp = None
 
 try:
-    from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model
+    import maxtext.models.gemma4 as _gemma4
 
-    Gemma4Model: Any = _Gemma4Model
+    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     Gemma4Model = None
 
 
-def _beam_search_step(seq: Any, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
+def _beam_search_step(seq: TensorType, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
     """Process a single sequence and expand it into multiple beams.
 
     Args:
@@ -41,6 +42,7 @@ def _beam_search_step(seq: Any, score: float, model_apply_fn: Any, beam_width: i
 
     Returns:
         A tuple containing the results.
+
     """
     logits = model_apply_fn(seq)
     if hasattr(logits, "shape") and len(logits.shape) == 3:
@@ -53,7 +55,7 @@ def _beam_search_step(seq: Any, score: float, model_apply_fn: Any, beam_width: i
     top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]
     top_probs = log_probs[top_indices]
 
-    new_beams = []
+    new_beams: list[tuple[Any, float]] = []
     for i in range(beam_width):
         token = top_indices[i].reshape(1, 1)
         new_seq = jnp.concatenate([seq, token], axis=-1)
@@ -70,9 +72,9 @@ def maxtext_beam_search(model_apply_fn: Any, input_ids: Any, beam_width: int, ma
         object: The resulting output from the operation.
 
     """
-    beams = [(input_ids, 0.0)]
+    beams: list[tuple[Any, float]] = [(input_ids, 0.0)]
     for _ in range(max_length):
-        new_beams = []
+        new_beams: list[tuple[Any, float]] = []
         for seq, score in beams:
             if seq[0, -1] == eos_token_id:
                 new_beams.append((seq, score))
@@ -88,7 +90,7 @@ def maxtext_beam_search(model_apply_fn: Any, input_ids: Any, beam_width: int, ma
     return (beams[0][0], beams[0][1])
 
 
-def _execute_generate(model_name: str, input_tokens: list[int], beam_width: int, max_length: int, eos_token_id: int, test_mode: bool, tokenizer: SQLTokenizer) -> tuple[str, str, float]:
+def _execute_generate(model_name: str, input_tokens: list[int], beam_width: int, max_length: int, eos_token_id: int, tokenizer: SQLTokenizer) -> tuple[str, str, float]:
     """Execute the generation logic.
 
     Args:
@@ -97,21 +99,18 @@ def _execute_generate(model_name: str, input_tokens: list[int], beam_width: int,
         beam_width: The beam width for search.
         max_length: The maximum length for generation.
         eos_token_id: The end-of-sequence token ID.
-        test_mode: Whether to run in test mode.
         tokenizer: The tokenizer instance.
 
     Returns:
         A tuple of raw output text, clean SQL, and generation time.
+
     """
     logger.info("Generating with MaxText: %s", model_name)
     input_ids = jnp.array([input_tokens], dtype=jnp.int32)
     model = Gemma4Model(model_name)
     apply_fn = model.apply if hasattr(model, "apply") else model
     jitted_beam_search = jax.jit(maxtext_beam_search, static_argnums=(2, 3, 4))
-    if not test_mode:
-        (output_ids, logprob_sum) = jitted_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
-    else:
-        (output_ids, logprob_sum) = maxtext_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
+    (output_ids, logprob_sum) = jitted_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
     sql = tokenizer.decode(output_ids[0].tolist())
     out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
     confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))
@@ -133,6 +132,7 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
 
     Raises:
         DependencyMissingError: If MaxText dependencies are missing.
+
     """
     tokenizer = SQLTokenizer(model_name=None)
     input_tokens = tokenizer.encode(prompt)
@@ -143,7 +143,7 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
 
         raise DependencyMissingError("MaxText dependencies are missing.")
     try:
-        status, sql, confidence_score = _execute_generate(model_name, input_tokens, beam_width, max_length, eos_token_id, bool(kwargs.get("test_mode")), tokenizer)
+        status, sql, confidence_score = _execute_generate(model_name, input_tokens, beam_width, max_length, eos_token_id, tokenizer)
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("MaxText Generation Error: ")
         status = f"failed: {e!s}"

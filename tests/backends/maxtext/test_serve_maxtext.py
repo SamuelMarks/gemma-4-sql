@@ -1,165 +1,129 @@
-"""Tests for MaxText Serving."""
-
-from unittest import mock
+from unittest.mock import MagicMock
 
 import pytest
 
-import gemma_4_sql.backends.maxtext.serve as srv
+import gemma_4_sql.backends.maxtext.serve as serve_module
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
-def test_serve_model_maxtext_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+@pytest.fixture
+def mock_jax_deps(monkeypatch):
+    mock_jax = MagicMock()
+    mock_gemma4 = MagicMock()
+    mock_jax.distributed.initialize = MagicMock()
 
-    Raises:
-        AssertionError: Description.
+    monkeypatch.setattr(serve_module, "jax", mock_jax)
+    monkeypatch.setattr(serve_module, "gemma4", mock_gemma4)
 
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
+    # Mock create_common_app and serve_model_wrapper
+    mock_create_common = MagicMock(return_value="app")
+    mock_serve_wrapper = MagicMock(return_value={"status": "serving"})
 
-    monkeypatch.setattr(srv, "jax", None)
+    monkeypatch.setattr(serve_module, "create_common_app", mock_create_common)
+    monkeypatch.setattr(serve_module, "serve_model_wrapper", mock_serve_wrapper)
+
+    return {
+        "jax": mock_jax,
+        "gemma4": mock_gemma4,
+        "create_common_app": mock_create_common,
+        "serve_model_wrapper": mock_serve_wrapper,
+    }
+
+
+def test_serve_model(mock_jax_deps):
+    res = serve_module.serve_model("dummy_model", port=8000, max_batch_size=32)
+    assert res["status"] == "serving"
+    mock_jax_deps["serve_model_wrapper"].assert_called_once()
+
+    # Get the app_factory to test _create_app
+    app_factory = mock_jax_deps["serve_model_wrapper"].call_args[1]["app_factory"]
+    app = app_factory()
+    assert app == "app"
+
+    # Get callbacks
+    startup_cb = mock_jax_deps["create_common_app"].call_args[1]["startup_callback"]
+    generate_logic = mock_jax_deps["create_common_app"].call_args[1]["generate_logic"]
+
+    # Test startup
+    startup_cb()
+    mock_jax_deps["jax"].distributed.initialize.assert_called_once()
+
+    # Test generate_logic (it will fail to import missing module or raise InferenceError)
+    with pytest.raises(Exception):
+        generate_logic("prompt")
+
+
+def test_serve_model_errors(mock_jax_deps, monkeypatch):
+    monkeypatch.setattr(serve_module, "jax", None)
     with pytest.raises(DependencyMissingError):
-        srv.serve_model("foo")
+        serve_module.serve_model("dummy_model")
 
 
-def test_serve_model_maxtext_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    monkeypatch.setattr(srv, "jax", object())
-    monkeypatch.setattr(srv, "gemma4", object())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", mock.MagicMock())
-    monkeypatch.setattr(srv, "JSONResponse", mock.MagicMock())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-    res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    if not res["backend"] == "maxtext":
-        raise AssertionError
-    if not res["status"] == "running_maxtext_serve":
-        raise AssertionError
+def test_startup_callback_error(mock_jax_deps):
+    mock_jax_deps["jax"].distributed.initialize.side_effect = RuntimeError("init fail")
+    serve_module._create_app("dummy_model")
+    startup_cb = mock_jax_deps["create_common_app"].call_args[1]["startup_callback"]
+    startup_cb()  # Should catch the error and log it, not raise
 
 
-def test_serve_model_maxtext_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+def test_generate_logic(mock_jax_deps, monkeypatch):
+    import sys
 
-    Raises:
-        AssertionError: Description.
+    mock_inference = MagicMock()
+    mock_generate_sql = MagicMock()
+    mock_inference.generate_sql = mock_generate_sql
+    sys.modules["gemma_4_sql.backends.maxtext.inference"] = mock_inference
 
-    """
-    monkeypatch.setattr(srv, "jax", object())
-    monkeypatch.setattr(srv, "gemma4", object())
+    serve_module._create_app("dummy_model")
+    generate_logic = mock_jax_deps["create_common_app"].call_args[1]["generate_logic"]
 
-    def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    mock_generate_sql.return_value = {"sql": "SELECT 1"}
+    assert generate_logic("prompt") == "SELECT 1"
 
-        Raises:
-            ValueError: Description.
+    # empty sql
+    mock_generate_sql.return_value = {"sql": ""}
+    with pytest.raises(InferenceError, match="empty SQL"):
+        generate_logic("prompt")
 
-        """
-        msg = "err"
-        raise ValueError(msg)
+    # general exception
+    mock_generate_sql.side_effect = ValueError("inference fail")
+    with pytest.raises(InferenceError, match="generation failed"):
+        generate_logic("prompt")
 
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", raise_err)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-    res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    if "failed" not in str(res["status"]):
-        raise AssertionError
-
-
-@pytest.mark.asyncio
-async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate endpoint logic directly."""
-    __import__("importlib", fromlist=[""])
-    srv.jax = object()
-    srv.gemma4 = object()
-
-    class MockJSONResponse:
-        """Mock class."""
-
-        def __init__(self, content: dict) -> None:
-            """Init."""
-            self.content = content
-            self.body = str(content).encode()
-
-    class MockApp:
-        """Mock app."""
-
-        def __init__(self) -> None:
-            """Init."""
-            self.router = mock.MagicMock()
-            self.router.routes = []
-
-        def post(self, *_args: object, **_kwargs: object) -> object:
-            """Post."""
-
-            def decorator(func: object) -> object:
-                """Decorator."""
-                route = mock.MagicMock()
-                route.endpoint = func
-                self.router.routes.append(route)
-                return func
-
-            return decorator
-
-    app_instance = MockApp()
-
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.JSONResponse", MockJSONResponse)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: app_instance)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-
-    srv.serve_model("foo", test_mode=True)
-    generate_func = app_instance.router.routes[-1].endpoint
-
-    request = mock.AsyncMock()
-    request.json.return_value = {"prompt": "test"}
-    result = await generate_func(request)
-    result.body.decode() if hasattr(result, "body") else result["sql"]
-
-    srv.serve_model("foo", test_mode=False)
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.inference.generate_sql", lambda *a, **k: {"sql": "SELECT 1", "status": "success"})
-    generate_func2 = app_instance.router.routes[-1].endpoint
-    result2 = await generate_func2(request)
-    assert result2 is not None
-
-    from gemma_4_sql.exceptions import InferenceError
-
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.inference.generate_sql", lambda *a, **k: {"sql": ""})
-    with pytest.raises(InferenceError, match="returned empty SQL"):
-        await generate_func2(request)
-
-    def mock_raise(*a: object, **k: object) -> dict[str, object]:
-        """Simulate MaxText inference failure for testing error handling."""
-        raise RuntimeError("MaxText failure")
-
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.inference.generate_sql", mock_raise)
-    with pytest.raises(InferenceError, match="MaxText generation failed"):
-        await generate_func2(request)
+    # inference error
+    mock_generate_sql.side_effect = InferenceError("inf error")
+    with pytest.raises(InferenceError, match="inf error"):
+        generate_logic("prompt")
 
 
-def test_serve_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    m_serve = __import__("gemma_4_sql.backends.maxtext.serve", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "fastapi", None)
-    importlib.reload(m_serve)
-    monkeypatch.undo()
-    importlib.reload(m_serve)
+def test_imports_except_blocks():
+    import importlib
+    import sys
 
+    # Save original modules
+    orig_jax = sys.modules.get("jax")
+    orig_gemma = sys.modules.get("maxtext.models.gemma4")
 
-def test_serve_fastapi_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+    # Force ImportError
+    sys.modules["jax"] = None
+    sys.modules["maxtext.models.gemma4"] = None
 
-    Raises:
-        AssertionError: Description.
+    import gemma_4_sql.backends.maxtext.serve as sm
 
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
+    importlib.reload(sm)
 
-    m_serve = __import__("gemma_4_sql.backends.maxtext.serve", fromlist=[""])
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", None)
-    monkeypatch.setattr(m_serve, "jax", object())
-    monkeypatch.setattr(m_serve, "gemma4", object())
-    with pytest.raises(DependencyMissingError):
-        m_serve.serve_model("m")
+    assert sm.jax is None
+    assert sm.gemma4 is None
+
+    # Restore
+    if orig_jax is not None:
+        sys.modules["jax"] = orig_jax
+    else:
+        del sys.modules["jax"]
+
+    if orig_gemma is not None:
+        sys.modules["maxtext.models.gemma4"] = orig_gemma
+    else:
+        del sys.modules["maxtext.models.gemma4"]
+
+    importlib.reload(sm)

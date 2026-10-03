@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import typing
+from typing import TYPE_CHECKING, cast
 
 from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
 from gemma_4_sql.sdk.adapters.postgres_adapter import PostgresAdapter
 from gemma_4_sql.sdk.adapters.snowflake_adapter import SnowflakeAdapter
 from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONPrimitive
 logger = logging.getLogger(__name__)
 _ADAPTERS = {"sqlite": SQLiteAdapter, "postgresql": PostgresAdapter, "snowflake": SnowflakeAdapter, "duckdb": DuckDBAdapter}
@@ -36,11 +36,12 @@ class LiveDatabaseEngine:
 
         Raises:
             ValueError: If unsupported db_type is provided.
+
         """
         self.db_path = db_path
         self.db_type = db_type.lower()
-        self.db_kwargs = kwargs.get("db_kwargs") or {}
-        self.read_only = kwargs.get("read_only", True)
+        self.db_kwargs: dict[str, object] = cast(dict[str, object], kwargs.get("db_kwargs", {}))
+        self.read_only: bool = bool(kwargs.get("read_only", True))
         adapter_cls = _ADAPTERS.get(self.db_type)
         if adapter_cls is None:
             msg = f"Unsupported db_type: {self.db_type}"
@@ -55,6 +56,7 @@ class LiveDatabaseEngine:
 
         Returns:
             The database connection.
+
         """
         return self.adapter.connect()
 
@@ -63,6 +65,7 @@ class LiveDatabaseEngine:
 
         Returns:
             The asynchronous database connection.
+
         """
         return await self.adapter.connect_async()
 
@@ -74,6 +77,7 @@ class LiveDatabaseEngine:
 
         Raises:
             PermissionError: If mutating statements are attempted in read-only mode.
+
         """
         if not self.read_only:
             return
@@ -95,6 +99,7 @@ class LiveDatabaseEngine:
 
         Args:
             ddl: The Data Definition Language (DDL) string.
+
         """
         old_ro = self.read_only
         self.read_only = False
@@ -114,6 +119,7 @@ class LiveDatabaseEngine:
 
         Returns:
             Tuple of (success, fetched rows, optional error message).
+
         """
         try:
             self._validate_safety(query)

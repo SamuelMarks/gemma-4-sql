@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from .protocols import BackendProtocol
@@ -11,7 +11,7 @@ ENTRY_POINTS: dict[str, importlib.metadata.EntryPoint] = {}
 
 
 def get_backend(name: str) -> BackendProtocol:
-    """Get backend by name.
+    """Provide backend by name.
 
     Args:
         name: The string representing the name.
@@ -21,11 +21,12 @@ def get_backend(name: str) -> BackendProtocol:
 
     Raises:
         ValueError: If the backend name is unknown.
+
     """
     if not ENTRY_POINTS:
         eps_all = importlib.metadata.entry_points()
-        eps = eps_all.get("gemma_4_sql.backends", []) if isinstance(eps_all, dict) else eps_all.select(group="gemma_4_sql.backends")
-        for ep in eps:
+        eps_list: Any = eps_all.get("gemma_4_sql.backends", []) if isinstance(eps_all, dict) else eps_all.select(group="gemma_4_sql.backends")
+        for ep in cast(list[Any], eps_list):
             ENTRY_POINTS[ep.name] = ep
     if name not in ENTRY_POINTS:
         msg = f"Unknown backend: {name}"

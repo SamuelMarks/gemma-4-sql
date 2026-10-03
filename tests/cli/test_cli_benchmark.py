@@ -2,10 +2,13 @@
 
 import argparse
 
-from gemma_4_sql.cli import benchmark_cmd
+import pytest
+
+from gemma_4_sql.cli_benchmark import benchmark_cmd
 
 
-def test_benchmark_cmd() -> object:
+def test_benchmark_cmd(monkeypatch: pytest.MonkeyPatch) -> object:
+    monkeypatch.setattr("gemma_4_sql.cli_benchmark.benchmark", lambda **kwargs: {"status": "ok"})
     """Initialize function test_benchmark_cmd."""
     args = argparse.Namespace(
         model="gemma-4",

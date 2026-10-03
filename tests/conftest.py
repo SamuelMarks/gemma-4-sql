@@ -7,6 +7,7 @@ os.environ.setdefault("XLA_PYTHON_CLIENT_ALLOCATOR", "platform")
 os.environ.setdefault("KERAS_BACKEND", "torch")
 
 import warnings
+from typing import Any, cast
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -119,7 +120,7 @@ class MockConftestGrain(types.ModuleType):
         return object()
 
 
-sys.modules["datasets"] = MockDatasets()
+sys.modules["datasets"] = MockDatasets()  # type: ignore
 _conftest_grain = MockConftestGrain()
 sys.modules["grain"] = _conftest_grain
 sys.modules["grain.python"] = _conftest_grain
@@ -261,11 +262,11 @@ class MockGemma4ForCausalLM:
 
 
 @pytest.fixture(autouse=True)
-def _mock_external_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+def _mock_external_calls(monkeypatch: Any) -> None:
     """Mock external network calls like datasets.load_dataset and duckdb.connect."""
-    monkeypatch.setitem(sys.modules, "datasets", MockDatasets())
-    monkeypatch.setitem(sys.modules, "grain", MockConftestGrain())
-    monkeypatch.setitem(sys.modules, "grain.python", MockConftestGrain())
+    monkeypatch.setitem(sys.modules, "datasets", cast(Any, MockDatasets()))
+    monkeypatch.setitem(sys.modules, "grain", cast(Any, MockConftestGrain()))
+    monkeypatch.setitem(sys.modules, "grain.python", cast(Any, MockConftestGrain()))
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.datasets", MockDatasets(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.datasets", MockDatasets(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.keras.etl.datasets", MockDatasets(), raising=False)
@@ -273,7 +274,7 @@ def _mock_external_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.grain", MockConftestGrain(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.keras.etl.grain", MockConftestGrain(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.grain", MockConftestGrain(), raising=False)
-    monkeypatch.setitem(sys.modules, "duckdb", MockDuckDB())
+    monkeypatch.setitem(sys.modules, "duckdb", cast(Any, MockDuckDB()))
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.duckdb", MockDuckDB(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.jax.etl.duckdb", MockDuckDB(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.keras.etl.duckdb", MockDuckDB(), raising=False)

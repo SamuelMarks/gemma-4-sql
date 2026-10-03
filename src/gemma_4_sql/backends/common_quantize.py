@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Callable
 
+from gemma_4_sql.type_hints import ModelType
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 
@@ -16,7 +18,7 @@ def apply_bits_and_bytes_quantization(
     bits_and_bytes_config_cls: type | None,
     float16_dtype: object = None,
     *,
-    model: Any = None,
+    model: ModelType | None = None,
     raise_if_missing: bool = False,
     llm_int8_threshold: float = 6.0,
     llm_int8_skip_modules: list[str] | None = None,
@@ -44,6 +46,7 @@ def apply_bits_and_bytes_quantization(
 
     Raises:
         DependencyMissingError: If raise_if_missing is True and bits_and_bytes_config_cls is None.
+
     """
     if bits_and_bytes_config_cls is None:
         if raise_if_missing:
@@ -79,8 +82,8 @@ def apply_bits_and_bytes_quantization(
     if model is not None:
         if hasattr(model, "config"):
             model.config.quantization_config = bnb_config
-        model._is_quantized = True
-        model._quant_method = method
+        model._is_quantized = True  # type: ignore # Runtime injection
+        model._quant_method = method  # type: ignore # Runtime injection
 
     return (memory_reduction, f"quantized_{method}")
 
@@ -105,6 +108,7 @@ def quantize_model_wrapper(
 
     Returns:
         A dictionary containing the quantization results.
+
     """
     if missing_deps:
         return {

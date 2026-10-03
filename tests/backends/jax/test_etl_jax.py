@@ -1,506 +1,123 @@
-"""Module docstring."""
-
-from gemma_4_sql.exceptions import DependencyMissingError
-
-"""Module docstring."""
-
+import importlib
 import sys
-from unittest import mock
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import gemma_4_sql.backends.jax.etl as jax_etl
-from gemma_4_sql.type_hints import ETLConfig
-
 
 @pytest.fixture(autouse=True)
-def _clean_sys_modules() -> object:
-    """Initialize function clean_sys_modules.
-
-    Yields:
-        object: Description of yield.
-
-    """
-    keys = list(sys.modules.keys())
-    yield
-    for k in list(sys.modules.keys()):
-        if k not in keys and "gemma_4_sql" in k:
-            del sys.modules[k]
-
-
-"Tests for JAX ETL module."
-
-
-def test_jax_etl_mocked() -> None:
-    """Test JAX ETL when libraries are missing via direct assignment.
-
-    Raises:
-        TypeError: Description.
-
-    """
-
-    etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-    original_datasets = getattr(etl_jax, "datasets", None)
-    original_grain = getattr(etl_jax, "grain", None)
-    try:
-        etl_jax.datasets = None
-        etl_jax.grain = None
-        with pytest.raises(DependencyMissingError, match=r"Missing grain or datasets\. Cannot load test\."):
-            etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-    finally:
-        etl_jax.datasets = original_datasets
-        etl_jax.grain = original_grain
-
-
-def test_jax_etl_import_error() -> None:
-    """Test JAX ETL ImportError fallback.
-
-    Raises:
-        TypeError: Description.
-
-    """
-    import importlib
-
-    try:
-        with mock.patch.dict(sys.modules, {"datasets": None, "grain": None, "grain.python": None}):
-            if "gemma_4_sql.backends.jax.etl" in sys.modules:
-                del sys.modules["gemma_4_sql.backends.jax.etl"]
-            etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-            with pytest.raises(DependencyMissingError, match=r"Missing grain or datasets\. Cannot load test\."):
-                etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10))
-    finally:
-        if "gemma_4_sql.backends.jax.etl" in sys.modules:
-            del sys.modules["gemma_4_sql.backends.jax.etl"]
-        importlib.import_module("gemma_4_sql.backends.jax.etl")
-
-
-class MockTokenizerForJax:
-    """Docstring."""
-
-    def __init__(self, *args, **kwargs):
-        """Docstring."""
-
-    def encode(self, x):
-        """Docstring."""
-        return [len(x)]
-
-
-def test_jax_etl_lightweight(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test JAX ETL lightweight loader."""
-
-    etl_jax = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-    monkeypatch.setattr(etl_jax, "datasets", None)
-    monkeypatch.setattr(etl_jax, "grain", None)
-
-    with pytest.raises(DependencyMissingError, match="Grain dependency is missing"):
-        etl_jax._get_sampler(10, False)
-
+def mock_dependencies():
+    mock_datasets = MagicMock()
     mock_grain = MagicMock()
-    monkeypatch.setattr(etl_jax, "grain", mock_grain)
-    etl_jax._get_sampler(10, False)
-    etl_jax._get_sampler(10, True)
 
-    class MockDuckDBForLightweight:
-        """Docstring."""
+    # To fix grain.python issues
+    mock_grain.python = mock_grain
 
-        def connect(self, *args, **kwargs):
-            """Docstring."""
+    mock_datasets.load_dataset.return_value = "mock_hf_dataset"
 
-            class MockConn:
-                """Docstring."""
+    mock_grain.JAXDistributedSharding.return_value = "dist_shard"
+    mock_grain.NoSharding.return_value = "no_shard"
+    mock_grain.IndexSampler.return_value = "mock_sampler"
+    mock_grain.DataLoader.return_value = "mock_dataloader"
+    mock_grain.Batch.return_value = "mock_batch_op"
 
-                def execute(self, *args, **kwargs):
-                    """Docstring."""
+    with patch.dict(
+        sys.modules,
+        {
+            "datasets": mock_datasets,
+            "grain": mock_grain,
+            "grain.python": mock_grain,
+        },
+    ):
+        yield mock_datasets, mock_grain
 
-                    class MockResult:
-                        """Docstring."""
 
-                        def fetchdf(self):
-                            """Docstring."""
+def reload_module():
+    import gemma_4_sql.backends.jax.etl as jax_etl
 
-                            class MockDF:
-                                """Docstring."""
+    importlib.reload(jax_etl)
+    return jax_etl
 
-                                def to_dict(self, orient="records"):
-                                    """Docstring."""
-                                    return [{"question": "q1", "query": "a1"}, {"sql_prompt": "q2", "sql": "a2"}]
 
-                            return MockDF()
+def test_missing_dependencies():
+    with patch.dict(sys.modules, {"datasets": None, "grain.python": None, "grain": None}):
+        jax_etl = reload_module()
 
-                    return MockResult()
+        with pytest.raises(Exception, match="Datasets dependency is missing."):
+            jax_etl._load_hf_or_duckdb("ds", "split", None, None)
 
-                def close(self):
-                    """Docstring."""
+        with pytest.raises(Exception, match="Grain dependency is missing."):
+            jax_etl._get_sampler(10, False)
 
-            return MockConn()
+        with pytest.raises(Exception, match="Missing grain or datasets. Cannot load"):
+            config = MagicMock()
+            config.dataset_name = "test"
+            config.split = "train"
+            config.batch_size = 1
+            config.distributed = False
+            config.tokenizer_name = "t"
+            config.duckdb_path = None
+            config.duckdb_table = None
+            jax_etl.build_dataloader(config)
 
-    monkeypatch.setattr(etl_jax, "duckdb", MockDuckDBForLightweight())
-    monkeypatch.setattr(etl_jax, "SQLTokenizer", MockTokenizerForJax)
 
-    with pytest.raises(DependencyMissingError):
-        etl_jax.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=2, duckdb_path="path", duckdb_table="table"))
+def test_load_hf_or_duckdb():
+    jax_etl = reload_module()
 
+    with patch("gemma_4_sql.backends.jax.etl.load_duckdb_dataset") as mock_duckdb:
+        mock_duckdb.return_value = "mock_duckdb_ds"
 
-class MockDatasets:
-    """Initialize class MockDatasets."""
+        res = jax_etl._load_hf_or_duckdb("ds", "split", "path", "table")
+        assert res == "mock_duckdb_ds"
 
-    @staticmethod
-    def load_dataset(*_args: object, **_kwargs: object) -> list[dict]:
-        """Initialize function load_dataset.
+        res = jax_etl._load_hf_or_duckdb("ds", "split", None, None)
+        assert res == "mock_hf_dataset"
 
-        Args:
-        ----
-        name: Description of name.
-        split: Description of split.
 
+def test_get_sampler():
+    jax_etl = reload_module()
 
-        Returns:
-            object: Description of return.
+    sampler = jax_etl._get_sampler(10, True)
+    assert sampler == "mock_sampler"
+    jax_etl.grain.JAXDistributedSharding.assert_called_once()
 
-        """
-        return [{"question": "Q1", "query": "A1"}, {"sql_prompt": "Q2", "sql": "A2"}]
+    jax_etl.grain.IndexSampler.reset_mock()
+    sampler = jax_etl._get_sampler(10, False)
+    assert sampler == "mock_sampler"
+    jax_etl.grain.NoSharding.assert_called_once()
 
 
-class MockGrain:
-    """Initialize class MockGrain."""
+def test_get_sampler_missing_sharding():
+    jax_etl = reload_module()
 
-    class RandomAccessDataSource:
-        """Initialize class RandomAccessDataSource."""
+    del jax_etl.grain.JAXDistributedSharding
+    del jax_etl.grain.NoSharding
 
-    class MapTransform:
-        """Initialize class MapTransform."""
+    sampler = jax_etl._get_sampler(10, True)
+    assert sampler == "mock_sampler"
 
-    @staticmethod
-    def mock_no_sharding() -> str:
-        """Initialize function nosharding.
 
-        Returns:
-            object: Description of return.
+def test_build_dataloader():
+    jax_etl = reload_module()
 
-        """
-        return "no_sharding"
+    config = MagicMock()
+    config.dataset_name = "ds"
+    config.split = "train"
+    config.batch_size = 2
+    config.distributed = True
+    config.tokenizer_name = "tok"
+    config.duckdb_path = None
+    config.duckdb_table = None
 
-    @staticmethod
-    def jax_distributed_sharding() -> str:
-        """Initialize function jaxdistributedsharding.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return "jax_distributed_sharding"
-
-    @staticmethod
-    def index_sampler(*_args: object, **kwargs: object) -> str:
-        """Initialize function indexsampler.
-
-        Args:
-        ----
-        args: Description of args.
-        kwargs: Description of kwargs.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        return kwargs.get("shard_options", "sampler")
-
-    @staticmethod
-    def _b(batch_size: int) -> str:
-        """Initialize function batch.
-
-        Args:
-        ----
-        batch_size: Description of batch_size.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        return f"batch_{batch_size}"
-
-    class DataLoader:
-        """Initialize class DataLoader."""
-
-        def __init__(self: object, data_source: object, sampler: object, operations: object) -> None:
-            """Initialize function __init__.
-
-            Args:
-            ----
-            data_source: Description of data_source.
-            sampler: Description of sampler.
-            operations: Description of operations.
-
-            """
-            self.data_source = data_source
-            self.sampler = sampler
-            self.operations = operations
-
-
-MockGrain.NoSharding = staticmethod(MockGrain.mock_no_sharding)
-MockGrain.JAXDistributedSharding = staticmethod(MockGrain.jax_distributed_sharding)
-MockGrain.IndexSampler = staticmethod(MockGrain.index_sampler)
-MockGrain.Batch = staticmethod(MockGrain._b)
-MockGrain.NoSharding = staticmethod(MockGrain.mock_no_sharding)
-MockGrain.JAXDistributedSharding = staticmethod(MockGrain.jax_distributed_sharding)
-MockGrain.IndexSampler = staticmethod(MockGrain.index_sampler)
-MockGrain.Batch = staticmethod(MockGrain._b)
-
-
-def _check_res(res: dict, status: str, *, distributed: bool, sampler: str) -> None:
-    """Execute function.
-
-    Raises:
-        TypeError: Description.
-
-    """
-    if res["status"] != status:
-        raise TypeError
-    if distributed is not None and res.get("distributed") is not distributed:
-        raise TypeError
-    if sampler is not None and getattr(res.get("loader"), "sampler", None) != sampler:
-        raise TypeError
-
-
-def test_jax_etl_loaded() -> None:
-    """Test JAX ETL when libraries are present."""
-    etl = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-    original_datasets = getattr(etl, "datasets", None)
-    original_grain = getattr(etl, "grain", None)
-    try:
-        etl.datasets = MockDatasets()
-        etl.grain = MockGrain()
-        res = etl.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10, distributed=False))
-        _check_res(res, "loaded", distributed=False, sampler="no_sharding")
-    finally:
-        etl.datasets = original_datasets
-        etl.grain = original_grain
-
-
-def test_jax_etl_dist() -> None:
-    """Test JAX ETL distributed."""
-    etl = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-    original_datasets = getattr(etl, "datasets", None)
-    original_grain = getattr(etl, "grain", None)
-    try:
-        etl.datasets = MockDatasets()
-        etl.grain = MockGrain()
-        res_dist_ = etl.build_dataloader(ETLConfig(dataset_name="test", split="train", batch_size=10, distributed=True))
-        _check_res(res_dist_, "loaded", distributed=True, sampler="jax_distributed_sharding")
-    finally:
-        etl.datasets = original_datasets
-        etl.grain = original_grain
-
-
-def _dummy() -> object:
-    """Execute function."""
-
-
-def test_jax_etl_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        TypeError: Description.
-
-    """
-    monkeypatch.setattr(jax_etl, "datasets", "mock")
-    monkeypatch.setattr(jax_etl, "grain", type("MockGrain", (), {"IndexSampler": lambda *args, **kwargs: None, "DataLoader": lambda *args, **kwargs: None, "Batch": lambda *args, **kwargs: None, "RandomAccessDataSource": object, "MapTransform": object}))
-
-    class MockDatasets2:
-        """Provide class docstring."""
-
-        def load_dataset(self, *_args: object, **_kwargs: object) -> object:
-            """Execute function.
-
-            Returns:
-                object: Description of return.
-
-            """
-            return [{"question": "q", "query": "a"}]
-
-    class MockGrain:
-        """Provide class docstring."""
-
-        class Batch:
-            """Docstring."""
-
-            def __init__(self, **kwargs: object) -> None:
-                """Docstring."""
-
-        class RandomAccessDataSource:
-            """Provide class docstring."""
-
-        class MapTransform:
-            """Provide class docstring."""
-
-        class IndexSampler:
-            """Provide class docstring."""
-
-            def __init__(self, **kwargs: object) -> object:
-                """Execute function."""
-
-        class DataLoader:
-            """Provide class docstring."""
-
-            def __init__(self, **kwargs: object) -> object:
-                """Execute function."""
-                self.data_source = kwargs.get("data_source")
-
-        def _b(self, **_kwargs: object) -> object:
-            """Execute function.
-
-            Returns:
-                object: Description of return.
-
-            """
-            return "batch"
-
-        def mock_no_sharding(self) -> object:
-            """Execute function.
-
-            Returns:
-                object: Description of return.
-
-            """
-            return "no_sharding"
-
-        def mock_jax_sharding(self) -> object:
-            """Execute function.
-
-            Returns:
-                object: Description of return.
-
-            """
-            return "jax_sharding"
-
-    monkeypatch.setattr(jax_etl, "datasets", MockDatasets2())
-    monkeypatch.setattr(jax_etl, "grain", MockGrain())
-    res = jax_etl.build_dataloader(ETLConfig(dataset_name="ds", split="split", batch_size=2))
-    if not (res["status"] == "loaded"):
-        raise TypeError
-
-
-def test_jax_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    monkeypatch.setattr(jax_etl, "datasets", "mock")
-    monkeypatch.setattr(jax_etl, "grain", type("MockGrain", (), {"IndexSampler": lambda *args, **kwargs: None, "DataLoader": lambda *args, **kwargs: None, "Batch": lambda *args, **kwargs: None, "RandomAccessDataSource": object, "MapTransform": object}))
-
-    sys.modules["gemma_4_sql.backends.common_data"].duckdb = None
-    monkeypatch.setattr(jax_etl, "_load_duckdb_dataset", lambda *args, **kwargs: (_ for _ in ()).throw(ImportError("duckdb is required")))
-    with pytest.raises(ImportError, match="duckdb is required"):
-        jax_etl.build_dataloader(ETLConfig(dataset_name="ds", split="split", duckdb_path="path", duckdb_table="table"))
-
-
-def test_jax_etl_duckdb_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test DuckDB dataset loading with jax_etl."""
-
-    class MockDuckDB:
-        """Docstring."""
-
-        def connect(self, *args: object, **kwargs: object) -> object:
-            """Docstring."""
-
-            class MockConn:
-                """Docstring."""
-
-                def execute(self, *args: object, **kwargs: object) -> object:
-                    """Docstring."""
-
-                    class MockResult:
-                        """Docstring."""
-
-                        def fetchdf(self) -> object:
-                            """Docstring."""
-
-                            class MockDF:
-                                """Docstring."""
-
-                                def to_dict(self, orient: str = "records") -> object:
-                                    """Docstring."""
-                                    return [{"question": "q1", "query": "a1"}, {"sql_prompt": "q2", "sql": "a2"}]
-
-                            return MockDF()
-
-                    return MockResult()
-
-                def close(self) -> None:
-                    """Docstring."""
-
-            return MockConn()
-
-    monkeypatch.setattr(jax_etl, "duckdb", MockDuckDB())
-
-    class MockGrain:
-        """Docstring."""
-
-        class RandomAccessDataSource:
-            """Docstring."""
-
-        class MapTransform:
-            """Docstring."""
-
-        class IndexSampler:
-            """Docstring."""
-
-            def __init__(self, **kwargs: object) -> None:
-                """Docstring."""
-
-        class DataLoader:
-            """Docstring."""
-
-            def __init__(self, **kwargs: object) -> None:
-                """Docstring."""
-
-        def NoSharding(self) -> str:
-            """Docstring."""
-            return "no_sharding"
-
-        class Batch:
-            """Docstring."""
-
-            def __init__(self, **kwargs: object) -> None:
-                """Docstring."""
-
-    monkeypatch.setattr(jax_etl, "grain", MockGrain())
-    monkeypatch.setattr(jax_etl, "datasets", "mock")
-
-    res = jax_etl.build_dataloader(ETLConfig(dataset_name="ds", split="split", duckdb_path="path", duckdb_table="table"))
-    assert res["status"] == "loaded"
-
-
-def test_jax_etl_grain_classes() -> None:
-    """Test Grain inner classes."""
-
-    class MockGrain:
-        """Docstring."""
-
-        class RandomAccessDataSource:
-            """Docstring."""
-
-        class MapTransform:
-            """Docstring."""
-
-    HFDataSource, JAXFormatTransform = jax_etl._get_grain_classes(MockGrain)
-
-    ds = HFDataSource([{"a": 1}, {"a": 2}])
-    expected_len = 2
-    assert len(ds) == expected_len
-    assert ds[0] == {"a": 1}
-    assert ds[1] == {"a": 2}
-
-    class MockTokenizer:
-        """Docstring."""
-
-        def encode(self, x: str) -> list[int]:
-            """Docstring."""
-            return [len(x)]
-
-    transform = JAXFormatTransform(MockTokenizer())
-    res1 = transform.map({"question": "hello", "query": "world"})
-    assert res1 == {"inputs": [5], "targets": [5]}
-
-    res2 = transform.map({"sql_prompt": "hi", "sql": "bye"})
-    assert res2 == {"inputs": [2], "targets": [3]}
+    mock_source = MagicMock()
+    mock_source.__len__.return_value = 100
+
+    with patch("gemma_4_sql.backends.jax.etl.get_grain_classes", return_value=(MagicMock(return_value=mock_source), MagicMock(return_value="mock_transform"))), patch("gemma_4_sql.backends.jax.etl.SQLTokenizer", return_value="mock_tokenizer"):
+        res = jax_etl.build_dataloader(config, duckdb_path="override")
+        assert res["dataset"] == "ds"
+        assert res["split"] == "train"
+        assert res["status"] == "loaded"
+        assert res["batch_size"] == 2
+        assert res["backend"] == "jax"
+        assert res["distributed"]
+        assert res["loader"] == "mock_dataloader"

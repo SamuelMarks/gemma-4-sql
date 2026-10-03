@@ -76,6 +76,3 @@ def test_etl_posttrain(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError
     if not res["batch_size"] == int("16"):
         raise AssertionError
-
-
-import pytest

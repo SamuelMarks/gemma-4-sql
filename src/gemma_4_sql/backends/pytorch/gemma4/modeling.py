@@ -50,6 +50,7 @@ def merge_modality_embeddings(
 
     Returns:
         Tensor of merged embeddings of shape (B, L, D) or (B, K + L, D).
+
     """
     if token_mask is None or not token_mask.any():
         return torch.cat([modality_features, text_embeddings], dim=1)
@@ -76,6 +77,7 @@ class Gemma4MultiModalProjector(nn.Module):
 
         Args:
             config: Gemma 4 configuration object.
+
         """
         super().__init__()
         self.linear_1 = nn.Linear(config.vision_config.hidden_size, config.hidden_size, bias=True)
@@ -90,6 +92,7 @@ class Gemma4MultiModalProjector(nn.Module):
 
         Returns:
             Projected multimodal features.
+
         """
         hidden_states = self.linear_1(image_features)
         hidden_states = self.act(hidden_states)
@@ -105,6 +108,7 @@ class Gemma4ForCausalLM(nn.Module):
 
         Args:
             config: Gemma 4 configuration object.
+
         """
         super().__init__()
         self.config = config
@@ -148,6 +152,7 @@ class Gemma4ForCausalLM(nn.Module):
 
         Returns:
             Tuple containing output logits and updated past key values.
+
         """
         hidden_states = self.embed_tokens(input_ids)
 
@@ -231,6 +236,7 @@ class Gemma4ForCausalLM(nn.Module):
 
         Returns:
             Tensor of generated token IDs including prompt tokens.
+
         """
         gen_cache: Cache | tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = DynamicCache()
         for i in range(max_new_tokens):
@@ -262,6 +268,7 @@ class Gemma4ForCausalLM(nn.Module):
 
         Returns:
             Initialized Gemma4ForCausalLM model instance.
+
         """
         from pathlib import Path
 
@@ -290,11 +297,13 @@ class Gemma4ForCausalLM(nn.Module):
 
         if weights_file is not None and weights_file.exists():
             try:
-                from safetensors import SafetensorError
-
                 state_dict = load_file(str(weights_file))
                 model.load_state_dict(state_dict, strict=False)
-            except (SafetensorError, ValueError, RuntimeError, OSError, KeyError, AttributeError) as exc:
+            except (ValueError, RuntimeError, OSError, KeyError, AttributeError) as exc:
+                import logging
+
+                logging.getLogger(__name__).debug("Failed to load safetensors: %s", exc)
+            except Exception as exc:  # noqa: BLE001
                 import logging
 
                 logging.getLogger(__name__).debug("Failed to load safetensors: %s", exc)
@@ -309,6 +318,7 @@ class Gemma4ForCausalLM(nn.Module):
 
         Returns:
             Path to the saved safetensors file.
+
         """
         from pathlib import Path
 

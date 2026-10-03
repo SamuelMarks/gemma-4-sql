@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from typing import Callable
+from typing import Any, Callable
 
 from gemma_4_sql.cli_etl import etl_posttrain_cmd, etl_pretrain_cmd, etl_sft_cmd
 from gemma_4_sql.constants import DEFAULT_POSTTRAIN_DATASET, DEFAULT_PRETRAIN_DATASET, DEFAULT_SFT_DATASET
 
 
 def add_etl_subparser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     name: str,
     help_text: str,
     default_dataset: str,
@@ -27,6 +27,7 @@ def add_etl_subparser(
 
     Returns:
         The configured ArgumentParser instance for this ETL command.
+
     """
     parser = subparsers.add_parser(name, help=help_text)
     parser.add_argument("--dataset", default=default_dataset, help="Hugging Face dataset name.")
@@ -44,7 +45,7 @@ def add_etl_subparser(
     return parser
 
 
-def add_etl_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> argparse.ArgumentParser:
+def add_etl_parsers(subparsers: Any) -> argparse.ArgumentParser:
     """Register the root ETL parser and all associated subcommands.
 
     Args:
@@ -52,6 +53,7 @@ def add_etl_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentPars
 
     Returns:
         The configured parent ArgumentParser instance for 'etl'.
+
     """
     parser_etl = subparsers.add_parser("etl", help="Run ETL to prepare SQL training datasets.")
     etl_subparsers = parser_etl.add_subparsers(dest="etl_command", required=True)

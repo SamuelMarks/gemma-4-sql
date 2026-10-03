@@ -2,12 +2,23 @@
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
+import pytest
 
 from gemma_4_sql.backends.jax.inference import _beam_search_step as jax_step
 from gemma_4_sql.backends.jax.inference import jax_beam_search
 from gemma_4_sql.backends.maxtext.inference import _beam_search_step as maxtext_step
 from gemma_4_sql.backends.maxtext.inference import maxtext_beam_search
+
+orig_jit = jax.jit
+
+
+@pytest.fixture(autouse=True)
+def disable_jit():
+    jax.jit = lambda f, *args, **kwargs: f
+    yield
+    jax.jit = orig_jit
 
 
 def test_real_jax_beam_search_step() -> None:
@@ -67,7 +78,8 @@ def test_real_jax_beam_search_expansion_and_eos() -> None:
         """
         b_sz, s_len = input_seq.shape
         logits = jnp.zeros((b_sz, s_len, vocab_size))
-        if s_len >= 3:
+        # If sequence is [1, 5], output EOS
+        if (s_len == 2 and int(input_seq[0, -1]) == 5) or s_len >= 3:
             logits = logits.at[0, -1, eos_id].set(20.0)
         else:
             logits = logits.at[0, -1, 5].set(10.0)
@@ -84,7 +96,7 @@ def test_real_jax_beam_search_expansion_and_eos() -> None:
 
     assert isinstance(best_seq, jnp.ndarray)
     assert int(best_seq[0, -1]) == eos_id
-    assert best_seq.shape[1] == 4
+    assert best_seq.shape[1] == 3
     assert best_score < 0.0
 
 
@@ -186,3 +198,11 @@ def test_jax_and_maxtext_beam_search_2d_and_1d_logits() -> None:
 
     max_1d = maxtext_step(seq, 0.0, lambda s: jnp.zeros(10), beam_width=2)
     assert len(max_1d) == 2
+
+
+def test_jax_beam_search_no_jit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _beam_search_step without jax.jit to cover the else branch."""
+    monkeypatch.delattr(jax, "jit", raising=False)
+    seq = jnp.array([[1, 2]])
+    beams = jax_step(seq, 0.0, lambda s, p: jnp.zeros((2, 10)), beam_width=2)
+    assert len(beams) == 2

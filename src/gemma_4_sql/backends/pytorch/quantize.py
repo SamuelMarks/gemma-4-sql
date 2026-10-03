@@ -12,10 +12,11 @@ from __future__ import annotations
 import logging
 import struct
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization, quantize_model_wrapper
 from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -54,6 +55,7 @@ def validate_gguf_file(file_path: str | Path) -> dict[str, Any]:
     Raises:
         FileNotFoundError: If the specified file does not exist.
         ValueError: If magic bytes or header format are corrupted.
+
     """
     path = Path(file_path)
     if not path.exists():
@@ -142,6 +144,7 @@ def _write_gguf_file(
         tensors: Optional dictionary mapping tensor names to NumPy arrays.
         metadata: Optional key-value metadata dictionary.
         out_type: Quantization format identifier (default: 'q4_0').
+
     """
     from gemma_4_sql.backends.pytorch.gguf import write_gguf_v3
 
@@ -179,12 +182,14 @@ def _apply_awq_quantization(
 
     Raises:
         DependencyMissingError: If autoawq or transformers is missing.
+
     """
     try:
-        from awq import AutoAWQForCausalLM
+        import awq
         from transformers import AutoTokenizer as _AutoTokenizer
 
         tok_cls: Any = _AutoTokenizer
+        awq_cls: Any = getattr(awq, "AutoAWQForCausalLM", None)
     except (ImportError, AttributeError) as exc:
         raise DependencyMissingError(f"AutoAWQ is required for AWQ quantization: {exc!s}") from exc
 
@@ -202,12 +207,12 @@ def _apply_awq_quantization(
     }
 
     tokenizer = tok_cls.from_pretrained(model_name)
-    model = AutoAWQForCausalLM.from_pretrained(model_name)
-    model.quantize(tokenizer, quant_config=quant_config, calib_data=calib_data)
+    model: ModelType = awq_cls.from_pretrained(model_name)
+    cast(Any, model).quantize(tokenizer, quant_config=quant_config, calib_data=calib_data)
 
     out_dir = Path(export_path) if export_path else Path(f"./quantized_awq/{Path(model_name).name or 'model'}")
     out_dir.mkdir(parents=True, exist_ok=True)
-    model.save_quantized(str(out_dir))
+    cast(Any, model).save_quantized(str(out_dir))
     tokenizer.save_pretrained(str(out_dir))
 
     return (0.75, "quantized_awq")
@@ -238,18 +243,20 @@ def _apply_gptq_quantization(
 
     Raises:
         DependencyMissingError: If optimum or transformers is missing.
+
     """
     try:
-        from optimum.gptq import GPTQQuantizer
+        import optimum
         from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
         from transformers import AutoTokenizer as _AutoTokenizer
 
         tok_cls: Any = _AutoTokenizer
         model_cls: Any = _AutoModelForCausalLM
+        quantizer_cls: Any = getattr(getattr(optimum, "gptq", None), "GPTQQuantizer", None)
     except (ImportError, AttributeError) as exc:
         raise DependencyMissingError(f"Optimum is required for GPTQ quantization: {exc!s}") from exc
 
-    quantizer = GPTQQuantizer(
+    quantizer: Any = quantizer_cls(
         bits=bits,
         dataset=dataset,
         group_size=group_size,
@@ -260,7 +267,7 @@ def _apply_gptq_quantization(
     model_kwargs = {"torch_dtype": torch.float16} if torch and hasattr(torch, "float16") else {}
     model = model_cls.from_pretrained(model_name, **model_kwargs)
 
-    quantized_model = quantizer.quantize_model(model, tokenizer)
+    quantized_model: ModelType = quantizer.quantize_model(model, tokenizer)
 
     out_dir = Path(export_path) if export_path else Path(f"./quantized_gptq/{Path(model_name).name or 'model'}")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -287,6 +294,7 @@ def _export_gguf(
 
     Returns:
         Tuple of memory reduction factor and status string ('quantized_gguf').
+
     """
     out_dir = Path(export_path) if export_path else Path("./gguf_export")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -320,6 +328,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
 
     Raises:
         DependencyMissingError: If required quantization backends or PyTorch are missing.
+
     """
     if torch is None or (method in {"int8", "int4"} and (BitsAndBytesConfig is None or AutoModelForCausalLM is None)):
         raise DependencyMissingError("PyTorch quantization dependencies are missing.")
@@ -343,7 +352,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
             return _apply_awq_quantization(
                 model_name=model_name,
                 export_path=export_path,
-                calib_data=calib_data if isinstance(calib_data, list) else None,
+                calib_data=cast(list[str], calib_data) if isinstance(calib_data, list) else None,
                 w_bit=w_bit,
                 q_group_size=q_group_size,
             )
@@ -377,7 +386,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
                 method,
                 BitsAndBytesConfig,
                 getattr(torch, "float16", None),
-                model=model_target,
+                model=model_target,  # type: ignore # Justified: Dynamic backend protocol typing
                 llm_int8_threshold=threshold,
                 bnb_4bit_quant_type=str(kwargs.get("bnb_4bit_quant_type", "nf4")),
                 bnb_4bit_use_double_quant=bool(kwargs.get("bnb_4bit_use_double_quant", True)),

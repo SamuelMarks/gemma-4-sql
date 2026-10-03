@@ -14,6 +14,7 @@ def rotate_half(x: torch.Tensor) -> torch.Tensor:
 
     Returns:
         Tensor with rotated halves.
+
     """
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
@@ -32,6 +33,7 @@ def apply_rotary_pos_emb(
 
     Returns:
         Tuple of embedded query and key tensors.
+
     """
     cos = cos[position_ids].unsqueeze(unsqueeze_dim)
     sin = sin[position_ids].unsqueeze(unsqueeze_dim)
@@ -74,6 +76,7 @@ class Gemma4RotaryEmbedding(nn.Module):
 
         Returns:
             Tuple of cached cosine and sine embeddings.
+
         """
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
@@ -107,6 +110,7 @@ class Gemma4RotaryEmbedding2D(nn.Module):
 
         Returns:
             Tuple of 2D cosine and sine embeddings.
+
         """
         device = x.device
         dtype = x.dtype

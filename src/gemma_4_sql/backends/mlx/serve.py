@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
+from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -33,16 +34,17 @@ def _load_mlx_model(model_name: str) -> tuple[Any, Any]:
 
     Raises:
         DependencyMissingError: If mlx_lm dependencies are missing.
+
     """
     if model_name in _mlx_model_cache:
         return _mlx_model_cache[model_name]
     try:
-        from mlx_lm import load
+        import mlx_lm
 
-        loaded = load(model_name)
+        loaded: Any = mlx_lm.load(model_name)
         if isinstance(loaded, (tuple, list)):
-            model = loaded[0]
-            tokenizer = loaded[1] if len(loaded) > 1 else None
+            model: ModelType = cast(list[Any], loaded)[0]
+            tokenizer: Any = cast(list[Any], loaded)[1] if len(cast(list[Any], loaded)) > 1 else None
         else:
             model = loaded
             tokenizer = None
@@ -53,12 +55,11 @@ def _load_mlx_model(model_name: str) -> tuple[Any, Any]:
         raise
 
 
-def _generate_query(prompt: str, test_mode: bool = False, model_name: str = "") -> str:
+def _generate_query(prompt: str, model_name: str = "") -> str:
     """Generate a SQL query for a prompt using MLX inference.
 
     Args:
         prompt: Natural language input prompt.
-        test_mode: Boolean flag indicating test mode.
         model_name: Target model identifier.
 
     Returns:
@@ -66,9 +67,8 @@ def _generate_query(prompt: str, test_mode: bool = False, model_name: str = "") 
 
     Raises:
         InferenceError: If model inference fails during non-test execution.
+
     """
-    if test_mode:
-        return f"SELECT * FROM generated WHERE prompt='{prompt}'"
     from gemma_4_sql.backends.mlx.inference import generate_sql
     from gemma_4_sql.exceptions import InferenceError
 
@@ -85,35 +85,35 @@ def _generate_query(prompt: str, test_mode: bool = False, model_name: str = "") 
         raise InferenceError(f"MLX generation failed: {e}") from e
 
 
-def _batch_generate_queries(prompts: list[str], test_mode: bool = False, model_name: str = "") -> list[str]:
+def _batch_generate_queries(prompts: list[str], model_name: str = "") -> list[str]:
     """Generate SQL queries for a batch of prompts using MLX inference.
 
     Args:
         prompts: Sequence of natural language prompts.
-        test_mode: Boolean flag indicating test mode.
         model_name: Target model identifier.
 
     Returns:
         List of generated SQL query strings.
+
     """
-    return [_generate_query(p, test_mode=test_mode, model_name=model_name) for p in prompts]
+    return [_generate_query(p, model_name=model_name) for p in prompts]
 
 
-def _app_factory(model_name: str, test_mode: bool = False) -> object:
+def _app_factory(model_name: str) -> object:
     """Construct FastAPI app for MLX model serving.
 
     Args:
         model_name: The name of the model being served.
-        test_mode: Whether running in test mode.
 
     Returns:
         The FastAPI application instance.
+
     """
 
     def _startup() -> None:
         """Preload model weights during server startup."""
         logger.info("Initializing MLX serve app for model %s", model_name)
-        if not test_mode and mx is not None:
+        if mx is not None:
             try:
                 _load_mlx_model(model_name)
             except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
@@ -122,10 +122,9 @@ def _app_factory(model_name: str, test_mode: bool = False) -> object:
     return create_common_app(
         backend_name="mlx",
         model_name=model_name,
-        test_mode=test_mode,
         startup_callback=_startup,
-        generate_logic=lambda prompt: _generate_query(prompt, test_mode=test_mode, model_name=model_name),
-        batch_generate_logic=lambda prompts: _batch_generate_queries(prompts, test_mode=test_mode, model_name=model_name),
+        generate_logic=lambda prompt: _generate_query(prompt, model_name=model_name),
+        batch_generate_logic=lambda prompts: _batch_generate_queries(prompts, model_name=model_name),
     )
 
 
@@ -148,8 +147,9 @@ def serve_model(
 
     Raises:
         DependencyMissingError: If MLX dependencies are not installed.
+
     """
-    if mx is None and not kwargs.get("test_mode"):
+    if mx is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("MLX dependencies are missing for serve.")
@@ -159,13 +159,12 @@ def serve_model(
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
-        missing_deps=mx is None and not bool(kwargs.get("test_mode")),
+        missing_deps=mx is None,
         missing_status="mocked_missing_mlx",
-        app_factory=lambda: _app_factory(model_name, bool(kwargs.get("test_mode"))),
-        test_mode=bool(kwargs.get("test_mode")),
+        app_factory=lambda: _app_factory(model_name),
     )
 
-    if result["status"] == "running_mlx_serve" and not kwargs.get("test_mode"):
+    if result["status"] == "running_mlx_serve":
         logger.info("Starting MLX server on port %d with max_batch_size %d", port, max_batch_size)
 
     return result

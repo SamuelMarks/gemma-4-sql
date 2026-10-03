@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONPrimitive
@@ -22,7 +22,7 @@ class DuckDBAdapter(DatabaseAdapter):
 
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
-        """Return the exception classes."""
+        """Provide the exception classes."""
         import duckdb
 
         return (duckdb.Error,)
@@ -35,6 +35,7 @@ class DuckDBAdapter(DatabaseAdapter):
 
         Raises:
             ImportError: If duckdb is not installed.
+
         """
         if "existing_conn" in self.db_kwargs and self.db_kwargs["existing_conn"] is not None:
             return self.db_kwargs["existing_conn"]
@@ -62,10 +63,11 @@ class DuckDBAdapter(DatabaseAdapter):
 
         Args:
             ddl: Schema DDL string to execute.
+
         """
         if "existing_conn" in self.db_kwargs or "conn" in self.db_kwargs:
             return
-        cast(Any, self.conn).execute(ddl)
+        self.conn.execute(ddl)
 
     def close(self) -> None:
         """Close connection if not an externally provided connection."""
@@ -92,8 +94,9 @@ class DuckDBAdapter(DatabaseAdapter):
 
                 Returns:
                     Query result rows.
+
                 """
-                conn_obj = cast(Any, self.conn)
+                conn_obj = self.conn
                 cur = conn_obj.cursor() if callable(getattr(conn_obj, "cursor", None)) else conn_obj
                 return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
 
@@ -122,8 +125,9 @@ class DuckDBAdapter(DatabaseAdapter):
 
                 Returns:
                     Query result rows.
+
                 """
-                conn_obj = cast(Any, self.conn)
+                conn_obj = self.conn
                 cur = conn_obj.cursor() if callable(getattr(conn_obj, "cursor", None)) else conn_obj
                 return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
 

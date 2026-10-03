@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 from typing import Any
 
-from gemma_4_sql.backends.common_data import _load_duckdb_dataset
+from gemma_4_sql.backends.common_data import load_duckdb_dataset
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig, JSONDict
 
@@ -35,6 +35,7 @@ def _get_pytorch_classes() -> type:
 
     Returns:
         The execution result.
+
     """
 
     class PyTorchDataset(Dataset if Dataset is not None else object):  # type: ignore[misc]
@@ -52,6 +53,7 @@ def _get_pytorch_classes() -> type:
 
             Returns:
                 The total number of samples.
+
             """
             return len(self._ds)
 
@@ -63,6 +65,7 @@ def _get_pytorch_classes() -> type:
 
             Returns:
                 Dictionary containing tokenized inputs, targets, and optional pixel/audio tensors.
+
             """
             from gemma_4_sql.backends.common_multimodal import (
                 format_multimodal_prompt,
@@ -83,7 +86,7 @@ def _get_pytorch_classes() -> type:
                 has_audio=audio_input is not None,
             )
             item: dict[str, Any] = {
-                "inputs": torch.tensor(self._tok.encode(str(formatted["prompt"])), dtype=torch.long),
+                "inputs": torch.tensor(self._tok.encode(str(formatted.get("prompt", prompt))), dtype=torch.long),
                 "targets": torch.tensor(self._tok.encode(str(target)), dtype=torch.long),
             }
             if image_input is not None:
@@ -105,6 +108,7 @@ def _collate_fn(batch: list[JSONDict]) -> JSONDict:
 
     Returns:
         Dictionary of batched PyTorch tensors.
+
     """
     inputs = [item["inputs"] for item in batch]
     targets = [item["targets"] for item in batch]
@@ -119,7 +123,7 @@ def _collate_fn(batch: list[JSONDict]) -> JSONDict:
 
 
 def _get_sampler(pt_dataset: typing.Any, distributed: bool) -> object:
-    """Get the appropriate PyTorch sampler for data loading.
+    """Provide the appropriate PyTorch sampler for data loading.
 
     Args:
         pt_dataset: The PyTorch dataset.
@@ -127,6 +131,7 @@ def _get_sampler(pt_dataset: typing.Any, distributed: bool) -> object:
 
     Returns:
         A DistributedSampler if distributed is true, otherwise None.
+
     """
     if not distributed:
         return None
@@ -151,9 +156,10 @@ def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, d
 
     Raises:
         DependencyMissingError: If datasets dependency is missing.
+
     """
     if duckdb_path and duckdb_table:
-        return _load_duckdb_dataset(duckdb_path, duckdb_table)
+        return load_duckdb_dataset(duckdb_path, duckdb_table)
     if datasets is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -173,6 +179,7 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
 
     Raises:
         DependencyMissingError: If required dependencies are missing.
+
     """
     dataset_name = config.dataset_name
     split = config.split

@@ -36,6 +36,7 @@ class Gemma4VisionEmbeddings(nn.Module):
 
         Returns:
             Patch embeddings tensor.
+
         """
         batch_size = pixel_values.shape[0]
         patch_embeds = self.patch_embedding(pixel_values)
@@ -65,6 +66,7 @@ class Gemma4VisionAttention(nn.Module):
 
         Returns:
             Output projected attention tensor.
+
         """
         bsz, seq_len, _ = hidden_states.size()
 
@@ -99,6 +101,7 @@ class Gemma4VisionEncoderLayer(nn.Module):
 
         Returns:
             Encoded layer hidden states tensor.
+
         """
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
@@ -129,6 +132,7 @@ class Gemma4VisionModel(nn.Module):
 
         Returns:
             Final vision representations tensor.
+
         """
         hidden_states = self.embeddings(pixel_values)
 

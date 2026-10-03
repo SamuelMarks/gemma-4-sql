@@ -28,6 +28,7 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
 
     Raises:
         DependencyMissingError: If TensorFlow dependencies are missing.
+
     """
     if tf is None:
         from gemma_4_sql.exceptions import DependencyMissingError

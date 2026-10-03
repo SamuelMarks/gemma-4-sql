@@ -4,29 +4,27 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gemma_4_sql.backends.common_data import _load_duckdb_dataset
+from gemma_4_sql.backends.common_data import load_duckdb_dataset
+from gemma_4_sql.backends.common_dpo import generic_run_training_epochs
+from gemma_4_sql.backends.common_logging import log_metrics_wrapper
+from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization, quantize_model_wrapper
+from gemma_4_sql.backends.common_serve import serve_model_wrapper
 
 
-def test_load_duckdb_dataset_missing(monkeypatch):
+def testload_duckdb_dataset_missing(monkeypatch):
     """Test load duckdb dataset missing functionality."""
     monkeypatch.setattr("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", lambda x: None)
     with pytest.raises(RuntimeError, match="duckdb is required"):
-        _load_duckdb_dataset("test.db", "test_table")
+        load_duckdb_dataset("test.db", "test_table")
 
 
-def test_load_duckdb_dataset_error(monkeypatch):
+def testload_duckdb_dataset_error(monkeypatch):
     """Test load duckdb dataset error functionality."""
     mock_duckdb = MagicMock()
     mock_duckdb.connect.side_effect = Exception("Test DB error")
     monkeypatch.setattr("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", lambda x: mock_duckdb)
     with pytest.raises(RuntimeError, match="DuckDB error"):
-        _load_duckdb_dataset("test.db", "test_table")
-
-
-from gemma_4_sql.backends.common_dpo import generic_run_training_epochs
-from gemma_4_sql.backends.common_logging import log_metrics_wrapper
-from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
-from gemma_4_sql.backends.common_serve import serve_model_wrapper
+        load_duckdb_dataset("test.db", "test_table")
 
 
 def test_common_dpo_run_training_epochs():
@@ -145,9 +143,6 @@ def test_common_serve_missing():
     assert res["status"] == "missing"
 
 
-from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization
-
-
 def test_quantize_missing_bitsandbytes():
     """Test quantize missing bitsandbytes functionality."""
     res = apply_bits_and_bytes_quantization("int8", None, None)
@@ -230,7 +225,7 @@ def test_quantize_model_wrapper_error_handling():
 
 
 def test_serve_model_wrapper_run_server(monkeypatch):
-    """Test serve_model_wrapper with run_server=True and test_mode=False."""
+    """Test serve_model_wrapper with run_server=True and ."""
     import gemma_4_sql.backends.common_serve as cs
 
     mock_uvicorn = MagicMock()
@@ -245,13 +240,12 @@ def test_serve_model_wrapper_run_server(monkeypatch):
         missing_deps=False,
         missing_status="",
         app_factory=lambda: "mock_app",
-        test_mode=False,
         run_server=True,
     )
     assert res["status"] == "running_test_serve"
     mock_uvicorn.run.assert_called_once_with("mock_app", host="0.0.0.0", port=8000)
 
-    # Test test_mode=False but run_server=False
+    # Test  but run_server=False
     mock_uvicorn.reset_mock()
     res2 = serve_model_wrapper(
         backend_name="test",
@@ -261,13 +255,12 @@ def test_serve_model_wrapper_run_server(monkeypatch):
         missing_deps=False,
         missing_status="",
         app_factory=lambda: "mock_app",
-        test_mode=False,
         run_server=False,
     )
     assert res2["status"] == "running_test_serve"
     mock_uvicorn.run.assert_not_called()
 
-    # Test test_mode=True
+    # Test
     res3 = serve_model_wrapper(
         backend_name="test",
         model_name="model",
@@ -276,14 +269,13 @@ def test_serve_model_wrapper_run_server(monkeypatch):
         missing_deps=False,
         missing_status="",
         app_factory=lambda: "mock_app",
-        test_mode=True,
     )
     assert res3["status"] == "running_test_serve"
 
 
-def test_load_duckdb_dataset_invalid_table():
-    """Test _load_duckdb_dataset rejects invalid table names."""
-    from gemma_4_sql.backends.common_data import _load_duckdb_dataset
+def testload_duckdb_dataset_invalid_table():
+    """Test load_duckdb_dataset rejects invalid table names."""
+    from gemma_4_sql.backends.common_data import load_duckdb_dataset
 
     with pytest.raises(RuntimeError, match="Invalid or unsafe table name"):
-        _load_duckdb_dataset(":memory:", "drop table users; --")
+        load_duckdb_dataset(":memory:", "drop table users; --")

@@ -34,6 +34,7 @@ def benchmark(
 
     Returns:
         A dictionary containing the results.
+
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     return get_backend(backend).benchmark_model(

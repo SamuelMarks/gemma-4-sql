@@ -12,28 +12,32 @@ from jax import Array
 from .config import ShardConfig
 
 
-def _make_linear(*args: Any, **kwargs: Any) -> Any:
-    """Docstring for _make_linear.
+def make_linear(*args: Any, **kwargs: Any) -> Any:
+    """Docstring for make_linear.
 
     Args:
         *args: Positional arguments passed directly to the underlying flax.nnx layer.
         **kwargs: Keyword arguments passed to the underlying flax.nnx layer (e.g. rngs, dtype).
+
     Returns:
         The execution result.
+
     """
     kwargs.pop("kernel_metadata", None)
     kwargs.pop("bias_metadata", None)
     return nnx.Linear(*args, **kwargs)
 
 
-def _make_embed(*args: Any, **kwargs: Any) -> Any:
-    """Docstring for _make_embed.
+def make_embed(*args: Any, **kwargs: Any) -> Any:
+    """Docstring for make_embed.
 
     Args:
         *args: Positional arguments passed directly to the underlying flax.nnx layer.
         **kwargs: Keyword arguments passed to the underlying flax.nnx layer (e.g. rngs, dtype).
+
     Returns:
         The execution result.
+
     """
     kwargs.pop("embedding_metadata", None)
     return nnx.Embed(*args, **kwargs)
@@ -65,6 +69,7 @@ class Gemma4RMSNorm(nnx.Module):
             with_scale: Whether to include learnable scale parameter.
             rngs: Random number generators for weight initialization.
             **kwargs: Additional Flax/NNX module configuration parameters like 'dtype'.
+
         """
         self.eps = eps
         self.with_scale = with_scale
@@ -148,13 +153,14 @@ class Gemma4MLP(nnx.Module):
             intermediate_size: Intermediate projection dimension.
             rngs: Random number generators for weight initialization.
             **kwargs: Additional Flax/NNX module configuration parameters like 'dtype'.
+
         """
         shd = kwargs.get("shd")
         if shd is None:
             shd = ShardConfig.no_sharding()
-        self.gate_proj = _make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.up_proj = _make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.down_proj = _make_linear(intermediate_size, hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.gate_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.up_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.down_proj = make_linear(intermediate_size, hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.dtype = kwargs.get("dtype", jnp.float32)
 
     @jax.named_scope("gemma4_mlp")

@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -34,13 +35,14 @@ except (ImportError, AttributeError):
 
 
 def _get_device(hardware: str) -> Any:
-    """Get the jax device for the hardware.
+    """Provide the jax device for the hardware.
 
     Args:
         hardware: Target hardware type.
 
     Returns:
         The matched JAX device or default CPU device.
+
     """
     try:
         if hardware == "tpu" and jax is not None and jax.devices("tpu"):
@@ -52,7 +54,7 @@ def _get_device(hardware: str) -> Any:
     return jax.devices("cpu")[0] if jax is not None else None
 
 
-def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, device: Any) -> tuple[float, float, float]:
+def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, device: str | object) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
     Args:
@@ -66,9 +68,10 @@ def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps
 
     Returns:
         A tuple containing the results.
+
     """
 
-    def forward_pass(model: Any, inputs: Any) -> Any:
+    def forward_pass(model: ModelType, inputs: TensorType) -> Any:
         """Execute a single forward pass.
 
         Args:
@@ -77,10 +80,11 @@ def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps
 
         Returns:
             The model forward pass output.
+
         """
         return model(inputs)
 
-    def generate_pass(model: Any, inputs: Any) -> Any:
+    def generate_pass(model: ModelType, inputs: TensorType) -> Any:
         """Execute a simple generation pass.
 
         Args:
@@ -89,6 +93,7 @@ def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps
 
         Returns:
             The generated token sequence.
+
         """
         seq = inputs
         # A simple unrolled loop for benchmarking generation throughput
@@ -135,7 +140,7 @@ def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps
             tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
 
         try:
-            stats = device.memory_stats()
+            stats = device.memory_stats()  # type: ignore # Justified: Dynamic backend protocol typing
             memory_mb = stats.get("peak_bytes_in_use", 8192.0 * 1024 * 1024) / (1024 * 1024)
         except (AttributeError, KeyError, RuntimeError, TypeError):
             memory_mb = 8192.0
@@ -157,6 +162,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
 
     Raises:
         DependencyMissingError: If required JAX dependencies are missing.
+
     """
 
     def _run() -> tuple[float, float, float]:

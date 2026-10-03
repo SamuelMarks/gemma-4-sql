@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import argparse
+from typing import Any
 
 from gemma_4_sql.cli_benchmark import benchmark_cmd
 from gemma_4_sql.cli_misc import log_metrics_cmd, rag_cmd, tokenize_cmd
 from gemma_4_sql.cli_parsers.db_parser import add_db_parsers
 
 
-def add_tokenize_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_tokenize_parser(subparsers: Any) -> None:
     """Register tokenization inspection subparser.
 
     Args:
         subparsers: Subparser collection to attach commands to.
+
     """
     parser_tokenize = subparsers.add_parser("tokenize", help="Encode or decode text using SQLTokenizer.")
     parser_tokenize.add_argument("--encode", type=str, help="Text to encode.")
@@ -23,11 +24,12 @@ def add_tokenize_parser(subparsers: argparse._SubParsersAction[argparse.Argument
     parser_tokenize.set_defaults(func=tokenize_cmd)
 
 
-def add_rag_log_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_rag_log_parsers(subparsers: Any) -> None:
     """Register RAG prompt builder and metric logging subparsers.
 
     Args:
         subparsers: Subparser collection to attach commands to.
+
     """
     parser_rag = subparsers.add_parser("rag", help="Build a RAG prompt or extract schema context.")
     parser_rag.add_argument("--action", default="build", choices=["build", "extract", "retrieve"], help="Action to perform.")
@@ -46,11 +48,12 @@ def add_rag_log_parsers(subparsers: argparse._SubParsersAction[argparse.Argument
     parser_log.set_defaults(func=log_metrics_cmd)
 
 
-def add_benchmark_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_benchmark_parser(subparsers: Any) -> None:
     """Register hardware throughput and latency benchmark subparser.
 
     Args:
         subparsers: Subparser collection to attach commands to.
+
     """
     parser_benchmark = subparsers.add_parser("benchmark", help="Benchmark a model on target hardware.")
     parser_benchmark.add_argument("--model", default="gemma-4", help="Model name.")
@@ -67,11 +70,12 @@ def add_benchmark_parser(subparsers: argparse._SubParsersAction[argparse.Argumen
     parser_benchmark.set_defaults(func=benchmark_cmd)
 
 
-def add_misc_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_misc_parsers(subparsers: Any) -> None:
     """Register tokenization, database, benchmark, RAG, and logging subparsers.
 
     Args:
         subparsers: Subparser collection to attach commands to.
+
     """
     add_tokenize_parser(subparsers)
     add_db_parsers(subparsers)

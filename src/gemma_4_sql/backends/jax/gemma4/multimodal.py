@@ -20,6 +20,7 @@ def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array)
 
     Returns:
         The resulting tensor array.
+
     """
 
     def merge_modalities(i_emb: Any, t_emb: Any, mask: Any) -> Any:

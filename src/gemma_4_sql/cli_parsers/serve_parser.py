@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import argparse
+from typing import Any
 
 from gemma_4_sql.cli_misc import export_cmd
 from gemma_4_sql.cli_serve import agent_cmd, chat_cmd, evaluate_cmd, few_shot_cmd, generate_cmd, serve_cmd
 
 
-def add_evaluate_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_evaluate_parsers(subparsers: Any) -> None:
     """Register evaluation, few-shot prompting, and conversational chat subparsers.
 
     Args:
         subparsers: Subparser collection to attach commands to.
+
     """
     parser_evaluate = subparsers.add_parser("evaluate", help="Evaluate a trained model.")
     parser_evaluate.add_argument("--model", default="gemma-4", help="Model name.")
@@ -48,11 +49,12 @@ def add_evaluate_parsers(subparsers: argparse._SubParsersAction[argparse.Argumen
     parser_chat.set_defaults(func=chat_cmd)
 
 
-def add_serve_export_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_serve_export_parsers(subparsers: Any) -> None:
     """Register HTTP continuous batching serving and model export parsers.
 
     Args:
         subparsers: Subparser collection to attach commands to.
+
     """
     parser_serve = subparsers.add_parser("serve", help="Serve a model using continuous batching.")
     parser_serve.add_argument("--model", default="gemma-4", help="Model name.")
@@ -70,11 +72,12 @@ def add_serve_export_parsers(subparsers: argparse._SubParsersAction[argparse.Arg
     parser_export.set_defaults(func=export_cmd)
 
 
-def add_generate_agent_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_generate_agent_parsers(subparsers: Any) -> None:
     """Register SQL generation and self-correction agent parsers.
 
     Args:
         subparsers: Subparser collection to attach commands to.
+
     """
     parser_generate = subparsers.add_parser("generate", help="Generate SQL from text using a trained model.")
     parser_generate.add_argument("--model", default="gemma-4", help="Model name.")
@@ -109,11 +112,12 @@ def add_generate_agent_parsers(subparsers: argparse._SubParsersAction[argparse.A
     parser_agent.set_defaults(func=agent_cmd)
 
 
-def add_inference_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_inference_parsers(subparsers: Any) -> None:
     """Register serving, export, generation, and agentic loop subparsers.
 
     Args:
         subparsers: Subparser collection to attach commands to.
+
     """
     add_serve_export_parsers(subparsers)
     add_generate_agent_parsers(subparsers)

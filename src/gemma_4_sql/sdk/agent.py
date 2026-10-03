@@ -29,6 +29,7 @@ class AgentContext:
         audio_path: Optional path to recorded natural language query audio.
         modality: Explicit modality selector ('text', 'vision', 'audio', 'multimodal').
         multimodal_context: Optional cached multimodal embeddings or metadata across attempts.
+
     """
 
     db_path: str = ":memory:"
@@ -64,6 +65,7 @@ async def _process_single_prompt(
 
     Returns:
         Result dictionary containing final_sql, history, and status.
+
     """
     if context.image_path or context.audio_path:
         from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
@@ -73,7 +75,7 @@ async def _process_single_prompt(
             has_image=context.image_path is not None,
             has_audio=context.audio_path is not None,
         )
-        base_prompt = mm["prompt"]
+        base_prompt = str(mm.get("prompt", prompt))
     else:
         base_prompt = prompt
 
@@ -145,15 +147,16 @@ async def _process_single_prompt(
 def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "jax", context: AgentContext | None = None, **kwargs: JSONValue) -> JSONDict | list[JSONDict]:
     """Run an agentic self-correction loop.
 
-        Args:
-                    **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
-    model_name: The name of the target model.
-            prompt: The input text prompt.
-            backend: The backend framework to use.
-            context: The context.
+    Args:
+        model_name: The name of the target model.
+        prompt: The input text prompt.
+        backend: The backend framework to use.
+        context: The agent context for state tracking across execution iterations.
+        **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
 
-        Returns:
+    Returns:
             A list of results.
+
     """
     if context is None:
         context = AgentContext()

@@ -18,6 +18,7 @@ def etl_pretrain_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     config = ETLConfig(dataset_name=args.dataset, split=args.split, batch_size=args.batch_size, distributed=args.distributed, tokenizer_name=args.tokenizer, duckdb_path=args.duckdb_path, duckdb_table=args.duckdb_table)
     etl_pretrain(config, backend=args.backend)
@@ -28,6 +29,7 @@ def etl_sft_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     config = ETLConfig(dataset_name=args.dataset, split=args.split, batch_size=args.batch_size, distributed=args.distributed, tokenizer_name=args.tokenizer, duckdb_path=args.duckdb_path, duckdb_table=args.duckdb_table)
     etl_sft(config, backend=args.backend)
@@ -38,6 +40,7 @@ def etl_posttrain_cmd(args: argparse.Namespace) -> None:
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
     """
     config = ETLConfig(dataset_name=args.dataset, split=args.split, batch_size=args.batch_size, distributed=args.distributed, tokenizer_name=args.tokenizer, duckdb_path=args.duckdb_path, duckdb_table=args.duckdb_table)
     etl_posttrain(config, backend=args.backend)

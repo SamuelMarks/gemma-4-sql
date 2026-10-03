@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import argparse
+from typing import Any
 
 from gemma_4_sql.cli_db import db_execute_cmd, embed_duckdb_cmd
 
 
-def add_db_parsers(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+def add_db_parsers(subparsers: Any) -> None:
     """Register database query execution and DuckDB embedding subparsers.
 
     Args:
         subparsers: Subparser collection to attach commands to.
+
     """
     parser_execute = subparsers.add_parser("execute", help="Execute SQL against a live database.")
     parser_execute.add_argument("--query", required=True, help="SQL query to execute.")

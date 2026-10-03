@@ -22,6 +22,7 @@ class DatabaseAdapter(abc.ABC):
             db_path: The file path to the database.
             db_kwargs: A mapping representing db kwargs.
             read_only: Boolean flag indicating read only.
+
         """
         self.db_path = db_path
         self.db_kwargs = db_kwargs
@@ -31,7 +32,7 @@ class DatabaseAdapter(abc.ABC):
     @property
     @abc.abstractmethod
     def error_classes(self) -> tuple[type[Exception], ...]:
-        """Return the tuple of exceptions that this adapter can catch."""
+        """Provide the tuple of exceptions that this adapter can catch."""
 
     @abc.abstractmethod
     def connect(self) -> object:
@@ -39,6 +40,7 @@ class DatabaseAdapter(abc.ABC):
 
         Returns:
             The connection object.
+
         """
 
     async def connect_async(self) -> object:
@@ -46,6 +48,7 @@ class DatabaseAdapter(abc.ABC):
 
         Returns:
             The async connection object.
+
         """
         import asyncio
 
@@ -56,6 +59,7 @@ class DatabaseAdapter(abc.ABC):
 
         Args:
             ddl: The SQL DDL query string.
+
         """
         self.execute_with_feedback(ddl)
 
@@ -68,18 +72,19 @@ class DatabaseAdapter(abc.ABC):
 
         Returns:
             A tuple containing success boolean, results list, and error string if any.
+
         """
         try:
             if hasattr(self.conn, "cursor"):
                 cursor = self.conn.cursor()
                 cursor.execute(query, params or ())
-                results = cursor.fetchall() if getattr(cursor, "description", None) is not None else []
+                results: list[tuple[JSONPrimitive, ...]] = cursor.fetchall() if getattr(cursor, "description", None) is not None else []
                 if hasattr(cursor, "close"):
                     cursor.close()
                 return (True, results, None)
             else:
-                results = self.conn.execute(query, params or ()).fetchall()
-                return (True, results, None)
+                results_alt: list[tuple[JSONPrimitive, ...]] = self.conn.execute(query, params or ()).fetchall()
+                return (True, results_alt, None)
         except self.error_classes as e:
             return (False, [], str(e))
 
@@ -92,6 +97,7 @@ class DatabaseAdapter(abc.ABC):
 
         Returns:
             A tuple containing success boolean, results list, and error string if any.
+
         """
         import asyncio
 
@@ -106,12 +112,13 @@ class DatabaseAdapter(abc.ABC):
 
         Returns:
             The results list.
+
         """
         try:
             if hasattr(self.conn, "cursor"):
                 cursor = self.conn.cursor()
                 cursor.execute(query, params or ())
-                results = cursor.fetchall() if getattr(cursor, "description", None) is not None else []
+                results: list[tuple[JSONPrimitive, ...]] = cursor.fetchall() if getattr(cursor, "description", None) is not None else []
                 if hasattr(cursor, "close"):
                     cursor.close()
                 return results
@@ -130,6 +137,7 @@ class DatabaseAdapter(abc.ABC):
 
         Returns:
             The results list.
+
         """
         import asyncio
 

@@ -23,6 +23,7 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
 
         Args:
             config: The configuration parameters.
+
         """
         self.hidden_size = config.hidden_size
         self.context_size = config.attention_chunk_size + config.attention_context_left - 1 + config.attention_context_right
@@ -41,6 +42,7 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
 
         Returns:
             The execution result.
+
         """
         position_ids = jnp.arange(self.context_size // 2, -1, -1, dtype=x.dtype)
         position_ids = position_ids[..., None]
@@ -49,7 +51,7 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
         return pos_embed.astype(x.dtype)
 
 
-def _convert_to_block(x: jax.Array, chunk_size: int) -> jax.Array:
+def convert_to_block(x: jax.Array, chunk_size: int) -> jax.Array:
     """Reshapes the input into chunks/blocks for block-wise attention.
 
     Returns:
@@ -63,7 +65,7 @@ def _convert_to_block(x: jax.Array, chunk_size: int) -> jax.Array:
     return x.reshape(batch_size, num_blocks, chunk_size, num_heads, head_dim)
 
 
-def _extract_block_context(x: jax.Array, attn: Any) -> jax.Array:
+def extract_block_context(x: jax.Array, attn: Any) -> jax.Array:
     """Extract the left context block for block-wise attention.
 
     Returns:
@@ -73,14 +75,14 @@ def _extract_block_context(x: jax.Array, attn: Any) -> jax.Array:
     (batch_size, seq_len, num_heads, head_dim) = x.shape
     x = jnp.pad(x, ((0, 0), (attn.max_past_horizon, attn.max_future_horizon + attn.chunk_size - 1), (0, 0), (0, 0)))
     num_blocks = (seq_len + attn.chunk_size - 1) // attn.chunk_size
-    blocks = []
+    blocks: list[Any] = []
     for i in range(num_blocks):
         start = i * attn.chunk_size
         blocks.append(jax.lax.dynamic_slice(x, (0, start, 0, 0), (batch_size, attn.context_size, num_heads, head_dim)))
     return jnp.stack(blocks, axis=1)
 
 
-def _rel_shift(x: jax.Array, context_size: int) -> jax.Array:
+def rel_shift(x: jax.Array, context_size: int) -> jax.Array:
     """Perform relative shift on attention scores.
 
     Returns:
@@ -94,7 +96,7 @@ def _rel_shift(x: jax.Array, context_size: int) -> jax.Array:
     return x.reshape((batch_size, num_heads, num_blocks, block_size, context_size))
 
 
-def _compute_audio_attention_outputs(attn: Any, qkv: tuple[jax.Array, jax.Array, jax.Array], pos_emb: jax.Array, mask: jax.Array | None) -> jax.Array:
+def compute_audio_attention_outputs(attn: Any, qkv: tuple[jax.Array, jax.Array, jax.Array], pos_emb: jax.Array, mask: jax.Array | None) -> jax.Array:
     """Compute the multi-head attention outputs for audio.
 
     Returns:
@@ -105,9 +107,9 @@ def _compute_audio_attention_outputs(attn: Any, qkv: tuple[jax.Array, jax.Array,
     (batch_size, seq_len, _) = q.shape[:3]
     q = q * attn.q_scale * jax.nn.softplus(attn.per_dim_scale[...])
     k *= attn.k_scale
-    q_block = _convert_to_block(q, attn.chunk_size)
-    k_context = _extract_block_context(k, attn)
-    v_context = _extract_block_context(v, attn)
+    q_block = convert_to_block(q, attn.chunk_size)
+    k_context = extract_block_context(k, attn)
+    v_context = extract_block_context(v, attn)
     num_blocks = q_block.shape[1]
     rel_k = attn.relative_k_proj(pos_emb).reshape((-1, attn.num_heads, attn.head_dim)).astype(q.dtype)
     queries = jnp.transpose(q_block, (0, 3, 1, 2, 4))
@@ -117,7 +119,7 @@ def _compute_audio_attention_outputs(attn: Any, qkv: tuple[jax.Array, jax.Array,
     rel_k_t = jnp.transpose(rel_k, (1, 2, 0))
     matrix_bd = jnp.matmul(queries_flat, rel_k_t)
     matrix_bd = matrix_bd.reshape((batch_size, attn.num_heads, num_blocks, attn.chunk_size, -1))
-    matrix_bd = _rel_shift(matrix_bd, attn.context_size)
+    matrix_bd = rel_shift(matrix_bd, attn.context_size)
     attn_weights = matrix_ac + matrix_bd
     attn_weights /= attn.softcap
     attn_weights = jnp.tanh(attn_weights) * attn.softcap
@@ -167,4 +169,4 @@ class Gemma4AudioAttention(nnx.Module):
         q = self.q_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
         k = self.k_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
         v = self.v_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
-        return _compute_audio_attention_outputs(self, (q, k, v), pos_emb, mask)
+        return compute_audio_attention_outputs(self, (q, k, v), pos_emb, mask)

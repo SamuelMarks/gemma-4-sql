@@ -26,6 +26,7 @@ def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, b
     Raises:
         ValueError: If backend does not return SQL.
         RuntimeError: If chat turn execution fails.
+
     """
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend(backend)

@@ -22,6 +22,7 @@ class TrainingProtocol(Protocol):
 
         Returns:
             Dictionary containing training status and final metrics.
+
         """
         ...
 
@@ -34,6 +35,7 @@ class TrainingProtocol(Protocol):
 
         Returns:
             Dictionary containing DPO training status and final metrics.
+
         """
         ...
 
@@ -46,6 +48,7 @@ class TrainingProtocol(Protocol):
 
         Returns:
             Dictionary containing dataloader objects and metadata.
+
         """
         ...
 
@@ -59,6 +62,7 @@ class TrainingProtocol(Protocol):
 
         Returns:
             Dictionary containing export status and target path.
+
         """
         ...
 
@@ -73,6 +77,7 @@ class TrainingProtocol(Protocol):
 
         Returns:
             Dictionary containing logging confirmation and status.
+
         """
         ...
 
@@ -97,6 +102,7 @@ class TrainingProtocol(Protocol):
 
         Returns:
             Dictionary containing adapter configuration status.
+
         """
         ...
 
@@ -110,6 +116,7 @@ class TrainingProtocol(Protocol):
 
         Returns:
             Dictionary containing quantization status and reduction factor.
+
         """
         ...
 
@@ -136,6 +143,7 @@ class InferenceProtocol(Protocol):
 
         Returns:
             Dictionary containing generated SQL and confidence metrics.
+
         """
         ...
 
@@ -156,6 +164,7 @@ class InferenceProtocol(Protocol):
 
         Returns:
             Dictionary containing server status and instance details.
+
         """
         ...
 
@@ -176,6 +185,7 @@ class InferenceProtocol(Protocol):
 
         Returns:
             Dictionary containing throughput (tokens/sec), latency (ms), and memory (MB).
+
         """
         ...
 

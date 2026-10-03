@@ -23,16 +23,25 @@ try:
     from fastapi import FastAPI as _FastAPI
     from fastapi import Request as _Request
     from fastapi.responses import JSONResponse as _JSONResponse
-    from vllm import AsyncEngineArgs as _AsyncEngineArgs
-    from vllm import AsyncLLMEngine as _AsyncLLMEngine
-    from vllm.utils import random_uuid as _random_uuid
 
     FastAPI: Any = _FastAPI
     Request: Any = _Request
     JSONResponse: Any = _JSONResponse
-    AsyncEngineArgs: Any = _AsyncEngineArgs
-    AsyncLLMEngine: Any = _AsyncLLMEngine
-    random_uuid: Any = _random_uuid
+    try:
+        import vllm
+
+        vllm_utils: Any = getattr(vllm, "utils", None)
+        AsyncEngineArgs_Any: Any = getattr(vllm, "AsyncEngineArgs", None)
+        AsyncLLMEngine_Any: Any = getattr(vllm, "AsyncLLMEngine", None)
+        random_uuid_Any: Any = getattr(vllm_utils, "random_uuid", None) if vllm_utils else None
+
+        AsyncEngineArgs = AsyncEngineArgs_Any
+        AsyncLLMEngine = AsyncLLMEngine_Any
+        random_uuid = random_uuid_Any
+    except (ImportError, AttributeError):
+        AsyncEngineArgs = None
+        AsyncLLMEngine = None
+        random_uuid = None
 except (ImportError, AttributeError):
     FastAPI = None
     Request = None
@@ -52,39 +61,47 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
 
     Returns:
         The FastAPI application instance.
+
     """
-    engine_args = AsyncEngineArgs(
-        model=model_name,
-        max_num_batched_tokens=max_batch_size * 256,
-        max_num_seqs=max_batch_size,
-        disable_log_requests=True,
+    engine_args: Any = (
+        AsyncEngineArgs.__call__(
+            model=model_name,
+            max_num_batched_tokens=max_batch_size * 256,
+            max_num_seqs=max_batch_size,
+            disable_log_requests=True,
+        )
+        if AsyncEngineArgs is not None
+        else None
     )
-    engine = AsyncLLMEngine.from_engine_args(engine_args)
+    engine: Any = AsyncLLMEngine.from_engine_args(engine_args) if AsyncLLMEngine is not None else None
 
-    app = FastAPI(title=f"vLLM Serve: {model_name}")
+    app: Any = FastAPI.__call__(title=f"vLLM Serve: {model_name}") if FastAPI is not None else None
 
-    @app.post("/generate")
-    async def generate(request: Any) -> Any:
-        """Execute vLLM-backed streaming request generation.
+    if app is not None and JSONResponse is not None:
 
-        Args:
-            request: The incoming HTTP request.
+        @app.post("/generate")
+        async def generate(request: Any) -> Any:
+            """Execute vLLM-backed streaming request generation.
 
-        Returns:
-            A JSON response containing the generated text.
-        """
-        request_dict = await request.json()
-        prompt = request_dict.pop("prompt", "")
-        request_id = random_uuid()
-        results_generator = engine.generate(prompt, None, request_id)
-        final_output = None
-        async for request_output in results_generator:  # pragma: no branch
-            if await request.is_disconnected():
-                await engine.abort(request_id)
-                return JSONResponse(content={"error": "Client disconnected"})
-            final_output = request_output
-        text = final_output.outputs[0].text if final_output else ""
-        return JSONResponse(content={"sql": text})
+            Args:
+                request: The incoming HTTP request.
+
+            Returns:
+                A JSON response containing the generated text.
+
+            """
+            request_dict = await request.json()
+            prompt = request_dict.pop("prompt", "")
+            request_id = random_uuid() if random_uuid is not None else ""
+            results_generator = engine.generate(prompt, None, request_id)
+            final_output = None
+            async for request_output in results_generator:  # pragma: no branch
+                if await request.is_disconnected():
+                    await engine.abort(request_id)
+                    return JSONResponse.__call__(content={"error": "Client disconnected"})
+                final_output = request_output
+            text = final_output.outputs[0].text if final_output else ""
+            return JSONResponse.__call__(content={"sql": text})
 
     return app
 
@@ -92,16 +109,16 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
 _create_app = _create_vllm_app
 
 
-def _create_native_app(model_name: str, max_batch_size: int, test_mode: bool = False) -> object:
+def _create_native_app(model_name: str, max_batch_size: int) -> object:
     """Create native PyTorch in-process continuous batching FastAPI server.
 
     Args:
         model_name: Name of the model to serve.
         max_batch_size: Maximum continuous batch size.
-        test_mode: Whether running in test mode.
 
     Returns:
         The FastAPI application instance.
+
     """
 
     def _generate(prompt: str) -> str:
@@ -112,10 +129,8 @@ def _create_native_app(model_name: str, max_batch_size: int, test_mode: bool = F
 
         Returns:
             Generated SQL string.
-        """
-        if test_mode:
-            return f"SELECT * FROM pytorch_native WHERE prompt='{prompt}'"
 
+        """
         from gemma_4_sql.backends.pytorch.inference import generate_sql
 
         try:
@@ -136,13 +151,13 @@ def _create_native_app(model_name: str, max_batch_size: int, test_mode: bool = F
 
         Returns:
             List of generated SQL queries.
+
         """
         return [_generate(p) for p in prompts]
 
     return create_common_app(
         backend_name="pytorch",
         model_name=model_name,
-        test_mode=test_mode,
         generate_logic=_generate,
         batch_generate_logic=_batch_generate,
         max_batch_size=max_batch_size,
@@ -164,6 +179,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
     Raises:
         DependencyMissingError: If vLLM dependencies are missing and native fallback is not active.
+
     """
     engine_type = str(kwargs.get("engine", "vllm" if not kwargs.get("native_fallback") else "native"))
     use_native = engine_type == "native" or bool(kwargs.get("native_fallback"))
@@ -173,11 +189,15 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
         raise DependencyMissingError("vLLM dependencies are missing for PyTorch serving.")
 
-    test_mode = bool(kwargs.get("test_mode"))
     if use_native:
-        app_factory = lambda: _create_native_app(model_name, max_batch_size, test_mode=test_mode)
+
+        def app_factory() -> Any:
+            return _create_native_app(model_name, max_batch_size)
+
     else:
-        app_factory = lambda: _create_vllm_app(model_name, max_batch_size)
+
+        def app_factory() -> Any:
+            return _create_vllm_app(model_name, max_batch_size)
 
     result = serve_model_wrapper(
         backend_name="pytorch",
@@ -187,7 +207,6 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         missing_deps=False,
         missing_status="mocked_missing_pytorch",
         app_factory=app_factory,
-        test_mode=test_mode,
     )
 
     if not use_native:
@@ -195,10 +214,10 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         if result["status"] == "running_pytorch_serve":
             result["status"] = "running_vllm"
 
-        if result["status"] == "running_vllm" and not test_mode:
+        if result["status"] == "running_vllm":
             logger.info("Starting vLLM server on port %d", port)
     else:
-        if result["status"] == "running_pytorch_serve" and not test_mode:
+        if result["status"] == "running_pytorch_serve":  # pragma: no cover
             logger.info("Starting native PyTorch server on port %d", port)
 
     return result

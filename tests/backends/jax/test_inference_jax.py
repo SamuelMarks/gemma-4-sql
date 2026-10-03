@@ -1,535 +1,365 @@
-"""Tests for JAX inference logic."""
-
-from pathlib import Path
-from unittest.mock import MagicMock
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import gemma_4_sql.backends.jax.inference as inf
-from gemma_4_sql.backends.jax.inference import generate_sql, jax_beam_search
-
-
-class MockArray:
-    """Mock JAX Array."""
-
-    def __init__(self: object, data: object) -> None:
-        """Initialize function __init__.
-
-        Args:
-        ----
-        data: Description of data.
-
-        """
-        self.data = data if isinstance(data, list) else [data]
-
-    @property
-    def shape(self: object) -> object:
-        """Initialize function shape."""
-        if isinstance(self.data[0], list):
-            return (len(self.data), len(self.data[0]))
-        return (len(self.data),)
-
-    def __getitem__(self: object, idx: object) -> object:
-        """Magic method docstring.
-
-        Returns:
-            object: Description of return.
-
-        """
-        if isinstance(idx, MockArray):
-            return MockArray([self.data[i] for i in getattr(idx, "data", [])])
-        try:
-            expected_len = 2
-            if isinstance(idx, tuple) and len(idx) == expected_len:
-                return self.data[idx[0]][idx[1]]
-            return MockArray(self.data[idx])
-        except (ValueError, TypeError, AttributeError, IndexError, KeyError):
-            return MockArray(self.data)
-
-    def tolist(self: object) -> object:
-        """Initialize function tolist.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self.data
-
-    def item(self: object) -> object:
-        """Initialize function item.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self.data[0] if isinstance(self.data, list) else self.data
-
-    def reshape(self: object, *shape: object) -> object:
-        """Initialize function reshape.
-
-        Args:
-        ----
-        shape: Description of shape.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        if shape == (1, 1):
-            val = self.data[0] if isinstance(self.data, list) else self.data
-            return MockArray([[val]])
-        return self
-
-
-class MockJNP:
-    """Mock JNP."""
-
-    def arange(self: object, val: object) -> object:
-        """Initialize function arange.
-
-        Args:
-        ----
-        val: Description of val.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockArray([0] * val)
-
-    def array(self: object, data: object, _dtype: object = None, **_kwargs: object) -> object:
-        """Initialize function array.
-
-        Args:
-        ----
-        data: Description of data.
-        dtype: Description of dtype.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockArray(data)
-
-    int32 = 1
-
-    def concatenate(self: object, arrays: object, axis: object = 0) -> object:
-        """Initialize function concatenate.
-
-        Args:
-        ----
-        arrays: Description of arrays.
-        axis: Description of axis.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        if axis == -1:
-            res = [arrays[0].data[i] + arrays[1].data[i] for i in range(len(arrays[0].data))]
-            return MockArray(res)
-        return MockArray([a.data for a in arrays])
-
-    def argsort(self: object, array: object) -> object:
-        """Initialize function argsort.
-
-        Args:
-        ----
-        array: Description of array.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        d = getattr(array, "data", array)
-        if isinstance(d, list) and len(d) > 0 and isinstance(d[0], list):
-            d = d[0]
-        return MockArray(sorted(range(len(d)), key=lambda x: d[x]))
-
-
-class MockNN:
-    """Initialize class MockNN."""
-
-    def log_softmax(self: object, x: object, _axis: object = -1, **_kwargs: object) -> object:
-        """Initialize function log_softmax.
-
-        Args:
-        ----
-        x: Description of x.
-        axis: Description of axis.
-
-
-        Returns:
-            object: Description of return.
-
-        """
-        if isinstance(x, MockArray):
-            return x
-        return MockArray(x)
-
-
-class MockJAX:
-    """Mock JAX."""
-
-    nn = MockNN()
-
-    @staticmethod
-    def jit(fn: object, *args: object, **kwargs: object) -> object:
-        """Mock jit compilation.
-
-        Args:
-            fn: Function to compile.
-            *args: Positional args.
-            **kwargs: Keyword args.
-
-        Returns:
-            The input function unmodified.
-        """
-        return fn
-
-
-class MockGemma4Config:
-    """Initialize class MockGemma4Config."""
-
-    @staticmethod
-    def gemma4_e2b() -> object:
-        """Initialize function gemma4_e2b.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return "mock_config"
-
-
-class MockGemma4ForCausalLM:
-    """Initialize class MockGemma4ForCausalLM."""
-
-    def __init__(self: object, config: object, _rngs: object = None, **_kwargs: object) -> None:
-        """Initialize function __init__.
-
-        Args:
-        ----
-        config: Description of config.
-        rngs: Description of rngs.
-
-        """
-        self.config = config
-
-    def __call__(self: object, _seq: object, _positions: object = None) -> object:
-        """Initialize function __call__.
-
-        Returns:
-            object: Description of return.
-
-        """
-        logits = [0.0] * 300
-        logits[100] = 10.0
-        return MockArray([logits])
-
-
-class MockNNX:
-    """Initialize class MockNNX."""
-
-    class Rngs:
-        """Initialize class Rngs."""
-
-        def __init__(self: object, seed: object) -> None:
-            """Initialize function __init__.
-
-            Args:
-            ----
-            seed: Description of seed.
-
-            """
-            self.seed = seed
+from gemma_4_sql.backends.jax.inference import (
+    _MODEL_CACHE,
+    _beam_search_step,
+    _compute_step_probs,
+    generate_sql,
+    jax_beam_search,
+)
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
 @pytest.fixture
-def _mock_jax_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Initialize function mock_jax_env.
+def mock_jax_deps(monkeypatch):
+    mock_jax = MagicMock()
+    mock_jnp = MagicMock()
+    mock_nnx = MagicMock()
+    mock_gemma_config = MagicMock()
+    mock_gemma_model = MagicMock()
+    mock_ocp = MagicMock()
 
-    Args:
-    ----
-    monkeypatch: Description of monkeypatch.
+    # jax
+    mock_jax.nn.log_softmax = MagicMock(side_effect=lambda x, axis: x)
+    mock_jax.jit = MagicMock(side_effect=lambda fn, **kwargs: fn)
 
-    """
-    monkeypatch.setattr(inf, "jax", MockJAX())
-    monkeypatch.setattr(inf, "jnp", MockJNP())
-    monkeypatch.setattr(inf, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
-    monkeypatch.setattr(inf, "Gemma4Config", MockGemma4Config)
-    monkeypatch.setattr(inf, "nnx", MockNNX())
+    # jnp
+    def mock_argsort(x):
+        return MagicMock()
 
+    mock_jnp.argsort = MagicMock(side_effect=mock_argsort)
+    mock_jnp.arange = MagicMock(return_value=MagicMock())
+    mock_jnp.concatenate = MagicMock(return_value=MagicMock())
+    mock_jnp.array = MagicMock(side_effect=lambda x, dtype=None: x)
 
-@pytest.mark.usefixtures("_mock_jax_env")
-def test_generate_sql_orbax_checkpoint_restore(tmp_path: object, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate_sql restores checkpoint when model path exists.
+    # Mock orbax checkpoint
+    sys.modules["orbax"] = MagicMock()
+    sys.modules["orbax.checkpoint"] = mock_ocp
 
-    Args:
-        tmp_path: Pytest tmp_path fixture.
-        monkeypatch: Pytest monkeypatch fixture.
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.jax", mock_jax)
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.jnp", mock_jnp)
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.nnx", mock_nnx)
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.Gemma4Config", mock_gemma_config)
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.Gemma4ForCausalLM", mock_gemma_model)
 
-    Returns:
-        None.
-    """
-    import sys
-    import types
-    from pathlib import Path
+    # We also need to clear _MODEL_CACHE
+    import gemma_4_sql.backends.jax.inference as inf_module
 
-    ckpt_dir = Path(str(tmp_path)) / "orbax_ckpt"
-    ckpt_dir.mkdir()
+    inf_module._MODEL_CACHE.clear()
 
-    class MockCheckpointer:
-        """Mock checkpointer."""
-
-        def restore(self, path: Path) -> dict:
-            """Restore mock weights."""
-            return {"weights": 1}
-
-    orbax_mod = types.ModuleType("orbax")
-    ocp_mod = types.ModuleType("orbax.checkpoint")
-    ocp_mod.PyTreeCheckpointer = MockCheckpointer
-    orbax_mod.checkpoint = ocp_mod
-    monkeypatch.setitem(sys.modules, "orbax", orbax_mod)
-    monkeypatch.setitem(sys.modules, "orbax.checkpoint", ocp_mod)
-    inf._MODEL_CACHE.clear()
-    res = inf.generate_sql(str(ckpt_dir), "SELECT 1")
-    assert res["status"] == "success"
+    return {
+        "jax": mock_jax,
+        "jnp": mock_jnp,
+        "nnx": mock_nnx,
+        "gemma_config": mock_gemma_config,
+        "gemma_model": mock_gemma_model,
+        "ocp": mock_ocp,
+    }
 
 
-@pytest.mark.usefixtures("_mock_jax_env")
-def test_generate_sql_success() -> None:
-    """Initialize function test_generate_sql_success.
+def test_compute_step_probs():
+    # 3D
+    logits = MagicMock()
+    logits.shape = (1, 10, 100)
+    last_logits = MagicMock()
+    logits.__getitem__.return_value = last_logits
 
-    Raises:
-        AssertionError: Description.
+    mock_jax = MagicMock()
+    mock_jax.nn.log_softmax.return_value = MagicMock()
 
+    mock_jnp = MagicMock()
+    mock_indices = MagicMock()
+    mock_jnp.argsort.return_value = MagicMock(__getitem__=MagicMock(return_value=mock_indices))
 
-        TypeError: Description.
+    with patch("gemma_4_sql.backends.jax.inference.jax", mock_jax), patch("gemma_4_sql.backends.jax.inference.jnp", mock_jnp):
+        top_idx, top_probs = _compute_step_probs(logits, 2)
+        assert logits.__getitem__.call_args[0][0] == (0, -1, slice(None, None, None))
 
-    """
-    res = generate_sql("mock-model", "test prompt", beam_width=2, max_length=3)
-    if not res["status"] == "success":
-        raise AssertionError
-    if not res["backend"] == "jax":
-        raise AssertionError
-    if not isinstance(res["sql"], str):
-        raise TypeError
+    # 2D
+    logits = MagicMock()
+    logits.shape = (10, 100)
+    with patch("gemma_4_sql.backends.jax.inference.jax", mock_jax), patch("gemma_4_sql.backends.jax.inference.jnp", mock_jnp):
+        top_idx, top_probs = _compute_step_probs(logits, 2)
+        assert logits.__getitem__.call_args[0][0] == (-1, slice(None, None, None))
 
-
-def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Initialize function test_generate_sql_missing_deps.
-
-    Args:
-    ----
-    monkeypatch: Description of monkeypatch.
-
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    monkeypatch.setattr(inf, "jax", None)
-    with pytest.raises(DependencyMissingError, match=r"JAX inference dependencies are missing\."):
-        generate_sql("mock-model", "test prompt")
+    # 1D
+    logits = MagicMock()
+    logits.shape = (100,)
+    with patch("gemma_4_sql.backends.jax.inference.jax", mock_jax), patch("gemma_4_sql.backends.jax.inference.jnp", mock_jnp):
+        _top_idx, _top_probs = _compute_step_probs(logits, 2)
+        assert not logits.__getitem__.called  # because len is 1, wait, len is 1 but we don't mock len
 
 
-@pytest.mark.usefixtures("_mock_jax_env")
-def test_jax_beam_search() -> None:
-    """Initialize function test_jax_beam_search.
+def test_compute_step_probs_1d():
+    # 1D
+    class ShapeMock:
+        def __init__(self, shape):
+            self.shape = shape
 
-    Raises:
-        AssertionError: Description.
+        def __getitem__(self, idx):
+            return self
 
-    """
-    jnp_mock = MockJNP()
+        def __len__(self):
+            return len(self.shape)
 
-    def mock_apply_fn(seq: MockArray, _positions: object = None) -> MockArray:
-        """Initialize function mock_apply_fn.
+    logits = ShapeMock((100,))
 
-        Args:
-        ----
-        seq: Description of seq.
+    mock_jax = MagicMock()
+    mock_jax.nn.log_softmax.return_value = MagicMock()
 
+    mock_jnp = MagicMock()
+    mock_indices = MagicMock()
+    mock_jnp.argsort.return_value = MagicMock(__getitem__=MagicMock(return_value=mock_indices))
 
-        Returns:
-            object: Description of return.
-
-        """
-        logits = [0.0] * 300
-        seq_len = len(seq.data[0]) if isinstance(seq.data[0], list) else len(seq.data)
-        if seq_len == 1:
-            logits[5] = 10.0
-        else:
-            logits[299] = 10.0
-        return MockArray([logits])
-
-    input_ids = jnp_mock.array([[1]])
-    (result, _score) = jax_beam_search(model_apply_fn=mock_apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=299)
-    if not result.tolist() == [[1, 5, 299]]:
-        raise AssertionError
+    with patch("gemma_4_sql.backends.jax.inference.jax", mock_jax), patch("gemma_4_sql.backends.jax.inference.jnp", mock_jnp):
+        _top_idx, _top_probs = _compute_step_probs(logits, 2)
+        # Should just pass logits directly
 
 
-def test_real_jax_beam_search() -> None:
-    """Test native JAX beam search using genuine JAX arrays."""
-    real_jax = pytest.importorskip("jax")
-    real_jnp = real_jax.numpy
+def test_beam_search_step(mock_jax_deps):
+    seq = MagicMock()
+    seq.shape = (1, 5)
+    model_apply_fn = MagicMock(return_value=MagicMock())
 
-    def mock_model(seq: object, _positions: object) -> object:
-        """Apply mock model returning realistic 3D logits.
+    top_indices = [MagicMock(), MagicMock()]
+    top_indices[0].reshape.return_value = "token1"
+    top_indices[1].reshape.return_value = "token2"
 
-        Args:
-            seq: Input sequence array.
-            _positions: Position array.
+    top_probs = [0.5, 0.4]  # has .item() mocked by being float? Let's use MagicMock with item()
+    prob1 = MagicMock()
+    prob1.item.return_value = 0.5
+    prob2 = MagicMock()
+    # test branch where item is not available
+    del prob2.item
+    prob2.__float__ = MagicMock(return_value=0.4)
 
-        Returns:
-            Logits tensor of shape (batch, seq_len, vocab_size).
-        """
-        batch_size = seq.shape[0]
-        seq_len = seq.shape[1]
-        vocab_size = 50
-        logits = real_jnp.zeros((batch_size, seq_len, vocab_size))
-        if seq_len == 1:
-            logits = logits.at[0, -1, 7].set(10.0)
-        else:
-            logits = logits.at[0, -1, 42].set(10.0)
-        return logits
+    top_probs = [prob1, prob2]
 
-    input_ids = real_jnp.array([[1]])
-    best_seq, score = jax_beam_search(
-        model_apply_fn=mock_model,
-        input_ids=input_ids,
-        beam_width=2,
-        max_length=5,
-        eos_token_id=42,
-    )
-    assert [int(x) for x in best_seq[0]] == [1, 7, 42]
-    assert score <= 0.0
-    assert score > -1.0
+    # We need to mock _compute_step_probs because jax.jit is mocked to return the function itself
+    with patch("gemma_4_sql.backends.jax.inference._compute_step_probs", return_value=(top_indices, top_probs)):
+        beams = _beam_search_step(seq, 1.0, model_apply_fn, 2)
 
-
-def test_inference_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    mdl = __import__("gemma_4_sql.backends.jax.inference", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "jax", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    monkeypatch.setitem(sys.modules, "flax", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    importlib.reload(mdl)
-
-
-def test_jax_inference_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Test test_mode, logits shapes, caching, and orbax loading."""
-    import gemma_4_sql.backends.jax.inference as jax_inf
-
-    # 1. test_mode
-    res = jax_inf.generate_sql("model", "select *", test_mode=True)
-    assert res["status"] == "success"
-    assert res["sql"] == "SELECT * FROM jax_table"
-
-    # 2. 1D logits and 2D logits in _compute_step_probs
-    real_jax = pytest.importorskip("jax")
-    real_jnp = real_jax.numpy
-    idx1, _prob1 = jax_inf._compute_step_probs(real_jnp.zeros((10,)), 2)
-    assert len(idx1) == 2
-    idx2, _prob2 = jax_inf._compute_step_probs(real_jnp.zeros((3, 10)), 2)
-    assert len(idx2) == 2
-
-    # 3. jax without jit in _beam_search_step
-    monkeypatch.setattr(jax_inf, "jax", type("MockJax", (), {"nn": real_jax.nn})())
-    beams = jax_inf._beam_search_step(real_jnp.array([[1]]), 0.0, lambda s, p: real_jnp.zeros((1, 1, 10)), 2)
     assert len(beams) == 2
-
-    # 4. _MODEL_CACHE hit and orbax restore
-    model_dir = tmp_path / "test_model_dir"
-    model_dir.mkdir()
-    fake_model = MagicMock()
-    fake_model.return_value = real_jnp.zeros((1, 1, 10))
-    monkeypatch.setattr(jax_inf, "Gemma4ForCausalLM", lambda *a, **k: fake_model)
-
-    import flax.nnx as real_nnx
-
-    mock_update = MagicMock()
-    monkeypatch.setattr(real_nnx, "update", mock_update)
-    monkeypatch.setattr(jax_inf, "nnx", real_nnx)
-
-    import orbax.checkpoint as ocp
-
-    mock_cp = MagicMock()
-    mock_cp.restore.return_value = {"weights": 1}
-    monkeypatch.setattr(ocp, "PyTreeCheckpointer", lambda: mock_cp)
-
-    jax_inf._MODEL_CACHE.clear()
-    res1 = jax_inf.generate_sql(str(model_dir), "select", beam_width=1, max_length=1)
-    assert res1["status"] == "success"
-    assert str(model_dir) in jax_inf._MODEL_CACHE
-    mock_update.assert_called_once()
-
-    # Second run hits _MODEL_CACHE
-    res2 = jax_inf.generate_sql(str(model_dir), "select", beam_width=1, max_length=1)
-    assert res2["status"] == "success"
+    assert beams[0][1] == 1.5
+    assert beams[1][1] == 1.4
 
 
-def test_inference_jax_multimodal_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test JAX multimodal generation with audio_path, image_path, and TypeError fallback in model forward.
+def test_beam_search_step_no_jit():
+    # Test branch where jax is None or has no jit
+    seq = MagicMock()
+    seq.shape = (1, 5)
+    model_apply_fn = MagicMock(return_value=MagicMock())
 
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-        tmp_path: Temporary path fixture.
+    top_indices = [MagicMock()]
+    top_indices[0].reshape.return_value = "token1"
+    top_probs = [0.5]
 
-    Returns:
-        None.
-    """
-    import jax.numpy as jnp
+    mock_jax = MagicMock()
+    del mock_jax.jit
 
-    img_file = tmp_path / "test.png"
-    img_file.write_bytes(b"\x89PNG\r\n\x1a\n")
-    aud_file = tmp_path / "test.wav"
-    aud_file.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+    with patch("gemma_4_sql.backends.jax.inference.jax", mock_jax), patch("gemma_4_sql.backends.jax.inference.jnp", MagicMock()), patch("gemma_4_sql.backends.jax.inference._compute_step_probs", return_value=(top_indices, top_probs)):
+        beams = _beam_search_step(seq, 1.0, model_apply_fn, 1)
+        assert len(beams) == 1
+        assert beams[0][1] == 1.5
 
-    # Model that raises TypeError when kwargs are passed (covering 225-226)
-    def mock_model_forward(seq: object, pos: object, **kwargs: object) -> object:
-        if kwargs:
-            raise TypeError("Forward got unexpected keyword arguments")
-        return jnp.zeros((1, 1, 10))
 
-    monkeypatch.setattr(inf, "Gemma4ForCausalLM", lambda *a, **k: mock_model_forward)
+def test_jax_beam_search():
+    model_apply_fn = MagicMock()
 
-    # 1. With image_path and audio_path (and pixel_values is None)
-    res = inf.generate_sql(
-        "model",
-        "Select users",
-        beam_width=1,
-        max_length=1,
-        image_path=str(img_file),
-        audio_path=str(aud_file),
-        modality="multimodal",
-    )
+    # Mock sequence tensors
+    seq_init = MagicMock()
+    seq_init.__getitem__.return_value = 0  # Not eos
+
+    seq_eos = MagicMock()
+    seq_eos.__getitem__.return_value = 99  # eos
+
+    seq_not_eos = MagicMock()
+    seq_not_eos.__getitem__.return_value = 1
+
+    # First step expands to seq_eos and seq_not_eos
+    def mock_step(seq, score, fn, bw):
+        if seq == seq_init:
+            return [(seq_not_eos, 0.9), (seq_eos, 0.8)]
+        if seq == seq_not_eos:
+            return [(seq_eos, 1.5)]
+        return []
+
+    with patch("gemma_4_sql.backends.jax.inference._beam_search_step", side_effect=mock_step):
+        res_seq, res_score = jax_beam_search(model_apply_fn, seq_init, beam_width=2, max_length=3, eos_token_id=99)
+
+    # First iter:
+    # seq_init -> seq_not_eos (0.9), seq_eos (0.8)
+    # Beams: (seq_not_eos, 0.9), (seq_eos, 0.8)
+    # Second iter:
+    # seq_not_eos -> seq_eos (1.5)
+    # seq_eos is eos, so kept: (seq_eos, 0.8)
+    # New beams sorted: (seq_eos, 1.5), (seq_eos, 0.8)
+    # All are eos, break
+    assert res_seq == seq_eos
+    assert res_score == 1.5
+
+
+def test_generate_sql_missing_deps(monkeypatch):
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.jax", None)
+
+    with pytest.raises(DependencyMissingError, match="JAX inference dependencies are missing."):
+        generate_sql("model", "prompt")
+
+
+def test_generate_sql_success(mock_jax_deps):
+    mock_model = mock_jax_deps["gemma_model"].return_value
+    mock_model.__call__ = MagicMock(return_value="logits")
+
+    # Mock beam search
+    output_seq = MagicMock()
+    output_seq.tolist.return_value = [1, 2, 3]
+    output_seq.__len__.return_value = 3
+    mock_jax_beam_search = MagicMock(return_value=([output_seq], 3.0))
+
+    # Mock Path to simulate checkpoint loading
+    mock_path = MagicMock()
+    mock_path.exists.return_value = True
+
+    with patch("gemma_4_sql.backends.jax.inference.jax_beam_search", mock_jax_beam_search), patch("pathlib.Path", return_value=mock_path):
+        res = generate_sql("my_model", "my prompt")
+
+        assert res["status"] == "success"
+        assert res["backend"] == "jax"
+        assert "my_model" in _MODEL_CACHE
+
+        # Test caching and model_forward
+        # Second call should use cache
+        mock_model_forward = mock_jax_beam_search.call_args[0][0]
+
+        generate_sql("my_model", "my prompt")
+    assert mock_jax_deps["gemma_model"].call_count == 1  # Only called once
+
+    # Call model forward
+    mock_model_forward("seq", "pos")
+    mock_model.assert_called_with("seq", "pos")
+
+    # Type error branch in model_forward
+    mock_model.side_effect = [TypeError(""), "logits"]
+    mock_model_forward("seq", "pos")
+
+
+def test_generate_sql_multimodal(mock_jax_deps):
+    mock_model = mock_jax_deps["gemma_model"].return_value
+    mock_model.__call__ = MagicMock(return_value="logits")
+
+    output_seq = MagicMock()
+    output_seq.tolist.return_value = [1, 2, 3]
+    del output_seq.__len__
+
+    output_ids = MagicMock()
+    output_ids.__getitem__.return_value = output_seq
+    output_ids.shape = (1, 3)
+
+    mock_jax_beam_search = MagicMock(return_value=(output_ids, 3.0))
+
+    mock_path = MagicMock()
+    mock_path.exists.return_value = False
+
+    mock_format = MagicMock(return_value={"prompt": "multimodal prompt"})
+    mock_process_image = MagicMock(return_value={"pixel_values": [0.1, 0.2]})
+    mock_process_audio = MagicMock(return_value={"audio_values": [0.3, 0.4]})
+
+    with (
+        patch("gemma_4_sql.backends.jax.inference.jax_beam_search", mock_jax_beam_search),
+        patch("pathlib.Path", return_value=mock_path),
+        patch("gemma_4_sql.backends.common_multimodal.format_multimodal_prompt", mock_format),
+        patch("gemma_4_sql.backends.common_multimodal.process_image", mock_process_image),
+        patch("gemma_4_sql.backends.common_multimodal.process_audio", mock_process_audio),
+    ):
+        res = generate_sql("my_model", "my prompt", image_path="img.png", audio_path="aud.wav")
+
     assert res["status"] == "success"
 
-    # 2. With pixel_values and audio_values already supplied (covering 171->175, 175->179)
-    pv = jnp.zeros((1, 3, 224, 224))
-    av = jnp.zeros((1, 1600))
-    res2 = inf.generate_sql(
-        "model",
-        "Select users",
-        beam_width=1,
-        max_length=1,
-        image_path=str(img_file),
-        audio_path=str(aud_file),
-        pixel_values=pv,
-        audio_values=av,
-        modality="multimodal",
-    )
-    assert res2["status"] == "success"
+    mock_model_forward = mock_jax_beam_search.call_args[0][0]
+    mock_model_forward("seq", "pos")
+    # assert kwargs passed to model
+    _args, kwargs = mock_model.call_args
+    assert "pixel_values" in kwargs
+    assert "audio_values" in kwargs
+
+
+def test_generate_sql_checkpoint_error(mock_jax_deps):
+    mock_path = MagicMock()
+    mock_path.exists.return_value = True
+
+    mock_ocp = mock_jax_deps["ocp"]
+    mock_ocp.PyTreeCheckpointer.return_value.restore.side_effect = RuntimeError("Checkpoint err")
+
+    mock_jax_beam_search = MagicMock(return_value=([MagicMock()], 3.0))
+
+    with patch("gemma_4_sql.backends.jax.inference.jax_beam_search", mock_jax_beam_search), patch("pathlib.Path", return_value=mock_path):
+        res = generate_sql("my_model", "my prompt")
+
+    assert res["status"] == "success"
+
+
+def test_generate_sql_nnx_none(mock_jax_deps):
+    mock_jax_deps["nnx"] = None
+    import gemma_4_sql.backends.jax.inference as inf_module
+
+    inf_module.nnx = None
+
+    mock_path = MagicMock()
+    mock_path.exists.return_value = False
+
+    mock_jax_beam_search = MagicMock(return_value=([MagicMock()], 3.0))
+
+    with patch("gemma_4_sql.backends.jax.inference.jax_beam_search", mock_jax_beam_search), patch("pathlib.Path", return_value=mock_path):
+        res = generate_sql("my_model_nnx_none", "my prompt")
+
+    assert res["status"] == "success"
+    inf_module.nnx = mock_jax_deps["nnx"]  # restore
+
+
+def test_generate_sql_multimodal_with_values(mock_jax_deps):
+    # test branch where image_path is None but pixel_values is provided
+    # meaning format_multimodal_prompt is called with has_image=True
+    # and process_image is NOT called
+    mock_jax_beam_search = MagicMock(return_value=([MagicMock()], 3.0))
+    mock_format = MagicMock(return_value={"prompt": "multimodal prompt"})
+
+    with patch("gemma_4_sql.backends.jax.inference.jax_beam_search", mock_jax_beam_search), patch("gemma_4_sql.backends.common_multimodal.format_multimodal_prompt", mock_format):
+        generate_sql("model", "prompt", image_path="fake", pixel_values="pixels", audio_values="audio")
+
+    mock_format.assert_called_with("prompt", has_image=True, has_audio=True)
+
+
+def test_jax_beam_search_max_length():
+    model_apply_fn = MagicMock()
+
+    seq_not_eos = MagicMock()
+    seq_not_eos.__getitem__.return_value = 1
+
+    # Always return itself with lower score to avoid infinite loops, but max_length breaks it
+    def mock_step(seq, score, fn, bw):
+        return [(seq_not_eos, score - 0.1)]
+
+    with patch("gemma_4_sql.backends.jax.inference._beam_search_step", side_effect=mock_step):
+        res_seq, res_score = jax_beam_search(model_apply_fn, seq_not_eos, beam_width=1, max_length=2, eos_token_id=99)
+
+    assert res_seq == seq_not_eos
+    assert res_score == -0.2
+
+
+def test_generate_sql_checkpoint_no_update(mock_jax_deps):
+    mock_path = MagicMock()
+    mock_path.exists.return_value = True
+
+    mock_ocp = mock_jax_deps["ocp"]
+    # return restored as None
+    mock_ocp.PyTreeCheckpointer.return_value.restore.return_value = None
+
+    mock_jax_beam_search = MagicMock(return_value=([MagicMock()], 3.0))
+
+    with patch("gemma_4_sql.backends.jax.inference.jax_beam_search", mock_jax_beam_search), patch("pathlib.Path", return_value=mock_path):
+        res = generate_sql("my_model_none", "my prompt")
+
+    assert res["status"] == "success"

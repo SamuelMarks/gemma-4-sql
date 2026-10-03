@@ -35,6 +35,7 @@ class Gemma4AudioCrossAttention(nn.Module):
 
         Returns:
             Attention output tensor.
+
         """
         q = self.q_proj(hidden_states)
         k = self.k_proj(audio_states)

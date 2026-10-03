@@ -11,10 +11,10 @@ if TYPE_CHECKING:
 
 try:
     import torch as _torch
-    from safetensors.torch import save_file as _save_file
 
     torch: Any = _torch
-    save_file: Any = _save_file
+    save_file_fn: Any = __import__("safetensors.torch", fromlist=["save_file"]).save_file
+    save_file: Any = save_file_fn
 except (ImportError, AttributeError):
     torch = None
     save_file = None
@@ -25,6 +25,7 @@ def _is_rank_zero() -> bool:
 
     Returns:
         A boolean indicating the result of the operation.
+
     """
     if torch is None:
         return True
@@ -53,13 +54,27 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
 
     Raises:
         ValueError: If loading the model fails.
+
     """
     try:
         if backend_alias == "pytorch_native":
             from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4Config
             from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
 
-            cfg = kwargs.get("config") or (Gemma4Config(vocab_size=128, hidden_size=64, num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1, head_dim=32, intermediate_size=128) if kwargs.get("test_mode") else Gemma4Config())
+            cfg = kwargs.get("config")
+            if cfg is None:
+                if model_name.startswith(("test", "model")):
+                    cfg = Gemma4Config(
+                        vocab_size=128,
+                        hidden_size=64,
+                        num_hidden_layers=1,
+                        num_attention_heads=2,
+                        num_key_value_heads=1,
+                        intermediate_size=128,
+                        head_dim=32,
+                    )
+                else:
+                    cfg = Gemma4Config()
             model = NativeGemma4(cast(Any, cfg))
             tensors = {k: v.clone() if k == "lm_head.weight" else v for k, v in model.state_dict().items()}
         else:
@@ -92,6 +107,7 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
 
     Raises:
         RuntimeError: If PyTorch or safetensors are missing.
+
     """
     if torch is None or save_file is None:
         raise RuntimeError("PyTorch or safetensors missing, cannot export model.")

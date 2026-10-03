@@ -26,6 +26,7 @@ class Gemma4MoERouter(nn.Module):
 
         Returns:
             Tuple of routing weights, selected experts indices, and router logits.
+
         """
         if self.training and self.router_jitter_noise > 0:
             jitter = torch.empty_like(hidden_states).uniform_(-self.router_jitter_noise, self.router_jitter_noise)
@@ -50,6 +51,7 @@ def calculate_load_balancing_loss(router_logits: torch.Tensor, num_experts: int,
 
     Returns:
         Auxiliary load balancing loss tensor.
+
     """
     router_probs = F.softmax(router_logits, dim=-1)
     router_probs_mean = router_probs.mean(dim=0)
@@ -81,6 +83,7 @@ class Gemma4MoE(nn.Module):
 
         Returns:
             Tuple of combined hidden states and auxiliary load balancing loss.
+
         """
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)

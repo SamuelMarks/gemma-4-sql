@@ -37,6 +37,14 @@ def test_jax_export_missing_ocp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
 
 def test_jax_export_model1(tmp_path: Path) -> None:
     """Test JAX export for model1."""
+    import importlib
+    import sys
+
+    for m in ["jax", "jax.numpy", "orbax.checkpoint", "gemma_4_sql.backends.jax.export"]:
+        if m in sys.modules and sys.modules[m] is None:
+            del sys.modules[m]
+    if "gemma_4_sql.backends.jax.export" in sys.modules:
+        importlib.reload(sys.modules["gemma_4_sql.backends.jax.export"])
     import gemma_4_sql.backends.jax.export as jexp
 
     res = jexp.export_model("model1", str(tmp_path / "jax_export"))
@@ -90,10 +98,17 @@ def test_keras_export_missing_deps(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
 def test_keras_inference_missing_tf(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test Keras inference raises DependencyMissingError when tf is missing."""
+    import sys
+
     import gemma_4_sql.backends.keras.inference as kinf
 
+    # Due to module reloading in other tests, kinf might be stale.
+    # Get the latest from sys.modules if present
+    if "gemma_4_sql.backends.keras.inference" in sys.modules:
+        kinf = sys.modules["gemma_4_sql.backends.keras.inference"]
+
     monkeypatch.setattr(kinf, "tf", None)
-    with pytest.raises(DependencyMissingError):
+    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
         kinf.generate_sql("foo", "bar")
 
 
@@ -102,7 +117,10 @@ def test_keras_inference_test_mode() -> None:
     """Test Keras inference handles missing keras_nlp gracefully."""
     import gemma_4_sql.backends.keras.inference as kinf
 
-    res = kinf.generate_sql("foo", "bar", test_mode=True)
+    res = kinf.generate_sql(
+        "foo",
+        "bar",
+    )
     assert "status" in res
     assert "failed" in res["status"] or res["status"] == "success"
 

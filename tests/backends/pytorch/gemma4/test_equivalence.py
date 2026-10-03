@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
 import torch
 
+from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config as PtGemma4Config
+from gemma_4_sql.backends.pytorch.gemma4.layers import Gemma4RMSNorm as PtRMSNorm
+from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as PtGemma4ForCausalLM
+from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_pytorch
+
 jax = pytest.importorskip("jax")
-import jax.numpy as jnp
 
 try:
     from flax import nnx
@@ -17,11 +22,6 @@ try:
     from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM as JaxGemma4ForCausalLM
 except ImportError:
     pytest.skip("Flax/JAX Gemma4 modeling not available", allow_module_level=True)
-
-from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config as PtGemma4Config
-from gemma_4_sql.backends.pytorch.gemma4.layers import Gemma4RMSNorm as PtRMSNorm
-from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as PtGemma4ForCausalLM
-from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_pytorch
 
 
 def test_logit_equivalence() -> None:

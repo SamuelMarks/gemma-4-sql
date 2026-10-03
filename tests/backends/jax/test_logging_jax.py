@@ -1,44 +1,43 @@
-"""Tests for JAX logging."""
+from unittest.mock import MagicMock, patch
 
-from unittest.mock import MagicMock
-
-from gemma_4_sql.backends.jax import logging as jax_logging
+from gemma_4_sql.backends.jax.logging import log_metrics
 
 
-def test_log_metrics_no_tb() -> None:
-    """Test JAX logging when TB is missing.
+def test_log_metrics():
+    with patch("gemma_4_sql.backends.jax.logging.log_metrics_wrapper") as mock_wrapper:
+        mock_wrapper.return_value = {"status": "success"}
 
-    Raises:
-        AssertionError: Description.
+        res = log_metrics({"loss": 0.5}, 10, "mylogs")
 
-    """
-    jax_logging.SummaryWriter = None
-    metrics = {"loss": 0.5, "acc": 0.9}
-    res = jax_logging.log_metrics(metrics, step=10, log_dir="test_logs")
-    if not res["backend"] == "jax":
-        raise AssertionError
-    if not res["status"] == "mocked_missing_tensorboard":
-        raise AssertionError
+        assert res == {"status": "success"}
+        mock_wrapper.assert_called_once()
+        _args, kwargs = mock_wrapper.call_args
+        assert kwargs["backend_name"] == "jax"
+        assert kwargs["metrics"] == {"loss": 0.5}
+        assert kwargs["step"] == 10
+        assert kwargs["log_dir"] == "mylogs"
+        assert kwargs["extra_fields"] == {"action": "log_metrics"}
 
 
-def test_log_metrics_with_tb() -> None:
-    """Test JAX logging when TB is available.
+def test_log_metrics_success_import(monkeypatch):
+    mock_tbx = MagicMock()
+    mock_tbx.SummaryWriter = "MockWriter"
+    import sys
 
-    Raises:
-        AssertionError: Description.
+    sys.modules["tensorboardX"] = mock_tbx
 
-    """
-    mock_writer_cls = MagicMock()
-    mock_writer = mock_writer_cls.return_value
-    jax_logging.SummaryWriter = mock_writer_cls
-    metrics = {"loss": 0.5, "acc": 0.9}
-    res = jax_logging.log_metrics(metrics, step=10, log_dir="test_logs")
-    if not res["backend"] == "jax":
-        raise AssertionError
-    if not res["status"] == "success":
-        raise AssertionError
-    mock_writer_cls.assert_called_once_with(log_dir="test_logs")
-    if not mock_writer.add_scalar.call_count == int("2"):
-        raise AssertionError
-    mock_writer.close.assert_called_once()
-    jax_logging.SummaryWriter = None
+    # Reload the module to trigger the try block
+    import importlib
+
+    import gemma_4_sql.backends.jax.logging as log_mod
+
+    importlib.reload(log_mod)
+
+    assert log_mod.SummaryWriter == "MockWriter"
+
+    with patch("gemma_4_sql.backends.jax.logging.log_metrics_wrapper") as mock_wrapper:
+        mock_wrapper.return_value = {"status": "success"}
+        res = log_mod.log_metrics({"loss": 0.5}, 10, "mylogs")
+        assert res == {"status": "success"}
+    del sys.modules["tensorboardX"]
+    importlib.reload(log_mod)

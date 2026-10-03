@@ -27,10 +27,9 @@ def _route_training(config: TrainingConfig) -> JSONDict:
 
     Returns:
         A dictionary containing the results.
+
     """
     backend = config.backend
-    if config.extra_kwargs is None:  # pragma: no cover
-        config.extra_kwargs = {}
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     return get_backend(backend).train_model(config)
 
@@ -43,6 +42,7 @@ def train_from_scratch(config: TrainingConfig | None = None) -> JSONDict:
 
     Returns:
         A dictionary indicating the training job status.
+
     """
     cfg = copy.copy(config) if config is not None else TrainingConfig()
     cfg.action = "train_from_scratch"
@@ -57,6 +57,7 @@ def pretrain_model(config: TrainingConfig | None = None) -> JSONDict:
 
     Returns:
         A dictionary indicating the pretraining job status.
+
     """
     cfg = copy.copy(config) if config is not None else TrainingConfig(backend="maxtext")
     cfg.action = "pretrain"
@@ -71,6 +72,7 @@ def sft_model(config: TrainingConfig | None = None) -> JSONDict:
 
     Returns:
         A dictionary indicating the SFT job status.
+
     """
     cfg = copy.copy(config) if config is not None else TrainingConfig()
     cfg.action = "sft"
@@ -85,6 +87,7 @@ def posttrain_model(config: TrainingConfig | None = None) -> JSONDict:
 
     Returns:
         A dictionary indicating the post-training job status.
+
     """
     cfg = copy.copy(config) if config is not None else TrainingConfig(backend="keras")
     cfg.action = "posttrain"

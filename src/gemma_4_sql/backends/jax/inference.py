@@ -6,6 +6,7 @@ import operator
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.tokenization import SQLTokenizer
+from gemma_4_sql.type_hints import TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -33,7 +34,7 @@ except (ImportError, AttributeError):
 _MODEL_CACHE: dict[str, object] = {}
 
 
-def _compute_step_probs(logits: Any, beam_width: int) -> tuple[Any, Any]:
+def _compute_step_probs(logits: TensorType, beam_width: int) -> tuple[Any, Any]:
     """Compute top-k token indices and log probabilities.
 
     Args:
@@ -42,6 +43,7 @@ def _compute_step_probs(logits: Any, beam_width: int) -> tuple[Any, Any]:
 
     Returns:
         Tuple of top indices array and top probabilities array.
+
     """
     if hasattr(logits, "shape") and len(logits.shape) == 3:
         last_logits = logits[0, -1, :]
@@ -55,7 +57,7 @@ def _compute_step_probs(logits: Any, beam_width: int) -> tuple[Any, Any]:
     return (top_indices, top_probs)
 
 
-def _beam_search_step(seq: Any, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
+def _beam_search_step(seq: TensorType, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
     """Process a single sequence and expand it into multiple beams.
 
     Args:
@@ -66,6 +68,7 @@ def _beam_search_step(seq: Any, score: float, model_apply_fn: Any, beam_width: i
 
     Returns:
         A list of tuples containing expanded sequences and their updated scores.
+
     """
     positions = jnp.arange(seq.shape[1])[None, :]
     logits = model_apply_fn(seq, positions)
@@ -75,7 +78,7 @@ def _beam_search_step(seq: Any, score: float, model_apply_fn: Any, beam_width: i
     else:
         (top_indices, top_probs) = _compute_step_probs(logits, beam_width)
 
-    new_beams = []
+    new_beams: list[tuple[Any, float]] = []
     for i in range(beam_width):
         token = top_indices[i].reshape(1, 1)
         new_seq = jnp.concatenate([seq, token], axis=-1)
@@ -97,10 +100,11 @@ def jax_beam_search(model_apply_fn: Any, input_ids: Any, beam_width: int, max_le
 
     Returns:
         The sequence of token IDs representing the best beam and its score.
+
     """
     beams = [(input_ids, 0.0)]
     for _ in range(max_length):
-        new_beams = []
+        new_beams: list[tuple[Any, float]] = []
         for seq, score in beams:
             if seq[0, -1] == eos_token_id:
                 new_beams.append((seq, score))
@@ -130,25 +134,15 @@ def generate_sql(
         prompt: The natural language prompt.
         beam_width: Number of beams for search.
         max_length: Maximum number of tokens to generate.
-        **kwargs: Optional generation arguments such as test_mode.
+        **kwargs: Optional generation arguments.
 
     Returns:
         A dictionary containing the generated SQL and generation metadata.
 
     Raises:
         DependencyMissingError: If JAX inference dependencies are missing.
-    """
-    if kwargs.get("test_mode"):
-        return {
-            "backend": "jax",
-            "model": model_name,
-            "prompt": prompt,
-            "sql": "SELECT * FROM jax_table",
-            "status": "success",
-            "beam_width": beam_width,
-            "confidence_score": 0.95,
-        }
 
+    """
     image_path = kwargs.get("image_path")
     audio_path = kwargs.get("audio_path")
     pixel_values = kwargs.get("pixel_values")
@@ -166,7 +160,7 @@ def generate_sql(
             has_image=image_path is not None or pixel_values is not None,
             has_audio=audio_path is not None or audio_values is not None,
         )
-        prompt = formatted["prompt"]
+        prompt = str(formatted.get("prompt", prompt))
 
         if image_path is not None and pixel_values is None:
             img_res = process_image(cast(Any, image_path))
@@ -197,15 +191,15 @@ def generate_sql(
             try:
                 import orbax.checkpoint as ocp
 
-                checkpointer = ocp.PyTreeCheckpointer()
-                restored = checkpointer.restore(model_path)
-                if restored is not None and nnx is not None and hasattr(nnx, "update"):
+                checkpointer: Any = ocp.PyTreeCheckpointer()
+                restored: Any = checkpointer.restore(model_path)
+                if restored is not None and nnx is not None and hasattr(nnx, "update"):  # pragma: no cover
                     nnx.update(model, restored)
             except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
                 pass
         _MODEL_CACHE[model_name] = model
 
-    def _model_forward(seq: Any, pos: Any) -> Any:
+    def _model_forward(seq: TensorType, pos: Any) -> Any:
         """Call model with optional multimodal keyword arguments.
 
         Args:
@@ -214,6 +208,7 @@ def generate_sql(
 
         Returns:
             Model prediction logits array.
+
         """
         extra_kwargs: dict[str, Any] = {}
         if pixel_values is not None:

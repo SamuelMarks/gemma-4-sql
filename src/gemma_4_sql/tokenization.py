@@ -27,6 +27,7 @@ class SQLTokenizer:
         Args:
             vocab_size: The integer value for vocabulary size.
             model_name: Optional model identifier or path to Hugging Face tokenizer.
+
         """
         self.vocab_size = vocab_size
         self.model_name = model_name
@@ -47,6 +48,7 @@ class SQLTokenizer:
 
         Returns:
             A dictionary mapping token strings or byte representations to integer IDs.
+
         """
         if self.hf_tokenizer is not None and hasattr(self.hf_tokenizer, "get_vocab"):
             return dict(self.hf_tokenizer.get_vocab())
@@ -60,9 +62,11 @@ class SQLTokenizer:
 
         Returns:
             A list of integer token IDs.
+
         """
         if self.hf_tokenizer is not None:
-            return cast("list[int]", self.hf_tokenizer.encode(text, add_special_tokens=False))
+            res: Any = self.hf_tokenizer.encode(text, add_special_tokens=False)
+            return cast(list[int], res)
         try:
             return list(text.encode("utf-8"))
         except (UnicodeEncodeError, AttributeError):
@@ -79,10 +83,11 @@ class SQLTokenizer:
 
         Returns:
             The decoded text string.
+
         """
         if self.hf_tokenizer is not None:
             return str(self.hf_tokenizer.decode(tokens))
         try:
             return bytes([int(t) % 256 for t in tokens]).decode("utf-8", errors="replace")
         except (ValueError, TypeError):
-            return "".join(chr(int(t) % self.vocab_size) for t in tokens if isinstance(t, int) or hasattr(t, "__int__"))
+            return "".join(chr(int(t) % self.vocab_size) for t in tokens if hasattr(t, "__int__"))

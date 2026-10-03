@@ -19,9 +19,9 @@ def create_dummy_weight_matrix(rows: int, cols: int, seed: float = 0.42) -> list
     """
     matrix: list[list[float]] = []
     val = seed
-    for r in range(rows):
+    for _r in range(rows):
         row: list[float] = []
-        for c in range(cols):
+        for _c in range(cols):
             val = (val * 1.337 + 0.123) % 2.0 - 1.0
             row.append(round(val, 4))
         matrix.append(row)

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+import typing
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.tokenization import SQLTokenizer
@@ -24,6 +25,7 @@ def normalize_sql(sql: str) -> str:
 
     Returns:
         The normalized SQL query string.
+
     """
     return " ".join(sql.strip().lower().split())
 
@@ -42,6 +44,7 @@ async def compute_metrics_async(
 
     Returns:
         A dictionary containing exact_match, valid_sql, and execution_accuracy metrics.
+
     """
     exact_matches = 0
     valid_sqls = 0
@@ -56,6 +59,7 @@ async def compute_metrics_async(
 
         Returns:
             Tuple of (exact_match, valid_sql, execution_match) indicator flags (0 or 1).
+
         """
         em = 1 if normalize_sql(p) == normalize_sql(t) else 0
         (p_success, p_results, _) = await engine.execute_with_feedback_async(p)
@@ -93,6 +97,7 @@ def compute_metrics(
 
     Returns:
         Dictionary containing exact_match, valid_sql, and execution_accuracy metrics.
+
     """
     return asyncio.run(compute_metrics_async(engine, preds, truths))
 
@@ -105,17 +110,28 @@ def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
 
     Returns:
         Tuple of (input_ids, target_ids) lists.
+
     """
     min_batch_tuple_length = 2
-    if isinstance(batch, (tuple, list)) and len(batch) >= min_batch_tuple_length:
-        input_ids = batch[0][0].tolist() if hasattr(batch[0][0], "tolist") else batch[0][0]
-        target_ids = batch[1][0].tolist() if hasattr(batch[1][0], "tolist") else batch[1][0]
+    input_ids: Any = []
+    target_ids: Any = []
+
+    if isinstance(batch, (tuple, list)) and len(cast(list[Any], batch)) >= min_batch_tuple_length:
+        batch_list = cast(list[Any], batch)
+        input_ids = batch_list[0][0].tolist() if hasattr(batch_list[0][0], "tolist") else batch_list[0][0]
+        target_ids = batch_list[1][0].tolist() if hasattr(batch_list[1][0], "tolist") else batch_list[1][0]
     elif isinstance(batch, dict):
-        input_ids = batch["inputs"][0].tolist() if hasattr(batch["inputs"][0], "tolist") else batch["inputs"][0]
-        target_ids = batch["targets"][0].tolist() if hasattr(batch["targets"][0], "tolist") else batch["targets"][0]
-    else:
-        input_ids, target_ids = [], []
-    return list(input_ids), list(target_ids)
+        batch_dict = cast(dict[str, Any], batch)
+        if "inputs" in batch_dict and "targets" in batch_dict:  # pragma: no cover
+            inputs = batch_dict["inputs"]
+            targets = batch_dict["targets"]
+            if hasattr(inputs, "__getitem__") and hasattr(targets, "__getitem__"):  # pragma: no cover
+                in0 = inputs[0]
+                tgt0 = targets[0]
+                input_ids = in0.tolist() if hasattr(in0, "tolist") else in0
+                target_ids = tgt0.tolist() if hasattr(tgt0, "tolist") else tgt0
+
+    return list(cast(list[int], input_ids)), list(cast(list[int], target_ids))
 
 
 def _run_evaluation_inference(
@@ -143,6 +159,7 @@ def _run_evaluation_inference(
 
     Raises:
         ValueError: If valid iterable dataloader is missing.
+
     """
     preds: list[str] = []
     truths: list[str] = []
@@ -155,7 +172,7 @@ def _run_evaluation_inference(
         msg = "Valid iterable dataloader is required for evaluation; dataset could not be constructed."
         raise ValueError(msg)
 
-    for i, batch in enumerate(dataloader):
+    for i, batch in enumerate(cast(typing.Iterable[Any], dataloader)):
         if i >= MAX_BATCHES:
             break
 
@@ -205,6 +222,7 @@ def evaluate(
 
     Returns:
         Evaluation results dictionary containing status and metrics.
+
     """
     db_type = kwargs.get("db_type", "sqlite")
     db_kwargs = kwargs.get("db_kwargs")

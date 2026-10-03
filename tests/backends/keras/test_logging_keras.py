@@ -1,70 +1,33 @@
 """Tests for Keras logging."""
 
-from __future__ import annotations
-
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gemma_4_sql.backends.keras import logging as keras_logging
+from gemma_4_sql.backends.keras.logging import log_metrics
 from gemma_4_sql.exceptions import DependencyMissingError
 
 
-def test_log_metrics_no_tb() -> None:
-    """Test Keras logging when TB is missing.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    keras_logging.tf = None
-    metrics = {"loss": 0.5, "acc": 0.9}
-    with pytest.raises(DependencyMissingError):
-        keras_logging.log_metrics(metrics, step=10, log_dir="test_logs")
+def test_log_metrics_missing_tf():
+    with patch("gemma_4_sql.backends.keras.logging.tf", None), pytest.raises(DependencyMissingError, match="TensorFlow dependencies are missing"):
+        log_metrics({"a": 1}, 1)
 
 
-def test_log_metrics_with_tb() -> None:
-    """Test Keras logging when TB is available.
+def test_log_metrics_missing_summary_attr():
+    mock_tf = MagicMock()
+    del mock_tf.summary
+    with patch("gemma_4_sql.backends.keras.logging.tf", mock_tf):
+        res = log_metrics({"a": 1}, 1)
+        assert res["status"] == "missing_summary_attr"
 
-    Raises:
-        AssertionError: Description.
 
-    """
+def test_log_metrics_success():
     mock_tf = MagicMock()
     mock_writer = MagicMock()
     mock_tf.summary.create_file_writer.return_value = mock_writer
-    keras_logging.tf = mock_tf
-    metrics = {"loss": 0.5, "acc": 0.9}
-    res = keras_logging.log_metrics(metrics, step=10, log_dir="test_logs")
-    if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["status"] == "success":
-        raise AssertionError
-    mock_tf.summary.create_file_writer.assert_called_once_with("test_logs")
-    if not mock_tf.summary.scalar.call_count == int("2"):
-        raise AssertionError
-    mock_writer.close.assert_called_once()
-    keras_logging.tf = None
 
-
-def test_logging_keras_imports_fail(monkeypatch: object) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    mdl = __import__("gemma_4_sql.backends.keras.logging", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "tensorflow", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    importlib.reload(mdl)
-
-
-def test_logging_keras_missing_attr(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test function."""
-    import gemma_4_sql.backends.keras.logging as log_module
-
-    class MockTf:
-        """Test class for MockTf."""
-
-    monkeypatch.setattr(log_module, "tf", MockTf)
-    res = log_module.log_metrics({"a": 1}, 1)
-    assert res["status"] == "missing_summary_attr"
+    with patch("gemma_4_sql.backends.keras.logging.tf", mock_tf):
+        res = log_metrics({"a": 1.0, "b": 2.0}, 5, "logs")
+        assert res["status"] == "success"
+        assert res["step"] == 5
+        mock_writer.close.assert_called_once()

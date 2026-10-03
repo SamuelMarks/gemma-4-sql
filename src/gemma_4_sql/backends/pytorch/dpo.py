@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -30,7 +30,7 @@ except (ImportError, AttributeError):
     functional = None
 
 
-def dpo_loss(policy_chosen_logps: Any, policy_rejected_logps: Any, ref_chosen_logps: Any, ref_rejected_logps: Any, beta: float = 0.1) -> tuple[Any, Any, Any]:
+def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[Any, Any, Any]:
     """Compute the DPO loss.
 
     Args:
@@ -42,13 +42,14 @@ def dpo_loss(policy_chosen_logps: Any, policy_rejected_logps: Any, ref_chosen_lo
 
     Returns:
         A tuple containing the results.
+
     """
     if torch is None or functional is None:
         return (0.0, 0.0, 0.0)
     return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, functional.logsigmoid)
 
 
-def _run_dpo_step(policy_model: Any, ref_model: Any, optimizer: Any, batch: JSONDict, beta: float) -> Any:
+def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: object, batch: JSONDict, beta: float) -> Any:
     """Run a single DPO training step.
 
     Returns:
@@ -90,11 +91,11 @@ def _run_training_epochs(state: TrainerState) -> float:
     final_loss = 0.0
     for _epoch in range(epochs):
         epoch_loss = 0.0
-        for batch in dataloader:
-            loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)
+        for batch in dataloader:  # type: ignore # Justified: Dynamic backend protocol typing
+            loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)  # type: ignore # Justified: Dynamic backend protocol typing
             loss_val = float(loss.item() if hasattr(loss, "item") else loss)
             epoch_loss += loss_val
-        final_loss = epoch_loss / max(1, len(dataloader))
+        final_loss = epoch_loss / max(1, len(dataloader))  # type: ignore # Justified: Dynamic backend protocol typing
     return float(final_loss)
 
 
@@ -111,6 +112,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     Raises:
         DependencyMissingError: If PyTorch dependencies are missing.
         ValueError: If model loading fails.
+
     """
     model_name = getattr(config, "model_name", "model")
     dataset = getattr(config, "dataset", "dataset")

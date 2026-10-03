@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 
-from .layers import Gemma4RMSNorm, _make_embed, _make_linear
+from .layers import Gemma4RMSNorm, make_embed, make_linear
 
 if TYPE_CHECKING:
     from .config import ModelConfig, VisionConfig
@@ -25,6 +25,7 @@ class SiglipVisionEmbeddings(nnx.Module):
         Args:
             config: The configuration parameters.
             rngs: The rngs.
+
         """
         self.config = config
         self.num_patches = (config.image_size // config.patch_size) ** 2
@@ -32,7 +33,7 @@ class SiglipVisionEmbeddings(nnx.Module):
         ki = functools.partial(jax.nn.initializers.lecun_normal())
         bi = functools.partial(jax.nn.initializers.zeros)
         self.patch_embedding = nnx.Conv(config.num_channels, config.hidden_size, kernel_size=(config.patch_size, config.patch_size), strides=(config.patch_size, config.patch_size), padding="valid", kernel_init=ki, bias_init=bi, rngs=rngs)
-        self.position_embedding = _make_embed(self.num_patches, config.hidden_size, embedding_metadata={}, rngs=rngs)
+        self.position_embedding = make_embed(self.num_patches, config.hidden_size, embedding_metadata={}, rngs=rngs)
         self.position_ids = jnp.expand_dims(jnp.arange(self.num_patches), 0)
 
     def __call__(self, pixel_values: Array) -> Array:
@@ -59,10 +60,10 @@ class SiglipAttention(nnx.Module):
         (hs, _shd) = (config.hidden_size, config.shd_cfg)
         km: dict[str, object] = {}
         bm: dict[str, object] = {}
-        self.q_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
-        self.k_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
-        self.v_proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
-        self.proj = _make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
+        self.q_proj = make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
+        self.k_proj = make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
+        self.v_proj = make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
+        self.proj = make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
 
     def __call__(self, x: Array) -> Array:
         """Apply multi-head attention.
@@ -95,8 +96,8 @@ class SiglipMLP(nnx.Module):
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
         """Docstring for __init__."""
         self.config = config
-        self.fc1 = _make_linear(config.hidden_size, config.intermediate_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.fc2 = _make_linear(config.intermediate_size, config.hidden_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.fc1 = make_linear(config.hidden_size, config.intermediate_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.fc2 = make_linear(config.intermediate_size, config.hidden_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
 
     def __call__(self, x: Array) -> Array:
         """Apply the MLP with tanh-approximate GELU activation.
@@ -193,7 +194,7 @@ class SiglipVisionTransformer(nnx.Module):
         return self.post_layernorm(x)
 
 
-def _avg_pool_vision_outputs(x: Array, kernel_size: int, config: VisionConfig, num_output_tokens: int) -> Array:
+def avg_pool_vision_outputs(x: Array, kernel_size: int, config: VisionConfig, num_output_tokens: int) -> Array:
     """Pools patch tokens into a fixed grid using position-based averaging.
 
     Each patch is assigned to a kernel bin via floor(position / kernel_size).
@@ -250,6 +251,7 @@ class Gemma4MultiModalProjector(nnx.Module):
 
         Raises:
             ValueError: If vision_config is missing in config.
+
         """
         self.text_config = config
         if config.vision_config is None:
@@ -276,7 +278,7 @@ class Gemma4MultiModalProjector(nnx.Module):
             Projected image tokens (B, num_output_tokens, text_hidden_size).
 
         """
-        pooled = _avg_pool_vision_outputs(vision_outputs, self.kernel_size, self.vision_config, self.num_output_tokens)
+        pooled = avg_pool_vision_outputs(vision_outputs, self.kernel_size, self.vision_config, self.num_output_tokens)
         pooled *= math.sqrt(self.vision_config.hidden_size)
         pooled = pooled.astype(self.text_config.dtype)
         pooled = self.mm_soft_emb_norm(pooled)

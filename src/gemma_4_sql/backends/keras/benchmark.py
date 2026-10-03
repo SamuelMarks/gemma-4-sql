@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -36,6 +37,7 @@ def _load_keras_model(model_name: str, dtype: str) -> object:
     Raises:
         DependencyMissingError: If Keras dependencies are missing.
         ValueError: If model cannot be loaded.
+
     """
     if keras is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -58,6 +60,7 @@ def _get_device_str(hardware: str) -> str:
 
     Returns:
         TensorFlow device string specification.
+
     """
     if tf is None:
         return "/CPU:0"
@@ -70,7 +73,7 @@ def _get_device_str(hardware: str) -> str:
     return "/CPU:0"
 
 
-def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, hardware: str) -> tuple[float, float, float]:
+def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, hardware: str) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
     Args:
@@ -87,6 +90,7 @@ def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps
 
     Raises:
         DependencyMissingError: If TensorFlow dependencies are missing.
+
     """
     if tf is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -100,7 +104,7 @@ def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps
         dummy_inputs = tf.random.uniform((batch_size, 32), minval=1, maxval=256000, dtype=tf.int32)
 
         @tf.function(jit_compile=True)
-        def forward_pass(inputs: Any) -> object:
+        def forward_pass(inputs: TensorType) -> object:
             """Run forward pass.
 
             Args:
@@ -108,6 +112,7 @@ def _run_benchmark_pass(model: Any, batch_size: int, num_runs: int, warmup_steps
 
             Returns:
                 Output tensor.
+
             """
             return model(inputs)
 
@@ -177,6 +182,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
 
     Raises:
         DependencyMissingError: If Keras dependencies are missing.
+
     """
 
     def _run() -> tuple[float, float, float]:
@@ -193,7 +199,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
 
         model = _load_keras_model(model_name, dtype=dtype)
         num_runs = int(str(kwargs.get("num_runs", 5)))
-        return _run_benchmark_pass(model, batch_size, num_runs, warmup_steps, mode, max_new_tokens, hardware)
+        return _run_benchmark_pass(model, batch_size, num_runs, warmup_steps, mode, max_new_tokens, hardware)  # type: ignore # Runtime typing
 
     if keras is None or tf is None:
         from gemma_4_sql.exceptions import DependencyMissingError

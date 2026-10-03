@@ -36,7 +36,9 @@ def test_benchmark_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         benchmark("gemma-4", "gpu", 1, "keras")
 
-    mock_bench = lambda *args, **kwargs: {"backend": "keras", "status": "completed"}
+    def mock_bench(*args, **kwargs):
+        return {"backend": "keras", "status": "completed"}
+
     monkeypatch.setattr(kbm, "keras", object())
     monkeypatch.setattr(kbm, "tf", object())
     monkeypatch.setattr(kbm, "benchmark_model", mock_bench)

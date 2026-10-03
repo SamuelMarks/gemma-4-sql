@@ -10,7 +10,7 @@ from flax import nnx
 from jax import Array
 
 from .attention import Gemma4Attention
-from .layers import Gemma4MLP, Gemma4RMSNorm, _make_linear
+from .layers import Gemma4MLP, Gemma4RMSNorm, make_linear
 from .moe import Gemma4MoE
 
 if TYPE_CHECKING:
@@ -30,6 +30,7 @@ class Gemma4DecoderLayer(nnx.Module):
             config: The configuration parameters.
             attention_type: The attention type.
             rngs: The rngs.
+
         """
         self.config = config
         shd = config.shd_cfg
@@ -43,8 +44,8 @@ class Gemma4DecoderLayer(nnx.Module):
             self.mlp = Gemma4MLP(config.hidden_size, config.intermediate_size, rngs=rngs, dtype=config.dtype, shd=shd)
         self.post_ffw_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         if config.hidden_size_per_layer_input:
-            self.per_layer_input_gate = _make_linear(config.hidden_size, config.hidden_size_per_layer_input, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-            self.per_layer_projection = _make_linear(config.hidden_size_per_layer_input, config.hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+            self.per_layer_input_gate = make_linear(config.hidden_size, config.hidden_size_per_layer_input, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+            self.per_layer_projection = make_linear(config.hidden_size_per_layer_input, config.hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
             self.post_per_layer_input_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         self.layer_scalar = nnx.Param(jnp.ones(1, dtype=config.weight_dtype))
 

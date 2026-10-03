@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.keras.etl import build_dataloader
-from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
+from gemma_4_sql.type_hints import ETLConfig, ModelType, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -23,15 +23,14 @@ except (ImportError, AttributeError):
     tf = None
 
 
-def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool, batch_size: int = 2) -> tuple[str, float]:
-    """Execute the core training loop.
+def _execute_train(model_name: str, dataset: str, epochs: int, batch_size: int = 2) -> tuple[str, float]:
+    """Execute the core training loop for Keras.
 
     Args:
-        model_name: Target model name.
+        model_name: The target model name.
         dataset: Dataset identifier.
         epochs: Number of training epochs.
-        test_mode: Whether to run in test mode.
-        batch_size: Training batch size.
+        batch_size: Batch size.
 
     Returns:
         A tuple of (status, final_loss).
@@ -39,13 +38,14 @@ def _execute_train(model_name: str, dataset: str, epochs: int, test_mode: bool, 
     Raises:
         DependencyMissingError: If Keras or TensorFlow dependencies are missing.
         ValueError: If model loading or dataloader fails.
+
     """
     if keras is None or tf is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("Keras dependencies are missing.")
 
-    model: Any = None
+    model: ModelType = None  # type: ignore # Justified: Dynamic backend protocol typing
     strategy = tf.distribute.MirroredStrategy()
     with strategy.scope():
         try:
@@ -71,13 +71,14 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     Args:
         config: Training configuration object.
-        **kwargs: Extra runtime options such as 'test_mode' and 'distributed_strategy'.
+        **kwargs: Extra runtime options such as 'distributed_strategy'.
 
     Returns:
         A dictionary containing training status and final metrics.
 
     Raises:
         DependencyMissingError: If Keras training dependencies are missing.
+
     """
     action = getattr(config, "action", "sft")
     model_name = getattr(config, "model_name", "gemma-4")
@@ -91,10 +92,9 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
         raise DependencyMissingError("Keras training dependencies are missing.")
 
     logger.info("Starting Keras %s on %s using %s", action, model_name, dataset)
-    test_mode = bool(kwargs.get("test_mode"))
     batch_size = getattr(config, "batch_size", 2)
     try:
-        status, final_loss = _execute_train(model_name, dataset, epochs, test_mode, batch_size=batch_size)
+        status, final_loss = _execute_train(model_name, dataset, epochs, batch_size=batch_size)
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Keras training error: ")
         status = f"failed: {e!s}"

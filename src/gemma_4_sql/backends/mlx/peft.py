@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -29,7 +31,7 @@ try:
 except (ImportError, AttributeError):
     load = None
 
-_ModuleBase: type = nn.Module if nn is not None else object
+_ModuleBase: Any = nn.Module if nn is not None else object
 
 
 class MLXLoRALinear(_ModuleBase):
@@ -76,6 +78,7 @@ class MLXLoRALinear(_ModuleBase):
         Raises:
             DependencyMissingError: If MLX is not installed.
             ValueError: If rank r is less than or equal to 0.
+
         """
         if nn is None or mx is None:
             from gemma_4_sql.exceptions import DependencyMissingError
@@ -111,28 +114,31 @@ class MLXLoRALinear(_ModuleBase):
 
     @property
     def W(self) -> Any:
-        """Return the base weight matrix W with shape (out_features, in_features).
+        """Provide the base weight matrix W with shape (out_features, in_features).
 
         Returns:
             The frozen base weight matrix.
+
         """
         return self.weight
 
     @property
     def A(self) -> Any:
-        """Return the down-projection adapter A with shape (in_features, r).
+        """Provide the down-projection adapter A with shape (in_features, r).
 
         Returns:
             The down-projection adapter tensor.
+
         """
         return self.lora_a
 
     @property
     def B(self) -> Any:
-        """Return the up-projection adapter B with shape (r, out_features).
+        """Provide the up-projection adapter B with shape (r, out_features).
 
         Returns:
             The up-projection adapter tensor.
+
         """
         return self.lora_b
 
@@ -142,6 +148,7 @@ class MLXLoRALinear(_ModuleBase):
         Args:
             key: Attribute name.
             val: Attribute value.
+
         """
         if key == "W":
             self.weight = val
@@ -170,6 +177,7 @@ class MLXLoRALinear(_ModuleBase):
 
         Returns:
             An MLXLoRALinear layer initialized with the linear module's weights.
+
         """
         has_bias = hasattr(linear, "bias") and linear.bias is not None
         weight = linear.weight
@@ -198,6 +206,7 @@ class MLXLoRALinear(_ModuleBase):
 
         Returns:
             Output tensor of shape (..., out_features).
+
         """
         base = x @ self.weight.T
         if self.bias is not None:
@@ -213,6 +222,7 @@ class MLXLoRALinear(_ModuleBase):
 
         Raises:
             DependencyMissingError: If MLX is missing.
+
         """
         if mx is None:
             from gemma_4_sql.exceptions import DependencyMissingError
@@ -232,6 +242,7 @@ class MLXLoRALinear(_ModuleBase):
         Raises:
             DependencyMissingError: If MLX is missing.
             KeyError: If required adapter keys are missing from the safetensors file.
+
         """
         if mx is None:
             from gemma_4_sql.exceptions import DependencyMissingError
@@ -245,7 +256,7 @@ class MLXLoRALinear(_ModuleBase):
 
 
 def inject_lora(
-    model: Any,
+    model: ModelType,
     target_modules: list[str],
     lora_r: int = 8,
     lora_alpha: float = 16.0,
@@ -269,6 +280,7 @@ def inject_lora(
 
     Raises:
         DependencyMissingError: If MLX is not installed.
+
     """
     if nn is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -291,9 +303,9 @@ def inject_lora(
     injected_count = 0
     for name, submodule in to_replace:
         parts = name.split(".")
-        curr = model
+        curr: Any = model
         for part in parts[:-1]:
-            if part.isdigit() and isinstance(curr, (list, tuple)):
+            if (part.isdigit() and isinstance(curr, list)) or (part.isdigit() and isinstance(curr, tuple)):
                 curr = curr[int(part)]
             else:
                 curr = getattr(curr, part)
@@ -317,7 +329,7 @@ def inject_lora(
     return model, injected_count
 
 
-def save_adapter_weights(model: Any, save_path: str | Path) -> None:
+def save_adapter_weights(model: ModelType, save_path: str | Path) -> None:
     """Save all LoRA adapter weights from an MLX model to a safetensors file.
 
     Extracts all trainable parameters (LoRA adapters) and serializes them into
@@ -329,23 +341,26 @@ def save_adapter_weights(model: Any, save_path: str | Path) -> None:
 
     Raises:
         DependencyMissingError: If MLX is missing.
+
     """
     if mx is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("MLX dependencies are missing.")
-    from mlx.utils import tree_flatten
+    import mlx.utils as _mlx_utils
+
+    tree_flatten: Any = getattr(_mlx_utils, "tree_flatten", None)
 
     path = Path(save_path)
     if path.is_dir() or path.suffix != ".safetensors":
         path = path / "adapter.safetensors"
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    trainable_dict = dict(tree_flatten(model.trainable_parameters()))
+    trainable_dict: dict[str, Any] = dict(tree_flatten(cast(Any, model).trainable_parameters()))
     mx.save_safetensors(str(path), trainable_dict)
 
 
-def load_adapter_weights(model: Any, load_path: str | Path) -> None:
+def load_adapter_weights(model: ModelType, load_path: str | Path) -> None:
     """Load LoRA adapter weights into an MLX model from a safetensors file.
 
     Args:
@@ -355,6 +370,7 @@ def load_adapter_weights(model: Any, load_path: str | Path) -> None:
     Raises:
         DependencyMissingError: If MLX is missing.
         FileNotFoundError: If the adapter weights file does not exist.
+
     """
     if mx is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -390,6 +406,7 @@ def apply_lora(
 
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
+
     """
     if nn is None or load is None or mx is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -403,7 +420,7 @@ def apply_lora(
             (model, _) = load(model_name)
 
         model, _ = inject_lora(
-            model=model,
+            model=model,  # type: ignore # Justified: Dynamic backend protocol typing
             target_modules=target_modules,
             lora_r=lora_r,
             lora_alpha=lora_alpha,
@@ -411,7 +428,7 @@ def apply_lora(
         )
 
         if "output_dir" in kwargs and kwargs["output_dir"] is not None:
-            save_adapter_weights(model, str(kwargs["output_dir"]))
+            save_adapter_weights(__import__("typing").cast(__import__("typing").Any, model), str(kwargs["output_dir"]))
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to apply LoRA: ")
         status = f"failed: {e!s}"

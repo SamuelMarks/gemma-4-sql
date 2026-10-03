@@ -1,372 +1,191 @@
-"""Tests for common FastAPI serving continuous batching engine and endpoints."""
-
-from __future__ import annotations
-
 import asyncio
-from typing import Any
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
+from fastapi.testclient import TestClient
 
-from gemma_4_sql.backends.common_serve import create_common_app
-
-
-class MockRequest:
-    """Mock HTTP request object."""
-
-    def __init__(self, data: dict[str, Any]) -> None:
-        """Initialize MockRequest.
-
-        Args:
-            data: Payload dictionary returned by json().
-        """
-        self._data = data
-
-    async def json(self) -> dict[str, Any]:
-        """Return payload json dictionary.
-
-        Returns:
-            The payload dictionary.
-        """
-        return self._data
+from gemma_4_sql.backends.common_serve import (
+    GenerateRequest,
+    create_common_app,
+    serve_model_wrapper,
+)
 
 
-@pytest.mark.asyncio
-async def test_continuous_batching_bundle_and_resolve(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test that concurrent requests are bundled and resolved by batching worker."""
-    batches_received: list[list[str]] = []
+@pytest.fixture
+def sample_dict():
+    return {"prompt": "SELECT *", "max_tokens": 50, "temperature": 0.5, "image_base64": "img", "audio_base64": "aud", "image_path": "path/img", "audio_path": "path/aud", "modality": "multimodal"}
 
-    def mock_batch_gen(prompts: list[str]) -> list[str]:
-        """Mock batch generation function.
 
-        Args:
-            prompts: List of prompt strings.
+def test_generate_request_from_dict_valid(sample_dict):
+    req = GenerateRequest.from_dict(sample_dict)
+    assert req.prompt == "SELECT *"
+    assert req.max_tokens == 50
 
-        Returns:
-            List of generated SQL queries.
-        """
-        batches_received.append(prompts)
-        return [f"SELECT count(*) FROM {p}" for p in prompts]
 
-    app: Any = create_common_app(
-        backend_name="pytorch",
-        model_name="test-model",
-        test_mode=False,
-        batch_generate_logic=mock_batch_gen,
-        max_batch_size=4,
-        max_wait_ms=50.0,
-    )
+def test_generate_request_from_dict_defaults():
+    req = GenerateRequest.from_dict({"prompt": "test"})
+    assert req.prompt == "test"
+    assert req.modality == "text"
 
-    generate_route = None
-    health_route = None
-    ready_route = None
-    models_route = None
-    for route in app.routes:
-        if getattr(route, "path", None) == "/generate":
-            generate_route = route.endpoint
-        elif getattr(route, "path", None) == "/health":
-            health_route = route.endpoint
-        elif getattr(route, "path", None) == "/ready":
-            ready_route = route.endpoint
-        elif getattr(route, "path", None) == "/v1/models":
-            models_route = route.endpoint
 
-    assert generate_route is not None
-    assert health_route is not None
-    assert ready_route is not None
-    assert models_route is not None
+def test_generate_request_from_dict_legacy_keys():
+    req = GenerateRequest.from_dict({"prompt": "test", "image": "img1", "audio": "aud1"})
+    assert req.image_base64 == "img1"
 
-    # Test health, ready, and models endpoints
-    health_res = await health_route()
-    assert health_res.status_code == 200
-    assert "healthy" in health_res.body.decode()
 
-    ready_res = await ready_route()
-    assert ready_res.status_code == 200
-    assert "ready" in ready_res.body.decode()
+def test_generate_request_from_dict_missing_prompt():
+    with pytest.raises(ValueError):
+        GenerateRequest.from_dict({"not_prompt": "test"})
+    with pytest.raises(ValueError):
+        GenerateRequest.from_dict({"prompt": 123})
 
-    models_res = await models_route()
-    assert models_res.status_code == 200
-    assert "test-model" in models_res.body.decode()
 
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.JSONResponse", None)
-    ready_res_raw = await ready_route()
-    assert ready_res_raw["status"] == "ready"
-    monkeypatch.undo()
+def test_create_common_app_require_handlers():
+    with pytest.raises(ValueError):
+        create_common_app("test_backend", "test_model", require_handlers=True)
 
-    # Dispatch concurrent generation requests
-    req1 = MockRequest({"prompt": "users"})
-    req2 = MockRequest({"prompt": "orders"})
-    req3 = MockRequest({"prompt": "items"})
-    req4 = MockRequest({"prompt": "payments"})
 
-    res1, res2, res3, res4 = await asyncio.gather(
-        generate_route(req1),
-        generate_route(req2),
-        generate_route(req3),
-        generate_route(req4),
-    )
+def test_create_common_app_startup_callback():
+    startup_mock = MagicMock()
+    create_common_app("test_backend", "test_model", startup_callback=startup_mock)
+    startup_mock.assert_called_once()
 
-    assert "SELECT count(*) FROM users" in res1.body.decode()
-    assert "SELECT count(*) FROM orders" in res2.body.decode()
-    assert "SELECT count(*) FROM items" in res3.body.decode()
-    assert "SELECT count(*) FROM payments" in res4.body.decode()
+
+def test_health_ready_list_models():
+    app = create_common_app("test", "model")
+    client = TestClient(app)
+
+    res = client.get("/health")
+    assert res.json()["status"] == "healthy"
+
+    res = client.get("/ready")
+    assert res.json()["status"] == "ready"
+
+    res = client.get("/v1/models")
+    assert res.json()["object"] == "list"
 
 
 @pytest.mark.asyncio
-async def test_continuous_batching_worker_error_propagation() -> None:
-    """Test that batch worker exceptions are propagated to waiting request futures."""
-
-    def failing_batch_gen(_prompts: list[str]) -> list[str]:
-        """Raise RuntimeError to simulate generation failure.
-
-        Args:
-            _prompts: Prompt list.
-
-        Raises:
-            RuntimeError: Simulated engine error.
-        """
-        msg = "Inference engine failed"
-        raise RuntimeError(msg)
-
-    app: Any = create_common_app(
-        backend_name="jax",
-        model_name="test-jax-model",
-        test_mode=False,
-        batch_generate_logic=failing_batch_gen,
-        max_batch_size=2,
-        max_wait_ms=10.0,
-    )
-
-    generate_route = None
-    for route in app.routes:
-        if getattr(route, "path", None) == "/generate":
-            generate_route = route.endpoint
-            break
-
-    assert generate_route is not None
-
-    req = MockRequest({"prompt": "fail_test"})
-    with pytest.raises(RuntimeError, match="Inference engine failed"):
-        await generate_route(req)
+async def test_generate_continuous_batching_generate_logic():
+    app = create_common_app("test", "model", generate_logic=lambda p: f"SYNC_{p}")
+    client = TestClient(app)
+    res = client.post("/generate", json={"prompt": "hello"})
+    assert res.json()["sql"] == "SYNC_hello"
 
 
 @pytest.mark.asyncio
-async def test_common_serve_health_and_models_endpoints() -> None:
-    """Test /health and /v1/models endpoints on the FastAPI server."""
-    app: Any = create_common_app(
-        backend_name="pytorch",
-        model_name="test-pt-model",
-        test_mode=True,
-    )
-    health_route = None
-    models_route = None
-    for route in app.routes:
-        if getattr(route, "path", None) == "/health":
-            health_route = route.endpoint
-        elif getattr(route, "path", None) == "/v1/models":
-            models_route = route.endpoint
-
-    assert health_route is not None
-    assert models_route is not None
-
-    h_res = await health_route()
-    assert h_res is not None
-
-    m_res = await models_route()
-    assert m_res is not None
+async def test_generate_continuous_batching_batch_generate_logic():
+    app = create_common_app("test", "model", batch_generate_logic=lambda p: [f"BATCH_{x}" for x in p], max_wait_ms=1.0)
+    client = TestClient(app)
+    res = client.post("/generate", json={"prompt": "world"})
+    assert res.json()["sql"] == "BATCH_world"
 
 
-@pytest.mark.asyncio
-async def test_common_serve_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test common_serve fallback and error execution branches."""
-    from gemma_4_sql.backends.common_serve import serve_model_wrapper
+def test_generate_multimodal_logic():
+    app = create_common_app("test", "model", batch_generate_logic=lambda p: [f"B_{x}" for x in p], max_wait_ms=1.0)
+    client = TestClient(app)
+    with patch("gemma_4_sql.backends.common_multimodal.format_multimodal_prompt") as mock_fmt:
+        mock_fmt.return_value = {"prompt": "MM_PROMPT"}
+        res = client.post("/generate", json={"prompt": "hello", "image_base64": "XYZ"})
+        assert res.json()["sql"] == "B_MM_PROMPT"
 
-    # 1. startup_callback invocation
-    called = []
-    create_common_app(
-        backend_name="test",
-        model_name="m1",
-        startup_callback=lambda: called.append(True),
-        test_mode=False,
-    )
-    assert len(called) == 1
 
-    # 2. generate_logic fallback (without batch_generate_logic)
-    app2: Any = create_common_app(
-        backend_name="test",
-        model_name="m2",
-        generate_logic=lambda p: f"SINGLE: {p}",
-        test_mode=False,
-    )
-    gen2 = next(r.endpoint for r in app2.routes if getattr(r, "path", None) == "/generate")
-    res2 = await gen2(MockRequest({"prompt": "p2"}))
-    assert "SINGLE: p2" in res2.body.decode()
+def test_generate_batching_error_propagation():
+    def err_logic(p):
+        raise ValueError("err")
 
-    # 3. NotImplementedError when no generation logic is provided
-    app3: Any = create_common_app(
-        backend_name="custom_backend",
-        model_name="m3",
-        test_mode=False,
-    )
-    gen3 = next(r.endpoint for r in app3.routes if getattr(r, "path", None) == "/generate")
-    with pytest.raises(NotImplementedError, match="No generation logic registered"):
-        await gen3(MockRequest({"prompt": "p3"}))
+    app = create_common_app("test", "model", batch_generate_logic=err_logic, max_wait_ms=1.0)
+    client = TestClient(app)
+    with pytest.raises(ValueError):
+        client.post("/generate", json={"prompt": "world"})
 
-    # 3b. Batch output length mismatch validation
-    app3b: Any = create_common_app(
-        backend_name="mismatch_backend",
-        model_name="m3b",
-        batch_generate_logic=lambda prompts: ["only_one_result"],
-        test_mode=False,
-    )
-    gen3b = next(r.endpoint for r in app3b.routes if getattr(r, "path", None) == "/generate")
-    task1 = asyncio.create_task(gen3b(MockRequest({"prompt": "req1"})))
-    task2 = asyncio.create_task(gen3b(MockRequest({"prompt": "req2"})))
-    with pytest.raises(ValueError, match="Batch generation returned"):
-        await asyncio.gather(task1, task2)
 
-    # 4. JSONResponse is None
-    import gemma_4_sql.backends.common_serve as cs
+def test_generate_batching_mismatch_results():
+    app = create_common_app("test", "model", batch_generate_logic=lambda p: ["EXTRA", "EXTRA"], max_wait_ms=1.0)
+    client = TestClient(app)
+    with pytest.raises(ValueError):
+        client.post("/generate", json={"prompt": "world"})
 
-    monkeypatch.setattr(cs, "JSONResponse", None)
-    app4: Any = create_common_app(
-        backend_name="test",
-        model_name="m4",
-        generate_logic=lambda p: f"FALLBACK {p}",
-        test_mode=True,
-    )
-    gen4 = next(r.endpoint for r in app4.routes if getattr(r, "path", None) == "/generate")
-    res4 = await gen4(MockRequest({"prompt": "p4"}))
-    assert res4 == {"sql": "FALLBACK p4", "modality": "text"}
 
-    h4 = next(r.endpoint for r in app4.routes if getattr(r, "path", None) == "/health")
-    assert (await h4())["status"] == "healthy"
+def test_generate_no_logic():
+    app = create_common_app("test", "model")
+    client = TestClient(app)
+    with pytest.raises(NotImplementedError):
+        client.post("/generate", json={"prompt": "world"})
 
-    m4 = next(r.endpoint for r in app4.routes if getattr(r, "path", None) == "/v1/models")
-    assert (await m4())["object"] == "list"
 
-    # 5. serve_model_wrapper exception
-    def bad_factory() -> Any:
-        """Execute bad factory helper."""
-        msg = "failed to build app"
-        raise RuntimeError(msg)
+def test_serve_model_wrapper_missing_deps():
+    res = serve_model_wrapper("test", "model", 8080, 32, True, "Deps missing", lambda: None)
+    assert res["status"] == "Deps missing"
 
-    res5 = serve_model_wrapper(
-        backend_name="err",
-        model_name="m",
-        port=8000,
-        max_batch_size=1,
-        missing_deps=False,
-        missing_status="",
-        app_factory=bad_factory,
-    )
-    assert "failed" in res5["status"]
-    assert res5["app"] is None
 
-    # 6. Cancellation handling during generate
-    app6: Any = create_common_app(backend_name="test", model_name="m6", test_mode=False)
-    gen6 = next(r.endpoint for r in app6.routes if getattr(r, "path", None) == "/generate")
-    task = asyncio.create_task(gen6(MockRequest({"prompt": "cancel_me"})))
-    await asyncio.sleep(0.001)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+def test_serve_model_wrapper_success():
+    with patch("gemma_4_sql.backends.common_serve.uvicorn.run") as mock_run:
+        res = serve_model_wrapper("test", "model", 8080, 32, False, "", lambda: MagicMock(), run_server=True)
+        assert "running" in res["status"]
+        mock_run.assert_called_once()
 
-    # 7. worker_task failed/None fallback branch
-    app7: Any = create_common_app(backend_name="test", model_name="m7", generate_logic=lambda p: f"SYNC: {p}", test_mode=True)
-    monkeypatch.setattr(asyncio, "get_running_loop", lambda: (_ for _ in ()).throw(RuntimeError("no loop")))
-    gen7 = next(r.endpoint for r in app7.routes if getattr(r, "path", None) == "/generate")
-    res7 = await gen7(MockRequest({"prompt": "p7"}))
-    sql_text7 = res7.body.decode() if hasattr(res7, "body") else str(res7)
-    assert "SYNC: p7" in sql_text7
+        # Test run_server = False
+        res2 = serve_model_wrapper("test", "model", 8080, 32, False, "", lambda: MagicMock(), run_server=False)
+        assert "running" in res2["status"]
 
-    # 8. worker_task None and generate_logic None raises NotImplementedError
-    app8: Any = create_common_app(backend_name="nosync", model_name="m8", test_mode=True)
-    gen8 = next(r.endpoint for r in app8.routes if getattr(r, "path", None) == "/generate")
-    with pytest.raises(NotImplementedError, match="No generation logic registered"):
-        await gen8(MockRequest({"prompt": "p8"}))
 
-    # 9. worker_task None and batch_generate_logic provided fallback branch
-    app9: Any = create_common_app(
-        backend_name="test_batch_fallback",
-        model_name="m9",
-        batch_generate_logic=lambda ps: [f"BATCH_FALLBACK: {p}" for p in ps],
-        test_mode=True,
-    )
-    gen9 = next(r.endpoint for r in app9.routes if getattr(r, "path", None) == "/generate")
-    res9 = await gen9(MockRequest({"prompt": "p9"}))
-    sql_text9 = res9.body.decode() if hasattr(res9, "body") else str(res9)
-    assert "BATCH_FALLBACK: p9" in sql_text9
+def test_serve_model_wrapper_factory_error():
+    def mock_factory():
+        raise RuntimeError("Factory failed")
 
-    # 10. item future already done when exception occurs in batch
-    app10: Any = create_common_app(
-        backend_name="test_predone_err",
-        model_name="m10",
-        max_wait_ms=50.0,
-        batch_generate_logic=lambda ps: (_ for _ in ()).throw(ValueError("forced error")),
-        test_mode=False,
-    )
-    gen10 = next(r.endpoint for r in app10.routes if getattr(r, "path", None) == "/generate")
-    task_a = asyncio.create_task(gen10(MockRequest({"prompt": "p10_a"})))
-    await asyncio.sleep(0.001)
-    task_a.cancel()
-    await asyncio.sleep(0.07)
+    res = serve_model_wrapper("test", "model", 8080, 32, False, "", mock_factory)
+    assert "failed" in res["status"]
 
 
 @pytest.mark.asyncio
-async def test_common_serve_ready_and_validation() -> None:
-    """Test /ready route, require_handlers check, and GenerateRequest schema validation."""
-    from gemma_4_sql.backends.common_serve import GenerateRequest
+async def test_worker_cancel_and_fallback():
+    with patch("gemma_4_sql.backends.common_serve.JSONResponse", None):
+        app = create_common_app("test", "model", generate_logic=lambda p: f"SYNC_{p}")
+        client = TestClient(app)
+        res = client.post("/generate", json={"prompt": "fallback_test"})
+        assert res.json()["sql"] == "SYNC_fallback_test"
+        assert client.get("/health").status_code == 200
+        assert client.get("/ready").status_code == 200
+        assert client.get("/v1/models").status_code == 200
 
-    # 1. GenerateRequest validation
-    req = GenerateRequest.from_dict({"prompt": "SELECT 1", "max_tokens": 64, "temperature": 0.5})
-    assert req.prompt == "SELECT 1"
-    assert req.max_tokens == 64
-    assert req.temperature == 0.5
 
-    with pytest.raises(ValueError, match=r"Field 'prompt' must be a valid string\."):
-        GenerateRequest.from_dict({"prompt": None})
+# Testing Asyncio specifics (batching multiple, cancellation, RuntimeError fallback)
+@pytest.mark.asyncio
+async def test_generate_async_batching():
+    # Delay processing so multiple items get into queue
+    async def slow_batch(prompts):
+        await asyncio.sleep(0.05)
+        return [f"BATCH_{p}" for p in prompts]
 
-    # 2. require_handlers validation during app construction
-    with pytest.raises(ValueError, match="At least one generation logic callback must be provided"):
-        create_common_app(backend_name="strict_backend", model_name="m_strict", require_handlers=True)
+    def sync_batch(prompts):
+        # We need this to block briefly or just return
+        return [f"BATCH_{p}" for p in prompts]
 
-    # 3. /ready endpoint
-    app: Any = create_common_app(
-        backend_name="ready_backend",
-        model_name="m_ready",
-        generate_logic=lambda p: f"SQL: {p}",
-        test_mode=True,
-    )
-    ready_route = next(r.endpoint for r in app.routes if getattr(r, "path", None) == "/ready")
-    res = await ready_route()
-    body = res.body.decode() if hasattr(res, "body") else str(res)
-    assert "ready" in body
-    assert "ready_backend" in body
-    assert "queue_depth" in body
+    app = create_common_app("test", "model", batch_generate_logic=sync_batch, max_batch_size=2, max_wait_ms=50.0)
+
+    # We use ASGITransport to hit the app concurrently
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        # Fire two requests concurrently
+        t1 = client.post("/generate", json={"prompt": "one"})
+        t2 = client.post("/generate", json={"prompt": "two"})
+        res1, res2 = await asyncio.gather(t1, t2)
+        assert res1.json()["sql"] == "BATCH_one"
+        assert res2.json()["sql"] == "BATCH_two"
 
 
 @pytest.mark.asyncio
-async def test_generate_request_multimodal_payload_validation() -> None:
-    """Test GenerateRequest deserialization with multimodal and alternate field aliases."""
-    from gemma_4_sql.backends.common_serve import GenerateRequest
+async def test_generate_cancellation():
+    async def cancel_later():
+        await asyncio.sleep(0.01)
+        raise asyncio.CancelledError()
 
-    payload = {
-        "prompt": "Find top customers from schema diagram",
-        "max_tokens": 256,
-        "temperature": 0.7,
-        "image": "aW1hZ2VfZGF0YQ==",
-        "audio": "YXVkaW9fZGF0YQ==",
-        "image_path": "/tmp/schema.png",
-        "audio_path": "/tmp/query.wav",
-        "modality": "multimodal",
-    }
-    req = GenerateRequest.from_dict(payload)
-    assert req.prompt == "Find top customers from schema diagram"
-    assert req.max_tokens == 256
-    assert abs(req.temperature - 0.7) < 1e-6
-    assert req.image_base64 == "aW1hZ2VfZGF0YQ=="
-    assert req.audio_base64 == "YXVkaW9fZGF0YQ=="
-    assert req.image_path == "/tmp/schema.png"
-    assert req.audio_path == "/tmp/query.wav"
-    assert req.modality == "multimodal"
+    app = create_common_app("test", "model", generate_logic=lambda p: "A")
+    # To test cancel, we need to cancel the HTTP request
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        # We can simulate cancel by adding a timeout using asyncio.wait_for
+        import asyncio
+
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(client.post("/generate", json={"prompt": "cancel"}), timeout=0.001)

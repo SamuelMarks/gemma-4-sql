@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
-from gemma_4_sql.sdk.agent import run_agentic_loop
+from gemma_4_sql.sdk.agent import AgentContext, _process_single_prompt, run_agentic_loop
+from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 
 
 def test_agentic_loop_jax(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,12 +82,6 @@ def test_agentic_loop_invalid_backend() -> None:
     """Test run_agentic_loop with invalid backend."""
     with pytest.raises(ValueError, match="Unknown backend: invalid"):
         run_agentic_loop(model_name="model", prompt="prompt", backend="invalid")
-
-
-from unittest.mock import AsyncMock, MagicMock
-
-from gemma_4_sql.sdk.agent import AgentContext, _process_single_prompt
-from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 
 
 @pytest.mark.asyncio

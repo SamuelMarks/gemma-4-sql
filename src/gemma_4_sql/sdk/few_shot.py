@@ -30,6 +30,7 @@ def select_relevant_examples(
 
     Returns:
         List of prioritized, budgeted demonstration examples.
+
     """
     if not example_pool:
         return []
@@ -79,6 +80,7 @@ def build_few_shot_prompt(
 
     Returns:
         A dictionary containing the results.
+
     """
     if top_k is not None and top_k > 0:
         active_examples = select_relevant_examples(prompt, examples, top_k=top_k, max_tokens=max_tokens)
@@ -123,6 +125,7 @@ def generate_few_shot_sql(
 
     Returns:
         Dictionary containing generation output, confidence score, and used prompt.
+
     """
     prompt_res = build_few_shot_prompt(
         model_name=model_name,

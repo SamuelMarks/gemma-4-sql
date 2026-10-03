@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -15,11 +16,11 @@ logger = logging.getLogger(__name__)
 try:
     import jax as _jax
     import jax.numpy as _jnp
-    from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model
+    import maxtext.models.gemma4 as _gemma4
 
     jax: Any = _jax
     jnp: Any = _jnp
-    Gemma4Model: Any = _Gemma4Model
+    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     jax = None
     jnp = None
@@ -27,13 +28,14 @@ except (ImportError, AttributeError):
 
 
 def _get_device(hardware: str) -> Any:
-    """Get the jax device for the hardware.
+    """Provide the jax device for the hardware.
 
     Args:
         hardware: Target hardware string.
 
     Returns:
         Matched JAX device or default CPU device.
+
     """
     try:
         if hardware == "tpu" and jax is not None and jax.devices("tpu"):
@@ -45,7 +47,7 @@ def _get_device(hardware: str) -> Any:
     return jax.devices("cpu")[0] if jax is not None else None
 
 
-def _run_benchmark_pass(model: Any, params: Any, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, device: Any) -> tuple[float, float, float]:
+def _run_benchmark_pass(model: ModelType, params: dict[str, TensorType], batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, device: str | object) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
     Args:
@@ -60,9 +62,10 @@ def _run_benchmark_pass(model: Any, params: Any, batch_size: int, num_runs: int,
 
     Returns:
         A tuple containing the results.
+
     """
 
-    def forward_pass(params: Any, inputs: Any) -> Any:
+    def forward_pass(params: dict[str, TensorType], inputs: TensorType) -> Any:
         """Execute model forward pass.
 
         Args:
@@ -71,10 +74,11 @@ def _run_benchmark_pass(model: Any, params: Any, batch_size: int, num_runs: int,
 
         Returns:
             Forward pass model output.
+
         """
         return model.apply(params, inputs)
 
-    def generate_pass(params: Any, inputs: Any) -> Any:
+    def generate_pass(params: dict[str, TensorType], inputs: TensorType) -> Any:
         """Execute simple generation pass.
 
         Args:
@@ -83,6 +87,7 @@ def _run_benchmark_pass(model: Any, params: Any, batch_size: int, num_runs: int,
 
         Returns:
             Generated sequence array.
+
         """
         seq = inputs
         for _ in range(max_new_tokens):
@@ -125,7 +130,7 @@ def _run_benchmark_pass(model: Any, params: Any, batch_size: int, num_runs: int,
             tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
 
         try:
-            stats = device.memory_stats()
+            stats = device.memory_stats()  # type: ignore # Dynamic typing
             memory_mb = stats.get("peak_bytes_in_use", 16384.0 * 1024 * 1024) / (1024 * 1024)
         except (AttributeError, KeyError, RuntimeError, TypeError):
             memory_mb = 16384.0
@@ -144,6 +149,7 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
 
     Returns:
         A dictionary containing benchmark metrics and status.
+
     """
 
     def _run() -> tuple[float, float, float]:
@@ -159,11 +165,10 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         warmup_steps = int(str(kwargs.get("warmup_steps", 5)))
         device = _get_device(hardware)
 
-        if not kwargs.get("test_mode"):
-            try:
-                jax.distributed.initialize()
-            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-                logger.warning("jax.distributed.initialize() failed: %s", e)
+        try:
+            jax.distributed.initialize()
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+            logger.warning("jax.distributed.initialize() failed: %s", e)
 
         try:
             model = Gemma4Model(model_name, dtype=getattr(jnp, dtype_str, None))
