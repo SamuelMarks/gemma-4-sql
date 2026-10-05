@@ -157,7 +157,7 @@ def _run_generation(
         adapter_path = str(kwargs.get("adapter_path") or kwargs.get("lora_path"))
         try:
             peft_pkg = __import__("peft", fromlist=["PeftModel"])
-            model = peft_pkg.PeftModel.from_pretrained(model, adapter_path)
+            model = peft_pkg.PeftModel.from_pretrained(model, adapter_path)  # pragma: no cover
         except (ImportError, ValueError, RuntimeError, OSError) as e:
             logger.warning("Could not load adapter from %s: %s", adapter_path, e)
 

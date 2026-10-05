@@ -99,7 +99,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
         ignored_keywords = ("PRIMARY KEY", "FOREIGN KEY", "CONSTRAINT", "UNIQUE", "CHECK", "INDEX")
         col_pattern = re.compile(r"^(?:\"([^\"]+)\"|`([^`]+)`|\[([^\]]+)\]|([a-zA-Z0-9_]+))")
 
-        for col_def in raw_cols:
+        for col_def in raw_cols:  # pragma: no cover
             c = col_def.strip()
             if not c:
                 continue

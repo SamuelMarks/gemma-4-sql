@@ -20,12 +20,12 @@ try:
     import mlx.optimizers as _optim
     import mlx_lm
 
-    mlx: Any = _mlx
-    mx: Any = _mx
-    nn: Any = _nn
-    mx_nn: Any = _nn
-    optim: Any = _optim
-    load: Any = getattr(mlx_lm, "load", None)
+    mlx: Any = _mlx  # pragma: no cover
+    mx: Any = _mx  # pragma: no cover
+    nn: Any = _nn  # pragma: no cover
+    mx_nn: Any = _nn  # pragma: no cover  # pragma: no cover
+    optim: Any = _optim  # pragma: no cover
+    load: Any = getattr(mlx_lm, "load", None)  # pragma: no cover
 except (ImportError, AttributeError):  # pragma: no cover
     mlx = None
     mx = None

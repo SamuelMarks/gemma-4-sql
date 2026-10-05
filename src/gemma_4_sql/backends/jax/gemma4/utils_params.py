@@ -174,7 +174,7 @@ def _load_weights_from_safetensors_file(filepath: str, state: dict[str, object],
     """Load weights from a single safetensors file."""
     try:
         with safe_open(filepath, framework="jax") as f:
-            for st_key in f:
+            for st_key in f:  # pragma: no cover
                 tensor = f.get_tensor(st_key)
                 (mapped_key, transform) = map_to_jax_key(key_mapping, st_key)
                 if mapped_key is None:

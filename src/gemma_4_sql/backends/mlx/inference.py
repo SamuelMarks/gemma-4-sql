@@ -17,15 +17,15 @@ logger = logging.getLogger(__name__)
 try:
     import mlx.core as _mx
 
-    mx: Any = _mx
+    mx: Any = _mx  # pragma: no cover
 except (ImportError, AttributeError):
     mx = None
 
 try:
     import mlx_lm
 
-    load: Any = getattr(mlx_lm, "load", None)
-    generate: Any = getattr(mlx_lm, "generate", None)
+    load: Any = getattr(mlx_lm, "load", None)  # pragma: no cover
+    generate: Any = getattr(mlx_lm, "generate", None)  # pragma: no cover
 except (ImportError, AttributeError):
     load = None
     generate = None

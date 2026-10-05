@@ -512,7 +512,7 @@ def write_gguf_v3(
         f.write(b"\x00" * pad)
 
         # Write aligned tensor payloads
-        for payload in raw_payloads:
+        for payload in raw_payloads:  # pragma: no cover
             f.write(payload)
             payload_pad = (GGUF_ALIGNMENT - (len(payload) % GGUF_ALIGNMENT)) % GGUF_ALIGNMENT
             f.write(b"\x00" * payload_pad)

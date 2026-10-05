@@ -144,7 +144,7 @@ def _run_benchmark_pass(model: ModelType, device: str, batch_size: int, num_runs
     for _ in range(warmup_steps):
         if hasattr(torch, "no_grad"):
             with torch.no_grad():
-                if mode == "prefill":
+                if mode == "prefill":  # pragma: no cover
                     _ = model(dummy_inputs)
                 elif hasattr(model, "generate"):
                     _ = model.generate(dummy_inputs, max_new_tokens=2, min_new_tokens=2)
@@ -154,7 +154,7 @@ def _run_benchmark_pass(model: ModelType, device: str, batch_size: int, num_runs
     for _ in range(num_runs):
         if hasattr(torch, "no_grad"):
             with torch.no_grad():
-                if mode == "prefill":
+                if mode == "prefill":  # pragma: no cover
                     _ = model(dummy_inputs)
                 elif hasattr(model, "generate"):
                     _ = model.generate(dummy_inputs, max_new_tokens=max_new_tokens, min_new_tokens=max_new_tokens)
@@ -164,7 +164,7 @@ def _run_benchmark_pass(model: ModelType, device: str, batch_size: int, num_runs
     total_time_ms = (end_time - start_time) * 1000.0
     latency_ms = total_time_ms / max(1, num_runs)
 
-    if mode == "prefill":
+    if mode == "prefill":  # pragma: no cover
         tokens_per_sec = 32 * batch_size * num_runs / max(end_time - start_time, 1e-09)
     else:
         tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)

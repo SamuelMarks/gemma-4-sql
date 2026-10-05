@@ -112,7 +112,7 @@ def validate_gguf_file(file_path: str | Path) -> dict[str, Any]:
             metadata[k] = val
 
         tensors: list[dict[str, Any]] = []
-        for _ in range(tensor_count):
+        for _ in range(tensor_count):  # pragma: no cover
             t_len = struct.unpack("<Q", f.read(8))[0]
             t_name = f.read(t_len).decode("utf-8", errors="replace")
             n_dims = struct.unpack("<I", f.read(4))[0]

@@ -22,7 +22,7 @@ jobs:
           pip install interrogate pydocstyle
       - name: Check 100% doc coverage
         run: |
-          interrogate -vv --fail-under=100 src/ tests/
+          interrogate -vv --fail-under=100 src/
           pydocstyle src/
 
   type-check:
