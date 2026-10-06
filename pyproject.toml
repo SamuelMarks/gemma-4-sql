@@ -31,6 +31,10 @@ mlx = ["requirements-mlx.txt"]
 all = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxtext.txt", "requirements-pytorch.txt", "requirements-duckdb.txt"]
 default = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxtext.txt", "requirements-pytorch.txt", "requirements-duckdb.txt"]
 
+[tool.pydocstyle]
+convention = "pep257"
+add_ignore = "D202"
+
 [tool.ruff]
 unsafe-fixes = true
 

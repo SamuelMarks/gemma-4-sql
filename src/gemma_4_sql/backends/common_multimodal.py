@@ -56,7 +56,9 @@ def load_image_bytes(image_input: ImageInput) -> bytes:
     if isinstance(image_input, bytes):
         return image_input
 
-    if isinstance(image_input, Path) or (isinstance(image_input, str) and not image_input.startswith("data:")):
+    import pathlib
+
+    if isinstance(image_input, pathlib.Path) or (isinstance(image_input, str) and not image_input.startswith("data:")):
         try:
             p = Path(str(image_input))
             if p.is_file():
@@ -214,7 +216,9 @@ def load_audio_bytes(audio_input: AudioInput) -> bytes:
     if isinstance(audio_input, bytes):
         return audio_input
 
-    if isinstance(audio_input, Path) or (isinstance(audio_input, str) and not audio_input.startswith("data:")):
+    import pathlib
+
+    if isinstance(audio_input, pathlib.Path) or (isinstance(audio_input, str) and not audio_input.startswith("data:")):
         try:
             p = Path(str(audio_input))
             if p.is_file():

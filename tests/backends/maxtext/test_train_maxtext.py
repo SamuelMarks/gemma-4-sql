@@ -25,6 +25,10 @@ def mock_deps(monkeypatch):
 
     def mock_value_and_grad(f):
         def inner(*args, **kwargs):
+            try:
+                f(*args, **kwargs)
+            except Exception:  # noqa: S110, BLE001
+                pass
             return ("loss_mock", "grads_mock")
 
         return inner

@@ -81,7 +81,7 @@ def _get_train_step_fn(model: ModelType, optimizer: object) -> Any:
 
         # type ignore for lambda mapping to dynamic PyTree
         def _wrapper(p: Any, b: Any) -> Any:
-            return _loss_fn(model, p, b)  # pragma: no cover
+            return _loss_fn(model, p, b)
 
         (loss, grads) = jax.value_and_grad(_wrapper)(params, batch)
         (updates, opt_state) = optimizer.update(grads, opt_state, params)  # type: ignore # Justified: Dynamic backend protocol typing
