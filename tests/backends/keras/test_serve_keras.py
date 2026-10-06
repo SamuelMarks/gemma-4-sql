@@ -23,6 +23,14 @@ def test_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
         serve_model("model")
 
 
+def test_serve_keras_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    import gemma_4_sql.backends.keras.serve as srv
+
+    monkeypatch.setattr(srv, "keras", None)
+    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing for serve."):
+        serve_model("model")
+
+
 def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.keras.serve as srv
     from gemma_4_sql.exceptions import InferenceError

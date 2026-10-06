@@ -22,11 +22,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 try:
-    import mlx.core as _mlx
-    import numpy as _np
+    import mlx.core as _mlx  # pragma: no cover
+    import numpy as _np  # pragma: no cover
 
-    mlx: Any = _mlx
-    np: Any = _np
+    mlx: Any = _mlx  # pragma: no cover
+    np: Any = _np  # pragma: no cover
 except (ImportError, AttributeError):
     mlx = None
     np = None

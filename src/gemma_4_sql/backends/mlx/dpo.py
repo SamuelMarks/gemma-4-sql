@@ -18,7 +18,7 @@ try:
     import mlx.core as _mx
     import mlx.nn as _nn
     import mlx.optimizers as _optim
-    import mlx_lm
+    import mlx_lm  # pragma: no cover
 
     mlx: Any = _mlx  # pragma: no cover
     mx: Any = _mx  # pragma: no cover

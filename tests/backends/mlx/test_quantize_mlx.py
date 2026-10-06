@@ -4,6 +4,13 @@ import numpy as np
 import pytest
 
 from gemma_4_sql.backends.mlx import quantize
+
+
+@pytest.fixture(autouse=True)
+def ensure_np():
+    quantize.np = np
+
+
 from gemma_4_sql.backends.mlx.quantize import (
     calibrate_awq_scales,
     calibrate_gptq_weights,
