@@ -77,7 +77,6 @@ def _get_train_step_fn(model: ModelType, optimizer: object) -> Any:
 
         Returns:
             Tuple of (updated_params, updated_opt_state, scalar_loss).
-
         """
 
         # type ignore for lambda mapping to dynamic PyTree

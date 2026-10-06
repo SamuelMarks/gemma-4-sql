@@ -59,6 +59,8 @@ def main() -> None:
         res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/jax/", "tests/backends/maxtext/"], capture_output=True, text=True, check=False)
         out += res.stdout
         print("[update_badges] Running batch 4/4 (mlx, backend modules)...", flush=True)
+        # Collect all tests/backends/test_*.py files dynamically to avoid missing any
+        backend_root_tests = [str(p) for p in Path("tests/backends").glob("test_*.py")]
         res = subprocess.run(
             [
                 sys.executable,
@@ -69,14 +71,7 @@ def main() -> None:
                 "--cov-append",
                 "--cov-report=term",
                 "tests/backends/mlx/",
-                "tests/backends/test_backend_imports.py",
-                "tests/backends/test_backend_methods_edge_cases.py",
-                "tests/backends/test_backends.py",
-                "tests/backends/test_common.py",
-                "tests/backends/test_common_serve_batching.py",
-                "tests/backends/test_lazy_loader.py",
-                "tests/backends/test_missing_backends_edge_cases.py",
-                "tests/backends/test_true_missing_backends.py",
+                *backend_root_tests,
             ],
             capture_output=True,
             text=True,

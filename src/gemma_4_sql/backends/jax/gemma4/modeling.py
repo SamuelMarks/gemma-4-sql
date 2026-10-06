@@ -326,7 +326,7 @@ class Gemma4ForCausalLM(nnx.Module):
 
 
 def _default_jit(x: Any) -> Any:
-    """Default fallback for jit decorator if nnx.jit is unavailable.
+    """Provide default fallback for jit decorator if nnx.jit is unavailable.
 
     Args:
         x: The function to be jitted.
