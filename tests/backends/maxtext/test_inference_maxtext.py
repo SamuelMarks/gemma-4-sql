@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -10,6 +12,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 @pytest.fixture(autouse=True)
 def mock_dependencies(monkeypatch):
+    """Docstring for mock_dependencies."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_gemma4 = MagicMock()
@@ -28,9 +31,11 @@ def mock_dependencies(monkeypatch):
 
 
 def test_beam_search_step():
+    """Docstring for test_beam_search_step."""
     seq = np.array([[1, 2, 3]])
 
     def model_apply_fn(s):
+        """Docstring for model_apply_fn."""
         # Return logits where shape is 3D
         logits = np.zeros((1, 3, 5))
         # Top indices will be 4, 3, 2, 1, 0 based on values
@@ -47,9 +52,11 @@ def test_beam_search_step():
 
 
 def test_beam_search_step_shapes():
+    """Docstring for test_beam_search_step_shapes."""
     seq = np.array([[1, 2, 3]])
 
     def model_apply_fn_2d(s):
+        """Docstring for model_apply_fn_2d."""
         logits = np.zeros((3, 5))
         logits[-1, :] = [0.1, 0.2, 0.3, 0.4, 0.5]
         return logits
@@ -58,6 +65,7 @@ def test_beam_search_step_shapes():
     np.testing.assert_array_equal(beams_2d[0][0], [[1, 2, 3, 4]])
 
     def model_apply_fn_1d(s):
+        """Docstring for model_apply_fn_1d."""
         logits = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
         return logits
 
@@ -66,23 +74,30 @@ def test_beam_search_step_shapes():
 
 
 def test_beam_search_step_no_item(mock_dependencies):
+    """Docstring for test_beam_search_step_no_item."""
     mock_jax, mock_jnp, _mock_gemma4 = mock_dependencies
 
     seq = np.array([[1, 2]])
 
     def model_apply_fn(s):
+        """Docstring for model_apply_fn."""
         return np.array([0.1, 0.2, 0.3])
 
     class NoItemScore:
+        """Docstring for NoItemScore."""
+
         def __init__(self, v):
+            """Docstring for __init__."""
             self.v = v
 
         def __float__(self):
+            """Docstring for __float__."""
             return float(self.v)
 
         # no .item() method!
 
     def dummy_argsort(x):
+        """Docstring for dummy_argsort."""
         return np.array([0, 1, 2])
 
     mock_jnp.argsort.side_effect = dummy_argsort
@@ -95,7 +110,10 @@ def test_beam_search_step_no_item(mock_dependencies):
 
 
 def test_maxtext_beam_search():
+    """Docstring for test_maxtext_beam_search."""
+
     def apply_fn(seq):
+        """Docstring for apply_fn."""
         return np.array([0.1, 0.9])  # always predicts 1
 
     input_ids = np.array([[0]])
@@ -112,9 +130,11 @@ def test_maxtext_beam_search():
 
 
 def test_maxtext_beam_search_eos():
+    """Docstring for test_maxtext_beam_search_eos."""
     call_count = 0
 
     def apply_fn(seq):
+        """Docstring for apply_fn."""
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -136,9 +156,11 @@ def test_maxtext_beam_search_eos():
 
 
 def test_maxtext_beam_search_eos_continue():
+    """Docstring for test_maxtext_beam_search_eos_continue."""
     call_count = 0
 
     def apply_fn(seq):
+        """Docstring for apply_fn."""
         nonlocal call_count
         call_count += 1
         # First call (input [2]): return top 2 tokens: 1 and 0 (eos)
@@ -154,6 +176,7 @@ def test_maxtext_beam_search_eos_continue():
 
 
 def test_execute_generate(mock_dependencies):
+    """Docstring for test_execute_generate."""
     mock_jax, _mock_jnp, _mock_gemma4 = mock_dependencies
 
     tokenizer = MagicMock()
@@ -173,6 +196,7 @@ def test_execute_generate(mock_dependencies):
 
 
 def test_execute_generate_model_apply(mock_dependencies):
+    """Docstring for test_execute_generate_model_apply."""
     mock_jax, _mock_jnp, mock_gemma4 = mock_dependencies
 
     mock_model = MagicMock()
@@ -199,6 +223,7 @@ def test_execute_generate_model_apply(mock_dependencies):
 
 
 def test_generate_sql(mock_dependencies):
+    """Docstring for test_generate_sql."""
     with patch("gemma_4_sql.backends.maxtext.inference._execute_generate") as mock_exec:
         mock_exec.return_value = ("success", "SELECT 1", 0.9)
 
@@ -209,6 +234,7 @@ def test_generate_sql(mock_dependencies):
 
 
 def test_generate_sql_missing_deps(monkeypatch):
+    """Docstring for test_generate_sql_missing_deps."""
     monkeypatch.setattr(inference, "jax", None)
 
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
@@ -216,6 +242,7 @@ def test_generate_sql_missing_deps(monkeypatch):
 
 
 def test_generate_sql_error(mock_dependencies):
+    """Docstring for test_generate_sql_error."""
     with patch("gemma_4_sql.backends.maxtext.inference._execute_generate") as mock_exec:
         mock_exec.side_effect = RuntimeError("Generation failed")
 
@@ -228,6 +255,7 @@ def test_generate_sql_error(mock_dependencies):
 
 
 def test_import_error_coverage():
+    """Docstring for test_import_error_coverage."""
     import importlib
     from unittest.mock import patch
 
@@ -237,6 +265,7 @@ def test_import_error_coverage():
     original_import = __import__
 
     def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
         if "maxtext.models.gemma4" in name:
             raise ImportError("mocked")
         return original_import(name, *args, **kwargs)
@@ -250,6 +279,7 @@ def test_import_error_coverage():
 
 
 def test_inference_import_error():
+    """Docstring for test_inference_import_error."""
     import importlib
     from unittest.mock import patch
 

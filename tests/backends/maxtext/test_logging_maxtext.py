@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,6 +9,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_log_metrics_success():
+    """Docstring for test_log_metrics_success."""
     metrics = {"loss": 0.5, "accuracy": 0.9}
     step = 10
     log_dir = "test_logs"
@@ -34,5 +37,6 @@ def test_log_metrics_success():
 
 
 def test_log_metrics_missing_dependency():
+    """Docstring for test_log_metrics_missing_dependency."""
     with patch("gemma_4_sql.backends.maxtext.logging.SummaryWriter", new=None), pytest.raises(DependencyMissingError, match="TensorBoardX dependencies are missing."):
         log_metrics({"loss": 0.5}, 10)

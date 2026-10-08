@@ -16,6 +16,7 @@ orig_jit = jax.jit
 
 @pytest.fixture(autouse=True)
 def disable_jit():
+    """Docstring for disable_jit."""
     jax.jit = lambda f, *args, **kwargs: f
     yield
     jax.jit = orig_jit

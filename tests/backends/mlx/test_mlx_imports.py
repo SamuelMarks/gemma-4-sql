@@ -1,9 +1,12 @@
+"""Module docstring."""
+
 import importlib
 import sys
 from unittest.mock import MagicMock
 
 
 def test_mlx_imports():
+    """Docstring for test_mlx_imports."""
     sys.modules["mlx"] = MagicMock()
     sys.modules["mlx.core"] = MagicMock()
     sys.modules["mlx.nn"] = MagicMock()
@@ -29,6 +32,7 @@ def test_mlx_imports():
 
 
 def test_mlx_logging_missing_tb(monkeypatch):
+    """Docstring for test_mlx_logging_missing_tb."""
     import gemma_4_sql.backends.mlx.logging as m_log
 
     monkeypatch.setattr(m_log, "SummaryWriter", None)
@@ -37,6 +41,7 @@ def test_mlx_logging_missing_tb(monkeypatch):
 
 
 def test_mlx_logging_success(monkeypatch):
+    """Docstring for test_mlx_logging_success."""
     import gemma_4_sql.backends.mlx.logging as m_log
 
     mock_sw = MagicMock()

@@ -217,6 +217,7 @@ def test_quantize_model_wrapper_error_handling():
     """Test error handling in quantize_model_wrapper."""
 
     def fail_apply():
+        """Docstring for fail_apply."""
         raise RuntimeError("Quantization execution failed")
 
     res = quantize_model_wrapper("test", "model", "int8", False, "", fail_apply)

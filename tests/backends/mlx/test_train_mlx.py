@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,6 +14,7 @@ from gemma_4_sql.type_hints import TrainerState
 
 
 def test_run_training_epochs():
+    """Docstring for test_run_training_epochs."""
     mock_dataloader = [{"inputs": [1, 2], "targets": [3, 4]}]
     mock_model = MagicMock()
     mock_model.parameters.return_value = "params"
@@ -40,6 +43,7 @@ def test_run_training_epochs():
 
 
 def test_run_training_epochs_loss_no_item():
+    """Docstring for test_run_training_epochs_loss_no_item."""
     mock_dataloader = [{"inputs": [1, 2], "targets": [3, 4]}]
     mock_model = MagicMock()
     mock_optimizer = MagicMock()
@@ -59,11 +63,13 @@ def test_run_training_epochs_loss_no_item():
 
 
 def test_execute_train_missing_deps():
+    """Docstring for test_execute_train_missing_deps."""
     with patch("gemma_4_sql.backends.mlx.train.mx", None), pytest.raises(DependencyMissingError):
         _execute_train("model", "dataset", 1, 0.01)
 
 
 def test_execute_train_success():
+    """Docstring for test_execute_train_success."""
     mock_load = MagicMock(return_value="model")
     mock_nn = MagicMock()
     mock_optim = MagicMock()
@@ -97,6 +103,7 @@ def test_execute_train_success():
 
 
 def test_execute_train_tuple_load():
+    """Docstring for test_execute_train_tuple_load."""
     mock_load = MagicMock(return_value=("model", "tok"))
     mock_nn = MagicMock()
     mock_optim = MagicMock()
@@ -116,6 +123,7 @@ def test_execute_train_tuple_load():
 
 
 def test_execute_train_invalid_loader():
+    """Docstring for test_execute_train_invalid_loader."""
     mock_load = MagicMock(return_value="model")
     mock_nn = MagicMock()
     mock_optim = MagicMock()
@@ -131,16 +139,18 @@ def test_execute_train_invalid_loader():
 
 
 class DummyConfig:
-    pass
+    """Docstring for DummyConfig."""
 
 
 def test_train_model_missing_deps():
+    """Docstring for test_train_model_missing_deps."""
     config = DummyConfig()
     with patch("gemma_4_sql.backends.mlx.train.mx", None), pytest.raises(DependencyMissingError):
         train_model(config)
 
 
 def test_train_model_success():
+    """Docstring for test_train_model_success."""
     config = DummyConfig()
     with (
         patch("gemma_4_sql.backends.mlx.train.mx", MagicMock()),
@@ -156,6 +166,7 @@ def test_train_model_success():
 
 
 def test_train_model_typeerror_fallback():
+    """Docstring for test_train_model_typeerror_fallback."""
     config = DummyConfig()
     config.batch_size = 4
 
@@ -170,6 +181,7 @@ def test_train_model_typeerror_fallback():
 
 
 def test_module_import_success():
+    """Docstring for test_module_import_success."""
     import importlib
 
     mock_mlx = MagicMock()

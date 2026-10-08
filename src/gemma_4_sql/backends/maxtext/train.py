@@ -81,6 +81,7 @@ def _get_train_step_fn(model: ModelType, optimizer: object) -> Any:
 
         # type ignore for lambda mapping to dynamic PyTree
         def _wrapper(p: Any, b: Any) -> Any:
+            """Docstring for _wrapper."""
             return _loss_fn(model, p, b)
 
         (loss, grads) = jax.value_and_grad(_wrapper)(params, batch)

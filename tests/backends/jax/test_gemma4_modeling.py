@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import jax.numpy as jnp
@@ -18,6 +20,7 @@ from gemma_4_sql.backends.jax.gemma4.modeling import (
 
 
 def test_gemma4_model():
+    """Docstring for test_gemma4_model."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -36,6 +39,7 @@ def test_gemma4_model():
 
 
 def test_gemma4_model_per_layer_input():
+    """Docstring for test_gemma4_model_per_layer_input."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -73,6 +77,7 @@ def test_gemma4_model_per_layer_input():
 @patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained")
 @patch("huggingface_hub.snapshot_download")
 def test_download_and_load_pretrained(mock_download, mock_create):
+    """Docstring for test_download_and_load_pretrained."""
     mock_download.return_value = "/path/to/model"
     mock_create.return_value = MagicMock()
 
@@ -86,12 +91,14 @@ def test_download_and_load_pretrained(mock_download, mock_create):
 
 @patch("gemma_4_sql.backends.jax.gemma4.modeling._download_and_load_pretrained")
 def test_gemma4_for_causal_lm_from_pretrained(mock_download):
+    """Docstring for test_gemma4_for_causal_lm_from_pretrained."""
     mock_download.return_value = MagicMock()
     Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B")
     mock_download.assert_called_once()
 
 
 def test_gemma4_for_causal_lm():
+    """Docstring for test_gemma4_for_causal_lm."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -111,6 +118,7 @@ def test_gemma4_for_causal_lm():
 
 
 def test_gemma4_for_causal_lm_softcapping():
+    """Docstring for test_gemma4_for_causal_lm_softcapping."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -131,6 +139,7 @@ def test_gemma4_for_causal_lm_softcapping():
 
 
 def test_gemma4_for_causal_lm_multimodal():
+    """Docstring for test_gemma4_for_causal_lm_multimodal."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -167,6 +176,7 @@ def test_gemma4_for_causal_lm_multimodal():
 
 
 def test_gemma4_for_causal_lm_multimodal_per_layer_inputs():
+    """Docstring for test_gemma4_for_causal_lm_multimodal_per_layer_inputs."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -193,6 +203,7 @@ def test_gemma4_for_causal_lm_multimodal_per_layer_inputs():
 
 
 def test_forward_function():
+    """Docstring for test_forward_function."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -220,6 +231,7 @@ def test_forward_function():
 
 
 def test_gemma4_model_with_cache():
+    """Docstring for test_gemma4_model_with_cache."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -235,7 +247,10 @@ def test_gemma4_model_with_cache():
     positions = jnp.array([[0, 1, 2]])
 
     class DummyCache:
+        """Docstring for DummyCache."""
+
         def __init__(self):
+            """Docstring for __init__."""
             import jax.numpy as jnp
             from flax import nnx
 
@@ -254,6 +269,7 @@ def test_gemma4_model_with_cache():
 @patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained")
 @patch("huggingface_hub.snapshot_download")
 def test_download_and_load_pretrained_with_config(mock_download, mock_create):
+    """Docstring for test_download_and_load_pretrained_with_config."""
     mock_download.return_value = "/path/to/model"
     mock_create.return_value = MagicMock()
 
@@ -264,6 +280,7 @@ def test_download_and_load_pretrained_with_config(mock_download, mock_create):
 
 
 def test_gemma4_model_missing_masks():
+    """Docstring for test_gemma4_model_missing_masks."""
     import jax.numpy as jnp
     from flax import nnx
 

@@ -14,6 +14,7 @@ def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "jax", object())
 
     def mock_serve_model_wrapper(backend_name, model_name, port, max_batch_size, missing_deps, missing_status, app_factory):
+        """Docstring for mock_serve_model_wrapper."""
         # Trigger the factory to test its internal logic
         app = app_factory()
 
@@ -54,6 +55,7 @@ def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
         return {"backend": backend_name, "model": model_name, "port": port, "max_batch_size": max_batch_size, "mode": "continuous_batching", "status": "running_jax_serve"}
 
     def mock_create_common_app(**kwargs):
+        """Docstring for mock_create_common_app."""
         return kwargs
 
     monkeypatch.setattr(srv, "serve_model_wrapper", mock_serve_model_wrapper)
@@ -80,6 +82,7 @@ def test_serve_model_jax_other_status(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "jax", object())
 
     def mock_serve_model_wrapper(**kwargs):
+        """Docstring for mock_serve_model_wrapper."""
         return {"status": "mocked_missing_jax", "backend": "jax"}
 
     monkeypatch.setattr(srv, "serve_model_wrapper", mock_serve_model_wrapper)

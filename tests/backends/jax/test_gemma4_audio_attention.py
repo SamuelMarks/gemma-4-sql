@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock
 
 import jax.numpy as jnp
@@ -7,6 +9,7 @@ from gemma_4_sql.backends.jax.gemma4.audio_attention import Gemma4AudioAttention
 
 
 def get_mock_audio_config():
+    """Docstring for get_mock_audio_config."""
     config = MagicMock()
     config.hidden_size = 16
     config.num_attention_heads = 2
@@ -20,6 +23,7 @@ def get_mock_audio_config():
 
 
 def test_rel_pos_encoding():
+    """Docstring for test_rel_pos_encoding."""
     config = get_mock_audio_config()
     pos_enc = Gemma4AudioRelPositionalEncoding(config)
     x = jnp.ones((2, 4, 16))
@@ -29,6 +33,7 @@ def test_rel_pos_encoding():
 
 
 def test_convert_to_block():
+    """Docstring for test_convert_to_block."""
     x = jnp.ones((2, 5, 2, 8))  # batch, seq_len, num_heads, head_dim
     out = convert_to_block(x, 2)
     # seq_len=5, chunk_size=2 -> num_blocks=3
@@ -36,6 +41,7 @@ def test_convert_to_block():
 
 
 def test_extract_block_context():
+    """Docstring for test_extract_block_context."""
     attn = MagicMock()
     attn.chunk_size = 2
     attn.max_past_horizon = 1
@@ -48,6 +54,7 @@ def test_extract_block_context():
 
 
 def test_rel_shift():
+    """Docstring for test_rel_shift."""
     # x shape: (batch, num_heads, num_blocks, block_size, position_length)
     x = jnp.ones((2, 2, 3, 2, 5))
     out = rel_shift(x, 4)
@@ -55,6 +62,7 @@ def test_rel_shift():
 
 
 def test_gemma4_audio_attention():
+    """Docstring for test_gemma4_audio_attention."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     attn = Gemma4AudioAttention(config, rngs=rngs)

@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import importlib
 import sys
 from unittest.mock import MagicMock, patch
@@ -7,6 +9,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_dependencies():
+    """Docstring for mock_dependencies."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_ocp = MagicMock()
@@ -43,6 +46,7 @@ def mock_dependencies():
 
 
 def reload_module():
+    """Docstring for reload_module."""
     import gemma_4_sql.backends.jax.export as jax_export
 
     importlib.reload(jax_export)
@@ -50,6 +54,7 @@ def reload_module():
 
 
 def test_export_model_with_weights(tmp_path):
+    """Docstring for test_export_model_with_weights."""
     jax_export = reload_module()
 
     export_path = str(tmp_path / "export")
@@ -62,6 +67,7 @@ def test_export_model_with_weights(tmp_path):
 
 
 def test_export_model_extract_weights(tmp_path):
+    """Docstring for test_export_model_extract_weights."""
     jax_export = reload_module()
 
     export_path = str(tmp_path / "export")
@@ -80,6 +86,7 @@ def test_export_model_extract_weights(tmp_path):
 
 
 def test_export_model_extract_weights_missing_flax(tmp_path):
+    """Docstring for test_export_model_extract_weights_missing_flax."""
     jax_export = reload_module()
 
     with patch.dict(sys.modules, {"flax": None}), pytest.raises(Exception, match="Flax NNX dependency missing:"):
@@ -88,6 +95,7 @@ def test_export_model_extract_weights_missing_flax(tmp_path):
 
 
 def test_export_model_extract_weights_error(tmp_path, mock_dependencies):
+    """Docstring for test_export_model_extract_weights_error."""
     jax_export = reload_module()
 
     # Make extraction fail
@@ -99,6 +107,7 @@ def test_export_model_extract_weights_error(tmp_path, mock_dependencies):
 
 
 def test_export_model_save_error(tmp_path, mock_dependencies):
+    """Docstring for test_export_model_save_error."""
     jax_export = reload_module()
 
     _, _, _, _, _, _, mock_checkpointer = mock_dependencies

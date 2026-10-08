@@ -124,6 +124,7 @@ def test_run_benchmark_wrapper_paths() -> None:
 
     # 2. Execution failure branch
     def _fail() -> tuple[float, float, float]:
+        """Docstring for _fail."""
         raise RuntimeError("Benchmark execution crashed")
 
     res_fail = run_benchmark_wrapper(
@@ -166,21 +167,29 @@ def test_run_benchmark_wrapper_paths() -> None:
 
 
 def test_sdk_benchmark(monkeypatch: object) -> None:
+    """Docstring for test_sdk_benchmark."""
     from unittest.mock import patch
 
     from gemma_4_sql.sdk.benchmark import benchmark
 
     class FakeBackend:
+        """Docstring for FakeBackend."""
+
         def benchmark_model(self, *args, **kwargs):
+            """Docstring for benchmark_model."""
             return {"status": "success"}
 
     class FakeRegistry:
+        """Docstring for FakeRegistry."""
+
         def get_backend(x):
+            """Docstring for get_backend."""
             return FakeBackend()
 
     original_import = __import__
 
     def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        """Docstring for mock_import."""
         if name == "gemma_4_sql.sdk.registry":
             return FakeRegistry
         return original_import(name, globals, locals, fromlist, level)

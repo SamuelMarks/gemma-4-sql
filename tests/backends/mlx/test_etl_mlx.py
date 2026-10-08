@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -9,6 +11,7 @@ from gemma_4_sql.type_hints import ETLConfig
 
 
 def test_pad_batch():
+    """Docstring for test_pad_batch."""
     inputs = [[1, 2], [1]]
     targets = [[3], [3, 4, 5]]
     res = _pad_batch(inputs, targets)
@@ -17,6 +20,7 @@ def test_pad_batch():
 
 
 def test_mlx_dataloader():
+    """Docstring for test_mlx_dataloader."""
     ds = [
         {"sql_prompt": "p1", "sql": "s1"},
         {"question": "p2", "query": "s2"},
@@ -36,6 +40,7 @@ def test_mlx_dataloader():
 
 
 def test_mlx_dataloader_fallback():
+    """Docstring for test_mlx_dataloader_fallback."""
     ds = [{}]
     tok = MagicMock()
     tok.encode.return_value = [1]
@@ -46,6 +51,7 @@ def test_mlx_dataloader_fallback():
 
 
 def test_load_hf_or_duckdb_duckdb(monkeypatch):
+    """Docstring for test_load_hf_or_duckdb_duckdb."""
     with patch("gemma_4_sql.backends.mlx.etl.load_duckdb_dataset") as mock_load:
         mock_load.return_value = "duckdb_ds"
         res = _load_hf_or_duckdb("ds", "train", "path", "table")
@@ -54,12 +60,14 @@ def test_load_hf_or_duckdb_duckdb(monkeypatch):
 
 
 def test_load_hf_or_duckdb_hf_missing_deps(monkeypatch):
+    """Docstring for test_load_hf_or_duckdb_hf_missing_deps."""
     monkeypatch.setattr(mlx_etl, "datasets", None)
     with pytest.raises(DependencyMissingError, match="Datasets dependency is missing"):
         _load_hf_or_duckdb("ds", "train", None, None)
 
 
 def test_load_hf_or_duckdb_hf(monkeypatch):
+    """Docstring for test_load_hf_or_duckdb_hf."""
     mock_datasets = MagicMock()
     mock_datasets.load_dataset.return_value = "hf_ds"
     monkeypatch.setattr(mlx_etl, "datasets", mock_datasets)
@@ -69,12 +77,14 @@ def test_load_hf_or_duckdb_hf(monkeypatch):
 
 
 def test_build_dataloader_missing_deps(monkeypatch):
+    """Docstring for test_build_dataloader_missing_deps."""
     monkeypatch.setattr(mlx_etl, "datasets", None)
     with pytest.raises(DependencyMissingError, match="Missing datasets."):
         build_dataloader(ETLConfig(dataset_name="ds", split="train", batch_size=2))
 
 
 def test_build_dataloader_success(monkeypatch):
+    """Docstring for test_build_dataloader_success."""
     mock_datasets = MagicMock()
     monkeypatch.setattr(mlx_etl, "datasets", mock_datasets)
 

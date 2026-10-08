@@ -154,7 +154,10 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
             passed_extra.update(kwargs)
 
             class MockOutput:
+                """Docstring for MockOutput."""
+
                 def __init__(self) -> None:
+                    """Docstring for __init__."""
                     self.sequences = torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long)
                     self.sequences_scores = [torch.tensor(0.9)]
 
@@ -172,11 +175,15 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
             """Simulate tokenization."""
 
             class MockInputs(UserDict):
+                """Docstring for MockInputs."""
+
                 def __init__(self) -> None:
+                    """Docstring for __init__."""
                     super().__init__({"input_ids": torch.tensor([[1, 2]], dtype=torch.long)})
                     self.input_ids = self["input_ids"]
 
                 def to(self, device: Any) -> MockInputs:
+                    """Docstring for to."""
                     return self
 
             return MockInputs()

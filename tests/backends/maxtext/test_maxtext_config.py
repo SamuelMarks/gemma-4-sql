@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,12 +16,16 @@ from gemma_4_sql.backends.maxtext.config_generator import (
 
 
 class MockTrainingConfig:
+    """Docstring for MockTrainingConfig."""
+
     def __init__(self, **kwargs):
+        """Docstring for __init__."""
         for k, v in kwargs.items():
             setattr(self, k, v)
 
 
 def test_to_float():
+    """Docstring for test_to_float."""
     assert _to_float(None, 2.0) == 2.0
     assert _to_float("3.14", 2.0) == 3.14
     assert _to_float(10, 2.0) == 10.0
@@ -27,6 +33,7 @@ def test_to_float():
 
 
 def test_to_int():
+    """Docstring for test_to_int."""
     assert _to_int(None, 2) == 2
     assert _to_int("3", 2) == 3
     assert _to_int(10.5, 2) == 10
@@ -34,6 +41,7 @@ def test_to_int():
 
 
 def test_normalize_model_architecture():
+    """Docstring for test_normalize_model_architecture."""
     assert normalize_model_architecture("gemma-4") == "gemma4_2b"
     assert normalize_model_architecture("gemma4_2b") == "gemma4_2b"
     assert normalize_model_architecture("gemma-4-7b") == "gemma4_7b"
@@ -43,6 +51,7 @@ def test_normalize_model_architecture():
 
 
 def test_build_maxtext_hyperparameters_defaults():
+    """Docstring for test_build_maxtext_hyperparameters_defaults."""
     config = MockTrainingConfig()
     params = build_maxtext_hyperparameters(config)
     assert params.model_architecture == "gemma4_2b"
@@ -52,6 +61,7 @@ def test_build_maxtext_hyperparameters_defaults():
 
 
 def test_build_maxtext_hyperparameters_overrides():
+    """Docstring for test_build_maxtext_hyperparameters_overrides."""
     config = MockTrainingConfig(model_name="gemma-4-7b", batch_size=4.0, learning_rate=2e-4, epochs=2, dataset="test_data", extra_kwargs={"opt_type": "adam"})
     params = build_maxtext_hyperparameters(config, steps=2000)
     assert params.model_architecture == "gemma4_7b"
@@ -64,6 +74,7 @@ def test_build_maxtext_hyperparameters_overrides():
 
 
 def test_build_maxtext_hyperparameters_validation_errors():
+    """Docstring for test_build_maxtext_hyperparameters_validation_errors."""
     config = MockTrainingConfig()
     with pytest.raises(ValueError, match="per_device_batch_size must be positive"):
         build_maxtext_hyperparameters(config, per_device_batch_size=-1)
@@ -94,6 +105,7 @@ def test_build_maxtext_hyperparameters_validation_errors():
 
 
 def test_generate_maxtext_gin_config():
+    """Docstring for test_generate_maxtext_gin_config."""
     config = MockTrainingConfig()
     gin_str = generate_maxtext_gin_config(config)
     assert "gemma4_2b" in gin_str
@@ -101,6 +113,7 @@ def test_generate_maxtext_gin_config():
 
 
 def test_save_maxtext_gin_config(tmp_path):
+    """Docstring for test_save_maxtext_gin_config."""
     gin_content = "test_content"
 
     # Test with output path
@@ -120,6 +133,7 @@ def test_save_maxtext_gin_config(tmp_path):
 
 
 def test_build_maxtext_cli_args(tmp_path):
+    """Docstring for test_build_maxtext_cli_args."""
     config = MockTrainingConfig()
 
     # Test without gin_config_path

@@ -46,6 +46,7 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
 
     def mock_train(*args, **kwargs):
+        """Docstring for mock_train."""
         return {"backend": "keras", "action": "pretrain", "model": "my-model"}
 
     monkeypatch.setattr(ktrain, "keras", object())

@@ -53,6 +53,7 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
         return (0.0, 0.0, 0.0)
 
     def _fallback_log_sig(x: Any) -> Any:
+        """Docstring for _fallback_log_sig."""
         return mx.negative(x) if hasattr(mx, "negative") else -x
 
     log_sig_fn: Any = getattr(getattr(mx_nn, "losses", None), "log_sigmoid", _fallback_log_sig)

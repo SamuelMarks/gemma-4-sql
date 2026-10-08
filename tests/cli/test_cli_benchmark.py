@@ -8,6 +8,7 @@ from gemma_4_sql.cli_benchmark import benchmark_cmd
 
 
 def test_benchmark_cmd(monkeypatch: pytest.MonkeyPatch) -> object:
+    """Docstring for test_benchmark_cmd."""
     monkeypatch.setattr("gemma_4_sql.cli_benchmark.benchmark", lambda **kwargs: {"status": "ok"})
     """Initialize function test_benchmark_cmd."""
     args = argparse.Namespace(

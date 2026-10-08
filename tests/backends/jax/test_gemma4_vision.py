@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import jax.numpy as jnp
 import pytest
 from flax import nnx
@@ -15,6 +17,8 @@ from gemma_4_sql.backends.jax.gemma4.vision import (
 
 
 class DummyVisionConfig:
+    """Docstring for DummyVisionConfig."""
+
     image_size = 32
     patch_size = 16
     num_channels = 3
@@ -25,16 +29,22 @@ class DummyVisionConfig:
     num_hidden_layers = 1
 
     class shd_cfg:
+        """Docstring for shd_cfg."""
+
         layer_norm = None
 
 
 class DummyAudioConfig:
+    """Docstring for DummyAudioConfig."""
+
     hidden_size = 16
     output_proj_dims = 16
     rms_norm_eps = 1e-6
 
 
 class DummyConfig:
+    """Docstring for DummyConfig."""
+
     hidden_size = 16
     dtype = jnp.float32
     vision_config = DummyVisionConfig()
@@ -43,6 +53,7 @@ class DummyConfig:
 
 
 def test_siglip_vision_embeddings():
+    """Docstring for test_siglip_vision_embeddings."""
     rngs = nnx.Rngs(0)
     config = DummyVisionConfig()
     model = SiglipVisionEmbeddings(config, rngs=rngs)
@@ -54,6 +65,7 @@ def test_siglip_vision_embeddings():
 
 
 def test_siglip_attention():
+    """Docstring for test_siglip_attention."""
     rngs = nnx.Rngs(0)
     config = DummyVisionConfig()
     model = SiglipAttention(config, rngs=rngs)
@@ -64,6 +76,7 @@ def test_siglip_attention():
 
 
 def test_siglip_mlp():
+    """Docstring for test_siglip_mlp."""
     rngs = nnx.Rngs(0)
     config = DummyVisionConfig()
     model = SiglipMLP(config, rngs=rngs)
@@ -74,6 +87,7 @@ def test_siglip_mlp():
 
 
 def test_siglip_encoder_layer():
+    """Docstring for test_siglip_encoder_layer."""
     rngs = nnx.Rngs(0)
     config = DummyVisionConfig()
     model = SiglipEncoderLayer(config, rngs=rngs)
@@ -84,6 +98,7 @@ def test_siglip_encoder_layer():
 
 
 def test_gemma4_multimodal_embedder():
+    """Docstring for test_gemma4_multimodal_embedder."""
     rngs = nnx.Rngs(0)
 
     config = DummyConfig()
@@ -101,6 +116,7 @@ def test_gemma4_multimodal_embedder():
 
 
 def test_siglip_vision_transformer():
+    """Docstring for test_siglip_vision_transformer."""
     rngs = nnx.Rngs(0)
     config = DummyVisionConfig()
     model = SiglipVisionTransformer(config, rngs=rngs)
@@ -111,6 +127,7 @@ def test_siglip_vision_transformer():
 
 
 def test_avg_pool_vision_outputs():
+    """Docstring for test_avg_pool_vision_outputs."""
     config = DummyVisionConfig()
     # 4 patches. image_size=32, patch_size=16 -> 2 patches per side.
     # tokens_per_side = sqrt(num_output_tokens). Let's use 1 output token.
@@ -122,6 +139,7 @@ def test_avg_pool_vision_outputs():
 
 
 def test_gemma4_multi_modal_projector():
+    """Docstring for test_gemma4_multi_modal_projector."""
     rngs = nnx.Rngs(0)
     config = DummyConfig()
     config.mm_tokens_per_image = 1

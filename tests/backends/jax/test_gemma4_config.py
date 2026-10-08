@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from jax.sharding import PartitionSpec
 
 from gemma_4_sql.backends.jax.gemma4.config import (
@@ -14,34 +16,40 @@ from gemma_4_sql.backends.jax.gemma4.config import (
 
 
 def test_vision_shard_config():
+    """Docstring for test_vision_shard_config."""
     cfg = VisionShardConfig.no_sharding()
     assert isinstance(cfg, VisionShardConfig)
     assert cfg.attn_kernel is None
 
 
 def test_vision_config():
+    """Docstring for test_vision_config."""
     cfg = VisionConfig()
     assert cfg.hidden_size == 1152
     assert cfg.image_size == 896
 
 
 def test_attention_type():
+    """Docstring for test_attention_type."""
     assert AttentionType.LOCAL_SLIDING.value == "local_sliding"
     assert AttentionType.GLOBAL.value == "global"
 
 
 def test_shard_mode():
+    """Docstring for test_shard_mode."""
     assert ShardMode.FSDP.value == "fsdp"
     assert ShardMode.TP.value == "tp"
 
 
 def test_make_spec():
+    """Docstring for test_make_spec."""
     spec = _make_spec(None, "fsdp")
     assert isinstance(spec, PartitionSpec)
     assert spec == PartitionSpec(None, "fsdp")
 
 
 def test_shard_config():
+    """Docstring for test_shard_config."""
     no_shard = ShardConfig.no_sharding()
     assert no_shard.attn_kernel is None
 
@@ -59,11 +67,13 @@ def test_shard_config():
 
 
 def test_audio_config():
+    """Docstring for test_audio_config."""
     cfg = AudioConfig()
     assert cfg.hidden_size == 1024
 
 
 def test_model_config_presets():
+    """Docstring for test_model_config_presets."""
     cfg1 = ModelConfigPresets.gemma4_base()
     assert isinstance(cfg1, ModelConfigPresets)
 
@@ -96,12 +106,14 @@ def test_model_config_presets():
 
 
 def test_model_config():
+    """Docstring for test_model_config."""
     cfg = ModelConfig()
     assert cfg.vocab_size == 256000
     assert cfg.hidden_size == 2048
 
 
 def test_model_config_presets_2():
+    """Docstring for test_model_config_presets_2."""
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfigPresets
 
     assert ModelConfigPresets.gemma4_e2b(use_fsdp=True).num_hidden_layers == 35

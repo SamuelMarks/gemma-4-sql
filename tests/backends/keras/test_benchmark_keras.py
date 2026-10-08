@@ -9,11 +9,13 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_get_device_str_no_tf():
+    """Docstring for test_get_device_str_no_tf."""
     with patch("gemma_4_sql.backends.keras.benchmark.tf", None):
         assert _get_device_str("gpu") == "/CPU:0"
 
 
 def test_get_device_str_with_tf():
+    """Docstring for test_get_device_str_with_tf."""
     mock_tf = MagicMock()
     mock_tf.config.list_physical_devices.return_value = ["GPU:0"]
     with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf):
@@ -27,17 +29,20 @@ def test_get_device_str_with_tf():
 
 
 def test_load_keras_model_missing_deps():
+    """Docstring for test_load_keras_model_missing_deps."""
     with patch("gemma_4_sql.backends.keras.benchmark.keras", None), pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
         _load_keras_model("test", "bfloat16")
 
 
 def test_load_keras_model_import_error():
+    """Docstring for test_load_keras_model_import_error."""
     mock_keras = MagicMock()
     with patch("gemma_4_sql.backends.keras.benchmark.keras", mock_keras), patch("builtins.__import__", side_effect=ImportError), pytest.raises(ValueError, match="Failed to load actual model"):
         _load_keras_model("test", "bfloat16")
 
 
 def test_load_keras_model_success():
+    """Docstring for test_load_keras_model_success."""
     mock_keras = MagicMock()
     mock_gemma_causal_lm_cls = MagicMock()
     mock_model = MagicMock()
@@ -50,17 +55,22 @@ def test_load_keras_model_success():
 
 
 def test_run_benchmark_pass_missing_tf():
+    """Docstring for test_run_benchmark_pass_missing_tf."""
     with patch("gemma_4_sql.backends.keras.benchmark.tf", None), pytest.raises(DependencyMissingError, match="TensorFlow dependencies are missing"):
         _run_benchmark_pass(None, 1, 1, 1, "prefill", 10, "cpu")
 
 
 def test_run_benchmark_pass_prefill():
+    """Docstring for test_run_benchmark_pass_prefill."""
     mock_tf = MagicMock()
     mock_tf.random.uniform.return_value = MagicMock()
     mock_model = MagicMock()
 
     def mock_function(*args, **kwargs):
+        """Docstring for mock_function."""
+
         def decorator(f):
+            """Docstring for decorator."""
             return f
 
         return decorator
@@ -78,13 +88,17 @@ def test_run_benchmark_pass_prefill():
 
 
 def test_run_benchmark_pass_generate_gpu():
+    """Docstring for test_run_benchmark_pass_generate_gpu."""
     mock_tf = MagicMock()
     mock_tf.random.uniform.return_value = MagicMock()
     mock_tf.config.experimental.get_memory_info.return_value = {"peak": 1024 * 1024}  # 1MB
     mock_model = MagicMock()
 
     def mock_function(*args, **kwargs):
+        """Docstring for mock_function."""
+
         def decorator(f):
+            """Docstring for decorator."""
             return f
 
         return decorator
@@ -102,6 +116,7 @@ def test_run_benchmark_pass_generate_gpu():
 
 
 def test_run_benchmark_pass_generate_gpu_value_error():
+    """Docstring for test_run_benchmark_pass_generate_gpu_value_error."""
     mock_tf = MagicMock()
     mock_tf.random.uniform.return_value = MagicMock()
     mock_tf.config.experimental.get_memory_info.side_effect = ValueError
@@ -109,7 +124,10 @@ def test_run_benchmark_pass_generate_gpu_value_error():
     mock_model = MagicMock()
 
     def mock_function(*args, **kwargs):
+        """Docstring for mock_function."""
+
         def decorator(f):
+            """Docstring for decorator."""
             return f
 
         return decorator
@@ -122,11 +140,15 @@ def test_run_benchmark_pass_generate_gpu_value_error():
 
 
 def test_run_benchmark_pass_branches():
+    """Docstring for test_run_benchmark_pass_branches."""
     mock_tf = MagicMock()
     mock_tf.random.uniform.return_value = MagicMock()
 
     def mock_function(*args, **kwargs):
+        """Docstring for mock_function."""
+
         def decorator(f):
+            """Docstring for decorator."""
             return f
 
         return decorator
@@ -137,7 +159,7 @@ def test_run_benchmark_pass_branches():
     mock_model = MagicMock()
 
     class OutNoNumpy:
-        pass
+        """Docstring for OutNoNumpy."""
 
     mock_model.return_value = OutNoNumpy()
     with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf), patch("gemma_4_sql.backends.keras.benchmark._get_device_str", return_value="/CPU:0"):
@@ -145,7 +167,10 @@ def test_run_benchmark_pass_branches():
 
     # Case 2: mode="generate", model does NOT have generate
     class ModelNoGenerate:
+        """Docstring for ModelNoGenerate."""
+
         def __call__(self, *args, **kwargs):
+            """Docstring for __call__."""
             return OutNoNumpy()
 
     with patch("gemma_4_sql.backends.keras.benchmark.tf", mock_tf), patch("gemma_4_sql.backends.keras.benchmark._get_device_str", return_value="/CPU:0"):
@@ -170,15 +195,18 @@ def test_run_benchmark_pass_branches():
 
 
 def test_benchmark_model_missing_deps():
+    """Docstring for test_benchmark_model_missing_deps."""
     with patch("gemma_4_sql.backends.keras.benchmark.keras", None), pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
         benchmark_model("test", "cpu", 1)
 
 
 def test_benchmark_model_success():
+    """Docstring for test_benchmark_model_success."""
     mock_keras = MagicMock()
     mock_tf = MagicMock()
 
     def mock_run_benchmark_wrapper(backend_name, model_name, hardware, batch_size, missing_deps, missing_status, benchmark_fn):
+        """Docstring for mock_run_benchmark_wrapper."""
         benchmark_fn()
         return {"status": "ok"}
 

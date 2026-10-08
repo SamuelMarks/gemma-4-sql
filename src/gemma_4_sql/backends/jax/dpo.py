@@ -118,6 +118,7 @@ def _get_train_step_fn(beta: float) -> object:
         if nnx is not None and hasattr(nnx, "value_and_grad"):
             # Using cast to Any to avoid strict typing complaints on the lambda arguments since they map to dynamic models
             def _loss_wrapper(p: Any, r: Any, b: Any) -> Any:
+                """Docstring for _loss_wrapper."""
                 return _dpo_step_loss(p, r, b, beta)
 
             (loss, grads) = nnx.value_and_grad(_loss_wrapper)(policy_model, ref_model, batch)

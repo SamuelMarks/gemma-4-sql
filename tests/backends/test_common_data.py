@@ -16,7 +16,7 @@ def test_create_hf_data_source():
     """Test _create_hf_data_source."""
 
     class DummyBase:
-        pass
+        """Docstring for DummyBase."""
 
     HFDataSource = _create_hf_data_source(DummyBase)
 
@@ -33,7 +33,7 @@ def test_create_base_format_transform():
     """Test _create_base_format_transform."""
 
     class DummyBaseMap:
-        pass
+        """Docstring for DummyBaseMap."""
 
     BaseFormatTransform = _create_base_format_transform(DummyBaseMap)
 

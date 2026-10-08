@@ -9,11 +9,13 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_log_metrics_missing_tf():
+    """Docstring for test_log_metrics_missing_tf."""
     with patch("gemma_4_sql.backends.keras.logging.tf", None), pytest.raises(DependencyMissingError, match="TensorFlow dependencies are missing"):
         log_metrics({"a": 1}, 1)
 
 
 def test_log_metrics_missing_summary_attr():
+    """Docstring for test_log_metrics_missing_summary_attr."""
     mock_tf = MagicMock()
     del mock_tf.summary
     with patch("gemma_4_sql.backends.keras.logging.tf", mock_tf):
@@ -22,6 +24,7 @@ def test_log_metrics_missing_summary_attr():
 
 
 def test_log_metrics_success():
+    """Docstring for test_log_metrics_success."""
     mock_tf = MagicMock()
     mock_writer = MagicMock()
     mock_tf.summary.create_file_writer.return_value = mock_writer

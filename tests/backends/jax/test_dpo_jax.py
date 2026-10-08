@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import importlib
 import sys
 from unittest.mock import MagicMock, patch
@@ -7,6 +9,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_dependencies():
+    """Docstring for mock_dependencies."""
     mock_jax = MagicMock()
     mock_jnn = MagicMock()
     mock_jnp = MagicMock()
@@ -28,7 +31,10 @@ def mock_dependencies():
     # jnp.sum needs to return exactly what we expect
 
     def mock_value_and_grad(f):
+        """Docstring for mock_value_and_grad."""
+
         def wrapper(*args, **kwargs):
+            """Docstring for wrapper."""
             return (f(*args, **kwargs), "mock_grads")
 
         return wrapper
@@ -52,6 +58,7 @@ def mock_dependencies():
 
 
 def reload_module():
+    """Docstring for reload_module."""
     import gemma_4_sql.backends.jax.dpo as jax_dpo
 
     importlib.reload(jax_dpo)
@@ -59,6 +66,7 @@ def reload_module():
 
 
 def test_missing_dependencies():
+    """Docstring for test_missing_dependencies."""
     with patch.dict(sys.modules, {"jax": None, "jax.nn": None, "jax.numpy": None, "optax": None, "flax": None, "flax.nnx": None}):
         jax_dpo = reload_module()
 
@@ -70,6 +78,7 @@ def test_missing_dependencies():
 
 
 def test_dpo_loss():
+    """Docstring for test_dpo_loss."""
     jax_dpo = reload_module()
 
     with patch("gemma_4_sql.backends.jax.dpo.generic_dpo_loss", return_value=("loss", "chosen", "rejected")):
@@ -80,6 +89,7 @@ def test_dpo_loss():
 
 
 def test_compute_logps():
+    """Docstring for test_compute_logps."""
     jax_dpo = reload_module()
 
     mock_model = MagicMock()
@@ -92,6 +102,7 @@ def test_compute_logps():
 
 
 def test_dpo_step_loss():
+    """Docstring for test_dpo_step_loss."""
     jax_dpo = reload_module()
 
     mock_batch = {"chosen_inputs": "ci", "rejected_inputs": "ri", "chosen_labels": "cl", "rejected_labels": "rl"}
@@ -106,6 +117,7 @@ def test_dpo_step_loss():
 
 
 def test_get_train_step_fn():
+    """Docstring for test_get_train_step_fn."""
     jax_dpo = reload_module()
 
     train_step = jax_dpo._get_train_step_fn(0.1)
@@ -120,6 +132,7 @@ def test_get_train_step_fn():
 
 
 def test_get_train_step_fn_no_nnx():
+    """Docstring for test_get_train_step_fn_no_nnx."""
     jax_dpo = reload_module()
 
     del jax_dpo.nnx.value_and_grad
@@ -135,10 +148,14 @@ def test_get_train_step_fn_no_nnx():
 
 
 def test_run_training_epochs():
+    """Docstring for test_run_training_epochs."""
     jax_dpo = reload_module()
 
     class MockLoss:
+        """Docstring for MockLoss."""
+
         def item(self):
+            """Docstring for item."""
             return 0.5
 
     mock_state = MagicMock()
@@ -155,6 +172,7 @@ def test_run_training_epochs():
 
 
 def test_execute_dpo():
+    """Docstring for test_execute_dpo."""
     jax_dpo = reload_module()
 
     with patch("gemma_4_sql.backends.jax.dpo.build_dataloader") as mock_build_dl:
@@ -175,6 +193,7 @@ def test_execute_dpo():
 
 
 def test_run_dpo():
+    """Docstring for test_run_dpo."""
     jax_dpo = reload_module()
 
     mock_config = MagicMock()

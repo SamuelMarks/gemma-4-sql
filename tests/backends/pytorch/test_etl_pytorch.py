@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,6 +10,7 @@ from gemma_4_sql.type_hints import ETLConfig
 
 
 def test_get_pytorch_classes():
+    """Docstring for test_get_pytorch_classes."""
     MagicMock()
     mock_torch = MagicMock()
     mock_torch.tensor.side_effect = lambda x, dtype=None: x
@@ -44,6 +47,7 @@ def test_get_pytorch_classes():
 
 
 def test_get_pytorch_classes_no_dataset():
+    """Docstring for test_get_pytorch_classes_no_dataset."""
     # If Dataset is None, it should inherit from object
     with patch("gemma_4_sql.backends.pytorch.etl.Dataset", None):
         PyTorchDataset = etl._get_pytorch_classes()
@@ -51,6 +55,7 @@ def test_get_pytorch_classes_no_dataset():
 
 
 def test_collate_fn():
+    """Docstring for test_collate_fn."""
     mock_torch = MagicMock()
     mock_torch.nn.utils.rnn.pad_sequence.side_effect = lambda x, batch_first: f"padded_{x}"
     mock_torch.stack.side_effect = lambda x: f"stacked_{x}"
@@ -78,11 +83,15 @@ def test_collate_fn():
 
 
 def test_get_sampler():
+    """Docstring for test_get_sampler."""
     assert etl._get_sampler(None, False) is None
 
     # Test valid distributed
     class MockDistributedSampler:
+        """Docstring for MockDistributedSampler."""
+
         def __init__(self, ds):
+            """Docstring for __init__."""
             self.ds = ds
 
     with patch("builtins.__import__", return_value=MagicMock(DistributedSampler=MockDistributedSampler)):
@@ -92,7 +101,10 @@ def test_get_sampler():
 
     # Test import error / value error fallback
     class MockFailingSampler:
+        """Docstring for MockFailingSampler."""
+
         def __init__(self, ds):
+            """Docstring for __init__."""
             raise ValueError("mock error")
 
     with patch("builtins.__import__", return_value=MagicMock(DistributedSampler=MockFailingSampler)):
@@ -100,6 +112,7 @@ def test_get_sampler():
 
 
 def test_load_hf_or_duckdb():
+    """Docstring for test_load_hf_or_duckdb."""
     with patch("gemma_4_sql.backends.pytorch.etl.load_duckdb_dataset") as mock_load:
         mock_load.return_value = "duckdb_ds"
         assert etl._load_hf_or_duckdb("ds", "split", "path", "table") == "duckdb_ds"
@@ -116,6 +129,7 @@ def test_load_hf_or_duckdb():
 
 
 def test_build_dataloader():
+    """Docstring for test_build_dataloader."""
     config = ETLConfig(dataset_name="dummy_ds", split="train", batch_size=4, tokenizer_name="dummy_tok", distributed=True, duckdb_path=None, duckdb_table=None)
 
     # Test missing deps

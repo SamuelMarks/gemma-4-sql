@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest import mock
 
 import pytest
@@ -29,20 +31,26 @@ def test_peft_import_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class DummyModel(nn.Module):
+    """Docstring for DummyModel."""
+
     def __init__(self):
+        """Docstring for __init__."""
         super().__init__()
         self.q_proj = nn.Linear(10, 10)
         self.saved_path = None
         self.printed = False
 
     def print_trainable_parameters(self):
+        """Docstring for print_trainable_parameters."""
         self.printed = True
 
     def save_pretrained(self, path: str):
+        """Docstring for save_pretrained."""
         self.saved_path = path
 
     @classmethod
     def from_pretrained(cls, model_name: str, *args, **kwargs):
+        """Docstring for from_pretrained."""
         if "error" in model_name:
             raise ValueError("mock error")
         return cls()
@@ -50,11 +58,13 @@ class DummyModel(nn.Module):
 
 @pytest.fixture
 def mock_transformers_auto_model(monkeypatch):
+    """Docstring for mock_transformers_auto_model."""
     import builtins
 
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Docstring for mock_import."""
         if name == "transformers":
             return type("MockTransformers", (), {"AutoModelForCausalLM": DummyModel})
         return orig_import(name, *a, **k)
@@ -64,6 +74,7 @@ def mock_transformers_auto_model(monkeypatch):
 
 
 def test_apply_lora_pytorch_real(monkeypatch: pytest.MonkeyPatch, mock_transformers_auto_model: None) -> None:
+    """Docstring for test_apply_lora_pytorch_real."""
     monkeypatch.setattr(pt_peft, "peft", mock.MagicMock())
     monkeypatch.setattr(pt_peft, "torch", mock.MagicMock())
     monkeypatch.setattr(pt_peft, "LoraConfig", mock.MagicMock())
@@ -78,6 +89,7 @@ def test_apply_lora_pytorch_real(monkeypatch: pytest.MonkeyPatch, mock_transform
 
 
 def test_apply_lora_pytorch_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_apply_lora_pytorch_missing_deps."""
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(pt_peft, "peft", None)
@@ -86,11 +98,13 @@ def test_apply_lora_pytorch_missing_deps(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_apply_lora_pytorch_error(monkeypatch: pytest.MonkeyPatch, mock_transformers_auto_model: None) -> None:
+    """Docstring for test_apply_lora_pytorch_error."""
     monkeypatch.setattr(pt_peft, "peft", mock.MagicMock())
     monkeypatch.setattr(pt_peft, "torch", mock.MagicMock())
     monkeypatch.setattr(pt_peft, "LoraConfig", mock.MagicMock())
 
     def mock_get_peft_model(*args, **kwargs):
+        """Docstring for mock_get_peft_model."""
         raise ValueError("mock error")
 
     monkeypatch.setattr(pt_peft, "get_peft_model", mock_get_peft_model)

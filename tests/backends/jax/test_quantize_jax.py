@@ -140,26 +140,39 @@ def test_quantize_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for _mock_jax_quantize_env."""
+
     # Mock Gemma4Config and Gemma4ForCausalLM to avoid allocating giant models
     class MockGemma4Config:
+        """Docstring for MockGemma4Config."""
+
         @staticmethod
         def gemma4_e2b():
+            """Docstring for gemma4_e2b."""
             return "mock_config"
 
     class MockGemma4ForCausalLM:
+        """Docstring for MockGemma4ForCausalLM."""
+
         def __init__(self, config, rngs):
-            pass
+            """Docstring for __init__."""
 
     monkeypatch.setattr(qt, "Gemma4Config", MockGemma4Config)
     monkeypatch.setattr(qt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
 
     class MockParam:
+        """Docstring for MockParam."""
+
         def __init__(self, val):
+            """Docstring for __init__."""
             self.value = val
 
     class MockGraph:
+        """Docstring for MockGraph."""
+
         @staticmethod
         def iter_graph(model):
+            """Docstring for iter_graph."""
             # Return 3 mock parameters for quantize
             yield ("path1", MockParam(jnp.array([[1.0, 2.0], [3.0, 4.0]])))
             yield ("path2", MockParam(jnp.array([[0.1, 0.2], [0.3, 0.4]])))
@@ -169,12 +182,16 @@ def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
             yield ("path4", "not_a_param")
 
     class MockNNX:
+        """Docstring for MockNNX."""
+
         graph = MockGraph()
         Param = MockParam
 
         class Rngs:
+            """Docstring for Rngs."""
+
             def __init__(self, seed):
-                pass
+                """Docstring for __init__."""
 
     monkeypatch.setattr(qt, "nnx", MockNNX())
 
@@ -211,6 +228,7 @@ def test_quantize_jax_model_error_handling(monkeypatch: pytest.MonkeyPatch) -> N
     """Test quantize_model when an error occurs in model graph iteration."""
 
     def raise_runtime_err(*_args: object, **_kwargs: object) -> object:
+        """Docstring for raise_runtime_err."""
         raise RuntimeError("Mock graph iteration failure")
 
     monkeypatch.setattr(qt, "_apply_quantization_to_model", raise_runtime_err)
@@ -234,7 +252,10 @@ def test_set_param_metadata_native() -> None:
     """Test _set_param_metadata when set_metadata is present."""
 
     class DummyParamNative:
+        """Docstring for DummyParamNative."""
+
         def set_metadata(self, k: str, v: str) -> None:
+            """Docstring for set_metadata."""
             setattr(self, k, v)
 
     dummy = DummyParamNative()

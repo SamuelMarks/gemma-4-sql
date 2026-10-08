@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import sqlite3
 from typing import ClassVar
 
@@ -8,29 +10,48 @@ from gemma_4_sql.type_hints import TrainingConfig
 
 @pytest.fixture
 def mock_keras_env(monkeypatch: pytest.MonkeyPatch):
+    """Docstring for mock_keras_env."""
     import gemma_4_sql.backends.keras.train as tr
 
     class MockKeras:
+        """Docstring for MockKeras."""
+
         class losses:
+            """Docstring for losses."""
+
             @staticmethod
             def SparseCategoricalCrossentropy(*args, **kwargs):
+                """Docstring for SparseCategoricalCrossentropy."""
                 return "loss"
 
         class optimizers:
+            """Docstring for optimizers."""
+
             @staticmethod
             def AdamW(*args, **kwargs):
+                """Docstring for AdamW."""
                 return "optimizer"
 
     class MockTF:
+        """Docstring for MockTF."""
+
         class distribute:
+            """Docstring for distribute."""
+
             class MirroredStrategy:
+                """Docstring for MirroredStrategy."""
+
                 def scope(self):
+                    """Docstring for scope."""
+
                     class MockScope:
+                        """Docstring for MockScope."""
+
                         def __enter__(self):
-                            pass
+                            """Docstring for __enter__."""
 
                         def __exit__(self, *a):
-                            pass
+                            """Docstring for __exit__."""
 
                     return MockScope()
 
@@ -40,6 +61,7 @@ def mock_keras_env(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_train_model_keras(tmp_path, mock_keras_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_train_model_keras."""
     # Use real mock sqlite DB for dataloader
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
@@ -60,8 +82,11 @@ def test_train_model_keras(tmp_path, mock_keras_env, monkeypatch: pytest.MonkeyP
     import sys
 
     class MockGemmaCls:
+        """Docstring for MockGemmaCls."""
+
         @classmethod
         def from_preset(cls, *a):
+            """Docstring for from_preset."""
             raise ValueError("dummy")
 
     mock_keras_nlp = type("keras_nlp", (), {"models": type("models", (), {"GemmaCausalLM": MockGemmaCls})})
@@ -72,16 +97,23 @@ def test_train_model_keras(tmp_path, mock_keras_env, monkeypatch: pytest.MonkeyP
 
 
 def test_execute_train_success(mock_keras_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_execute_train_success."""
+
     class MockHistory:
+        """Docstring for MockHistory."""
+
         history: ClassVar[dict] = {"loss": (0.5,)}
 
     class MockModel:
+        """Docstring for MockModel."""
+
         preprocessor = type("MockPrep", (), {"sequence_length": 512})()
 
         def compile(self, *a, **k):
-            pass
+            """Docstring for compile."""
 
         def fit(self, *a, **k):
+            """Docstring for fit."""
             return MockHistory()
 
     monkeypatch.setattr(mock_keras_env, "build_dataloader", lambda *a, **k: {"loader": [{"a": 1}]})
@@ -89,8 +121,11 @@ def test_execute_train_success(mock_keras_env, monkeypatch: pytest.MonkeyPatch) 
     import sys
 
     class MockGemmaCls:
+        """Docstring for MockGemmaCls."""
+
         @classmethod
         def from_preset(cls, *a):
+            """Docstring for from_preset."""
             return MockModel()
 
     mock_keras_nlp = type("keras_nlp", (), {"models": type("models", (), {"GemmaCausalLM": MockGemmaCls})})
@@ -106,16 +141,23 @@ def test_execute_train_success(mock_keras_env, monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_execute_train_no_loss(mock_keras_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_execute_train_no_loss."""
+
     class MockHistory:
+        """Docstring for MockHistory."""
+
         history: tuple = ()
 
     class MockModel:
+        """Docstring for MockModel."""
+
         preprocessor = type("MockPrep", (), {"sequence_length": 512})()
 
         def compile(self, *a, **k):
-            pass
+            """Docstring for compile."""
 
         def fit(self, *a, **k):
+            """Docstring for fit."""
             return MockHistory()
 
     monkeypatch.setattr(mock_keras_env, "build_dataloader", lambda *a, **k: {"loader": [{"a": 1}]})
@@ -123,8 +165,11 @@ def test_execute_train_no_loss(mock_keras_env, monkeypatch: pytest.MonkeyPatch) 
     import sys
 
     class MockGemmaCls:
+        """Docstring for MockGemmaCls."""
+
         @classmethod
         def from_preset(cls, *a):
+            """Docstring for from_preset."""
             return MockModel()
 
     mock_keras_nlp = type("keras_nlp", (), {"models": type("models", (), {"GemmaCausalLM": MockGemmaCls})})
@@ -136,11 +181,15 @@ def test_execute_train_no_loss(mock_keras_env, monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_execute_train_load_fail(mock_keras_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_execute_train_load_fail."""
     import sys
 
     class MockGemmaCls:
+        """Docstring for MockGemmaCls."""
+
         @classmethod
         def from_preset(cls, *a):
+            """Docstring for from_preset."""
             raise ValueError("Cannot load")
 
     mock_keras_nlp = type("keras_nlp", (), {"models": type("models", (), {"GemmaCausalLM": MockGemmaCls})})
@@ -151,13 +200,17 @@ def test_execute_train_load_fail(mock_keras_env, monkeypatch: pytest.MonkeyPatch
 
 
 def test_execute_train_bad_dataloader(mock_keras_env, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_execute_train_bad_dataloader."""
     monkeypatch.setattr(mock_keras_env, "build_dataloader", lambda *a, **k: {"loader": None})
 
     import sys
 
     class MockGemmaCls:
+        """Docstring for MockGemmaCls."""
+
         @classmethod
         def from_preset(cls, *a):
+            """Docstring for from_preset."""
             return type("MockModel", (), {"preprocessor": type("MockPrep", (), {"sequence_length": 512})(), "compile": lambda *args, **kwargs: None})()
 
     mock_keras_nlp = type("keras_nlp", (), {"models": type("models", (), {"GemmaCausalLM": MockGemmaCls})})
@@ -168,6 +221,7 @@ def test_execute_train_bad_dataloader(mock_keras_env, monkeypatch: pytest.Monkey
 
 
 def test_train_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_train_model_missing_deps."""
     import gemma_4_sql.backends.keras.train as tr
     from gemma_4_sql.exceptions import DependencyMissingError
 

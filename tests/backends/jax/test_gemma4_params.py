@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -21,6 +23,8 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 class DummyTransform:
+    """Docstring for DummyTransform."""
+
     DEFAULT = None
     BIAS = None
     LINEAR = ((1, 0), None, False)
@@ -30,6 +34,7 @@ class DummyTransform:
 
 
 def test_mappings():
+    """Docstring for test_mappings."""
     t_maps = _get_text_mappings(DummyTransform)
     a_maps = _get_audio_mappings(DummyTransform)
     v_maps = _get_vision_mappings(DummyTransform)
@@ -44,6 +49,7 @@ def test_mappings():
 
 
 def test_process_moe_tensor():
+    """Docstring for test_process_moe_tensor."""
     import re
 
     moe_pattern = re.compile(r"^model\.layers\.(\d+)\.block_sparse_moe\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$")
@@ -63,6 +69,7 @@ def test_process_moe_tensor():
 
 @patch("gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape")
 def test_process_standard_tensor(mock_assign):
+    """Docstring for test_process_standard_tensor."""
     mock_sf = MagicMock()
     mock_sf.get_tensor.return_value = jnp.array([1.0])
 
@@ -85,6 +92,7 @@ def test_process_standard_tensor(mock_assign):
 
 @patch("gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape")
 def test_stack_and_assign_expert_tensors(mock_assign):
+    """Docstring for test_stack_and_assign_expert_tensors."""
     expert_tensors = {0: {"gate_proj": {0: jnp.array([1.0]), 1: jnp.array([2.0])}}}
     mapping = {r"^model\.layers\.(\d+)\.mlp\.routed_experts\.(gate_proj)\.weight$": ("model\\.layers\\.\1\\.mlp\\.routed_experts\\.\2_kernel", DummyTransform.LINEAR_3D)}
     jax_state = {}
@@ -97,6 +105,7 @@ def test_stack_and_assign_expert_tensors(mock_assign):
 @patch("gemma_4_sql.backends.jax.gemma4.params._process_moe_tensor")
 @patch("gemma_4_sql.backends.jax.gemma4.params.process_standard_tensor")
 def test_process_safetensors_file(mock_standard, mock_moe, mock_safetensors):
+    """Docstring for test_process_safetensors_file."""
     mock_sf = MagicMock()
     mock_sf.keys.return_value = ["model.layers.0.block_sparse_moe.experts.1.gate_proj.weight", "model.embed.weight"]
     mock_safetensors.safe_open.return_value.__enter__.return_value = mock_sf
@@ -115,10 +124,14 @@ def test_process_safetensors_file(mock_standard, mock_moe, mock_safetensors):
 
 
 def test_fix_jax_state_embeddings():
+    """Docstring for test_fix_jax_state_embeddings."""
+
     class DummyShapeDtypeStruct:
-        pass
+        """Docstring for DummyShapeDtypeStruct."""
 
     class DummyConfig:
+        """Docstring for DummyConfig."""
+
         hidden_size = 4
         vision_config = MagicMock(num_patches=256)
 
@@ -145,6 +158,7 @@ def test_fix_jax_state_embeddings():
 @patch("gemma_4_sql.backends.jax.gemma4.params._stack_and_assign_expert_tensors")
 @patch("gemma_4_sql.backends.jax.gemma4.params._fix_jax_state_embeddings")
 def test_create_gemma4_from_pretrained(mock_fix, mock_stack, mock_process, mock_nnx):
+    """Docstring for test_create_gemma4_from_pretrained."""
     mock_epath = MagicMock()
     mock_epath.epath = mock_epath
     mock_epath.Path.return_value.expanduser.return_value.glob.return_value = ["file1.safetensors"]
@@ -184,6 +198,7 @@ def test_create_gemma4_from_pretrained(mock_fix, mock_stack, mock_process, mock_
 
 
 def test_process_moe_tensor_branch_coverage():
+    """Docstring for test_process_moe_tensor_branch_coverage."""
     from unittest.mock import MagicMock
 
     import jax.numpy as jnp
@@ -207,6 +222,7 @@ def test_process_moe_tensor_branch_coverage():
 
 
 def test_fix_jax_state_embeddings_coverage():
+    """Docstring for test_fix_jax_state_embeddings_coverage."""
     import jax
 
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
@@ -219,6 +235,7 @@ def test_fix_jax_state_embeddings_coverage():
 
 
 def test_params_missing_moe_branches():
+    """Docstring for test_params_missing_moe_branches."""
     from unittest.mock import MagicMock
 
     import jax.numpy as jnp
@@ -243,6 +260,7 @@ def test_params_missing_moe_branches():
 
 
 def test_params_missing_fix_jax_state_embeddings():
+    """Docstring for test_params_missing_fix_jax_state_embeddings."""
     import jax
 
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
@@ -255,6 +273,7 @@ def test_params_missing_fix_jax_state_embeddings():
 
 
 def test_create_gemma4_from_pretrained_etils_missing():
+    """Docstring for test_create_gemma4_from_pretrained_etils_missing."""
     from unittest.mock import MagicMock, patch
 
     from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
@@ -266,6 +285,7 @@ def test_create_gemma4_from_pretrained_etils_missing():
 
 
 def test_create_gemma4_from_pretrained_etils_success_and_state():
+    """Docstring for test_create_gemma4_from_pretrained_etils_success_and_state."""
     from importlib.abc import Loader, MetaPathFinder
     from importlib.machinery import ModuleSpec
     from unittest.mock import MagicMock, patch
@@ -273,13 +293,19 @@ def test_create_gemma4_from_pretrained_etils_success_and_state():
     from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
 
     class EtilsFinder(MetaPathFinder):
+        """Docstring for EtilsFinder."""
+
         def find_spec(self, fullname, path, target=None):
+            """Docstring for find_spec."""
             if fullname == "etils":
                 return ModuleSpec("etils", EtilsLoader())
             return None
 
     class EtilsLoader(Loader):
+        """Docstring for EtilsLoader."""
+
         def create_module(self, spec):
+            """Docstring for create_module."""
             mock_etils = MagicMock()
             mock_epath = MagicMock()
             mock_epath.Path.return_value.expanduser.return_value.glob.return_value = ["file.safetensors"]
@@ -287,7 +313,7 @@ def test_create_gemma4_from_pretrained_etils_success_and_state():
             return mock_etils
 
         def exec_module(self, module):
-            pass
+            """Docstring for exec_module."""
 
     sys.modules.pop("etils", None)
     finder = EtilsFinder()
@@ -316,6 +342,7 @@ def test_create_gemma4_from_pretrained_etils_success_and_state():
 
 
 def test_create_gemma4_from_pretrained_missing_etils():
+    """Docstring for test_create_gemma4_from_pretrained_missing_etils."""
     from unittest.mock import patch
 
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
@@ -327,6 +354,7 @@ def test_create_gemma4_from_pretrained_missing_etils():
 
 
 def test_create_gemma4_from_pretrained_no_safetensors():
+    """Docstring for test_create_gemma4_from_pretrained_no_safetensors."""
     from unittest.mock import MagicMock, patch
 
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
@@ -339,6 +367,7 @@ def test_create_gemma4_from_pretrained_no_safetensors():
 
 
 def test_create_gemma4_from_pretrained_success():
+    """Docstring for test_create_gemma4_from_pretrained_success."""
     from unittest.mock import MagicMock, patch
 
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfig

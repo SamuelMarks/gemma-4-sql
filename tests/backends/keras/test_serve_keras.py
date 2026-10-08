@@ -7,6 +7,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_serve_model() -> None:
+    """Docstring for test_serve_model."""
     res = serve_model("dummy_model", port=8080, max_batch_size=128)
     assert res["status"] == "running_keras_serve"
     assert res["backend"] == "keras"
@@ -16,6 +17,7 @@ def test_serve_model() -> None:
 
 
 def test_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_serve_missing_deps."""
     import gemma_4_sql.backends.common_serve as cs
 
     monkeypatch.setattr(cs, "FastAPI", None)
@@ -24,6 +26,7 @@ def test_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_serve_keras_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_serve_keras_missing_deps."""
     import gemma_4_sql.backends.keras.serve as srv
 
     monkeypatch.setattr(srv, "keras", None)
@@ -32,13 +35,15 @@ def test_serve_keras_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_create_app_generation_logic."""
     import gemma_4_sql.backends.keras.serve as srv
     from gemma_4_sql.exceptions import InferenceError
 
     class MockApp:
-        pass
+        """Docstring for MockApp."""
 
     def mock_create_common_app(**kwargs):
+        """Docstring for mock_create_common_app."""
         app = MockApp()
         app.startup = kwargs["startup_callback"]
         app.generate = kwargs["generate_logic"]
@@ -54,19 +59,26 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test generation with mock loaded_model via startup
     class MockModel:
+        """Docstring for MockModel."""
+
         def generate(self, prompt, **kwargs):
+            """Docstring for generate."""
             if isinstance(prompt, list):
                 return [f"BATCH_{p}" for p in prompt]
             return "MOCK_SQL"
 
     class DummyPreset:
+        """Docstring for DummyPreset."""
+
         @classmethod
         def from_preset(cls, model_name):
+            """Docstring for from_preset."""
             return MockModel()
 
     orig_import = __import__
 
     def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
         if name == "keras_nlp.models":
             return type("models", (), {"GemmaCausalLM": DummyPreset})
         return orig_import(name, *args, **kwargs)
@@ -82,15 +94,22 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test individual generation fallback
     class MockModelFail:
+        """Docstring for MockModelFail."""
+
         def generate(self, prompt, **kwargs):
+            """Docstring for generate."""
             raise ValueError("fail")
 
     class DummyPresetFail:
+        """Docstring for DummyPresetFail."""
+
         @classmethod
         def from_preset(cls, model_name):
+            """Docstring for from_preset."""
             return MockModelFail()
 
     def mock_import_fail(name, *args, **kwargs):
+        """Docstring for mock_import_fail."""
         if name == "keras_nlp.models":
             return type("models", (), {"GemmaCausalLM": DummyPresetFail})
         return orig_import(name, *args, **kwargs)
@@ -101,8 +120,11 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     import sys
 
     class MockInfModSuccess:
+        """Docstring for MockInfModSuccess."""
+
         @staticmethod
         def generate_sql(**kwargs):
+            """Docstring for generate_sql."""
             return {"sql": "FALLBACK_SQL"}
 
     monkeypatch.setitem(sys.modules, "gemma_4_sql.backends.keras.inference", MockInfModSuccess)
@@ -112,17 +134,24 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test batch generation fallback exception
     class MockBatchModelFail:
+        """Docstring for MockBatchModelFail."""
+
         def generate(self, prompt, **kwargs):
+            """Docstring for generate."""
             if isinstance(prompt, list):
                 raise TypeError("batch fail")
             return "MOCK_SQL"
 
     class DummyPresetBatchFail:
+        """Docstring for DummyPresetBatchFail."""
+
         @classmethod
         def from_preset(cls, model_name):
+            """Docstring for from_preset."""
             return MockBatchModelFail()
 
     def mock_import_batch_fail(name, *args, **kwargs):
+        """Docstring for mock_import_batch_fail."""
         if name == "keras_nlp.models":
             return type("models", (), {"GemmaCausalLM": DummyPresetBatchFail})
         return orig_import(name, *args, **kwargs)
@@ -137,8 +166,11 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test empty fallback output
     class MockInfModEmpty:
+        """Docstring for MockInfModEmpty."""
+
         @staticmethod
         def generate_sql(**kwargs):
+            """Docstring for generate_sql."""
             return {"sql": ""}
 
     monkeypatch.setitem(sys.modules, "gemma_4_sql.backends.keras.inference", MockInfModEmpty)
@@ -148,6 +180,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test generic fallback output error
     def gen_err(**kwargs):
+        """Docstring for gen_err."""
         raise OSError("other err")
 
     import sys
@@ -158,6 +191,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # We must mock import to raise an exception so loaded_model becomes None
     def mock_import_none(name, *args, **kwargs):
+        """Docstring for mock_import_none."""
         if name == "keras_nlp.models":
             raise ImportError("Simulated missing keras")
         return orig_import(name, *args, **kwargs)

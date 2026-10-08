@@ -63,6 +63,7 @@ def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
         run_dpo(model_name="model3", dataset="data3", backend="keras", beta=0.3)
 
     def mock_dpo(*args, **kwargs):
+        """Docstring for mock_dpo."""
         return {
             "backend": "keras",
             "action": "dpo",

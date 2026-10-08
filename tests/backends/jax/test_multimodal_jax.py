@@ -50,6 +50,7 @@ def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         """Mock JAX causal model for beam search."""
 
         def __call__(self, input_ids: Any, positions: Any = None, **kwargs: Any) -> Any:
+            """Docstring for __call__."""
             import jax.numpy as jnp
 
             batch, seq = input_ids.shape

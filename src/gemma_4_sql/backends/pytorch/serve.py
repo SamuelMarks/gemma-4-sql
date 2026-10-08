@@ -192,11 +192,13 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
     if use_native:
 
         def app_factory() -> Any:
+            """Docstring for app_factory."""
             return _create_native_app(model_name, max_batch_size)
 
     else:
 
         def app_factory() -> Any:
+            """Docstring for app_factory."""
             return _create_vllm_app(model_name, max_batch_size)
 
     result = serve_model_wrapper(

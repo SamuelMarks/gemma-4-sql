@@ -16,6 +16,7 @@ from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
 def test_mlx_serve_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_mlx_serve_model."""
     monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda name: (object(), object()))
     res = serve_model("dummy_mlx_model", port=8080, max_batch_size=128)
     assert res["status"] == "running_mlx_serve"
@@ -26,12 +27,14 @@ def test_mlx_serve_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_mlx_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_mlx_serve_missing_deps."""
     monkeypatch.setattr(mlx_serve, "mx", None)
     with pytest.raises(DependencyMissingError, match="MLX dependencies are missing for serve"):
         serve_model("model")
 
 
 def test_load_mlx_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_load_mlx_model_missing_deps."""
     monkeypatch.setattr(mlx_serve, "mx", None)
     with pytest.raises(ImportError):
         # We simulate what happens if mlx_lm is missing
@@ -42,6 +45,7 @@ def test_load_mlx_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
         real_import = builtins.__import__
 
         def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+            """Docstring for mock_import."""
             if name == "mlx_lm":
                 raise ImportError("No module named mlx_lm")
             return real_import(name, globals, locals, fromlist, level)
@@ -51,12 +55,16 @@ def test_load_mlx_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_generate_query_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_generate_query_error."""
     with pytest.raises(InferenceError):
         _generate_query("SELECT 1", model_name="dummy")
 
 
 def test_batch_generate_queries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_batch_generate_queries."""
+
     def dummy_generate(*args, **kwargs):
+        """Docstring for dummy_generate."""
         return "SELECT 1"
 
     monkeypatch.setattr(mlx_serve, "_generate_query", dummy_generate)
@@ -65,6 +73,7 @@ def test_batch_generate_queries(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_app_factory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_app_factory."""
     monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda name: (object(), object()))
     app = _app_factory("dummy_model")
     assert app is not None

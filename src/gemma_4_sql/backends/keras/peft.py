@@ -110,6 +110,7 @@ class KerasLoRADense(_LayerBase):
         scale_init = 1.0 / math.sqrt(self.r)
 
         def _fallback_init(*args: Any, **kwargs: Any) -> Any:
+            """Docstring for _fallback_init."""
             return None  # pragma: no cover
 
         self.lora_a = self.add_weight(

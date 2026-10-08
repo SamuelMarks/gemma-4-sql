@@ -87,6 +87,7 @@ def test_run_benchmark_wrapper_success():
     """Test run_benchmark_wrapper success."""
 
     def mock_benchmark():
+        """Docstring for mock_benchmark."""
         return (10.0, 50.0, 100.0)
 
     with patch("gemma_4_sql.backends.common_benchmark.get_current_rss_mb", return_value=10.0):
@@ -105,6 +106,7 @@ def test_run_benchmark_wrapper_failure():
     """Test run_benchmark_wrapper failure."""
 
     def mock_benchmark():
+        """Docstring for mock_benchmark."""
         raise RuntimeError("Benchmark error")
 
     with patch("gemma_4_sql.backends.common_benchmark.get_current_rss_mb", return_value=10.0):

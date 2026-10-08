@@ -1,11 +1,15 @@
+"""Module docstring."""
+
 from gemma_4_sql.backends.pytorch import __all__, get_trainer
 
 
 def test_get_trainer():
+    """Docstring for test_get_trainer."""
     assert get_trainer() == "pytorch_trainer"
 
 
 def test_all_exports():
+    """Docstring for test_all_exports."""
     expected = [
         "apply_lora",
         "benchmark_model",

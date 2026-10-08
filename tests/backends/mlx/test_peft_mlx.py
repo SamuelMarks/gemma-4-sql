@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,16 +15,19 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_MLXLoRALinear_init_no_deps():
+    """Docstring for test_MLXLoRALinear_init_no_deps."""
     with patch("gemma_4_sql.backends.mlx.peft.nn", None), pytest.raises(DependencyMissingError):
         MLXLoRALinear(10, 10)
 
 
 def test_MLXLoRALinear_init_invalid_r():
+    """Docstring for test_MLXLoRALinear_init_invalid_r."""
     with patch("gemma_4_sql.backends.mlx.peft.nn", MagicMock()), patch("gemma_4_sql.backends.mlx.peft.mx", MagicMock()), pytest.raises(ValueError, match="must be positive"):
         MLXLoRALinear(10, 10, r=0)
 
 
 def test_MLXLoRALinear_init_and_props():
+    """Docstring for test_MLXLoRALinear_init_and_props."""
     mock_mx = MagicMock()
     mock_nn = MagicMock()
     with patch("gemma_4_sql.backends.mlx.peft.mx", mock_mx), patch("gemma_4_sql.backends.mlx.peft.nn", mock_nn):
@@ -44,6 +49,7 @@ def test_MLXLoRALinear_init_and_props():
 
 
 def test_MLXLoRALinear_from_linear():
+    """Docstring for test_MLXLoRALinear_from_linear."""
     mock_mx = MagicMock()
     mock_nn = MagicMock()
     mock_linear = MagicMock()
@@ -57,6 +63,7 @@ def test_MLXLoRALinear_from_linear():
 
 
 def test_MLXLoRALinear_call():
+    """Docstring for test_MLXLoRALinear_call."""
     mock_mx = MagicMock()
     mock_nn = MagicMock()
     with patch("gemma_4_sql.backends.mlx.peft.mx", mock_mx), patch("gemma_4_sql.backends.mlx.peft.nn", mock_nn):
@@ -82,6 +89,7 @@ def test_MLXLoRALinear_call():
 
 
 def test_MLXLoRALinear_save_load_adapters(tmp_path):
+    """Docstring for test_MLXLoRALinear_save_load_adapters."""
     mock_mx = MagicMock()
     mock_nn = MagicMock()
     with patch("gemma_4_sql.backends.mlx.peft.mx", mock_mx), patch("gemma_4_sql.backends.mlx.peft.nn", mock_nn):
@@ -96,6 +104,7 @@ def test_MLXLoRALinear_save_load_adapters(tmp_path):
 
 
 def test_MLXLoRALinear_load_adapters_missing_keys(tmp_path):
+    """Docstring for test_MLXLoRALinear_load_adapters_missing_keys."""
     mock_mx = MagicMock()
     mock_nn = MagicMock()
     with patch("gemma_4_sql.backends.mlx.peft.mx", mock_mx), patch("gemma_4_sql.backends.mlx.peft.nn", mock_nn):
@@ -106,6 +115,7 @@ def test_MLXLoRALinear_load_adapters_missing_keys(tmp_path):
 
 
 def test_MLXLoRALinear_save_load_missing_deps():
+    """Docstring for test_MLXLoRALinear_save_load_missing_deps."""
     layer = MLXLoRALinear.__new__(MLXLoRALinear)
     with patch("gemma_4_sql.backends.mlx.peft.mx", None):
         with pytest.raises(DependencyMissingError):
@@ -115,19 +125,24 @@ def test_MLXLoRALinear_save_load_missing_deps():
 
 
 def test_inject_lora_missing_deps():
+    """Docstring for test_inject_lora_missing_deps."""
     with patch("gemma_4_sql.backends.mlx.peft.nn", None), pytest.raises(DependencyMissingError):
         inject_lora("model", ["q_proj"])
 
 
 def test_inject_lora():
+    """Docstring for test_inject_lora."""
     mock_nn = MagicMock()
     mock_mx = MagicMock()
 
     class DummyLinear:
-        pass
+        """Docstring for DummyLinear."""
 
     class DummyModel:
+        """Docstring for DummyModel."""
+
         def __init__(self):
+            """Docstring for __init__."""
             self.q_proj = DummyLinear()
             self.q_proj.weight = MagicMock()
             self.q_proj.weight.shape = (20, 10)
@@ -136,9 +151,10 @@ def test_inject_lora():
             self.other.weight.shape = (20, 10)
 
         def freeze(self):
-            pass
+            """Docstring for freeze."""
 
         def named_modules(self):
+            """Docstring for named_modules."""
             return [("q_proj", self.q_proj), ("other", self.other)]
 
     model = DummyModel()
@@ -161,6 +177,7 @@ def test_inject_lora():
 
 
 def test_inject_lora_empty_targets():
+    """Docstring for test_inject_lora_empty_targets."""
     mock_nn = MagicMock()
     model = MagicMock()
     mock_nn.Linear = type("DummyLinear", (), {})
@@ -170,11 +187,13 @@ def test_inject_lora_empty_targets():
 
 
 def test_save_adapter_weights_missing_deps():
+    """Docstring for test_save_adapter_weights_missing_deps."""
     with patch("gemma_4_sql.backends.mlx.peft.mx", None), pytest.raises(DependencyMissingError):
         save_adapter_weights("model", "test")
 
 
 def test_save_adapter_weights(tmp_path):
+    """Docstring for test_save_adapter_weights."""
     mock_mx = MagicMock()
     model = MagicMock()
     with patch("gemma_4_sql.backends.mlx.peft.mx", mock_mx):
@@ -186,17 +205,20 @@ def test_save_adapter_weights(tmp_path):
 
 
 def test_load_adapter_weights_missing_deps():
+    """Docstring for test_load_adapter_weights_missing_deps."""
     with patch("gemma_4_sql.backends.mlx.peft.mx", None), pytest.raises(DependencyMissingError):
         load_adapter_weights("model", "test")
 
 
 def test_load_adapter_weights_not_found():
+    """Docstring for test_load_adapter_weights_not_found."""
     mock_mx = MagicMock()
     with patch("gemma_4_sql.backends.mlx.peft.mx", mock_mx), pytest.raises(FileNotFoundError):
         load_adapter_weights("model", "nonexistent.safetensors")
 
 
 def test_load_adapter_weights(tmp_path):
+    """Docstring for test_load_adapter_weights."""
     mock_mx = MagicMock()
     model = MagicMock()
     f = tmp_path / "test.safetensors"
@@ -207,11 +229,13 @@ def test_load_adapter_weights(tmp_path):
 
 
 def test_apply_lora_missing_deps():
+    """Docstring for test_apply_lora_missing_deps."""
     with patch("gemma_4_sql.backends.mlx.peft.nn", None), pytest.raises(DependencyMissingError):
         apply_lora("model", ["q"])
 
 
 def test_apply_lora_success(tmp_path):
+    """Docstring for test_apply_lora_success."""
     mock_nn = MagicMock()
     mock_mx = MagicMock()
     mock_load = MagicMock()
@@ -224,6 +248,7 @@ def test_apply_lora_success(tmp_path):
 
 
 def test_apply_lora_load():
+    """Docstring for test_apply_lora_load."""
     mock_nn = MagicMock()
     mock_mx = MagicMock()
     mock_load = MagicMock(return_value=("loaded_model", "tok"))
@@ -234,6 +259,7 @@ def test_apply_lora_load():
 
 
 def test_apply_lora_exception():
+    """Docstring for test_apply_lora_exception."""
     mock_nn = MagicMock()
     mock_mx = MagicMock()
     mock_load = MagicMock()
@@ -244,6 +270,7 @@ def test_apply_lora_exception():
 
 
 def test_MLXLoRALinear_from_linear_no_bias():
+    """Docstring for test_MLXLoRALinear_from_linear_no_bias."""
     mock_mx = MagicMock()
     mock_nn = MagicMock()
     mock_linear = MagicMock()
@@ -257,6 +284,7 @@ def test_MLXLoRALinear_from_linear_no_bias():
 
 
 def test_MLXLoRALinear_call_no_bias():
+    """Docstring for test_MLXLoRALinear_call_no_bias."""
     mock_mx = MagicMock()
     mock_nn = MagicMock()
     with patch("gemma_4_sql.backends.mlx.peft.mx", mock_mx), patch("gemma_4_sql.backends.mlx.peft.nn", mock_nn):
@@ -275,17 +303,22 @@ def test_MLXLoRALinear_call_no_bias():
 
 
 def test_inject_lora_no_freeze_and_not_linear():
+    """Docstring for test_inject_lora_no_freeze_and_not_linear."""
     mock_nn = MagicMock()
     mock_mx = MagicMock()
 
     class DummyNotLinear:
-        pass
+        """Docstring for DummyNotLinear."""
 
     class DummyModel:
+        """Docstring for DummyModel."""
+
         def __init__(self):
+            """Docstring for __init__."""
             self.q_proj = DummyNotLinear()
 
         def named_modules(self):
+            """Docstring for named_modules."""
             return [("q_proj", self.q_proj)]
 
     model = DummyModel()
@@ -296,19 +329,24 @@ def test_inject_lora_no_freeze_and_not_linear():
 
 
 def test_inject_lora_tuple():
+    """Docstring for test_inject_lora_tuple."""
     mock_nn = MagicMock()
     mock_mx = MagicMock()
 
     class DummyLinear:
-        pass
+        """Docstring for DummyLinear."""
 
     class DummyModel:
+        """Docstring for DummyModel."""
+
         def __init__(self):
+            """Docstring for __init__."""
             self.my_tuple = (DummyLinear(),)
             self.my_tuple[0].weight = MagicMock()
             self.my_tuple[0].weight.shape = (20, 10)
 
         def named_modules(self):
+            """Docstring for named_modules."""
             return [("my_tuple.0", self.my_tuple[0])]
 
     DummyModel()
@@ -327,23 +365,31 @@ def test_inject_lora_tuple():
 
 
 def test_inject_lora_tuple_middle():
+    """Docstring for test_inject_lora_tuple_middle."""
     mock_nn = MagicMock()
     mock_mx = MagicMock()
 
     class DummyLinear:
-        pass
+        """Docstring for DummyLinear."""
 
     class InnerMod:
+        """Docstring for InnerMod."""
+
         def __init__(self):
+            """Docstring for __init__."""
             self.q = DummyLinear()
             self.q.weight = MagicMock()
             self.q.weight.shape = (20, 10)
 
     class DummyModel:
+        """Docstring for DummyModel."""
+
         def __init__(self):
+            """Docstring for __init__."""
             self.my_tuple = (InnerMod(),)
 
         def named_modules(self):
+            """Docstring for named_modules."""
             return [("my_tuple.0.q", self.my_tuple[0].q)]
 
     model = DummyModel()
@@ -356,6 +402,7 @@ def test_inject_lora_tuple_middle():
 
 
 def test_load_adapter_weights_no_load_weights(tmp_path):
+    """Docstring for test_load_adapter_weights_no_load_weights."""
     mock_mx = MagicMock()
     model = MagicMock()
     del model.load_weights
@@ -367,4 +414,4 @@ def test_load_adapter_weights_no_load_weights(tmp_path):
 
 
 def test_peft_module_reload():
-    pass
+    """Docstring for test_peft_module_reload."""

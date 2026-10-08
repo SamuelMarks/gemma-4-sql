@@ -162,11 +162,17 @@ def test_sql_tokenizer_fallback_edge_cases(monkeypatch: pytest.MonkeyPatch) -> N
         """Object that fails both direct encode and str encode."""
 
         def encode(self, _encoding: str, **kwargs: object) -> bytes:
+            """Docstring for encode."""
             raise UnicodeEncodeError("utf-8", "", 0, 1, "test")
 
         def __str__(self) -> str:
+            """Docstring for __str__."""
+
             class FailingStr(str):
+                """Docstring for FailingStr."""
+
                 def encode(self, _encoding: str, **kwargs: object) -> bytes:
+                    """Docstring for encode."""
                     raise RuntimeError("Str encode failed")
 
             return FailingStr("abc")
@@ -189,7 +195,10 @@ def test_sql_tokenizer_get_vocab() -> None:
     assert vocab["a"] == ord("a")
 
     class MockVocabHFTokenizer(MockHFTokenizer):
+        """Docstring for MockVocabHFTokenizer."""
+
         def get_vocab(self) -> dict[str, int]:
+            """Docstring for get_vocab."""
             return {"<pad>": 0, "select": 1}
 
     tok_hf = SQLTokenizer()

@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +15,7 @@ from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
 def test_load_mlx_model_cache():
+    """Docstring for test_load_mlx_model_cache."""
     with patch("gemma_4_sql.backends.mlx.serve._mlx_model_cache", {"test_model": ("model", "tok")}):
         model, tok = _load_mlx_model("test_model")
         assert model == "model"
@@ -20,6 +23,7 @@ def test_load_mlx_model_cache():
 
 
 def test_load_mlx_model_success_tuple():
+    """Docstring for test_load_mlx_model_success_tuple."""
     mock_load = MagicMock()
     mock_load.return_value = ["model", "tok"]
     with patch.dict("sys.modules", {"mlx_lm": MagicMock(load=mock_load)}):
@@ -29,6 +33,7 @@ def test_load_mlx_model_success_tuple():
 
 
 def test_load_mlx_model_success_single():
+    """Docstring for test_load_mlx_model_success_single."""
     mock_load = MagicMock()
     mock_load.return_value = "model"
     with patch.dict("sys.modules", {"mlx_lm": MagicMock(load=mock_load)}):
@@ -38,6 +43,7 @@ def test_load_mlx_model_success_single():
 
 
 def test_load_mlx_model_error():
+    """Docstring for test_load_mlx_model_error."""
     mock_load = MagicMock()
     mock_load.side_effect = RuntimeError("Failed")
     with patch.dict("sys.modules", {"mlx_lm": MagicMock(load=mock_load)}), pytest.raises(RuntimeError):
@@ -45,31 +51,37 @@ def test_load_mlx_model_error():
 
 
 def test_generate_query_success():
+    """Docstring for test_generate_query_success."""
     with patch("gemma_4_sql.backends.mlx.inference.generate_sql", return_value={"sql": "SELECT 1;"}):
         assert _generate_query("test", "model") == "SELECT 1;"
 
 
 def test_generate_query_empty():
+    """Docstring for test_generate_query_empty."""
     with patch("gemma_4_sql.backends.mlx.inference.generate_sql", return_value={"sql": ""}), pytest.raises(InferenceError, match="returned empty SQL"):
         _generate_query("test", "model")
 
 
 def test_generate_query_error():
+    """Docstring for test_generate_query_error."""
     with patch("gemma_4_sql.backends.mlx.inference.generate_sql", side_effect=ValueError("Error")), pytest.raises(InferenceError, match="MLX generation failed"):
         _generate_query("test", "model")
 
 
 def test_generate_query_inference_error_propagated():
+    """Docstring for test_generate_query_inference_error_propagated."""
     with patch("gemma_4_sql.backends.mlx.inference.generate_sql", side_effect=InferenceError("Direct error")), pytest.raises(InferenceError, match="Direct error"):
         _generate_query("test", "model")
 
 
 def test_batch_generate_queries():
+    """Docstring for test_batch_generate_queries."""
     with patch("gemma_4_sql.backends.mlx.serve._generate_query", side_effect=["SELECT 1;", "SELECT 2;"]):
         assert _batch_generate_queries(["a", "b"], "model") == ["SELECT 1;", "SELECT 2;"]
 
 
 def test_app_factory():
+    """Docstring for test_app_factory."""
     with patch("gemma_4_sql.backends.mlx.serve.create_common_app") as mock_create:
         _app_factory("model")
         mock_create.assert_called_once()
@@ -106,17 +118,20 @@ def test_app_factory():
 
 
 def test_serve_model_missing_deps():
+    """Docstring for test_serve_model_missing_deps."""
     with patch("gemma_4_sql.backends.mlx.serve.mx", None), pytest.raises(DependencyMissingError):
         serve_model("model")
 
 
 def test_serve_model_success():
+    """Docstring for test_serve_model_success."""
     with patch("gemma_4_sql.backends.mlx.serve.mx", MagicMock()), patch("gemma_4_sql.backends.mlx.serve.serve_model_wrapper", return_value={"status": "running_mlx_serve"}):
         res = serve_model("model")
         assert res["status"] == "running_mlx_serve"
 
 
 def test_serve_model_not_running():
+    """Docstring for test_serve_model_not_running."""
     with patch("gemma_4_sql.backends.mlx.serve.mx", MagicMock()), patch("gemma_4_sql.backends.mlx.serve.serve_model_wrapper", return_value={"status": "mocked"}):
         res = serve_model("model")
         assert res["status"] == "mocked"

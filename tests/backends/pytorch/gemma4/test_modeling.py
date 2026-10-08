@@ -195,6 +195,8 @@ def test_attention_edge_cases2(monkeypatch):
     import gemma_4_sql.backends.pytorch.gemma4.attention as attn
 
     class MockConfig:
+        """Docstring for MockConfig."""
+
         hidden_size = 32
         num_attention_heads = 4
         num_key_value_heads = 2
@@ -273,6 +275,7 @@ def test_gemma4_native_save_load_and_generate(tmp_path, monkeypatch):
 
     # Test Exception in load_file
     def mock_load_file_exc(*args, **kwargs):
+        """Docstring for mock_load_file_exc."""
         raise RuntimeError("Custom exception")
 
     monkeypatch.setattr("safetensors.torch.load_file", mock_load_file_exc, raising=False)

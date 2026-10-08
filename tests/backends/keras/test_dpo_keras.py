@@ -20,17 +20,20 @@ original_import = builtins.__import__
 
 
 def _mock_import(name, *args, **kwargs):
+    """Docstring for _mock_import."""
     if name == "keras_nlp.models":
         raise ImportError
     return original_import(name, *args, **kwargs)
 
 
 def test_dpo_loss_missing_tf():
+    """Docstring for test_dpo_loss_missing_tf."""
     with patch("gemma_4_sql.backends.keras.dpo.tf", None):
         assert dpo_loss(None, None, None, None) == (0.0, 0.0, 0.0)
 
 
 def test_dpo_loss_with_tf():
+    """Docstring for test_dpo_loss_with_tf."""
     mock_tf = MagicMock()
     mock_tf.math.log_sigmoid = MagicMock()
     with patch("gemma_4_sql.backends.keras.dpo.tf", mock_tf), patch("gemma_4_sql.backends.keras.dpo.generic_dpo_loss", return_value=(1, 2, 3)) as mock_generic:
@@ -40,11 +43,13 @@ def test_dpo_loss_with_tf():
 
 
 def test_compute_logps_missing_tf():
+    """Docstring for test_compute_logps_missing_tf."""
     with patch("gemma_4_sql.backends.keras.dpo.tf", None):
         assert _compute_logps(None, None, None) == 0.0
 
 
 def test_compute_logps_with_tf():
+    """Docstring for test_compute_logps_with_tf."""
     mock_tf = MagicMock()
     mock_tf.nn.log_softmax.return_value = MagicMock()
     mock_tf.expand_dims.return_value = MagicMock()
@@ -62,22 +67,28 @@ def test_compute_logps_with_tf():
 
 
 def test_get_train_step_fn_missing_tf():
+    """Docstring for test_get_train_step_fn_missing_tf."""
     with patch("gemma_4_sql.backends.keras.dpo.tf", None):
         fn = _get_train_step_fn(None, None, None, 0.1)
         assert fn(None) == 0.0
 
 
 def test_get_train_step_fn_with_tf():
+    """Docstring for test_get_train_step_fn_with_tf."""
     mock_tf = MagicMock()
 
     class DummyTape:
+        """Docstring for DummyTape."""
+
         def __enter__(self):
+            """Docstring for __enter__."""
             return self
 
         def __exit__(self, *args):
-            pass
+            """Docstring for __exit__."""
 
         def gradient(self, *args):
+            """Docstring for gradient."""
             return [1, 2]
 
     mock_tf.GradientTape = DummyTape
@@ -98,13 +109,18 @@ def test_get_train_step_fn_with_tf():
 
 
 def test_run_training_epochs():
+    """Docstring for test_run_training_epochs."""
     mock_loader = [[1, 2], [3, 4]]
 
     class DummyLoss:
+        """Docstring for DummyLoss."""
+
         def numpy(self):
+            """Docstring for numpy."""
             return 1.5
 
     def mock_train_step(batch):
+        """Docstring for mock_train_step."""
         return DummyLoss()
 
     state = TrainerState(dataloader=mock_loader, epochs=2, train_step=mock_train_step)
@@ -113,9 +129,11 @@ def test_run_training_epochs():
 
 
 def test_run_training_epochs_no_numpy():
+    """Docstring for test_run_training_epochs_no_numpy."""
     mock_loader = [[1]]
 
     def mock_train_step(batch):
+        """Docstring for mock_train_step."""
         return 2.5
 
     state = TrainerState(dataloader=mock_loader, epochs=1, train_step=mock_train_step)
@@ -123,8 +141,13 @@ def test_run_training_epochs_no_numpy():
     assert loss == 2.5
 
     def mock_train_step_err(batch):
+        """Docstring for mock_train_step_err."""
+
         class ErrLoss:
+            """Docstring for ErrLoss."""
+
             def __float__(self):
+                """Docstring for __float__."""
                 raise ValueError
 
         return ErrLoss()
@@ -134,8 +157,13 @@ def test_run_training_epochs_no_numpy():
     assert loss == 0.0
 
     def mock_train_step_err_type(batch):
+        """Docstring for mock_train_step_err_type."""
+
         class ErrLoss:
+            """Docstring for ErrLoss."""
+
             def __float__(self):
+                """Docstring for __float__."""
                 raise TypeError
 
         return ErrLoss()
@@ -146,11 +174,13 @@ def test_run_training_epochs_no_numpy():
 
 
 def test_execute_dpo_missing_keras():
+    """Docstring for test_execute_dpo_missing_keras."""
     with patch("gemma_4_sql.backends.keras.dpo.keras", None), pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
         _execute_dpo("model", "dataset", 0.1, 1, 0.01)
 
 
 def test_execute_dpo_import_error():
+    """Docstring for test_execute_dpo_import_error."""
     mock_keras = MagicMock()
     mock_tf = MagicMock()
     with patch("gemma_4_sql.backends.keras.dpo.keras", mock_keras), patch("gemma_4_sql.backends.keras.dpo.tf", mock_tf), patch("builtins.__import__", side_effect=_mock_import), pytest.raises(ValueError, match="Failed to load Keras model"):
@@ -158,11 +188,13 @@ def test_execute_dpo_import_error():
 
 
 def test_execute_dpo_invalid_dataloader():
+    """Docstring for test_execute_dpo_invalid_dataloader."""
     mock_keras = MagicMock()
     mock_tf = MagicMock()
     mock_cls = MagicMock()
 
     def _mock_import_success(name, *args, **kwargs):
+        """Docstring for _mock_import_success."""
         if name == "keras_nlp.models":
             return mock_cls
         return original_import(name, *args, **kwargs)
@@ -173,11 +205,13 @@ def test_execute_dpo_invalid_dataloader():
 
 
 def test_execute_dpo_success():
+    """Docstring for test_execute_dpo_success."""
     mock_keras = MagicMock()
     mock_tf = MagicMock()
     mock_cls = MagicMock()
 
     def _mock_import_success(name, *args, **kwargs):
+        """Docstring for _mock_import_success."""
         if name == "keras_nlp.models":
             return mock_cls
         return original_import(name, *args, **kwargs)
@@ -191,11 +225,13 @@ def test_execute_dpo_success():
 
 
 def test_run_dpo_missing_keras():
+    """Docstring for test_run_dpo_missing_keras."""
     with patch("gemma_4_sql.backends.keras.dpo.keras", None), pytest.raises(DependencyMissingError, match="Keras DPO dependencies are missing"):
         run_dpo(DPOConfig(model_name="a", dataset="b", beta=0.1, epochs=1, learning_rate=0.01, batch_size=2))
 
 
 def test_run_dpo_success():
+    """Docstring for test_run_dpo_success."""
     mock_keras = MagicMock()
     mock_tf = MagicMock()
     with patch("gemma_4_sql.backends.keras.dpo.keras", mock_keras), patch("gemma_4_sql.backends.keras.dpo.tf", mock_tf), patch("gemma_4_sql.backends.keras.dpo._execute_dpo", return_value=("completed", 1.0)):
@@ -205,6 +241,7 @@ def test_run_dpo_success():
 
 
 def test_run_dpo_failure():
+    """Docstring for test_run_dpo_failure."""
     mock_keras = MagicMock()
     mock_tf = MagicMock()
     with patch("gemma_4_sql.backends.keras.dpo.keras", mock_keras), patch("gemma_4_sql.backends.keras.dpo.tf", mock_tf), patch("gemma_4_sql.backends.keras.dpo._execute_dpo", side_effect=ValueError("Test Error")):

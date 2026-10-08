@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import math
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +14,7 @@ from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
 def test_compute_confidence_score():
+    """Docstring for test_compute_confidence_score."""
     assert compute_confidence_score([], 0) == 0.0
     assert compute_confidence_score([-0.5, -0.5], 2) == pytest.approx(math.exp(-0.5))
     assert compute_confidence_score(-1.0, 2) == pytest.approx(math.exp(-0.5))
@@ -19,11 +22,13 @@ def test_compute_confidence_score():
 
 
 def test_mlx_beam_search_no_model():
+    """Docstring for test_mlx_beam_search_no_model."""
     with pytest.raises(InferenceError, match="Valid model instance is required"):
         mlx_beam_search(None, None, "test")
 
 
 def test_mlx_beam_search_with_mx():
+    """Docstring for test_mlx_beam_search_with_mx."""
     mock_model = MagicMock()
     mock_mx = MagicMock()
     mock_mx.array.return_value = [1, 2, 3]
@@ -59,6 +64,7 @@ def test_mlx_beam_search_with_mx():
 
 
 def test_mlx_beam_search_no_mx():
+    """Docstring for test_mlx_beam_search_no_mx."""
     mock_model = MagicMock()
     mock_tokenizer = MagicMock()
     mock_tokenizer.encode.return_value = MagicMock(tolist=lambda: [1, 2, 3])
@@ -72,6 +78,7 @@ def test_mlx_beam_search_no_mx():
 
 
 def test_mlx_beam_search_ndim_2():
+    """Docstring for test_mlx_beam_search_ndim_2."""
     mock_model = MagicMock()
     mock_mx = MagicMock()
     mock_tokenizer = MagicMock()
@@ -91,6 +98,7 @@ def test_mlx_beam_search_ndim_2():
 
 
 def test_mlx_beam_search_empty_output():
+    """Docstring for test_mlx_beam_search_empty_output."""
     mock_model = MagicMock()
     mock_mx = MagicMock()
     mock_tokenizer = MagicMock()
@@ -118,6 +126,7 @@ def test_mlx_beam_search_empty_output():
 
 
 def test_mlx_beam_search_only_eos():
+    """Docstring for test_mlx_beam_search_only_eos."""
     mock_model = MagicMock()
     mock_model.return_value = [MagicMock()]
     with patch("gemma_4_sql.tokenization.SQLTokenizer") as mock_tok_cls:
@@ -129,11 +138,13 @@ def test_mlx_beam_search_only_eos():
 
 
 def test_generate_sql_missing_deps():
+    """Docstring for test_generate_sql_missing_deps."""
     with patch("gemma_4_sql.backends.mlx.inference.load", None), pytest.raises(DependencyMissingError):
         generate_sql("model", "test")
 
 
 def test_generate_sql_success():
+    """Docstring for test_generate_sql_success."""
     mock_load = MagicMock()
     mock_model = MagicMock()
     mock_tokenizer = MagicMock()
@@ -146,6 +157,7 @@ def test_generate_sql_success():
 
 
 def test_generate_sql_list_load():
+    """Docstring for test_generate_sql_list_load."""
     mock_load = MagicMock()
     mock_load.return_value = [MagicMock(), MagicMock()]
 
@@ -155,6 +167,7 @@ def test_generate_sql_list_load():
 
 
 def test_generate_sql_exception():
+    """Docstring for test_generate_sql_exception."""
     mock_load = MagicMock()
     mock_load.side_effect = RuntimeError("Failed")
     with patch("gemma_4_sql.backends.mlx.inference.load", mock_load):

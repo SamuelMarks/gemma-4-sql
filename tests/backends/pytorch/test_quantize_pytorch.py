@@ -26,6 +26,7 @@ class TinyModel(nn.Module):
     """A tiny real PyTorch model for testing."""
 
     def __init__(self, **kwargs: Any) -> None:
+        """Docstring for __init__."""
         super().__init__()
         self.linear = nn.Linear(4, 4)
         self.config = type("Config", (), {"quantization_config": None})()
@@ -33,15 +34,18 @@ class TinyModel(nn.Module):
         self.saved_path: str | None = None
 
     def quantize(self, tokenizer: Any, quant_config: Any = None, calib_data: Any = None) -> None:
+        """Docstring for quantize."""
         self.quantized = True
         assert quant_config["w_bit"] == 4
         assert calib_data is not None
 
     def save_quantized(self, save_path: str) -> None:
+        """Docstring for save_quantized."""
         self.saved_path = save_path
 
     @classmethod
     def from_pretrained(cls, _name: str, **kwargs: Any) -> Any:
+        """Docstring for from_pretrained."""
         return cls()
 
 
@@ -49,7 +53,7 @@ class DummyBitsAndBytesConfig:
     """Dummy config since BitsAndBytes isn't installed."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
+        """Docstring for __init__."""
 
 
 def test_quantize_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -240,6 +244,7 @@ def test_export_gguf_extract_failure(tmp_path: Path, monkeypatch: pytest.MonkeyP
     """
 
     def mock_fail_extract(model_name: str) -> dict[str, object]:
+        """Docstring for mock_fail_extract."""
         raise RuntimeError("State dict extraction failed")
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.gguf.extract_pytorch_state_dict", mock_fail_extract)
@@ -254,13 +259,17 @@ def test_apply_awq_quantization_success(monkeypatch: pytest.MonkeyPatch, tmp_pat
     import sys
 
     class MockTokenizer:
+        """Docstring for MockTokenizer."""
+
         saved_path: str | None = None
 
         def save_pretrained(self, save_path: str) -> None:
+            """Docstring for save_pretrained."""
             self.saved_path = save_path
 
         @classmethod
         def from_pretrained(cls, _name: str) -> Any:
+            """Docstring for from_pretrained."""
             return cls()
 
     mock_awq_module = type("MockAWQModule", (), {"AutoAWQForCausalLM": TinyModel})
@@ -302,26 +311,34 @@ def test_apply_gptq_quantization_success(monkeypatch: pytest.MonkeyPatch, tmp_pa
     import sys
 
     class MockGPTQQuantizer:
+        """Docstring for MockGPTQQuantizer."""
+
         bits: int
         dataset: str
 
         def __init__(self, bits: int = 4, dataset: str = "c4", **kwargs: object) -> None:
+            """Docstring for __init__."""
             self.bits = bits
             self.dataset = dataset
 
         def quantize_model(self, model: Any, _tokenizer: Any) -> Any:
+            """Docstring for quantize_model."""
             return model
 
         def save(self, _model: Any, save_dir: str) -> None:
+            """Docstring for save."""
             Path(save_dir).mkdir(parents=True, exist_ok=True)
             (Path(save_dir) / "model.safetensors").write_bytes(b"dummy_weights")
 
     class MockTokenizer:
+        """Docstring for MockTokenizer."""
+
         def save_pretrained(self, _save_path: str) -> None:
-            pass
+            """Docstring for save_pretrained."""
 
         @classmethod
         def from_pretrained(cls, _name: str) -> Any:
+            """Docstring for from_pretrained."""
             return cls()
 
     mock_optimum_gptq = type("MockOptimumGPTQ", (), {"GPTQQuantizer": MockGPTQQuantizer})

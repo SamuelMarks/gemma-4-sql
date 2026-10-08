@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import importlib
 import sys
 from unittest.mock import MagicMock, patch
@@ -11,6 +13,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 @pytest.fixture(autouse=True)
 def reload_module_after_test():
+    """Docstring for reload_module_after_test."""
     # Store original state to restore later if needed, but pytest runs in a process
     # We just ensure the module is reloaded to its normal state before leaving.
     yield
@@ -18,6 +21,7 @@ def reload_module_after_test():
 
 
 def test_module_imports_success():
+    """Docstring for test_module_imports_success."""
     with patch.dict(
         sys.modules,
         {
@@ -39,6 +43,7 @@ def test_module_imports_success():
 
 
 def test_module_imports_failure():
+    """Docstring for test_module_imports_failure."""
     with patch.dict(
         sys.modules,
         {
@@ -55,6 +60,7 @@ def test_module_imports_failure():
 
 
 def test_quantize_tensor_aqt_missing_jax():
+    """Docstring for test_quantize_tensor_aqt_missing_jax."""
     quantize_mod.jax = None
     quantize_mod.jnp = None
     with pytest.raises(DependencyMissingError, match="JAX dependencies are missing."):
@@ -62,6 +68,7 @@ def test_quantize_tensor_aqt_missing_jax():
 
 
 def test_quantize_tensor_aqt_negative_bits():
+    """Docstring for test_quantize_tensor_aqt_negative_bits."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = MagicMock()
     with pytest.raises(ValueError, match="Quantization bits must be positive, got 0"):
@@ -71,6 +78,7 @@ def test_quantize_tensor_aqt_negative_bits():
 
 
 def test_quantize_tensor_aqt_int8():
+    """Docstring for test_quantize_tensor_aqt_int8."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -87,6 +95,7 @@ def test_quantize_tensor_aqt_int8():
 
 
 def test_quantize_tensor_aqt_int16():
+    """Docstring for test_quantize_tensor_aqt_int16."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -97,6 +106,7 @@ def test_quantize_tensor_aqt_int16():
 
 
 def test_apply_aqt_quantization_missing_jax():
+    """Docstring for test_apply_aqt_quantization_missing_jax."""
     quantize_mod.jax = None
     quantize_mod.jnp = None
     with pytest.raises(DependencyMissingError, match="JAX dependencies are missing."):
@@ -104,6 +114,7 @@ def test_apply_aqt_quantization_missing_jax():
 
 
 def test_apply_aqt_quantization_methods():
+    """Docstring for test_apply_aqt_quantization_methods."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -126,6 +137,7 @@ def test_apply_aqt_quantization_methods():
 
 
 def test_apply_aqt_quantization_targets_and_traverse():
+    """Docstring for test_apply_aqt_quantization_targets_and_traverse."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
     quantize_mod.aqt = MagicMock()
@@ -151,6 +163,7 @@ def test_apply_aqt_quantization_targets_and_traverse():
 
 
 def test_quantize_model_missing_maxtext_deps():
+    """Docstring for test_quantize_model_missing_maxtext_deps."""
     quantize_mod.jax = None
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
         quantize_mod.quantize_model("model")
@@ -177,6 +190,7 @@ def test_quantize_model_missing_maxtext_deps():
 
 
 def test_quantize_model_with_gemma4_init():
+    """Docstring for test_quantize_model_with_gemma4_init."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
     quantize_mod.Gemma4Model = MagicMock()
@@ -197,6 +211,7 @@ def test_quantize_model_with_gemma4_init():
 
 
 def test_quantize_model_with_params_kwargs_dict():
+    """Docstring for test_quantize_model_with_params_kwargs_dict."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -211,6 +226,7 @@ def test_quantize_model_with_params_kwargs_dict():
 
 
 def test_quantize_model_with_params_non_dict():
+    """Docstring for test_quantize_model_with_params_non_dict."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -224,6 +240,7 @@ def test_quantize_model_with_params_non_dict():
 
 
 def test_quantize_model_exception_handling():
+    """Docstring for test_quantize_model_exception_handling."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 

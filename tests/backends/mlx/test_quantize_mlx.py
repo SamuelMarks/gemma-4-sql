@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -8,6 +10,7 @@ from gemma_4_sql.backends.mlx import quantize
 
 @pytest.fixture(autouse=True)
 def ensure_np():
+    """Docstring for ensure_np."""
     quantize.np = np
 
 
@@ -27,18 +30,23 @@ from gemma_4_sql.exceptions import (
 # and we can test its logic easily without testing the wrapper's exception handling.
 @pytest.fixture(autouse=True)
 def bypass_wrapper(monkeypatch):
+    """Docstring for bypass_wrapper."""
+
     def mock_wrapper(**kwargs):
+        """Docstring for mock_wrapper."""
         return kwargs["apply_fn"]()
 
     monkeypatch.setattr(quantize, "quantize_model_wrapper", mock_wrapper)
 
 
 def test_calibrate_awq_scales_empty_alpha():
+    """Docstring for test_calibrate_awq_scales_empty_alpha."""
     with pytest.raises(ValueError, match="alpha_range must contain at least one value"):
         calibrate_awq_scales(MagicMock(), MagicMock(), alpha_range=[])
 
 
 def test_calibrate_awq_scales_no_np(monkeypatch):
+    """Docstring for test_calibrate_awq_scales_no_np."""
     monkeypatch.setattr(quantize, "np", None)
     weight_matrix = MagicMock()
     weight_matrix.shape = (1, 10)
@@ -47,6 +55,7 @@ def test_calibrate_awq_scales_no_np(monkeypatch):
 
 
 def test_calibrate_awq_scales_1d_activations():
+    """Docstring for test_calibrate_awq_scales_1d_activations."""
     w = np.random.randn(5, 5).astype(np.float32)
     x = np.random.randn(5).astype(np.float32)
     scales = calibrate_awq_scales(w, x)
@@ -54,6 +63,7 @@ def test_calibrate_awq_scales_1d_activations():
 
 
 def test_calibrate_awq_scales_2d_activations():
+    """Docstring for test_calibrate_awq_scales_2d_activations."""
     w = np.random.randn(5, 5).astype(np.float32)
     x = np.random.randn(3, 5).astype(np.float32)
     scales = calibrate_awq_scales(w, x)
@@ -61,6 +71,7 @@ def test_calibrate_awq_scales_2d_activations():
 
 
 def test_calibrate_gptq_weights_no_np(monkeypatch):
+    """Docstring for test_calibrate_gptq_weights_no_np."""
     monkeypatch.setattr(quantize, "np", None)
     w = MagicMock()
     res = calibrate_gptq_weights(w, MagicMock())
@@ -68,6 +79,7 @@ def test_calibrate_gptq_weights_no_np(monkeypatch):
 
 
 def test_calibrate_gptq_weights_1d_activations():
+    """Docstring for test_calibrate_gptq_weights_1d_activations."""
     w = np.random.randn(5, 5).astype(np.float32)
     x = np.random.randn(5).astype(np.float32)
     res = calibrate_gptq_weights(w, x)
@@ -75,6 +87,7 @@ def test_calibrate_gptq_weights_1d_activations():
 
 
 def test_calibrate_gptq_weights_2d_activations():
+    """Docstring for test_calibrate_gptq_weights_2d_activations."""
     w = np.random.randn(5, 5).astype(np.float32)
     x = np.random.randn(3, 5).astype(np.float32)
     res = calibrate_gptq_weights(w, x)
@@ -82,6 +95,7 @@ def test_calibrate_gptq_weights_2d_activations():
 
 
 def test_calibrate_gptq_weights_singular_matrix():
+    """Docstring for test_calibrate_gptq_weights_singular_matrix."""
     w = np.random.randn(5, 5).astype(np.float32)
     x = np.random.randn(3, 5).astype(np.float32)
     with patch("numpy.linalg.inv", side_effect=np.linalg.LinAlgError):
@@ -90,18 +104,22 @@ def test_calibrate_gptq_weights_singular_matrix():
 
 
 def test_quantize_model_no_mlx(monkeypatch):
+    """Docstring for test_quantize_model_no_mlx."""
     monkeypatch.setattr(quantize, "mlx", None)
     with pytest.raises(DependencyMissingError, match="MLX dependencies are missing"):
         quantize_model("dummy")
 
 
 class MockNN:
+    """Docstring for MockNN."""
+
     def quantize(self, model, group_size, bits):
-        pass
+        """Docstring for quantize."""
 
 
 @pytest.fixture
 def mock_mlx_env():
+    """Docstring for mock_mlx_env."""
     import sys
 
     mock_mlx = MagicMock()
@@ -115,12 +133,14 @@ def mock_mlx_env():
 
 
 def test_quantize_model_unsupported_method(monkeypatch):
+    """Docstring for test_quantize_model_unsupported_method."""
     monkeypatch.setattr(quantize, "mlx", MagicMock())
     with pytest.raises(UnsupportedQuantizationMethodError, match="Unsupported quantization method"):
         quantize_model("dummy", method="invalid")
 
 
 def test_quantize_model_missing_mlx_lm(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_missing_mlx_lm."""
     import sys
 
     monkeypatch.setattr(quantize, "mlx", MagicMock())
@@ -129,6 +149,7 @@ def test_quantize_model_missing_mlx_lm(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_load_fails(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_load_fails."""
     _mock_mlx, mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
 
@@ -139,6 +160,7 @@ def test_quantize_model_load_fails(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_no_nn_quantize(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_no_nn_quantize."""
     _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
 
@@ -153,6 +175,7 @@ def test_quantize_model_no_nn_quantize(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_awq(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_awq."""
     _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
 
@@ -161,6 +184,7 @@ def test_quantize_model_awq(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_gptq(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_gptq."""
     _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
 
@@ -169,6 +193,7 @@ def test_quantize_model_gptq(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_int4(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_int4."""
     _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
 
@@ -177,6 +202,7 @@ def test_quantize_model_int4(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_int8(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_int8."""
     _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
 
@@ -185,6 +211,7 @@ def test_quantize_model_int8(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_load_tuple(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_load_tuple."""
     _mock_mlx, mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
 
@@ -195,6 +222,7 @@ def test_quantize_model_load_tuple(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_load_not_tuple(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_load_not_tuple."""
     _mock_mlx, mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
 
@@ -205,6 +233,7 @@ def test_quantize_model_load_not_tuple(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_awq_no_np(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_awq_no_np."""
     _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
     monkeypatch.setattr(quantize, "np", None)
@@ -214,6 +243,7 @@ def test_quantize_model_awq_no_np(monkeypatch, mock_mlx_env):
 
 
 def test_quantize_model_gptq_no_np(monkeypatch, mock_mlx_env):
+    """Docstring for test_quantize_model_gptq_no_np."""
     _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
     monkeypatch.setattr(quantize, "mlx", MagicMock())
     monkeypatch.setattr(quantize, "np", None)

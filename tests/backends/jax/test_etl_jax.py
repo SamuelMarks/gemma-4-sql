@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import importlib
 import sys
 from unittest.mock import MagicMock, patch
@@ -7,6 +9,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_dependencies():
+    """Docstring for mock_dependencies."""
     mock_datasets = MagicMock()
     mock_grain = MagicMock()
 
@@ -33,6 +36,7 @@ def mock_dependencies():
 
 
 def reload_module():
+    """Docstring for reload_module."""
     import gemma_4_sql.backends.jax.etl as jax_etl
 
     importlib.reload(jax_etl)
@@ -40,6 +44,7 @@ def reload_module():
 
 
 def test_missing_dependencies():
+    """Docstring for test_missing_dependencies."""
     with patch.dict(sys.modules, {"datasets": None, "grain.python": None, "grain": None}):
         jax_etl = reload_module()
 
@@ -62,6 +67,7 @@ def test_missing_dependencies():
 
 
 def test_load_hf_or_duckdb():
+    """Docstring for test_load_hf_or_duckdb."""
     jax_etl = reload_module()
 
     with patch("gemma_4_sql.backends.jax.etl.load_duckdb_dataset") as mock_duckdb:
@@ -75,6 +81,7 @@ def test_load_hf_or_duckdb():
 
 
 def test_get_sampler():
+    """Docstring for test_get_sampler."""
     jax_etl = reload_module()
 
     sampler = jax_etl._get_sampler(10, True)
@@ -88,6 +95,7 @@ def test_get_sampler():
 
 
 def test_get_sampler_missing_sharding():
+    """Docstring for test_get_sampler_missing_sharding."""
     jax_etl = reload_module()
 
     del jax_etl.grain.JAXDistributedSharding
@@ -98,6 +106,7 @@ def test_get_sampler_missing_sharding():
 
 
 def test_build_dataloader():
+    """Docstring for test_build_dataloader."""
     jax_etl = reload_module()
 
     config = MagicMock()

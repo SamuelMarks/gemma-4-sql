@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,6 +9,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_get_device():
+    """Docstring for test_get_device."""
     # cpu
     assert bm._get_device("cpu") == "cpu"
 
@@ -32,22 +35,26 @@ def test_get_device():
 
 
 def test_load_pytorch_model_and_device_native():
+    """Docstring for test_load_pytorch_model_and_device_native."""
     mock_torch = MagicMock()
     mock_torch.bfloat16 = "mock_bfloat16"
     mock_torch.compile = MagicMock(side_effect=RuntimeError("compile failed"))
 
     class MockGemma4Config:
-        pass
+        """Docstring for MockGemma4Config."""
 
     class MockGemma4ForCausalLM:
+        """Docstring for MockGemma4ForCausalLM."""
+
         def __init__(self, config):
+            """Docstring for __init__."""
             self.config = config
 
         def to(self, device_or_dtype):
-            pass
+            """Docstring for to."""
 
         def eval(self):
-            pass
+            """Docstring for eval."""
 
     with patch("gemma_4_sql.backends.pytorch.benchmark.torch", mock_torch), patch("gemma_4_sql.backends.pytorch.benchmark._get_device", return_value="cpu"), patch.dict("sys.modules", {"gemma_4_sql.backends.pytorch.gemma4.modeling": MagicMock(Gemma4Config=MockGemma4Config, Gemma4ForCausalLM=MockGemma4ForCausalLM)}):
         model, device = bm._load_pytorch_model_and_device("dummy", "cpu", backend_alias="pytorch_native")
@@ -72,7 +79,10 @@ def test_load_pytorch_model_and_device_native():
     del mock_torch_none_dtype.float32
 
     class MockGemma4ForCausalLMNoTo:
+        """Docstring for MockGemma4ForCausalLMNoTo."""
+
         def __init__(self, config):
+            """Docstring for __init__."""
             self.config = config
 
     with (
@@ -92,6 +102,7 @@ def test_load_pytorch_model_and_device_native():
 
 
 def test_load_pytorch_model_and_device_hf():
+    """Docstring for test_load_pytorch_model_and_device_hf."""
     mock_torch = MagicMock()
     mock_torch.bfloat16 = "mock_bfloat16"
     mock_torch.compile = MagicMock(return_value="compiled_model")
@@ -116,7 +127,7 @@ def test_load_pytorch_model_and_device_hf():
 
     # test hf without to or eval
     class MockModelNoToNoEval:
-        pass
+        """Docstring for MockModelNoToNoEval."""
 
     mock_auto_model_2 = MagicMock()
     mock_auto_model_2.from_pretrained.return_value = MockModelNoToNoEval()
@@ -126,6 +137,7 @@ def test_load_pytorch_model_and_device_hf():
 
 
 def test_sync_cuda():
+    """Docstring for test_sync_cuda."""
     mock_torch = MagicMock()
     with patch("gemma_4_sql.backends.pytorch.benchmark.torch", mock_torch):
         bm._sync_cuda("cuda")
@@ -138,6 +150,7 @@ def test_sync_cuda():
 
 
 def test_get_memory_mb():
+    """Docstring for test_get_memory_mb."""
     mock_torch = MagicMock()
     mock_torch.cuda.max_memory_allocated.return_value = 1024 * 1024 * 5
     mock_torch.mps.driver_allocated_memory.return_value = 1024 * 1024 * 10
@@ -149,17 +162,21 @@ def test_get_memory_mb():
 
 
 def test_run_benchmark_pass():
+    """Docstring for test_run_benchmark_pass."""
     mock_torch = MagicMock()
     mock_tensor = MagicMock()
     mock_torch.randint.return_value = mock_tensor
     mock_tensor.to.return_value = mock_tensor
 
     class MockModelContext:
+        """Docstring for MockModelContext."""
+
         def __enter__(self):
+            """Docstring for __enter__."""
             return self
 
         def __exit__(self, *args):
-            pass
+            """Docstring for __exit__."""
 
     mock_torch.no_grad.return_value = MockModelContext()
 
@@ -186,13 +203,15 @@ def test_run_benchmark_pass():
     mock_torch_no_attr.no_grad.return_value = MockModelContext()
 
     class MockTensorNoTo:
-        pass
+        """Docstring for MockTensorNoTo."""
 
     mock_torch_no_attr.randint.return_value = MockTensorNoTo()
 
     class MockModelNoGenerate:
+        """Docstring for MockModelNoGenerate."""
+
         def __call__(self, *args, **kwargs):
-            pass
+            """Docstring for __call__."""
 
     mock_model_no_gen = MockModelNoGenerate()
 
@@ -213,6 +232,7 @@ def test_run_benchmark_pass():
 
 
 def test_benchmark_model():
+    """Docstring for test_benchmark_model."""
     # Test dependencies missing
     with patch("gemma_4_sql.backends.pytorch.benchmark.torch", None), pytest.raises(DependencyMissingError):
         bm.benchmark_model("model", "cpu", 1)
@@ -223,6 +243,7 @@ def test_benchmark_model():
     with patch("gemma_4_sql.backends.pytorch.benchmark.torch", mock_torch), patch("gemma_4_sql.backends.pytorch.benchmark.AutoModelForCausalLM", mock_auto_model), patch("gemma_4_sql.backends.pytorch.benchmark.run_benchmark_wrapper") as mock_wrapper:
 
         def fake_wrapper(*args, **kwargs):
+            """Docstring for fake_wrapper."""
             # Extract and run the benchmark fn
             run = kwargs["benchmark_fn"]
             return run()

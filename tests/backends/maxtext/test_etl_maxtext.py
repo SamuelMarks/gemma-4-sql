@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,6 +10,7 @@ from gemma_4_sql.type_hints import ETLConfig
 
 
 def test_load_hf_or_duckdb():
+    """Docstring for test_load_hf_or_duckdb."""
     with patch("gemma_4_sql.backends.maxtext.etl.load_duckdb_dataset", return_value="duckdb_ds") as mock_duckdb:
         res = _load_hf_or_duckdb("ds", "split", "path", "table")
         assert res == "duckdb_ds"
@@ -22,11 +25,13 @@ def test_load_hf_or_duckdb():
 
 
 def test_load_hf_missing_deps():
+    """Docstring for test_load_hf_missing_deps."""
     with patch("gemma_4_sql.backends.maxtext.etl.datasets", None), pytest.raises(DependencyMissingError, match="Datasets dependency is missing."):
         _load_hf_or_duckdb("ds", "split", None, None)
 
 
 def test_get_sampler():
+    """Docstring for test_get_sampler."""
     mock_grain = MagicMock()
     mock_grain.JAXDistributedSharding = MagicMock(return_value="shard")
     mock_grain.NoSharding = MagicMock(return_value="no_shard")
@@ -46,11 +51,13 @@ def test_get_sampler():
 
 
 def test_get_sampler_missing_deps():
+    """Docstring for test_get_sampler_missing_deps."""
     with patch("gemma_4_sql.backends.maxtext.etl.grain", None), pytest.raises(DependencyMissingError, match="Grain dependency is missing."):
         _get_sampler(10, True)
 
 
 def test_build_dataloader():
+    """Docstring for test_build_dataloader."""
     config = ETLConfig(dataset_name="ds", split="split", batch_size=2, distributed=True, tokenizer_name="tok")
 
     mock_datasets = MagicMock()
@@ -59,17 +66,23 @@ def test_build_dataloader():
     mock_grain.Batch = MagicMock(return_value="batch_op")
 
     class MockBaseTransform:
+        """Docstring for MockBaseTransform."""
+
         def __init__(self, tokenizer):
-            pass
+            """Docstring for __init__."""
 
         def map(self, element):
+            """Docstring for map."""
             return {"a": 1}
 
     class MockDataSource:
+        """Docstring for MockDataSource."""
+
         def __init__(self, ds):
-            pass
+            """Docstring for __init__."""
 
         def __len__(self):
+            """Docstring for __len__."""
             return 10
 
     with (
@@ -99,6 +112,7 @@ def test_build_dataloader():
 
 
 def test_build_dataloader_missing_deps():
+    """Docstring for test_build_dataloader_missing_deps."""
     config = ETLConfig(dataset_name="ds", split="split")
     with patch("gemma_4_sql.backends.maxtext.etl.datasets", None), pytest.raises(DependencyMissingError, match="Missing grain or datasets. Cannot load ds."):
         build_dataloader(config)

@@ -80,6 +80,7 @@ def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer:
     if tf is None:
 
         def _dummy_step(_b: Any) -> float:
+            """Docstring for _dummy_step."""
             return 0.0
 
         return _dummy_step

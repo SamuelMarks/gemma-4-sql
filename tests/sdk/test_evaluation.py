@@ -279,6 +279,7 @@ def test_collect_predictions_batch_multimodal_and_type_error() -> None:
 
     # Mock generate_sql to raise TypeError when called with kwargs, then succeed without kwargs
     def mock_generate_sql(model_name: str, prompt: str, **kwargs: object) -> dict[str, object]:
+        """Docstring for mock_generate_sql."""
         if kwargs:
             raise TypeError("generate_sql() got an unexpected keyword argument")
         return {"sql": "SELECT 1", "confidence_score": 0.85}

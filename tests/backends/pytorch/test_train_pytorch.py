@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import pytest
 import torch
 from torch import nn
@@ -8,34 +10,44 @@ from gemma_4_sql.type_hints import TrainingConfig
 
 
 class DummyModel(nn.Module):
+    """Docstring for DummyModel."""
+
     def __init__(self):
+        """Docstring for __init__."""
         super().__init__()
         self.embed = nn.Embedding(100, 16)
         self.linear = nn.Linear(16, 100)
 
     def forward(self, x):
+        """Docstring for forward."""
         x = self.embed(x)
         return self.linear(x)
 
     @classmethod
     def from_pretrained(cls, *args, **kwargs):
+        """Docstring for from_pretrained."""
         return cls()
 
 
 @pytest.fixture
 def mock_transformers_gemma(monkeypatch):
+    """Docstring for mock_transformers_gemma."""
     monkeypatch.setattr(tr, "Gemma4ForCausalLM", DummyModel)
 
 
 @pytest.fixture
 def mock_build_dataloader(monkeypatch):
+    """Docstring for mock_build_dataloader."""
+
     def mock_build(*args, **kwargs):
+        """Docstring for mock_build."""
         return {"loader": [{"inputs": torch.randint(0, 100, (2, 10)), "targets": torch.randint(0, 100, (2, 10))}]}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build)
 
 
 def test_train_model_pytorch_real(mock_transformers_gemma, mock_build_dataloader):
+    """Docstring for test_train_model_pytorch_real."""
     config = TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1)
     res = train_model(config)
     assert res["backend"] == "pytorch"
@@ -43,6 +55,7 @@ def test_train_model_pytorch_real(mock_transformers_gemma, mock_build_dataloader
 
 
 def test_train_model_pytorch_missing(monkeypatch):
+    """Docstring for test_train_model_pytorch_missing."""
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(tr, "torch", None)
@@ -51,6 +64,7 @@ def test_train_model_pytorch_missing(monkeypatch):
 
 
 def test_execute_train_missing_deps(monkeypatch):
+    """Docstring for test_execute_train_missing_deps."""
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(tr, "torch", None)
@@ -59,6 +73,7 @@ def test_execute_train_missing_deps(monkeypatch):
 
 
 def test_train_model_pytorch_error(mock_transformers_gemma, monkeypatch):
+    """Docstring for test_train_model_pytorch_error."""
     monkeypatch.setattr(tr, "build_dataloader", lambda *a, **k: Exception("err"))
     config = TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1)
     res = train_model(config)
@@ -66,6 +81,7 @@ def test_train_model_pytorch_error(mock_transformers_gemma, monkeypatch):
 
 
 def test_train_model_pytorch_no_loader_fallback(mock_transformers_gemma, monkeypatch):
+    """Docstring for test_train_model_pytorch_no_loader_fallback."""
     monkeypatch.setattr(tr, "build_dataloader", lambda *a, **k: {"loader": None})
     config = TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=2, learning_rate=0.1)
     res = train_model(config)
@@ -73,7 +89,10 @@ def test_train_model_pytorch_no_loader_fallback(mock_transformers_gemma, monkeyp
 
 
 def test_execute_train_success(mock_transformers_gemma, monkeypatch):
+    """Docstring for test_execute_train_success."""
+
     def mock_build(*args, **kwargs):
+        """Docstring for mock_build."""
         return {"loader": [{"inputs": torch.randint(0, 100, (2, 10)), "targets": torch.randint(0, 100, (2, 10))}]}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build)
@@ -83,28 +102,38 @@ def test_execute_train_success(mock_transformers_gemma, monkeypatch):
 
 
 def test_execute_train_loss_tuple(mock_transformers_gemma, monkeypatch):
+    """Docstring for test_execute_train_loss_tuple."""
+
     class TupleModel:
+        """Docstring for TupleModel."""
+
         def __call__(self, x):
+            """Docstring for __call__."""
             t = torch.randn(2, 10, 100)
             t.requires_grad = True
             return (t,)
 
         def to(self, d):
+            """Docstring for to."""
             return self
 
         def parameters(self):
+            """Docstring for parameters."""
             return [torch.nn.Parameter(torch.randn(1))]
 
         def train(self, mode=True):
+            """Docstring for train."""
             return self
 
         @classmethod
         def from_pretrained(cls, *a, **k):
+            """Docstring for from_pretrained."""
             return cls()
 
     monkeypatch.setattr(tr, "Gemma4ForCausalLM", TupleModel)
 
     def mock_build(*args, **kwargs):
+        """Docstring for mock_build."""
         return {"loader": [{"inputs": torch.randint(0, 100, (2, 10)), "targets": torch.randint(0, 100, (2, 10))}]}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build)
@@ -113,33 +142,39 @@ def test_execute_train_loss_tuple(mock_transformers_gemma, monkeypatch):
 
 
 def test_pytorch_setup_distributed(monkeypatch):
+    """Docstring for test_pytorch_setup_distributed."""
     is_dist, d, _device, _rank = _setup_distributed("none")
     assert not is_dist
     assert d is None
 
     # Test ddp branch with mocks since we don't have multiple GPUs
     class MockDist:
+        """Docstring for MockDist."""
+
         @staticmethod
         def is_initialized():
+            """Docstring for is_initialized."""
             return False
 
         @staticmethod
         def init_process_group(*a):
-            pass
+            """Docstring for init_process_group."""
 
         @staticmethod
         def get_rank():
+            """Docstring for get_rank."""
             return 0
 
         @staticmethod
         def destroy_process_group():
-            pass
+            """Docstring for destroy_process_group."""
 
     import builtins
 
     orig_import = builtins.__import__
 
     def mock_import(name, *a, **k):
+        """Docstring for mock_import."""
         if name == "torch.distributed":
             return MockDist
         return orig_import(name, *a, **k)
@@ -153,18 +188,22 @@ def test_pytorch_setup_distributed(monkeypatch):
     _cleanup_distributed(d)
 
     class MockInitializedDist:
+        """Docstring for MockInitializedDist."""
+
         @staticmethod
         def is_initialized():
+            """Docstring for is_initialized."""
             return True
 
         @staticmethod
         def destroy_process_group():
-            pass
+            """Docstring for destroy_process_group."""
 
     _cleanup_distributed(MockInitializedDist)
 
 
 def test_wrap_model_distributed():
+    """Docstring for test_wrap_model_distributed."""
     model = nn.Linear(10, 10)
     # Testing "none"
     wrapped = _wrap_model_distributed(model, "none", 0)
@@ -175,6 +214,7 @@ def test_wrap_model_distributed():
 
 
 def test_wrap_model_distributed_real(monkeypatch):
+    """Docstring for test_wrap_model_distributed_real."""
     model = nn.Linear(10, 10)
 
     # DDP mock
@@ -183,6 +223,7 @@ def test_wrap_model_distributed_real(monkeypatch):
     orig_import_module = importlib.import_module
 
     def mock_import_module(name):
+        """Docstring for mock_import_module."""
         if name == "torch.nn.parallel":
             return type("MockDDPModule", (), {"DistributedDataParallel": lambda m, **kwargs: m})
         if name == "torch.distributed.fsdp":
@@ -199,9 +240,14 @@ def test_wrap_model_distributed_real(monkeypatch):
 
 
 def test_train_model_pytorch_native(mock_build_dataloader, monkeypatch):
+    """Docstring for test_train_model_pytorch_native."""
+
     class MockNativeGemma:
+        """Docstring for MockNativeGemma."""
+
         @classmethod
         def from_pretrained(cls, *args, **kwargs):
+            """Docstring for from_pretrained."""
             return DummyModel()
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM", MockNativeGemma, raising=False)
@@ -212,6 +258,7 @@ def test_train_model_pytorch_native(mock_build_dataloader, monkeypatch):
 
 
 def test_train_pytorch_import_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_train_pytorch_import_success."""
     import importlib
     import sys
 
@@ -226,6 +273,7 @@ def test_train_pytorch_import_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_setup_distributed_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_setup_distributed_cuda."""
     import torch
 
     from gemma_4_sql.backends.pytorch.train import _setup_distributed
@@ -235,12 +283,16 @@ def test_setup_distributed_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(torch.cuda, "set_device", lambda d: None)
 
     class MockDist:
+        """Docstring for MockDist."""
+
         @staticmethod
         def is_initialized():
+            """Docstring for is_initialized."""
             return True
 
         @staticmethod
         def get_rank():
+            """Docstring for get_rank."""
             return 0
 
     import sys

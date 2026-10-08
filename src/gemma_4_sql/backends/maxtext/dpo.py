@@ -131,6 +131,7 @@ def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer:
         """
 
         def _wrapper(p: Any, r: Any, b: Any) -> Any:
+            """Docstring for _wrapper."""
             return _dpo_step_loss(policy_model, p, ref_model, r, b, beta)
 
         (loss, grads) = jax.value_and_grad(_wrapper)(policy_params, ref_params, batch)

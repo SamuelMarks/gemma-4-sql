@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import math
 from unittest.mock import MagicMock, patch
 
@@ -13,6 +15,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_extract_flat_scores():
+    """Docstring for test_extract_flat_scores."""
     assert _extract_flat_scores([1.0, 2.0]) == [1.0, 2.0]
     assert _extract_flat_scores([[1.0], [2.0, 3.0]]) == [1.0, 2.0, 3.0]
     assert _extract_flat_scores(1.0) == [1.0]
@@ -21,16 +24,23 @@ def test_extract_flat_scores():
 
 
 def test_compute_keras_confidence_zero_tokens():
+    """Docstring for test_compute_keras_confidence_zero_tokens."""
     assert compute_keras_confidence(None, 0) == 0.0
     assert compute_keras_confidence(None, -1) == 0.0
 
 
 def test_compute_keras_confidence_with_numpy_and_tolist():
+    """Docstring for test_compute_keras_confidence_with_numpy_and_tolist."""
+
     class DummyScores:
+        """Docstring for DummyScores."""
+
         def numpy(self):
+            """Docstring for numpy."""
             return self
 
         def tolist(self):
+            """Docstring for tolist."""
             return [1.0, 1.0]
 
     scores = DummyScores()
@@ -38,6 +48,7 @@ def test_compute_keras_confidence_with_numpy_and_tolist():
 
 
 def test_compute_keras_confidence_list():
+    """Docstring for test_compute_keras_confidence_list."""
     assert compute_keras_confidence([1.0, 1.0], 2) == 1.0
     assert compute_keras_confidence([0.5, 0.5], 2) == 0.5
     assert compute_keras_confidence([-1.0, -1.0], 2) == math.exp(-1.0)
@@ -45,28 +56,42 @@ def test_compute_keras_confidence_list():
 
 
 def test_compute_keras_confidence_scalar():
+    """Docstring for test_compute_keras_confidence_scalar."""
     assert compute_keras_confidence(0.5, 1) == 0.5
     assert compute_keras_confidence(-2.0, 2) == math.exp(-2.0 / 2)
 
 
 def test_compute_keras_confidence_fallback():
+    """Docstring for test_compute_keras_confidence_fallback."""
     assert compute_keras_confidence(None, 10) == max(0.1, min(0.95, 1.0 / (1.0 + math.exp(-0.1 * 10))))
 
 
 @patch("gemma_4_sql.backends.keras.inference.logger.warning")
 def test_configure_beam_sampler(mock_warning):
+    """Docstring for test_configure_beam_sampler."""
+
     # Setup mock sampler
     class MockBeamSampler:
+        """Docstring for MockBeamSampler."""
+
         def __init__(self, num_beams):
+            """Docstring for __init__."""
             self.num_beams = num_beams
 
     class MockKerasNLP:
+        """Docstring for MockKerasNLP."""
+
         class samplers:
+            """Docstring for samplers."""
+
             BeamSampler = MockBeamSampler
 
     # Test with compile
     class MockModelCompile:
+        """Docstring for MockModelCompile."""
+
         def compile(self, sampler):
+            """Docstring for compile."""
             self.sampler = sampler
 
     model_compile = MockModelCompile()
@@ -78,6 +103,8 @@ def test_configure_beam_sampler(mock_warning):
 
     # Test with sampler attribute
     class MockModelSampler:
+        """Docstring for MockModelSampler."""
+
         sampler = None
 
     model_sampler = MockModelSampler()
@@ -87,7 +114,7 @@ def test_configure_beam_sampler(mock_warning):
 
     # Test with model having neither compile nor sampler
     class MockModelNothing:
-        pass
+        """Docstring for MockModelNothing."""
 
     model_nothing = MockModelNothing()
     with patch.dict("sys.modules", {"keras_nlp": MockKerasNLP()}):
@@ -98,7 +125,11 @@ def test_configure_beam_sampler(mock_warning):
 
     # Test with BeamSampler being None
     class MockKerasNLPNoSampler:
+        """Docstring for MockKerasNLPNoSampler."""
+
         class samplers:
+            """Docstring for samplers."""
+
             BeamSampler = None
 
     with patch.dict("sys.modules", {"keras_nlp": MockKerasNLPNoSampler()}):
@@ -113,6 +144,7 @@ def test_configure_beam_sampler(mock_warning):
 
 
 def test_generate_sql_missing_deps():
+    """Docstring for test_generate_sql_missing_deps."""
     with patch("gemma_4_sql.backends.keras.inference.keras", None), pytest.raises(DependencyMissingError):
         generate_sql("model", "prompt")
 
@@ -121,6 +153,7 @@ def test_generate_sql_missing_deps():
 
 
 def test_generate_sql_success_dict_output():
+    """Docstring for test_generate_sql_success_dict_output."""
     mock_model = MagicMock()
     mock_model.generate.return_value = {"text": "prompt SELECT * FROM t;", "scores": [0.9]}
     mock_cls = MagicMock()
@@ -137,6 +170,7 @@ def test_generate_sql_success_dict_output():
 
 
 def test_generate_sql_success_tuple_output():
+    """Docstring for test_generate_sql_success_tuple_output."""
     mock_model = MagicMock()
     mock_model.generate.return_value = ("prompt SELECT 1;", [0.8])
     mock_cls = MagicMock()
@@ -152,8 +186,10 @@ def test_generate_sql_success_tuple_output():
 
 
 def test_generate_sql_success_str_output():
+    """Docstring for test_generate_sql_success_str_output."""
+
     class StrOutput(str):
-        pass
+        """Docstring for StrOutput."""
 
     out = StrOutput("prompt SELECT 2;")
     out.scores = [0.7]
@@ -173,6 +209,7 @@ def test_generate_sql_success_str_output():
 
 
 def test_generate_sql_success_fallback_output():
+    """Docstring for test_generate_sql_success_fallback_output."""
     mock_model = MagicMock()
     mock_model.generate.return_value = 123  # Cast to string
     mock_cls = MagicMock()
@@ -188,6 +225,7 @@ def test_generate_sql_success_fallback_output():
 
 
 def test_generate_sql_empty_sql():
+    """Docstring for test_generate_sql_empty_sql."""
     mock_model = MagicMock()
     mock_model.generate.return_value = "prompt "
     mock_cls = MagicMock()
@@ -203,6 +241,7 @@ def test_generate_sql_empty_sql():
 
 
 def test_generate_sql_exception():
+    """Docstring for test_generate_sql_exception."""
     mock_model = MagicMock()
     mock_model.generate.side_effect = ValueError("Some error")
     mock_cls = MagicMock()

@@ -1,8 +1,14 @@
+"""Module docstring."""
+
 import gemma_4_sql.backends.keras.peft as pt
 
 
 def test_peft_properties():
+    """Docstring for test_peft_properties."""
+
     class DummyDense:
+        """Docstring for DummyDense."""
+
         bias = "bias"
 
     layer = pt.KerasLoRADense(dense=DummyDense(), r=4)
@@ -10,7 +16,11 @@ def test_peft_properties():
 
 
 def test_peft_count_params(monkeypatch):
+    """Docstring for test_peft_count_params."""
+
     class DummyModel:
+        """Docstring for DummyModel."""
+
         weights = (1,)
         trainable_weights = (1,)
 
@@ -21,7 +31,11 @@ def test_peft_count_params(monkeypatch):
 
 
 def test_peft_count_params_not_trainable(monkeypatch):
+    """Docstring for test_peft_count_params_not_trainable."""
+
     class DummyModel:
+        """Docstring for DummyModel."""
+
         weights = (1,)
         trainable_weights = ()
 
@@ -32,10 +46,14 @@ def test_peft_count_params_not_trainable(monkeypatch):
 
 
 def test_peft_list_modifier():
+    """Docstring for test_peft_list_modifier."""
     import keras
 
     class DummyModel:
+        """Docstring for DummyModel."""
+
         def __init__(self):
+            """Docstring for __init__."""
             self.layers = [keras.layers.Dense(64, name="target")]
 
     m = DummyModel()
@@ -44,20 +62,26 @@ def test_peft_list_modifier():
 
 
 def test_peft_apply_lora_save_path(monkeypatch):
+    """Docstring for test_peft_apply_lora_save_path."""
     import sys
 
     import gemma_4_sql.backends.keras.peft as pt
 
     class MockModel:
+        """Docstring for MockModel."""
+
         def save(self, path):
-            pass
+            """Docstring for save."""
 
         def save_weights(self, path):
-            pass
+            """Docstring for save_weights."""
 
     class MockGemma:
+        """Docstring for MockGemma."""
+
         @classmethod
         def from_preset(cls, *args, **kwargs):
+            """Docstring for from_preset."""
             return MockModel()
 
     monkeypatch.setitem(sys.modules, "keras_nlp.models", type("models", (), {"GemmaCausalLM": MockGemma}))
@@ -68,27 +92,37 @@ def test_peft_apply_lora_save_path(monkeypatch):
 
 
 def test_peft_apply_kwargs():
+    """Docstring for test_peft_apply_kwargs."""
+
     class DummyModel:
-        pass
+        """Docstring for DummyModel."""
 
     pt.apply_lora("dummy", ["q"], model=DummyModel())
 
 
 def test_peft_apply_merge():
+    """Docstring for test_peft_apply_merge."""
+
     class DummyModel:
-        pass
+        """Docstring for DummyModel."""
 
     pt.apply_lora("dummy", ["q"], merge=True)
 
 
 def test_peft_apply_native_lora():
+    """Docstring for test_peft_apply_native_lora."""
+
     class Backbone:
+        """Docstring for Backbone."""
+
         def enable_lora(self, rank):
-            pass
+            """Docstring for enable_lora."""
 
         layers = ()
 
     class DummyModel:
+        """Docstring for DummyModel."""
+
         backbone = Backbone()
 
     pt.apply_lora("dummy", ["q"], model=DummyModel())

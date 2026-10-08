@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import jax.numpy as jnp
@@ -6,6 +8,7 @@ from gemma_4_sql.backends.maxtext import benchmark
 
 
 def test_get_device():
+    """Docstring for test_get_device."""
     mock_jax = MagicMock()
     mock_jax.devices.side_effect = lambda x: ["tpu0"] if x == "tpu" else ["gpu0"] if x == "gpu" else ["cpu0"]
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", mock_jax):
@@ -15,9 +18,11 @@ def test_get_device():
 
 
 def test_get_device_runtime_error():
+    """Docstring for test_get_device_runtime_error."""
     mock_jax = MagicMock()
 
     def mock_devices(t):
+        """Docstring for mock_devices."""
         if t == "cpu":
             return ["cpu0"]
         raise RuntimeError()
@@ -28,11 +33,13 @@ def test_get_device_runtime_error():
 
 
 def test_get_device_no_jax():
+    """Docstring for test_get_device_no_jax."""
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", None):
         assert benchmark._get_device("tpu") is None
 
 
 def test_run_benchmark_pass():
+    """Docstring for test_run_benchmark_pass."""
     mock_model = MagicMock()
     mock_model.apply.return_value = jnp.zeros((2, 32, 256))
 
@@ -68,6 +75,7 @@ def test_run_benchmark_pass():
 
 
 def test_benchmark_model():
+    """Docstring for test_benchmark_model."""
     with (
         patch("gemma_4_sql.backends.maxtext.benchmark.Gemma4Model", MagicMock()),
         patch("gemma_4_sql.backends.maxtext.benchmark.jax", MagicMock()),
@@ -85,12 +93,14 @@ def test_benchmark_model():
 
 
 def test_benchmark_model_error():
+    """Docstring for test_benchmark_model_error."""
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", None):
         res = benchmark.benchmark_model("gemma4", "cpu", 2)
         assert res["status"] == "mocked_missing_maxtext"
 
 
 def test_import_error():
+    """Docstring for test_import_error."""
     import importlib
 
     with patch.dict("sys.modules", {"jax": None}):
@@ -101,6 +111,7 @@ def test_import_error():
 
 
 def test_import_success():
+    """Docstring for test_import_success."""
     import importlib
 
     mock_jax = MagicMock()

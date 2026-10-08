@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import asyncio
 from unittest.mock import MagicMock, patch
 
@@ -14,27 +16,32 @@ from gemma_4_sql.backends.common_serve import (
 
 @pytest.fixture
 def sample_dict():
+    """Docstring for sample_dict."""
     return {"prompt": "SELECT *", "max_tokens": 50, "temperature": 0.5, "image_base64": "img", "audio_base64": "aud", "image_path": "path/img", "audio_path": "path/aud", "modality": "multimodal"}
 
 
 def test_generate_request_from_dict_valid(sample_dict):
+    """Docstring for test_generate_request_from_dict_valid."""
     req = GenerateRequest.from_dict(sample_dict)
     assert req.prompt == "SELECT *"
     assert req.max_tokens == 50
 
 
 def test_generate_request_from_dict_defaults():
+    """Docstring for test_generate_request_from_dict_defaults."""
     req = GenerateRequest.from_dict({"prompt": "test"})
     assert req.prompt == "test"
     assert req.modality == "text"
 
 
 def test_generate_request_from_dict_legacy_keys():
+    """Docstring for test_generate_request_from_dict_legacy_keys."""
     req = GenerateRequest.from_dict({"prompt": "test", "image": "img1", "audio": "aud1"})
     assert req.image_base64 == "img1"
 
 
 def test_generate_request_from_dict_missing_prompt():
+    """Docstring for test_generate_request_from_dict_missing_prompt."""
     with pytest.raises(ValueError):
         GenerateRequest.from_dict({"not_prompt": "test"})
     with pytest.raises(ValueError):
@@ -42,17 +49,20 @@ def test_generate_request_from_dict_missing_prompt():
 
 
 def test_create_common_app_require_handlers():
+    """Docstring for test_create_common_app_require_handlers."""
     with pytest.raises(ValueError):
         create_common_app("test_backend", "test_model", require_handlers=True)
 
 
 def test_create_common_app_startup_callback():
+    """Docstring for test_create_common_app_startup_callback."""
     startup_mock = MagicMock()
     create_common_app("test_backend", "test_model", startup_callback=startup_mock)
     startup_mock.assert_called_once()
 
 
 def test_health_ready_list_models():
+    """Docstring for test_health_ready_list_models."""
     app = create_common_app("test", "model")
     client = TestClient(app)
 
@@ -68,6 +78,7 @@ def test_health_ready_list_models():
 
 @pytest.mark.asyncio
 async def test_generate_continuous_batching_generate_logic():
+    """Docstring for test_generate_continuous_batching_generate_logic."""
     app = create_common_app("test", "model", generate_logic=lambda p: f"SYNC_{p}")
     client = TestClient(app)
     res = client.post("/generate", json={"prompt": "hello"})
@@ -76,6 +87,7 @@ async def test_generate_continuous_batching_generate_logic():
 
 @pytest.mark.asyncio
 async def test_generate_continuous_batching_batch_generate_logic():
+    """Docstring for test_generate_continuous_batching_batch_generate_logic."""
     app = create_common_app("test", "model", batch_generate_logic=lambda p: [f"BATCH_{x}" for x in p], max_wait_ms=1.0)
     client = TestClient(app)
     res = client.post("/generate", json={"prompt": "world"})
@@ -83,6 +95,7 @@ async def test_generate_continuous_batching_batch_generate_logic():
 
 
 def test_generate_multimodal_logic():
+    """Docstring for test_generate_multimodal_logic."""
     app = create_common_app("test", "model", batch_generate_logic=lambda p: [f"B_{x}" for x in p], max_wait_ms=1.0)
     client = TestClient(app)
     with patch("gemma_4_sql.backends.common_multimodal.format_multimodal_prompt") as mock_fmt:
@@ -92,7 +105,10 @@ def test_generate_multimodal_logic():
 
 
 def test_generate_batching_error_propagation():
+    """Docstring for test_generate_batching_error_propagation."""
+
     def err_logic(p):
+        """Docstring for err_logic."""
         raise ValueError("err")
 
     app = create_common_app("test", "model", batch_generate_logic=err_logic, max_wait_ms=1.0)
@@ -102,6 +118,7 @@ def test_generate_batching_error_propagation():
 
 
 def test_generate_batching_mismatch_results():
+    """Docstring for test_generate_batching_mismatch_results."""
     app = create_common_app("test", "model", batch_generate_logic=lambda p: ["EXTRA", "EXTRA"], max_wait_ms=1.0)
     client = TestClient(app)
     with pytest.raises(ValueError):
@@ -109,6 +126,7 @@ def test_generate_batching_mismatch_results():
 
 
 def test_generate_no_logic():
+    """Docstring for test_generate_no_logic."""
     app = create_common_app("test", "model")
     client = TestClient(app)
     with pytest.raises(NotImplementedError):
@@ -116,11 +134,13 @@ def test_generate_no_logic():
 
 
 def test_serve_model_wrapper_missing_deps():
+    """Docstring for test_serve_model_wrapper_missing_deps."""
     res = serve_model_wrapper("test", "model", 8080, 32, True, "Deps missing", lambda: None)
     assert res["status"] == "Deps missing"
 
 
 def test_serve_model_wrapper_success():
+    """Docstring for test_serve_model_wrapper_success."""
     with patch("gemma_4_sql.backends.common_serve.uvicorn.run") as mock_run:
         res = serve_model_wrapper("test", "model", 8080, 32, False, "", lambda: MagicMock(), run_server=True)
         assert "running" in res["status"]
@@ -132,7 +152,10 @@ def test_serve_model_wrapper_success():
 
 
 def test_serve_model_wrapper_factory_error():
+    """Docstring for test_serve_model_wrapper_factory_error."""
+
     def mock_factory():
+        """Docstring for mock_factory."""
         raise RuntimeError("Factory failed")
 
     res = serve_model_wrapper("test", "model", 8080, 32, False, "", mock_factory)
@@ -141,6 +164,7 @@ def test_serve_model_wrapper_factory_error():
 
 @pytest.mark.asyncio
 async def test_worker_cancel_and_fallback():
+    """Docstring for test_worker_cancel_and_fallback."""
     with patch("gemma_4_sql.backends.common_serve.JSONResponse", None):
         app = create_common_app("test", "model", generate_logic=lambda p: f"SYNC_{p}")
         client = TestClient(app)
@@ -154,12 +178,16 @@ async def test_worker_cancel_and_fallback():
 # Testing Asyncio specifics (batching multiple, cancellation, RuntimeError fallback)
 @pytest.mark.asyncio
 async def test_generate_async_batching():
+    """Docstring for test_generate_async_batching."""
+
     # Delay processing so multiple items get into queue
     async def slow_batch(prompts):
+        """Docstring for slow_batch."""
         await asyncio.sleep(0.05)
         return [f"BATCH_{p}" for p in prompts]
 
     def sync_batch(prompts):
+        """Docstring for sync_batch."""
         # We need this to block briefly or just return
         return [f"BATCH_{p}" for p in prompts]
 
@@ -177,7 +205,10 @@ async def test_generate_async_batching():
 
 @pytest.mark.asyncio
 async def test_generate_cancellation():
+    """Docstring for test_generate_cancellation."""
+
     async def cancel_later():
+        """Docstring for cancel_later."""
         await asyncio.sleep(0.01)
         raise asyncio.CancelledError()
 

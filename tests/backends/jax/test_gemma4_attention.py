@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock
 
 import jax.numpy as jnp
@@ -13,6 +15,7 @@ from gemma_4_sql.backends.jax.gemma4.rope import RoPE
 
 
 def test_compute_attention_scores_and_output():
+    """Docstring for test_compute_attention_scores_and_output."""
     # test soft_cap
     q = jnp.ones((2, 1, 4, 16))
     k = jnp.ones((2, 4, 4, 16))
@@ -31,6 +34,7 @@ def test_compute_attention_scores_and_output():
 
 
 def test_prepare_qkv_for_attention():
+    """Docstring for test_prepare_qkv_for_attention."""
     q = jnp.ones((2, 1, 4, 16))
     k = jnp.ones((2, 1, 4, 16))
     v = jnp.ones((2, 1, 4, 16))
@@ -49,6 +53,7 @@ def test_prepare_qkv_for_attention():
 
 
 def test_gemma4_attention_local():
+    """Docstring for test_gemma4_attention_local."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
     config.num_attention_heads = 4
@@ -64,6 +69,8 @@ def test_gemma4_attention_local():
     config.sliding_window_size = 512
 
     class LocalType:
+        """Docstring for LocalType."""
+
         name = "LOCAL_SLIDING"
 
     attn = Gemma4Attention(config, LocalType(), rngs=rngs)
@@ -80,6 +87,7 @@ def test_gemma4_attention_local():
 
 
 def test_gemma4_attention_global():
+    """Docstring for test_gemma4_attention_global."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
     config.num_attention_heads = 4
@@ -95,6 +103,8 @@ def test_gemma4_attention_global():
     config.attn_logits_soft_cap = 50.0
 
     class GlobalType:
+        """Docstring for GlobalType."""
+
         name = "GLOBAL"
 
     attn = Gemma4Attention(config, GlobalType(), rngs=rngs)
@@ -107,6 +117,7 @@ def test_gemma4_attention_global():
 
 
 def test_gemma4_attention_global_fallback_options():
+    """Docstring for test_gemma4_attention_global_fallback_options."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
     config.num_attention_heads = 4
@@ -125,6 +136,8 @@ def test_gemma4_attention_global_fallback_options():
     config.rope_max_timescale = 10000
 
     class GlobalType:
+        """Docstring for GlobalType."""
+
         name = "GLOBAL"
 
     attn = Gemma4Attention(config, GlobalType(), rngs=rngs)

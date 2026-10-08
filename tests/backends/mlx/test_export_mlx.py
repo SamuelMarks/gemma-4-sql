@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import json
 from unittest.mock import MagicMock, patch
 
@@ -9,19 +11,24 @@ from gemma_4_sql.backends.mlx.export import export_model
 
 @pytest.fixture
 def mock_mx(monkeypatch):
+    """Docstring for mock_mx."""
     mock = MagicMock()
     monkeypatch.setattr(mlx_export, "mx", mock)
     return mock
 
 
 def test_export_model_missing_mx(monkeypatch, tmp_path):
+    """Docstring for test_export_model_missing_mx."""
     monkeypatch.setattr(mlx_export, "mx", None)
     with pytest.raises(RuntimeError, match="MLX is not installed"):
         export_model("model", str(tmp_path))
 
 
 def test_export_model_load_failure(mock_mx, tmp_path):
+    """Docstring for test_export_model_load_failure."""
+
     def mock_import(name, fromlist=None, *args, **kwargs):
+        """Docstring for mock_import."""
         if name == "mlx_lm":
             raise ImportError("Failed to import")
         return __import__(name, fromlist=fromlist, *args, **kwargs)
@@ -31,6 +38,7 @@ def test_export_model_load_failure(mock_mx, tmp_path):
 
 
 def test_export_model_success_dict_config(mock_mx, tmp_path):
+    """Docstring for test_export_model_success_dict_config."""
     mock_model = MagicMock()
     mock_model.parameters.return_value = [("layer1", MagicMock())]
     mock_model.config = {"model_type": "gemma"}
@@ -38,6 +46,7 @@ def test_export_model_success_dict_config(mock_mx, tmp_path):
     mock_load = MagicMock(return_value=(mock_model, MagicMock()))
 
     def mock_import(name, fromlist=None, *args, **kwargs):
+        """Docstring for mock_import."""
         if name == "mlx_lm":
             m = MagicMock()
             m.load = mock_load
@@ -59,11 +68,15 @@ def test_export_model_success_dict_config(mock_mx, tmp_path):
 
 
 def test_export_model_success_object_config(mock_mx, tmp_path):
+    """Docstring for test_export_model_success_object_config."""
     mock_model = MagicMock()
     mock_model.parameters.return_value = [("layer1", MagicMock())]
 
     class Config:
+        """Docstring for Config."""
+
         def __init__(self):
+            """Docstring for __init__."""
             self.model_type = "gemma2"
 
     mock_model.config = Config()
@@ -71,6 +84,7 @@ def test_export_model_success_object_config(mock_mx, tmp_path):
     mock_load = MagicMock(return_value=(mock_model, MagicMock()))
 
     def mock_import(name, fromlist=None, *args, **kwargs):
+        """Docstring for mock_import."""
         if name == "mlx_lm":
             m = MagicMock()
             m.load = mock_load
@@ -89,6 +103,7 @@ def test_export_model_success_object_config(mock_mx, tmp_path):
 
 
 def test_export_model_success_no_config(mock_mx, tmp_path):
+    """Docstring for test_export_model_success_no_config."""
     mock_model = MagicMock()
     mock_model.parameters.return_value = [("layer1", MagicMock())]
     del mock_model.config
@@ -96,6 +111,7 @@ def test_export_model_success_no_config(mock_mx, tmp_path):
     mock_load = MagicMock(return_value=(mock_model, MagicMock()))
 
     def mock_import(name, fromlist=None, *args, **kwargs):
+        """Docstring for mock_import."""
         if name == "mlx_lm":
             m = MagicMock()
             m.load = mock_load

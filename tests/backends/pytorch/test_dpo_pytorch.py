@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,6 +10,7 @@ from gemma_4_sql.type_hints import DPOConfig, TrainerState
 
 
 def test_dpo_loss():
+    """Docstring for test_dpo_loss."""
     # Test torch missing
     with patch("gemma_4_sql.backends.pytorch.dpo.torch", None):
         assert dpo.dpo_loss(None, None, None, None) == (0.0, 0.0, 0.0)
@@ -22,19 +25,24 @@ def test_dpo_loss():
 
 
 def test_run_dpo_step():
+    """Docstring for test_run_dpo_step."""
     mock_torch = MagicMock()
 
     class MockModelContext:
+        """Docstring for MockModelContext."""
+
         def __enter__(self):
+            """Docstring for __enter__."""
             return self
 
         def __exit__(self, *args):
-            pass
+            """Docstring for __exit__."""
 
     mock_torch.no_grad.return_value = MockModelContext()
 
     # Model that returns tensors with a mean method
     def mock_model(inputs):
+        """Docstring for mock_model."""
         t = MagicMock()
         t.mean.return_value = f"mean_{inputs}"
         return t
@@ -60,6 +68,7 @@ def test_run_dpo_step():
 
     # Test without mean, item, backward, step etc
     def mock_model_no_mean(inputs):
+        """Docstring for mock_model_no_mean."""
         return inputs
 
     policy2 = MagicMock(side_effect=mock_model_no_mean)
@@ -76,6 +85,7 @@ def test_run_dpo_step():
 
 
 def test_run_training_epochs():
+    """Docstring for test_run_training_epochs."""
     batch1 = {"b": 1}
     batch2 = {"b": 2}
     dataloader = [batch1, batch2]
@@ -105,6 +115,7 @@ def test_run_training_epochs():
 
 
 def test_run_dpo():
+    """Docstring for test_run_dpo."""
     config = DPOConfig(model_name="m", dataset="d")
 
     # Test dependencies missing
@@ -129,6 +140,7 @@ def test_run_dpo():
         orig_import = __import__
 
         def fake_import(name, *args, **kwargs):
+            """Docstring for fake_import."""
             if name == "transformers.models.gemma4":
                 return MagicMock(Gemma4ForCausalLM=mock_model_cls)
             return orig_import(name, *args, **kwargs)

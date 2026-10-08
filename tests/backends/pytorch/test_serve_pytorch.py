@@ -386,6 +386,7 @@ def test_pytorch_native_serve_generate_branches(monkeypatch: pytest.MonkeyPatch)
     captured_logic: dict[str, typing.Callable[..., object]] = {}
 
     def mock_create_common_app(**kwargs: object) -> dict[str, object]:
+        """Docstring for mock_create_common_app."""
         captured_logic["generate"] = typing.cast(typing.Callable[..., object], kwargs.get("generate_logic"))
         captured_logic["batch_generate"] = typing.cast(typing.Callable[..., object], kwargs.get("batch_generate_logic"))
         return {"backend": "pytorch", "status": "running_pytorch_serve"}
@@ -420,6 +421,7 @@ def test_pytorch_native_serve_generate_branches(monkeypatch: pytest.MonkeyPatch)
 
     # 3. Inference raising RuntimeError
     def mock_raise(*a: object, **k: object) -> dict[str, object]:
+        """Docstring for mock_raise."""
         raise RuntimeError("Inference failed")
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.generate_sql", mock_raise)
@@ -449,6 +451,7 @@ def test_pytorch_native_serve_generate_branches(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_serve_model_pytorch_native(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_serve_model_pytorch_native."""
     import gemma_4_sql.backends.pytorch.serve as srv
 
     monkeypatch.setattr(srv, "vllm", None)
@@ -461,13 +464,17 @@ def test_serve_model_pytorch_native(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_vllm_app_request_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_vllm_app_request_none."""
     import gemma_4_sql.backends.pytorch.serve as srv
 
     monkeypatch.setattr(srv, "Request", None)
     monkeypatch.setattr(srv, "JSONResponse", None)
 
     class DummyFastAPI:
+        """Docstring for DummyFastAPI."""
+
         def __init__(self, *args, **kwargs):
+            """Docstring for __init__."""
             self.router = mock.MagicMock()
             route = mock.MagicMock()
             route.endpoint = mock.AsyncMock()

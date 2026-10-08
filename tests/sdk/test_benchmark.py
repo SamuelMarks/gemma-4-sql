@@ -37,6 +37,7 @@ def test_benchmark_keras(monkeypatch: pytest.MonkeyPatch) -> None:
         benchmark("gemma-4", "gpu", 1, "keras")
 
     def mock_bench(*args, **kwargs):
+        """Docstring for mock_bench."""
         return {"backend": "keras", "status": "completed"}
 
     monkeypatch.setattr(kbm, "keras", object())
@@ -89,6 +90,7 @@ def test_benchmark_parameter_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     recorded_kwargs: dict[str, Any] = {}
 
     def mock_bench(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Docstring for mock_bench."""
         recorded_kwargs.update(kwargs)
         return {"backend": "jax", "batch_size": kwargs.get("batch_size", 1)}
 

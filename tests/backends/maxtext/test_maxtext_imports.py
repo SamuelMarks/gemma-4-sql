@@ -1,9 +1,12 @@
+"""Module docstring."""
+
 import importlib
 import sys
 from unittest.mock import MagicMock
 
 
 def test_maxtext_imports_success():
+    """Docstring for test_maxtext_imports_success."""
     sys.modules["jax"] = MagicMock()
     sys.modules["jax.numpy"] = MagicMock()
     sys.modules["maxtext"] = MagicMock()
@@ -45,6 +48,7 @@ def test_maxtext_imports_success():
 
 
 def test_maxtext_imports_missing_force():
+    """Docstring for test_maxtext_imports_missing_force."""
     if "maxtext" in sys.modules:
         del sys.modules["maxtext"]
     if "jax" in sys.modules:

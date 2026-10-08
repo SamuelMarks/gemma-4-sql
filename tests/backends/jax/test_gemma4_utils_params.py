@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import jax
@@ -8,6 +10,7 @@ from gemma_4_sql.backends.jax.gemma4.utils_params import _apply_transform, _get_
 
 
 def test_map_to_jax_key_proper():
+    """Docstring for test_map_to_jax_key_proper."""
     import re
 
     assert map_to_jax_key({}, "foo") == (None, None)
@@ -18,10 +21,12 @@ def test_map_to_jax_key_proper():
 
 
 def test_apply_transform():
+    """Docstring for test_apply_transform."""
     assert _apply_transform(jnp.ones(1), None).shape == (1,)
 
 
 def test_assign_weights():
+    """Docstring for test_assign_weights."""
     # To hit 108-128
     # list of keys: ["key1"]
     state_dict = {"1": MagicMock(value=jnp.ones(1)), "2": jnp.ones(1)}
@@ -40,6 +45,7 @@ def test_assign_weights():
 
 
 def test_assign_weights_from_eval_shape():
+    """Docstring for test_assign_weights_from_eval_shape."""
     # 145-170
     state_dict = {"1": jax.ShapeDtypeStruct((1,), jnp.float32)}
     assign_weights_from_eval_shape(["1"], jnp.ones(1), state_dict, "st_key", None)
@@ -57,6 +63,7 @@ def test_assign_weights_from_eval_shape():
 
 
 def test_load_weights_from_safetensors_file():
+    """Docstring for test_load_weights_from_safetensors_file."""
     # 175-188
     # we need safe_open to work.
     mock_safe_open = MagicMock()
@@ -76,6 +83,7 @@ def test_load_weights_from_safetensors_file():
 
 
 def test_get_model_and_state():
+    """Docstring for test_get_model_and_state."""
     mock_model_cls = MagicMock()
     mock_model_cls.return_value = "model"
     with patch("flax.nnx.split", return_value=("graph", "state", "other")):
@@ -85,12 +93,14 @@ def test_get_model_and_state():
 
 
 def test_populate_state_from_files():
+    """Docstring for test_populate_state_from_files."""
     with patch("os.walk", return_value=[("dir", [], ["file.safetensors"])]), patch("gemma_4_sql.backends.jax.gemma4.utils_params._load_weights_from_safetensors_file") as mock_load:
         _populate_state_from_files("dir", {}, {})
         mock_load.assert_called_once()
 
 
 def test_create_model_from_safe_tensors():
+    """Docstring for test_create_model_from_safe_tensors."""
     with patch("gemma_4_sql.backends.jax.gemma4.utils_params.safe_open", None):
         res = create_model_from_safe_tensors("bad_dir", lambda c, **kw: "fallback", {}, {})
         assert res == "fallback"
@@ -112,6 +122,7 @@ def test_create_model_from_safe_tensors():
 
 
 def test_apply_transform_more():
+    """Docstring for test_apply_transform_more."""
     import jax.numpy as jnp
 
     from gemma_4_sql.backends.jax.gemma4.utils_params import _apply_transform
@@ -123,14 +134,19 @@ def test_apply_transform_more():
 
 
 def test_assign_weights_fallbacks():
+    """Docstring for test_assign_weights_fallbacks."""
     import jax.numpy as jnp
 
     from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights
 
     class MockSharding:
+        """Docstring for MockSharding."""
+
         spec = "spec"
 
     class Target:
+        """Docstring for Target."""
+
         sharding = MockSharding()
 
     sd = {1: jnp.ones(1)}
@@ -144,13 +160,18 @@ def test_assign_weights_fallbacks():
 
 
 def test_assign_weights_from_eval_shape_fallbacks():
+    """Docstring for test_assign_weights_from_eval_shape_fallbacks."""
     import jax
     import jax.numpy as jnp
 
     from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights_from_eval_shape
 
     class TargetObj:
+        """Docstring for TargetObj."""
+
         class ShardingObj:
+            """Docstring for ShardingObj."""
+
             spec = "spec"
 
         sharding = ShardingObj()
@@ -169,6 +190,7 @@ def test_assign_weights_from_eval_shape_fallbacks():
 
 
 def test_load_weights_continue_and_error():
+    """Docstring for test_load_weights_continue_and_error."""
     from unittest.mock import MagicMock, patch
 
     from gemma_4_sql.backends.jax.gemma4.utils_params import _load_weights_from_safetensors_file
@@ -186,6 +208,7 @@ def test_load_weights_continue_and_error():
 
 
 def test_map_to_jax_key_success():
+    """Docstring for test_map_to_jax_key_success."""
     import re
 
     from gemma_4_sql.backends.jax.gemma4.utils_params import map_to_jax_key
@@ -195,5 +218,6 @@ def test_map_to_jax_key_success():
 
 
 def test_stoi_coverage():
+    """Docstring for test_stoi_coverage."""
     assert stoi("123") == 123
     assert stoi("abc") == "abc"

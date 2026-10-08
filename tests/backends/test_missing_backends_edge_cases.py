@@ -46,6 +46,7 @@ def exec_import(mod_name: str, mock_dict: dict[str, object], func_name: str | No
 
 
 def test_missing_jax():
+    """Docstring for test_missing_jax."""
     return
 
 
@@ -60,6 +61,7 @@ def _ignore() -> object:
 
 
 def test_missing_keras():
+    """Docstring for test_missing_keras."""
     return
 
 
@@ -74,6 +76,7 @@ def _ignore() -> object:
 
 
 def test_missing_maxtext():
+    """Docstring for test_missing_maxtext."""
     return
 
 
@@ -85,6 +88,7 @@ def _ignore() -> object:
 
 
 def test_missing_pytorch():
+    """Docstring for test_missing_pytorch."""
     return
 
 

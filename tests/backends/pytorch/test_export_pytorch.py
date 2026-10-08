@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -7,6 +9,7 @@ import gemma_4_sql.backends.pytorch.export as ex
 
 
 def test_is_rank_zero():
+    """Docstring for test_is_rank_zero."""
     # Torch missing
     with patch("gemma_4_sql.backends.pytorch.export.torch", None):
         assert ex._is_rank_zero() is True
@@ -32,6 +35,7 @@ def test_is_rank_zero():
 
         # Test ImportError
         def mock_import(*args, **kwargs):
+            """Docstring for mock_import."""
             raise ImportError()
 
         with patch("builtins.__import__", side_effect=mock_import):
@@ -39,19 +43,25 @@ def test_is_rank_zero():
 
 
 def test_save_real_model():
+    """Docstring for test_save_real_model."""
     mock_save_file = MagicMock()
 
     with patch("gemma_4_sql.backends.pytorch.export.save_file", mock_save_file):
         # Test native loading
         class MockConfig:
+            """Docstring for MockConfig."""
+
             def __init__(self, **kwargs):
-                pass
+                """Docstring for __init__."""
 
         class MockNativeModel:
+            """Docstring for MockNativeModel."""
+
             def __init__(self, cfg):
-                pass
+                """Docstring for __init__."""
 
             def state_dict(self):
+                """Docstring for state_dict."""
                 mock_t = MagicMock()
                 mock_t.clone.return_value = "cloned_weight"
                 return {"lm_head.weight": mock_t, "other": "weight"}
@@ -113,6 +123,7 @@ def test_save_real_model():
 
 
 def test_export_model():
+    """Docstring for test_export_model."""
     # Test dependencies missing
     with patch("gemma_4_sql.backends.pytorch.export.torch", None), pytest.raises(RuntimeError):
         ex.export_model("m", "p")

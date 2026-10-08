@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 
 

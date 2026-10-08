@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,6 +9,7 @@ from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 
 
 def test_export_model_success_with_kwargs(tmp_path):
+    """Docstring for test_export_model_success_with_kwargs."""
     export_path = tmp_path / "export_dir"
     weights = {"w": 1}
 
@@ -38,6 +41,7 @@ def test_export_model_success_with_kwargs(tmp_path):
 
 
 def test_export_model_success_without_kwargs(tmp_path):
+    """Docstring for test_export_model_success_without_kwargs."""
     export_path = tmp_path / "export_dir"
 
     mock_mngr_instance = MagicMock()
@@ -69,11 +73,13 @@ def test_export_model_success_without_kwargs(tmp_path):
 
 
 def test_export_model_missing_jax(tmp_path):
+    """Docstring for test_export_model_missing_jax."""
     with patch("gemma_4_sql.backends.maxtext.export.jax", None), pytest.raises(DependencyMissingError, match="MaxText export dependencies \\(jax, orbax.checkpoint\\) are missing."):
         export_model("test_model", str(tmp_path))
 
 
 def test_export_model_missing_gemma4model(tmp_path):
+    """Docstring for test_export_model_missing_gemma4model."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_ocp = MagicMock()
@@ -88,6 +94,7 @@ def test_export_model_missing_gemma4model(tmp_path):
 
 
 def test_export_model_init_error(tmp_path):
+    """Docstring for test_export_model_init_error."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_ocp = MagicMock()
@@ -103,6 +110,7 @@ def test_export_model_init_error(tmp_path):
 
 
 def test_export_model_save_error(tmp_path):
+    """Docstring for test_export_model_save_error."""
     export_path = tmp_path / "export_dir"
 
     mock_mngr_class = MagicMock(side_effect=Exception("Save failed"))

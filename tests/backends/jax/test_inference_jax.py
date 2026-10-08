@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +17,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 @pytest.fixture
 def mock_jax_deps(monkeypatch):
+    """Docstring for mock_jax_deps."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_nnx = MagicMock()
@@ -28,6 +31,7 @@ def mock_jax_deps(monkeypatch):
 
     # jnp
     def mock_argsort(x):
+        """Docstring for mock_argsort."""
         return MagicMock()
 
     mock_jnp.argsort = MagicMock(side_effect=mock_argsort)
@@ -61,6 +65,7 @@ def mock_jax_deps(monkeypatch):
 
 
 def test_compute_step_probs():
+    """Docstring for test_compute_step_probs."""
     # 3D
     logits = MagicMock()
     logits.shape = (1, 10, 100)
@@ -94,15 +99,22 @@ def test_compute_step_probs():
 
 
 def test_compute_step_probs_1d():
+    """Docstring for test_compute_step_probs_1d."""
+
     # 1D
     class ShapeMock:
+        """Docstring for ShapeMock."""
+
         def __init__(self, shape):
+            """Docstring for __init__."""
             self.shape = shape
 
         def __getitem__(self, idx):
+            """Docstring for __getitem__."""
             return self
 
         def __len__(self):
+            """Docstring for __len__."""
             return len(self.shape)
 
     logits = ShapeMock((100,))
@@ -120,6 +132,7 @@ def test_compute_step_probs_1d():
 
 
 def test_beam_search_step(mock_jax_deps):
+    """Docstring for test_beam_search_step."""
     seq = MagicMock()
     seq.shape = (1, 5)
     model_apply_fn = MagicMock(return_value=MagicMock())
@@ -148,6 +161,7 @@ def test_beam_search_step(mock_jax_deps):
 
 
 def test_beam_search_step_no_jit():
+    """Docstring for test_beam_search_step_no_jit."""
     # Test branch where jax is None or has no jit
     seq = MagicMock()
     seq.shape = (1, 5)
@@ -167,6 +181,7 @@ def test_beam_search_step_no_jit():
 
 
 def test_jax_beam_search():
+    """Docstring for test_jax_beam_search."""
     model_apply_fn = MagicMock()
 
     # Mock sequence tensors
@@ -181,6 +196,7 @@ def test_jax_beam_search():
 
     # First step expands to seq_eos and seq_not_eos
     def mock_step(seq, score, fn, bw):
+        """Docstring for mock_step."""
         if seq == seq_init:
             return [(seq_not_eos, 0.9), (seq_eos, 0.8)]
         if seq == seq_not_eos:
@@ -203,6 +219,7 @@ def test_jax_beam_search():
 
 
 def test_generate_sql_missing_deps(monkeypatch):
+    """Docstring for test_generate_sql_missing_deps."""
     monkeypatch.setattr("gemma_4_sql.backends.jax.inference.jax", None)
 
     with pytest.raises(DependencyMissingError, match="JAX inference dependencies are missing."):
@@ -210,6 +227,7 @@ def test_generate_sql_missing_deps(monkeypatch):
 
 
 def test_generate_sql_success(mock_jax_deps):
+    """Docstring for test_generate_sql_success."""
     mock_model = mock_jax_deps["gemma_model"].return_value
     mock_model.__call__ = MagicMock(return_value="logits")
 
@@ -247,6 +265,7 @@ def test_generate_sql_success(mock_jax_deps):
 
 
 def test_generate_sql_multimodal(mock_jax_deps):
+    """Docstring for test_generate_sql_multimodal."""
     mock_model = mock_jax_deps["gemma_model"].return_value
     mock_model.__call__ = MagicMock(return_value="logits")
 
@@ -287,6 +306,7 @@ def test_generate_sql_multimodal(mock_jax_deps):
 
 
 def test_generate_sql_checkpoint_error(mock_jax_deps):
+    """Docstring for test_generate_sql_checkpoint_error."""
     mock_path = MagicMock()
     mock_path.exists.return_value = True
 
@@ -302,6 +322,7 @@ def test_generate_sql_checkpoint_error(mock_jax_deps):
 
 
 def test_generate_sql_nnx_none(mock_jax_deps):
+    """Docstring for test_generate_sql_nnx_none."""
     mock_jax_deps["nnx"] = None
     import gemma_4_sql.backends.jax.inference as inf_module
 
@@ -320,6 +341,7 @@ def test_generate_sql_nnx_none(mock_jax_deps):
 
 
 def test_generate_sql_multimodal_with_values(mock_jax_deps):
+    """Docstring for test_generate_sql_multimodal_with_values."""
     # test branch where image_path is None but pixel_values is provided
     # meaning format_multimodal_prompt is called with has_image=True
     # and process_image is NOT called
@@ -333,6 +355,7 @@ def test_generate_sql_multimodal_with_values(mock_jax_deps):
 
 
 def test_jax_beam_search_max_length():
+    """Docstring for test_jax_beam_search_max_length."""
     model_apply_fn = MagicMock()
 
     seq_not_eos = MagicMock()
@@ -340,6 +363,7 @@ def test_jax_beam_search_max_length():
 
     # Always return itself with lower score to avoid infinite loops, but max_length breaks it
     def mock_step(seq, score, fn, bw):
+        """Docstring for mock_step."""
         return [(seq_not_eos, score - 0.1)]
 
     with patch("gemma_4_sql.backends.jax.inference._beam_search_step", side_effect=mock_step):
@@ -350,6 +374,7 @@ def test_jax_beam_search_max_length():
 
 
 def test_generate_sql_checkpoint_no_update(mock_jax_deps):
+    """Docstring for test_generate_sql_checkpoint_no_update."""
     mock_path = MagicMock()
     mock_path.exists.return_value = True
 

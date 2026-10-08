@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 import importlib
 from unittest.mock import MagicMock, patch
 
@@ -10,6 +12,7 @@ from gemma_4_sql.type_hints import TrainingConfig
 
 @pytest.fixture(autouse=True)
 def mock_deps(monkeypatch):
+    """Docstring for mock_deps."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_optax = MagicMock()
@@ -18,13 +21,17 @@ def mock_deps(monkeypatch):
     mock_ocp = MagicMock()
 
     def _mean(x):
+        """Docstring for _mean."""
         return x
 
     mock_jnp.mean.side_effect = None
     mock_jnp.mean.return_value = "mean_loss"
 
     def mock_value_and_grad(f):
+        """Docstring for mock_value_and_grad."""
+
         def inner(*args, **kwargs):
+            """Docstring for inner."""
             try:
                 f(*args, **kwargs)
             except Exception:  # noqa: S110, BLE001
@@ -53,6 +60,7 @@ def mock_deps(monkeypatch):
 
 
 def test_loss_fn(mock_deps):
+    """Docstring for test_loss_fn."""
     mock_model = MagicMock()
     mock_model.apply.return_value = "logits"
 
@@ -69,6 +77,7 @@ def test_loss_fn(mock_deps):
 
 
 def test_get_train_step_fn(mock_deps):
+    """Docstring for test_get_train_step_fn."""
     mock_jax = mock_deps["jax"]
     mock_jax.jit.side_effect = lambda f: f
 
@@ -81,6 +90,7 @@ def test_get_train_step_fn(mock_deps):
 
 
 def test_get_train_step_fn_no_jit(mock_deps, monkeypatch):
+    """Docstring for test_get_train_step_fn_no_jit."""
     mock_jax = mock_deps["jax"]
     del mock_jax.jit
 
@@ -93,6 +103,7 @@ def test_get_train_step_fn_no_jit(mock_deps, monkeypatch):
 
 
 def test_get_train_step_fn_no_jax(mock_deps, monkeypatch):
+    """Docstring for test_get_train_step_fn_no_jax."""
     monkeypatch.setattr(maxtext_train_module, "jax", None)
     mock_model = MagicMock()
     mock_optimizer = mock_deps["optimizer"]
@@ -101,8 +112,13 @@ def test_get_train_step_fn_no_jax(mock_deps, monkeypatch):
 
 
 def test_run_training_epochs(mock_deps):
+    """Docstring for test_run_training_epochs."""
+
     class DummyLoss:
+        """Docstring for DummyLoss."""
+
         def item(self):
+            """Docstring for item."""
             return 42.0
 
     mock_train_step = MagicMock(return_value=("new_p", "new_o", DummyLoss()))
@@ -115,6 +131,7 @@ def test_run_training_epochs(mock_deps):
     state.dataloader = [{"a": 1}, {"b": 2}]
 
     def fake_run(epochs, dataloader, process_batch):
+        """Docstring for fake_run."""
         return process_batch({"batch": 1})
 
     with patch("gemma_4_sql.backends.maxtext.train.generic_run_training_epochs", side_effect=fake_run):
@@ -123,12 +140,14 @@ def test_run_training_epochs(mock_deps):
 
 
 def test_initialize_jax_distributed(mock_deps):
+    """Docstring for test_initialize_jax_distributed."""
     mock_deps["jax"]
     res = maxtext_train_module._initialize_jax_distributed(coordinator_address="localhost:1234", num_processes=2, process_id=0)
     assert res is True
 
 
 def test_initialize_jax_distributed_failure(mock_deps):
+    """Docstring for test_initialize_jax_distributed_failure."""
     mock_jax = mock_deps["jax"]
     mock_jax.distributed.initialize.side_effect = RuntimeError("init failed")
     res = maxtext_train_module._initialize_jax_distributed()
@@ -136,18 +155,21 @@ def test_initialize_jax_distributed_failure(mock_deps):
 
 
 def test_initialize_jax_distributed_missing_jax(mock_deps, monkeypatch):
+    """Docstring for test_initialize_jax_distributed_missing_jax."""
     monkeypatch.setattr(maxtext_train_module, "jax", None)
     res = maxtext_train_module._initialize_jax_distributed()
     assert res is False
 
 
 def test_save_maxtext_checkpoint_missing_ocp(monkeypatch):
+    """Docstring for test_save_maxtext_checkpoint_missing_ocp."""
     monkeypatch.setattr(maxtext_train_module, "ocp", None)
     with pytest.raises(DependencyMissingError, match="Orbax checkpoint dependency"):
         maxtext_train_module.save_maxtext_checkpoint("dir", 1, {})
 
 
 def test_save_maxtext_checkpoint_success(mock_deps, tmp_path):
+    """Docstring for test_save_maxtext_checkpoint_success."""
     mock_ocp = mock_deps["ocp"]
     mock_mngr = MagicMock()
     mock_ocp.CheckpointManager.return_value.__enter__.return_value = mock_mngr
@@ -156,6 +178,7 @@ def test_save_maxtext_checkpoint_success(mock_deps, tmp_path):
 
 
 def test_save_maxtext_checkpoint_success_no_opt(mock_deps, tmp_path):
+    """Docstring for test_save_maxtext_checkpoint_success_no_opt."""
     mock_ocp = mock_deps["ocp"]
     mock_mngr = MagicMock()
     mock_ocp.CheckpointManager.return_value.__enter__.return_value = mock_mngr
@@ -164,6 +187,7 @@ def test_save_maxtext_checkpoint_success_no_opt(mock_deps, tmp_path):
 
 
 def test_save_maxtext_checkpoint_failure(mock_deps, tmp_path):
+    """Docstring for test_save_maxtext_checkpoint_failure."""
     mock_ocp = mock_deps["ocp"]
     mock_ocp.CheckpointManager.side_effect = Exception("save failed")
     with pytest.raises(ExportError, match="Failed to persist Orbax checkpoint"):
@@ -171,12 +195,14 @@ def test_save_maxtext_checkpoint_failure(mock_deps, tmp_path):
 
 
 def test_execute_train_missing_deps(monkeypatch):
+    """Docstring for test_execute_train_missing_deps."""
     monkeypatch.setattr(maxtext_train_module, "jax", None)
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing for training"):
         maxtext_train_module._execute_train("gemma-4")
 
 
 def test_execute_train_invalid_dataloader(mock_deps):
+    """Docstring for test_execute_train_invalid_dataloader."""
     with patch("gemma_4_sql.backends.maxtext.train.build_dataloader", return_value={}), pytest.raises(ValueError, match="Invalid dataloader"):
         maxtext_train_module._execute_train("gemma-4")
 
@@ -186,6 +212,7 @@ def test_execute_train_invalid_dataloader(mock_deps):
 @patch("gemma_4_sql.backends.maxtext.config_generator.save_maxtext_gin_config", return_value="gin_path")
 @patch("gemma_4_sql.backends.maxtext.config_generator.build_maxtext_cli_args", return_value=["--arg"])
 def test_execute_train_distributed(mock_cli, mock_save, mock_gen, mock_build_dl, mock_deps, tmp_path):
+    """Docstring for test_execute_train_distributed."""
     mock_build_dl.return_value = {"loader": [1, 2, 3]}
     status, _loss = maxtext_train_module._execute_train("gemma-4", local_step_mode=False, checkpoint_dir=str(tmp_path))
     assert status == "completed"
@@ -196,6 +223,7 @@ def test_execute_train_distributed(mock_cli, mock_save, mock_gen, mock_build_dl,
 @patch("gemma_4_sql.backends.maxtext.config_generator.save_maxtext_gin_config", return_value="gin_path")
 @patch("gemma_4_sql.backends.maxtext.config_generator.build_maxtext_cli_args", return_value=["--arg"])
 def test_execute_train_distributed_no_ckpt(mock_cli, mock_save, mock_gen, mock_build_dl, mock_deps, tmp_path):
+    """Docstring for test_execute_train_distributed_no_ckpt."""
     mock_build_dl.return_value = {"loader": [1, 2, 3]}
     status, _loss = maxtext_train_module._execute_train("gemma-4", local_step_mode=False)
     assert status == "completed"
@@ -204,6 +232,7 @@ def test_execute_train_distributed_no_ckpt(mock_cli, mock_save, mock_gen, mock_b
 @patch("gemma_4_sql.backends.maxtext.train.build_dataloader")
 @patch("gemma_4_sql.backends.maxtext.train._run_training_epochs")
 def test_execute_train_local(mock_run, mock_build_dl, mock_deps, tmp_path):
+    """Docstring for test_execute_train_local."""
     mock_build_dl.return_value = {"loader": [1, 2, 3]}
     mock_run.return_value = ("p", "o", 42.0)
 
@@ -219,6 +248,7 @@ def test_execute_train_local(mock_run, mock_build_dl, mock_deps, tmp_path):
 @patch("gemma_4_sql.backends.maxtext.train.build_dataloader")
 @patch("gemma_4_sql.backends.maxtext.train._run_training_epochs")
 def test_execute_train_local_no_ckpt(mock_run, mock_build_dl, mock_deps, tmp_path):
+    """Docstring for test_execute_train_local_no_ckpt."""
     mock_build_dl.return_value = {"loader": [1, 2, 3]}
     mock_run.return_value = ("p", "o", 42.0)
     mock_model_cls = mock_deps["gemma4"]
@@ -230,30 +260,35 @@ def test_execute_train_local_no_ckpt(mock_run, mock_build_dl, mock_deps, tmp_pat
 
 
 def test_execute_train_local_missing_gemma4(mock_deps, monkeypatch):
+    """Docstring for test_execute_train_local_missing_gemma4."""
     monkeypatch.setattr(maxtext_train_module, "Gemma4Model", None)
     with patch("gemma_4_sql.backends.maxtext.train.build_dataloader", return_value={"loader": [1]}), pytest.raises(DependencyMissingError, match="MaxText dependencies are missing for training"):
         maxtext_train_module._execute_train("gemma-4", local_step_mode=True)
 
 
 def test_train_model_missing_deps(monkeypatch):
+    """Docstring for test_train_model_missing_deps."""
     monkeypatch.setattr(maxtext_train_module, "jax", None)
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
         maxtext_train_module.train_model(TrainingConfig(model_name="gemma-4"))
 
 
 def test_train_model_success():
+    """Docstring for test_train_model_success."""
     with patch.object(maxtext_train_module, "_execute_train", return_value=("completed", 10.0)):
         res = maxtext_train_module.train_model(TrainingConfig(model_name="gemma-4"), checkpoint_dir="/tmp/ckpt")
     assert res["status"] == "completed"
 
 
 def test_train_model_failure():
+    """Docstring for test_train_model_failure."""
     with patch.object(maxtext_train_module, "_execute_train", side_effect=ValueError("fail")):
         res = maxtext_train_module.train_model(TrainingConfig(model_name="gemma-4"))
     assert "failed: fail" in res["status"]
 
 
 def test_train_import_error():
+    """Docstring for test_train_import_error."""
     import sys
     from unittest.mock import patch
 

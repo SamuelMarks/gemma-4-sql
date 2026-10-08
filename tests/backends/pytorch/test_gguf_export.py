@@ -117,7 +117,10 @@ def test_extract_pytorch_state_dict_from_model() -> None:
     from torch import nn
 
     class DummyModel(nn.Module):
+        """Docstring for DummyModel."""
+
         def __init__(self) -> None:
+            """Docstring for __init__."""
             super().__init__()
             self.model = nn.ModuleDict({"embed_tokens": nn.Embedding(2, 4)})
 
@@ -381,7 +384,10 @@ def test_extract_pytorch_state_dict_callable_object() -> None:
     from torch import nn
 
     class CallableModel(nn.Module):
+        """Docstring for CallableModel."""
+
         def __init__(self) -> None:
+            """Docstring for __init__."""
             super().__init__()
             self.model = nn.ModuleDict({"embed_tokens": nn.Embedding(2, 4)})
 
@@ -397,7 +403,10 @@ def test_extract_state_dict_local_hf_model(tmp_path: Path, monkeypatch: pytest.M
     local_dir.mkdir()
 
     class HFModel(nn.Module):
+        """Docstring for HFModel."""
+
         def __init__(self) -> None:
+            """Docstring for __init__."""
             super().__init__()
             self.embed_tokens = nn.Embedding(2, 4)
             self.layers = nn.ModuleDict({"notanint": nn.Linear(4, 4)})

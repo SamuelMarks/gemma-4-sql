@@ -1,3 +1,5 @@
+"""Module docstring."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,6 +12,7 @@ from gemma_4_sql.type_hints import DPOConfig, TrainerState
 
 @pytest.fixture(autouse=True)
 def mock_mlx_deps(monkeypatch):
+    """Docstring for mock_mlx_deps."""
     mock_mlx = MagicMock()
     mock_mx = MagicMock()
     mock_nn = MagicMock()
@@ -26,11 +29,13 @@ def mock_mlx_deps(monkeypatch):
 
 
 def test_dpo_loss_missing_deps(monkeypatch):
+    """Docstring for test_dpo_loss_missing_deps."""
     monkeypatch.setattr(mlx_dpo, "mx", None)
     assert dpo_loss(1, 1, 1, 1) == (0.0, 0.0, 0.0)
 
 
 def test_dpo_loss(mock_mlx_deps):
+    """Docstring for test_dpo_loss."""
     mock_mx, mock_mx_nn = mock_mlx_deps
     mock_mx.negative.side_effect = lambda x: -x
     mock_mx_nn.losses.log_sigmoid = lambda x: -x
@@ -43,6 +48,7 @@ def test_dpo_loss(mock_mlx_deps):
 
 
 def test_dpo_loss_fallback_log_sig(mock_mlx_deps):
+    """Docstring for test_dpo_loss_fallback_log_sig."""
     mock_mx, mock_mx_nn = mock_mlx_deps
     del mock_mx.negative  # fallback to -x
     del mock_mx_nn.losses.log_sigmoid
@@ -50,6 +56,7 @@ def test_dpo_loss_fallback_log_sig(mock_mlx_deps):
     with patch("gemma_4_sql.backends.mlx.dpo.generic_dpo_loss") as mock_generic:
 
         def call_generic(pc, pr, rc, rr, b, log_sig):
+            """Docstring for call_generic."""
             # Test fallback log_sig
             assert log_sig(5) == -5
             return (1.0, 2.0, 3.0)
@@ -60,6 +67,7 @@ def test_dpo_loss_fallback_log_sig(mock_mlx_deps):
 
 
 def test_run_dpo_step():
+    """Docstring for test_run_dpo_step."""
     policy_model = MagicMock()
     ref_model = MagicMock()
     optimizer = MagicMock()
@@ -80,6 +88,7 @@ def test_run_dpo_step():
 
 
 def test_run_dpo_step_no_mean_no_backward():
+    """Docstring for test_run_dpo_step_no_mean_no_backward."""
     policy_model = MagicMock()
     ref_model = MagicMock()
     optimizer = MagicMock()
@@ -99,6 +108,7 @@ def test_run_dpo_step_no_mean_no_backward():
 
 
 def test_run_training_epochs():
+    """Docstring for test_run_training_epochs."""
     dataloader = [{"chosen_inputs": 1, "rejected_inputs": 2}]
     state = TrainerState(dataloader=dataloader, epochs=2, policy_model=MagicMock(), ref_model=MagicMock(), optimizer=MagicMock(), beta=0.1)
 
@@ -112,6 +122,7 @@ def test_run_training_epochs():
 
 
 def test_run_training_epochs_no_item():
+    """Docstring for test_run_training_epochs_no_item."""
     dataloader = [{"chosen_inputs": 1, "rejected_inputs": 2}]
     state = TrainerState(dataloader=dataloader, epochs=1, policy_model=MagicMock(), ref_model=MagicMock(), optimizer=MagicMock(), beta=0.1)
 
@@ -124,12 +135,14 @@ def test_run_training_epochs_no_item():
 
 
 def test_run_dpo_missing_deps(monkeypatch):
+    """Docstring for test_run_dpo_missing_deps."""
     monkeypatch.setattr(mlx_dpo, "mlx", None)
     with pytest.raises(DependencyMissingError, match="MLX dependencies are missing."):
         run_dpo(DPOConfig(model_name="model", dataset="ds"))
 
 
 def test_run_dpo_success(monkeypatch):
+    """Docstring for test_run_dpo_success."""
     monkeypatch.setattr(mlx_dpo, "load", MagicMock(return_value=(MagicMock(), MagicMock())))
 
     with patch("gemma_4_sql.backends.mlx.dpo.build_dataloader") as mock_build:
@@ -146,6 +159,7 @@ def test_run_dpo_success(monkeypatch):
 
 
 def test_run_dpo_tuple_load(monkeypatch):
+    """Docstring for test_run_dpo_tuple_load."""
     mock_load = MagicMock()
     mock_load.return_value = [MagicMock(), MagicMock()]  # test list return
     monkeypatch.setattr(mlx_dpo, "load", mock_load)
@@ -160,6 +174,7 @@ def test_run_dpo_tuple_load(monkeypatch):
 
 
 def test_run_dpo_invalid_dataloader(monkeypatch):
+    """Docstring for test_run_dpo_invalid_dataloader."""
     monkeypatch.setattr(mlx_dpo, "load", MagicMock(return_value=MagicMock()))
     with patch("gemma_4_sql.backends.mlx.dpo.build_dataloader") as mock_build:
         mock_build.return_value = {"loader": None}  # Invalid loader
@@ -169,6 +184,7 @@ def test_run_dpo_invalid_dataloader(monkeypatch):
 
 
 def test_run_dpo_exception(monkeypatch):
+    """Docstring for test_run_dpo_exception."""
     monkeypatch.setattr(mlx_dpo, "load", MagicMock(side_effect=RuntimeError("Fail")))
     res = run_dpo(DPOConfig(model_name="model", dataset="ds"))
     assert "failed: Fail" in res["status"]

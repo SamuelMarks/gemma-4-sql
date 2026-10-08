@@ -12,6 +12,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_apply_bits_and_bytes_quantization_missing():
+    """Docstring for test_apply_bits_and_bytes_quantization_missing."""
     res = apply_bits_and_bytes_quantization("int8", None)
     assert res == (0.0, "mocked_missing_bitsandbytes")
 
@@ -20,6 +21,7 @@ def test_apply_bits_and_bytes_quantization_missing():
 
 
 def test_apply_bits_and_bytes_quantization_int8():
+    """Docstring for test_apply_bits_and_bytes_quantization_int8."""
     mock_cls = MagicMock()
     mock_cls.return_value = "mock_config"
     mock_model = MagicMock()
@@ -38,6 +40,7 @@ def test_apply_bits_and_bytes_quantization_int8():
 
 
 def test_apply_bits_and_bytes_quantization_int4():
+    """Docstring for test_apply_bits_and_bytes_quantization_int4."""
     mock_cls = MagicMock()
     res = apply_bits_and_bytes_quantization("int4", mock_cls, "float16")
     assert res == (0.75, "quantized_int4")
@@ -50,25 +53,31 @@ def test_apply_bits_and_bytes_quantization_int4():
 
 
 def test_apply_bits_and_bytes_quantization_unsupported():
+    """Docstring for test_apply_bits_and_bytes_quantization_unsupported."""
     mock_cls = MagicMock()
     res = apply_bits_and_bytes_quantization("int16", mock_cls)
     assert res == (0.0, "unsupported_method_int16")
 
 
 def test_quantize_model_wrapper_missing():
+    """Docstring for test_quantize_model_wrapper_missing."""
     res = quantize_model_wrapper("test_backend", "model", "method", True, "missing", lambda: (0.0, "status"))
     assert res["status"] == "missing"
     assert res["memory_reduction_factor"] == 0.0
 
 
 def test_quantize_model_wrapper_success():
+    """Docstring for test_quantize_model_wrapper_success."""
     res = quantize_model_wrapper("test_backend", "model", "method", False, "missing", lambda: (0.5, "quantized_method"))
     assert res["status"] == "quantized_method"
     assert res["memory_reduction_factor"] == 0.5
 
 
 def test_quantize_model_wrapper_failure():
+    """Docstring for test_quantize_model_wrapper_failure."""
+
     def mock_fail():
+        """Docstring for mock_fail."""
         raise RuntimeError("test error")
 
     res = quantize_model_wrapper("test_backend", "model", "method", False, "missing", mock_fail)
@@ -77,6 +86,7 @@ def test_quantize_model_wrapper_failure():
 
 
 def test_apply_bits_and_bytes_quantization_int8_no_skip():
+    """Docstring for test_apply_bits_and_bytes_quantization_int8_no_skip."""
     mock_cls = MagicMock()
     mock_cls.return_value = "mock_config"
     res = apply_bits_and_bytes_quantization("int8", mock_cls)
@@ -88,10 +98,11 @@ def test_apply_bits_and_bytes_quantization_int8_no_skip():
 
 
 def test_apply_bits_and_bytes_quantization_model_no_config():
+    """Docstring for test_apply_bits_and_bytes_quantization_model_no_config."""
     mock_cls = MagicMock()
 
     class DummyModel:
-        pass
+        """Docstring for DummyModel."""
 
     dummy = DummyModel()
     res = apply_bits_and_bytes_quantization("int4", mock_cls, model=dummy)
