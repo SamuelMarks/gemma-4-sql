@@ -15,7 +15,7 @@ try:
     import datasets as _datasets
 
     datasets: typing.Any = _datasets
-except (ImportError, AttributeError):  # pragma: no cover
+except (ImportError, AttributeError):
     datasets = None
 duckdb = None
 mx = None

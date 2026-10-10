@@ -75,11 +75,11 @@ def _run_generation(
             )
             prompt = str(formatted.get("prompt", prompt))
 
-            if image_path is not None and pixel_values is None:  # pragma: no cover
+            if image_path is not None and pixel_values is None:
                 img_res = process_image(cast(Any, image_path))
                 pixel_values = torch.tensor(img_res["pixel_values"], dtype=torch.float32).unsqueeze(0)
 
-            if audio_path is not None and audio_values is None:  # pragma: no cover
+            if audio_path is not None and audio_values is None:
                 aud_res = process_audio(cast(Any, audio_path))
                 audio_values = torch.tensor(aud_res["audio_values"], dtype=torch.float32).unsqueeze(0)
 
@@ -88,12 +88,12 @@ def _run_generation(
         if AutoTokenizer is not None:
             try:
                 tokenizer = AutoTokenizer.from_pretrained(model_name)
-                inputs = tokenizer(prompt, return_tensors="pt")  # pragma: no cover
-                input_ids = inputs.input_ids  # pragma: no cover
+                inputs = tokenizer(prompt, return_tensors="pt")
+                input_ids = inputs.input_ids
             except (OSError, ValueError, RuntimeError, KeyError, AttributeError):
                 tokenizer = None
 
-        if tokenizer is None or input_ids is None:  # pragma: no cover
+        if tokenizer is None or input_ids is None:
             sql_tok = SQLTokenizer()
             tokens = sql_tok.encode(prompt)
             input_ids = torch.tensor([tokens], dtype=torch.long)
@@ -110,16 +110,16 @@ def _run_generation(
             output_ids = model.generate(input_ids, **gen_kwargs)
 
         gen_tokens = output_ids[0][input_ids.shape[-1] :]
-        if len(gen_tokens) == 0:  # pragma: no cover
-            raise InferenceError("PyTorch native generation yielded an empty sequence.")  # pragma: no cover
+        if len(gen_tokens) == 0:
+            raise InferenceError("PyTorch native generation yielded an empty sequence.")
 
-        if tokenizer is not None and hasattr(tokenizer, "decode"):  # pragma: no cover
-            sql = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()  # pragma: no cover
+        if tokenizer is not None and hasattr(tokenizer, "decode"):
+            sql = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
         else:
             sql = SQLTokenizer().decode(cast(list[int], gen_tokens.tolist())).strip()
 
-        if not sql:  # pragma: no cover
-            raise InferenceError("PyTorch native generation decoded into an empty SQL query string.")  # pragma: no cover
+        if not sql:
+            raise InferenceError("PyTorch native generation decoded into an empty SQL query string.")
 
         confidence_score = 0.95
         return (sql, confidence_score)
@@ -157,7 +157,7 @@ def _run_generation(
         adapter_path = str(kwargs.get("adapter_path") or kwargs.get("lora_path"))
         try:
             peft_pkg = __import__("peft", fromlist=["PeftModel"])
-            model = peft_pkg.PeftModel.from_pretrained(model, adapter_path)  # pragma: no cover
+            model = peft_pkg.PeftModel.from_pretrained(model, adapter_path)
         except (ImportError, ValueError, RuntimeError, OSError) as e:
             logger.warning("Could not load adapter from %s: %s", adapter_path, e)
 

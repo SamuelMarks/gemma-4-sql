@@ -35,7 +35,7 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
     (q, k, v) = qkv
     (head_dim, soft_cap, num_kv_heads, num_heads) = config_params
     scale = 1.0 / math.sqrt(head_dim)
-    if num_kv_heads != num_heads:  # pragma: no cover
+    if num_kv_heads != num_heads:
         num_rep = num_heads // num_kv_heads
         k = jnp.repeat(k, num_rep, axis=2)
         v = jnp.repeat(v, num_rep, axis=2)
@@ -43,7 +43,7 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
     if soft_cap is not None:
         scores /= soft_cap
         scores = jnp.tanh(scores) * soft_cap
-    if attention_mask is not None:  # pragma: no cover
+    if attention_mask is not None:
         scores = scores + attention_mask
     weights = jax.nn.softmax(scores, axis=-1)
     out: Any = jnp.einsum("bhqk,bkhd->bqhd", weights, v)
@@ -143,7 +143,7 @@ class Gemma4Attention(nnx.Module):
         k = self.k_norm.__call__(k) if hasattr(self, "k_norm") and getattr(self, "k_norm", None) is not None else k
         v = self.v_norm.__call__(v) if hasattr(self, "v_norm") and getattr(self, "v_norm", None) is not None else v
         (q, k, v, mask, window) = _prepare_qkv_for_attention((q, k, v), positions, self.rope, cache)
-        if getattr(self.attention_type, "name", str(self.attention_type).upper()) == "LOCAL_SLIDING":  # pragma: no cover
+        if getattr(self.attention_type, "name", str(self.attention_type).upper()) == "LOCAL_SLIDING":
             mask &= window < self.config.sliding_window_size
         structural_mask = jnp.where(mask, 0.0, MASK_PENALTY).astype(q.dtype)[:, None, :, :]
         attention_mask = structural_mask if attention_mask is None else attention_mask + structural_mask

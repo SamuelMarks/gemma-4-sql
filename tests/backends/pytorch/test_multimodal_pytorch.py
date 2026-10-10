@@ -8,12 +8,30 @@ from typing import Any
 
 import pytest
 
-from gemma_4_sql.backends.pytorch.etl import _collate_fn, _get_pytorch_classes
+try:
+    import torch
+except ImportError:
+    pytest.skip("No torch", allow_module_level=True)
+
 from gemma_4_sql.backends.pytorch.inference import generate_sql
 from gemma_4_sql.tokenization import SQLTokenizer
 
 
 def test_pytorch_etl_multimodal_extraction(tmp_path: Path) -> None:
+    """Docstring for test_pytorch_etl_multimodal_extraction."""
+    import importlib
+
+    from gemma_4_sql.backends.pytorch import etl
+
+    importlib.reload(etl)
+    _get_pytorch_classes = etl._get_pytorch_classes
+
+    try:
+        import torch
+    except ImportError:
+        import pytest
+
+        pytest.skip("No torch")
     """Test PyTorch dataset extraction of image and audio items."""
     import torch
 
@@ -37,7 +55,7 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path) -> None:
 
     tokenizer = SQLTokenizer(model_name=None)
     pt_dataset_cls = _get_pytorch_classes()
-    ds = pt_dataset_cls(mock_records, tokenizer)
+    ds = pt_dataset_cls(list(mock_records), tokenizer)
 
     assert len(ds) == 2
     item0 = ds[0]
@@ -56,6 +74,20 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path) -> None:
 
 
 def test_pytorch_collate_multimodal() -> None:
+    """Docstring for test_pytorch_collate_multimodal."""
+    import importlib
+
+    from gemma_4_sql.backends.pytorch import etl
+
+    importlib.reload(etl)
+    _collate_fn = etl._collate_fn
+
+    try:
+        import torch
+    except ImportError:
+        import pytest
+
+        pytest.skip("No torch")
     """Test _collate_fn stacking pixel and audio tensors when present in batch."""
     import torch
 
@@ -84,6 +116,20 @@ def test_pytorch_collate_multimodal() -> None:
 
 
 def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_pytorch_inference_multimodal_native."""
+    import importlib
+
+    import gemma_4_sql.backends.pytorch.inference as inf
+
+    importlib.reload(inf)
+    generate_sql = inf.generate_sql
+
+    try:
+        import torch
+    except ImportError:
+        import pytest
+
+        pytest.skip("No torch")
     """Test PyTorch native inference accepting multimodal image and audio tensors."""
     import torch
 
@@ -131,6 +177,13 @@ def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest
 
 
 def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docstring for test_pytorch_inference_multimodal_hf."""
+    try:
+        import torch
+    except ImportError:
+        import pytest
+
+        pytest.skip("No torch")
     """Test PyTorch Hugging Face inference forwarding multimodal tensors to generate."""
     import torch
 

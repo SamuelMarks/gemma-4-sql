@@ -37,7 +37,7 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
     if hasattr(tf, "summary"):
         writer = tf.summary.create_file_writer(log_dir)
         with writer.as_default():
-            for k, v in metrics.items():  # pragma: no cover
+            for k, v in metrics.items():
                 tf.summary.scalar(k, v, step=step)
         writer.close()
         status = "success"

@@ -18,8 +18,8 @@ try:
     import sentence_transformers as _st
     import sklearn.metrics.pairwise as _smp
 
-    SentenceTransformer: Any = _st.SentenceTransformer  # pragma: no cover
-    cosine_similarity: Any = _smp.cosine_similarity  # pragma: no cover
+    SentenceTransformer: Any = _st.SentenceTransformer
+    cosine_similarity: Any = _smp.cosine_similarity
 except (ImportError, ValueError, AttributeError, OSError):
     SentenceTransformer = None
     cosine_similarity = None
@@ -99,7 +99,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
         ignored_keywords = ("PRIMARY KEY", "FOREIGN KEY", "CONSTRAINT", "UNIQUE", "CHECK", "INDEX")
         col_pattern = re.compile(r"^(?:\"([^\"]+)\"|`([^`]+)`|\[([^\]]+)\]|([a-zA-Z0-9_]+))")
 
-        for col_def in raw_cols:  # pragma: no cover
+        for col_def in raw_cols:
             c = col_def.strip()
             if not c:
                 continue

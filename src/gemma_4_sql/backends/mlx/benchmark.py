@@ -19,14 +19,14 @@ try:
     import mlx.core as _mx
 
     mx: Any = _mx
-except (ImportError, AttributeError):  # pragma: no cover
+except (ImportError, AttributeError):
     mx = None
 
 try:
     import mlx_lm
 
     load: Any = getattr(mlx_lm, "load", None)
-except (ImportError, AttributeError):  # pragma: no cover
+except (ImportError, AttributeError):
     load = None
 
 

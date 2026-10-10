@@ -193,7 +193,7 @@ def generate_sql(
 
                 checkpointer: Any = ocp.PyTreeCheckpointer()
                 restored: Any = checkpointer.restore(model_path)
-                if restored is not None and nnx is not None and hasattr(nnx, "update"):  # pragma: no cover
+                if restored is not None and nnx is not None and hasattr(nnx, "update"):
                     nnx.update(model, restored)
             except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
                 pass

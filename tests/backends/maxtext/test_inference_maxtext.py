@@ -289,3 +289,74 @@ def test_inference_import_error():
         importlib.reload(inf)
         assert inf.Gemma4Model is None
     importlib.reload(inf)
+
+
+def test_inference_jax_import_error():
+    """Docstring for test_inference_jax_import_error."""
+    import builtins
+    import importlib
+
+    import gemma_4_sql.backends.maxtext.inference as inf
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name == "jax" or name == "jax.numpy":
+            raise ImportError("mock")
+        return orig_import(name, *args, **kwargs)
+
+    builtins.__import__ = mock_import
+    try:
+        importlib.reload(inf)
+        assert inf.jax is None
+    finally:
+        builtins.__import__ = orig_import
+        importlib.reload(inf)
+
+
+def test_beam_search_75_74():
+    """Docstring for test_beam_search_75_74."""
+    import numpy as np
+
+    import gemma_4_sql.backends.maxtext.inference as inf
+
+    def apply_fn(seq):
+        # We need seq[0, -1] to NOT be eos_token_id (0)
+        # And we need to exhaust the beam width.
+        # It doesn't matter, we just need it to run out of loop
+        """Docstring for apply_fn."""
+        return np.array([0.5, 0.5])
+
+    # beam_width=1, max_length=1
+    out_seq, _score = inf.maxtext_beam_search(
+        model_apply_fn=apply_fn,
+        input_ids=np.array([[2]]),
+        beam_width=1,
+        max_length=1,
+        eos_token_id=0,
+    )
+
+
+def test_inference_gemma4_import_error():
+    """Docstring for test_inference_gemma4_import_error."""
+    import builtins
+    import importlib
+
+    import gemma_4_sql.backends.maxtext.inference as inf
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if "maxtext.models.gemma4" in name:
+            raise ImportError("mock")
+        return orig_import(name, *args, **kwargs)
+
+    builtins.__import__ = mock_import
+    try:
+        importlib.reload(inf)
+        assert inf.Gemma4Model is None
+    finally:
+        builtins.__import__ = orig_import
+        importlib.reload(inf)

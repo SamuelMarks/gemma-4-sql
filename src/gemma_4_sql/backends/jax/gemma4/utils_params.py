@@ -83,7 +83,7 @@ def _apply_transform(tensor: TensorType, transform: Any) -> Any:
     (permute, reshape, reshape_first) = transform
     if reshape_first and reshape is not None:
         tensor = tensor.reshape(reshape)
-    if permute:  # pragma: no cover
+    if permute:
         tensor = tensor.transpose(permute)
     if not reshape_first and reshape is not None:
         tensor = tensor.reshape(reshape)
@@ -111,7 +111,7 @@ def assign_weights(keys: list[str], tensor: TensorType, state_dict: Any, st_key:
     if hasattr(state_dict, "__contains__") and resolved_key not in state_dict:
         if isinstance(resolved_key, str) and resolved_key.isdigit() and int(resolved_key) in state_dict:
             resolved_key = int(resolved_key)
-        elif isinstance(resolved_key, int) and str(resolved_key) in state_dict:  # pragma: no cover
+        elif isinstance(resolved_key, int) and str(resolved_key) in state_dict:
             resolved_key = str(resolved_key)
     if not rest:
         tensor = _apply_transform(tensor, transform)
@@ -163,7 +163,7 @@ def assign_weights_from_eval_shape(keys: list[str], tensor: TensorType, state_di
             shd_spec = getattr(target.sharding, "spec", target.sharding)
             tensor = jax.device_put(tensor, shd_spec)
         if hasattr(val_obj, "value"):
-            val_obj.value = tensor  # pragma: no cover
+            val_obj.value = tensor
         else:
             state_dict[resolved_key] = tensor
     else:
@@ -174,7 +174,7 @@ def _load_weights_from_safetensors_file(filepath: str, state: dict[str, object],
     """Load weights from a single safetensors file."""
     try:
         with safe_open(filepath, framework="jax") as f:
-            for st_key in f:  # pragma: no cover
+            for st_key in f:
                 tensor = f.get_tensor(st_key)
                 (mapped_key, transform) = map_to_jax_key(key_mapping, st_key)
                 if mapped_key is None:
@@ -218,7 +218,7 @@ def _populate_state_from_files(file_dir: str, state: dict[str, Any], key_mapping
     """
     for root, _, files in os.walk(file_dir):
         for file in files:
-            if file.endswith(".safetensors"):  # pragma: no cover
+            if file.endswith(".safetensors"):
                 filepath = str(Path(root) / file)
                 _load_weights_from_safetensors_file(filepath, state, key_mapping)
 

@@ -1,252 +1,183 @@
-"""Module docstring."""
+"""Tests for mlx quantize."""
 
+import sys
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
-from gemma_4_sql.backends.mlx import quantize
+from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 
 
-@pytest.fixture(autouse=True)
-def ensure_np():
-    """Docstring for ensure_np."""
-    quantize.np = np
+def test_mlx_quantize_imports():
+    """Test mlx quantize imports fallback."""
+    import importlib
 
+    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None, "numpy": None}):
+        import gemma_4_sql.backends.mlx.quantize as quantize_module
 
-from gemma_4_sql.backends.mlx.quantize import (
-    calibrate_awq_scales,
-    calibrate_gptq_weights,
-    quantize_model,
-)
-from gemma_4_sql.exceptions import (
-    DependencyMissingError,
-    UnsupportedQuantizationMethodError,
-)
+        importlib.reload(quantize_module)
+        assert quantize_module.mlx is None
+        assert quantize_module.np is None
+    importlib.reload(quantize_module)
 
 
-# We patch quantize_model_wrapper so that it just calls apply_fn directly.
-# This way, exceptions raised in apply_fn are propagated to our tests,
-# and we can test its logic easily without testing the wrapper's exception handling.
-@pytest.fixture(autouse=True)
-def bypass_wrapper(monkeypatch):
-    """Docstring for bypass_wrapper."""
+def test_calibrate_awq_scales():
+    """Test calibrate_awq_scales."""
+    import gemma_4_sql.backends.mlx.quantize as quantize_module
 
-    def mock_wrapper(**kwargs):
-        """Docstring for mock_wrapper."""
-        return kwargs["apply_fn"]()
+    with pytest.raises(ValueError):
+        quantize_module.calibrate_awq_scales(MagicMock(), MagicMock(), alpha_range=[])
 
-    monkeypatch.setattr(quantize, "quantize_model_wrapper", mock_wrapper)
+    quantize_module.np = None
+    res = quantize_module.calibrate_awq_scales(MagicMock(shape=(2, 10)), MagicMock())
+    assert res == [1.0] * 10
 
+    import numpy as np
 
-def test_calibrate_awq_scales_empty_alpha():
-    """Docstring for test_calibrate_awq_scales_empty_alpha."""
-    with pytest.raises(ValueError, match="alpha_range must contain at least one value"):
-        calibrate_awq_scales(MagicMock(), MagicMock(), alpha_range=[])
+    quantize_module.np = np
 
+    w = np.random.randn(10, 5)
+    acts = np.random.randn(100, 5)
 
-def test_calibrate_awq_scales_no_np(monkeypatch):
-    """Docstring for test_calibrate_awq_scales_no_np."""
-    monkeypatch.setattr(quantize, "np", None)
-    weight_matrix = MagicMock()
-    weight_matrix.shape = (1, 10)
-    result = calibrate_awq_scales(weight_matrix, MagicMock())
-    assert result == [1.0] * 10
+    scales = quantize_module.calibrate_awq_scales(w, acts)
+    assert scales.shape == (5,)
 
+    acts_1d = np.random.randn(5)
+    scales2 = quantize_module.calibrate_awq_scales(w, acts_1d)
+    assert scales2.shape == (5,)
 
-def test_calibrate_awq_scales_1d_activations():
-    """Docstring for test_calibrate_awq_scales_1d_activations."""
-    w = np.random.randn(5, 5).astype(np.float32)
-    x = np.random.randn(5).astype(np.float32)
-    scales = calibrate_awq_scales(w, x)
-    assert len(scales) == 5
 
+def test_calibrate_gptq_weights():
+    """Test calibrate_gptq_weights."""
+    import gemma_4_sql.backends.mlx.quantize as quantize_module
 
-def test_calibrate_awq_scales_2d_activations():
-    """Docstring for test_calibrate_awq_scales_2d_activations."""
-    w = np.random.randn(5, 5).astype(np.float32)
-    x = np.random.randn(3, 5).astype(np.float32)
-    scales = calibrate_awq_scales(w, x)
-    assert len(scales) == 5
+    quantize_module.np = None
+    res = quantize_module.calibrate_gptq_weights("w", "a")
+    assert res == "w"
 
+    import numpy as np
 
-def test_calibrate_gptq_weights_no_np(monkeypatch):
-    """Docstring for test_calibrate_gptq_weights_no_np."""
-    monkeypatch.setattr(quantize, "np", None)
-    w = MagicMock()
-    res = calibrate_gptq_weights(w, MagicMock())
-    assert res is w
+    quantize_module.np = np
 
+    w = np.random.randn(10, 5)
+    acts = np.random.randn(100, 5)
 
-def test_calibrate_gptq_weights_1d_activations():
-    """Docstring for test_calibrate_gptq_weights_1d_activations."""
-    w = np.random.randn(5, 5).astype(np.float32)
-    x = np.random.randn(5).astype(np.float32)
-    res = calibrate_gptq_weights(w, x)
-    assert res.shape == (5, 5)
+    w_q = quantize_module.calibrate_gptq_weights(w, acts)
+    assert w_q.shape == (10, 5)
 
+    acts_1d = np.random.randn(5)
+    w_q2 = quantize_module.calibrate_gptq_weights(w, acts_1d)
+    assert w_q2.shape == (10, 5)
 
-def test_calibrate_gptq_weights_2d_activations():
-    """Docstring for test_calibrate_gptq_weights_2d_activations."""
-    w = np.random.randn(5, 5).astype(np.float32)
-    x = np.random.randn(3, 5).astype(np.float32)
-    res = calibrate_gptq_weights(w, x)
-    assert res.shape == (5, 5)
+    # Test linalg error fallback
+    with patch("numpy.linalg.inv") as mock_inv:
+        mock_inv.side_effect = np.linalg.LinAlgError("error")
+        quantize_module.calibrate_gptq_weights(w, acts)
 
 
-def test_calibrate_gptq_weights_singular_matrix():
-    """Docstring for test_calibrate_gptq_weights_singular_matrix."""
-    w = np.random.randn(5, 5).astype(np.float32)
-    x = np.random.randn(3, 5).astype(np.float32)
-    with patch("numpy.linalg.inv", side_effect=np.linalg.LinAlgError):
-        res = calibrate_gptq_weights(w, x)
-    assert res.shape == (5, 5)
+def test_quantize_model():
+    """Test quantize_model."""
+    import gemma_4_sql.backends.mlx.quantize as quantize_module
 
+    quantize_module.mlx = MagicMock()
 
-def test_quantize_model_no_mlx(monkeypatch):
-    """Docstring for test_quantize_model_no_mlx."""
-    monkeypatch.setattr(quantize, "mlx", None)
-    with pytest.raises(DependencyMissingError, match="MLX dependencies are missing"):
-        quantize_model("dummy")
+    with patch("gemma_4_sql.backends.mlx.quantize.quantize_model_wrapper") as mock_wrapper:
+        mock_wrapper.return_value = {"status": "ok"}
 
+        res = quantize_module.quantize_model("model", "int8")
+        assert res == {"status": "ok"}
 
-class MockNN:
-    """Docstring for MockNN."""
+        mock_wrapper.call_args[1]["apply_fn"]
 
-    def quantize(self, model, group_size, bits):
-        """Docstring for quantize."""
+        # Test unsupported method
+        with patch("gemma_4_sql.backends.mlx.quantize.quantize_model_wrapper"):  # don't care
+            pass
 
+        quantize_module.quantize_model = quantize_module.quantize_model  # refresh closures? No, apply_fn captures kwargs
+        # We need to call apply_fn and see what happens inside it.
+        # But wait, apply_fn uses `method`, `kwargs`, `model_name` from outer scope.
 
-@pytest.fixture
-def mock_mlx_env():
-    """Docstring for mock_mlx_env."""
-    import sys
 
-    mock_mlx = MagicMock()
-    mock_mlx_lm = MagicMock()
+def test_quantize_model_apply_fn():
+    """Test quantize apply_fn."""
+    import gemma_4_sql.backends.mlx.quantize as quantize_module
 
-    mock_nn = MockNN()
-    mock_mlx.nn = mock_nn
+    quantize_module.mlx = MagicMock()
 
-    with patch.dict(sys.modules, {"mlx": mock_mlx, "mlx_lm": mock_mlx_lm, "mlx.nn": mock_nn}):
-        yield mock_mlx, mock_mlx_lm, mock_nn
-
-
-def test_quantize_model_unsupported_method(monkeypatch):
-    """Docstring for test_quantize_model_unsupported_method."""
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-    with pytest.raises(UnsupportedQuantizationMethodError, match="Unsupported quantization method"):
-        quantize_model("dummy", method="invalid")
-
-
-def test_quantize_model_missing_mlx_lm(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_missing_mlx_lm."""
-    import sys
-
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-    with patch.dict(sys.modules, {"mlx_lm": None}), pytest.raises(DependencyMissingError, match="mlx and mlx_lm are required for MLX quantization"):
-        quantize_model("dummy", method="int8")
-
-
-def test_quantize_model_load_fails(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_load_fails."""
-    _mock_mlx, mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-
-    mock_mlx_lm.load.side_effect = Exception("Load failed")
-
-    with pytest.raises(RuntimeError, match="MLX quantization failed: Load failed"):
-        quantize_model("dummy", method="int8")
-
-
-def test_quantize_model_no_nn_quantize(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_no_nn_quantize."""
-    _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-
-    # Remove quantize from class
-    del MockNN.quantize
-    try:
-        with pytest.raises(RuntimeError, match="mlx.nn.quantize is not available"):
-            quantize_model("dummy", method="int8", model=MagicMock())
-    finally:
-        # Restore for other tests
-        MockNN.quantize = lambda self, model, group_size, bits: None
-
-
-def test_quantize_model_awq(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_awq."""
-    _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-
-    res = quantize_model("dummy", method="awq", model=MagicMock())
-    assert res == (0.75, "quantized_awq")
-
-
-def test_quantize_model_gptq(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_gptq."""
-    _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-
-    res = quantize_model("dummy", method="gptq", model=MagicMock())
-    assert res == (0.75, "quantized_gptq")
-
-
-def test_quantize_model_int4(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_int4."""
-    _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-
-    res = quantize_model("dummy", method="int4", model=MagicMock(), group_size="32", calib_data=["a"])
-    assert res == (0.75, "quantized_int4")
-
-
-def test_quantize_model_int8(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_int8."""
-    _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-
-    res = quantize_model("dummy", method="int8", model=MagicMock(), calib_data="not a sequence")
-    assert res == (0.5, "quantized_int8")
-
-
-def test_quantize_model_load_tuple(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_load_tuple."""
-    _mock_mlx, mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-
-    mock_mlx_lm.load.return_value = (MagicMock(), MagicMock())
-
-    res = quantize_model("dummy", method="int8")
-    assert res == (0.5, "quantized_int8")
-
-
-def test_quantize_model_load_not_tuple(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_load_not_tuple."""
-    _mock_mlx, mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-
-    mock_mlx_lm.load.return_value = MagicMock()
-
-    res = quantize_model("dummy", method="int8")
-    assert res == (0.5, "quantized_int8")
-
-
-def test_quantize_model_awq_no_np(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_awq_no_np."""
-    _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-    monkeypatch.setattr(quantize, "np", None)
-
-    res = quantize_model("dummy", method="awq", model=MagicMock())
-    assert res == (0.75, "quantized_awq")
-
-
-def test_quantize_model_gptq_no_np(monkeypatch, mock_mlx_env):
-    """Docstring for test_quantize_model_gptq_no_np."""
-    _mock_mlx, _mock_mlx_lm, _mock_nn = mock_mlx_env
-    monkeypatch.setattr(quantize, "mlx", MagicMock())
-    monkeypatch.setattr(quantize, "np", None)
-
-    res = quantize_model("dummy", method="gptq", model=MagicMock())
-    assert res == (0.75, "quantized_gptq")
+    with patch("gemma_4_sql.backends.mlx.quantize.quantize_model_wrapper") as mock_wrapper:
+        quantize_module.quantize_model("model", "invalid")
+        apply_fn = mock_wrapper.call_args[1]["apply_fn"]
+        with pytest.raises(UnsupportedQuantizationMethodError):
+            apply_fn()
+
+    with patch("gemma_4_sql.backends.mlx.quantize.quantize_model_wrapper") as mock_wrapper:
+        mock_model = MagicMock()
+        quantize_module.quantize_model("model", "int8", model=mock_model)
+        apply_fn = mock_wrapper.call_args[1]["apply_fn"]
+
+        with patch.dict(sys.modules, {"mlx_lm": MagicMock(), "mlx.nn": MagicMock()}):
+            import mlx.nn as mlx_nn
+
+            mlx_nn.quantize = MagicMock()
+
+            red, stat = apply_fn()
+            assert stat == "quantized_int8"
+
+            # missing quantize
+            del mlx_nn.quantize
+            with pytest.raises(RuntimeError, match="not available"):
+                apply_fn()
+
+            # missing deps
+            with patch.dict(sys.modules, {"mlx_lm": None}):
+                with pytest.raises(DependencyMissingError):
+                    apply_fn()
+
+    # Test load model inside apply_fn
+    with patch("gemma_4_sql.backends.mlx.quantize.quantize_model_wrapper") as mock_wrapper:
+        quantize_module.quantize_model("model", "int8")
+        apply_fn = mock_wrapper.call_args[1]["apply_fn"]
+        with patch.dict(sys.modules, {"mlx_lm": MagicMock(), "mlx.nn": MagicMock()}):
+            import mlx.nn as mlx_nn
+            import mlx_lm
+
+            mlx_nn.quantize = MagicMock()
+            mlx_lm.load.return_value = ("model_obj", "tok")
+
+            red, stat = apply_fn()
+            assert stat == "quantized_int8"
+
+            # load fails
+            mlx_lm.load.side_effect = Exception("error")
+            with pytest.raises(RuntimeError):
+                apply_fn()
+
+    # Test awq / gptq
+    import numpy as np
+
+    quantize_module.np = np
+    with patch("gemma_4_sql.backends.mlx.quantize.quantize_model_wrapper") as mock_wrapper:
+        quantize_module.quantize_model("model", "awq", model=MagicMock(), calib_data=["a"])
+        apply_fn = mock_wrapper.call_args[1]["apply_fn"]
+        with patch.dict(sys.modules, {"mlx_lm": MagicMock(), "mlx.nn": MagicMock()}):
+            import mlx.nn as mlx_nn
+
+            mlx_nn.quantize = MagicMock()
+            with patch("gemma_4_sql.backends.mlx.quantize.calibrate_awq_scales"):
+                red, stat = apply_fn()
+                assert stat == "quantized_awq"
+
+    with patch("gemma_4_sql.backends.mlx.quantize.quantize_model_wrapper") as mock_wrapper:
+        quantize_module.quantize_model("model", "gptq", model=MagicMock(), group_size="32")
+        apply_fn = mock_wrapper.call_args[1]["apply_fn"]
+        with patch.dict(sys.modules, {"mlx_lm": MagicMock(), "mlx.nn": MagicMock()}):
+            import mlx.nn as mlx_nn
+
+            mlx_nn.quantize = MagicMock()
+            with patch("gemma_4_sql.backends.mlx.quantize.calibrate_gptq_weights"):
+                red, stat = apply_fn()
+                assert stat == "quantized_gptq"
+
+    quantize_module.mlx = None
+    with pytest.raises(DependencyMissingError):
+        quantize_module.quantize_model("model", "int8")

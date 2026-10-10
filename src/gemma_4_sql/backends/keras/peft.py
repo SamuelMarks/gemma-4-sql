@@ -111,7 +111,7 @@ class KerasLoRADense(_LayerBase):
 
         def _fallback_init(*args: Any, **kwargs: Any) -> Any:
             """Docstring for _fallback_init."""
-            return None  # pragma: no cover
+            return None
 
         self.lora_a = self.add_weight(
             shape=(in_features, self.r),
@@ -310,7 +310,7 @@ def inject_lora(
                             _traverse(item)
                     if list_modified:
                         setattr(curr_any, attr_name, list(val))
-                elif (keras is not None and isinstance(val, getattr(getattr(keras, "layers", None), "Layer", type(None)))) or hasattr(val, "__dict__"):  # pragma: no cover
+                elif (keras is not None and isinstance(val, getattr(getattr(keras, "layers", None), "Layer", type(None)))) or hasattr(val, "__dict__"):
                     _traverse(val)
         finally:
             if has_tracker:
@@ -442,7 +442,7 @@ def apply_lora(
             model_any.backbone.enable_lora(rank=lora_r)
             # Explicitly freeze non-adapter layers
             for layer in getattr(model_any.backbone, "layers", []):
-                if not getattr(layer, "trainable_variables", []):  # pragma: no cover
+                if not getattr(layer, "trainable_variables", []):
                     layer.trainable = False
             logger.info("Enabled Keras native LoRA with rank %d", lora_r)
             injected_count = len(target_modules)

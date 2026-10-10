@@ -30,7 +30,7 @@ def test_compute_attention_scores_and_output():
     out2 = _compute_attention_scores_and_output((q, k, v), mask, (16, None, 4, 4))
     assert out2.shape == (2, 1, 64)
 
-    # test num_kv_heads != num_heads (handled inside _compute_attention_scores_and_output if missing pragma, though it has pragma: no cover)
+    # test num_kv_heads != num_heads (handled inside _compute_attention_scores_and_output)
 
 
 def test_prepare_qkv_for_attention():

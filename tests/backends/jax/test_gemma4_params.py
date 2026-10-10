@@ -1,399 +1,272 @@
 """Module docstring."""
 
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import jax
-import jax.numpy as jnp
 import pytest
 
-from gemma_4_sql.backends.jax.gemma4.params import (
-    _fix_jax_state_embeddings,
-    _get_audio_mappings,
-    _get_key_and_transform_mapping,
-    _get_text_mappings,
-    _get_vision_mappings,
-    _process_moe_tensor,
-    _process_safetensors_file,
-    _stack_and_assign_expert_tensors,
-    create_gemma4_from_pretrained,
-    process_standard_tensor,
-)
-from gemma_4_sql.exceptions import DependencyMissingError
+
+def test_safetensors_missing():
+    """Docstring for test_safetensors_missing."""
+    import builtins
+    import importlib
+
+    import gemma_4_sql.backends.jax.gemma4.params as mod
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name == "safetensors":
+            raise ImportError("mock")
+        return orig_import(name, *args, **kwargs)
+
+    builtins.__import__ = mock_import
+    try:
+        importlib.reload(mod)
+        assert mod.safetensors is None
+    finally:
+        builtins.__import__ = orig_import
+        importlib.reload(mod)
 
 
-class DummyTransform:
-    """Docstring for DummyTransform."""
-
-    DEFAULT = None
-    BIAS = None
-    LINEAR = ((1, 0), None, False)
-    CONV2D = ((2, 3, 1, 0), None, False)
-    EMBED = None
-    LINEAR_3D = ((0, 2, 1), None, False)
-
-
-def test_mappings():
-    """Docstring for test_mappings."""
-    t_maps = _get_text_mappings(DummyTransform)
-    a_maps = _get_audio_mappings(DummyTransform)
-    v_maps = _get_vision_mappings(DummyTransform)
-    all_maps = _get_key_and_transform_mapping()
-
-    assert r"^model\.embed_tokens\.weight$" in t_maps
-    assert r"^audio_tower\.output_proj\.bias$" in a_maps
-    assert r"^vision_tower\.vision_model\.post_layernorm\.weight$" in v_maps
-    assert r"^model\.embed_tokens\.weight$" in all_maps
-    assert r"^audio_tower\.output_proj\.bias$" in all_maps
-    assert r"^vision_tower\.vision_model\.post_layernorm\.weight$" in all_maps
-
-
-def test_process_moe_tensor():
-    """Docstring for test_process_moe_tensor."""
-    import re
-
-    moe_pattern = re.compile(r"^model\.layers\.(\d+)\.block_sparse_moe\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$")
-    match = moe_pattern.match("model.layers.0.block_sparse_moe.experts.1.gate_proj.weight")
-
-    mock_sf = MagicMock()
-    mock_sf.get_tensor.return_value = jnp.array([1.0])
-    expert_tensors = {}
-
-    _process_moe_tensor(match, mock_sf, "model.layers.0.block_sparse_moe.experts.1.gate_proj.weight", expert_tensors)
-
-    assert 0 in expert_tensors
-    assert "gate_proj" in expert_tensors[0]
-    assert 1 in expert_tensors[0]["gate_proj"]
-    assert jnp.allclose(expert_tensors[0]["gate_proj"][1], jnp.array([1.0]))
-
-
-@patch("gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape")
-def test_process_standard_tensor(mock_assign):
-    """Docstring for test_process_standard_tensor."""
-    mock_sf = MagicMock()
-    mock_sf.get_tensor.return_value = jnp.array([1.0])
-
-    mapping = {r"^model\.embed\.weight$": (r"model\.embed", DummyTransform.EMBED)}
-
-    process_standard_tensor(mock_sf, "model.embed.weight", {}, mapping)
-    mock_assign.assert_called_once()
-
-    mock_assign.reset_mock()
-    process_standard_tensor(mock_sf, "unmatched.weight", {}, mapping)
-    mock_assign.assert_not_called()
-
-    mock_assign.side_effect = KeyError("Test error")
-    process_standard_tensor(mock_sf, "model.embed.weight", {}, mapping)
-
-    mock_assign.side_effect = TypeError("Test error")
-    with pytest.raises(TypeError):
-        process_standard_tensor(mock_sf, "model.embed.weight", {}, mapping)
-
-
-@patch("gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape")
-def test_stack_and_assign_expert_tensors(mock_assign):
-    """Docstring for test_stack_and_assign_expert_tensors."""
-    expert_tensors = {0: {"gate_proj": {0: jnp.array([1.0]), 1: jnp.array([2.0])}}}
-    mapping = {r"^model\.layers\.(\d+)\.mlp\.routed_experts\.(gate_proj)\.weight$": ("model\\.layers\\.\1\\.mlp\\.routed_experts\\.\2_kernel", DummyTransform.LINEAR_3D)}
-    jax_state = {}
-
-    _stack_and_assign_expert_tensors(expert_tensors, mapping, jax_state)
-    mock_assign.assert_called_once()
-
-
-@patch("gemma_4_sql.backends.jax.gemma4.params.safetensors")
-@patch("gemma_4_sql.backends.jax.gemma4.params._process_moe_tensor")
-@patch("gemma_4_sql.backends.jax.gemma4.params.process_standard_tensor")
-def test_process_safetensors_file(mock_standard, mock_moe, mock_safetensors):
-    """Docstring for test_process_safetensors_file."""
-    mock_sf = MagicMock()
-    mock_sf.keys.return_value = ["model.layers.0.block_sparse_moe.experts.1.gate_proj.weight", "model.embed.weight"]
-    mock_safetensors.safe_open.return_value.__enter__.return_value = mock_sf
-
-    import re
-
-    moe_pattern = re.compile(r"^model\.layers\.(\d+)\.block_sparse_moe\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$")
-    expert_tensors = {}
-    jax_state = {}
-    mapping = {}
-
-    _process_safetensors_file("dummy.safetensors", moe_pattern, expert_tensors, jax_state, mapping)
-
-    mock_moe.assert_called_once()
-    mock_standard.assert_called_once()
-
-
-def test_fix_jax_state_embeddings():
-    """Docstring for test_fix_jax_state_embeddings."""
-
-    class DummyShapeDtypeStruct:
-        """Docstring for DummyShapeDtypeStruct."""
-
-    class DummyConfig:
-        """Docstring for DummyConfig."""
-
-        hidden_size = 4
-        vision_config = MagicMock(num_patches=256)
-
-    cfg = DummyConfig()
-
-    jax_state = {"model": {"embed_scale": DummyShapeDtypeStruct()}}
-    with patch("gemma_4_sql.backends.jax.gemma4.params.jax.ShapeDtypeStruct", DummyShapeDtypeStruct, create=True):
-        _fix_jax_state_embeddings(jax_state, None, cfg)
-
-    assert isinstance(jax_state["model"]["embed_scale"], jax.Array)
-
-    jax_state = {"vision_tower": {"embeddings": {"position_ids": DummyShapeDtypeStruct()}}}
-    with patch("gemma_4_sql.backends.jax.gemma4.params.jax.ShapeDtypeStruct", DummyShapeDtypeStruct, create=True):
-        _fix_jax_state_embeddings(jax_state, None, cfg)
-
-    assert isinstance(jax_state["vision_tower"]["embeddings"]["position_ids"], jax.Array)
-
-    jax_state = {}
-    _fix_jax_state_embeddings(jax_state, None, cfg)
-
-
-@patch("gemma_4_sql.backends.jax.gemma4.params.nnx")
-@patch("gemma_4_sql.backends.jax.gemma4.params._process_safetensors_file")
-@patch("gemma_4_sql.backends.jax.gemma4.params._stack_and_assign_expert_tensors")
-@patch("gemma_4_sql.backends.jax.gemma4.params._fix_jax_state_embeddings")
-def test_create_gemma4_from_pretrained(mock_fix, mock_stack, mock_process, mock_nnx):
-    """Docstring for test_create_gemma4_from_pretrained."""
-    mock_epath = MagicMock()
-    mock_epath.epath = mock_epath
-    mock_epath.Path.return_value.expanduser.return_value.glob.return_value = ["file1.safetensors"]
-
-    cfg = MagicMock()
-
-    mock_graph_def = MagicMock()
-    mock_state = MagicMock()
-    mock_state.to_pure_dict.return_value = {"a": 1}
-    mock_nnx.eval_shape.return_value = "dummy"
-    mock_nnx.split.return_value = (mock_graph_def, mock_state)
-    mock_nnx.merge.return_value = "merged_model"
-
-    with patch.dict("sys.modules", {"etils": MagicMock(epath=mock_epath)}):
-        res = create_gemma4_from_pretrained("dummy_dir", cfg)
-        assert res == "merged_model"
-        mock_process.assert_called_once()
-        mock_stack.assert_called_once()
-        mock_fix.assert_called_once()
-
-        mock_state_2 = MagicMock()
-        del mock_state_2.to_pure_dict
-        mock_state_2.to_flat_dict.return_value = {"a": 1}
-        mock_nnx.split.return_value = (mock_graph_def, mock_state_2)
-        create_gemma4_from_pretrained("dummy_dir", cfg)
-
-        mock_state_3 = {"a": 1}
-        mock_nnx.split.return_value = (mock_graph_def, mock_state_3)
-        create_gemma4_from_pretrained("dummy_dir", cfg)
-
-        mock_epath.Path.return_value.expanduser.return_value.glob.return_value = []
-        with pytest.raises(ValueError, match="No safetensors found"):
-            create_gemma4_from_pretrained("dummy_dir", cfg)
-
-    with patch.dict("sys.modules", {"etils": None}), pytest.raises(DependencyMissingError):
-        create_gemma4_from_pretrained("dummy_dir", cfg)
-
-
-def test_process_moe_tensor_branch_coverage():
-    """Docstring for test_process_moe_tensor_branch_coverage."""
-    from unittest.mock import MagicMock
-
+def test_stack_expert_tensors_none_key():
+    """Docstring for test_stack_expert_tensors_none_key."""
     import jax.numpy as jnp
 
-    from gemma_4_sql.backends.jax.gemma4.params import _process_moe_tensor
+    from gemma_4_sql.backends.jax.gemma4.params import _stack_and_assign_expert_tensors
 
-    sf = MagicMock()
-    sf.get_tensor.return_value = jnp.ones((2, 2))
-    match = MagicMock()
-    match.groups.return_value = ("0", "1", "gate_proj")
-    expert_tensors = {}
-    _process_moe_tensor(match, sf, "key1", expert_tensors)
+    expert_tensors = {0: {"test_proj": {0: jnp.zeros((1,)), 1: jnp.zeros((1,))}}}
 
-    match2 = MagicMock()
-    match2.groups.return_value = ("0", "2", "up_proj")
-    _process_moe_tensor(match2, sf, "key2", expert_tensors)
+    # mapping that returns (None, None) for jax_key
+    class MockMapping:
+        """Docstring for MockMapping."""
 
-    match3 = MagicMock()
-    match3.groups.return_value = ("0", "3", "gate_proj")
-    _process_moe_tensor(match3, sf, "key3", expert_tensors)
+        @staticmethod
+        def __getitem__(key):
+            """Docstring for __getitem__."""
+            raise KeyError()  # or whatever map_to_jax_key does.
+
+    mapping = {}
+
+    jax_state = {}
+    _stack_and_assign_expert_tensors(expert_tensors, mapping, jax_state)
+    assert jax_state == {}
+
+
+def test_create_gemma4_from_pretrained(tmp_path):
+    """Docstring for test_create_gemma4_from_pretrained."""
+    import numpy as np
+    from safetensors.numpy import save_file
+
+    from gemma_4_sql.backends.jax.gemma4.config import AudioConfig, ModelConfig, VisionConfig
+    from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
+
+    # Save a fake safetensors file
+    tensors = {
+        "model.embed_tokens.weight": np.zeros((10, 8), dtype=np.float32),
+        "model.norm.weight": np.ones((8,), dtype=np.float32),
+        "lm_head.weight": np.zeros((10, 8), dtype=np.float32),
+        # Audio keys
+        "audio_tower.output_proj.weight": np.zeros((8, 8), dtype=np.float32),
+        "audio_tower.output_proj.bias": np.zeros((8,), dtype=np.float32),
+        # Vision keys
+        "vision_tower.vision_model.post_layernorm.weight": np.zeros((8,), dtype=np.float32),
+        # MOE keys
+        "model.layers.0.block_sparse_moe.experts.0.gate_proj.weight": np.zeros((16, 8), dtype=np.float32),
+        "model.layers.0.block_sparse_moe.experts.1.gate_proj.weight": np.zeros((16, 8), dtype=np.float32),
+        "model.layers.0.block_sparse_moe.experts.2.gate_proj.weight": np.zeros((16, 8), dtype=np.float32),
+        "model.layers.0.block_sparse_moe.experts.3.gate_proj.weight": np.zeros((16, 8), dtype=np.float32),
+    }
+
+    file_path = tmp_path / "model.safetensors"
+    save_file(tensors, str(file_path))
+
+    cfg = ModelConfig(
+        vocab_size=10,
+        hidden_size=8,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=4,
+        intermediate_size=16,
+        num_experts=4,
+        vision_config=VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4),
+        audio_config=AudioConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2),
+    )
+
+    model = create_gemma4_from_pretrained(str(tmp_path), cfg)
+    assert model is not None
+
+    # Test error cases
+    with pytest.raises(ValueError, match="No safetensors found"):
+        create_gemma4_from_pretrained(str(tmp_path / "empty"), cfg)
+
+
+def test_process_standard_tensor_errors():
+    """Docstring for test_process_standard_tensor_errors."""
+    import numpy as np
+
+    from gemma_4_sql.backends.jax.gemma4.params import _get_key_and_transform_mapping, process_standard_tensor
+
+    mapping = _get_key_and_transform_mapping()
+
+    class FakeSF:
+        """Docstring for FakeSF."""
+
+        def get_tensor(self, key):
+            """Docstring for get_tensor."""
+            return np.zeros((1,))
+
+    # Test skipping standard KeyError exception by assign_weights_from_eval_shape
+    jax_state = {}
+    process_standard_tensor(FakeSF(), "model.embed_tokens.weight", jax_state, mapping)
+
+    # Test jax_key is None
+    process_standard_tensor(FakeSF(), "unknown.key", jax_state, mapping)
+
+    # Test raising AttributeError inside try block
+    class FakeSF2:
+        """Docstring for FakeSF2."""
+
+        def get_tensor(self, key):
+            """Docstring for get_tensor."""
+            return np.zeros((1,))
+
+    with patch("gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape", side_effect=AttributeError("bad")):
+        with pytest.raises(AttributeError):
+            process_standard_tensor(FakeSF2(), "model.embed_tokens.weight", jax_state, mapping)
+
+
+def test_create_gemma4_from_pretrained_etils_success(tmp_path, monkeypatch):
+    """Docstring for test_create_gemma4_from_pretrained_etils_success."""
+    import sys
+
+    import numpy as np
+    from safetensors.numpy import save_file
+
+    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
+    from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
+
+    save_file({"lm_head.weight": np.zeros((10, 8), dtype=np.float32)}, str(tmp_path / "model.safetensors"))
+    cfg = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16)
+
+    # Remove etils from sys.modules to force import
+    if "etils" in sys.modules:
+        monkeypatch.delitem(sys.modules, "etils")
+
+    with patch("flax.nnx.split") as mock_split:
+        mock_split.return_value = (None, {})
+        with patch("gemma_4_sql.backends.jax.gemma4.params.nnx.merge"):
+            with patch("gemma_4_sql.backends.jax.gemma4.params.hasattr", side_effect=lambda obj, name: False if name == "State" else hasattr(obj, name)):
+                create_gemma4_from_pretrained(str(tmp_path), cfg)
+
+
+def test_create_gemma4_from_pretrained_etils_missing(tmp_path, monkeypatch):
+    """Docstring for test_create_gemma4_from_pretrained_etils_missing."""
+    import sys
+
+    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
+    from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    cfg = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16)
+
+    # Mock sys.modules to not have etils
+    monkeypatch.setitem(sys.modules, "etils", None)
+
+    import builtins
+
+    orig_import = builtins.__import__
+    with patch("builtins.__import__") as mock_import:
+
+        def side_effect(name, *args, **kwargs):
+            """Docstring for side_effect."""
+            if name == "etils":
+                raise ImportError("no etils")
+            return orig_import(name, *args, **kwargs)
+
+        mock_import.side_effect = side_effect
+
+        with pytest.raises(DependencyMissingError):
+            create_gemma4_from_pretrained(str(tmp_path), cfg)
 
 
 def test_fix_jax_state_embeddings_coverage():
     """Docstring for test_fix_jax_state_embeddings_coverage."""
     import jax
-
-    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
-    from gemma_4_sql.backends.jax.gemma4.params import _fix_jax_state_embeddings
-
-    cfg = ModelConfig()
-
-    state = {"model": {"embed_scale": jax.ShapeDtypeStruct((), jax.numpy.float32)}}
-    _fix_jax_state_embeddings(state, None, cfg)
-
-
-def test_params_missing_moe_branches():
-    """Docstring for test_params_missing_moe_branches."""
-    from unittest.mock import MagicMock
-
     import jax.numpy as jnp
 
-    from gemma_4_sql.backends.jax.gemma4.params import _process_moe_tensor
-
-    sf = MagicMock()
-    sf.get_tensor.return_value = jnp.ones((2, 2))
-
-    match = MagicMock()
-    match.groups.return_value = ("0", "1", "gate_proj")
-    expert_tensors = {}
-    _process_moe_tensor(match, sf, "key1", expert_tensors)
-
-    match2 = MagicMock()
-    match2.groups.return_value = ("0", "2", "up_proj")
-    _process_moe_tensor(match2, sf, "key2", expert_tensors)
-
-    match3 = MagicMock()
-    match3.groups.return_value = ("0", "3", "gate_proj")
-    _process_moe_tensor(match3, sf, "key3", expert_tensors)
-
-
-def test_params_missing_fix_jax_state_embeddings():
-    """Docstring for test_params_missing_fix_jax_state_embeddings."""
-    import jax
-
-    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
+    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig, VisionConfig
     from gemma_4_sql.backends.jax.gemma4.params import _fix_jax_state_embeddings
 
-    cfg = ModelConfig()
+    cfg = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16, vision_config=VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4))
 
-    state = {"model": {"embed_scale": jax.ShapeDtypeStruct((), jax.numpy.float32)}}
-    _fix_jax_state_embeddings(state, None, cfg)
+    # Test when embed_scale is ShapeDtypeStruct
+    jax_state = {"model": {"embed_scale": jax.ShapeDtypeStruct((), jnp.float32)}, "vision_tower": {"embeddings": {"position_ids": jax.ShapeDtypeStruct((1, 100), jnp.int32)}}}
 
+    _fix_jax_state_embeddings(jax_state, None, cfg)
+    assert isinstance(jax_state["model"]["embed_scale"], jax.Array)
+    assert isinstance(jax_state["vision_tower"]["embeddings"]["position_ids"], jax.Array)
 
-def test_create_gemma4_from_pretrained_etils_missing():
-    """Docstring for test_create_gemma4_from_pretrained_etils_missing."""
-    from unittest.mock import MagicMock, patch
-
-    from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    # Mock sys.modules to remove etils
-    with patch.dict(sys.modules, {"etils": None, "etils.epath": None}), pytest.raises(DependencyMissingError):
-        create_gemma4_from_pretrained("/fake/dir", MagicMock())
+    # Test when vision_config is None
+    cfg2 = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16)
+    jax_state2 = {"model": {"embed_scale": 1.0}}
+    _fix_jax_state_embeddings(jax_state2, None, cfg2)
 
 
-def test_create_gemma4_from_pretrained_etils_success_and_state():
-    """Docstring for test_create_gemma4_from_pretrained_etils_success_and_state."""
-    from importlib.abc import Loader, MetaPathFinder
-    from importlib.machinery import ModuleSpec
-    from unittest.mock import MagicMock, patch
-
-    from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
-
-    class EtilsFinder(MetaPathFinder):
-        """Docstring for EtilsFinder."""
-
-        def find_spec(self, fullname, path, target=None):
-            """Docstring for find_spec."""
-            if fullname == "etils":
-                return ModuleSpec("etils", EtilsLoader())
-            return None
-
-    class EtilsLoader(Loader):
-        """Docstring for EtilsLoader."""
-
-        def create_module(self, spec):
-            """Docstring for create_module."""
-            mock_etils = MagicMock()
-            mock_epath = MagicMock()
-            mock_epath.Path.return_value.expanduser.return_value.glob.return_value = ["file.safetensors"]
-            mock_etils.epath = mock_epath
-            return mock_etils
-
-        def exec_module(self, module):
-            """Docstring for exec_module."""
-
-    sys.modules.pop("etils", None)
-    finder = EtilsFinder()
-    sys.meta_path.insert(0, finder)
-    try:
-        mock_nnx = MagicMock()
-        mock_graph_def = MagicMock()
-        mock_state = MagicMock()
-        mock_state.to_pure_dict.return_value = {"a": 1}
-        mock_nnx.eval_shape.return_value = "dummy"
-        mock_nnx.split.return_value = (mock_graph_def, mock_state)
-        mock_nnx.merge.return_value = "merged_model"
-
-        # We need to simulate that nnx does not have "State"
-        # Since we patch params.nnx with mock_nnx, we must ensure it doesn't have 'State'
-        # MagicMock has everything by default, so we delete it.
-        del mock_nnx.State
-
-        cfg = MagicMock()
-        with patch("gemma_4_sql.backends.jax.gemma4.params.nnx", mock_nnx), patch("gemma_4_sql.backends.jax.gemma4.params._process_safetensors_file"), patch("gemma_4_sql.backends.jax.gemma4.params._stack_and_assign_expert_tensors"), patch("gemma_4_sql.backends.jax.gemma4.params._fix_jax_state_embeddings"):
-            res = create_gemma4_from_pretrained("dummy_dir", cfg)
-            assert res == "merged_model"
-
-    finally:
-        sys.meta_path.remove(finder)
-
-
-def test_create_gemma4_from_pretrained_missing_etils():
-    """Docstring for test_create_gemma4_from_pretrained_missing_etils."""
-    from unittest.mock import patch
-
-    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
-    from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    with patch.dict("sys.modules", {"etils": None}), pytest.raises(DependencyMissingError):
-        create_gemma4_from_pretrained("/fake/dir", ModelConfig())
-
-
-def test_create_gemma4_from_pretrained_no_safetensors():
-    """Docstring for test_create_gemma4_from_pretrained_no_safetensors."""
-    from unittest.mock import MagicMock, patch
+def test_create_gemma4_state_dict_fallbacks(tmp_path):
+    """Docstring for test_create_gemma4_state_dict_fallbacks."""
+    import numpy as np
+    from safetensors.numpy import save_file
 
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
     from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
 
-    mock_epath = MagicMock()
-    mock_epath.Path.return_value.expanduser.return_value.glob.return_value = []
-    with patch.dict("sys.modules", {"etils": mock_epath, "etils.epath": mock_epath}), pytest.raises(ValueError):
-        create_gemma4_from_pretrained("/fake/dir", ModelConfig())
+    save_file({"lm_head.weight": np.zeros((10, 8), dtype=np.float32)}, str(tmp_path / "model.safetensors"))
+    cfg = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16)
 
+    with patch("flax.nnx.split") as mock_split:
+        # Test to_pure_dict
+        class MockState0:
+            """Docstring for MockState0."""
 
-def test_create_gemma4_from_pretrained_success():
-    """Docstring for test_create_gemma4_from_pretrained_success."""
-    from unittest.mock import MagicMock, patch
+            def to_pure_dict(self):
+                """Docstring for to_pure_dict."""
+                return {"a": 0}
 
-    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
-    from gemma_4_sql.backends.jax.gemma4.params import create_gemma4_from_pretrained
+        mock_split.return_value = (None, MockState0())
 
-    mock_epath = MagicMock()
-    mock_epath.epath = mock_epath
-    mock_epath.Path.return_value.expanduser.return_value.glob.return_value = ["file1.safetensors"]
+        with patch("gemma_4_sql.backends.jax.gemma4.params.nnx.merge") as mock_merge:
+            mock_merge.return_value = "model0"
+            res = create_gemma4_from_pretrained(str(tmp_path), cfg)
+            assert res == "model0"
 
-    with (
-        patch.dict("sys.modules", {"etils": mock_epath, "etils.epath": mock_epath}),
-        patch("gemma_4_sql.backends.jax.gemma4.params.nnx.eval_shape") as mock_eval,
-        patch("gemma_4_sql.backends.jax.gemma4.params.nnx.split") as mock_split,
-        patch("gemma_4_sql.backends.jax.gemma4.params.nnx.merge") as mock_merge,
-        patch("gemma_4_sql.backends.jax.gemma4.params._process_safetensors_file"),
-        patch("gemma_4_sql.backends.jax.gemma4.params._stack_and_assign_expert_tensors"),
-        patch("gemma_4_sql.backends.jax.gemma4.params._fix_jax_state_embeddings"),
-    ):
-        from flax import nnx
+        # Test to_flat_dict fallback
+        class MockState1:
+            """Docstring for MockState1."""
 
-        if hasattr(nnx, "State"):
-            del nnx.State
+            def to_flat_dict(self):
+                """Docstring for to_flat_dict."""
+                return {"a": 1}
 
-        mock_eval.return_value = "gemma4"
-        mock_split.return_value = ("graph_def", {})
-        mock_merge.return_value = "merged_model"
+        mock_split.return_value = (None, MockState1())
 
-        model = create_gemma4_from_pretrained("/fake/dir", ModelConfig())
-        assert model == "merged_model"
+        with patch("gemma_4_sql.backends.jax.gemma4.params.nnx.merge") as mock_merge:
+            mock_merge.return_value = "model1"
+            res = create_gemma4_from_pretrained(str(tmp_path), cfg)
+            assert res == "model1"
+
+        # Test dict() fallback
+        class MockState2:
+            """Docstring for MockState2."""
+
+            def __iter__(self):
+                """Docstring for __iter__."""
+                yield from {"b": 2}.items()
+
+        mock_split.return_value = (None, MockState2())
+
+        with patch("gemma_4_sql.backends.jax.gemma4.params.nnx.merge") as mock_merge:
+            mock_merge.return_value = "model2"
+            res = create_gemma4_from_pretrained(str(tmp_path), cfg)
+            assert res == "model2"

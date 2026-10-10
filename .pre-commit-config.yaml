@@ -12,7 +12,7 @@ repos:
         args: [ --strict ]
         additional_dependencies: [pytest, click, types-setuptools, types-requests]
   - repo: https://github.com/econchick/interrogate
-    rev: v1.7.0
+    rev: 1.7.0
     hooks:
       - id: interrogate
         args: [ -vv, --fail-under=100, src/, tests/ ]
@@ -21,7 +21,7 @@ repos:
     hooks:
       - id: tests
         name: Run tests
-        entry: bash -c "uv run --all-extras pytest --cov=src/gemma_4_sql --cov-branch -q"
+        entry: bash -c "uv run --all-extras pytest --cov=src/gemma_4_sql --cov-branch"
         language: system
         pass_filenames: false
         always_run: true

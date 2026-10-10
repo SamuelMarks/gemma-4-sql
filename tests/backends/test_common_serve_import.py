@@ -1,57 +1,53 @@
 """Module docstring."""
 
-import builtins
 import importlib
-from unittest.mock import patch
+import sys
 
 import pytest
 
-
-def test_common_serve_import_fallback():
-    """Docstring for test_common_serve_import_fallback."""
-    # Test fallback inside a clean module load without messing up sys.modules permanently
-    import gemma_4_sql.backends.common_serve as mod
-
-    # We can just manually patch mod.uvicorn to None for the function call
-    old_uvicorn = mod.uvicorn
-    mod.uvicorn = None
-    try:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        with pytest.raises(DependencyMissingError):
-            mod.serve_model_wrapper("test", "model", 8080, 1, False, "", lambda: None)
-    finally:
-        mod.uvicorn = old_uvicorn
-
-    old_fastapi = mod.FastAPI
-    mod.FastAPI = None
-    try:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        with pytest.raises(DependencyMissingError):
-            mod.serve_model_wrapper("test", "model", 8080, 1, False, "", lambda: None)
-    finally:
-        mod.FastAPI = old_fastapi
+import gemma_4_sql.backends.common_serve as mod
 
 
-def test_import_exception_logging():
-    """Docstring for test_import_exception_logging."""
-    # to hit lines 30-35 we do the __import__ mock
-    import gemma_4_sql.backends.common_serve as mod
+def test_fastapi_missing(monkeypatch):
+    """Docstring for test_fastapi_missing."""
+    monkeypatch.setitem(sys.modules, "fastapi", None)
+    monkeypatch.setitem(sys.modules, "uvicorn", None)
 
-    old_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name in ("fastapi", "uvicorn"):
-            raise ImportError(f"Mocked ImportError for {name}")
-        return old_import(name, *args, **kwargs)
-
-    with patch("builtins.__import__", side_effect=mock_import):
-        importlib.reload(mod)
-        assert mod.uvicorn is None
-        assert mod.FastAPI is None
-
-    # RESTORE IT!
     importlib.reload(mod)
-    assert mod.uvicorn is not None
+    assert mod.FastAPI is None
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    with pytest.raises(DependencyMissingError):
+        mod.serve_model_wrapper(backend_name="pytorch", model_name="test", max_batch_size=32, missing_deps=None, missing_status=None, app_factory=lambda: None, port=8000)
+
+    # Restore
+    monkeypatch.delitem(sys.modules, "fastapi", raising=False)
+    monkeypatch.delitem(sys.modules, "uvicorn", raising=False)
+    # the sys.modules will be restored by monkeypatch at the end of the test.
+    importlib.reload(mod)
+
+
+def test_serve_model_wrapper_run_server():
+    """Docstring for test_serve_model_wrapper_run_server."""
+    import pytest
+
+    import gemma_4_sql.backends.common_serve as mod
+
+    # ensure it's reloaded with correct deps first
+    importlib.reload(mod)
+
+    with pytest.MonkeyPatch.context() as mp:
+        called = []
+
+        class MockUvicorn:
+            """Docstring for MockUvicorn."""
+
+            def run(self, *args, **kwargs):
+                """Docstring for run."""
+                called.append(True)
+
+        mp.setattr(mod, "uvicorn", MockUvicorn())
+
+        mod.serve_model_wrapper(backend_name="pytorch", model_name="test", max_batch_size=32, missing_deps=None, missing_status=None, app_factory=lambda: "fake_app", run_server=True, port=8000)
+        assert len(called) == 1

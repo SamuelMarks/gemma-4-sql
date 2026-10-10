@@ -26,6 +26,7 @@ try:
     optax: Any = _optax
     Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
+    jax, jnp, optax, Gemma4Model = None, None, None, None
     jax = None
     jnp = None
     optax = None

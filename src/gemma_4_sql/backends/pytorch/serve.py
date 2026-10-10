@@ -95,11 +95,16 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
             request_id = random_uuid() if random_uuid is not None else ""
             results_generator = engine.generate(prompt, None, request_id)
             final_output = None
-            async for request_output in results_generator:  # pragma: no branch
-                if await request.is_disconnected():
-                    await engine.abort(request_id)
-                    return JSONResponse.__call__(content={"error": "Client disconnected"})
-                final_output = request_output
+            results_iterator = results_generator.__aiter__()
+            try:
+                while True:
+                    request_output = await results_iterator.__anext__()
+                    if await request.is_disconnected():
+                        await engine.abort(request_id)
+                        return JSONResponse.__call__(content={"error": "Client disconnected"})
+                    final_output = request_output
+            except StopAsyncIteration:
+                pass
             text = final_output.outputs[0].text if final_output else ""
             return JSONResponse.__call__(content={"sql": text})
 
@@ -219,7 +224,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         if result["status"] == "running_vllm":
             logger.info("Starting vLLM server on port %d", port)
     else:
-        if result["status"] == "running_pytorch_serve":  # pragma: no cover
+        if result["status"] == "running_pytorch_serve":
             logger.info("Starting native PyTorch server on port %d", port)
 
     return result

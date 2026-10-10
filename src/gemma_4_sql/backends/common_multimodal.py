@@ -28,7 +28,7 @@ except (ImportError, AttributeError):
     np = None
 
 try:
-    from PIL import Image as _Image  # pragma: no cover
+    from PIL import Image as _Image
 
     Image: Any = _Image
 except (ImportError, AttributeError):
@@ -82,12 +82,12 @@ def load_image_bytes(image_input: ImageInput) -> bytes:
 
     global Image
     if Image is None:
-        try:  # pragma: no cover
-            from PIL import Image as _Image  # pragma: no cover
+        try:
+            from PIL import Image as _Image
 
-            Image = _Image  # pragma: no cover
-        except ImportError as err:  # pragma: no cover
-            logger.debug("Failed to import PIL: %s", err)  # pragma: no cover
+            Image = _Image
+        except ImportError as err:
+            logger.debug("Failed to import PIL: %s", err)
     if Image is not None and getattr(image_input, "save", None) is not None:
         buf = io.BytesIO()
         save_fn = cast(Any, image_input).save
@@ -136,13 +136,13 @@ def process_image(
         try:
             with Image.open(io.BytesIO(img_bytes)) as pil_img:
                 pil_resized = pil_img.convert("RGB").resize((target_w, target_h), Image.Resampling.BILINEAR)
-                if np is not None:  # pragma: no cover
+                if np is not None:
                     rgb_array = np.array(pil_resized, dtype=np.float32) / 255.0
         except (OSError, ValueError, TypeError, KeyError) as e:
             logger.debug("PIL image decoding failed: %s; using synthetic tensor fallback", e)
 
     if rgb_array is None:
-        if np is not None:  # pragma: no cover
+        if np is not None:
             rgb_array = np.zeros((target_h, target_w, 3), dtype=np.float32)
         else:
             rgb_array = [[[0.0, 0.0, 0.0] for _ in range(target_w)] for _ in range(target_h)]
@@ -268,7 +268,6 @@ def _parse_wav_samples(wav_bytes: bytes) -> tuple[list[float], int]:
                         else:
                             mono = [x / 32768.0 for x in raw_ints]
                         return mono, int(sample_rate)
-                    break  # pragma: no cover
                 data_offset += 8 + chunk_size
         except (struct.error, ValueError, IndexError) as exc:
             logger.debug("WAV parsing failed: %s; using default synth waveform", exc)
@@ -321,14 +320,19 @@ def process_audio(
     else:
         if np is None:
             try:
-                import numpy as _np
+                import sys as _sys
 
-                np = _np
-            except ImportError as err:  # pragma: no cover
-                logger.debug("Failed to import numpy: %s", err)  # pragma: no cover
-        if np is not None and isinstance(audio_input, np.ndarray):  # pragma: no cover
-            samples = [float(x) for x in audio_input.flatten().tolist()]  # pragma: no cover
-            orig_rate = sample_rate  # pragma: no cover
+                if "numpy" in _sys.modules:
+                    np = _sys.modules["numpy"]
+                else:
+                    import numpy
+
+                    np = numpy
+            except ImportError as err:
+                logger.debug("Failed to import numpy: %s", err)
+        if np is not None and isinstance(audio_input, np.ndarray):
+            samples = [float(x) for x in audio_input.flatten().tolist()]
+            orig_rate = sample_rate
         else:
             raw_bytes = load_audio_bytes(audio_input)
             samples, orig_rate = _parse_wav_samples(raw_bytes)
@@ -350,7 +354,7 @@ def process_audio(
 
     num_frames = max(1, (len(samples) - frame_length) // frame_shift + 1) if len(samples) >= frame_length else 1
 
-    if np is not None:  # pragma: no cover
+    if np is not None:
         audio_array = np.array(samples, dtype=np.float32)
         spectrogram = np.zeros((num_frames, n_mels), dtype=np.float32)
         hann_window = 0.5 - 0.5 * np.cos(2.0 * math.pi * np.arange(frame_length) / max(1, frame_length - 1))
@@ -433,11 +437,3 @@ def format_multimodal_prompt(
         "audio_token_mask": audio_mask,
         "modality": modality,
     }
-
-
-import os
-
-if os.environ.get("PYTEST_CURRENT_TEST"):  # pragma: no cover
-    print("CM LOADED! Image is", Image)  # pragma: no cover
-
-print("CM LOADED! Image is", Image)

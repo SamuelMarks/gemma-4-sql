@@ -218,11 +218,19 @@ def test_quantize_model_with_params_kwargs_dict():
     tensor = np.array([[1.0]])
     params = {"q_proj": {"kernel": tensor}}
 
-    res = quantize_mod.quantize_model("my_model", method="int4", params=params, quant_targets=("q_proj",))
-
+    res = quantize_mod.quantize_model("my_model", method="int4", params=params, quant_targets=["q_proj"])
     assert res["status"] == "quantized_int4"
     assert res["memory_reduction_factor"] == 0.75
     assert res["metadata"]["bits"] == 4
+
+
+def test_apply_aqt_quantization_non_dict_param():
+    """Docstring for test_apply_aqt_quantization_non_dict_param."""
+    quantize_mod.jax = MagicMock()
+    quantize_mod.jnp = np
+
+    res = quantize_mod.apply_aqt_quantization("not_a_dict")
+    assert res[0] == "not_a_dict"
 
 
 def test_quantize_model_with_params_non_dict():

@@ -1118,21 +1118,17 @@ def test_snowflake_adapter_setup_schema_error_rollback(monkeypatch: pytest.Monke
 
 
 def test_snowflake_setup_schema_no_commit_or_rollback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test SnowflakeAdapter setup_schema without commit and rollback methods.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-
-    Returns:
-        None.
-    """
+    """Test SnowflakeAdapter setup_schema without commit and rollback methods."""
     import gemma_4_sql.sdk.adapters.snowflake_adapter as s_ad
 
+    # Mock snowflake module so initialization doesn't raise ImportError
+    monkeypatch.setattr(s_ad, "snowflake", MagicMock())
+
     class NoCommitConn:
-        """Connection without commit or rollback."""
+        """Docstring for NoCommitConn."""
 
         def cursor(self) -> MagicMock:
-            """Return mock cursor."""
+            """Docstring for cursor."""
             return MagicMock()
 
     adapter = s_ad.SnowflakeAdapter("acc/db/schema", {})

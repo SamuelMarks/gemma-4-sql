@@ -1,493 +1,271 @@
-"""Tests for PyTorch Serving."""
+"""Tests for PyTorch serve."""
 
-from __future__ import annotations
-
-import typing
-from unittest import mock
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import gemma_4_sql.backends.pytorch.serve as srv
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
-class MockAsyncEngineArgs:
-    """Provide class docstring."""
+def test_pytorch_serve_imports():
+    """Test pytorch serve imports fallback."""
+    import importlib
 
-    def __init__(self, **kwargs: object) -> None:
-        """Execute function."""
+    with patch.dict(sys.modules, {"torch": None, "fastapi": None, "vllm": None}):
+        import gemma_4_sql.backends.pytorch.serve as serve_module
 
+        importlib.reload(serve_module)
+        assert serve_module.torch is None
+        assert serve_module.FastAPI is None
+        assert serve_module.AsyncEngineArgs is None
+        assert serve_module.AsyncLLMEngine is None
 
-class MockAsyncLLMEngine:
-    """Provide class docstring."""
-
-    @staticmethod
-    def from_engine_args(_args: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-
-        class Engine:
-            """Provide class docstring."""
-
-            def generate(self, prompt, *_args: object, **_kwargs: object) -> object:
-                """Execute generate helper."""
-
-                class Output:
-                    """Test class for Output."""
-
-                    class Out:
-                        """Test class for Out."""
-
-                        text = "SELECT * FROM vllm"
-
-                    outputs: typing.ClassVar = [Out()]
-
-                async def gen() -> typing.AsyncGenerator:
-                    """Execute gen helper."""
-                    if prompt == "empty":
-                        return
-                    yield Output()
-
-                return gen()
-
-            async def abort(self, req_id: object) -> None:
-                """Execute function."""
-
-        return Engine()
-
-
-def mock_random_uuid() -> str:
-    """Execute function.
-
-    Returns:
-        object: Description of return.
-
-    """
-    return "123"
-
-
-def test_serve_model_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    from gemma_4_sql.exceptions import DependencyMissingError
-
-    monkeypatch.setattr(srv, "AsyncEngineArgs", None)
-    with pytest.raises(DependencyMissingError, match=r"vLLM dependencies are missing for PyTorch serving\."):
-        srv.serve_model("foo")
-
-
-def test_serve_model_pytorch_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    monkeypatch.setattr(srv, "AsyncEngineArgs", MockAsyncEngineArgs)
-    monkeypatch.setattr(srv, "AsyncLLMEngine", MockAsyncLLMEngine)
-    monkeypatch.setattr(srv, "random_uuid", mock_random_uuid)
-
-    class MockFastAPI:
-        """Docstring."""
-
-        def __init__(self, **_kwargs: object) -> None:
-            """Docstring."""
-            self.router = mock.MagicMock()
-            self.func = None
-
-        def post(self, *_args: object, **_kwargs: object) -> object:
-            """Docstring."""
-
-            def decorator(func: object) -> object:
-                """Docstring."""
-                self.func = func
-                return func
-
-            return decorator
-
-    monkeypatch.setattr(srv, "FastAPI", MockFastAPI)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", MockFastAPI)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-    monkeypatch.setattr(srv, "Request", mock.MagicMock())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", MockFastAPI)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-    res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    if not res["backend"] == "pytorch":
-        raise AssertionError
-    assert res["status"] == "running_vllm"
-    if not res["port"] == int("8000"):
-        raise AssertionError
-
-
-def test_serve_model_pytorch_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    monkeypatch.setattr(srv, "AsyncEngineArgs", MockAsyncEngineArgs)
-    monkeypatch.setattr(srv, "AsyncLLMEngine", MockAsyncLLMEngine)
-
-    class MockFastAPI:
-        """Docstring."""
-
-        def __init__(self, **_kwargs: object) -> None:
-            """Docstring."""
-            self.router = mock.MagicMock()
-            self.func = None
-
-        def post(self, *_args: object, **_kwargs: object) -> object:
-            """Docstring."""
-
-            def decorator(func: object) -> object:
-                """Docstring."""
-                self.func = func
-                return func
-
-            return decorator
-
-    monkeypatch.setattr(srv, "FastAPI", MockFastAPI)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", MockFastAPI)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-
-    def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Raises:
-            ValueError: Description.
-
-        """
-        msg = "err"
-        raise ValueError(msg)
-
-    monkeypatch.setattr(MockAsyncLLMEngine, "from_engine_args", raise_err)
-    res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    if "failed" not in str(res["status"]):
-        raise AssertionError
+    with patch.dict(sys.modules, {"torch": MagicMock(), "fastapi": MagicMock(), "vllm": MagicMock()}):
+        importlib.reload(serve_module)
+    importlib.reload(serve_module)
 
 
 @pytest.mark.asyncio
-async def test_generate_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test generate endpoint logic directly.
+async def test_create_vllm_app(monkeypatch):
+    """Test _create_vllm_app."""
+    import gemma_4_sql.backends.pytorch.serve as serve_module
 
-    Raises:
-        AssertionError: Description.
+    mock_fastapi = MagicMock()
+    mock_app = MagicMock()
 
-    """
-    __import__("importlib", fromlist=[""])
+    mock_fastapi.__call__ = MagicMock(return_value=mock_app)
 
-    srv.AsyncEngineArgs = MockAsyncEngineArgs
-    srv.AsyncLLMEngine = MockAsyncLLMEngine
-    srv.random_uuid = mock_random_uuid
+    monkeypatch.setattr(serve_module, "FastAPI", mock_fastapi)
+    monkeypatch.setattr(serve_module, "AsyncEngineArgs", MagicMock())
+    monkeypatch.setattr(serve_module, "AsyncLLMEngine", MagicMock())
+    monkeypatch.setattr(serve_module, "JSONResponse", MagicMock())
 
-    class MockJSONResponse:
-        """Provide class docstring."""
+    app = serve_module._create_vllm_app("m", 1)
+    assert app == mock_app
 
-        def __init__(self, content: dict) -> None:
-            """Execute function."""
-            self.content = content
+    # Check that route was registered
+    mock_app.post.assert_called_with("/generate")
+    generate_fn = mock_app.post.call_args_list[0][0][0]  # No wait, it's a decorator
 
-    srv.JSONResponse = MockJSONResponse
+    # We can inspect the decorator by capturing it
+    def mock_decorator(path):
+        """Docstring for mock_decorator."""
 
-    class MockApp:
-        """Provide class docstring."""
+        def wrapper(func):
+            """Docstring for wrapper."""
+            mock_app.generate_func = func
+            return func
 
-        def __init__(self) -> None:
-            """Execute function."""
-            self.func = None
-            self.router = mock.MagicMock()
-            self.router.routes = []
+        return wrapper
 
-        def post(self, *_args: object, **_kwargs: object) -> object:
-            """Execute function.
+    mock_app.post.side_effect = mock_decorator
+    serve_module._create_vllm_app("m", 1)
+    generate_fn = mock_app.generate_func
 
-            Returns:
-                object: Description of return.
+    # Test generation execution
+    mock_req = MagicMock()
 
-            """
+    async def mock_json():
+        """Docstring for mock_json."""
+        return {"prompt": "p"}
 
-            def decorator(func: object) -> object:
-                """Execute function.
+    mock_req.json = mock_json
 
-                Returns:
-                    object: Description of return.
+    async def mock_disconnected():
+        """Docstring for mock_disconnected."""
+        return False
 
-                """
-                self.func = func
-                route = mock.MagicMock()
-                route.endpoint = func
-                self.router.routes.append(route)
-                return func
+    mock_req.is_disconnected = mock_disconnected
 
-            return decorator
+    mock_engine = MagicMock()
+    serve_module.AsyncLLMEngine.from_engine_args.return_value = mock_engine
 
-        def on_event(self, *_args: object, **_kwargs: object) -> object:
-            """Execute function."""
+    class MockOutput:
+        """Docstring for MockOutput."""
 
-            def decorator(func: object) -> object:
-                """Test function."""
-                return func
+        class Out:
+            """Docstring for Out."""
 
-            return decorator
+            text = "sql"
 
-    app_instance = MockApp()
-    srv.FastAPI = lambda *_args, **_kwargs: app_instance
-    srv.Request = mock.MagicMock()
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", lambda *_args, **_kwargs: app_instance)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-    monkeypatch.setattr(srv, "Request", mock.MagicMock())
-    import gemma_4_sql.backends.common_serve
+        outputs = [Out()]
 
-    if hasattr(gemma_4_sql.backends.common_serve, "Request"):
-        monkeypatch.setattr("gemma_4_sql.backends.common_serve.Request", mock.MagicMock())
-    res = srv.serve_model(
-        "foo",
-    )
-    res["app"]
-    generate_func = app_instance.func
-    request = mock.AsyncMock()
-    request.json.return_value = {"prompt": "test"}
-    request.is_disconnected.return_value = False
-    result = await generate_func(request)
-    if result.content["sql"] != "SELECT * FROM vllm":
-        raise AssertionError
-    request.is_disconnected.return_value = True
-    result2 = await generate_func(request)
-    if "error" not in result2.content:
-        raise AssertionError
-    request.json.return_value = {"prompt": "empty"}
-    request.is_disconnected.return_value = False
-    result3 = await generate_func(request)
-    if result3.content["sql"] != "":
-        raise AssertionError
+    async def mock_generate_stream(*args, **kwargs):
+        """Docstring for mock_generate_stream."""
+        yield MockOutput()
+
+    mock_engine.generate.return_value = mock_generate_stream()
+
+    def mock_json_response(content):
+        """Docstring for mock_json_response."""
+        return {"response": content}
+
+    serve_module.JSONResponse.__call__ = mock_json_response
+
+    app = serve_module._create_vllm_app("m", 1)
+    generate_fn = mock_app.generate_func
+
+    res = await generate_fn(mock_req)
+    assert res == {"response": {"sql": "sql"}}
+
+    # Test disconnect
+    async def mock_disconnected_true():
+        """Docstring for mock_disconnected_true."""
+        return True
+
+    mock_req.is_disconnected = mock_disconnected_true
+
+    async def mock_abort(*args):
+        """Docstring for mock_abort."""
+
+    mock_engine.abort = mock_abort
+
+    mock_engine.generate.return_value = mock_generate_stream()
+
+    res2 = await generate_fn(mock_req)
+    assert res2 == {"response": {"error": "Client disconnected"}}
+
+    # Test missing app or JSONResponse
+    serve_module.JSONResponse = None
+    app = serve_module._create_vllm_app("m", 1)
+    assert app == mock_app
 
 
-def test_serve_imports_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    m_serve = __import__("gemma_4_sql.backends.pytorch.serve", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "uvicorn", type("M", (), {})())
-    monkeypatch.setitem(sys.modules, "fastapi", type("M", (), {"FastAPI": None, "Request": None})())
-    monkeypatch.setitem(sys.modules, "fastapi.responses", type("M", (), {"JSONResponse": None})())
-    monkeypatch.setitem(sys.modules, "vllm", type("M", (), {"AsyncEngineArgs": None, "AsyncLLMEngine": None})())
-    monkeypatch.setitem(sys.modules, "vllm.utils", type("M", (), {"random_uuid": None})())
-    importlib.reload(m_serve)
-    monkeypatch.undo()
-    importlib.reload(m_serve)
+def test_create_native_app():
+    """Test _create_native_app."""
+    import gemma_4_sql.backends.pytorch.serve as serve_module
+
+    with patch("gemma_4_sql.backends.pytorch.serve.create_common_app") as mock_create:
+        serve_module._create_native_app("m", 1)
+        mock_create.assert_called_once()
+
+        generate_logic = mock_create.call_args[1]["generate_logic"]
+        batch_generate_logic = mock_create.call_args[1]["batch_generate_logic"]
+
+        with patch("gemma_4_sql.backends.pytorch.inference.generate_sql") as mock_gen:
+            mock_gen.return_value = {"sql": "SELECT 1;"}
+            assert generate_logic("p") == "SELECT 1;"
+
+            mock_gen.return_value = {}
+            assert "pytorch_native" in generate_logic("p")
+
+            mock_gen.side_effect = RuntimeError("error")
+            assert "pytorch_native" in generate_logic("p")
+
+        with patch("gemma_4_sql.backends.pytorch.inference.generate_sql") as mock_gen:
+            mock_gen.return_value = {"sql": "sql"}
+            assert batch_generate_logic(["p1", "p2"]) == ["sql", "sql"]
+
+
+def test_serve_model(monkeypatch):
+    """Test serve_model."""
+    import gemma_4_sql.backends.pytorch.serve as serve_module
+
+    monkeypatch.setattr(serve_module, "AsyncEngineArgs", MagicMock())
+
+    with patch("gemma_4_sql.backends.pytorch.serve.serve_model_wrapper") as mock_wrapper:
+        # Test vLLM
+        mock_wrapper.return_value = {"status": "running_pytorch_serve"}
+        res = serve_module.serve_model("m")
+        assert res["status"] == "running_vllm"
+
+        app_factory = mock_wrapper.call_args[1]["app_factory"]
+        with patch("gemma_4_sql.backends.pytorch.serve._create_vllm_app") as mock_create_vllm:
+            app_factory()
+            mock_create_vllm.assert_called_once()
+
+        # Test native
+        mock_wrapper.return_value = {"status": "running_pytorch_serve"}
+        res = serve_module.serve_model("m", native_fallback=True)
+        assert res["status"] == "running_pytorch_serve"
+
+        app_factory_native = mock_wrapper.call_args[1]["app_factory"]
+        with patch("gemma_4_sql.backends.pytorch.serve._create_native_app") as mock_create_native:
+            app_factory_native()
+            mock_create_native.assert_called_once()
+
+        mock_wrapper.return_value = {"status": "failed"}
+        res = serve_module.serve_model("m", native_fallback=True)
+        assert res["status"] == "failed"
+
+        # Test vllm failed
+        mock_wrapper.return_value = {"status": "failed"}
+        res = serve_module.serve_model("m")
+        assert res["status"] == "failed"
+
+        app_factory = mock_wrapper.call_args[1]["app_factory"]
+        with patch("gemma_4_sql.backends.pytorch.serve._create_vllm_app") as mock_create_vllm2:
+            app_factory()
+            mock_create_vllm2.assert_called_once()
+
+    # Test vLLM missing deps
+    serve_module.AsyncEngineArgs = None
+    with pytest.raises(DependencyMissingError):
+        serve_module.serve_model("m")
 
 
 @pytest.mark.asyncio
-async def test_serve_pytorch_coverage(monkeypatch):
-    """Test serve pytorch coverage functionality."""
-    import gemma_4_sql.backends.pytorch.serve as pts
+async def test_create_vllm_app_empty_generator(monkeypatch):
+    """Docstring for test_create_vllm_app_empty_generator."""
+    from unittest.mock import MagicMock
 
-    class MockEngine:
-        """Test class for MockEngine."""
+    import gemma_4_sql.backends.pytorch.serve as serve_module
 
-        async def generate(self, *a, **k):
-            # empty generator to cover 56->61
-            """Execute generate helper."""
-            if False:
-                yield None
+    mock_fastapi = MagicMock()
+    mock_app = MagicMock()
+    mock_fastapi.__call__ = MagicMock(return_value=mock_app)
 
-        async def abort(self, *a, **k):
-            """Execute abort helper."""
+    monkeypatch.setattr(serve_module, "FastAPI", mock_fastapi)
+    monkeypatch.setattr(serve_module, "AsyncEngineArgs", MagicMock())
+    monkeypatch.setattr(serve_module, "AsyncLLMEngine", MagicMock())
+    monkeypatch.setattr(serve_module, "JSONResponse", MagicMock())
 
-    class MockRequest:
-        """Test class for MockRequest."""
+    def mock_decorator(path):
+        """Docstring for mock_decorator."""
 
-        async def json(self):
-            """Execute json helper."""
-            return {"prompt": "p"}
+        def wrapper(func):
+            """Docstring for wrapper."""
+            mock_app.generate_func = func
+            return func
 
-        async def is_disconnected(self):
-            """Execute is disconnected helper."""
-            return False
+        return wrapper
 
-    monkeypatch.setattr(pts, "AsyncLLMEngine", type("AsyncLLMEngine", (), {"from_engine_args": lambda *a: MockEngine()}))
-    monkeypatch.setattr(pts, "AsyncEngineArgs", lambda **k: None)
-    monkeypatch.setattr(pts, "random_uuid", lambda: "123")
+    mock_app.post.side_effect = mock_decorator
 
-    class MockFastAPI:
-        """Test class for MockFastAPI."""
+    serve_module._create_vllm_app("m", 1)
+    generate_fn = mock_app.generate_func
 
-        def __init__(self, **kwargs):
-            """Initialize __init__."""
-            self.routes = []
+    mock_req = MagicMock()
 
-        def post(self, path):
-            """Execute post helper."""
+    async def mock_json():
+        """Docstring for mock_json."""
+        return {"prompt": "p"}
 
-            def decorator(f):
-                """Execute decorator helper."""
+    mock_req.json = mock_json
 
-                class Route:
-                    """Test class for Route."""
+    async def mock_disconnected():
+        """Docstring for mock_disconnected."""
+        return False
 
-                    def __init__(self, path, endpoint):
-                        """Initialize __init__."""
-                        self.path = path
-                        self.endpoint = endpoint
+    mock_req.is_disconnected = mock_disconnected
 
-                self.routes.append(Route(path, f))
-                return f
+    mock_engine = MagicMock()
+    serve_module.AsyncLLMEngine.from_engine_args.return_value = mock_engine
 
-            return decorator
+    async def mock_generate_stream(*args, **kwargs):
+        # Empty generator
+        """Docstring for mock_generate_stream."""
+        if False:
+            yield None
 
-    monkeypatch.setattr(pts, "FastAPI", MockFastAPI)
-    monkeypatch.setattr(pts, "JSONResponse", lambda content: type("JSONResponse", (), {"body": __import__("json").dumps(content).encode()})())
+    mock_engine.generate.return_value = mock_generate_stream()
 
-    app = pts._create_app("model", 100)
-    # find the route
-    route = next(r for r in app.routes if getattr(r, "path", "") == "/generate")
+    def mock_json_response(content):
+        """Docstring for mock_json_response."""
+        return {"response": content}
 
-    # We must patch endpoint directly since FastAPI Request requires scope
-    res = await route.endpoint(MockRequest())
-    import json
+    serve_module.JSONResponse.__call__ = mock_json_response
 
-    assert json.loads(res.body.decode()) == {"sql": ""}
-
-
-def test_serve_model_pytorch_native_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test PyTorch serving with native continuous batching fallback."""
-    monkeypatch.setattr(srv, "AsyncEngineArgs", None)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", mock.MagicMock())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-
-    res = srv.serve_model(
-        "foo",
-        port=8000,
-        max_batch_size=32,
-        native_fallback=True,
-    )
-    assert res["backend"] == "pytorch"
-    assert res["status"] == "running_pytorch_serve"
-    assert res["mode"] == "continuous_batching"
-
-
-def test_pytorch_native_serve_generate_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test PyTorch native app generation logic with successful inference, empty sql, and exceptions.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-
-    Returns:
-        None.
-    """
-    captured_logic: dict[str, typing.Callable[..., object]] = {}
-
-    def mock_create_common_app(**kwargs: object) -> dict[str, object]:
-        """Docstring for mock_create_common_app."""
-        captured_logic["generate"] = typing.cast(typing.Callable[..., object], kwargs.get("generate_logic"))
-        captured_logic["batch_generate"] = typing.cast(typing.Callable[..., object], kwargs.get("batch_generate_logic"))
-        return {"backend": "pytorch", "status": "running_pytorch_serve"}
-
-    monkeypatch.setattr(srv, "create_common_app", mock_create_common_app)
-
-    # 1. Successful inference returning SQL
-    monkeypatch.setattr(
-        "gemma_4_sql.backends.pytorch.inference.generate_sql",
-        lambda *a, **k: {"sql": "SELECT 1"},
-    )
-    srv._create_native_app(
-        "test-model",
-        16,
-    )
-    gen = captured_logic["generate"]
-    batch_gen = captured_logic["batch_generate"]
-    assert gen("test prompt") == "SELECT 1"
-    assert batch_gen(["p1", "p2"]) == ["SELECT 1", "SELECT 1"]
-
-    # 2. Inference returning empty SQL
-    monkeypatch.setattr(
-        "gemma_4_sql.backends.pytorch.inference.generate_sql",
-        lambda *a, **k: {"sql": None},
-    )
-    srv._create_native_app(
-        "test-model",
-        16,
-    )
-    gen = captured_logic["generate"]
-    assert "SELECT * FROM pytorch_native" in str(gen("test prompt"))
-
-    # 3. Inference raising RuntimeError
-    def mock_raise(*a: object, **k: object) -> dict[str, object]:
-        """Docstring for mock_raise."""
-        raise RuntimeError("Inference failed")
-
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.generate_sql", mock_raise)
-    srv._create_native_app(
-        "test-model",
-        16,
-    )
-    gen = captured_logic["generate"]
-    assert "SELECT * FROM pytorch_native" in str(gen("test prompt"))
-
-    # Test
-    srv._create_native_app(
-        "test-model",
-        16,
-    )
-    gen_tm = captured_logic["generate"]
-    assert "SELECT * FROM pytorch_native" in str(gen_tm("test prompt"))
-
-    # 4. Native serve with  to hit logger.info
-    monkeypatch.setattr(srv, "AsyncEngineArgs", None)
-    res = srv.serve_model(
-        "test-model",
-        port=8000,
-        native_fallback=True,
-    )
-    assert res["status"] == "running_pytorch_serve"
-
-
-def test_serve_model_pytorch_native(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_serve_model_pytorch_native."""
-    import gemma_4_sql.backends.pytorch.serve as srv
-
-    monkeypatch.setattr(srv, "vllm", None)
-    monkeypatch.setattr(srv, "AsyncLLMEngine", None)
-    monkeypatch.setattr(srv, "AsyncEngineArgs", mock.MagicMock())
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.uvicorn", mock.MagicMock())
-
-    app = srv.serve_model("model", native_fallback=True)
-    assert app is not None
-
-
-def test_vllm_app_request_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_vllm_app_request_none."""
-    import gemma_4_sql.backends.pytorch.serve as srv
-
-    monkeypatch.setattr(srv, "Request", None)
-    monkeypatch.setattr(srv, "JSONResponse", None)
-
-    class DummyFastAPI:
-        """Docstring for DummyFastAPI."""
-
-        def __init__(self, *args, **kwargs):
-            """Docstring for __init__."""
-            self.router = mock.MagicMock()
-            route = mock.MagicMock()
-            route.endpoint = mock.AsyncMock()
-            self.router.routes = [route]
-
-    monkeypatch.setattr(srv, "FastAPI", DummyFastAPI)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.FastAPI", DummyFastAPI)
-
-    monkeypatch.setattr(srv, "AsyncLLMEngine", MockAsyncLLMEngine)
-    monkeypatch.setattr(srv, "AsyncEngineArgs", MockAsyncEngineArgs)
-    monkeypatch.setattr(srv, "random_uuid", mock_random_uuid)
-
-    app_instance = srv._create_vllm_app("model", 1)
-    import asyncio
-
-    asyncio.run(app_instance.router.routes[-1].endpoint({"prompt": "query"}))
+    res = await generate_fn(mock_req)
+    assert res == {"response": {"sql": ""}}

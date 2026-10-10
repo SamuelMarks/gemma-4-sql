@@ -34,7 +34,6 @@ class SiglipVisionEmbeddings(nnx.Module):
         bi = functools.partial(jax.nn.initializers.zeros)
         self.patch_embedding = nnx.Conv(config.num_channels, config.hidden_size, kernel_size=(config.patch_size, config.patch_size), strides=(config.patch_size, config.patch_size), padding="valid", kernel_init=ki, bias_init=bi, rngs=rngs)
         self.position_embedding = make_embed(self.num_patches, config.hidden_size, embedding_metadata={}, rngs=rngs)
-        self.position_ids = jnp.expand_dims(jnp.arange(self.num_patches), 0)
 
     def __call__(self, pixel_values: Array) -> Array:
         """Apply patch and position embeddings to pixel values.
@@ -46,7 +45,8 @@ class SiglipVisionEmbeddings(nnx.Module):
         patch_embeds = self.patch_embedding(pixel_values)
         (b, h, w, c) = patch_embeds.shape
         embeddings = patch_embeds.reshape((b, h * w, c))
-        return embeddings + self.position_embedding(self.position_ids)
+        position_ids = jnp.expand_dims(jnp.arange(self.num_patches), 0)
+        return embeddings + self.position_embedding(position_ids)
 
 
 class SiglipAttention(nnx.Module):

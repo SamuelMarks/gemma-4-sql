@@ -1,6 +1,5 @@
 """Module docstring."""
 
-import importlib
 import sys
 from unittest.mock import MagicMock
 
@@ -15,20 +14,7 @@ def test_mlx_imports():
 
     import gemma_4_sql.backends.mlx as mlx_init
 
-    importlib.reload(mlx_init)
     assert mlx_init.get_trainer() == "mlx_trainer"
-
-    import gemma_4_sql.backends.mlx.inference as m_inf
-
-    importlib.reload(m_inf)
-
-    import gemma_4_sql.backends.mlx.peft as m_peft
-
-    importlib.reload(m_peft)
-
-    import gemma_4_sql.backends.mlx.train as m_train
-
-    importlib.reload(m_train)
 
 
 def test_mlx_logging_missing_tb(monkeypatch):

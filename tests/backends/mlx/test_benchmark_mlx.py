@@ -1,279 +1,228 @@
-"""Module docstring."""
+"""Tests for mlx benchmark."""
 
-import importlib
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import gemma_4_sql.backends.mlx.benchmark as mlx_benchmark
-from gemma_4_sql.backends.mlx.benchmark import (
-    _get_peak_memory_mb,
-    _load_mlx_model_and_device,
-    _run_benchmark_pass,
-    _sync_and_eval,
-    benchmark_model,
-)
 from gemma_4_sql.exceptions import DependencyMissingError
 
 
-@pytest.fixture(autouse=True)
-def mock_mlx(monkeypatch):
-    """Docstring for mock_mlx."""
+def test_mlx_benchmark_imports():
+    """Test mlx benchmark imports fallback."""
+    # test mlx core fails
+    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None, "mlx_lm": MagicMock()}):
+        if "gemma_4_sql.backends.mlx.benchmark" in sys.modules:
+            del sys.modules["gemma_4_sql.backends.mlx.benchmark"]
+        import gemma_4_sql.backends.mlx.benchmark as benchmark_module
+
+        assert benchmark_module.mx is None
+
+    # test mlx_lm fails
+    with patch.dict(sys.modules, {"mlx": MagicMock(), "mlx.core": MagicMock(), "mlx_lm": None}):
+        if "gemma_4_sql.backends.mlx.benchmark" in sys.modules:
+            del sys.modules["gemma_4_sql.backends.mlx.benchmark"]
+        import gemma_4_sql.backends.mlx.benchmark as benchmark_module
+
+        assert benchmark_module.load is None
+
+
+def test_mlx_benchmark_missing_deps():
+    """Test mlx benchmark missing deps."""
+    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None, "mlx_lm": None}):
+        import gemma_4_sql.backends.mlx.benchmark as benchmark_module
+
+        benchmark_module.mx = None
+        benchmark_module.load = None
+
+        with pytest.raises(DependencyMissingError, match="MLX dependencies"):
+            benchmark_module._load_mlx_model_and_device("model", "cpu")
+
+        with pytest.raises(DependencyMissingError, match="MLX dependencies"):
+            benchmark_module._run_benchmark_pass(None, 1, 1)
+
+
+def test_load_mlx_model_and_device():
+    """Test load mlx model and device."""
+    import gemma_4_sql.backends.mlx.benchmark as benchmark_module
+
     mock_mx = MagicMock()
     mock_load = MagicMock()
-    monkeypatch.setattr(mlx_benchmark, "mx", mock_mx)
-    monkeypatch.setattr(mlx_benchmark, "load", mock_load)
-    return mock_mx, mock_load
 
+    benchmark_module.mx = mock_mx
+    benchmark_module.load = mock_load
 
-def test_load_mlx_model_missing_deps(monkeypatch):
-    """Docstring for test_load_mlx_model_missing_deps."""
-    monkeypatch.setattr(mlx_benchmark, "mx", None)
-    with pytest.raises(DependencyMissingError, match="MLX dependencies"):
-        _load_mlx_model_and_device("model", "gpu")
+    # Mock __call__ attribute specifically if it's accessed that way
+    mock_load.__call__ = MagicMock(return_value=["model", "tokenizer"])
 
-
-def test_load_mlx_model_cpu(mock_mlx):
-    """Docstring for test_load_mlx_model_cpu."""
-    mock_mx, mock_load = mock_mlx
-    mock_mx.cpu = MagicMock()
-    mock_load.return_value = (MagicMock(), MagicMock())
-
-    _model, device = _load_mlx_model_and_device("model", "cpu")
+    # cpu
+    model, device = benchmark_module._load_mlx_model_and_device("model", "cpu")
+    assert model == "model"
     assert device == "cpu"
-    mock_mx.set_default_device.assert_called_once()
-    mock_mx.Device.assert_called_with(mock_mx.cpu)
+    mock_mx.set_default_device.assert_called()
 
-
-def test_load_mlx_model_gpu(mock_mlx):
-    """Docstring for test_load_mlx_model_gpu."""
-    mock_mx, mock_load = mock_mlx
-    mock_mx.gpu = 0
-    mock_load.return_value = MagicMock()  # not a tuple
-
-    _model, device = _load_mlx_model_and_device("model", "gpu")
-    assert device == "gpu"
-    mock_mx.set_default_device.assert_called_once()
-    mock_mx.Device.assert_called_with(0)
-
-
-def test_load_mlx_model_device_error(mock_mlx):
-    """Docstring for test_load_mlx_model_device_error."""
-    mock_mx, mock_load = mock_mlx
-    mock_mx.set_default_device.side_effect = ValueError("Invalid device")
-    mock_load.return_value = MagicMock()
-
-    _model, device = _load_mlx_model_and_device("model", "gpu")
+    # gpu
+    model, device = benchmark_module._load_mlx_model_and_device("model", "gpu")
     assert device == "gpu"
 
+    # not tuple
+    mock_load.__call__ = MagicMock(return_value="model_only")
+    model, device = benchmark_module._load_mlx_model_and_device("model", "gpu")
+    assert model == "model_only"
 
-def test_sync_and_eval(mock_mlx):
-    """Docstring for test_sync_and_eval."""
-    mock_mx, _ = mock_mlx
-    # Test single
-    _sync_and_eval(MagicMock())
-    mock_mx.eval.assert_called_once()
-    mock_mx.eval.reset_mock()
+    # mx set default device raises
+    mock_mx.set_default_device.side_effect = ValueError("error")
+    model, device = benchmark_module._load_mlx_model_and_device("model", "gpu")
 
-    # Test list
-    _sync_and_eval([MagicMock(), MagicMock()])
-    mock_mx.eval.assert_called_once()
-
-
-def test_sync_and_eval_no_mx(monkeypatch):
-    """Docstring for test_sync_and_eval_no_mx."""
-    monkeypatch.setattr(mlx_benchmark, "mx", None)
-    # Should not crash
-    _sync_and_eval(MagicMock())
-
-
-def test_get_peak_memory_mb_no_mx(monkeypatch):
-    """Docstring for test_get_peak_memory_mb_no_mx."""
-    monkeypatch.setattr(mlx_benchmark, "mx", None)
-    assert _get_peak_memory_mb() == 0.0
-
-
-def test_get_peak_memory_mb_metal(mock_mlx):
-    """Docstring for test_get_peak_memory_mb_metal."""
-    mock_mx, _ = mock_mlx
-    mock_mx.metal.is_available.return_value = True
-    mock_mx.metal.get_peak_memory.return_value = 1024 * 1024 * 10
-    assert _get_peak_memory_mb() == 10.0
-
-
-def test_get_peak_memory_mb_metal_fallback_active(mock_mlx):
-    """Docstring for test_get_peak_memory_mb_metal_fallback_active."""
-    mock_mx, _ = mock_mlx
-    mock_mx.metal.is_available.return_value = True
-    mock_mx.metal.get_peak_memory.return_value = 0
-    mock_mx.metal.get_active_memory.return_value = 1024 * 1024 * 5
-    assert _get_peak_memory_mb() == 5.0
-
-
-def test_get_peak_memory_mb_no_metal_fallback(mock_mlx):
-    """Docstring for test_get_peak_memory_mb_no_metal_fallback."""
-    mock_mx, _ = mock_mlx
-    del mock_mx.metal.get_peak_memory
-    del mock_mx.metal.get_active_memory
-    mock_mx.get_peak_memory.return_value = 1024 * 1024 * 2
-    assert _get_peak_memory_mb() == 2.0
-
-
-def test_run_benchmark_pass_missing_mx(monkeypatch):
-    """Docstring for test_run_benchmark_pass_missing_mx."""
-    monkeypatch.setattr(mlx_benchmark, "mx", None)
-    with pytest.raises(DependencyMissingError, match="MLX dependencies are missing."):
-        _run_benchmark_pass(MagicMock(), 1, 1)
-
-
-def test_run_benchmark_pass(mock_mlx):
-    """Docstring for test_run_benchmark_pass."""
-    mock_mx, _ = mock_mlx
-    mock_mx.zeros.return_value = MagicMock()
-    mock_mx.metal.get_peak_memory.return_value = 100
-    mock_model = MagicMock()
-
-    # Test typical success path
-    tokens_per_sec, latency_ms, memory_mb = _run_benchmark_pass(model=mock_model, batch_size=1, num_runs=2, prompt_len=2, decode_tokens=2)
-    assert tokens_per_sec > 0
-    assert latency_ms > 0
-    assert memory_mb >= 0
-
-
-def test_run_benchmark_pass_metal_reset_error(mock_mlx):
-    """Docstring for test_run_benchmark_pass_metal_reset_error."""
-    mock_mx, _ = mock_mlx
-    mock_mx.metal.reset_peak_memory.side_effect = RuntimeError("Failed")
-    mock_mx.zeros.return_value = MagicMock()
-    mock_mx.metal.get_peak_memory.return_value = 100
-    mock_model = MagicMock()
-
-    # Should not crash
-    _run_benchmark_pass(model=mock_model, batch_size=1, num_runs=1, prompt_len=2, decode_tokens=2)
-
-
-def test_benchmark_model(mock_mlx):
-    """Docstring for test_benchmark_model."""
-    mock_mx, mock_load = mock_mlx
-    mock_load.return_value = MagicMock()
-    mock_mx.metal.get_peak_memory.return_value = 100
-
-    result = benchmark_model("model", "cpu", 1, num_runs=1, prompt_len=2, decode_tokens=2)
-    assert result["backend"] == "mlx"
-    assert "status" in result
-
-
-def test_benchmark_model_missing_deps(monkeypatch):
-    """Docstring for test_benchmark_model_missing_deps."""
-    monkeypatch.setattr(mlx_benchmark, "load", None)
-    result = benchmark_model("model", "cpu", 1)
-    assert result["status"] == "mocked_missing_mlx"
-
-
-def test_get_peak_memory_mb_no_methods(mock_mlx):
-    """Docstring for test_get_peak_memory_mb_no_methods."""
-    mock_mx, _ = mock_mlx
-    del mock_mx.metal.get_peak_memory
-    del mock_mx.metal.get_active_memory
-    del mock_mx.get_peak_memory
-    assert _get_peak_memory_mb() == 0.0
-
-
-def test_run_benchmark_pass_no_model(mock_mlx):
-    """Docstring for test_run_benchmark_pass_no_model."""
-    mock_mx, _ = mock_mlx
-    mock_mx.zeros.return_value = MagicMock()
-    del mock_mx.metal.get_peak_memory
-    del mock_mx.metal.get_active_memory
-    mock_mx.get_peak_memory.return_value = 0
-
-    tokens_per_sec, latency_ms, memory_mb = _run_benchmark_pass(model=None, batch_size=1, num_runs=1, prompt_len=2, decode_tokens=2)
-    assert tokens_per_sec > 0
-    assert latency_ms > 0
-    assert memory_mb == 0.0
-
-
-def test_load_mlx_model_no_device_support(mock_mlx):
-    """Docstring for test_load_mlx_model_no_device_support."""
-    mock_mx, mock_load = mock_mlx
+    # mx missing set_default_device
     del mock_mx.set_default_device
-    mock_load.return_value = MagicMock()
-
-    _model, device = _load_mlx_model_and_device("model", "gpu")
+    model, device = benchmark_module._load_mlx_model_and_device("model", "gpu")
     assert device == "gpu"
+    assert model == "model_only"
 
 
-def test_get_peak_memory_mb_metal_no_peak_memory(mock_mlx):
-    """Docstring for test_get_peak_memory_mb_metal_no_peak_memory."""
-    mock_mx, _ = mock_mlx
+def test_sync_and_eval():
+    """Test sync and eval."""
+    import gemma_4_sql.backends.mlx.benchmark as benchmark_module
+
+    mock_mx = MagicMock()
+    benchmark_module.mx = mock_mx
+
+    benchmark_module._sync_and_eval(["t1", "t2"])
+    mock_mx.eval.assert_called_with("t1", "t2")
+
+    benchmark_module._sync_and_eval("t1")
+    mock_mx.eval.assert_called_with("t1")
+
+    benchmark_module.mx = None
+    benchmark_module._sync_and_eval("t1")  # shouldn't raise
+
+
+def test_get_peak_memory_mb():
+    """Test get peak memory mb."""
+    import gemma_4_sql.backends.mlx.benchmark as benchmark_module
+
+    mock_mx = MagicMock()
+    benchmark_module.mx = mock_mx
+
+    # metal available
     mock_mx.metal.is_available.return_value = True
-    del mock_mx.metal.get_peak_memory
-    mock_mx.get_peak_memory.return_value = 0
-    mock_mx.metal.get_active_memory.return_value = 1024 * 1024 * 3
-    assert _get_peak_memory_mb() == 3.0
+    mock_mx.metal.get_peak_memory.return_value = 1048576 * 10
+    assert benchmark_module._get_peak_memory_mb() == 10.0
 
+    # fallback to get_active_memory
+    mock_mx.metal.get_peak_memory.return_value = 0
+    mock_mx.metal.get_active_memory.return_value = 1048576 * 5
+    assert benchmark_module._get_peak_memory_mb() == 5.0
 
-def test_get_peak_memory_mb_metal_no_active_memory(mock_mlx):
-    """Docstring for test_get_peak_memory_mb_metal_no_active_memory."""
-    mock_mx, _ = mock_mlx
-    mock_mx.metal.is_available.return_value = True
-    del mock_mx.metal.get_peak_memory
+    # missing get_active_memory but has mx.get_peak_memory
     del mock_mx.metal.get_active_memory
-    mock_mx.get_peak_memory.return_value = 1024 * 1024 * 4
-    assert _get_peak_memory_mb() == 4.0
+    mock_mx.get_peak_memory.return_value = 1048576 * 2
+    assert benchmark_module._get_peak_memory_mb() == 2.0
+
+    # fallback to get_peak_memory directly if metal is not available
+    mock_mx.metal.is_available.return_value = False
+    mock_mx.get_peak_memory.return_value = 1048576 * 2
+    assert benchmark_module._get_peak_memory_mb() == 2.0
+
+    # nothing available
+    del mock_mx.get_peak_memory
+    assert benchmark_module._get_peak_memory_mb() == 0.0
+
+    # None
+    benchmark_module.mx = None
+    assert benchmark_module._get_peak_memory_mb() == 0.0
 
 
-def test_benchmark_module_reload():
-    """Docstring for test_benchmark_module_reload."""
-    import gemma_4_sql.backends.mlx.benchmark as bm
+@patch("time.perf_counter")
+def test_run_benchmark_pass(mock_perf):
+    """Test run benchmark pass."""
+    import gemma_4_sql.backends.mlx.benchmark as benchmark_module
 
-    importlib.reload(bm)
+    mock_mx = MagicMock()
+    benchmark_module.mx = mock_mx
+
+    mock_mx.metal.is_available.return_value = False
+    mock_mx.get_peak_memory.return_value = 0
+    mock_mx.zeros.return_value = MagicMock()
+
+    mock_model = MagicMock()
+    mock_model.return_value = "out"
+
+    times = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+    mock_perf.side_effect = times * 10
+
+    tokens_sec, lat_ms, mem_mb = benchmark_module._run_benchmark_pass(model=mock_model, batch_size=1, num_runs=1, prompt_len=2, decode_tokens=2)
+
+    assert tokens_sec > 0
+    assert lat_ms > 0
+
+    # metal reset peak memory
+    mock_mx.metal.reset_peak_memory.side_effect = RuntimeError("error")
+    benchmark_module._run_benchmark_pass(mock_model, 1, 1)
+
+    # model is None
+    del mock_mx.metal
+    benchmark_module._run_benchmark_pass(None, 1, 1)
 
 
-def test_benchmark_module_reload_with_mock_modules():
-    """Docstring for test_benchmark_module_reload_with_mock_modules."""
-    import gemma_4_sql.backends.mlx.benchmark as bm
+def test_benchmark_model():
+    """Test benchmark_model."""
+    import gemma_4_sql.backends.mlx.benchmark as benchmark_module
+
+    benchmark_module.mx = MagicMock()
+    benchmark_module.mx.metal.get_peak_memory.return_value = 100
+    benchmark_module.load = MagicMock()
+
+    with patch.object(benchmark_module, "run_benchmark_wrapper") as mock_wrapper:
+        mock_wrapper.return_value = {"status": "ok"}
+        res = benchmark_module.benchmark_model("model", "cpu", 1)
+        assert res == {"status": "ok"}
+
+        # Test benchmark fn
+        fn = mock_wrapper.call_args[1]["benchmark_fn"]
+
+        with patch.object(benchmark_module, "_load_mlx_model_and_device") as mock_load:
+            mock_load.return_value = (MagicMock(), "cpu")
+            with patch.object(benchmark_module, "_run_benchmark_pass") as mock_run:
+                mock_run.return_value = (1.0, 2.0, 3.0)
+                assert fn() == (1.0, 2.0, 3.0)
+
+
+def test_get_peak_memory_mb_missing_metal_get_peak():
+    """Test get_peak_memory_mb missing metal.get_peak_memory to hit branch."""
+    from unittest.mock import MagicMock
+
+    import gemma_4_sql.backends.mlx.benchmark as benchmark_module
+
+    mock_mx = MagicMock()
+    benchmark_module.mx = mock_mx
+    mock_mx.metal.is_available.return_value = True
+    del mock_mx.metal.get_peak_memory
+    mock_mx.metal.get_active_memory.return_value = 1048576 * 3
+    assert benchmark_module._get_peak_memory_mb() == 3.0
+
+
+def test_mlx_benchmark_successful_imports():
+    """Test mlx benchmark successful imports."""
+    import sys
+    from unittest.mock import MagicMock
 
     mock_mlx = MagicMock()
-    mock_mlx_lm = MagicMock()
-    mock_mlx_lm.load = "mocked_load"
+    mock_core = MagicMock()
+    mock_lm = MagicMock()
 
-    # Save original modules
-    orig_mlx = sys.modules.get("mlx.core")
-    orig_mlx_lm = sys.modules.get("mlx_lm")
+    with patch.dict(
+        sys.modules,
+        {
+            "mlx": mock_mlx,
+            "mlx.core": mock_core,
+            "mlx_lm": mock_lm,
+        },
+    ):
+        if "gemma_4_sql.backends.mlx.benchmark" in sys.modules:
+            del sys.modules["gemma_4_sql.backends.mlx.benchmark"]
+        import gemma_4_sql.backends.mlx.benchmark as benchmark_module
 
-    sys.modules["mlx.core"] = mock_mlx
-    sys.modules["mlx_lm"] = mock_mlx_lm
-    try:
-        importlib.reload(bm)
-    finally:
-        if orig_mlx:
-            sys.modules["mlx.core"] = orig_mlx
-        else:
-            del sys.modules["mlx.core"]
-
-        if orig_mlx_lm:
-            sys.modules["mlx_lm"] = orig_mlx_lm
-        else:
-            del sys.modules["mlx_lm"]
-
-
-def test_get_peak_memory_mb_no_metal_but_has_get_peak(mock_mlx):
-    """Docstring for test_get_peak_memory_mb_no_metal_but_has_get_peak."""
-    mock_mx, _ = mock_mlx
-    del mock_mx.metal
-    mock_mx.get_peak_memory.return_value = 1024 * 1024 * 10
-    assert _get_peak_memory_mb() == 10.0
-
-
-def test_run_benchmark_pass_no_metal_module(mock_mlx):
-    """Docstring for test_run_benchmark_pass_no_metal_module."""
-    mock_mx, _ = mock_mlx
-    mock_mx.zeros.return_value = MagicMock()
-    del mock_mx.metal
-    mock_mx.get_peak_memory.return_value = 100
-    mock_model = MagicMock()
-
-    _tokens_per_sec, _latency_ms, memory_mb = _run_benchmark_pass(model=mock_model, batch_size=1, num_runs=2, prompt_len=2, decode_tokens=2)
-    assert memory_mb > 0
+        assert benchmark_module.mx is not None
+        assert benchmark_module.load is not None

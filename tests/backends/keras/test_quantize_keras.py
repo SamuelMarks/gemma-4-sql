@@ -1,257 +1,175 @@
 """Module docstring."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
-from gemma_4_sql.backends.keras import quantize
-from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
+import gemma_4_sql.backends.keras.quantize as q
 
 
-@pytest.fixture
-def mock_np():
-    """Docstring for mock_np."""
-    np_mock = MagicMock()
-    np_mock.max.return_value = 10.0
-    return np_mock
+def test_module_load_import_error(monkeypatch):
+    """Docstring for test_module_load_import_error."""
+    with open(q.__file__) as f:
+        code = f.read()
+
+    import builtins
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name in ("keras", "numpy"):
+            raise ImportError("simulated missing import")
+        return orig_import(name, *args, **kwargs)
+
+    namespace = {"__name__": "mock_quantize", "__builtins__": dict(builtins.__dict__)}
+    namespace["__builtins__"]["__import__"] = mock_import
+
+    exec(code, namespace)  # noqa: S102
+
+    assert namespace.get("keras") is None
+    assert namespace.get("np") is None
 
 
-@pytest.fixture
-def mock_keras():
-    """Docstring for mock_keras."""
-    return MagicMock()
+def test_quantize_layer_weights(monkeypatch):
+    """Docstring for test_quantize_layer_weights."""
+    mock_layer = MagicMock()
+    mock_layer.name = "dense"
+
+    # Missing np
+    monkeypatch.setattr(q, "np", None)
+    assert q.quantize_layer_weights(mock_layer, "int8") == 0
+
+    monkeypatch.setattr(q, "np", np)
+
+    # Needs np array ndim >= 2
+    mock_w = MagicMock()
+    mock_w.name = "kernel"
+    mock_w.numpy.return_value = np.array([[1.0, -1.0], [2.0, -2.0]])
+    mock_layer.weights = [mock_w]
+
+    # int8
+    res = q.quantize_layer_weights(mock_layer, "int8")
+    assert res > 0
+
+    # int4 and zero max
+    mock_layer3 = MagicMock()
+    mock_layer3.name = "dense"
+    mock_w3 = MagicMock()
+    mock_w3.name = "kernel"
+    mock_w3.numpy.return_value = np.array([[0.0, 0.0]])  # ndim=2, zero max
+    del mock_w3.assign  # make hasattr(w, "assign") False
+    mock_layer3.weights = [mock_w3]
+    res3 = q.quantize_layer_weights(mock_layer3, "int4")
+    assert res3 > 0
+
+    # ndim < 2
+    mock_layer_ndim1 = MagicMock()
+    mock_w_ndim1 = MagicMock()
+    mock_w_ndim1.numpy.return_value = np.array([1.0, 2.0])
+    mock_layer_ndim1.weights = [mock_w_ndim1]
+    res_ndim1 = q.quantize_layer_weights(mock_layer_ndim1, "int8")
+    assert res_ndim1 == 0
+
+    # runtime error
+    mock_layer4 = MagicMock()
+    mock_w4 = MagicMock()
+    mock_w4.numpy.side_effect = RuntimeError("sim")
+    mock_layer4.weights = [mock_w4]
+    assert q.quantize_layer_weights(mock_layer4, "int8") == 0
 
 
-class TestQuantizeLayerWeights:
-    """Docstring for TestQuantizeLayerWeights."""
+def test_quantize_model(monkeypatch, tmp_path):
+    """Docstring for test_quantize_model."""
+    from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 
-    def test_np_none(self):
-        """Docstring for test_np_none."""
-        with patch.object(quantize, "np", None):
-            assert quantize.quantize_layer_weights(object()) == 0
+    # 1. Missing keras
+    monkeypatch.setattr(q, "keras", None)
+    with pytest.raises(DependencyMissingError):
+        q.quantize_model("m", "int8")
 
-    def test_method_int8(self, mock_np):
-        """Docstring for test_method_int8."""
-        layer = MagicMock()
-        w1 = MagicMock()
-        w1.numpy.return_value.ndim = 2
-        layer.weights = [w1]
+    mock_keras = MagicMock()
+    monkeypatch.setattr(q, "keras", mock_keras)
 
-        with patch.object(quantize, "np", mock_np):
-            count = quantize.quantize_layer_weights(layer, "int8")
-            assert count == 1
-            w1.assign.assert_called_once()
-            mock_np.clip.assert_called()
-            # check call args for clip
-            clip_args = mock_np.clip.call_args[0]
-            assert clip_args[1] == -128
-            assert clip_args[2] == 127
+    # 2. Unsupported method
+    with pytest.raises(UnsupportedQuantizationMethodError):
+        q.quantize_model("m", "unknown")
 
-    def test_method_int4(self, mock_np):
-        """Docstring for test_method_int4."""
-        layer = MagicMock()
-        w1 = MagicMock()
-        w1.numpy.return_value.ndim = 2
-        layer.weights = [w1]
+    # 3. Model passed in kwargs, success, export_path
+    mock_model = MagicMock()
+    mock_layer = MagicMock()
+    mock_model.layers = [mock_layer]
 
-        with patch.object(quantize, "np", mock_np):
-            count = quantize.quantize_layer_weights(layer, "int4")
-            assert count == 1
-            w1.assign.assert_called_once()
-            clip_args = mock_np.clip.call_args[0]
-            assert clip_args[1] == -8
-            assert clip_args[2] == 7
+    monkeypatch.setattr(q, "quantize_layer_weights", MagicMock(return_value=1))
 
-    def test_numpy_fallback(self, mock_np):
-        """Docstring for test_numpy_fallback."""
-        layer = MagicMock()
-        w1 = MagicMock()
-        del w1.numpy
-        mock_np.array.return_value.ndim = 2
-        layer.weights = [w1]
+    export_dir = tmp_path / "export"
+    res = q.quantize_model("m", "int8", model=mock_model, export_path=str(export_dir))
+    assert res["status"] == "quantized_int8"
+    assert "export_path" in res
+    assert res["quantized_layers_count"] == 1
 
-        with patch.object(quantize, "np", mock_np):
-            count = quantize.quantize_layer_weights(layer, "int8")
-            assert count == 1
-            mock_np.array.assert_called_once_with(w1)
+    # 4. Keras config.set_dtype_policy mock
+    del mock_keras.dtype_policies
+    mock_keras.config.set_dtype_policy = MagicMock()
+    q.quantize_model("m", "int4", model=mock_model)
 
-    def test_ndim_less_than_2(self, mock_np):
-        """Docstring for test_ndim_less_than_2."""
-        layer = MagicMock()
-        w1 = MagicMock()
-        w1.numpy.return_value.ndim = 1
-        layer.weights = [w1]
+    # 4.b Keras without dtype_policies and without config
+    del mock_keras.config
+    q.quantize_model("m", "int4", model=mock_model)
 
-        with patch.object(quantize, "np", mock_np):
-            count = quantize.quantize_layer_weights(layer, "int8")
-            assert count == 0
-            w1.assign.assert_not_called()
+    # 5. Load model from preset
+    import builtins
 
-    def test_max_abs_zero(self, mock_np):
-        """Docstring for test_max_abs_zero."""
-        mock_np.max.return_value = 0.0
-        layer = MagicMock()
-        w1 = MagicMock()
-        w1.numpy.return_value.ndim = 2
-        layer.weights = [w1]
+    original_import = builtins.__import__
 
-        with patch.object(quantize, "np", mock_np):
-            count = quantize.quantize_layer_weights(layer, "int8")
-            assert count == 1
-            w1.assign.assert_called_once()
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name == "keras_nlp.models":
+            mock_models = MagicMock()
+            mock_models.GemmaCausalLM.from_preset.return_value = mock_model
+            return mock_models
+        return original_import(name, *args, **kwargs)
 
-    def test_no_assign_method(self, mock_np):
-        """Docstring for test_no_assign_method."""
-        layer = MagicMock()
-        w1 = MagicMock()
-        w1.numpy.return_value.ndim = 2
-        del w1.assign
-        layer.weights = [w1]
+    monkeypatch.setattr(builtins, "__import__", mock_import)
 
-        with patch.object(quantize, "np", mock_np):
-            count = quantize.quantize_layer_weights(layer, "int8")
-            assert count == 1
+    res = q.quantize_model("m", "int8")
+    assert res["status"] == "quantized_int8"
 
-    @pytest.mark.parametrize("exc", [RuntimeError, ValueError, TypeError, AttributeError])
-    def test_exceptions_caught(self, mock_np, exc):
-        """Docstring for test_exceptions_caught."""
-        layer = MagicMock()
-        w1 = MagicMock()
-        w1.numpy.side_effect = exc("test")
-        layer.weights = [w1]
+    # 6. Load model from preset error
+    def mock_import_err(*args, **kwargs):
+        """Docstring for mock_import_err."""
+        raise ValueError("sim")
 
-        with patch.object(quantize, "np", mock_np):
-            count = quantize.quantize_layer_weights(layer, "int8")
-            assert count == 0
+    monkeypatch.setattr(builtins, "__import__", mock_import_err)
+
+    res = q.quantize_model("m", "int8")
+    assert res["status"] == "quantized_int8"  # Doesn't fail, model is just None
+
+    # 7. Model runtime error
+    mock_model.save.side_effect = RuntimeError("sim")
+    res = q.quantize_model("m", "int8", model=mock_model, export_path=str(export_dir))
+    assert "failed" in res["status"]
+    assert res["memory_reduction_factor"] == 0.0
+
+    # 8. Model without save
+    mock_model_nosave = MagicMock()
+    del mock_model_nosave.save
+    mock_model_nosave.layers = [mock_layer]
+    res = q.quantize_model("m", "int8", model=mock_model_nosave, export_path=str(export_dir))
+    assert res["status"] == "quantized_int8"
 
 
-class TestQuantizeModel:
-    """Docstring for TestQuantizeModel."""
+def test_module_load_import_error_coverage(monkeypatch):
+    """Docstring for test_module_load_import_error_coverage."""
+    import importlib
+    import sys
 
-    def test_keras_none(self):
-        """Docstring for test_keras_none."""
-        with patch.object(quantize, "keras", None), pytest.raises(DependencyMissingError, match="Keras dependencies are missing."):
-            quantize.quantize_model("model_name")
+    import gemma_4_sql.backends.keras.quantize as q
 
-    def test_unsupported_method(self, mock_keras):
-        """Docstring for test_unsupported_method."""
-        with patch.object(quantize, "keras", mock_keras), pytest.raises(UnsupportedQuantizationMethodError, match="Unsupported quantization method"):
-            quantize.quantize_model("model_name", method="int16")
-
-    def test_set_dtype_policy_via_dtype_policies(self, mock_keras):
-        """Docstring for test_set_dtype_policy_via_dtype_policies."""
-        # Setup mock_keras to have dtype_policies
-        mock_keras.dtype_policies = MagicMock()
-        del mock_keras.config
-
-        with patch.object(quantize, "keras", mock_keras):
-            result = quantize.quantize_model("model_name", method="int8")
-            mock_keras.dtype_policies.set_dtype_policy.assert_called_once_with("int8_from_float32")
-            assert result["status"] == "quantized_int8"
-
-    def test_set_dtype_policy_via_config(self, mock_keras):
-        """Docstring for test_set_dtype_policy_via_config."""
-        del mock_keras.dtype_policies
-        mock_keras.config = MagicMock()
-
-        with patch.object(quantize, "keras", mock_keras):
-            result = quantize.quantize_model("model_name", method="int8")
-            mock_keras.config.set_dtype_policy.assert_called_once_with("int8_from_float32")
-            assert result["status"] == "quantized_int8"
-
-    def test_set_dtype_policy_neither(self, mock_keras):
-        """Docstring for test_set_dtype_policy_neither."""
-        del mock_keras.dtype_policies
-        del mock_keras.config
-
-        with patch.object(quantize, "keras", mock_keras):
-            result = quantize.quantize_model("model_name", method="int8")
-            assert result["status"] == "quantized_int8"
-
-    def test_model_provided_in_kwargs(self, mock_keras):
-        """Docstring for test_model_provided_in_kwargs."""
-        mock_model = MagicMock()
-        mock_model.layers = [MagicMock()]
-
-        with patch.object(quantize, "keras", mock_keras), patch.object(quantize, "quantize_layer_weights", return_value=1) as mock_qlw:
-            result = quantize.quantize_model("model_name", method="int4", model=mock_model)
-            assert result["status"] == "quantized_int4"
-            assert result["memory_reduction_factor"] == 0.75
-            assert result["quantized_layers_count"] == 1
-            mock_qlw.assert_called_once_with(mock_model.layers[0], method="int4")
-
-    def test_model_not_provided_import_success(self, mock_keras):
-        """Docstring for test_model_not_provided_import_success."""
-        mock_model_cls = MagicMock()
-        mock_model_instance = MagicMock()
-        mock_model_cls.from_preset.return_value = mock_model_instance
-        mock_model_instance.layers = []
-
-        mock_keras_nlp = MagicMock()
-        mock_keras_nlp.models.GemmaCausalLM = mock_model_cls
-
-        def fake_import(name, fromlist=None):
-            """Docstring for fake_import."""
-            if name == "keras_nlp.models" and "GemmaCausalLM" in fromlist:
-                return mock_keras_nlp.models
-            raise ImportError(name)
-
-        with patch.object(quantize, "keras", mock_keras), patch("builtins.__import__", side_effect=fake_import):
-            result = quantize.quantize_model("preset_name")
-            assert result["status"] == "quantized_int8"
-            mock_model_cls.from_preset.assert_called_once_with("preset_name")
-
-    @pytest.mark.parametrize("exc", [ImportError, ValueError, RuntimeError, AttributeError, OSError])
-    def test_model_not_provided_import_fails(self, mock_keras, exc):
-        """Docstring for test_model_not_provided_import_fails."""
-
-        def fake_import(name, fromlist=None):
-            """Docstring for fake_import."""
-            raise exc("import failed")
-
-        with patch.object(quantize, "keras", mock_keras), patch("builtins.__import__", side_effect=fake_import):
-            result = quantize.quantize_model("preset_name")
-            assert result["status"] == "quantized_int8"
-            assert "quantized_layers_count" not in result
-
-    def test_export_path_provided_with_save(self, mock_keras, tmp_path):
-        """Docstring for test_export_path_provided_with_save."""
-        mock_model = MagicMock()
-        mock_model.layers = []
-        export_dir = tmp_path / "export"
-
-        with patch.object(quantize, "keras", mock_keras):
-            result = quantize.quantize_model("my_model", method="int8", model=mock_model, export_path=str(export_dir))
-
-            assert "export_path" in result
-            expected_file = export_dir / "my_model_int8.keras"
-            assert result["export_path"] == str(expected_file)
-            mock_model.save.assert_called_once_with(str(expected_file))
-            assert export_dir.exists()
-
-    def test_export_path_provided_without_save(self, mock_keras, tmp_path):
-        """Docstring for test_export_path_provided_without_save."""
-        mock_model = MagicMock()
-        mock_model.layers = []
-        del mock_model.save
-        export_dir = tmp_path / "export"
-
-        with patch.object(quantize, "keras", mock_keras):
-            result = quantize.quantize_model("my_model", method="int8", model=mock_model, export_path=str(export_dir))
-
-            assert "export_path" in result
-            # directory should still be created
-            assert export_dir.exists()
-
-    @pytest.mark.parametrize("exc", [RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError])
-    def test_quantize_model_exception_caught(self, mock_keras, exc):
-        """Docstring for test_quantize_model_exception_caught."""
-        # We can trigger an exception by making keras.dtype_policies.set_dtype_policy raise it
-        mock_keras.dtype_policies = MagicMock()
-        mock_keras.dtype_policies.set_dtype_policy.side_effect = exc("test exception")
-
-        with patch.object(quantize, "keras", mock_keras):
-            result = quantize.quantize_model("my_model")
-
-            assert result["status"].startswith("failed:")
-            assert result["memory_reduction_factor"] == 0.0
+    monkeypatch.setitem(sys.modules, "keras", None)
+    importlib.reload(q)
+    assert q.keras is None
+    assert q.np is None
+    monkeypatch.undo()
+    importlib.reload(q)

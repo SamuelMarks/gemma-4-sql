@@ -1,5 +1,8 @@
 [build-system]
-requires = ["hatchling", "hatch-requirements-txt"]
+requires = [
+    "hatchling",
+    "hatch-requirements-txt",
+]
 build-backend = "hatchling.build"
 
 [project]
@@ -9,27 +12,67 @@ description = "Natural text to SQL with Gemma 4; with DuckDB support and swappab
 readme = "README.md"
 license = "Apache-2.0 OR MIT"
 requires-python = ">=3.12"
-dynamic = ["dependencies", "optional-dependencies"]
+dynamic = [
+    "dependencies",
+    "optional-dependencies",
+]
 
 [project.scripts]
 gemma-4-sql = "gemma_4_sql.cli:cli"
+
+[project.entry-points."gemma_4_sql.backends"]
+jax = "gemma_4_sql.backends.jax"
+keras = "gemma_4_sql.backends.keras"
+maxtext = "gemma_4_sql.backends.maxtext"
+pytorch = "gemma_4_sql.backends.pytorch"
+pytorch_hf = "gemma_4_sql.backends.pytorch"
+pytorch_native = "gemma_4_sql.backends.pytorch"
+mlx = "gemma_4_sql.backends.mlx"
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.hatch.metadata.hooks.requirements_txt]
-files = ["requirements.txt"]
+files = [
+    "requirements.txt",
+]
 
 [tool.hatch.metadata.hooks.requirements_txt.optional-dependencies]
-dev = ["requirements-dev.txt"]
-jax = ["requirements-jax.txt"]
-keras = ["requirements-keras.txt"]
-maxtext = ["requirements-maxtext.txt"]
-pytorch = ["requirements-pytorch.txt"]
-duckdb = ["requirements-duckdb.txt"]
-mlx = ["requirements-mlx.txt"]
-all = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxtext.txt", "requirements-pytorch.txt", "requirements-duckdb.txt"]
-default = ["requirements-jax.txt", "requirements-keras.txt", "requirements-maxtext.txt", "requirements-pytorch.txt", "requirements-duckdb.txt"]
+dev = [
+    "requirements-dev.txt",
+]
+jax = [
+    "requirements-jax.txt",
+]
+keras = [
+    "requirements-keras.txt",
+]
+maxtext = [
+    "requirements-maxtext.txt",
+]
+pytorch = [
+    "requirements-pytorch.txt",
+]
+duckdb = [
+    "requirements-duckdb.txt",
+]
+mlx = [
+    "requirements-mlx.txt",
+]
+all = [
+    "requirements-jax.txt",
+    "requirements-keras.txt",
+    "requirements-maxtext.txt",
+    "requirements-pytorch.txt",
+    "requirements-duckdb.txt",
+]
+default = [
+    "requirements-jax.txt",
+    "requirements-keras.txt",
+    "requirements-maxtext.txt",
+    "requirements-pytorch.txt",
+    "requirements-duckdb.txt",
+]
 
 [tool.pydocstyle]
 convention = "pep257"
@@ -37,22 +80,77 @@ add_ignore = "D202"
 
 [tool.ruff]
 unsafe-fixes = true
-
 preview = true
-
 line-length = 320
 target-version = "py39"
 
 [tool.ruff.lint]
-ignore = ["non-empty-init-module", "pytest-raises-ambiguous-pattern", "unused-unpacked-variable", "assert-raises-exception", "star-arg-unpacking-after-keyword-arg", "missing-trailing-comma", "single-line-implicit-string-concatenation", "too-many-statements", "non-pep604-annotation-union", "too-many-statements-in-try-clause", "float-equality-comparison"]
+ignore = [
+    "non-empty-init-module",
+    "pytest-raises-ambiguous-pattern",
+    "unused-unpacked-variable",
+    "assert-raises-exception",
+    "star-arg-unpacking-after-keyword-arg",
+    "missing-trailing-comma",
+    "single-line-implicit-string-concatenation",
+    "too-many-statements",
+    "non-pep604-annotation-union",
+    "too-many-statements-in-try-clause",
+    "float-equality-comparison",
+]
+
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["assert", "no-self-use", "unused-function-argument", "unused-method-argument", "unused-class-method-argument", "unused-async", "docstring-missing-exception", "docstring-missing-returns", "pytest-composite-assertion", "compare-to-empty-string", "too-many-statements-in-try-clause", "import-outside-top-level", "import-private-name", "too-many-locals", "too-many-statements-in-try-clause", "float-equality-comparison", "subclass-builtin", "multiple-with-statements", "mutable-class-default"]
-"src/**/tests/*" = ["assert", "no-self-use", "unused-function-argument", "unused-method-argument", "unused-class-method-argument", "unused-async", "docstring-missing-exception", "docstring-missing-returns", "pytest-composite-assertion", "compare-to-empty-string", "too-many-statements-in-try-clause", "import-outside-top-level", "import-private-name", "too-many-locals", "too-many-statements-in-try-clause", "float-equality-comparison", "subclass-builtin", "multiple-with-statements", "mutable-class-default"]
-select = ["ALL"]
-
-extend-unsafe-fixes = ["ALL"]
-
-extend-safe-fixes = ["ALL"]
+"tests/*" = [
+    "assert",
+    "no-self-use",
+    "unused-function-argument",
+    "unused-method-argument",
+    "unused-class-method-argument",
+    "unused-async",
+    "docstring-missing-exception",
+    "docstring-missing-returns",
+    "pytest-composite-assertion",
+    "compare-to-empty-string",
+    "too-many-statements-in-try-clause",
+    "import-outside-top-level",
+    "import-private-name",
+    "too-many-locals",
+    "too-many-statements-in-try-clause",
+    "float-equality-comparison",
+    "subclass-builtin",
+    "multiple-with-statements",
+    "mutable-class-default",
+]
+"src/**/tests/*" = [
+    "assert",
+    "no-self-use",
+    "unused-function-argument",
+    "unused-method-argument",
+    "unused-class-method-argument",
+    "unused-async",
+    "docstring-missing-exception",
+    "docstring-missing-returns",
+    "pytest-composite-assertion",
+    "compare-to-empty-string",
+    "too-many-statements-in-try-clause",
+    "import-outside-top-level",
+    "import-private-name",
+    "too-many-locals",
+    "too-many-statements-in-try-clause",
+    "float-equality-comparison",
+    "subclass-builtin",
+    "multiple-with-statements",
+    "mutable-class-default",
+]
+select = [
+    "ALL",
+]
+extend-unsafe-fixes = [
+    "ALL",
+]
+extend-safe-fixes = [
+    "ALL",
+]
 
 [tool.ruff.lint.pylint]
 max-args = 8
@@ -61,7 +159,9 @@ max-args = 8
 fixture-parentheses = false
 
 [tool.ruff.lint.isort]
-known-first-party = ["gemma_4_sql"]
+known-first-party = [
+    "gemma_4_sql",
+]
 
 [tool.mypy]
 python_version = "3.12"
@@ -93,128 +193,18 @@ disallow_untyped_decorators = false
 warn_return_any = false
 
 [tool.coverage.run]
-omit = [
-    "*/tests/*",
-    "tests/*",
-]
 
 [tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "if __name__ == .__main__.:",
-    "except \\(ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError\\):",
-    "except \\(ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError\\) as e:",
-    "except \\(ImportError, RuntimeError\\):",
-    "except \\(ImportError, RuntimeError\\) as e:",
-    "except \\(RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError\\):",
-    "except \\(RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError\\) as e:",
-    "except \\(RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, DependencyMissingError\\):",
-    "except \\(ValueError, TypeError, RuntimeError, OSError, AttributeError, KeyError, DependencyMissingError\\) as e:",
-    "except \\(ImportError, ValueError\\):",
-    "except \\(ImportError, ValueError\\) as e:",
-    "except \\(ImportError, AttributeError\\):",
-    "except \\(ImportError, AttributeError\\) as e:",
-    "except \\(ImportError, AttributeError, RuntimeError\\):",
-    "except \\(ImportError, AttributeError, RuntimeError\\) as e:",
-    "except \\(ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError\\):",
-    "except \\(ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError\\) as e:",
-    "except ImportError:",
-    "if TYPE_CHECKING:",
-    "if typing.TYPE_CHECKING:",
-    "\\.\\.\\.",
-    "if mlx is None:",
-    "if torch is None:",
-    "if tf is None:",
-    "if jax is None:",
-    "if keras is None:",
-    "if duckdb is None:",
-    "if datasets is None or grain is None:",
-    "if not _found_datasets or not _found_torch:",
-    "if transformers is None or peft is None:",
-    "if FastAPI is None or uvicorn is None:",
-    "if mx is not None:",
-    "if mlx is not None:",
-    "if mlx is not None and BitsAndBytesConfig is not None and \\(AutoModelForCausalLM is not None\\):",
-    "if mx is not None and nn is not None and \\(optim is not None\\) and \\(load is not None\\):",
-    "if mlx is not None and nn is not None and \\(optim is not None\\):",
-    "if mlx is None or functional is None:",
-    "if mlx is None or AutoModelForCausalLM is None:",
-    "if load is not None and generate is not None:",
-    "if nn is not None and load is not None:",
-    "if duckdb is None:",
-    "if datasets is None:",
-    "if mx is None or nn is None or optim is None or load is None:",
-    "if mlx is None or BitsAndBytesConfig is None or AutoModelForCausalLM is None:",
-    "if torch is None or peft is None:",
-    "if tf is None or keras is None:",
-    "if mx is not None and nn is not None:",
-    "import keras as _keras",
-    "import tensorflow as _tf",
-    "import torch as _torch",
-    "import transformers as _transformers",
-    "import peft as _peft",
-    "import optax as _optax",
-    "import jax as _jax",
-    "import jax.numpy as _jnp",
-    "import flax.nnx as _nnx",
-    "import mlx.core as _mx",
-    "import mlx.nn as _nn",
-    "import mlx.optimizers as _optim",
-    "from maxtext.models.gemma4 import Gemma4Model as _Gemma4Model",
-    "from maxtext.models import gemma4 as _gemma4",
-    "Gemma4Model: Any = _Gemma4Model",
-    "gemma4: Any = _gemma4",
-    "maxtext_train: Any = _maxtext_train",
-    "keras: Any = _keras",
-
-
-    "tf: Any = _tf",
-    "torch: Any = _torch",
-    "transformers: Any = _transformers",
-    "peft: Any = _peft",
-    "optax: Any = _optax",
-    "jax: Any = _jax",
-    "jnp: Any = _jnp",
-    "nnx: Any = _nnx",
-    "mx: Any = _mx",
-    "nn: Any = _nn",
-    "optim: Any = _optim",
-    "from tensorboardX import SummaryWriter as _SummaryWriter",
-    "from PIL import Image as _Image",
-    "Image: Any = _Image",
-
-    "from mlx.utils.tensorboard import SummaryWriter as _SummaryWriter",
-    "from torch.utils.tensorboard import SummaryWriter as _SummaryWriter",
-    "SummaryWriter: Any = _SummaryWriter",
-    "raise DependencyMissingError\\(\"JAX dependencies are missing for training\\.\"\\)",
-    "raise DependencyMissingError\\(\"JAX dependencies are missing for DPO\\.\"\\)",
-    "raise DependencyMissingError\\(\"MaxText dependencies are missing for training\\.\"\\)",
-    "raise DependencyMissingError\\(\"PyTorch dependencies are missing\\.\"\\)",
-    "raise DependencyMissingError\\(\"Datasets dependency is missing\\.\"\\)",
-    "raise DependencyMissingError\\(\"Grain dependency is missing\\.\"\\)"
-]
-
-[project.entry-points."gemma_4_sql.backends"]
-jax = "gemma_4_sql.backends.jax"
-keras = "gemma_4_sql.backends.keras"
-maxtext = "gemma_4_sql.backends.maxtext"
-pytorch = "gemma_4_sql.backends.pytorch"
-pytorch_hf = "gemma_4_sql.backends.pytorch"
-pytorch_native = "gemma_4_sql.backends.pytorch"
-mlx = "gemma_4_sql.backends.mlx"
-
-
 
 [tool.pytest.ini_options]
 addopts = "--cov=src/gemma_4_sql --cov-report=term-missing --cov-fail-under=100 --cov-branch"
-
 filterwarnings = [
     "ignore::FutureWarning",
     "ignore::DeprecationWarning",
     "ignore::UserWarning",
     "ignore::ImportWarning",
     "ignore:.*PyparsingDeprecationWarning.*",
-    "ignore:.*non-supported Python version.*:FutureWarning"
+    "ignore:.*non-supported Python version.*:FutureWarning",
 ]
 
 [tool.interrogate]

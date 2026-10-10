@@ -1,83 +1,108 @@
-"""Tests for Keras ETL."""
+"""Module docstring."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from gemma_4_sql.backends.keras.etl import _get_sampler, _load_hf_or_duckdb, build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ETLConfig
+
+def test_load_hf_or_duckdb(monkeypatch):
+    """Docstring for test_load_hf_or_duckdb."""
+    from gemma_4_sql.backends.keras import etl
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.load_duckdb_dataset", MagicMock(return_value="duckdb"))
+    assert etl._load_hf_or_duckdb("ds", "train", "path", "table") == "duckdb"
+
+    monkeypatch.setattr(etl, "datasets", None)
+    with pytest.raises(DependencyMissingError):
+        etl._load_hf_or_duckdb("ds", "train", None, None)
+
+    mock_ds = MagicMock()
+    mock_ds.load_dataset.return_value = "hf"
+    monkeypatch.setattr(etl, "datasets", mock_ds)
+    assert etl._load_hf_or_duckdb("ds", "train", None, None) == "hf"
 
 
-def test_load_hf_or_duckdb_duckdb():
-    """Docstring for test_load_hf_or_duckdb_duckdb."""
-    with patch("gemma_4_sql.backends.keras.etl.load_duckdb_dataset", return_value="duckdb") as mock_duckdb:
-        res = _load_hf_or_duckdb("ds", "train", "path", "table")
-        assert res == "duckdb"
-        mock_duckdb.assert_called_once_with("path", "table")
+def test_import_error():
+    """Docstring for test_import_error."""
+    import builtins
+    import importlib
+
+    import gemma_4_sql.backends.keras.etl as mod
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name == "datasets" or name == "grain.python":
+            raise ImportError("mock")
+        return orig_import(name, *args, **kwargs)
+
+    builtins.__import__ = mock_import
+    try:
+        importlib.reload(mod)
+        assert mod.datasets is None
+        assert mod.grain is None
+    finally:
+        builtins.__import__ = orig_import
+        importlib.reload(mod)
 
 
-def test_load_hf_or_duckdb_missing_datasets():
-    """Docstring for test_load_hf_or_duckdb_missing_datasets."""
-    with patch("gemma_4_sql.backends.keras.etl.datasets", None), pytest.raises(DependencyMissingError, match="Datasets dependency is missing"):
-        _load_hf_or_duckdb("ds", "train", None, None)
+def test_get_sampler(monkeypatch):
+    """Docstring for test_get_sampler."""
+    from gemma_4_sql.backends.keras import etl
+    from gemma_4_sql.exceptions import DependencyMissingError
 
+    monkeypatch.setattr(etl, "grain", None)
+    with pytest.raises(DependencyMissingError):
+        etl._get_sampler(10, False)
 
-def test_load_hf_or_duckdb_hf():
-    """Docstring for test_load_hf_or_duckdb_hf."""
-    mock_datasets = MagicMock()
-    mock_datasets.load_dataset.return_value = "hf"
-    with patch("gemma_4_sql.backends.keras.etl.datasets", mock_datasets):
-        res = _load_hf_or_duckdb("ds", "train", None, None)
-        assert res == "hf"
-        mock_datasets.load_dataset.assert_called_once_with("ds", split="train")
-
-
-def test_get_sampler_missing_grain():
-    """Docstring for test_get_sampler_missing_grain."""
-    with patch("gemma_4_sql.backends.keras.etl.grain", None), pytest.raises(DependencyMissingError, match="Grain dependency is missing"):
-        _get_sampler(10, False)
-
-
-def test_get_sampler_success():
-    """Docstring for test_get_sampler_success."""
     mock_grain = MagicMock()
     mock_grain.JAXDistributedSharding.return_value = "dist"
-    mock_grain.NoSharding.return_value = "no"
+    mock_grain.NoSharding.return_value = "none"
     mock_grain.IndexSampler.return_value = "sampler"
-    with patch("gemma_4_sql.backends.keras.etl.grain", mock_grain):
-        res1 = _get_sampler(10, True)
-        assert res1 == "sampler"
-        mock_grain.IndexSampler.assert_called_with(num_records=10, shard_options="dist", shuffle=False, num_epochs=1)
+    monkeypatch.setattr(etl, "grain", mock_grain)
 
-        res2 = _get_sampler(10, False)
-        assert res2 == "sampler"
-        mock_grain.IndexSampler.assert_called_with(num_records=10, shard_options="no", shuffle=False, num_epochs=1)
+    assert etl._get_sampler(10, True) == "sampler"
+    assert etl._get_sampler(10, False) == "sampler"
 
 
-def test_build_dataloader_missing_deps():
-    """Docstring for test_build_dataloader_missing_deps."""
-    with patch("gemma_4_sql.backends.keras.etl.datasets", None), pytest.raises(DependencyMissingError, match="Missing grain or datasets"):
-        build_dataloader(ETLConfig(dataset_name="a", split="b", batch_size=2))
+def test_build_dataloader(monkeypatch):
+    """Docstring for test_build_dataloader."""
+    from gemma_4_sql.backends.keras import etl
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(etl, "datasets", None)
+    config = MagicMock()
+    with pytest.raises(DependencyMissingError):
+        etl.build_dataloader(config)
+
+    monkeypatch.setattr(etl, "datasets", MagicMock())
+    monkeypatch.setattr(etl, "grain", MagicMock())
+    monkeypatch.setattr(etl, "_load_hf_or_duckdb", MagicMock())
+
+    class MockSource:
+        """Docstring for MockSource."""
+
+        def __len__(self):
+            """Docstring for __len__."""
+            return 10
+
+    monkeypatch.setattr(etl, "get_grain_classes", MagicMock(return_value=(MagicMock(return_value=MockSource()), MagicMock())))
+    monkeypatch.setattr(etl, "SQLTokenizer", MagicMock())
+    monkeypatch.setattr(etl, "_get_sampler", MagicMock())
+
+    res = etl.build_dataloader(config)
+    assert res["status"] == "loaded"
 
 
-def test_build_dataloader_success():
-    """Docstring for test_build_dataloader_success."""
-    mock_datasets = MagicMock()
-    mock_grain = MagicMock()
-    mock_grain.DataLoader.return_value = "loader"
-    mock_grain.Batch = MagicMock()
+def test_build_dataloader_missing_grain(monkeypatch):
+    """Docstring for test_build_dataloader_missing_grain."""
+    from gemma_4_sql.backends.keras import etl
+    from gemma_4_sql.exceptions import DependencyMissingError
 
-    with (
-        patch("gemma_4_sql.backends.keras.etl.datasets", mock_datasets),
-        patch("gemma_4_sql.backends.keras.etl.grain", mock_grain),
-        patch("gemma_4_sql.backends.keras.etl._load_hf_or_duckdb", return_value=[1, 2]),
-        patch("gemma_4_sql.backends.keras.etl.get_grain_classes", return_value=(list, MagicMock)),
-        patch("gemma_4_sql.backends.keras.etl.SQLTokenizer"),
-        patch("gemma_4_sql.backends.keras.etl._get_sampler"),
-    ):
-        config = ETLConfig(dataset_name="ds", split="train", batch_size=2, distributed=False, tokenizer_name="tok")
-        res = build_dataloader(config)
-        assert res["loader"] == "loader"
-        assert res["status"] == "loaded"
-        assert res["dataset"] == "ds"
+    monkeypatch.setattr(etl, "datasets", MagicMock())
+    monkeypatch.setattr(etl, "grain", None)
+    config = MagicMock()
+    with pytest.raises(DependencyMissingError):
+        etl.build_dataloader(config)

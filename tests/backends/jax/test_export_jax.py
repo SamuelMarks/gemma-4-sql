@@ -115,3 +115,24 @@ def test_export_model_save_error(tmp_path, mock_dependencies):
 
     with pytest.raises(Exception, match="Failed to save Orbax checkpoint at"):
         jax_export.export_model("test_model", str(tmp_path / "export"), weights="w")
+
+
+def test_jax_export_import_error():
+    """Docstring for test_jax_export_import_error."""
+    import importlib
+    import sys
+    from unittest.mock import patch
+
+    import pytest
+
+    with patch.dict(sys.modules, {"jax": None}):
+        import gemma_4_sql.backends.jax.export as mod
+
+        importlib.reload(mod)
+        assert mod.jax is None
+
+        with pytest.raises(Exception, match="JAX export dependencies are missing."):
+            mod.export_model("model", "path")
+
+    # reload cleanly
+    importlib.reload(mod)

@@ -69,11 +69,11 @@ def _generate_query(prompt: str, model_name: str = "") -> str:
         InferenceError: If model inference fails during non-test execution.
 
     """
-    from gemma_4_sql.backends.mlx.inference import generate_sql
+    import gemma_4_sql.backends.mlx.inference as mlx_inf
     from gemma_4_sql.exceptions import InferenceError
 
     try:
-        res = generate_sql(model_name=model_name or "default", prompt=prompt)
+        res = mlx_inf.generate_sql(model_name=model_name or "default", prompt=prompt)
         sql = res.get("sql", "")
         if sql:
             return str(sql)

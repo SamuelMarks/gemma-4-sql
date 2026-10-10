@@ -416,3 +416,31 @@ def test_rag_bm25_search() -> None:
 
     empty = _bm25_search("", schema, top_k_tables=2)
     assert len(empty) == 2
+
+
+def test_rag_successful_imports():
+    """Test rag successful imports."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    mock_st = MagicMock()
+    mock_smp = MagicMock()
+    mock_sklearn = MagicMock()
+    mock_sklearn.metrics = MagicMock()
+    mock_sklearn.metrics.pairwise = mock_smp
+
+    with patch.dict(
+        sys.modules,
+        {
+            "sentence_transformers": mock_st,
+            "sklearn": mock_sklearn,
+            "sklearn.metrics": mock_sklearn.metrics,
+            "sklearn.metrics.pairwise": mock_smp,
+        },
+    ):
+        if "gemma_4_sql.sdk.rag" in sys.modules:
+            del sys.modules["gemma_4_sql.sdk.rag"]
+        import gemma_4_sql.sdk.rag as rag_module
+
+        assert rag_module.SentenceTransformer is not None
+        assert rag_module.cosine_similarity is not None

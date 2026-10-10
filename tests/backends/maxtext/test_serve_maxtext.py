@@ -1,137 +1,117 @@
-"""Module docstring."""
+"""Tests for maxtext serve."""
 
-from unittest.mock import MagicMock
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-import gemma_4_sql.backends.maxtext.serve as serve_module
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
-@pytest.fixture
-def mock_jax_deps(monkeypatch):
-    """Docstring for mock_jax_deps."""
+def test_maxtext_serve_missing_deps():
+    """Test maxtext serve missing deps."""
+    import importlib
+
+    with patch.dict(sys.modules, {"jax": None, "maxtext": None, "maxtext.models": None, "maxtext.models.gemma4": None}):
+        import gemma_4_sql.backends.maxtext.serve as serve_module
+
+        importlib.reload(serve_module)
+
+        serve_module.jax = None
+        serve_module.gemma4 = None
+
+        with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
+            serve_module.serve_model("model")
+    importlib.reload(serve_module)
+
+
+def test_maxtext_serve_success():
+    """Test maxtext serve success."""
+    import gemma_4_sql.backends.maxtext.serve as serve_module
+
     mock_jax = MagicMock()
-    mock_gemma4 = MagicMock()
-    mock_jax.distributed.initialize = MagicMock()
+    serve_module.jax = mock_jax
+    serve_module.gemma4 = MagicMock()
 
-    monkeypatch.setattr(serve_module, "jax", mock_jax)
-    monkeypatch.setattr(serve_module, "gemma4", mock_gemma4)
+    with patch("gemma_4_sql.backends.maxtext.serve.serve_model_wrapper") as mock_wrapper:
+        mock_wrapper.return_value = {"status": "ok"}
+        result = serve_module.serve_model("model")
+        assert result == {"status": "ok"}
 
-    # Mock create_common_app and serve_model_wrapper
-    mock_create_common = MagicMock(return_value="app")
-    mock_serve_wrapper = MagicMock(return_value={"status": "serving"})
-
-    monkeypatch.setattr(serve_module, "create_common_app", mock_create_common)
-    monkeypatch.setattr(serve_module, "serve_model_wrapper", mock_serve_wrapper)
-
-    return {
-        "jax": mock_jax,
-        "gemma4": mock_gemma4,
-        "create_common_app": mock_create_common,
-        "serve_model_wrapper": mock_serve_wrapper,
-    }
+        # Test app factory
+        app_factory = mock_wrapper.call_args[1]["app_factory"]
+        app_factory()
 
 
-def test_serve_model(mock_jax_deps):
-    """Docstring for test_serve_model."""
-    res = serve_module.serve_model("dummy_model", port=8000, max_batch_size=32)
-    assert res["status"] == "serving"
-    mock_jax_deps["serve_model_wrapper"].assert_called_once()
+def test_maxtext_create_app():
+    """Test maxtext create app."""
+    import gemma_4_sql.backends.maxtext.serve as serve_module
 
-    # Get the app_factory to test _create_app
-    app_factory = mock_jax_deps["serve_model_wrapper"].call_args[1]["app_factory"]
-    app = app_factory()
-    assert app == "app"
+    mock_jax = MagicMock()
+    serve_module.jax = mock_jax
+    serve_module.gemma4 = MagicMock()
 
-    # Get callbacks
-    startup_cb = mock_jax_deps["create_common_app"].call_args[1]["startup_callback"]
-    generate_logic = mock_jax_deps["create_common_app"].call_args[1]["generate_logic"]
+    with patch("gemma_4_sql.backends.maxtext.serve.create_common_app") as mock_create:
+        serve_module._create_app("model")
+        mock_create.assert_called_once()
+        kwargs = mock_create.call_args[1]
 
-    # Test startup
-    startup_cb()
-    mock_jax_deps["jax"].distributed.initialize.assert_called_once()
+        # Test startup
+        startup = kwargs["startup_callback"]
+        startup()
+        mock_jax.distributed.initialize.assert_called_once()
 
-    # Test generate_logic (it will fail to import missing module or raise InferenceError)
-    with pytest.raises(Exception):
-        generate_logic("prompt")
+        # Test startup exception
+        mock_jax.distributed.initialize.side_effect = RuntimeError("error")
+        startup()  # Should handle exception and log warning
 
+        # Test generate
+        generate = kwargs["generate_logic"]
 
-def test_serve_model_errors(mock_jax_deps, monkeypatch):
-    """Docstring for test_serve_model_errors."""
-    monkeypatch.setattr(serve_module, "jax", None)
-    with pytest.raises(DependencyMissingError):
-        serve_module.serve_model("dummy_model")
+        with patch("gemma_4_sql.backends.maxtext.inference.generate_sql") as mock_generate_sql:
+            mock_generate_sql.return_value = {"sql": "SELECT 1"}
+            assert generate("prompt") == "SELECT 1"
 
+            # Test empty SQL
+            mock_generate_sql.return_value = {"sql": ""}
+            with pytest.raises(InferenceError, match="returned empty SQL"):
+                generate("prompt")
 
-def test_startup_callback_error(mock_jax_deps):
-    """Docstring for test_startup_callback_error."""
-    mock_jax_deps["jax"].distributed.initialize.side_effect = RuntimeError("init fail")
-    serve_module._create_app("dummy_model")
-    startup_cb = mock_jax_deps["create_common_app"].call_args[1]["startup_callback"]
-    startup_cb()  # Should catch the error and log it, not raise
+            # Test exception
+            mock_generate_sql.side_effect = Exception("test error")
+            with pytest.raises(InferenceError, match="MaxText generation failed"):
+                generate("prompt")
 
-
-def test_generate_logic(mock_jax_deps, monkeypatch):
-    """Docstring for test_generate_logic."""
-    import sys
-
-    mock_inference = MagicMock()
-    mock_generate_sql = MagicMock()
-    mock_inference.generate_sql = mock_generate_sql
-    sys.modules["gemma_4_sql.backends.maxtext.inference"] = mock_inference
-
-    serve_module._create_app("dummy_model")
-    generate_logic = mock_jax_deps["create_common_app"].call_args[1]["generate_logic"]
-
-    mock_generate_sql.return_value = {"sql": "SELECT 1"}
-    assert generate_logic("prompt") == "SELECT 1"
-
-    # empty sql
-    mock_generate_sql.return_value = {"sql": ""}
-    with pytest.raises(InferenceError, match="empty SQL"):
-        generate_logic("prompt")
-
-    # general exception
-    mock_generate_sql.side_effect = ValueError("inference fail")
-    with pytest.raises(InferenceError, match="generation failed"):
-        generate_logic("prompt")
-
-    # inference error
-    mock_generate_sql.side_effect = InferenceError("inf error")
-    with pytest.raises(InferenceError, match="inf error"):
-        generate_logic("prompt")
+            # Test raise InferenceError
+            mock_generate_sql.side_effect = InferenceError("test error")
+            with pytest.raises(InferenceError, match="test error"):
+                generate("prompt")
 
 
-def test_imports_except_blocks():
-    """Docstring for test_imports_except_blocks."""
+def test_maxtext_serve_successful_imports():
+    """Test maxtext serve successful imports."""
     import importlib
     import sys
+    from unittest.mock import MagicMock
 
-    # Save original modules
-    orig_jax = sys.modules.get("jax")
-    orig_gemma = sys.modules.get("maxtext.models.gemma4")
+    mock_jax = MagicMock()
+    mock_gemma4 = MagicMock()
+    mock_maxtext = MagicMock()
+    mock_maxtext.models = MagicMock()
+    mock_maxtext.models.gemma4 = mock_gemma4
 
-    # Force ImportError
-    sys.modules["jax"] = None
-    sys.modules["maxtext.models.gemma4"] = None
+    with patch.dict(
+        sys.modules,
+        {
+            "jax": mock_jax,
+            "maxtext": mock_maxtext,
+            "maxtext.models": mock_maxtext.models,
+            "maxtext.models.gemma4": mock_gemma4,
+        },
+    ):
+        import gemma_4_sql.backends.maxtext.serve as serve_module
 
-    import gemma_4_sql.backends.maxtext.serve as sm
-
-    importlib.reload(sm)
-
-    assert sm.jax is None
-    assert sm.gemma4 is None
-
-    # Restore
-    if orig_jax is not None:
-        sys.modules["jax"] = orig_jax
-    else:
-        del sys.modules["jax"]
-
-    if orig_gemma is not None:
-        sys.modules["maxtext.models.gemma4"] = orig_gemma
-    else:
-        del sys.modules["maxtext.models.gemma4"]
-
-    importlib.reload(sm)
+        importlib.reload(serve_module)
+        assert serve_module.jax is mock_jax
+        assert serve_module.gemma4 is mock_gemma4
+    importlib.reload(serve_module)

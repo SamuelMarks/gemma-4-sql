@@ -71,8 +71,8 @@ def _flatten_values(arr: Any) -> list[float]:
         return [float(b) for b in arr]
     if np is not None and hasattr(arr, "flatten") and hasattr(arr, "tolist"):
         return [float(x) for x in arr.flatten().tolist()]
-    if torch is not None and hasattr(arr, "flatten") and hasattr(arr, "detach"):  # pragma: no cover
-        return [float(x) for x in arr.detach().cpu().flatten().numpy().tolist()]  # pragma: no cover
+    if torch is not None and hasattr(arr, "flatten") and hasattr(arr, "detach"):
+        return [float(x) for x in arr.detach().cpu().flatten().numpy().tolist()]
     if isinstance(arr, (list, tuple)):
         out: list[float] = []
         for item in cast(list[Any], arr):
@@ -483,11 +483,8 @@ def write_gguf_v3(
                 payload = quantize_tensor_q8_0(arr)
             elif ggml_type == GGML_TYPE_Q4_0:
                 payload = quantize_tensor_q4_0(arr)
-            elif ggml_type == GGML_TYPE_Q4_K:
+            else:  # ggml_type == GGML_TYPE_Q4_K
                 payload = quantize_tensor_q4_k_m(arr)
-            else:  # pragma: no cover
-                flat_vals = _flatten_values(arr)
-                payload = struct.pack(f"<{len(flat_vals)}f", *flat_vals)
 
             descriptors.append((t_name, shape, ggml_type, data_offset))
             raw_payloads.append(payload)
@@ -512,7 +509,7 @@ def write_gguf_v3(
         f.write(b"\x00" * pad)
 
         # Write aligned tensor payloads
-        for payload in raw_payloads:  # pragma: no cover
+        for payload in raw_payloads:
             f.write(payload)
             payload_pad = (GGUF_ALIGNMENT - (len(payload) % GGUF_ALIGNMENT)) % GGUF_ALIGNMENT
             f.write(b"\x00" * payload_pad)

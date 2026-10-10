@@ -168,12 +168,12 @@ def create_common_app(
                     raise NotImplementedError(msg)
             except (ValueError, TypeError, RuntimeError, OSError, AttributeError, KeyError, DependencyMissingError, NotImplementedError) as e:
                 for item in batch:
-                    if not item["future"].done():  # pragma: no cover
+                    if not item["future"].done():
                         item["future"].set_exception(e)
                 continue
 
             for item, sql in zip(batch, sql_responses):
-                if not item["future"].done():  # pragma: no cover
+                if not item["future"].done():
                     item["future"].set_result(sql)
 
     @app.post("/generate", response_model=None)
@@ -199,8 +199,8 @@ def create_common_app(
             try:
                 loop = asyncio.get_running_loop()
                 worker_task = loop.create_task(_batching_worker())
-            except RuntimeError:  # pragma: no cover
-                worker_task = None  # pragma: no cover
+            except RuntimeError:
+                worker_task = None
 
         data: Any = await request.json()
         validated_req = GenerateRequest.from_dict(cast(dict[str, Any], data))
@@ -218,20 +218,20 @@ def create_common_app(
         future: asyncio.Future[Any] = asyncio.Future()
         await request_queue.put({"prompt": prompt, "future": future})
 
-        if worker_task is not None and not worker_task.done():  # pragma: no cover
+        if worker_task is not None and not worker_task.done():
             try:
                 sql_response = await future
             except asyncio.CancelledError:
                 future.cancel()
                 raise
-        elif generate_logic is not None:  # pragma: no cover
-            sql_response = generate_logic(prompt)  # pragma: no cover
-        elif batch_generate_logic is not None:  # pragma: no cover
-            sql_responses = batch_generate_logic([prompt])  # pragma: no cover
-            sql_response = sql_responses[0]  # pragma: no cover
+        elif generate_logic is not None:
+            sql_response = generate_logic(prompt)
+        elif batch_generate_logic is not None:
+            sql_responses = batch_generate_logic([prompt])
+            sql_response = sql_responses[0]
         else:
-            msg = f"No generation logic registered for backend '{backend_name}'."  # pragma: no cover
-            raise NotImplementedError(msg)  # pragma: no cover
+            msg = f"No generation logic registered for backend '{backend_name}'."
+            raise NotImplementedError(msg)
 
         res_payload = {"sql": sql_response, "modality": validated_req.modality}
         if JSONResponse is not None:

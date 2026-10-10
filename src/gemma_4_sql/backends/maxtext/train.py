@@ -18,16 +18,16 @@ try:
     import jax as _jax
     import jax.numpy as _jnp
     import maxtext.models.gemma4 as _gemma4
-    import maxtext.train as _maxtext_train  # pragma: no cover
+    import maxtext.train as _maxtext_train
     import optax as _optax
-    import orbax.checkpoint as _ocp  # pragma: no cover
+    import orbax.checkpoint as _ocp
 
     jax: Any = _jax
     jnp: Any = _jnp
     optax: Any = _optax
     maxtext_train: Any = _maxtext_train
-    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)  # pragma: no cover
-    ocp: Any = _ocp  # pragma: no cover
+    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
+    ocp: Any = _ocp
 except (ImportError, AttributeError):
     jax = None
     jnp = None

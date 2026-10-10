@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 try:
     import mlx.utils.tensorboard as mlx_tb
 
-    SummaryWriter: Any = getattr(mlx_tb, "SummaryWriter", None)  # pragma: no cover
+    SummaryWriter: Any = getattr(mlx_tb, "SummaryWriter", None)
 except (ImportError, AttributeError):
     SummaryWriter = None
 

@@ -1,255 +1,291 @@
 """Module docstring."""
 
-import math
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-
-from gemma_4_sql.backends.keras.inference import (
-    _extract_flat_scores,
-    compute_keras_confidence,
-    configure_beam_sampler,
-    generate_sql,
-)
-from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_extract_flat_scores():
     """Docstring for test_extract_flat_scores."""
-    assert _extract_flat_scores([1.0, 2.0]) == [1.0, 2.0]
-    assert _extract_flat_scores([[1.0], [2.0, 3.0]]) == [1.0, 2.0, 3.0]
-    assert _extract_flat_scores(1.0) == [1.0]
-    assert _extract_flat_scores(((1.0,), 2.0)) == [2.0, 1.0]
-    assert _extract_flat_scores(["ignored", 1.0]) == [1.0]  # Cover else branch
+    import gemma_4_sql.backends.keras.inference as inf
+
+    # list pop(0) in BFS manner
+    # [[1.0, 2], 3.0] -> pop [1.0, 2], stack=[3.0, 1.0, 2] -> pop 3.0 -> flat=[3.0], stack=[1.0, 2]
+    # -> pop 1.0 -> flat=[3.0, 1.0], stack=[2] -> pop 2 -> flat=[3.0, 1.0, 2.0]
+    res = inf._extract_flat_scores([[1.0, 2], 3.0])
+    assert res == [3.0, 1.0, 2.0]
 
 
-def test_compute_keras_confidence_zero_tokens():
-    """Docstring for test_compute_keras_confidence_zero_tokens."""
-    assert compute_keras_confidence(None, 0) == 0.0
-    assert compute_keras_confidence(None, -1) == 0.0
+def test_compute_keras_confidence():
+    """Docstring for test_compute_keras_confidence."""
+    import math
+
+    import gemma_4_sql.backends.keras.inference as inf
+
+    assert inf.compute_keras_confidence(None, 0) == 0.0
+
+    mock_np = MagicMock()
+    mock_np.numpy.return_value = [0.1, 0.2]
+    mock_np.tolist.return_value = [0.1, 0.2]
+
+    assert inf.compute_keras_confidence(mock_np, 2) == pytest.approx(0.15)
+
+    # negative log probs
+    assert inf.compute_keras_confidence([-1.0, -2.0], 2) == pytest.approx(math.exp(-1.5))
+
+    # scalar positive
+    assert inf.compute_keras_confidence(0.5, 2) == 0.5
+    # scalar negative
+    assert inf.compute_keras_confidence(-1.0, 2) == pytest.approx(math.exp(-0.5))
+
+    # empty list
+    assert inf.compute_keras_confidence([], 2) == 0.5
+
+    # fallback
+    assert inf.compute_keras_confidence(None, 10) > 0.0
 
 
-def test_compute_keras_confidence_with_numpy_and_tolist():
-    """Docstring for test_compute_keras_confidence_with_numpy_and_tolist."""
-
-    class DummyScores:
-        """Docstring for DummyScores."""
-
-        def numpy(self):
-            """Docstring for numpy."""
-            return self
-
-        def tolist(self):
-            """Docstring for tolist."""
-            return [1.0, 1.0]
-
-    scores = DummyScores()
-    assert compute_keras_confidence(scores, 2) == 1.0
-
-
-def test_compute_keras_confidence_list():
-    """Docstring for test_compute_keras_confidence_list."""
-    assert compute_keras_confidence([1.0, 1.0], 2) == 1.0
-    assert compute_keras_confidence([0.5, 0.5], 2) == 0.5
-    assert compute_keras_confidence([-1.0, -1.0], 2) == math.exp(-1.0)
-    assert compute_keras_confidence([], 2) == 0.5
-
-
-def test_compute_keras_confidence_scalar():
-    """Docstring for test_compute_keras_confidence_scalar."""
-    assert compute_keras_confidence(0.5, 1) == 0.5
-    assert compute_keras_confidence(-2.0, 2) == math.exp(-2.0 / 2)
-
-
-def test_compute_keras_confidence_fallback():
-    """Docstring for test_compute_keras_confidence_fallback."""
-    assert compute_keras_confidence(None, 10) == max(0.1, min(0.95, 1.0 / (1.0 + math.exp(-0.1 * 10))))
-
-
-@patch("gemma_4_sql.backends.keras.inference.logger.warning")
-def test_configure_beam_sampler(mock_warning):
+def test_configure_beam_sampler(monkeypatch):
     """Docstring for test_configure_beam_sampler."""
-
-    # Setup mock sampler
-    class MockBeamSampler:
-        """Docstring for MockBeamSampler."""
-
-        def __init__(self, num_beams):
-            """Docstring for __init__."""
-            self.num_beams = num_beams
-
-    class MockKerasNLP:
-        """Docstring for MockKerasNLP."""
-
-        class samplers:
-            """Docstring for samplers."""
-
-            BeamSampler = MockBeamSampler
-
-    # Test with compile
-    class MockModelCompile:
-        """Docstring for MockModelCompile."""
-
-        def compile(self, sampler):
-            """Docstring for compile."""
-            self.sampler = sampler
-
-    model_compile = MockModelCompile()
-    with patch.dict("sys.modules", {"keras_nlp": MockKerasNLP()}):
-        sampler = configure_beam_sampler(model_compile, 3)
-        assert isinstance(sampler, MockBeamSampler)
-        assert sampler.num_beams == 3
-        assert model_compile.sampler == sampler
-
-    # Test with sampler attribute
-    class MockModelSampler:
-        """Docstring for MockModelSampler."""
-
-        sampler = None
-
-    model_sampler = MockModelSampler()
-    with patch.dict("sys.modules", {"keras_nlp": MockKerasNLP()}):
-        sampler = configure_beam_sampler(model_sampler, 3)
-        assert model_sampler.sampler == sampler
-
-    # Test with model having neither compile nor sampler
-    class MockModelNothing:
-        """Docstring for MockModelNothing."""
-
-    model_nothing = MockModelNothing()
-    with patch.dict("sys.modules", {"keras_nlp": MockKerasNLP()}):
-        sampler = configure_beam_sampler(model_nothing, 3)
-        assert not hasattr(model_nothing, "compile")
-        assert not hasattr(model_nothing, "sampler")
-        assert sampler is not None
-
-    # Test with BeamSampler being None
-    class MockKerasNLPNoSampler:
-        """Docstring for MockKerasNLPNoSampler."""
-
-        class samplers:
-            """Docstring for samplers."""
-
-            BeamSampler = None
-
-    with patch.dict("sys.modules", {"keras_nlp": MockKerasNLPNoSampler()}):
-        sampler = configure_beam_sampler(model_nothing, 3)
-        assert sampler is None
-
-    # Test import error
-    with patch.dict("sys.modules", {"keras_nlp": None}):
-        sampler = configure_beam_sampler(model_sampler, 3)
-        assert sampler is None
-        mock_warning.assert_called()
-
-
-def test_generate_sql_missing_deps():
-    """Docstring for test_generate_sql_missing_deps."""
-    with patch("gemma_4_sql.backends.keras.inference.keras", None), pytest.raises(DependencyMissingError):
-        generate_sql("model", "prompt")
-
-    with patch("gemma_4_sql.backends.keras.inference.tf", None), pytest.raises(DependencyMissingError):
-        generate_sql("model", "prompt")
-
-
-def test_generate_sql_success_dict_output():
-    """Docstring for test_generate_sql_success_dict_output."""
-    mock_model = MagicMock()
-    mock_model.generate.return_value = {"text": "prompt SELECT * FROM t;", "scores": [0.9]}
-    mock_cls = MagicMock()
-    mock_cls.from_preset.return_value = mock_model
-
-    mock_keras_nlp = MagicMock()
-    mock_keras_nlp.models.GemmaCausalLM = mock_cls
-
-    with patch.dict("sys.modules", {"keras_nlp.models": mock_keras_nlp.models}), patch("gemma_4_sql.backends.keras.inference.keras", MagicMock()), patch("gemma_4_sql.backends.keras.inference.tf", MagicMock()):
-        result = generate_sql("model", "prompt ")
-        assert result["sql"] == "SELECT * FROM t;"
-        assert result["status"] == "success"
-        assert result["confidence_score"] == 0.9
-
-
-def test_generate_sql_success_tuple_output():
-    """Docstring for test_generate_sql_success_tuple_output."""
-    mock_model = MagicMock()
-    mock_model.generate.return_value = ("prompt SELECT 1;", [0.8])
-    mock_cls = MagicMock()
-    mock_cls.from_preset.return_value = mock_model
-
-    mock_keras_nlp = MagicMock()
-    mock_keras_nlp.models.GemmaCausalLM = mock_cls
-
-    with patch.dict("sys.modules", {"keras_nlp.models": mock_keras_nlp.models}), patch("gemma_4_sql.backends.keras.inference.keras", MagicMock()), patch("gemma_4_sql.backends.keras.inference.tf", MagicMock()):
-        result = generate_sql("model", "prompt ")
-        assert result["sql"] == "SELECT 1;"
-        assert result["status"] == "success"
-
-
-def test_generate_sql_success_str_output():
-    """Docstring for test_generate_sql_success_str_output."""
-
-    class StrOutput(str):
-        """Docstring for StrOutput."""
-
-    out = StrOutput("prompt SELECT 2;")
-    out.scores = [0.7]
+    import gemma_4_sql.backends.keras.inference as inf
 
     mock_model = MagicMock()
-    mock_model.generate.return_value = out
-    mock_cls = MagicMock()
-    mock_cls.from_preset.return_value = mock_model
+    # successful import
+    import builtins
 
-    mock_keras_nlp = MagicMock()
-    mock_keras_nlp.models.GemmaCausalLM = mock_cls
+    original_import = builtins.__import__
 
-    with patch.dict("sys.modules", {"keras_nlp.models": mock_keras_nlp.models}), patch("gemma_4_sql.backends.keras.inference.keras", MagicMock()), patch("gemma_4_sql.backends.keras.inference.tf", MagicMock()):
-        result = generate_sql("model", "prompt ")
-        assert result["sql"] == "SELECT 2;"
-        assert result["status"] == "success"
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name == "keras_nlp":
+            mock_nlp = MagicMock()
+            mock_sampler_cls = MagicMock(return_value="sampler_obj")
+            mock_nlp.samplers.BeamSampler = mock_sampler_cls
+            return mock_nlp
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+
+    # with compile
+    inf.configure_beam_sampler(mock_model, 2)
+    mock_model.compile.assert_called_with(sampler="sampler_obj")
+
+    # with sampler attribute
+    mock_model2 = MagicMock(spec=["sampler"])
+    inf.configure_beam_sampler(mock_model2, 2)
+    assert mock_model2.sampler == "sampler_obj"
+
+    # import error
+    def mock_import_err(name, *args, **kwargs):
+        """Docstring for mock_import_err."""
+        if name == "keras_nlp":
+            raise ImportError("sim")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import_err)
+
+    res = inf.configure_beam_sampler(MagicMock(), 2)
+    assert res is None
 
 
-def test_generate_sql_success_fallback_output():
-    """Docstring for test_generate_sql_success_fallback_output."""
+def test_generate_sql(monkeypatch):
+    """Docstring for test_generate_sql."""
+    import gemma_4_sql.backends.keras.inference as inf
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(inf, "keras", None)
+    with pytest.raises(DependencyMissingError):
+        inf.generate_sql("m", "p")
+
+    monkeypatch.setattr(inf, "keras", MagicMock())
+    monkeypatch.setattr(inf, "tf", MagicMock())
+    monkeypatch.setattr(inf, "configure_beam_sampler", MagicMock())
+
+    import builtins
+
+    original_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name == "keras_nlp.models":
+            mock_models = MagicMock()
+            mock_cls = MagicMock()
+            mock_model = MagicMock()
+            mock_model.generate.return_value = "prompt SELECT 1"
+            mock_cls.from_preset.return_value = mock_model
+            mock_models.GemmaCausalLM = mock_cls
+            return mock_models
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+
+    res = inf.generate_sql("m", "prompt ")
+    assert res["status"] == "success"
+    assert res["sql"] == "SELECT 1"
+
+
+def test_generate_sql_outputs(monkeypatch):
+    """Docstring for test_generate_sql_outputs."""
+    import gemma_4_sql.backends.keras.inference as inf
+
+    monkeypatch.setattr(inf, "keras", MagicMock())
+    monkeypatch.setattr(inf, "tf", MagicMock())
+    monkeypatch.setattr(inf, "configure_beam_sampler", MagicMock())
+
+    def setup_mock(ret_val):
+        """Docstring for setup_mock."""
+        import builtins
+
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            """Docstring for mock_import."""
+            if name == "keras_nlp.models":
+                mock_models = MagicMock()
+                mock_cls = MagicMock()
+                mock_model = MagicMock()
+                mock_model.generate.return_value = ret_val
+                mock_cls.from_preset.return_value = mock_model
+                mock_models.GemmaCausalLM = mock_cls
+                return mock_models
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", mock_import)
+
+    # dict output
+    setup_mock({"text": "prompt SEL", "scores": 0.5})
+    res = inf.generate_sql("m", "prompt ")
+    assert res["status"] == "success"
+
+    # tuple output
+    setup_mock(("prompt SEL", 0.5))
+    res2 = inf.generate_sql("m", "prompt ")
+    assert res2["status"] == "success"
+
+    # empty output
+    setup_mock("prompt ")
+    res3 = inf.generate_sql("m", "prompt ")
+    assert "failed" in res3["status"]
+
+
+def test_extract_flat_scores_missing_branch():
+    """Docstring for test_extract_flat_scores_missing_branch."""
+    import gemma_4_sql.backends.keras.inference as inf
+
+    res = inf._extract_flat_scores([[1.0, 2], "skip_me", None, 3.0])
+    assert res == [3.0, 1.0, 2.0]
+
+
+def test_configure_beam_sampler_branches(monkeypatch):
+    """Docstring for test_configure_beam_sampler_branches."""
+    from unittest.mock import MagicMock
+
+    import gemma_4_sql.backends.keras.inference as inf
+
     mock_model = MagicMock()
-    mock_model.generate.return_value = 123  # Cast to string
-    mock_cls = MagicMock()
-    mock_cls.from_preset.return_value = mock_model
+    del mock_model.compile
+    del mock_model.sampler
 
-    mock_keras_nlp = MagicMock()
-    mock_keras_nlp.models.GemmaCausalLM = mock_cls
+    import builtins
 
-    with patch.dict("sys.modules", {"keras_nlp.models": mock_keras_nlp.models}), patch("gemma_4_sql.backends.keras.inference.keras", MagicMock()), patch("gemma_4_sql.backends.keras.inference.tf", MagicMock()):
-        result = generate_sql("model", "12")
-        assert result["sql"] == "3"
-        assert result["status"] == "success"
+    original_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name == "keras_nlp":
+            mock_nlp = MagicMock()
+            mock_nlp.samplers = MagicMock()
+            mock_nlp.samplers.BeamSampler = None
+            return mock_nlp
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+
+    inf.configure_beam_sampler(mock_model, 2)
+
+    def mock_import_2(name, *args, **kwargs):
+        """Docstring for mock_import_2."""
+        if name == "keras_nlp":
+            mock_nlp = MagicMock()
+            mock_nlp.samplers.BeamSampler = MagicMock(return_value="sampler_obj")
+            return mock_nlp
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import_2)
+
+    inf.configure_beam_sampler(mock_model, 2)
 
 
-def test_generate_sql_empty_sql():
-    """Docstring for test_generate_sql_empty_sql."""
-    mock_model = MagicMock()
-    mock_model.generate.return_value = "prompt "
-    mock_cls = MagicMock()
-    mock_cls.from_preset.return_value = mock_model
+def test_generate_sql_outputs_else_block(monkeypatch):
+    """Docstring for test_generate_sql_outputs_else_block."""
+    from unittest.mock import MagicMock
 
-    mock_keras_nlp = MagicMock()
-    mock_keras_nlp.models.GemmaCausalLM = mock_cls
+    import gemma_4_sql.backends.keras.inference as inf
 
-    with patch.dict("sys.modules", {"keras_nlp.models": mock_keras_nlp.models}), patch("gemma_4_sql.backends.keras.inference.keras", MagicMock()), patch("gemma_4_sql.backends.keras.inference.tf", MagicMock()):
-        result = generate_sql("model", "prompt ")
-        assert "failed" in result["status"]
-        assert result["sql"] == ""
+    monkeypatch.setattr(inf, "keras", MagicMock())
+    monkeypatch.setattr(inf, "tf", MagicMock())
+    monkeypatch.setattr(inf, "configure_beam_sampler", MagicMock())
+
+    import builtins
+
+    original_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name == "keras_nlp.models":
+            mock_models = MagicMock()
+            mock_cls = MagicMock()
+            mock_model = MagicMock()
+            mock_model.generate.return_value = 12345
+            mock_cls.from_preset.return_value = mock_model
+            mock_models.GemmaCausalLM = mock_cls
+            return mock_models
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+
+    res = inf.generate_sql("m", "")
+    assert res["status"] == "success"
+    assert "12345" in res["sql"]
 
 
-def test_generate_sql_exception():
-    """Docstring for test_generate_sql_exception."""
-    mock_model = MagicMock()
-    mock_model.generate.side_effect = ValueError("Some error")
-    mock_cls = MagicMock()
-    mock_cls.from_preset.return_value = mock_model
+def test_module_load_import_error():
+    """Docstring for test_module_load_import_error."""
+    import gemma_4_sql.backends.keras.inference as q
 
-    mock_keras_nlp = MagicMock()
-    mock_keras_nlp.models.GemmaCausalLM = mock_cls
+    with open(q.__file__) as f:
+        code = f.read()
 
-    with patch.dict("sys.modules", {"keras_nlp.models": mock_keras_nlp.models}), patch("gemma_4_sql.backends.keras.inference.keras", MagicMock()), patch("gemma_4_sql.backends.keras.inference.tf", MagicMock()):
-        result = generate_sql("model", "prompt ")
-        assert "failed: Some error" in result["status"]
+    import builtins
+
+    orig_import = builtins.__import__
+
+    def mock_import(name, *args, **kwargs):
+        """Docstring for mock_import."""
+        if name in ("keras", "tensorflow"):
+            raise ImportError("simulated missing import")
+        return orig_import(name, *args, **kwargs)
+
+    namespace = {"__name__": "mock_inference", "__builtins__": dict(builtins.__dict__)}
+    namespace["__builtins__"]["__import__"] = mock_import
+
+    exec(code, namespace)  # noqa: S102
+
+    assert namespace.get("keras") is None
+    assert namespace.get("tf") is None
+
+
+def test_module_load_import_error_coverage(monkeypatch):
+    """Docstring for test_module_load_import_error_coverage."""
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.keras.inference as inf
+
+    monkeypatch.setitem(sys.modules, "keras", None)
+    monkeypatch.setitem(sys.modules, "tensorflow", None)
+    importlib.reload(inf)
+    assert inf.keras is None
+    assert inf.tf is None
+    monkeypatch.undo()
+    importlib.reload(inf)

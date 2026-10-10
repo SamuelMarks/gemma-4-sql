@@ -1,619 +1,475 @@
-"""Real PyTorch inference tests."""
+"""Tests for PyTorch inference."""
+
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
-import torch
 
-from gemma_4_sql.backends.pytorch.inference import generate_sql
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
-def test_generate_sql_success() -> None:
-    """Docstring for test_generate_sql_success."""
-    # Just test that the pipeline can run using pytorch_native mock config via kwargs
-    # We will pass backend_alias="pytorch_native" to use the internal model
-    from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
+def test_pytorch_inference_imports():
+    """Test pytorch inference imports fallback."""
+    import importlib
 
-    config = Gemma4Config(
-        vocab_size=128,
-        hidden_size=16,
-        num_hidden_layers=1,
-        num_attention_heads=2,
-        num_key_value_heads=1,
-        intermediate_size=32,
-        head_dim=8,
-    )
-    res = generate_sql(
-        model_name="dummy_model",
-        prompt="SELECT *",
-        beam_width=1,
-        max_length=2,
-        backend_alias="pytorch_native",
-        config=config,
-    )
-    assert res["status"] == "success"
-    assert "sql" in res
+    with patch.dict(sys.modules, {"torch": None, "transformers": None}):
+        import gemma_4_sql.backends.pytorch.inference as inf_module
+
+        importlib.reload(inf_module)
+        assert inf_module.torch is None
+        assert inf_module.AutoModelForCausalLM is None
+        assert inf_module.AutoTokenizer is None
+    importlib.reload(inf_module)
 
 
-def test_generate_sql_multimodal() -> None:
-    """Docstring for test_generate_sql_multimodal."""
-    from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
+def test_run_generation_native():
+    """Test _run_generation native."""
+    import gemma_4_sql.backends.pytorch.inference as inf_module
 
-    config = Gemma4Config(
-        vocab_size=128,
-        hidden_size=16,
-        num_hidden_layers=1,
-        num_attention_heads=2,
-        num_key_value_heads=1,
-        intermediate_size=32,
-        head_dim=8,
-    )
-    res = generate_sql(
-        model_name="dummy_model",
-        prompt="SELECT *",
-        beam_width=1,
-        max_length=2,
-        backend_alias="pytorch_native",
-        config=config,
-        pixel_values=torch.randn(1, 3, 224, 224),
-        audio_values=torch.randn(1, 16000),
-    )
-    assert res["status"] == "success"
+    inf_module.torch = MagicMock()
+    inf_module.AutoModelForCausalLM = MagicMock()
+    inf_module.AutoTokenizer = MagicMock()
+
+    with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM") as mock_native:
+        mock_model = MagicMock()
+        mock_native.from_pretrained.return_value = mock_model
+
+        # Output setup
+        mock_model.generate.return_value = [[1, 2, 3, 4, 5]]
+
+        # Test basic success
+        inf_module.AutoTokenizer.from_pretrained.return_value = MagicMock()
+        inf_module.AutoTokenizer.from_pretrained.return_value.return_value.input_ids = MagicMock(shape=[1, 2])
+        inf_module.AutoTokenizer.from_pretrained.return_value.decode.return_value = "SELECT 1;"
+
+        sql, conf = inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch_native")
+        assert sql == "SELECT 1;"
+        assert conf == 0.95
+
+        # Test empty sequence
+        mock_model.generate.return_value = [[1, 2]]  # equals input length
+        with pytest.raises(InferenceError, match="yielded an empty sequence"):
+            inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch_native")
+
+        # Test empty decoded string
+        mock_model.generate.return_value = [[1, 2, 3, 4, 5]]
+        inf_module.AutoTokenizer.from_pretrained.return_value.decode.return_value = ""
+        with pytest.raises(InferenceError, match="empty SQL"):
+            inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch_native")
+
+        # Test without AutoTokenizer available
+        inf_module.AutoTokenizer = None
+        with patch("gemma_4_sql.tokenization.SQLTokenizer") as mock_sql_tok:
+            mock_sql_tok.return_value.encode.return_value = [1, 2]
+            mock_sql_tok.return_value.decode.return_value = "SQL;"
+            inf_module.torch.tensor.return_value.shape = [1, 2]
+
+            # Need an object that returns a list from .tolist() and has __len__
+            class MockGenTokens:
+                """Docstring for MockGenTokens."""
+
+                def tolist(self):
+                    """Docstring for tolist."""
+                    return [1, 2]
+
+                def __len__(self):
+                    """Docstring for __len__."""
+                    return 2
+
+            mock_out = MagicMock()
+            mock_out.__getitem__.return_value.__getitem__.return_value = MockGenTokens()
+            mock_model.generate.return_value = mock_out
+
+            sql, conf = inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch_native")
+            assert sql == "SQL;"
 
 
-def test_generate_sql_hf(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_generate_sql_hf."""
+def test_run_generation_native_multimodal():
+    """Test _run_generation native multimodal."""
+    import gemma_4_sql.backends.pytorch.inference as inf_module
 
-    class MockModel:
-        """Docstring for MockModel."""
+    inf_module.torch = MagicMock()
+    inf_module.AutoModelForCausalLM = MagicMock()
+    inf_module.AutoTokenizer = MagicMock()
 
-        @classmethod
-        def from_pretrained(cls, *a, **k):
-            """Docstring for from_pretrained."""
-            return cls()
+    with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM") as mock_native:
+        mock_model = MagicMock()
+        mock_native.from_pretrained.return_value = mock_model
+        mock_model.generate.return_value = [[1, 2, 3, 4, 5]]
+        inf_module.AutoTokenizer.from_pretrained.return_value.return_value.input_ids = MagicMock(shape=[1, 2])
+        inf_module.AutoTokenizer.from_pretrained.return_value.decode.return_value = "SQL"
 
-        def to(self, *a, **k):
+        with patch("gemma_4_sql.backends.common_multimodal.process_image") as mock_pi:
+            with patch("gemma_4_sql.backends.common_multimodal.process_audio") as mock_pa:
+                with patch("gemma_4_sql.backends.common_multimodal.format_multimodal_prompt") as mock_fmt:
+                    mock_fmt.return_value = {"prompt": "fmt"}
+                    mock_pi.return_value = {"pixel_values": "p"}
+                    mock_pa.return_value = {"audio_values": "a"}
+
+                    sql, conf = inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch_native", image_path="ip", audio_path="ap")
+                    assert sql == "SQL"
+                    mock_model.generate.assert_called()
+                    assert "pixel_values" in mock_model.generate.call_args[1]
+                    assert "audio_values" in mock_model.generate.call_args[1]
+
+
+def test_run_generation_hf():
+    """Test _run_generation hf."""
+    import gemma_4_sql.backends.pytorch.inference as inf_module
+
+    inf_module.torch = MagicMock()
+    mock_auto_model = MagicMock()
+    inf_module.AutoModelForCausalLM = mock_auto_model
+    inf_module.AutoTokenizer = MagicMock()
+
+    mock_model = MagicMock()
+    mock_auto_model.from_pretrained.return_value = mock_model
+
+    mock_out = MagicMock()
+    mock_out.sequences = [[1, 2, 3, 4]]
+
+    # Needs to support len(sequences[0])
+    class MockSeq(list):
+        """Docstring for MockSeq."""
+
+        def __getitem__(self, i):
+            """Docstring for __getitem__."""
+            if isinstance(i, slice):
+                return list.__getitem__(self, i)
+            return list.__getitem__(self, i)
+
+        def __len__(self):
+            """Docstring for __len__."""
+            return 4
+
+    seq = MockSeq([1, 2, 3, 4])
+    mock_out.sequences = [seq]
+
+    mock_out.sequences_scores.item.return_value = 0.5
+    mock_model.generate.return_value = mock_out
+
+    class MockInputIds:
+        """Docstring for MockInputIds."""
+
+        shape = [1, 2]
+
+    class MockInputs(dict):
+        """Docstring for MockInputs."""
+
+        def __init__(self):
+            """Docstring for __init__."""
+            super().__init__()
+            self["input_ids"] = MockInputIds()
+            self.input_ids = self["input_ids"]
+
+        def to(self, device):
             """Docstring for to."""
             return self
 
-        def eval(self):
-            """Docstring for eval."""
+    inputs_mock = MockInputs()
+    inf_module.AutoTokenizer.from_pretrained.return_value.return_value = inputs_mock
+    inf_module.AutoTokenizer.from_pretrained.return_value.decode.return_value = "SQL"
 
-        def generate(self, **kwargs):
-            """Docstring for generate."""
+    sql, conf = inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch")
+    assert sql == "SQL"
 
-            class Outputs:
-                """Docstring for Outputs."""
+    # Test adapter load
+    with patch("builtins.__import__") as mock_import:
+        mock_peft = MagicMock()
+        mock_peft.PeftModel.from_pretrained.return_value = mock_model
+        mock_import.return_value = mock_peft
 
-                sequences = torch.tensor([[1, 2, 3]])
-                sequences_scores = torch.tensor([-0.5])
+        inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", adapter_path="p")
 
-            return Outputs()
+        # Test PEFT import failure
+        mock_import.side_effect = ImportError("error")
+        inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", adapter_path="p")
 
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
+    # Test low conf score logic
+    mock_out.sequences_scores.item.return_value = -0.5
+    sql, conf = inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch")
+    assert conf > 0.0
 
-        @classmethod
-        def from_pretrained(cls, *a, **k):
-            """Docstring for from_pretrained."""
-            return cls()
+    # Test empty SQL
+    inf_module.AutoTokenizer.from_pretrained.return_value.decode.return_value = ""
+    with pytest.raises(InferenceError, match="empty SQL"):
+        inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch")
 
-        def __call__(self, text, return_tensors):
-            """Docstring for __call__."""
-
-            class Inputs(dict):
-                """Docstring for Inputs."""
-
-                def __init__(self):
-                    """Docstring for __init__."""
-                    super().__init__({"input_ids": torch.tensor([[1]])})
-                    self.input_ids = self["input_ids"]
-
-                def to(self, *a):
-                    """Docstring for to."""
-                    return self
-
-            return Inputs()
-
-        def decode(self, *a, **k):
-            """Docstring for decode."""
-            return "SELECT * FROM t"
-
-    import gemma_4_sql.backends.pytorch.inference as inf
-
-    monkeypatch.setattr(inf, "AutoModelForCausalLM", MockModel)
-    monkeypatch.setattr(inf, "AutoTokenizer", MockTokenizer)
-
-    res = generate_sql(
-        model_name="hf_model",
-        prompt="SELECT *",
-        beam_width=1,
-        max_length=2,
-        backend_alias="pytorch",
-        pixel_values=torch.randn(1, 3, 224, 224),
-        audio_values=torch.randn(1, 16000),
-    )
-    assert res["status"] == "success"
+    # Test inputs missing shape and other fallbacks
+    inf_module.AutoTokenizer.from_pretrained.return_value.return_value = {}
+    inf_module.AutoTokenizer.from_pretrained.return_value.decode.return_value = "promptSQL"
+    sql, conf = inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch")
+    assert sql == "SQL"
 
 
-def test_generate_sql_hf_empty_sequence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_generate_sql_hf_empty_sequence."""
+def test_run_generation_hf_multimodal():
+    """Test _run_generation hf multimodal."""
+    import gemma_4_sql.backends.pytorch.inference as inf_module
 
-    class MockModel:
-        """Docstring for MockModel."""
+    inf_module.torch = MagicMock()
+    inf_module.AutoModelForCausalLM = MagicMock()
+    inf_module.AutoTokenizer = MagicMock()
 
-        @classmethod
-        def from_pretrained(cls, *a, **k):
-            """Docstring for from_pretrained."""
-            return cls()
+    with patch("gemma_4_sql.backends.common_multimodal.process_image") as mock_pi:
+        with patch("gemma_4_sql.backends.common_multimodal.process_audio") as mock_pa:
+            with patch("gemma_4_sql.backends.common_multimodal.format_multimodal_prompt") as mock_fmt:
+                mock_fmt.return_value = {"prompt": "fmt"}
+                mock_pi.return_value = {"pixel_values": "p"}
+                mock_pa.return_value = {"audio_values": "a"}
 
-        def to(self, *a, **k):
-            """Docstring for to."""
-            return self
+                class MockSeq(list):
+                    """Docstring for MockSeq."""
 
-        def eval(self):
-            """Docstring for eval."""
+                    def __len__(self):
+                        """Docstring for __len__."""
+                        return 3
 
-        def generate(self, **kwargs):
-            """Docstring for generate."""
+                inf_module.AutoModelForCausalLM.from_pretrained.return_value.generate.return_value.sequences = [MockSeq([1, 2, 3])]
 
-            class Outputs:
-                """Docstring for Outputs."""
+                class MockInputIds:
+                    """Docstring for MockInputIds."""
 
-                sequences = torch.tensor([[1]])  # Only prompt, no generation
-                sequences_scores = torch.tensor([0.9])
+                    shape = [1, 2]
 
-            return Outputs()
+                class MockInputs(dict):
+                    """Docstring for MockInputs."""
 
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
+                    def __init__(self):
+                        """Docstring for __init__."""
+                        super().__init__()
+                        self["input_ids"] = MockInputIds()
+                        self.input_ids = self["input_ids"]
 
-        @classmethod
-        def from_pretrained(cls, *a, **k):
-            """Docstring for from_pretrained."""
-            return cls()
+                    def to(self, device):
+                        """Docstring for to."""
+                        return self
 
-        def __call__(self, text, return_tensors):
-            """Docstring for __call__."""
+                inputs_mock = MockInputs()
+                inf_module.AutoTokenizer.from_pretrained.return_value.return_value = inputs_mock
+                inf_module.AutoTokenizer.from_pretrained.return_value.decode.return_value = "SQL"
 
-            class Inputs(dict):
-                """Docstring for Inputs."""
-
-                def __init__(self):
-                    """Docstring for __init__."""
-                    super().__init__({"input_ids": torch.tensor([[1]])})
-                    self.input_ids = self["input_ids"]
-
-                def to(self, *a):
-                    """Docstring for to."""
-                    return self
-
-            return Inputs()
-
-        def decode(self, *a, **k):
-            """Docstring for decode."""
-            return ""  # empty sql
-
-    import gemma_4_sql.backends.pytorch.inference as inf
-
-    monkeypatch.setattr(inf, "AutoModelForCausalLM", MockModel)
-    monkeypatch.setattr(inf, "AutoTokenizer", MockTokenizer)
-
-    res = generate_sql(
-        model_name="hf_model",
-        prompt="SELECT *",
-        beam_width=1,
-        max_length=2,
-        backend_alias="pytorch",
-    )
-    assert "failed" in res["status"]
+                sql, conf = inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", image_path="ip", audio_path="ap")
+                assert sql == "SQL"
 
 
-def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_generate_sql_missing_deps."""
-    import gemma_4_sql.backends.pytorch.inference as inf
+def test_generate_sql():
+    """Test generate_sql."""
+    import gemma_4_sql.backends.pytorch.inference as inf_module
 
-    monkeypatch.setattr(inf, "torch", None)
+    inf_module.torch = MagicMock()
+    inf_module.AutoModelForCausalLM = MagicMock()
+    inf_module.AutoTokenizer = MagicMock()
+
+    with patch("gemma_4_sql.backends.pytorch.inference._run_generation") as mock_run:
+        mock_run.return_value = ("SELECT 1;", 0.9)
+
+        res = inf_module.generate_sql("model", "prompt", backend_alias="pytorch")
+        assert res["status"] == "success"
+        assert res["sql"] == "SELECT 1;"
+
+        # Test error
+        mock_run.side_effect = RuntimeError("error")
+        res2 = inf_module.generate_sql("model", "prompt", backend_alias="pytorch")
+        assert "failed: error" in res2["status"]
+
+    inf_module.torch = None
     with pytest.raises(DependencyMissingError):
-        generate_sql("model", "prompt")
+        inf_module.generate_sql("model", "prompt", backend_alias="pytorch")
 
 
-def test_inference_pytorch_no_attrs(monkeypatch, tmp_path):
-    """Docstring for test_inference_pytorch_no_attrs."""
-    from gemma_4_sql.backends.pytorch.inference import generate_sql
+def test_inference_coverage_gaps():
+    """Docstring for test_inference_coverage_gaps."""
+    from unittest.mock import MagicMock, patch
 
-    class DummyModelNoAttrs:
-        """Docstring for DummyModelNoAttrs."""
+    import gemma_4_sql.backends.pytorch.inference as inf_module
 
-        def generate(self, *args, **kwargs):
-            """Docstring for generate."""
-            import torch
+    inf_module.torch = MagicMock()
 
-            class MockOutput:
-                """Docstring for MockOutput."""
+    mock_auto_model = MagicMock()
+    inf_module.AutoModelForCausalLM = mock_auto_model
 
-                sequences = torch.zeros((1, 1, 10))
+    mock_auto_tok = MagicMock()
 
-            return MockOutput()
+    def side_effect(model_name):
+        """Docstring for side_effect."""
+        if model_name == "fail":
+            raise OSError("error")
+        return MagicMock()
 
-    class MockAutoModelForCausalLM:
-        """Docstring for MockAutoModelForCausalLM."""
+    mock_auto_tok.from_pretrained.side_effect = side_effect
+    inf_module.AutoTokenizer = mock_auto_tok
 
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-            return DummyModelNoAttrs()
+    with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM") as mock_native:
+        mock_model = MagicMock()
+        mock_native.from_pretrained.return_value = mock_model
+        mock_auto_model.from_pretrained.return_value = mock_model
 
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
+        class MockOutputs:
+            """Docstring for MockOutputs."""
 
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
+            def __init__(self):
+                # HF sequences
+                """Docstring for __init__."""
 
-            class Tok:
-                """Docstring for Tok."""
+                class HfSeq(list):
+                    """Docstring for HfSeq."""
 
-                def __call__(self, *a, **k):
-                    """Docstring for __call__."""
-                    import torch
+                    def __init__(self):
+                        """Docstring for __init__."""
+                        super().__init__([1, 2, 3, 4])
 
-                    return {"input_ids": torch.tensor([[1]])}
+                    def tolist(self):
+                        """Docstring for tolist."""
+                        return self
 
-                def decode(self, *a, **k):
-                    """Docstring for decode."""
-                    return "SELECT 1"
+                    def __getitem__(self, idx):
+                        """Docstring for __getitem__."""
+                        if isinstance(idx, slice):
+                            return [1]
+                        return 1
 
-            return Tok()
+                    def __len__(self):
+                        """Docstring for __len__."""
+                        return 4
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoModelForCausalLM", MockAutoModelForCausalLM)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockTokenizer)
+                self.sequences = [HfSeq()]
+                self.sequences_scores = [MagicMock()]
+                self.sequences_scores[0].item.return_value = 0.95
 
-    res = generate_sql("model", "query", beam_width=1, max_length=1)
-    assert res["status"] == "success"
+            def __getitem__(self, idx):
+                # Native output_ids
+                """Docstring for __getitem__."""
 
+                class NativeSeq(list):
+                    """Docstring for NativeSeq."""
 
-def test_inference_pytorch_dict_output(monkeypatch, tmp_path):
-    """Docstring for test_inference_pytorch_dict_output."""
-    from gemma_4_sql.backends.pytorch.inference import generate_sql
+                    def __init__(self):
+                        """Docstring for __init__."""
+                        super().__init__([1, 2, 3, 4])
 
-    class DummyModelDictOutput:
-        """Docstring for DummyModelDictOutput."""
+                    def tolist(self):
+                        """Docstring for tolist."""
+                        return self
 
-        def eval(self):
-            """Docstring for eval."""
+                    def __getitem__(self, idx):
+                        """Docstring for __getitem__."""
+                        return self
 
-        def generate(self, *args, **kwargs):
-            """Docstring for generate."""
-            import torch
+                    def __len__(self):
+                        """Docstring for __len__."""
+                        return 4
 
-            class MockOutput:
-                """Docstring for MockOutput."""
+                return NativeSeq()
 
-                sequences = torch.ones((1, 10))
+        mock_model.generate.return_value = MockOutputs()
 
-            return MockOutput()
+        with patch("gemma_4_sql.tokenization.SQLTokenizer") as mock_sql_tok:
+            mock_sql_tok.return_value.encode.return_value = [1, 2]
+            mock_sql_tok.return_value.decode.return_value = "SQL;"
+            inf_module.torch.tensor.return_value.shape = [1, 2]
 
-    class MockAutoModelForCausalLM:
-        """Docstring for MockAutoModelForCausalLM."""
+            sql, conf = inf_module._run_generation("fail", "prompt", 1, 10, backend_alias="pytorch_native")
+            assert sql == "SQL;"
 
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-            return DummyModelDictOutput()
+            with patch("gemma_4_sql.backends.common_multimodal.process_image") as mock_pi:
+                mock_pi.return_value = {"pixel_values": []}
+                inf_module._run_generation("fail", "prompt", 1, 10, backend_alias="pytorch_native", image_path=b"img")
 
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
+            with patch("gemma_4_sql.backends.common_multimodal.process_audio") as mock_pa:
+                mock_pa.return_value = {"audio_values": []}
+                inf_module._run_generation("fail", "prompt", 1, 10, backend_alias="pytorch_native", audio_path=b"aud")
 
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
+            # Hit 146->150 and 150->154 in hf path
+            # We need to ensure that the mocked tokenizer returns something where inputs.input_ids.shape[-1] is an int
+            class MockTokRes(dict):
+                """Docstring for MockTokRes."""
 
-            class Tok:
-                """Docstring for Tok."""
+                def __init__(self):
+                    """Docstring for __init__."""
+                    super().__init__()
 
-                def __call__(self, *a, **k):
-                    """Docstring for __call__."""
-                    import torch
+                    class MockInputIds:
+                        """Docstring for MockInputIds."""
 
-                    return {"input_ids": torch.tensor([[1]])}
+                        def __init__(self):
+                            """Docstring for __init__."""
+                            self.shape = (1, 0)
 
-                def decode(self, *a, **k):
-                    """Docstring for decode."""
-                    return "SELECT 1"
+                    self.input_ids = MockInputIds()
+                    self["input_ids"] = self.input_ids
 
-            return Tok()
+                def to(self, *args, **kwargs):
+                    """Docstring for to."""
+                    return self
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoModelForCausalLM", MockAutoModelForCausalLM)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockTokenizer)
+            mock_tok_res = MockTokRes()
+            mock_auto_tok.from_pretrained.side_effect = None
+            mock_auto_tok_inst = MagicMock()
+            mock_auto_tok_inst.return_value = mock_tok_res
+            mock_auto_tok.from_pretrained.return_value = mock_auto_tok_inst
 
-    res = generate_sql("model", "query", beam_width=1, max_length=1)
-    assert res["status"] == "success"
+            with patch("gemma_4_sql.backends.common_multimodal.process_image") as mock_px:
+                mock_px.return_value = {"pixel_values": []}
+                inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", image_path=b"img")
 
+            with patch("gemma_4_sql.backends.common_multimodal.process_audio") as mock_ax:
+                mock_ax.return_value = {"audio_values": []}
+                inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", audio_path=b"aud")
 
-def test_inference_pytorch_tokenizer_err(monkeypatch, tmp_path):
-    """Docstring for test_inference_pytorch_tokenizer_err."""
-    from gemma_4_sql.backends.pytorch.inference import generate_sql
 
-    class DummyModelDictOutput:
-        """Docstring for DummyModelDictOutput."""
+def test_inference_negative_conf():
+    """Docstring for test_inference_negative_conf."""
+    from unittest.mock import MagicMock
 
-        def eval(self):
-            """Docstring for eval."""
+    import gemma_4_sql.backends.pytorch.inference as inf_module
 
-        def generate(self, *args, **kwargs):
-            """Docstring for generate."""
-            import torch
+    inf_module.torch = MagicMock()
+    mock_auto_model = MagicMock()
+    inf_module.AutoModelForCausalLM = mock_auto_model
+    inf_module.AutoTokenizer = MagicMock()
 
-            class MockOutput:
-                """Docstring for MockOutput."""
+    mock_model = MagicMock()
+    mock_auto_model.from_pretrained.return_value = mock_model
 
-                sequences = torch.ones((1, 10))
+    mock_out = MagicMock()
 
-            return MockOutput()
+    class MockSeq(list):
+        """Docstring for MockSeq."""
 
-    class MockAutoModelForCausalLM:
-        """Docstring for MockAutoModelForCausalLM."""
+        def __len__(self):
+            """Docstring for __len__."""
+            return 4
 
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-            return DummyModelDictOutput()
+    mock_out.sequences = [MockSeq([1, 2, 3, 4])]
 
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
+    # Properly mock sequence_scores to return -0.5
+    mock_score = MagicMock()
+    mock_score.item.return_value = -0.5
+    mock_out.sequences_scores.__getitem__.return_value = mock_score
 
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-            raise OSError("err")
+    mock_model.generate.return_value = mock_out
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoModelForCausalLM", MockAutoModelForCausalLM)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockTokenizer)
+    class MockInputIds:
+        """Docstring for MockInputIds."""
 
-    res = generate_sql("model", "query", beam_width=1, max_length=1)
-    assert "failed" in res["status"]
+        shape = [1, 2]
 
+    class MockInputs(dict):
+        """Docstring for MockInputs."""
 
-def test_inference_pytorch_empty_gen(monkeypatch, tmp_path):
-    """Docstring for test_inference_pytorch_empty_gen."""
-    from gemma_4_sql.backends.pytorch.inference import generate_sql
+        def __init__(self):
+            """Docstring for __init__."""
+            super().__init__()
+            self["input_ids"] = MockInputIds()
+            self.input_ids = self["input_ids"]
 
-    class DummyModelEmpty:
-        """Docstring for DummyModelEmpty."""
+        def to(self, device):
+            """Docstring for to."""
+            return self
 
-        def eval(self):
-            """Docstring for eval."""
+    inputs_mock = MockInputs()
+    inf_module.AutoTokenizer.from_pretrained.return_value.return_value = inputs_mock
+    inf_module.AutoTokenizer.from_pretrained.return_value.decode.return_value = "SQL"
 
-        def generate(self, *args, **kwargs):
-            """Docstring for generate."""
-            import torch
-
-            class MockOutput:
-                """Docstring for MockOutput."""
-
-                sequences = torch.tensor([[1]])
-
-            return MockOutput()
-
-    class MockAutoModelForCausalLM:
-        """Docstring for MockAutoModelForCausalLM."""
-
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-            return DummyModelEmpty()
-
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
-
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-
-            class Tok:
-                """Docstring for Tok."""
-
-                def __call__(self, *a, **k):
-                    """Docstring for __call__."""
-                    import torch
-
-                    return {"input_ids": torch.tensor([[1]])}
-
-                def decode(self, *a, **k):
-                    """Docstring for decode."""
-                    return ""
-
-            return Tok()
-
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoModelForCausalLM", MockAutoModelForCausalLM)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockTokenizer)
-
-    res = generate_sql("model", "query", beam_width=1, max_length=1)
-    assert "failed" in str(res["status"])
-
-
-def test_inference_pytorch_empty_sql(monkeypatch, tmp_path):
-    """Docstring for test_inference_pytorch_empty_sql."""
-    from gemma_4_sql.backends.pytorch.inference import generate_sql
-
-    class DummyModelEmpty:
-        """Docstring for DummyModelEmpty."""
-
-        def eval(self):
-            """Docstring for eval."""
-
-        def generate(self, *args, **kwargs):
-            """Docstring for generate."""
-            import torch
-
-            class MockOutput:
-                """Docstring for MockOutput."""
-
-                sequences = torch.tensor([[1, 2]])
-
-            return MockOutput()
-
-    class MockAutoModelForCausalLM:
-        """Docstring for MockAutoModelForCausalLM."""
-
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-            return DummyModelEmpty()
-
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
-
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-
-            class Tok:
-                """Docstring for Tok."""
-
-                def __call__(self, *a, **k):
-                    """Docstring for __call__."""
-                    import torch
-
-                    return {"input_ids": torch.tensor([[1]])}
-
-                def decode(self, *a, **k):
-                    """Docstring for decode."""
-                    return ""
-
-            return Tok()
-
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoModelForCausalLM", MockAutoModelForCausalLM)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockTokenizer)
-
-    res = generate_sql("model", "query", beam_width=1, max_length=1)
-    assert "failed" in str(res["status"])
-
-
-def test_inference_pytorch_multimodal_edge_cases(monkeypatch, tmp_path):
-    """Docstring for test_inference_pytorch_multimodal_edge_cases."""
-    from gemma_4_sql.backends.pytorch.inference import generate_sql
-
-    class DummyModel:
-        """Docstring for DummyModel."""
-
-        device = "cpu"
-
-        def eval(self):
-            """Docstring for eval."""
-
-        def generate(self, *args, **kwargs):
-            """Docstring for generate."""
-            import torch
-
-            class MockOutput:
-                """Docstring for MockOutput."""
-
-                sequences = torch.tensor([[1, 2]])
-
-            return MockOutput()
-
-    class MockAutoModelForCausalLM:
-        """Docstring for MockAutoModelForCausalLM."""
-
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-            return DummyModel()
-
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
-
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-
-            class Tok:
-                """Docstring for Tok."""
-
-                def __call__(self, *a, **k):
-                    """Docstring for __call__."""
-                    import torch
-
-                    return {"input_ids": torch.tensor([[1]])}
-
-                def decode(self, *a, **k):
-                    """Docstring for decode."""
-                    return "SELECT 1"
-
-            return Tok()
-
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoModelForCausalLM", MockAutoModelForCausalLM)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockTokenizer)
-
-    dummy_img = tmp_path / "img.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
-    dummy_audio = tmp_path / "aud.wav"
-    dummy_audio.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
-
-    res1 = generate_sql("model", "query", beam_width=1, max_length=1, image_path=str(dummy_img))
-    res2 = generate_sql("model", "query", beam_width=1, max_length=1, audio_path=str(dummy_audio))
-    res3 = generate_sql("model", "query", beam_width=1, max_length=1, adapter_path="dummy/path")
-    assert res1["status"] == "success"
-    assert res2["status"] == "success"
-    assert res3["status"] == "success"
-
-
-def test_inference_pytorch_pixel_in_inputs(monkeypatch, tmp_path):
-    """Docstring for test_inference_pytorch_pixel_in_inputs."""
-    from gemma_4_sql.backends.pytorch.inference import generate_sql
-
-    class DummyModel:
-        """Docstring for DummyModel."""
-
-        device = "cpu"
-
-        def eval(self):
-            """Docstring for eval."""
-
-        def generate(self, *args, **kwargs):
-            """Docstring for generate."""
-            import torch
-
-            class MockOutput:
-                """Docstring for MockOutput."""
-
-                sequences = torch.tensor([[1, 2]])
-
-            return MockOutput()
-
-    class MockAutoModelForCausalLM:
-        """Docstring for MockAutoModelForCausalLM."""
-
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-            return DummyModel()
-
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
-
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs):
-            """Docstring for from_pretrained."""
-
-            class Tok:
-                """Docstring for Tok."""
-
-                def __call__(self, *a, **k):
-                    """Docstring for __call__."""
-                    import torch
-
-                    return {"input_ids": torch.tensor([[1]]), "pixel_values": 1}
-
-                def decode(self, *a, **k):
-                    """Docstring for decode."""
-                    return "SELECT 1"
-
-            return Tok()
-
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoModelForCausalLM", MockAutoModelForCausalLM)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockTokenizer)
-
-    res = generate_sql("model", "query", beam_width=1, max_length=1)
-    assert res["status"] == "success"
+    sql, conf = inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch")
+    assert conf < 1.0

@@ -17,15 +17,15 @@ logger = logging.getLogger(__name__)
 try:
     import mlx.core as _mx
 
-    mx: Any = _mx  # pragma: no cover
+    mx: Any = _mx
 except (ImportError, AttributeError):
     mx = None
 
 try:
     import mlx_lm
 
-    load: Any = getattr(mlx_lm, "load", None)  # pragma: no cover
-    generate: Any = getattr(mlx_lm, "generate", None)  # pragma: no cover
+    load: Any = getattr(mlx_lm, "load", None)
+    generate: Any = getattr(mlx_lm, "generate", None)
 except (ImportError, AttributeError):
     load = None
     generate = None
@@ -111,9 +111,9 @@ def mlx_beam_search(
         candidates: list[tuple[list[int], float, bool]] = []
 
         for gen_tokens, cum_score, is_done in beams:
-            if is_done:  # pragma: no cover
-                candidates.append((gen_tokens, cum_score, True))  # pragma: no cover
-                continue  # pragma: no cover
+            if is_done:
+                candidates.append((gen_tokens, cum_score, True))
+                continue
 
             full_seq = input_ids + gen_tokens
             if mx is not None:
@@ -154,8 +154,8 @@ def mlx_beam_search(
             break
 
     best_tokens, best_score, _ = beams[0]
-    if not best_tokens:  # pragma: no cover
-        raise InferenceError("MLX beam search yielded an empty sequence.")  # pragma: no cover
+    if not best_tokens:
+        raise InferenceError("MLX beam search yielded an empty sequence.")
 
     confidence = compute_confidence_score(best_score, len(best_tokens))
 
@@ -164,12 +164,12 @@ def mlx_beam_search(
     if not output_tokens:
         raise InferenceError("MLX beam search yielded only an EOS token.")
 
-    if tokenizer is not None and hasattr(tokenizer, "decode"):  # pragma: no cover
+    if tokenizer is not None and hasattr(tokenizer, "decode"):
         sql = tokenizer.decode(output_tokens).strip()
     else:
-        from gemma_4_sql.tokenization import SQLTokenizer  # pragma: no cover
+        from gemma_4_sql.tokenization import SQLTokenizer
 
-        sql = SQLTokenizer().decode(output_tokens).strip()  # pragma: no cover
+        sql = SQLTokenizer().decode(output_tokens).strip()
 
     if not sql:
         raise InferenceError("MLX beam search decoded into an empty SQL query string.")

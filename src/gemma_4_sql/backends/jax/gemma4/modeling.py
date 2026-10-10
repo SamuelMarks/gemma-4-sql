@@ -120,8 +120,8 @@ class Gemma4Model(nnx.Module):
             object: The resulting output from the operation.
 
         """
-        if self.config.hidden_size_per_layer_input is None:  # pragma: no cover
-            return input_ids  # pragma: no cover
+        if self.config.hidden_size_per_layer_input is None:
+            return input_ids
         ple = self.embed_tokens_per_layer(input_ids) * float(self.config.hidden_size_per_layer_input) ** 0.5
         (batch_size, seq_len, _) = ple.shape
         return ple.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
@@ -137,7 +137,7 @@ class Gemma4Model(nnx.Module):
         proj = self.per_layer_model_projection(inputs_embeds) * self.per_layer_model_projection_scale
         proj = proj.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
         proj = self.per_layer_projection_norm(proj)
-        if per_layer_inputs is not None:  # pragma: no cover
+        if per_layer_inputs is not None:
             proj = (proj + per_layer_inputs) * self.per_layer_input_scale
         return proj
 
@@ -263,10 +263,10 @@ class Gemma4ForCausalLM(nnx.Module):
         inputs_embeds = self.model.embed_tokens(inputs.input_ids) * self.model.embed_scale
         image_features = None
         audio_features = None
-        if has_vision and inputs.pixel_values is not None:
+        if has_vision:
             vision_outputs = self.vision_tower.__call__(inputs.pixel_values)
             image_features = self.multi_modal_projector.__call__(vision_outputs)
-        if has_audio and inputs.input_features is not None:
+        if has_audio:
             audio_outputs = self.audio_tower.__call__(inputs.input_features, inputs.input_features_mask)
             audio_features = self.embed_audio.__call__(audio_outputs)
         inputs_embeds = self._merge_multimodal_features(inputs_embeds, image_features, audio_features, inputs)
@@ -335,7 +335,7 @@ def _default_jit(x: Any) -> Any:
         Any: The original function unmodified.
 
     """
-    return x  # pragma: no cover
+    return x
 
 
 _jit: Any = getattr(nnx, "jit", _default_jit)

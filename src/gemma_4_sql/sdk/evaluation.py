@@ -122,10 +122,10 @@ def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
         target_ids = batch_list[1][0].tolist() if hasattr(batch_list[1][0], "tolist") else batch_list[1][0]
     elif isinstance(batch, dict):
         batch_dict = cast(dict[str, Any], batch)
-        if "inputs" in batch_dict and "targets" in batch_dict:  # pragma: no cover
+        if "inputs" in batch_dict and "targets" in batch_dict:
             inputs = batch_dict["inputs"]
             targets = batch_dict["targets"]
-            if hasattr(inputs, "__getitem__") and hasattr(targets, "__getitem__"):  # pragma: no cover
+            if hasattr(inputs, "__getitem__") and hasattr(targets, "__getitem__"):
                 in0 = inputs[0]
                 tgt0 = targets[0]
                 input_ids = in0.tolist() if hasattr(in0, "tolist") else in0

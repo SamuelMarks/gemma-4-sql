@@ -1118,3 +1118,32 @@ def test_cli_serve_branches(monkeypatch):
     cli_s.chat_cmd(args)
     args = argparse.Namespace(model="m", prompt="p", backend="b", examples="bad")
     cli_s.few_shot_cmd(args)
+
+
+def test_cli_if_main(monkeypatch):
+    """Docstring for test_cli_if_main."""
+    import runpy
+    import sys
+
+    import gemma_4_sql.cli
+
+    # We patch cli so it returns 0 when called via sys.exit(cli())
+    monkeypatch.setattr(gemma_4_sql.cli, "cli", lambda args=None: 0)
+
+    monkeypatch.setattr(sys, "argv", ["gemma_4_sql", "--help"])
+    import sys as _sys
+
+    monkeypatch.setattr(_sys, "exit", lambda x: None)
+
+    import argparse
+
+    def mock_parse_args(*args, **kwargs):
+        """Docstring for mock_parse_args."""
+        ns = argparse.Namespace()
+        ns.func = lambda x: 0
+        return ns
+
+    monkeypatch.setattr(argparse.ArgumentParser, "parse_args", mock_parse_args)
+
+    # Do not catch SystemExit, let it return
+    runpy.run_path("src/gemma_4_sql/cli.py", run_name="__main__")

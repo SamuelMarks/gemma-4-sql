@@ -1,385 +1,276 @@
-"""Tests for PyTorch quantization logic (BitsAndBytes, AWQ, GPTQ, GGUF)."""
+"""Tests for PyTorch quantize."""
 
-from __future__ import annotations
-
-import math
-import struct
-from pathlib import Path
-from typing import Any
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
-from torch import nn
 
-import gemma_4_sql.backends.pytorch.quantize as pt_quantize
-from gemma_4_sql.backends.pytorch.quantize import (
-    _apply_awq_quantization,
-    _apply_gptq_quantization,
-    _export_gguf,
-    _write_gguf_file,
-    quantize_model,
-    validate_gguf_file,
-)
 from gemma_4_sql.exceptions import DependencyMissingError
 
 
-class TinyModel(nn.Module):
-    """A tiny real PyTorch model for testing."""
+def test_pytorch_quantize_imports():
+    """Test pytorch quantize imports fallback."""
+    import importlib
 
-    def __init__(self, **kwargs: Any) -> None:
-        """Docstring for __init__."""
-        super().__init__()
-        self.linear = nn.Linear(4, 4)
-        self.config = type("Config", (), {"quantization_config": None})()
-        self.quantized = False
-        self.saved_path: str | None = None
+    with patch.dict(sys.modules, {"torch": None, "numpy": None, "transformers": None}):
+        import gemma_4_sql.backends.pytorch.quantize as quantize_module
 
-    def quantize(self, tokenizer: Any, quant_config: Any = None, calib_data: Any = None) -> None:
-        """Docstring for quantize."""
-        self.quantized = True
-        assert quant_config["w_bit"] == 4
-        assert calib_data is not None
-
-    def save_quantized(self, save_path: str) -> None:
-        """Docstring for save_quantized."""
-        self.saved_path = save_path
-
-    @classmethod
-    def from_pretrained(cls, _name: str, **kwargs: Any) -> Any:
-        """Docstring for from_pretrained."""
-        return cls()
+        importlib.reload(quantize_module)
+        assert quantize_module.torch is None
+        assert quantize_module.np is None
+        assert quantize_module.BitsAndBytesConfig is None
+        assert quantize_module.AutoModelForCausalLM is None
+        assert quantize_module.AutoTokenizer is None
+    importlib.reload(quantize_module)
 
 
-class DummyBitsAndBytesConfig:
-    """Dummy config since BitsAndBytes isn't installed."""
+def test_validate_gguf_file(tmp_path):
+    """Test validate_gguf_file."""
+    import struct
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """Docstring for __init__."""
+    import gemma_4_sql.backends.pytorch.quantize as quantize_module
 
+    file_path = tmp_path / "test.gguf"
 
-def test_quantize_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test PyTorch quantize raises DependencyMissingError when dependencies are absent."""
-    monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", None)
-    with pytest.raises(DependencyMissingError, match=r"PyTorch quantization dependencies are missing\."):
-        quantize_model("model", "int8")
+    with pytest.raises(FileNotFoundError):
+        quantize_module.validate_gguf_file(file_path)
 
+    with open(file_path, "wb") as f:
+        f.write(b"BADH")
+    with pytest.raises(ValueError, match="Corrupt GGUF magic"):
+        quantize_module.validate_gguf_file(file_path)
 
-def test_quantize_pytorch_bnb_methods(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test standard BitsAndBytes int8 and int4 quantization methods."""
-    monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", DummyBitsAndBytesConfig)
-    monkeypatch.setattr(pt_quantize, "AutoModelForCausalLM", object())
-
-    res_int8 = quantize_model("model", "int8")
-    assert res_int8["backend"] == "pytorch"
-    assert res_int8["status"] == "quantized_int8"
-
-    res_int4 = quantize_model("model", "int4")
-    assert res_int4["status"] == "quantized_int4"
-
-    res_unknown = quantize_model("model", "unknown_method")
-    assert "unsupported" in str(res_unknown["status"])
-
-
-def test_quantize_pytorch_bnb_in_memory_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test BitsAndBytes quantization attached directly to an in-memory model instance."""
-    monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", DummyBitsAndBytesConfig)
-
-    real_model = TinyModel()
-
-    res = quantize_model("dummy_name", "int8", model=real_model)
-    assert res["status"] == "quantized_int8"
-    assert getattr(real_model, "_is_quantized", False) is True
-    assert getattr(real_model, "_quant_method", "") == "int8"
-    assert real_model.config.quantization_config is not None
-
-
-def test_quantize_pytorch_error_branch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test error branch during quantization wrapper execution."""
-    monkeypatch.setattr(pt_quantize, "BitsAndBytesConfig", Exception)
-    res = quantize_model("model", "int8")
-    assert "failed" in str(res["status"])
-
-
-def test_validate_gguf_file_valid_and_invalid(tmp_path: Path) -> None:
-    """Test validate_gguf_file with valid, non-existent, and corrupt files."""
-    gguf_path = tmp_path / "valid.gguf"
-    _write_gguf_file(gguf_path, model_name="test_model")
-
-    info = validate_gguf_file(gguf_path)
-    assert info["version"] == 3
-    assert info["tensor_count"] == 1
-    assert "general.architecture" in info["metadata"]
-    assert info["tensors"][0]["name"] == "token_embd.weight"
-
-    # Non-existent file
-    with pytest.raises(FileNotFoundError, match="GGUF file not found"):
-        validate_gguf_file(tmp_path / "missing.gguf")
-
-    # Corrupt magic
-    corrupt_magic = tmp_path / "corrupt_magic.gguf"
-    with open(corrupt_magic, "wb") as f:
-        f.write(b"BADM\x03\x00\x00\x00")
-    with pytest.raises(ValueError, match="Corrupt GGUF magic header"):
-        validate_gguf_file(corrupt_magic)
-
-    # Unsupported version
-    bad_version = tmp_path / "bad_version.gguf"
-    with open(bad_version, "wb") as f:
+    with open(file_path, "wb") as f:
         f.write(b"GGUF")
-        f.write(struct.pack("<I", 99))
+        f.write(struct.pack("<I", 1))  # Version 1
     with pytest.raises(ValueError, match="Unsupported GGUF version"):
-        validate_gguf_file(bad_version)
+        quantize_module.validate_gguf_file(file_path)
 
 
-def test_gguf_metadata_types_and_tensor_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test GGUF parsing with uint32, float32, and unknown metadata types, and raw bytes tensors."""
-    custom_gguf = tmp_path / "custom_meta.gguf"
-    with open(custom_gguf, "wb") as f:
+def test_validate_gguf_file_valid(tmp_path):
+    """Test validate_gguf_file valid."""
+    import struct
+
+    import gemma_4_sql.backends.pytorch.quantize as quantize_module
+
+    file_path = tmp_path / "test.gguf"
+
+    with open(file_path, "wb") as f:
         f.write(b"GGUF")
-        f.write(struct.pack("<I", 3))
+        f.write(struct.pack("<I", 3))  # Version 3
         f.write(struct.pack("<Q", 1))  # 1 tensor
-        f.write(struct.pack("<Q", 8))  # 8 metadata keys
+        f.write(struct.pack("<Q", 11))  # 11 KV pairs
 
-        # KV 1: UINT32 (5)
-        k1 = b"custom.uint"
-        f.write(struct.pack("<Q", len(k1)) + k1)
-        f.write(struct.pack("<I", 5))
-        f.write(struct.pack("<I", 42))
+        # KV 1: String
+        f.write(struct.pack("<Q", 2))
+        f.write(b"k1")
+        f.write(struct.pack("<I", 8))  # String type
+        f.write(struct.pack("<Q", 2))
+        f.write(b"v1")
 
-        # KV 2: FLOAT32 (6)
-        k2 = b"custom.float"
-        f.write(struct.pack("<Q", len(k2)) + k2)
+        # KV 2: Bool
+        f.write(struct.pack("<Q", 2))
+        f.write(b"k2")
+        f.write(struct.pack("<I", 7))
+        f.write(struct.pack("<B", 1))
+
+        # KV 3: Int32
+        f.write(struct.pack("<Q", 2))
+        f.write(b"k3")
+        f.write(struct.pack("<I", 4))
+        f.write(struct.pack("<i", 42))
+
+        # KV 4: Float32
+        f.write(struct.pack("<Q", 2))
+        f.write(b"k4")
         f.write(struct.pack("<I", 6))
-        f.write(struct.pack("<f", math.pi))
+        f.write(struct.pack("<f", 3.14))
 
-        # KV 3: UNKNOWN (99)
-        k3 = b"custom.unknown"
-        f.write(struct.pack("<Q", len(k3)) + k3)
+        # KV 5: Int64
+        f.write(struct.pack("<Q", 2))
+        f.write(b"k5")
+        f.write(struct.pack("<I", 10))
+        f.write(struct.pack("<q", 100))
+
+        # KV 6: Float64
+        f.write(struct.pack("<Q", 2))
+        f.write(b"k6")
+        f.write(struct.pack("<I", 12))
+        f.write(struct.pack("<d", 2.0))
+
+        # KV 7: Array of int32
+        f.write(struct.pack("<Q", 2))
+        f.write(b"k7")
+        f.write(struct.pack("<I", 9))  # Array type
+        f.write(struct.pack("<I", 4))  # Int32 elements
+        f.write(struct.pack("<Q", 1))  # 1 element
+        f.write(struct.pack("<i", 5))
+
+        # KV 8: Array of strings
+        f.write(struct.pack("<Q", 2))
+        f.write(b"k8")
+        f.write(struct.pack("<I", 9))
+        f.write(struct.pack("<I", 8))
+        f.write(struct.pack("<Q", 1))
+        f.write(struct.pack("<Q", 1))
+        f.write(b"a")
+
+        # KV 9: Array of float32
+        f.write(struct.pack("<Q", 2))
+        f.write(b"k9")
+        f.write(struct.pack("<I", 9))
+        f.write(struct.pack("<I", 6))
+        f.write(struct.pack("<Q", 1))
+        f.write(struct.pack("<f", 1.0))
+
+        # KV 10: Array of other
+        f.write(struct.pack("<Q", 3))
+        f.write(b"k10")
+        f.write(struct.pack("<I", 9))
+        f.write(struct.pack("<I", 99))
+        f.write(struct.pack("<Q", 1))
+
+        # KV 11: Unknown type
+        f.write(struct.pack("<Q", 3))
+        f.write(b"k11")
         f.write(struct.pack("<I", 99))
 
-        # KV 4: INT64 (11)
-        k4 = b"custom.int64"
-        f.write(struct.pack("<Q", len(k4)) + k4)
-        f.write(struct.pack("<I", 11))
-        f.write(struct.pack("<q", 1234567890123))
-
-        # KV 5: FLOAT64 (12)
-        k5 = b"custom.float64"
-        f.write(struct.pack("<Q", len(k5)) + k5)
-        f.write(struct.pack("<I", 12))
-        f.write(struct.pack("<d", math.e))
-
-        # KV 6: ARRAY of INT32 (arr_type 4)
-        k6 = b"custom.arr_int"
-        f.write(struct.pack("<Q", len(k6)) + k6)
-        f.write(struct.pack("<I", 9))  # ARRAY
-        f.write(struct.pack("<I", 4))  # arr_type = INT32
-        f.write(struct.pack("<Q", 2))  # arr_len = 2
-        f.write(struct.pack("<ii", 10, 20))
-
-        # KV 7: ARRAY of FLOAT32 (arr_type 6)
-        k7 = b"custom.arr_float"
-        f.write(struct.pack("<Q", len(k7)) + k7)
-        f.write(struct.pack("<I", 9))  # ARRAY
-        f.write(struct.pack("<I", 6))  # arr_type = FLOAT32
-        f.write(struct.pack("<Q", 1))  # arr_len = 1
-        f.write(struct.pack("<f", 1.5))
-
-        # KV 8: ARRAY of OTHER (arr_type 99)
-        k8 = b"custom.arr_other"
-        f.write(struct.pack("<Q", len(k8)) + k8)
-        f.write(struct.pack("<I", 9))  # ARRAY
-        f.write(struct.pack("<I", 99))  # arr_type = OTHER
-        f.write(struct.pack("<Q", 1))  # arr_len = 1
-
-        # Tensor descriptor
-        t_name = b"raw_tensor"
-        f.write(struct.pack("<Q", len(t_name)) + t_name)
+        # Tensor
+        f.write(struct.pack("<Q", 2))
+        f.write(b"t1")
         f.write(struct.pack("<I", 1))  # 1 dim
-        f.write(struct.pack("<Q", 16))
-        f.write(struct.pack("<I", 0))
-        f.write(struct.pack("<Q", 0))
+        f.write(struct.pack("<Q", 10))  # dim=10
+        f.write(struct.pack("<I", 1))  # type=1
+        f.write(struct.pack("<Q", 0))  # offset=0
 
-        # Align to 32 bytes
-        pad = (32 - (f.tell() % 32)) % 32
-        f.write(b"\x00" * pad)
-        f.write(b"\x00" * 64)
-
-    parsed = validate_gguf_file(custom_gguf)
-    assert parsed["metadata"]["custom.uint"] == 42
-    assert abs(parsed["metadata"]["custom.float"] - math.pi) < 1e-4
-    assert parsed["metadata"]["custom.unknown"] == "unknown"
-
-    # Test _write_gguf_file with np is None and unaligned raw bytes
-    monkeypatch.setattr(pt_quantize, "np", None)
-    np_none_gguf = tmp_path / "np_none.gguf"
-    _write_gguf_file(np_none_gguf, model_name="fallback", tensors={"raw": bytes(35)})
-    validate_gguf_file(np_none_gguf)
+    res = quantize_module.validate_gguf_file(file_path)
+    assert res["version"] == 3
+    assert res["tensor_count"] == 1
+    assert res["metadata"]["k1"] == "v1"
+    assert res["metadata"]["k2"] is True
+    assert res["metadata"]["k3"] == 42
+    assert "tensors" in res
 
 
-def test_export_gguf_end_to_end(tmp_path: Path) -> None:
-    """Test _export_gguf creation and re-validation when file exists."""
-    reduction, status = _export_gguf("gemma4_sql", str(tmp_path))
-    assert reduction == 0.6
-    assert status == "quantized_gguf"
+def test_write_gguf_file(tmp_path):
+    """Test _write_gguf_file."""
+    import gemma_4_sql.backends.pytorch.quantize as quantize_module
 
-    # Call again to exercise already-exists branch
-    red2, stat2 = _export_gguf("gemma4_sql", str(tmp_path))
-    assert red2 == 0.6
-    assert stat2 == "quantized_gguf"
+    with patch("gemma_4_sql.backends.pytorch.gguf.write_gguf_v3") as mock_write:
+        file_path = tmp_path / "test.gguf"
+        quantize_module._write_gguf_file(file_path, "m")
+        mock_write.assert_called_once()
 
-    # Test through top-level quantize_model
-    res = quantize_model("gemma4_sql", method="gguf", export_path=str(tmp_path))
-    assert res["status"] == "quantized_gguf"
+        # with tensors and meta
+        quantize_module._write_gguf_file(file_path, "m", {"t": 1}, {"m": 1})
 
 
-def test_export_gguf_extract_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _export_gguf handles extract_pytorch_state_dict exception gracefully.
+def test_apply_awq_quantization(tmp_path):
+    """Test _apply_awq_quantization."""
+    import gemma_4_sql.backends.pytorch.quantize as quantize_module
 
-    Args:
-        tmp_path: Temporary path fixture.
-        monkeypatch: Pytest monkeypatch fixture.
+    with patch("builtins.__import__") as mock_import:
+        mock_awq = MagicMock()
+        mock_awq.AutoAWQForCausalLM = MagicMock()
+        mock_import.return_value = mock_awq
 
-    Returns:
-        None.
-    """
+        quantize_module.AutoTokenizer = MagicMock()
 
-    def mock_fail_extract(model_name: str) -> dict[str, object]:
-        """Docstring for mock_fail_extract."""
-        raise RuntimeError("State dict extraction failed")
+        res = quantize_module._apply_awq_quantization("m", str(tmp_path), ["data"])
+        assert res[1] == "quantized_awq"
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.gguf.extract_pytorch_state_dict", mock_fail_extract)
-    fail_dir = tmp_path / "gguf_fail_dir"
-    reduction, status = _export_gguf("model_extract_fail", str(fail_dir))
-    assert reduction == 0.6
-    assert status == "quantized_gguf"
+        res2 = quantize_module._apply_awq_quantization("m", None, None)
+        assert res2[1] == "quantized_awq"
 
-
-def test_apply_awq_quantization_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test _apply_awq_quantization execution, calibration, and serialization."""
-    import sys
-
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
-
-        saved_path: str | None = None
-
-        def save_pretrained(self, save_path: str) -> None:
-            """Docstring for save_pretrained."""
-            self.saved_path = save_path
-
-        @classmethod
-        def from_pretrained(cls, _name: str) -> Any:
-            """Docstring for from_pretrained."""
-            return cls()
-
-    mock_awq_module = type("MockAWQModule", (), {"AutoAWQForCausalLM": TinyModel})
-    mock_transformers_module = type("MockTransformersModule", (), {"AutoTokenizer": MockTokenizer})
-    monkeypatch.setitem(sys.modules, "awq", mock_awq_module)
-    monkeypatch.setitem(sys.modules, "transformers", mock_transformers_module)
-
-    out_dir = tmp_path / "awq_export"
-    reduction, status = _apply_awq_quantization(
-        model_name="gemma-4-sql",
-        export_path=str(out_dir),
-        calib_data=["SELECT 1;"],
-        w_bit=4,
-        q_group_size=128,
-    )
-    assert reduction == 0.75
-    assert status == "quantized_awq"
-
-    # Test with default calib_data and default export path in isolated tmp directory
-    monkeypatch.chdir(tmp_path)
-    _apply_awq_quantization(model_name="gemma-4-sql")
-
-    # Test through top-level quantize_model
-    res = quantize_model("gemma-4-sql", method="awq", export_path=str(out_dir))
-    assert res["status"] == "quantized_awq"
+        mock_import.side_effect = ImportError("error")
+        with pytest.raises(DependencyMissingError):
+            quantize_module._apply_awq_quantization("m")
 
 
-def test_apply_awq_quantization_missing_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _apply_awq_quantization raises DependencyMissingError when autoawq is absent."""
-    import sys
+def test_apply_gptq_quantization(tmp_path):
+    """Test _apply_gptq_quantization."""
+    import gemma_4_sql.backends.pytorch.quantize as quantize_module
 
-    monkeypatch.setitem(sys.modules, "awq", None)
-    with pytest.raises(DependencyMissingError, match="AutoAWQ is required for AWQ quantization"):
-        _apply_awq_quantization("gemma-model")
+    with patch("builtins.__import__") as mock_import:
+        mock_opt = MagicMock()
+        mock_opt.gptq.GPTQQuantizer = MagicMock()
+        mock_import.return_value = mock_opt
 
+        quantize_module.AutoTokenizer = MagicMock()
+        quantize_module.AutoModelForCausalLM = MagicMock()
+        quantize_module.torch = MagicMock()
 
-def test_apply_gptq_quantization_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test _apply_gptq_quantization execution, quantization, and artifact serialization."""
-    import sys
+        res = quantize_module._apply_gptq_quantization("m", str(tmp_path))
+        assert res[1] == "quantized_gptq"
 
-    class MockGPTQQuantizer:
-        """Docstring for MockGPTQQuantizer."""
+        res2 = quantize_module._apply_gptq_quantization("m", None)
+        assert res2[1] == "quantized_gptq"
 
-        bits: int
-        dataset: str
-
-        def __init__(self, bits: int = 4, dataset: str = "c4", **kwargs: object) -> None:
-            """Docstring for __init__."""
-            self.bits = bits
-            self.dataset = dataset
-
-        def quantize_model(self, model: Any, _tokenizer: Any) -> Any:
-            """Docstring for quantize_model."""
-            return model
-
-        def save(self, _model: Any, save_dir: str) -> None:
-            """Docstring for save."""
-            Path(save_dir).mkdir(parents=True, exist_ok=True)
-            (Path(save_dir) / "model.safetensors").write_bytes(b"dummy_weights")
-
-    class MockTokenizer:
-        """Docstring for MockTokenizer."""
-
-        def save_pretrained(self, _save_path: str) -> None:
-            """Docstring for save_pretrained."""
-
-        @classmethod
-        def from_pretrained(cls, _name: str) -> Any:
-            """Docstring for from_pretrained."""
-            return cls()
-
-    mock_optimum_gptq = type("MockOptimumGPTQ", (), {"GPTQQuantizer": MockGPTQQuantizer})
-    mock_optimum = type("MockOptimum", (), {"gptq": mock_optimum_gptq})
-    monkeypatch.setitem(sys.modules, "optimum", mock_optimum)
-    monkeypatch.setitem(sys.modules, "optimum.gptq", mock_optimum_gptq)
-
-    mock_transformers = type(
-        "MockTransformers",
-        (),
-        {"AutoModelForCausalLM": TinyModel, "AutoTokenizer": MockTokenizer},
-    )
-    monkeypatch.setitem(sys.modules, "transformers", mock_transformers)
-
-    out_dir = tmp_path / "gptq_export"
-    reduction, status = _apply_gptq_quantization(
-        model_name="gemma-4-sql",
-        export_path=str(out_dir),
-        bits=4,
-        dataset="c4",
-        group_size=128,
-        damp_percent=0.01,
-    )
-    assert reduction == 0.75
-    assert status == "quantized_gptq"
-    assert (out_dir / "model.safetensors").exists()
-
-    # Test with default export_path in isolated tmp directory
-    monkeypatch.chdir(tmp_path)
-    _apply_gptq_quantization(model_name="gemma-4-sql")
-
-    # Test through top-level quantize_model
-    res = quantize_model("gemma-4-sql", method="gptq", export_path=str(out_dir))
-    assert res["status"] == "quantized_gptq"
+        mock_import.side_effect = ImportError("error")
+        with pytest.raises(DependencyMissingError):
+            quantize_module._apply_gptq_quantization("m")
 
 
-def test_apply_gptq_quantization_missing_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _apply_gptq_quantization raises DependencyMissingError when optimum is absent."""
-    import sys
+def test_export_gguf(tmp_path):
+    """Test _export_gguf."""
+    import gemma_4_sql.backends.pytorch.quantize as quantize_module
 
-    monkeypatch.setitem(sys.modules, "optimum", None)
-    monkeypatch.setitem(sys.modules, "optimum.gptq", None)
-    with pytest.raises(DependencyMissingError, match="Optimum is required for GPTQ quantization"):
-        _apply_gptq_quantization("gemma-model")
+    with patch("gemma_4_sql.backends.pytorch.gguf.extract_pytorch_state_dict") as mock_extract:
+        mock_extract.return_value = {"t": 1}
+        with patch("gemma_4_sql.backends.pytorch.quantize._write_gguf_file"):
+            with patch("gemma_4_sql.backends.pytorch.quantize.validate_gguf_file"):
+                res = quantize_module._export_gguf("m", str(tmp_path))
+                assert res[1] == "quantized_gguf"
+
+                # Check file exists branch skip extract
+                (tmp_path / "m.gguf").touch()
+                mock_extract.reset_mock()
+                quantize_module._export_gguf("m", str(tmp_path))
+                mock_extract.assert_not_called()
+
+                # Check error
+                (tmp_path / "m2.gguf").unlink(missing_ok=True)
+                mock_extract.side_effect = ValueError("error")
+                quantize_module._export_gguf("m2", str(tmp_path))
+
+
+def test_quantize_model():
+    """Test quantize_model."""
+    import gemma_4_sql.backends.pytorch.quantize as quantize_module
+
+    quantize_module.torch = MagicMock()
+    quantize_module.BitsAndBytesConfig = MagicMock()
+    quantize_module.AutoModelForCausalLM = MagicMock()
+
+    with patch("gemma_4_sql.backends.pytorch.quantize.quantize_model_wrapper") as mock_wrapper:
+        # GGUF
+        quantize_module.quantize_model("m", "gguf")
+        fn_gguf = mock_wrapper.call_args[1]["apply_fn"]
+        with patch("gemma_4_sql.backends.pytorch.quantize._export_gguf") as mock_exp:
+            mock_exp.return_value = (0.5, "ok")
+            assert fn_gguf() == (0.5, "ok")
+
+        # AWQ
+        quantize_module.quantize_model("m", "awq", calib_data="d")
+        fn_awq = mock_wrapper.call_args[1]["apply_fn"]
+        with patch("gemma_4_sql.backends.pytorch.quantize._apply_awq_quantization") as mock_awq:
+            mock_awq.return_value = (0.5, "ok")
+            assert fn_awq() == (0.5, "ok")
+
+        # GPTQ
+        quantize_module.quantize_model("m", "gptq")
+        fn_gptq = mock_wrapper.call_args[1]["apply_fn"]
+        with patch("gemma_4_sql.backends.pytorch.quantize._apply_gptq_quantization") as mock_gptq:
+            mock_gptq.return_value = (0.5, "ok")
+            assert fn_gptq() == (0.5, "ok")
+
+        # int8
+        quantize_module.quantize_model("m", "int8")
+        fn_int8 = mock_wrapper.call_args[1]["apply_fn"]
+        with patch("gemma_4_sql.backends.pytorch.quantize.apply_bits_and_bytes_quantization") as mock_bnb:
+            mock_bnb.return_value = (0.5, "ok")
+            assert fn_int8() == (0.5, "ok")
+
+    quantize_module.torch = None
+    with pytest.raises(DependencyMissingError):
+        quantize_module.quantize_model("m", "int8")

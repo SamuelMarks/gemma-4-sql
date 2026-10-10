@@ -88,7 +88,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
     if kwargs.get("export_type") == "adapter" and hasattr(model, "save_pretrained"):
         model.save_pretrained(export_path)
         file_path = Path(export_path) / "adapter_model.safetensors"
-    elif is_rank_zero and save_file is not None:  # pragma: no cover
+    elif is_rank_zero and save_file is not None:
         save_file(tensors, str(file_path))
     status = "exported_with_safetensors" if is_rank_zero else "skipped_non_rank_zero"
     return (file_path, status)

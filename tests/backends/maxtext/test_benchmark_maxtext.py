@@ -91,6 +91,13 @@ def test_benchmark_model():
             res = benchmark.benchmark_model("gemma4", "cpu", 2)
             assert res["status"] == "success"
 
+        # jax.distributed.initialize() error
+        mock_jax = MagicMock()
+        mock_jax.distributed.initialize.side_effect = RuntimeError("init failed")
+        with patch("gemma_4_sql.backends.maxtext.benchmark.jax", mock_jax):
+            res = benchmark.benchmark_model("gemma4", "cpu", 2)
+            assert res["status"] == "success"
+
 
 def test_benchmark_model_error():
     """Docstring for test_benchmark_model_error."""

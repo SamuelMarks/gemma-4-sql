@@ -1,5 +1,20 @@
 """Module docstring."""
 
+import pytest
+
+import gemma_4_sql.backends.common_serve as cs
+
+
+@pytest.fixture(autouse=True)
+def check_fastapi(request):
+    """Docstring for check_fastapi."""
+    yield
+    if cs.FastAPI is None:
+        print(f"\nFASTAPI BECAME NONE AFTER TEST: {request.node.name}\n")
+
+
+"""Module docstring."""
+
 import os
 
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")

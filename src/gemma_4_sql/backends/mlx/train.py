@@ -147,6 +147,6 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
             status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, batch_size=batch_size)
         except TypeError:
             status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:  # pragma: no cover
-        status = f"failed: {e!s}"  # pragma: no cover
+    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        status = f"failed: {e!s}"
     return {"backend": "mlx", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}

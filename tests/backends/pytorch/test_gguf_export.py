@@ -480,3 +480,91 @@ def test_gguf_export_corrupted_file_validation(tmp_path: Path) -> None:
     truncated.write_bytes(b"GGUF\x00")
     with pytest.raises((ValueError, struct.error)):
         validate_gguf_file(truncated)
+
+
+def test_gguf_import_errors_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test except ImportError block for numpy and torch."""
+    import importlib
+    import sys
+
+    import gemma_4_sql.backends.pytorch.gguf as gguf_mod
+
+    # Store originals
+
+    # Force ImportError on numpy
+    monkeypatch.setitem(sys.modules, "numpy", None)
+    importlib.reload(gguf_mod)
+    assert gguf_mod.np is None
+
+    # Clean up numpy, force torch
+    monkeypatch.undo()
+    monkeypatch.setitem(sys.modules, "torch", None)
+    importlib.reload(gguf_mod)
+    assert gguf_mod.torch is None
+
+    # Restore
+    monkeypatch.undo()
+    importlib.reload(gguf_mod)
+
+
+def test_quantize_tensor_numpy_arrays() -> None:
+    """Test quantization branches for numpy arrays directly."""
+    import numpy as np
+
+    from gemma_4_sql.backends.pytorch.gguf import quantize_tensor_q4_k_m, quantize_tensor_q8_0
+
+    arr = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    res_q8 = quantize_tensor_q8_0(arr)
+    assert len(res_q8) > 0
+
+    arr_unaligned = np.array([1.0] * 10, dtype=np.float32)
+    res_q4k = quantize_tensor_q4_k_m(arr_unaligned)
+    assert len(res_q4k) > 0
+
+
+def test_quantize_tensor_q4_k_m_extra_branches() -> None:
+    """Test quantization branches for Q4_K_M with list and perfectly aligned array."""
+    import numpy as np
+
+    from gemma_4_sql.backends.pytorch.gguf import quantize_tensor_q4_k_m
+
+    # Hit else branch (not numpy, not torch) -> pass a list
+    arr_list = [1.0] * 10
+    res_list = quantize_tensor_q4_k_m(arr_list)
+    assert len(res_list) > 0
+
+    # Hit rem == 0 branch -> length 256
+    arr_aligned = np.array([1.0] * 256, dtype=np.float32)
+    res_aligned = quantize_tensor_q4_k_m(arr_aligned)
+    assert len(res_aligned) > 0
+
+
+def test_quantize_tensor_q4_0_numpy() -> None:
+    """Test quantization branches for Q4_0 with numpy arrays."""
+    import numpy as np
+
+    from gemma_4_sql.backends.pytorch.gguf import quantize_tensor_q4_0
+
+    arr = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    res = quantize_tensor_q4_0(arr)
+    assert len(res) > 0
+
+
+def test_flatten_values_torch_no_numpy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _flatten_values with torch tensor when numpy is not available."""
+    import importlib
+    import sys
+
+    import torch
+
+    import gemma_4_sql.backends.pytorch.gguf as gguf_mod
+
+    monkeypatch.setitem(sys.modules, "numpy", None)
+    importlib.reload(gguf_mod)
+
+    tensor = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    flat = gguf_mod._flatten_values(tensor)
+    assert flat == [1.0, 2.0, 3.0, 4.0]
+
+    monkeypatch.undo()
+    importlib.reload(gguf_mod)

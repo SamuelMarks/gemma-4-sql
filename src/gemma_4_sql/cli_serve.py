@@ -19,7 +19,7 @@ def evaluate_cmd(args: argparse.Namespace) -> None:
 
     """
     db_kwargs: dict[str, Any] = {}
-    if args.db_kwargs:  # pragma: no cover
+    if args.db_kwargs:
         db_kwargs = json.loads(args.db_kwargs)
     res = evaluate(
         model_name=args.model,
@@ -58,9 +58,9 @@ def generate_cmd(args: argparse.Namespace) -> None:
         modality=getattr(args, "modality", "text"),
     )
     sql_output = (res or {}).get("sql", "")
-    if sql_output:  # pragma: no cover
+    if sql_output:
         print(str(sql_output))
-    if getattr(args, "show_confidence", False) and res and "confidence_score" in res:  # pragma: no cover
+    if getattr(args, "show_confidence", False) and res and "confidence_score" in res:
         print(f"Confidence: {float(str(res['confidence_score'])):.4f}")
 
 
@@ -72,7 +72,7 @@ def agent_cmd(args: argparse.Namespace) -> None:
 
     """
     db_kwargs: dict[str, Any] = {}
-    if args.db_kwargs:  # pragma: no cover
+    if args.db_kwargs:
         db_kwargs = json.loads(args.db_kwargs)
     agent_context_cls = __import__("gemma_4_sql.sdk.agent", fromlist=["AgentContext"]).AgentContext
     context = agent_context_cls(
@@ -121,7 +121,7 @@ def chat_cmd(args: argparse.Namespace) -> None:
 
     """
     history: list[dict[str, str]] = []
-    if getattr(args, "history", ""):  # pragma: no cover
+    if getattr(args, "history", ""):
         try:
             history = json.loads(args.history)
         except json.JSONDecodeError:
@@ -145,7 +145,7 @@ def few_shot_cmd(args: argparse.Namespace) -> None:
 
     """
     examples: list[dict[str, str]] = []
-    if getattr(args, "examples", ""):  # pragma: no cover
+    if getattr(args, "examples", ""):
         try:
             examples = json.loads(args.examples)
         except json.JSONDecodeError:
@@ -157,5 +157,5 @@ def few_shot_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
     )
     prompt_text = (res or {}).get("few_shot_prompt", "")
-    if prompt_text:  # pragma: no cover
-        print(str(prompt_text))  # pragma: no cover
+    if prompt_text:
+        print(str(prompt_text))

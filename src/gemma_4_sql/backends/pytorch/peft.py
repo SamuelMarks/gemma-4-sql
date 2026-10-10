@@ -63,7 +63,7 @@ def apply_lora(
         model = AutoModelForCausalLM.from_pretrained(model_name)
         lora_config = LoraConfig(r=lora_r, lora_alpha=lora_alpha, target_modules=target_modules, lora_dropout=lora_dropout, bias="none", task_type="CAUSAL_LM")
         model = get_peft_model(model, lora_config)
-        if hasattr(model, "print_trainable_parameters"):  # pragma: no cover
+        if hasattr(model, "print_trainable_parameters"):
             model.print_trainable_parameters()
         if "output_dir" in kwargs and hasattr(model, "save_pretrained"):
             model.save_pretrained(str(kwargs["output_dir"]))

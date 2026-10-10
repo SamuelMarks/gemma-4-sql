@@ -97,7 +97,7 @@ def log_metrics_cmd(args: argparse.Namespace) -> None:
 
     """
     metrics_dict: dict[str, float] = {}
-    if args.metrics:  # pragma: no cover
+    if args.metrics:
         for m in args.metrics.split(","):
             (k, v) = m.split("=")
             metrics_dict[k.strip()] = float(v.strip())

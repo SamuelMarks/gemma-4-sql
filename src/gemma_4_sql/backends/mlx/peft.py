@@ -27,7 +27,7 @@ except (ImportError, AttributeError):
 try:
     from mlx_lm import load as _load
 
-    load: Any = _load  # pragma: no cover
+    load: Any = _load
 except (ImportError, AttributeError):
     load = None
 
