@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
+from tests.conftest import requires_maxtext
+
+pytestmark = requires_maxtext
+
 import pytest
 
 from gemma_4_sql.backends.maxtext.dpo import _compute_logps, _dpo_step_loss, _execute_dpo, _get_train_step_fn, _run_training_epochs, dpo_loss, run_dpo

@@ -188,6 +188,5 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         hardware=hardware,
         batch_size=batch_size,
         missing_deps=jax is None or jnp is None or Gemma4Model is None,
-        missing_status="mocked_missing_maxtext",
         benchmark_fn=_run,
     )

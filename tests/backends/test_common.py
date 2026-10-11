@@ -87,7 +87,7 @@ def test_common_logging_file_fallback(tmp_path):
         extra_fields={"epoch": "2"},
         step_duration_s=1.25,
     )
-    assert res["status"] == "mocked_missing_tensorboard"
+    assert res["status"] == "backend_unavailable"
     assert "fallback_file" in res
 
     metrics_file = tmp_path / "fallback_logs" / "metrics.jsonl"
@@ -146,7 +146,7 @@ def test_common_serve_missing():
 def test_quantize_missing_bitsandbytes():
     """Test quantize missing bitsandbytes functionality."""
     res = apply_bits_and_bytes_quantization("int8", None, None)
-    assert res[1] == "mocked_missing_bitsandbytes"
+    assert res[1] == "backend_unavailable"
 
 
 def test_apply_bits_and_bytes_quantization():

@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock
 
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
 import pytest
 
 
@@ -269,7 +273,7 @@ def test_module_load_import_error():
     namespace = {"__name__": "mock_inference", "__builtins__": dict(builtins.__dict__)}
     namespace["__builtins__"]["__import__"] = mock_import
 
-    exec(code, namespace)  # noqa: S102
+    exec(code, namespace)  
 
     assert namespace.get("keras") is None
     assert namespace.get("tf") is None

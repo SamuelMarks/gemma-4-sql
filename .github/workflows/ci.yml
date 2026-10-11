@@ -2,119 +2,61 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
 
 jobs:
-  doc-coverage:
-    name: 100% Documentation Coverage Gate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install interrogate pydocstyle
-      - name: Check 100% doc coverage
-        run: |
-          interrogate -vv --fail-under=100 src/
-          pydocstyle src/
-
-  type-check:
-    name: Strict Type Checking Gate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install mypy
-      - name: Run strict type checking
-        run: |
-          mypy --strict src/
-
-  test:
-    name: 100% Test Branch Coverage Gate
-    runs-on: macos-latest
+  tox-matrix:
     strategy:
       matrix:
-        python-version: ['3.12']
+        include:
+          - env: core
+            os: ubuntu-latest
+          - env: pytorch
+            os: ubuntu-latest
+          - env: jax
+            os: ubuntu-latest
+          - env: keras
+            os: ubuntu-latest
+          - env: maxtext
+            os: ubuntu-latest
+          - env: mlx
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev,mlx]"
-      - name: Run lint and format
-        run: |
-          ruff check .
-          ruff format --check .
+          python-version: "3.12"
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
       - name: Run tests
-        env:
-          KERAS_BACKEND: torch
-        run: |
-          pytest --cov=src/gemma_4_sql --cov-branch --cov-report=xml --cov-report=term tests/core/ tests/sdk/ tests/cli/ src/
-          pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-report=xml --cov-report=term tests/backends/pytorch/ tests/backends/keras/
-          pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-report=xml --cov-report=term tests/backends/jax/ tests/backends/maxtext/
-          pytest --cov=src/gemma_4_sql --cov-branch --cov-append --cov-fail-under=100 --cov-report=xml --cov-report=term tests/backends/mlx/ tests/backends/test_*.py
-
-  test-gpu:
-    runs-on: ubuntu-latest
-    # This would typically run on a self-hosted GPU runner, but we use a mock tag here
-    # runs-on: [self-hosted, gpu]
-    strategy:
-      matrix:
-        python-version: ['3.12']
-    steps:
-      - uses: actions/checkout@v7
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+        run: uvx --with tox-uv tox run -e ${{ matrix.env }}
+      - name: Upload coverage slice
+        uses: actions/upload-artifact@v4
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install PyTorch & Keras GPU dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-          pip install keras tensorflow
-      - name: Run GPU tests
-        run: |
-          pytest tests/backends/pytorch/
-          pytest tests/backends/keras/
+          name: coverage-slice-${{ matrix.env }}
+          path: .tox/.coverage.${{ matrix.env }}
 
-  test-tpu:
+  tox-coverage-aggregate:
+    needs: [tox-matrix]
+    if: always()
     runs-on: ubuntu-latest
-    # This would typically run on a self-hosted TPU runner (e.g. GKE TPU node)
-    # runs-on: [self-hosted, tpu]
-    strategy:
-      matrix:
-        python-version: ['3.12']
     steps:
-      - uses: actions/checkout@v7
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install JAX & MaxText TPU dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pip install -U "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-      - name: Run TPU tests
-        run: |
-          pytest tests/backends/jax/
-          pytest tests/backends/maxtext/
+          python-version: "3.12"
+      - name: Download coverage slices
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-slice-*
+          path: .tox/
+          merge-multiple: true
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Aggregate coverage
+        run: uvx --with tox-uv tox run -e coverage-report

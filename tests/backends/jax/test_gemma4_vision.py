@@ -4,6 +4,10 @@ import jax.numpy as jnp
 import pytest
 from flax import nnx
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 from gemma_4_sql.backends.jax.gemma4.vision import (
     Gemma4MultimodalEmbedder,
     Gemma4MultiModalProjector,

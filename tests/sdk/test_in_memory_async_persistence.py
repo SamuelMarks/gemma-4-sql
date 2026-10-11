@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from tests.conftest import requires_duckdb
+
+pytestmark = requires_duckdb
 
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 
@@ -52,11 +55,6 @@ async def test_duckdb_in_memory_async_persistence(monkeypatch: pytest.MonkeyPatc
     Returns:
         None.
     """
-    # Ensure real duckdb module is used for DuckDBAdapter
-    real_duck = getattr(pytest, "_real_duckdb", None)
-    if real_duck is not None:
-        monkeypatch.setitem(__import__("sys").modules, "duckdb", real_duck)
-        monkeypatch.setattr("gemma_4_sql.sdk.adapters.duckdb_adapter.duckdb", real_duck)
 
     ddl = """
     CREATE TABLE products (id INT, title TEXT);

@@ -2,6 +2,10 @@
 
 import pytest
 
+from tests.conftest import requires_maxtext
+
+pytestmark = requires_maxtext
+
 import gemma_4_sql.backends.maxtext.etl as etl_maxtext
 from gemma_4_sql.type_hints import ETLConfig
 

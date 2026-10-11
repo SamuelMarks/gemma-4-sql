@@ -19,7 +19,6 @@ def apply_bits_and_bytes_quantization(
     float16_dtype: object = None,
     *,
     model: ModelType | None = None,
-    raise_if_missing: bool = False,
     llm_int8_threshold: float = 6.0,
     llm_int8_skip_modules: list[str] | None = None,
     bnb_4bit_quant_type: str = "nf4",
@@ -49,12 +48,10 @@ def apply_bits_and_bytes_quantization(
 
     """
     if bits_and_bytes_config_cls is None:
-        if raise_if_missing:
-            from gemma_4_sql.exceptions import DependencyMissingError
+        from gemma_4_sql.exceptions import DependencyMissingError
 
-            msg = "bitsandbytes and transformers are required for BitsAndBytes quantization. Install with `pip install bitsandbytes transformers`."
-            raise DependencyMissingError(msg)
-        return (0.0, "mocked_missing_bitsandbytes")
+        msg = "bitsandbytes and transformers are required for BitsAndBytes quantization. Install with `pip install bitsandbytes transformers`."
+        raise DependencyMissingError(msg)
 
     bnb_config: Any
     if method == "int8":
@@ -93,7 +90,6 @@ def quantize_model_wrapper(
     model_name: str,
     method: str,
     missing_deps: bool,
-    missing_status: str,
     apply_fn: Callable[..., tuple[float, str]],
 ) -> JSONDict:
     """Wrap and standardize execution and error handling for quantization.
@@ -111,13 +107,9 @@ def quantize_model_wrapper(
 
     """
     if missing_deps:
-        return {
-            "backend": backend_name,
-            "model": model_name,
-            "method": method,
-            "status": missing_status,
-            "memory_reduction_factor": 0.0,
-        }
+        from gemma_4_sql.exceptions import DependencyMissingError
+
+        raise DependencyMissingError(f"Dependencies missing for backend: {backend_name}")
 
     try:
         (memory_reduction, status) = apply_fn()

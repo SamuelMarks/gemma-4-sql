@@ -2,6 +2,10 @@
 
 import pytest
 
+from tests.conftest import requires_torch
+
+pytestmark = requires_torch
+
 import gemma_4_sql.backends.pytorch.etl as etl_pytorch
 from gemma_4_sql.type_hints import ETLConfig
 

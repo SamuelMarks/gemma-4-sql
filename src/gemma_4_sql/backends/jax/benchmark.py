@@ -202,6 +202,5 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         hardware=hardware,
         batch_size=batch_size,
         missing_deps=False,
-        missing_status="missing_jax",
         benchmark_fn=_run,
     )

@@ -1,28 +1,20 @@
-"""Module docstring."""
+"""Global pytest fixtures for gemma-4-sql tests."""
+
+import importlib
+import logging
+import os
+import sys
+import warnings
+from contextlib import contextmanager
+from typing import Any, AsyncGenerator, Generator
+from unittest.mock import patch
 
 import pytest
-
-import gemma_4_sql.backends.common_serve as cs
-
-
-@pytest.fixture(autouse=True)
-def check_fastapi(request):
-    """Docstring for check_fastapi."""
-    yield
-    if cs.FastAPI is None:
-        print(f"\nFASTAPI BECAME NONE AFTER TEST: {request.node.name}\n")
-
-
-"""Module docstring."""
-
-import os
+from gemma_4_sql.backends.lazy_loader import LazyLoader
 
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 os.environ.setdefault("XLA_PYTHON_CLIENT_ALLOCATOR", "platform")
 os.environ.setdefault("KERAS_BACKEND", "torch")
-
-import warnings
-from typing import Any, cast
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -32,314 +24,78 @@ try:
 except (ImportError, RuntimeError):
     torch = None
 
-import pytest
-
-"""Global pytest fixtures for gemma-4-sql tests."""
+HAS_TORCH: bool = LazyLoader("torch").is_available
+HAS_JAX: bool = LazyLoader("jax").is_available and LazyLoader("flax").is_available
+HAS_KERAS: bool = LazyLoader("keras").is_available
+HAS_MAXTEXT: bool = LazyLoader("maxtext").is_available
+HAS_MLX: bool = LazyLoader("mlx").is_available
+HAS_DUCKDB: bool = LazyLoader("duckdb").is_available
 
-import importlib.machinery
-import json
-import sys
-import types
-import typing
-from unittest.mock import MagicMock
+requires_torch = pytest.mark.skipif(not HAS_TORCH, reason="PyTorch is not installed in this environment")
+requires_jax = pytest.mark.skipif(not HAS_JAX, reason="JAX/Flax is not installed in this environment")
+requires_keras = pytest.mark.skipif(not HAS_KERAS, reason="Keras is not installed in this environment")
+requires_maxtext = pytest.mark.skipif(not HAS_MAXTEXT, reason="MaxText is not installed in this environment")
+requires_mlx = pytest.mark.skipif(not HAS_MLX, reason="MLX is not installed in this environment")
+requires_duckdb = pytest.mark.skipif(not HAS_DUCKDB, reason="DuckDB is not installed in this environment")
 
-try:
-    import duckdb as _real_duckdb
-except ImportError:
-    _real_duckdb = None
 
-try:
-    import aiosqlite as _real_aiosqlite
-except ImportError:
-    _real_aiosqlite = None
+@pytest.fixture
+def in_memory_duckdb() -> Generator[Any, None, None]:
+    """Provide an isolated in-memory DuckDB instance with transaction auto-cleanup.
 
-pytest._real_duckdb = _real_duckdb
+    Yields:
+        DuckDB connection object.
+    """
+    import duckdb
 
+    conn = duckdb.connect(":memory:")
+    yield conn
+    conn.close()
 
-class MockDatasets(types.ModuleType):
-    """Mock for datasets module."""
 
-    def __init__(self: object) -> None:
-        """Initialize MockDatasets as a valid module with spec."""
-        super().__init__("datasets")
-        self.__spec__ = importlib.machinery.ModuleSpec("datasets", None)
+@pytest.fixture
+async def in_memory_sqlite() -> AsyncGenerator[Any, None]:
+    """Provide an isolated in-memory SQLite / aiosqlite database.
 
-    def load_dataset(self: object, *_args: object, **_kwargs: object) -> list[dict[str, str]]:
-        """Mock load_dataset.
+    Yields:
+        aiosqlite connection object.
+    """
+    import aiosqlite
 
-        Returns:
-            object: Description of return.
+    async with aiosqlite.connect(":memory:") as db:
+        yield db
 
-        """
-        return [{"query": "SELECT 1", "sql": "SELECT 1", "question": "test", "nl": "test"}]
 
+@pytest.fixture
+def synthetic_dataset() -> list[dict[str, str]]:
+    """Supply valid text-to-SQL pairs without depending on network calls.
 
-class MockConftestGrain(types.ModuleType):
-    """Mock grain for test environment."""
+    Returns:
+        List of dictionaries with dataset items.
+    """
+    return [{"question": "What is the total?", "query": "SELECT sum(val) FROM table;", "sql": "SELECT sum(val) FROM table;", "nl": "What is the total?"}, {"question": "Count users", "query": "SELECT count(*) FROM users;", "sql": "SELECT count(*) FROM users;", "nl": "Count users"}]
 
-    def __init__(self) -> None:
-        """Initialize MockConftestGrain as a valid module with spec."""
-        super().__init__("grain")
-        self.__spec__ = importlib.machinery.ModuleSpec("grain", None)
-        self.python = self
 
-    class RandomAccessDataSource:
-        """Mock RandomAccessDataSource."""
+@pytest.fixture
+def missing_dependency_context() -> Any:
+    """Opt-in context manager fixture for testing missing optional packages.
 
-    class MapTransform:
-        """Mock MapTransform."""
+    Provides a scoped unittest.mock.patch.dict(sys.modules, ...) with automatic restoration.
 
-    class DataLoader:
-        """Mock DataLoader."""
+    Returns:
+        A context manager function to mock missing modules.
+    """
 
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            """Initialize Mock DataLoader."""
-            self.data_source = args[0] if args else None
+    @contextmanager
+    def _mock_missing(modules: list[str]) -> Generator[None, None, None]:
+        mocks = {module: None for module in modules}
+        with patch.dict(sys.modules, mocks):
+            yield
 
-        def __iter__(self) -> typing.Iterator[dict[str, typing.Any]]:
-            """Iterate mock batches."""
-            try:
-                import jax.numpy as jnp
-
-                yield {
-                    "inputs": jnp.ones((2, 10), dtype=jnp.int32),
-                    "targets": jnp.ones((2, 10), dtype=jnp.int32),
-                    "chosen_inputs": jnp.ones((2, 10), dtype=jnp.int32),
-                    "chosen_input_ids": jnp.ones((2, 10), dtype=jnp.int32),
-                    "chosen_labels": jnp.ones((2, 10), dtype=jnp.int32),
-                    "rejected_inputs": jnp.ones((2, 10), dtype=jnp.int32),
-                    "rejected_input_ids": jnp.ones((2, 10), dtype=jnp.int32),
-                    "rejected_labels": jnp.ones((2, 10), dtype=jnp.int32),
-                }
-            except (ImportError, AttributeError):
-                yield {"inputs": [1, 2], "targets": [2, 3]}
-
-    @staticmethod
-    def IndexSampler(*args: object, **kwargs: object) -> object:
-        """Mock IndexSampler."""
-        return object()
-
-    @staticmethod
-    def Batch(*args: object, **kwargs: object) -> object:
-        """Mock Batch."""
-        return object()
-
-    @staticmethod
-    def NoSharding() -> object:
-        """Mock NoSharding."""
-        return object()
-
-    @staticmethod
-    def JAXDistributedSharding(*args: object, **kwargs: object) -> object:
-        """Mock JAXDistributedSharding."""
-        return object()
-
-
-sys.modules["datasets"] = MockDatasets()  # type: ignore
-_conftest_grain = MockConftestGrain()
-sys.modules["grain"] = _conftest_grain
-sys.modules["grain.python"] = _conftest_grain
-
-
-class MockConn:
-    """Mock for DuckDB connection."""
-
-    def execute(self: object, *_args: object, **_kwargs: object) -> object:
-        """Mock execute.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return self
-
-    def fetchall(self: typing.Any) -> list:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return [[json.dumps({"success": True, "generated_sql": "SELECT COUNT(*) FROM test", "results": [[1]]})]]
-
-    def fetchdf(self: object) -> object:
-        """Mock fetchdf.
-
-        Returns:
-            object: Description of return.
-
-        """
-
-        class MockDF:
-            """Provide class docstring."""
-
-            def to_dict(self: typing.Any, orient: str = "records") -> list[dict[str, str]]:
-                """Execute function.
-
-                Returns:
-                    object: Description of return.
-
-                """
-                return [{"query": "SELECT 1", "nl": "Get 1", "sql": "SELECT 1", "sql_prompt": "Get 1"}]
-
-        return MockDF()
-
-    def create_function(self, name: object, func: object, args: object, ret: object) -> None:
-        """Execute function."""
-
-    def cursor(self: typing.Any) -> typing.Any:
-        """Return self as DB-API 2.0 cursor."""
-        return self
-
-    def close(self: typing.Any) -> None:
-        """Mock close."""
-
-
-class MockDuckDB:
-    """Mock for DuckDB module."""
-
-    def connect(self: object, *_args: object, **_kwargs: object) -> object:
-        """Mock connect.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockConn()
-
-
-sys.modules["duckdb"] = MockDuckDB()
-
-
-class MockHFTokenizer:
-    """Mock HF Tokenizer."""
-
-    def encode(self: object, _text: str, **_kwargs: object) -> list[int]:
-        """Mock encode.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return [99, 100]
-
-    def decode(self: object, _tokens: list[int], **_kwargs: object) -> str:
-        """Mock decode.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return "hf_decoded"
-
-
-class MockAutoTokenizer:
-    """Mock AutoTokenizer."""
-
-    @classmethod
-    def from_pretrained(cls: type, _model_name: str) -> object:
-        """Mock from_pretrained.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockHFTokenizer()
-
-
-class MockModel:
-    """Provide class docstring."""
-
-    def save_pretrained(self: object, *_a: object, **_k: object) -> None:
-        """Execute function."""
-
-    def parameters(self: object) -> dict:
-        """Execute function.
-
-        Returns:
-            dict: Empty parameter dictionary.
-        """
-        return {}
-
-
-class MockGemma4ForCausalLM:
-    """Provide class docstring."""
-
-    @classmethod
-    def from_pretrained(cls: type, *_args: object, **_kwargs: object) -> object:
-        """Execute function.
-
-        Returns:
-            object: Description of return.
-
-        """
-        return MockModel()
+    return _mock_missing
 
 
 @pytest.fixture(autouse=True)
-def _mock_external_calls(monkeypatch: Any) -> None:
-    """Mock external network calls like datasets.load_dataset and duckdb.connect."""
-    monkeypatch.setitem(sys.modules, "datasets", cast(Any, MockDatasets()))
-    monkeypatch.setitem(sys.modules, "grain", cast(Any, MockConftestGrain()))
-    monkeypatch.setitem(sys.modules, "grain.python", cast(Any, MockConftestGrain()))
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.datasets", MockDatasets(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.datasets", MockDatasets(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.datasets", MockDatasets(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.datasets", MockDatasets(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.grain", MockConftestGrain(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.grain", MockConftestGrain(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.grain", MockConftestGrain(), raising=False)
-    monkeypatch.setitem(sys.modules, "duckdb", cast(Any, MockDuckDB()))
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.duckdb", MockDuckDB(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.duckdb", MockDuckDB(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.duckdb", MockDuckDB(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.duckdb", MockDuckDB(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.tokenization.AutoTokenizer", MockAutoTokenizer, raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.gemma4_for_causal_lm_cls", MockGemma4ForCausalLM, raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", None, raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.peft.peft", None, raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.mlx.peft.load", lambda m: (MockModel(), None), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.mlx.inference.load", lambda m: (MockModel(), MockHFTokenizer()), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.mlx.train.load", lambda m: (MockModel(), MockHFTokenizer()), raising=False)
-
-
-class MockDBModule:
-    """Implementation of MockDBModule."""
-
-    def __init__(self, name: str) -> None:
-        """Initialize the instance."""
-        self.name = name
-
-    def connect(self, *args: object, **kwargs: object) -> None:
-        """Execute the connect operation."""
-
-    class Error(Exception):
-        """Implementation of Error."""
-
-
-from unittest.mock import AsyncMock
-
-sys.modules["psycopg2"] = MagicMock(Error=Exception)
-sys.modules["asyncpg"] = MagicMock(Error=Exception)
-sys.modules["snowflake"] = MagicMock(Error=Exception)
-sys.modules["snowflake.connector"] = MagicMock(Error=Exception)
-
-if _real_aiosqlite is None:
-    mock_aiosqlite = MagicMock(Error=Exception)
-    mock_conn = AsyncMock()
-    mock_cursor = AsyncMock()
-    mock_cursor.fetchall = AsyncMock(return_value=[])
-    mock_conn.execute = AsyncMock(return_value=mock_cursor)
-    mock_aiosqlite.connect = AsyncMock(return_value=mock_conn)
-    sys.modules["aiosqlite"] = mock_aiosqlite
-
-sys.modules["sentence_transformers"] = MagicMock(Error=Exception)
-
-
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def _suppress_expected_errors(request):
-    """Docstring."""
+def _suppress_expected_errors(request: pytest.FixtureRequest) -> Generator[None, None, None]:
+    """Suppress expected errors during test execution."""
     yield

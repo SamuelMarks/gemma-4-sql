@@ -226,6 +226,5 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
         hardware=hardware,
         batch_size=batch_size,
         missing_deps=mx is None or load is None,
-        missing_status="mocked_missing_mlx",
         benchmark_fn=_run,
     )

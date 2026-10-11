@@ -109,13 +109,9 @@ class KerasLoRADense(_LayerBase):
 
         scale_init = 1.0 / math.sqrt(self.r)
 
-        def _fallback_init(*args: Any, **kwargs: Any) -> Any:
-            """Docstring for _fallback_init."""
-            return None
-
         self.lora_a = self.add_weight(
             shape=(in_features, self.r),
-            initializer=getattr(getattr(keras, "initializers", type("MockInit", (), {"RandomUniform": _fallback_init})), "RandomUniform", _fallback_init)(minval=-scale_init, maxval=scale_init),
+            initializer=keras.initializers.RandomUniform(minval=-scale_init, maxval=scale_init),
             trainable=True,
             name="lora_a",
         )

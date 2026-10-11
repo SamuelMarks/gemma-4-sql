@@ -1,5 +1,9 @@
 """Test file."""
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 
 def test_inference_restore_nnx_has_no_update_false_again_6(monkeypatch):
     """Test function."""

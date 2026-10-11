@@ -309,7 +309,6 @@ def serve_model_wrapper(
     port: int,
     max_batch_size: int,
     missing_deps: bool,
-    missing_status: str,
     app_factory: Callable[[], object],
     run_server: bool = False,
     host: str = "0.0.0.0",
@@ -322,7 +321,6 @@ def serve_model_wrapper(
         port: Listening network port.
         max_batch_size: Maximum concurrency/batch size.
         missing_deps: Whether required dependencies are missing.
-        missing_status: Status message to return when dependencies are missing.
         app_factory: Factory callback to create the FastAPI application.
         run_server: Whether to run the uvicorn HTTP server.
         host: Network host binding interface.
@@ -331,23 +329,15 @@ def serve_model_wrapper(
         The execution status dictionary.
 
     Raises:
-        DependencyMissingError: If FastAPI or uvicorn is missing.
+        DependencyMissingError: If FastAPI, uvicorn, or backend dependencies are missing.
 
     """
+    from gemma_4_sql.exceptions import DependencyMissingError
+
     if missing_deps:
-        return {
-            "backend": backend_name,
-            "model": model_name,
-            "port": port,
-            "max_batch_size": max_batch_size,
-            "status": missing_status,
-            "mode": "continuous_batching",
-            "app": None,
-        }
+        raise DependencyMissingError(f"Dependencies missing for backend: {backend_name}")
 
     if FastAPI is None or uvicorn is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         msg = "FastAPI and uvicorn are required for serving."
         raise DependencyMissingError(msg)
 

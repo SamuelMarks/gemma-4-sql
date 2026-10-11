@@ -114,7 +114,7 @@ def test_log_metrics_wrapper_without_writer_fallback(tmp_path):
 
     result = log_metrics_wrapper(backend_name="test_backend2", metrics=metrics, step=20, log_dir=log_dir, summary_writer_cls=None, extra_fields={"model": "gemma"}, step_duration_s=2.0)
 
-    assert result["status"] == "mocked_missing_tensorboard"
+    assert result["status"] == "backend_unavailable"
     assert result["step_duration_s"] == 2.0
     assert result["model"] == "gemma"
     assert "fallback_file" in result
@@ -144,7 +144,7 @@ def test_log_metrics_wrapper_without_writer_fallback_minimal(tmp_path):
 
     result = log_metrics_wrapper(backend_name="test_backend3", metrics=metrics, step=30, log_dir=log_dir, summary_writer_cls=None)
 
-    assert result["status"] == "mocked_missing_tensorboard"
+    assert result["status"] == "backend_unavailable"
     assert "step_duration_s" not in result
     assert "fallback_file" in result
 

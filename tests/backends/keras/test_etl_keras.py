@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock
 
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
 import pytest
 
 

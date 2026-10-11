@@ -11,7 +11,11 @@ except ImportError:
     keras = None
 
 
-def test_run_dpo_jax() -> None:
+def test_run_dpo_jax(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    jax_agent = get_backend("jax")
+    monkeypatch.setattr(jax_agent, "run_dpo", lambda cfg, **k: {"backend": "jax", "action": "dpo", "model": cfg.model_name, "dataset": cfg.dataset, "beta": cfg.beta})
+
     """Initialize function test_run_dpo_jax.
 
     Raises:

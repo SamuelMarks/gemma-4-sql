@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from pathlib import Path
 
 from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
 from gemma_4_sql.type_hints import ETLConfig
@@ -103,25 +104,19 @@ def test_etl_duckdb_success_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError
 
 
-def test_etl_duckdb_success_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test ETL duckdb success for pytorch.
+def test_etl_duckdb_success_pytorch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test ETL duckdb success for pytorch."""
+    import duckdb
 
-    Raises:
-        AssertionError: Description.
+    db_file = str(tmp_path / "test.duckdb")
+    conn = duckdb.connect(db_file)
+    conn.execute("CREATE TABLE users (id INT, sql_prompt TEXT, sql TEXT)")
+    conn.execute("INSERT INTO users VALUES (1, 'Get users', 'SELECT * FROM users')")
+    conn.close()
 
-    """
-    mock_duckdb = MagicMock()
-    conn = MagicMock()
-    mock_duckdb.connect.return_value = conn
-    mock_df = MagicMock()
-    mock_df.to_dict.return_value = [{"sql_prompt": "Get users", "sql": "SELECT * FROM users"}]
-    conn.execute.return_value.fetchdf.return_value = mock_df
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.duckdb", mock_duckdb, raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.DataLoader", MagicMock(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.Dataset", MagicMock(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.torch", MagicMock(), raising=False)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.datasets", MagicMock(), raising=False)
-    config = ETLConfig(dataset_name="mock", split="train", duckdb_path=":memory:", duckdb_table="users", tokenizer_name="mock")
+    config = ETLConfig(dataset_name="mock", split="train", duckdb_path=db_file, duckdb_table="users", tokenizer_name="mock")
     etl_pretrain(config, backend="pytorch")
-    if False:
-        raise AssertionError

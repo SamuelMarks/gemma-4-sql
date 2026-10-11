@@ -3,6 +3,10 @@
 import sys
 from unittest import mock
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 import pytest
 
 import gemma_4_sql.backends.jax.serve as srv
@@ -13,7 +17,7 @@ def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Initialize function test_serve_model_jax."""
     monkeypatch.setattr(srv, "jax", object())
 
-    def mock_serve_model_wrapper(backend_name, model_name, port, max_batch_size, missing_deps, missing_status, app_factory):
+    def mock_serve_model_wrapper(backend_name, model_name, port, max_batch_size, missing_deps, app_factory):
         """Docstring for mock_serve_model_wrapper."""
         # Trigger the factory to test its internal logic
         app = app_factory()
@@ -94,11 +98,11 @@ def test_serve_model_jax_other_status(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def mock_serve_model_wrapper(**kwargs):
         """Docstring for mock_serve_model_wrapper."""
-        return {"status": "mocked_missing_jax", "backend": "jax"}
+        return {"status": "backend_unavailable", "backend": "jax"}
 
     monkeypatch.setattr(srv, "serve_model_wrapper", mock_serve_model_wrapper)
     res = srv.serve_model("foo")
-    assert res["status"] == "mocked_missing_jax"
+    assert res["status"] == "backend_unavailable"
 
 
 def test_serve_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -134,7 +138,7 @@ def test_serve_model_jax_real_factory(monkeypatch):
 
     monkeypatch.setattr(srv, "create_common_app", mock_create_common_app)
 
-    def mock_serve_model_wrapper(backend_name, model_name, port, max_batch_size, missing_deps, missing_status, app_factory):
+    def mock_serve_model_wrapper(backend_name, model_name, port, max_batch_size, missing_deps, app_factory):
         """Docstring for mock_serve_model_wrapper."""
         app = app_factory()
 
@@ -189,7 +193,7 @@ def test_serve_model_jax_real_factory_import_error(monkeypatch):
 
     monkeypatch.setattr(srv, "create_common_app", mock_create_common_app)
 
-    def mock_serve_model_wrapper(backend_name, model_name, port, max_batch_size, missing_deps, missing_status, app_factory):
+    def mock_serve_model_wrapper(backend_name, model_name, port, max_batch_size, missing_deps, app_factory):
         """Docstring for mock_serve_model_wrapper."""
         app_factory()
 

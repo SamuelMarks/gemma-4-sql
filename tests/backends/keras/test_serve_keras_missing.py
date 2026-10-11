@@ -4,6 +4,10 @@ import builtins
 import importlib
 from unittest.mock import MagicMock, patch
 
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
 import pytest
 
 import gemma_4_sql.backends.keras.serve as mod

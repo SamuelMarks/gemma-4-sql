@@ -2,6 +2,10 @@
 
 import jax.numpy as jnp
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 from gemma_4_sql.backends.jax.gemma4.multimodal import MultimodalInputs, batched_merge_modalities
 
 

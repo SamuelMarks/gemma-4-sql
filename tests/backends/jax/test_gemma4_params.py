@@ -2,6 +2,10 @@
 
 from unittest.mock import patch
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 import pytest
 
 

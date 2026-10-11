@@ -3,6 +3,10 @@
 import sys
 from unittest.mock import MagicMock, patch
 
+from tests.conftest import requires_mlx
+
+pytestmark = requires_mlx
+
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
@@ -283,7 +287,7 @@ def test_mlx_lm_import_success_exec():
     namespace = {"__name__": "mock_peft", "__builtins__": dict(builtins.__dict__)}
     namespace["__builtins__"]["__import__"] = mock_import
 
-    exec(code, namespace)  # noqa: S102
+    exec(code, namespace)  
 
     assert namespace.get("load") == "MockLoad"
 

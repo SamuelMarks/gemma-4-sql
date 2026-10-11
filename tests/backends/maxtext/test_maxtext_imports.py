@@ -4,6 +4,10 @@ import importlib
 import sys
 from unittest.mock import MagicMock
 
+from tests.conftest import requires_maxtext
+
+pytestmark = requires_maxtext
+
 
 def test_maxtext_imports_success():
     """Docstring for test_maxtext_imports_success."""

@@ -13,7 +13,11 @@ def test_route_backend_invalid() -> None:
         _route_backend(ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False), "invalid")
 
 
-def test_route_backend_pytorch() -> None:
+def test_route_backend_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    pytorch_agent = get_backend("pytorch")
+    monkeypatch.setattr(pytorch_agent, "build_dataloader", lambda *a, **k: {"backend": "pytorch"})
+
     """Test routing with pytorch backend.
 
     Raises:

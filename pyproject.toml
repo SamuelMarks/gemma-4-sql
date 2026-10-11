@@ -197,7 +197,15 @@ warn_return_any = false
 [tool.coverage.report]
 
 [tool.pytest.ini_options]
-addopts = "--cov=src/gemma_4_sql --cov-report=term-missing --cov-fail-under=100 --cov-branch"
+addopts = "--cov-report=term-missing --cov-fail-under=100 --cov-branch"
+markers = [
+    "torch: Tests requiring PyTorch (torch, torchvision, torchaudio)",
+    "jax: Tests requiring JAX and Flax (jax, jaxlib, flax)",
+    "keras: Tests requiring Keras and TensorFlow (keras, tensorflow)",
+    "maxtext: Tests requiring MaxText Gemma 4 dependencies",
+    "mlx: Tests requiring Apple Silicon MLX (mlx, mlx_lm)",
+    "duckdb: Tests requiring native DuckDB engine",
+]
 filterwarnings = [
     "ignore::FutureWarning",
     "ignore::DeprecationWarning",

@@ -91,7 +91,7 @@ def test_generate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "jax")
-    if not res.get("sql") == "SELECT 1" and (not res.get("status", "").startswith("mocked_missing_")):
+    if not res.get("sql") == "SELECT 1" and (not res.get("status", "").startswith("backend_unavailable")):
         raise AssertionError
 
 
@@ -117,7 +117,7 @@ def test_generate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "maxtext")
-    if not res.get("sql") == "SELECT 1" and (not res.get("status", "").startswith("mocked_missing_")):
+    if not res.get("sql") == "SELECT 1" and (not res.get("status", "").startswith("backend_unavailable")):
         raise AssertionError
 
 
@@ -130,7 +130,7 @@ def test_generate_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _x: type("MockBackend", (), {"generate_sql": lambda *_a, **_k: {"sql": "SELECT 1"}})())
     res = generate("model1", "Find all users", "pytorch")
-    if not res.get("sql") == "SELECT 1" and (not res.get("status", "").startswith("mocked_missing_")):
+    if not res.get("sql") == "SELECT 1" and (not res.get("status", "").startswith("backend_unavailable")):
         raise AssertionError
 
 

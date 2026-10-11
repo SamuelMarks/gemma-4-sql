@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from tests.conftest import requires_torch
+
+pytestmark = requires_torch
+
 import struct
 from pathlib import Path
 from unittest.mock import MagicMock

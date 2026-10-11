@@ -212,7 +212,6 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         port=port,
         max_batch_size=max_batch_size,
         missing_deps=False,
-        missing_status="mocked_missing_pytorch",
         app_factory=app_factory,
     )
 

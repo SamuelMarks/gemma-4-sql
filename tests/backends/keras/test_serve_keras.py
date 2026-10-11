@@ -2,6 +2,10 @@
 
 import pytest
 
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
 from gemma_4_sql.backends.keras.serve import serve_model
 from gemma_4_sql.exceptions import DependencyMissingError
 

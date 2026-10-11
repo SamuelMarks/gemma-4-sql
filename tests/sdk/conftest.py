@@ -1,28 +1,79 @@
-"""Module docstring."""
+"""Fixtures for SDK tests."""
 
-from unittest import mock
-
+from typing import Any, Iterator
 import pytest
+from unittest.mock import MagicMock
 
 
-@pytest.fixture(autouse=True)
-def mock_build_dataloader():
-    """Test function."""
-    with (
-        mock.patch("gemma_4_sql.backends.jax.etl.build_dataloader", return_value={"status": "mocked", "dataset": "dummy/data", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.keras.etl.build_dataloader", return_value={"status": "mocked", "dataset": "dummy/data", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.maxtext.etl.build_dataloader", return_value={"status": "mocked", "dataset": "dummy/data", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.mlx.etl.build_dataloader", return_value={"status": "mocked", "dataset": "dummy/data", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.pytorch.etl.build_dataloader", return_value={"status": "mocked", "dataset": "dummy/data", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.jax.train.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.keras.train.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.maxtext.train.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.mlx.train.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.pytorch.train.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.jax.dpo.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.keras.dpo.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.maxtext.dpo.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.mlx.dpo.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-        mock.patch("gemma_4_sql.backends.pytorch.dpo.build_dataloader", return_value={"status": "mocked", "mock_samples": []}),
-    ):
-        yield
+class MockTokenizer:
+    """Standardized mock tokenizer for evaluation and agent tests."""
+
+    def encode(self, text: str, **kwargs: Any) -> list[int]:
+        """Mock encode method.
+
+        Args:
+            text: Input string to encode.
+            **kwargs: Additional tokenizer arguments.
+
+        Returns:
+            Mocked token IDs.
+        """
+        return [1, 2, 3]
+
+    def decode(self, tokens: list[int], **kwargs: Any) -> str:
+        """Mock decode method.
+
+        Args:
+            tokens: List of token IDs.
+            **kwargs: Additional decode arguments.
+
+        Returns:
+            Mocked decoded string.
+        """
+        return "SELECT 1;"
+
+
+class MockModelEvaluator:
+    """Standardized mock model evaluator for evaluation tests."""
+
+    def evaluate(self, model_name: str, dataset: str) -> dict[str, Any]:
+        """Mock evaluate method.
+
+        Args:
+            model_name: The name of the model.
+            dataset: The dataset name.
+
+        Returns:
+            Dictionary with evaluation metrics.
+        """
+        return {"exact_match": 1.0, "execution_accuracy": 1.0}
+
+
+@pytest.fixture
+def mock_tokenizer() -> MockTokenizer:
+    """Fixture providing a standardized mock tokenizer.
+
+    Returns:
+        MockTokenizer instance.
+    """
+    return MockTokenizer()
+
+
+@pytest.fixture
+def mock_model_evaluator() -> MockModelEvaluator:
+    """Fixture providing a standardized mock model evaluator.
+
+    Returns:
+        MockModelEvaluator instance.
+    """
+    return MockModelEvaluator()
+
+
+@pytest.fixture
+def in_memory_batch_generator() -> Iterator[dict[str, Any]]:
+    """Fixture providing a lightweight, typed in-memory batch generator.
+
+    Yields:
+        A dummy batch dictionary.
+    """
+    yield {"inputs": [1, 2], "targets": [2, 3]}

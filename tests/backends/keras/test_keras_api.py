@@ -2,6 +2,10 @@
 
 from gemma_4_sql.backends.keras import apply_lora, benchmark_model, export_model, get_trainer, quantize_model, run_dpo, serve_model, train_model
 
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
 
 def test_keras_apis() -> None:
     """Docstring for test_keras_apis."""

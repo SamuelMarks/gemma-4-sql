@@ -25,8 +25,9 @@ def test_apply_peft_jax() -> object:
         raise AssertionError
 
 
-def test_apply_peft_pytorch() -> object:
+def test_apply_peft_pytorch(monkeypatch: pytest.MonkeyPatch) -> object:
     """Initialize function test_apply_peft_pytorch."""
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.peft.peft", None)
     with pytest.raises(DependencyMissingError):
         apply_peft(model_name="test-model", backend="pytorch")
 

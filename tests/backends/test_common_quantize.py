@@ -11,10 +11,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 def test_apply_bits_and_bytes_quantization_missing_deps():
     """Docstring for test_apply_bits_and_bytes_quantization_missing_deps."""
     with pytest.raises(DependencyMissingError):
-        apply_bits_and_bytes_quantization("int8", None, raise_if_missing=True)
-
-    reduction, status = apply_bits_and_bytes_quantization("int8", None, raise_if_missing=False)
-    assert status == "mocked_missing_bitsandbytes"
+        apply_bits_and_bytes_quantization("int8", None)
 
 
 def test_apply_bits_and_bytes_quantization_int8():
@@ -61,18 +58,18 @@ def test_apply_bits_and_bytes_quantization_with_model():
 
 def test_quantize_model_wrapper():
     """Docstring for test_quantize_model_wrapper."""
-    res = quantize_model_wrapper("b", "m", "int8", True, "missing", lambda: (0, ""))
-    assert res["status"] == "missing"
+    with pytest.raises(DependencyMissingError):
+        quantize_model_wrapper("b", "m", "int8", True, lambda: (0, ""))
 
-    res = quantize_model_wrapper("b", "m", "int8", False, "", lambda: (0.5, "ok"))
+    res = quantize_model_wrapper("b", "m", "int8", False, lambda: (0.5, "ok"))
     assert res["status"] == "ok"
 
-    res = quantize_model_wrapper("b", "m", "int8", False, "", lambda: (0.0, "unsupported_xyz"))
+    res = quantize_model_wrapper("b", "m", "int8", False, lambda: (0.0, "unsupported_xyz"))
     assert res["status"] == "unsupported_xyz"
 
     def fail_fn():
         """Docstring for fail_fn."""
         raise ValueError("oops")
 
-    res = quantize_model_wrapper("b", "m", "int8", False, "", fail_fn)
+    res = quantize_model_wrapper("b", "m", "int8", False, fail_fn)
     assert res["status"] == "failed: oops"

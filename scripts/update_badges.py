@@ -38,7 +38,12 @@ def main() -> None:
     import subprocess
 
     cov_path = Path(".coverage")
-    if cov_path.exists() and "--force-run" not in sys.argv:
+    tox_cov_path = Path(".tox/.coverage")
+    if tox_cov_path.exists() and "--force-run" not in sys.argv:
+        print("[update_badges] Reading existing .tox/.coverage...", flush=True)
+        res = subprocess.run(["uvx", "coverage", "report", "--data-file=.tox/.coverage"], capture_output=True, text=True, check=False)
+        cov_out_str = res.stdout
+    elif cov_path.exists() and "--force-run" not in sys.argv:
         print("[update_badges] Reading existing .coverage...", flush=True)
         res = subprocess.run([sys.executable, "-m", "coverage", "report"], capture_output=True, text=True, check=False)
         cov_out_str = res.stdout

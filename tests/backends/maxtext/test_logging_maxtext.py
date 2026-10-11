@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
+from tests.conftest import requires_maxtext
+
+pytestmark = requires_maxtext
+
 import pytest
 
 from gemma_4_sql.backends.maxtext.logging import log_metrics

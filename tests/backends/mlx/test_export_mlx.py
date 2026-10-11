@@ -4,6 +4,10 @@ import json
 import sys
 from unittest.mock import MagicMock, patch
 
+from tests.conftest import requires_mlx
+
+pytestmark = requires_mlx
+
 import pytest
 
 

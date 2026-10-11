@@ -3,6 +3,10 @@
 import sys
 from unittest import mock
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 import pytest
 
 import gemma_4_sql.backends.jax.train as tr

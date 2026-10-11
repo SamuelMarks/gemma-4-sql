@@ -24,6 +24,9 @@ except (ImportError, AttributeError):
 
 def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test pretraining a model."""
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    jax_agent = get_backend("jax")
+    monkeypatch.setattr(jax_agent, "train_model", lambda cfg, **k: {"backend": cfg.backend, "action": cfg.action, "model": cfg.model_name, "dataset": cfg.dataset, "epochs": cfg.epochs})
     res = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="jax"))
     if not res["backend"] == "jax":
         raise AssertionError

@@ -79,7 +79,6 @@ def run_benchmark_wrapper(
     hardware: str,
     batch_size: int,
     missing_deps: bool,
-    missing_status: str,
     benchmark_fn: Callable[[], tuple[float, float, float]],
     *,
     raise_if_missing: bool = False,
@@ -93,7 +92,6 @@ def run_benchmark_wrapper(
         hardware: The target hardware.
         batch_size: The batch size.
         missing_deps: Whether dependencies are missing.
-        missing_status: The status message if dependencies are missing.
         benchmark_fn: A callable that executes the benchmark and returns (tokens_per_sec, latency_ms, memory_mb).
         raise_if_missing: If True, raises DependencyMissingError when missing_deps is True.
         latency_samples: Optional sequence of individual request latency samples for percentile stats.
@@ -117,7 +115,7 @@ def run_benchmark_wrapper(
             "model": model_name,
             "hardware": hardware,
             "batch_size": batch_size,
-            "status": missing_status,
+            "status": "backend_unavailable",
             "tokens_per_sec": 0.0,
             "latency_ms": 0.0,
             "memory_mb": 0.0,

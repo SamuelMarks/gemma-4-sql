@@ -3,6 +3,10 @@
 import builtins
 import importlib
 
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
 import pytest
 
 import gemma_4_sql.backends.keras.export as mod

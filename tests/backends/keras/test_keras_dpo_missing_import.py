@@ -3,6 +3,10 @@
 import builtins
 import importlib
 
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
 
 def test_keras_dpo_missing_imports(monkeypatch):
     """Test keras DPO missing imports."""

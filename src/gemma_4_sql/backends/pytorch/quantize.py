@@ -397,6 +397,5 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
         model_name=model_name,
         method=method,
         missing_deps=False,
-        missing_status="mocked_missing_torch",
         apply_fn=apply_fn,
     )

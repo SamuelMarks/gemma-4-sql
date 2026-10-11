@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
+from tests.conftest import requires_maxtext
+
+pytestmark = requires_maxtext
+
 import jax.numpy as jnp
 
 from gemma_4_sql.backends.maxtext import benchmark
@@ -103,7 +107,7 @@ def test_benchmark_model_error():
     """Docstring for test_benchmark_model_error."""
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", None):
         res = benchmark.benchmark_model("gemma4", "cpu", 2)
-        assert res["status"] == "mocked_missing_maxtext"
+        assert res["status"] == "backend_unavailable"
 
 
 def test_import_error():

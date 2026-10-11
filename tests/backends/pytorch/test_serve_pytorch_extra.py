@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock
 
+from tests.conftest import requires_torch
+
+pytestmark = requires_torch
+
 import pytest
 
 import gemma_4_sql.backends.pytorch.serve as serve_module

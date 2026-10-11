@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from tests.conftest import requires_torch
+
+pytestmark = requires_torch
+
 from collections import UserDict
 from pathlib import Path
 from typing import Any

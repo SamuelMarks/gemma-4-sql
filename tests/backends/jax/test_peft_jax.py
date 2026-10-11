@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 from typing import Any
 
 import jax

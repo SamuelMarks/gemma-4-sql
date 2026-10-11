@@ -3,6 +3,10 @@
 import sys
 from unittest.mock import MagicMock
 
+from tests.conftest import requires_mlx
+
+pytestmark = requires_mlx
+
 
 def test_mlx_imports():
     """Docstring for test_mlx_imports."""
@@ -23,7 +27,7 @@ def test_mlx_logging_missing_tb(monkeypatch):
 
     monkeypatch.setattr(m_log, "SummaryWriter", None)
     res = m_log.log_metrics({"loss": 1.0}, 1, "test")
-    assert "mocked" in res["status"]
+    assert "backend_unavailable" in res["status"]
 
 
 def test_mlx_logging_success(monkeypatch):

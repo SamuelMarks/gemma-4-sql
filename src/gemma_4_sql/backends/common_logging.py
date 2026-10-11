@@ -51,7 +51,7 @@ def log_metrics_wrapper(
                 writer.close()
         status = "success"
     else:
-        status = "mocked_missing_tensorboard"
+        status = "backend_unavailable"
         log_path = Path(log_dir)
         log_path.mkdir(parents=True, exist_ok=True)
         metrics_file = log_path / "metrics.jsonl"

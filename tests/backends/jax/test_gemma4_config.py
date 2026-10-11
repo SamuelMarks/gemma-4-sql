@@ -2,6 +2,10 @@
 
 from jax.sharding import PartitionSpec
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 from gemma_4_sql.backends.jax.gemma4.config import (
     AttentionType,
     AudioConfig,

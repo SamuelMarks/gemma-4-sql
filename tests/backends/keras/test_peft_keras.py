@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
 import pytest
 
 from gemma_4_sql.backends.keras.peft import (

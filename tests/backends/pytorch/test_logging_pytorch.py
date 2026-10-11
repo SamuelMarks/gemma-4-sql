@@ -3,6 +3,10 @@
 import sys
 from unittest.mock import patch
 
+from tests.conftest import requires_torch
+
+pytestmark = requires_torch
+
 
 def test_pytorch_logging_imports():
     """Test pytorch logging imports fallback."""

@@ -4,6 +4,10 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 from gemma_4_sql.backends.jax.gemma4.config import ShardConfig
 from gemma_4_sql.backends.jax.gemma4.layers import (
     ConstVar,

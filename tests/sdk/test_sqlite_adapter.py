@@ -1,326 +1,200 @@
-"""Module docstring."""
+"""Tests for SQLite adapter."""
+
+from __future__ import annotations
 
 import sqlite3
-from unittest.mock import MagicMock, PropertyMock, patch
-
 import pytest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
 
 
 @pytest.mark.asyncio
-async def test_sqlite_adapter(monkeypatch):
-    """Docstring for test_sqlite_adapter."""
+async def test_sqlite_adapter_live(tmp_path: Path) -> None:
+    """Test sqlite adapter with real execution."""
+    db_path = str(tmp_path / "test.db")
+
+    # 1. Create and setup schema
+    adapter = SQLiteAdapter(db_path, {})
+    adapter.setup_schema("CREATE TABLE products (id INTEGER, name TEXT);")
+
+    # Execute query directly using standard sqlite3 to insert (simulate setup)
+    conn = adapter.connect()
+    conn.execute("INSERT INTO products VALUES (1, 'apple')")
+    conn.commit()
+    adapter.close()
+
+    # 2. Query async
+    res = await adapter.execute_query_async("SELECT * FROM products;")
+    assert res == [(1, "apple")]
+
+    # 3. Query with feedback success
+    success, rows, err = await adapter.execute_with_feedback_async("SELECT name FROM products WHERE id=1")
+    assert success is True
+    assert rows == [("apple",)]
+    assert err is None
+
+    # 4. Query with feedback failure
+    success, rows, err = await adapter.execute_with_feedback_async("SELECT * FROM missing_table")
+    assert success is False
+    assert rows == []
+    assert "no such table: missing_table" in err or "missing_table" in err
+
+    # 5. Test execute_with_feedback_async rollback on Exception
+    # We will do a valid insert, then an invalid one to cause error,
+    # but sqlite execute_with_feedback_async does auto-commit per statement if we don't handle it well?
+    # Wait, execute_with_feedback_async does:
+    # try: await cursor.execute(query) ... await conn.commit() ... except ... await conn.rollback()
+
+    success, _, _ = await adapter.execute_with_feedback_async("INSERT INTO products VALUES (2, 'banana')")
+    assert success is True
+
+    success, _, _ = await adapter.execute_with_feedback_async("INSERT INTO missing_table VALUES (3)")
+    assert success is False
+
+    # Check if transaction was rolled back properly
+    res_after = await adapter.execute_query_async("SELECT name FROM products WHERE id=3")
+    assert res_after == []
+
+    adapter.close()
+
+    # 6. Test in-memory
+    mem_adapter = SQLiteAdapter(":memory:", {})
+    mem_adapter.setup_schema("CREATE TABLE t (a INT)")
+    success, _, _ = await mem_adapter.execute_with_feedback_async("INSERT INTO t VALUES (1)")
+    assert success is True
+    res_mem = await mem_adapter.execute_query_async("SELECT * FROM t")
+    assert res_mem == [(1,)]
+    mem_adapter.close()
+
+
+def test_sqlite_adapter_missing_aiosqlite(monkeypatch: pytest.MonkeyPatch, missing_dependency_context: Any) -> None:
+    """Test SQLiteAdapter raises ImportError when aiosqlite is missing."""
+    import importlib
     import gemma_4_sql.sdk.adapters.sqlite_adapter as sa
 
-    # Test connect memory
-    adapter1 = sa.SQLiteAdapter(":memory:", {"check_same_thread": True})
-    assert adapter1.db_path == ":memory:"
-    assert adapter1.error_classes == (sqlite3.Error,)
+    with missing_dependency_context(["aiosqlite"]):
+        importlib.reload(sa)
 
-    # Test connect file
-    with patch("sqlite3.connect") as m_connect:
-        m_connect.return_value = "conn"
-        adapter2 = sa.SQLiteAdapter("file.db", {})
-        assert adapter2.connect() == "conn"
+        adapter = sa.SQLiteAdapter(":memory:", {})
+        import asyncio
 
-    # Test connect_async memory
-    mock_aiosqlite = MagicMock()
+        with pytest.raises(ImportError, match="aiosqlite is required"):
+            asyncio.run(adapter.connect_async())
 
-    async def mock_connect(*a, **k):
-        """Docstring for mock_connect."""
-        return "aconn"
+    # Restore the module state
+    importlib.reload(sa)
 
-    mock_aiosqlite.connect = mock_connect
-    with patch("gemma_4_sql.sdk.adapters.sqlite_adapter.aiosqlite", mock_aiosqlite):
-        res = await adapter1.connect_async()
-        assert res == "aconn"
 
-        # Test connect_async file
-        adapter3 = sa.SQLiteAdapter("file.db", {})
-        res2 = await adapter3.connect_async()
-        assert res2 == "aconn"
+@pytest.mark.asyncio
+async def test_sqlite_adapter_extra_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Extra coverage for missing branches."""
+    adapter = SQLiteAdapter(":memory:", {})
+    adapter.setup_schema("CREATE TABLE products (id INTEGER, name TEXT);")
 
-    # Test missing aiosqlite
-    with patch("gemma_4_sql.sdk.adapters.sqlite_adapter.aiosqlite", None):
-        with pytest.raises(ImportError):
-            await adapter1.connect_async()
+    # execute_query_async with INSERT (no description -> triggers commit branches)
+    res = await adapter.execute_query_async("INSERT INTO products VALUES (1, 'apple')")
+    assert res == []
 
-    # Test setup_schema
-    m_conn = MagicMock()
-    adapter2.conn = m_conn
-    adapter2.setup_schema("DDL")
-    m_conn.executescript.assert_called_with("DDL")
-
-    # Mock async connection
-    class AsyncMockConn:
-        """Docstring for AsyncMockConn."""
-
-        def __init__(self, c_mock):
-            """Docstring for __init__."""
-            self.c_mock = c_mock
-            self.commit_called = False
-            self.rollback_called = False
-            self.close_called = False
-
-        async def execute(self, q, p):
-            """Docstring for execute."""
-            if q == "FAIL_EXEC":
-                raise sqlite3.Error("exec_err")
-            if q == "FAIL_AFTER":
-                raise ValueError("val_err")
-            return self.c_mock
-
-        async def commit(self):
-            """Docstring for commit."""
-            self.commit_called = True
-
-        async def rollback(self):
-            """Docstring for rollback."""
-            self.rollback_called = True
-
-        async def close(self):
-            """Docstring for close."""
-            self.close_called = True
-
-    class AsyncMockCursor:
-        """Docstring for AsyncMockCursor."""
-
-        def __init__(self, desc=True):
-            """Docstring for __init__."""
-            self.description = desc
-            if not desc:
-                del self.description
-            self.close_called = False
-
-        async def fetchall(self):
-            """Docstring for fetchall."""
-            return [("row",)]
-
-        async def close(self):
-            """Docstring for close."""
-            self.close_called = True
-
-    # Test execute_with_feedback_async success with desc
-    c_mock = AsyncMockCursor()
-    conn_mock = AsyncMockConn(c_mock)
-
-    async def _async_conn(*a, **k):
-        """Docstring for _async_conn."""
-        return conn_mock
-
-    adapter1.connect_async = _async_conn
-
-    res_fw = await adapter1.execute_with_feedback_async("SELECT")
-    assert res_fw == (True, [("row",)], None)
-
-    # Test execute_with_feedback_async success NO desc
-    c_mock2 = AsyncMockCursor(desc=False)
-    conn_mock2 = AsyncMockConn(c_mock2)
-
-    async def _async_conn2(*a, **k):
-        """Docstring for _async_conn2."""
-        return conn_mock2
-
-    adapter1.connect_async = _async_conn2
-
-    res_fw2 = await adapter1.execute_with_feedback_async("UPDATE")
-    assert res_fw2 == (True, [], None)
-
-    # Test execute_with_feedback_async failure
-    c_mock3 = AsyncMockCursor()
-    conn_mock3 = AsyncMockConn(c_mock3)
-
-    async def _async_conn3(*a, **k):
-        """Docstring for _async_conn3."""
-        return conn_mock3
-
-    adapter1.connect_async = _async_conn3
-    res_err = await adapter1.execute_with_feedback_async("FAIL_EXEC")
-    assert res_err == (False, [], "exec_err")
-
-    # Test execute_with_feedback_async rollback on Exception
-    c_mock4 = AsyncMockCursor()
-    conn_mock4 = AsyncMockConn(c_mock4)
-
-    async def _async_conn4(*a, **k):
-        """Docstring for _async_conn4."""
-        return conn_mock4
-
-    adapter1.connect_async = _async_conn4
-    with patch.object(sa.SQLiteAdapter, "error_classes", new_callable=PropertyMock, return_value=(Exception,)):
-        res_val = await adapter1.execute_with_feedback_async("FAIL_AFTER")
-        assert res_val == (False, [], "val_err")
-        assert conn_mock4.rollback_called
-
-    # Test execute_query_async success with desc
-    c_mock5 = AsyncMockCursor()
-    conn_mock5 = AsyncMockConn(c_mock5)
-
-    async def _async_conn5(*a, **k):
-        """Docstring for _async_conn5."""
-        return conn_mock5
-
-    adapter1.connect_async = _async_conn5
-    res_q = await adapter1.execute_query_async("SELECT")
-    assert res_q == [("row",)]
-
-    # Test execute_query_async success NO desc
-    c_mock6 = AsyncMockCursor(desc=False)
-    conn_mock6 = AsyncMockConn(c_mock6)
-
-    async def _async_conn6(*a, **k):
-        """Docstring for _async_conn6."""
-        return conn_mock6
-
-    adapter1.connect_async = _async_conn6
-    res_q2 = await adapter1.execute_query_async("UPDATE")
-    assert res_q2 == []
-
-    # Test execute_query_async failure
-    c_mock7 = AsyncMockCursor()
-    conn_mock7 = AsyncMockConn(c_mock7)
-
-    async def _async_conn7(*a, **k):
-        """Docstring for _async_conn7."""
-        return conn_mock7
-
-    adapter1.connect_async = _async_conn7
-    res_q3 = await adapter1.execute_query_async("FAIL_EXEC")
-    assert res_q3 == []
-
-    # Test execute_with_feedback_async success NO desc NO commit
-    class AsyncMockConnNoCommit:
-        """Docstring for AsyncMockConnNoCommit."""
-
-        def __init__(self, c_mock):
-            """Docstring for __init__."""
-            self.c_mock = c_mock
-
-        async def execute(self, q, p):
-            """Docstring for execute."""
-            return self.c_mock
-
-        def close(self):
-            """Docstring for close."""
-
-        def rollback(self):
-            """Docstring for rollback."""
-
-    c_mock_nocommit = AsyncMockCursor(desc=False)
-    conn_mock_nocommit = AsyncMockConnNoCommit(c_mock_nocommit)
-
-    async def _async_conn_nocommit(*a, **k):
-        """Docstring for _async_conn_nocommit."""
-        return conn_mock_nocommit
-
-    adapter1.connect_async = _async_conn_nocommit
-    await adapter1.execute_with_feedback_async("UPDATE")
-    await adapter1.execute_query_async("UPDATE")
-
-    # Test missing close and commit methods for coverage 158-182
-    class AsyncMockCursorNoClose:
-        """Docstring for AsyncMockCursorNoClose."""
-
-        def __init__(self, desc=True):
-            """Docstring for __init__."""
-            self.description = desc
-            if not desc:
-                del self.description
-
-        async def fetchall(self):
-            """Docstring for fetchall."""
-            return [("row",)]
-
-    class AsyncMockConnNoCloseCommit:
-        """Docstring for AsyncMockConnNoCloseCommit."""
-
-        def __init__(self, c_mock):
-            """Docstring for __init__."""
-            self.c_mock = c_mock
-
-        async def execute(self, q, p):
-            """Docstring for execute."""
-            if q == "FAIL_AFTER":
-                raise ValueError("val_err")
-            return self.c_mock
-
-    class SyncMockCursor:
-        """Docstring for SyncMockCursor."""
-
-        def __init__(self, desc=True):
-            """Docstring for __init__."""
-            self.description = desc
-            if not desc:
-                del self.description
-
-        async def fetchall(self):
-            """Docstring for fetchall."""
-            return [("row",)]
-
-        def close(self):
-            """Docstring for close."""
-
+    # Mock connect_async to return an object with sync commit/rollback/close
     class SyncMockConn:
-        """Docstring for SyncMockConn."""
-
-        def __init__(self, c_mock):
-            """Docstring for __init__."""
-            self.c_mock = c_mock
-
         async def execute(self, q, p):
-            """Docstring for execute."""
-            return self.c_mock
-
-        def commit(self):
-            """Docstring for commit."""
-
-        def rollback(self):
-            """Docstring for rollback."""
-
-        def close(self):
-            """Docstring for close."""
-
-    c_mock_sync = SyncMockCursor(desc=False)
-    conn_mock_sync = SyncMockConn(c_mock_sync)
-
-    async def _async_conn_sync(*a, **k):
-        """Docstring for _async_conn_sync."""
-        return conn_mock_sync
-
-    adapter1.connect_async = _async_conn_sync
-    await adapter1.execute_with_feedback_async("UPDATE")
-    await adapter1.execute_query_async("UPDATE")
-
-    # And test rollback sync
-    class SyncMockConnFail(SyncMockConn):
-        """Docstring for SyncMockConnFail."""
-
+            class SyncMockCursor:
+                def fetchall(self): return []
+                # missing description
+                def close(self): pass
+            return SyncMockCursor()
+        def commit(self): pass
+        def rollback(self): pass
+        def close(self): pass
+    
+    with patch.object(adapter, "connect_async", return_value=SyncMockConn()):
+        await adapter.execute_with_feedback_async("INSERT")
+        await adapter.execute_query_async("INSERT")
+        
+    # Mock connect_async to return an object with NO commit/rollback/close
+    class EmptyMockConn:
         async def execute(self, q, p):
-            """Docstring for execute."""
-            raise ValueError("val_err")
+            class EmptyMockCursor:
+                def fetchall(self): return []
+                # no close
+            return EmptyMockCursor()
+    
+    with patch.object(adapter, "connect_async", return_value=EmptyMockConn()):
+        await adapter.execute_with_feedback_async("INSERT")
+        await adapter.execute_query_async("INSERT")
 
-    conn_mock_sync_fail = SyncMockConnFail(c_mock_sync)
+    # Mock exception to hit rollback branches
+    class ErrorSyncMockConn(SyncMockConn):
+        async def execute(self, q, p):
+            raise Exception("Mock error")
+    
+    with patch.object(adapter, "connect_async", return_value=ErrorSyncMockConn()):
+        with pytest.raises(Exception, match="Mock error"):
+            await adapter.execute_with_feedback_async("INSERT")
+        with pytest.raises(Exception, match="Mock error"):
+            await adapter.execute_query_async("INSERT")
+        
+    class ErrorEmptyMockConn(EmptyMockConn):
+        async def execute(self, q, p):
+            raise Exception("Mock error")
+    
+    with patch.object(adapter, "connect_async", return_value=ErrorEmptyMockConn()):
+        with pytest.raises(Exception, match="Mock error"):
+            await adapter.execute_with_feedback_async("INSERT")
+        with pytest.raises(Exception, match="Mock error"):
+            await adapter.execute_query_async("INSERT")
 
-    async def _async_conn_sync_fail(*a, **k):
-        """Docstring for _async_conn_sync_fail."""
-        return conn_mock_sync_fail
+    # execute_query_async with bad SQL -> triggers except block line 180-182
+    res_err = await adapter.execute_query_async("BAD SQL")
+    assert res_err == []
+    adapter.close()
 
-    adapter1.connect_async = _async_conn_sync_fail
-    with patch.object(sa.SQLiteAdapter, "error_classes", new_callable=PropertyMock, return_value=(Exception,)):
-        await adapter1.execute_with_feedback_async("FAIL_AFTER")
+    # Mocking to cover asyncio.iscoroutine branches
+    from unittest.mock import MagicMock
+    import asyncio
 
-    c_mock8 = AsyncMockCursorNoClose()
-    conn_mock8 = AsyncMockConnNoCloseCommit(c_mock8)
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.description = None
+    mock_cursor.fetchall.return_value = []
 
-    async def _async_conn8(*a, **k):
-        """Docstring for _async_conn8."""
-        return conn_mock8
+    async def mock_execute(q, p):
+        return mock_cursor
 
-    adapter1.connect_async = _async_conn8
+    async def mock_close():
+        pass
 
-    await adapter1.execute_query_async("SELECT")
-    c_mock8_2 = AsyncMockCursorNoClose(desc=False)
-    conn_mock8.c_mock = c_mock8_2
-    await adapter1.execute_query_async("UPDATE")
+    async def mock_commit():
+        pass
 
-    with patch.object(sa.SQLiteAdapter, "error_classes", new_callable=PropertyMock, return_value=(Exception,)):
-        await adapter1.execute_with_feedback_async("FAIL_AFTER")
+    async def mock_rollback():
+        pass
+
+    mock_conn.execute = mock_execute
+    mock_conn.commit = mock_commit
+    mock_conn.rollback = mock_rollback
+    mock_conn.close = mock_close
+    mock_cursor.close = mock_close
+
+    from unittest.mock import AsyncMock
+
+    adapter.connect_async = AsyncMock(return_value=mock_conn)
+
+    suc, res, err = await adapter.execute_with_feedback_async("INSERT")
+    assert suc is True
+
+    res2 = await adapter.execute_query_async("INSERT")
+    assert res2 == []
+
+    # Force error to cover rollback
+    async def mock_execute_err(q, p):
+        import sqlite3
+
+        raise sqlite3.Error("err")
+
+    mock_conn.execute = mock_execute_err
+
+    suc, res, err = await adapter.execute_with_feedback_async("INSERT")
+    assert suc is False

@@ -1,38 +1,49 @@
-"""Module docstring."""
+"""Tests for type hints module."""
 
-import importlib
 import sys
+import pytest
+from unittest.mock import patch
 
 
-def test_numpy_missing_fallback(monkeypatch):
-    """Docstring for test_numpy_missing_fallback."""
-    orig_th = sys.modules.get("gemma_4_sql.type_hints")
+def test_type_hints_protocols():
+    """Test TensorType and ModelType protocols."""
+    from gemma_4_sql.type_hints import TensorType, ModelType
 
-    monkeypatch.setitem(sys.modules, "numpy", None)
-    if "gemma_4_sql.type_hints" in sys.modules:
-        monkeypatch.delitem(sys.modules, "gemma_4_sql.type_hints")
+    class DummyTensor:
+        shape = (1, 2)
+        dtype = "float32"
 
-    import builtins
+        def tolist(self):
+            return [1, 2]
 
-    orig_import = builtins.__import__
+        def to(self, device):
+            return self
 
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name == "numpy":
-            raise ImportError("No module named 'numpy'")
-        return orig_import(name, *args, **kwargs)
+        def item(self):
+            return 1.0
 
-    monkeypatch.setattr(builtins, "__import__", mock_import)
+        def cpu(self):
+            return self
 
+        def numpy(self):
+            return [1.0, 2.0]
+
+        def view(self, *a, **k):
+            return self
+
+        def reshape(self, *a, **k):
+            return self
+
+    t = DummyTensor()
+    assert hasattr(t, "shape")
+
+
+def test_numpy_fallback(monkeypatch):
+    """Test fallback when numpy is missing."""
     import gemma_4_sql.type_hints as th
+    import importlib
 
-    assert th.ndarray is object
-
-    monkeypatch.undo()
-
-    # Ensure it can be re-imported correctly
-    if orig_th:
-        sys.modules["gemma_4_sql.type_hints"] = orig_th
-        importlib.reload(sys.modules["gemma_4_sql.type_hints"])
-    else:
-        importlib.reload(__import__("gemma_4_sql.type_hints", fromlist=[""]))
+    with patch.dict(sys.modules, {"numpy": None}):
+        importlib.reload(th)
+        assert th.ndarray is object
+    importlib.reload(th)

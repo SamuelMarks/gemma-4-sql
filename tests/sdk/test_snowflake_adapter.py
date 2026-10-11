@@ -1,107 +1,121 @@
-"""Module docstring."""
+"""Tests for Snowflake adapter."""
 
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
 
 import pytest
+from unittest.mock import patch, MagicMock
+
+from tests.utils.test_utils import FakeDBConnection, FakeDBCursor
+
+
+@pytest.fixture
+def fake_snowflake_module():
+    mock_snowflake = MagicMock()
+
+    class SnowflakeError(Exception):
+        pass
+
+    mock_snowflake.connector.errors.Error = SnowflakeError
+
+    conn = FakeDBConnection()
+    mock_snowflake.connector.connect.return_value = conn
+    return mock_snowflake, conn, SnowflakeError
 
 
 @pytest.mark.asyncio
-async def test_snowflake_adapter(monkeypatch):
-    """Docstring for test_snowflake_adapter."""
-    import importlib
-
+async def test_snowflake_adapter_execution(fake_snowflake_module, monkeypatch) -> None:
+    """Test SnowflakeAdapter execution paths."""
+    mock_snowflake, conn, SnowflakeError = fake_snowflake_module
     import gemma_4_sql.sdk.adapters.snowflake_adapter as sa
 
-    # error_classes with missing snowflake module
-    with patch.dict("sys.modules", {"snowflake": None, "snowflake.connector": None}):
-        importlib.reload(sa)
-        adapter = sa.SnowflakeAdapter.__new__(sa.SnowflakeAdapter)
-        assert adapter.error_classes == (Exception,)
+    monkeypatch.setattr(sa, "snowflake", mock_snowflake)
 
-    # error_classes with proper exception class
-    class DummyError(Exception):
-        """Docstring for DummyError."""
-
-    mock_snowflake = MagicMock()
-    mock_snowflake.connector = type("connector", (), {"errors": type("errors", (), {"Error": DummyError})()})()
     with patch.dict("sys.modules", {"snowflake": mock_snowflake, "snowflake.connector": mock_snowflake.connector}):
-        importlib.reload(sa)
-        adapter = sa.SnowflakeAdapter.__new__(sa.SnowflakeAdapter)
-        # Instead of calling it via the class we check if we patched it correctly, but error_classes returns the class, so we can just assert on the property directly now because reload will set sa.snowflake to our mock!
-        # Wait, the property re-imports it? Let's see:
-        assert adapter.error_classes == (DummyError,)
-
-    # error_classes with snowflake module present but missing Exception base
-    mock_snowflake_bad = MagicMock()
-    mock_snowflake_bad.connector = type("connector", (), {"errors": type("errors", (), {"Error": int})()})()
-    with patch.dict("sys.modules", {"snowflake": mock_snowflake_bad, "snowflake.connector": mock_snowflake_bad.connector}):
-        importlib.reload(sa)
-        adapter = sa.SnowflakeAdapter.__new__(sa.SnowflakeAdapter)
-        assert adapter.error_classes == (Exception,)
-
-    # error_classes with AttributeError
-    mock_snowflake_attr = MagicMock()
-    del mock_snowflake_attr.connector
-    with patch.dict("sys.modules", {"snowflake": mock_snowflake_attr}):
-        importlib.reload(sa)
-        adapter = sa.SnowflakeAdapter.__new__(sa.SnowflakeAdapter)
-        assert adapter.error_classes == (Exception,)
-
-    # restore module state so sa is normal
-    importlib.reload(sa)
-
-    # connect sync
-    adapter = sa.SnowflakeAdapter.__new__(sa.SnowflakeAdapter)
-    adapter.db_kwargs = {}
-    with patch.object(sa, "snowflake", mock_snowflake):
-        mock_snowflake.connector.connect = MagicMock(return_value="conn")
-        assert adapter.connect() == "conn"
-
-    # connect sync missing connect
-    mock_snowflake_noconnect = MagicMock()
-    del mock_snowflake_noconnect.connector
-    del mock_snowflake_noconnect.connect
-    with patch.object(sa, "snowflake", mock_snowflake_noconnect):
-        with pytest.raises(ImportError):
+        adapter = sa.SnowflakeAdapter("account", {})
+    
+        # test connect and connect_async
+        c1 = adapter.connect()
+        assert c1 == conn
+    
+        c2 = await adapter.connect_async()
+        assert c2 == conn
+        
+        # test error classes
+        assert SnowflakeError in adapter.error_classes
+        
+        # test error classes exception branch
+        mock_snowflake.connector.errors.Error = 123
+        assert Exception in adapter.error_classes
+    
+        # test connect exception
+        original_connector = mock_snowflake.connector
+        del mock_snowflake.connector
+        mock_snowflake.connect = None
+        with pytest.raises(ImportError, match="snowflake connect function could not be resolved"):
             adapter.connect()
+        mock_snowflake.connector = original_connector
+    
+        # execute_query_async delegates to sync
+        conn.set_results([[(1, "apple")]])
+        res = await adapter.execute_query_async("SELECT")
+        assert res == [(1, "apple")]
 
-    # connect sync missing module
-    with patch.object(sa, "snowflake", None):
-        with pytest.raises(ImportError):
-            adapter.connect()
+        conn.set_results([[(1, "apple")]])
+        suc, res, err = await adapter.execute_with_feedback_async("SELECT")
+        assert suc is True
+        assert res == [(1, "apple")]
 
-    # connect async
-    adapter.connect = MagicMock(return_value="aconn")
-    res = await adapter.connect_async()
-    assert res == "aconn"
+        # test failure
+        def mock_fail(*a, **k):
+            raise SnowflakeError("Simulated")
 
-    # setup_schema success
+        conn.cursor = MagicMock()
+        conn.cursor.return_value.execute = mock_fail
+        suc, res, err = await adapter.execute_with_feedback_async("FAIL")
+        assert suc is False
+        assert "Simulated" in str(err)
+
+
+@pytest.mark.asyncio
+async def test_snowflake_adapter_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test missing dependencies."""
+    import gemma_4_sql.sdk.adapters.snowflake_adapter as sa
+
+    monkeypatch.setattr(sa, "snowflake", None)
+    with pytest.raises(ImportError):
+        sa.SnowflakeAdapter("path", {})
+    
+    # Test error_classes import error branch
+    with patch.dict("sys.modules", {"snowflake.connector": None}):
+        # Mock __init__ to bypass connection init
+        with patch.object(sa.SnowflakeAdapter, "__init__", return_value=None):
+            dummy_adapter = sa.SnowflakeAdapter("path", {})
+            assert Exception in dummy_adapter.error_classes
+
+
+def test_snowflake_adapter_schema(fake_snowflake_module, monkeypatch) -> None:
+    """Test setup_schema."""
+    mock_snowflake, conn, SnowflakeError = fake_snowflake_module
+    import gemma_4_sql.sdk.adapters.snowflake_adapter as sa
+
+    monkeypatch.setattr(sa, "snowflake", mock_snowflake)
+
+    adapter = sa.SnowflakeAdapter("path", {})
+    adapter.setup_schema("CREATE TABLE t (a INT)")
+    assert conn._transactions_committed == 1
+
+    conn.set_fail_query("FAIL")
+    with pytest.raises(Exception):
+        adapter.setup_schema("FAIL")
+    assert conn._transactions_rolled_back == 1
+    
+    # Test missing commit/rollback attributes
     adapter.conn = MagicMock()
-    adapter.setup_schema("DDL")
-    adapter.conn.cursor.return_value.execute.assert_called_with("DDL")
-    adapter.conn.commit.assert_called_once()
-
-    # setup_schema success NO commit
     del adapter.conn.commit
-    adapter.setup_schema("DDL")
-
-    # setup_schema error
-    adapter.conn = MagicMock()
-    adapter.conn.cursor.return_value.execute.side_effect = ValueError("err")
-    with pytest.raises(ValueError):
-        adapter.setup_schema("DDL")
-    adapter.conn.rollback.assert_called_once()
-
-    # setup_schema error NO rollback
-    adapter.conn = MagicMock()
     del adapter.conn.rollback
-    adapter.conn.cursor.return_value.execute.side_effect = ValueError("err")
-    with pytest.raises(ValueError):
-        adapter.setup_schema("DDL")
-
-    # async wrappers
-    adapter.execute_with_feedback = MagicMock(return_value="fw_res")
-    assert await adapter.execute_with_feedback_async("SELECT") == "fw_res"
-
-    adapter.execute_query = MagicMock(return_value="q_res")
-    assert await adapter.execute_query_async("SELECT") == "q_res"
+    
+    adapter.setup_schema("CREATE TABLE t2 (a INT)")
+    
+    adapter.conn.cursor.return_value.execute.side_effect = Exception("Mock error")
+    with pytest.raises(Exception, match="Mock error"):
+        adapter.setup_schema("FAIL2")

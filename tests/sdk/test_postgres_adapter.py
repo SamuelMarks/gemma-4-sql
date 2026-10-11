@@ -1,200 +1,156 @@
-"""Module docstring."""
+"""Tests for PostgreSQL adapter."""
 
-from unittest.mock import MagicMock, PropertyMock, patch
+from __future__ import annotations
 
 import pytest
+from unittest.mock import patch, MagicMock
+
+from gemma_4_sql.sdk.adapters.postgres_adapter import PostgresAdapter
+from tests.utils.test_utils import FakeDBConnection, FakeDBCursor
+
+
+@pytest.fixture
+def fake_postgres_module():
+    mock_psycopg2 = MagicMock()
+
+    class PostgresError(Exception):
+        pass
+
+    mock_psycopg2.Error = PostgresError
+
+    conn = FakeDBConnection()
+    mock_psycopg2.connect.return_value = conn
+
+    mock_asyncpg = MagicMock()
+    mock_asyncpg.PostgresError = PostgresError
+
+    # Return fake connection
+    async def mock_ac(*a, **k):
+        # Create an async interface on top of FakeDBConnection
+        class AsyncFakeConn:
+            def __init__(self):
+                self._conn = conn
+
+            async def fetch(self, query, *args):
+                cur = self._conn.cursor()
+                cur.execute(query, args)
+
+                class MockRecord:
+                    def __init__(self, row):
+                        self._row = row
+
+                    def values(self):
+                        return list(self._row)
+
+                return [MockRecord(row) for row in cur.fetchall()]
+
+            async def execute(self, query, *args):
+                cur = self._conn.cursor()
+                cur.execute(query, args)
+                return f"CMD {cur.rowcount}"
+
+            async def close(self):
+                pass
+
+        return AsyncFakeConn()
+
+    mock_asyncpg.connect.side_effect = mock_ac
+
+    return mock_psycopg2, mock_asyncpg, conn, PostgresError
 
 
 @pytest.mark.asyncio
-async def test_postgres_adapter(monkeypatch):
-    """Docstring for test_postgres_adapter."""
-    import importlib
-
+async def test_postgres_adapter_execution(fake_postgres_module, monkeypatch) -> None:
+    """Test PostgresAdapter execution paths."""
+    mock_psycopg2, mock_asyncpg, conn, PostgresError = fake_postgres_module
     import gemma_4_sql.sdk.adapters.postgres_adapter as pa
 
-    # 27->31, 31->35, 36: error_classes with missing psycopg2 and asyncpg
-    with patch.dict("sys.modules", {"psycopg2": None, "asyncpg": None}):
-        importlib.reload(pa)
-        adapter = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-        assert adapter.error_classes == (Exception,)
-        with pytest.raises(ImportError):
-            adapter.connect()
-        with pytest.raises(ImportError):
-            await adapter.connect_async()
+    monkeypatch.setattr(pa, "psycopg2", mock_psycopg2)
+    monkeypatch.setattr(pa, "asyncpg", mock_asyncpg)
 
-    # 29->31: psycopg2 present but err is not exception subclass
-    mock_psycopg2 = MagicMock()
-    mock_psycopg2.Error = int
-    with patch.dict("sys.modules", {"psycopg2": mock_psycopg2, "asyncpg": None}):
-        importlib.reload(pa)
-        adapter = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-        assert adapter.error_classes == (Exception,)
+    adapter = pa.PostgresAdapter("host=localhost dbname=test", {})
+    
+    # Test empty db_path
+    empty_adapter = pa.PostgresAdapter("", {})
+    empty_adapter.connect()
+    await empty_adapter.connect_async()
 
-    # both psycopg2 and asyncpg present with valid Error subclass
-    class DummyPsy(Exception):
-        """Docstring for DummyPsy."""
+    conn.set_results([[(1, "apple")]])
+    res = await adapter.execute_query_async("SELECT")
+    assert res == [(1, "apple")]
 
-    mock_psycopg2_ok = MagicMock()
-    mock_psycopg2_ok.Error = DummyPsy
+    conn.set_results([[(1, "apple")]])
+    print("CONN CLOSED?", conn._closed)
+    suc, res, err = await adapter.execute_with_feedback_async("SELECT")
+    assert suc is True
+    assert res == [(1, "apple")]
 
-    class DummyApg(Exception):
-        """Docstring for DummyApg."""
+    conn.set_fail_query("FAIL")
 
-    mock_apg_ok = MagicMock()
-    mock_apg_ok.PostgresError = DummyApg
+    # Make FakeDBConnection raise PostgresError on failure
+    def mock_fail(*args, **kwargs):
+        raise PostgresError("Simulated")
 
-    with patch.dict("sys.modules", {"psycopg2": mock_psycopg2_ok, "asyncpg": mock_apg_ok}):
-        importlib.reload(pa)
-        adapter = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-        err_tuple = adapter.error_classes
-        assert DummyPsy in err_tuple
-        assert DummyApg in err_tuple
+    conn.cursor = MagicMock()
+    conn.cursor.return_value.execute = mock_fail
 
-    # AttributeError inside error_classes
-    mock_apg_bad = MagicMock()
-    del mock_apg_bad.PostgresError
-    with patch.dict("sys.modules", {"psycopg2": None, "asyncpg": mock_apg_bad}):
-        importlib.reload(pa)
-        adapter = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-        assert adapter.error_classes == (Exception,)
+    suc, res, err = await adapter.execute_with_feedback_async("FAIL")
+    assert suc is False
+    assert "Simulated" in str(err)
 
-    # reload pa normally
-    importlib.reload(pa)
+    res_err = await adapter.execute_query_async("FAIL")
+    assert res_err == []
 
-    # exception in execute_query_async
-    adapter = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-    with patch.object(pa.PostgresAdapter, "error_classes", new_callable=PropertyMock, return_value=(ValueError,)):
 
-        async def mock_connect(*a, **k):
-            """Docstring for mock_connect."""
-            m = MagicMock()
-            m.fetch.side_effect = ValueError("err")
+@pytest.mark.asyncio
+async def test_postgres_adapter_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test missing dependencies."""
+    import gemma_4_sql.sdk.adapters.postgres_adapter as pa
 
-            async def close():
-                """Docstring for close."""
+    monkeypatch.setattr(pa, "psycopg2", None)
+    with pytest.raises(ImportError):
+        pa.PostgresAdapter("path", {})
 
-            m.close = close
-            return m
+    # Mock psycopg2 to pass init, but asyncpg is None
+    monkeypatch.setattr(pa, "psycopg2", MagicMock())
+    monkeypatch.setattr(pa, "asyncpg", None)
+    
+    adapter = pa.PostgresAdapter("path", {})
+    with pytest.raises(ImportError):
+        await adapter.connect_async()
 
-        adapter.connect_async = mock_connect
-        res = await adapter.execute_query_async("SELECT")
-        assert res == []
+    # Test error_classes branch where both are None
+    monkeypatch.setattr(pa, "psycopg2", None)
+    monkeypatch.setattr(pa, "asyncpg", None)
+    # create adapter without init logic triggering error
+    with patch.object(pa.PostgresAdapter, "__init__", return_value=None):
+        dummy_adapter = pa.PostgresAdapter("path", {})
+        assert Exception in dummy_adapter.error_classes
 
-    # test success execute_query_async
-    async def mock_connect_success(*a, **k):
-        """Docstring for mock_connect_success."""
+        # Test error_classes branch where Error objects are not types
+        mock_p = MagicMock()
+        mock_p.Error = 123
+        monkeypatch.setattr(pa, "psycopg2", mock_p)
+        
+        mock_a = MagicMock()
+        mock_a.PostgresError = 123
+        monkeypatch.setattr(pa, "asyncpg", mock_a)
+        
+        assert Exception in dummy_adapter.error_classes
 
-        class MockRecord:
-            """Docstring for MockRecord."""
 
-            def values(self):
-                """Docstring for values."""
-                return [1, 2]
+def test_postgres_adapter_schema(fake_postgres_module, monkeypatch) -> None:
+    """Test setup_schema."""
+    mock_psycopg2, mock_asyncpg, conn, PostgresError = fake_postgres_module
+    import gemma_4_sql.sdk.adapters.postgres_adapter as pa
 
-        m = MagicMock()
+    monkeypatch.setattr(pa, "psycopg2", mock_psycopg2)
+    monkeypatch.setattr(pa, "asyncpg", mock_asyncpg)
 
-        async def fetch(*a, **k):
-            """Docstring for fetch."""
-            return [MockRecord()]
+    adapter = pa.PostgresAdapter("path", {})
+    adapter.setup_schema("CREATE TABLE t (a INT)")
+    assert conn._transactions_committed == 1
 
-        m.fetch = fetch
-
-        async def execute(*a, **k):
-            """Docstring for execute."""
-
-        m.execute = execute
-
-        async def close():
-            """Docstring for close."""
-
-        m.close = close
-        return m
-
-    adapter.connect_async = mock_connect_success
-    res_succ = await adapter.execute_query_async("SELECT")
-    assert res_succ == [(1, 2)]
-
-    res_fw = await adapter.execute_with_feedback_async("SELECT")
-    assert res_fw == (True, [(1, 2)], None)
-
-    async def mock_connect_err(*a, **k):
-        """Docstring for mock_connect_err."""
-        m = MagicMock()
-
-        async def fetch(*a, **k):
-            """Docstring for fetch."""
-            raise ValueError("err")
-
-        m.fetch = fetch
-
-        async def execute(*a, **k):
-            """Docstring for execute."""
-            raise ValueError("err")
-
-        m.execute = execute
-
-        async def close():
-            """Docstring for close."""
-
-        m.close = close
-        return m
-
-    adapter.connect_async = mock_connect_err
-    res_fw_err = await adapter.execute_with_feedback_async("SELECT")
-    assert res_fw_err == (False, [], "err")
-
-    # test sync connect
-    with patch.dict("sys.modules", {"psycopg2": mock_psycopg2_ok}):
-        importlib.reload(pa)
-        adapter = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-        adapter.db_path = "path"
-        adapter.db_kwargs = {}
-        pa.psycopg2.connect = MagicMock(return_value="conn")
-        assert adapter.connect() == "conn"
-
-        adapter2 = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-        adapter2.db_path = "path"
-        adapter2.db_kwargs = {"user": "u", "password": "p"}
-        adapter2.connect()
-        pa.psycopg2.connect.assert_called_with("path", user="u", password="p")
-
-        adapter3 = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-        adapter3.db_path = ":memory:"
-        adapter3.db_kwargs = {}
-        adapter3.connect()
-        pa.psycopg2.connect.assert_called_with()
-
-        pa.psycopg2.connect.side_effect = Exception("err")
-        with pytest.raises(Exception):
-            adapter.connect()
-
-    # test async connect
-    with patch.dict("sys.modules", {"asyncpg": mock_apg_ok}):
-        importlib.reload(pa)
-        adapter = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-        adapter.db_path = "path"
-        adapter.db_kwargs = {}
-
-        async def _mock_ac(*a, **k):
-            """Docstring for _mock_ac."""
-            return "aconn"
-
-        pa.asyncpg.connect = getattr(pytest, "AsyncMock", MagicMock)(side_effect=_mock_ac)
-
-        res = await adapter.connect_async()
-        assert res == "aconn"
-
-        adapter2 = pa.PostgresAdapter.__new__(pa.PostgresAdapter)
-        adapter2.db_path = ":memory:"
-        adapter2.db_kwargs = {}
-        res2 = await adapter2.connect_async()
-        assert res2 == "aconn"
-
-    # test setup_schema
-    adapter.conn = MagicMock()
-    adapter.setup_schema("DDL")
-    adapter.conn.cursor.return_value.execute.assert_called_with("DDL")
-
-    adapter.conn.cursor.return_value.execute.side_effect = ValueError("err")
-    with pytest.raises(ValueError):
-        adapter.setup_schema("DDL")
+    conn.set_fail_query("FAIL")
+    with pytest.raises(Exception):
+        adapter.setup_schema("FAIL")

@@ -4,6 +4,10 @@ import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 import pytest
 
 
@@ -133,7 +137,7 @@ def test_benchmark_model_execution():
     # We don't mock _run_benchmark_pass, we let it run with mocked jax
     with patch("gemma_4_sql.backends.jax.benchmark.run_benchmark_wrapper") as mock_wrapper:
 
-        def side_effect(backend_name, model_name, hardware, batch_size, missing_deps, missing_status, benchmark_fn):
+        def side_effect(backend_name, model_name, hardware, batch_size, missing_deps, benchmark_fn, **kwargs):
             """Docstring for side_effect."""
             return benchmark_fn()
 

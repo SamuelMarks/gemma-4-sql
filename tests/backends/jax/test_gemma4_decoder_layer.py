@@ -3,6 +3,10 @@
 import jax.numpy as jnp
 from flax import nnx
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 from gemma_4_sql.backends.jax.gemma4.config import AttentionType, ModelConfig
 from gemma_4_sql.backends.jax.gemma4.decoder_layer import Gemma4DecoderLayer
 

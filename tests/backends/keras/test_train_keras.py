@@ -3,6 +3,10 @@
 import sqlite3
 from typing import ClassVar
 
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
 import pytest
 
 from gemma_4_sql.type_hints import TrainingConfig

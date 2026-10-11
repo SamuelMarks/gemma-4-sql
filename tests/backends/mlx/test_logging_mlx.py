@@ -3,6 +3,10 @@
 import sys
 from unittest.mock import patch
 
+from tests.conftest import requires_mlx
+
+pytestmark = requires_mlx
+
 
 def test_mlx_logging_imports():
     """Test mlx logging imports fallback."""

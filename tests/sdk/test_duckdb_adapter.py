@@ -1,78 +1,85 @@
-"""Module docstring."""
+"""Tests for DuckDB adapter."""
 
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
 
+import sys
 import pytest
+from pathlib import Path
+from unittest.mock import patch
+
+from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
+from tests.conftest import requires_duckdb
 
 
 @pytest.mark.asyncio
-async def test_duckdb_adapter(monkeypatch):
-    """Docstring for test_duckdb_adapter."""
-    import gemma_4_sql.sdk.adapters.duckdb_adapter as da
+@requires_duckdb
+async def test_duckdb_adapter_live(tmp_path: Path) -> None:
+    """Test duckdb adapter with real duckdb execution."""
+    db_path = str(tmp_path / "test.db")
 
-    mock_duckdb = MagicMock()
-    mock_duckdb.Error = ValueError
+    # 1. Create and setup schema
+    adapter = DuckDBAdapter(db_path, {})
+    adapter.setup_schema("CREATE TABLE products (id INTEGER, name TEXT); INSERT INTO products VALUES (1, 'apple');")
 
-    # Reload with mock duckdb
-    with patch.dict("sys.modules", {"duckdb": mock_duckdb}):
-        da.duckdb = mock_duckdb
+    # 2. Query async
+    res = await adapter.execute_query_async("SELECT * FROM products;")
+    assert res == [(1, "apple")]
 
-        # error_classes
-        assert da.DuckDBAdapter("path", {}).error_classes == (ValueError,)
+    # 3. Query with feedback success
+    success, rows, err = await adapter.execute_with_feedback_async("SELECT name FROM products WHERE id=1")
+    assert success is True
+    assert rows == [("apple",)]
+    assert err is None
 
-        # connect existing_conn
-        adapter1 = da.DuckDBAdapter("path", {"existing_conn": "conn1"})
-        assert adapter1.connect() == "conn1"
-        assert await adapter1.connect_async() == "conn1"
+    # 4. Query with feedback failure
+    success, rows, err = await adapter.execute_with_feedback_async("SELECT * FROM missing_table")
+    assert success is False
+    assert rows == []
+    assert "missing_table" in err
 
-        # connect conn
-        adapter2 = da.DuckDBAdapter("path", {"conn": "conn2"})
-        assert adapter2.connect() == "conn2"
+    adapter.close()
 
-        # connect readonly
-        adapter3 = da.DuckDBAdapter("path", {}, read_only=True)
-        adapter3.connect()
-        mock_duckdb.connect.assert_called_with("path", read_only=True)
+    # 5. Read-only connection
+    read_only_adapter = DuckDBAdapter(db_path, {}, read_only=True)
+    res_ro = await read_only_adapter.execute_query_async("SELECT name FROM products")
+    assert res_ro == [("apple",)]
 
-        # setup_schema existing_conn
-        adapter1.setup_schema("DDL")
+    success, _, err = await read_only_adapter.execute_with_feedback_async("INSERT INTO products VALUES (2, 'banana')")
+    assert success is False
+    assert "read-only" in err.lower() or "read_only" in err.lower() or "not allowed" in err.lower() or "read only" in err.lower() or "cannot" in err.lower()
 
-        # setup_schema normal
-        adapter3.conn = MagicMock()
-        adapter3.setup_schema("DDL")
-        adapter3.conn.execute.assert_called_with("DDL")
+    read_only_adapter.close()
 
-        # close existing_conn
-        adapter1.close()
+    # 6. Existing connection
+    import duckdb
 
-        # close normal
-        adapter3.close()
-        adapter3.conn.close.assert_called()
+    conn = duckdb.connect(db_path)
+    existing_adapter = DuckDBAdapter(db_path, {"existing_conn": conn})
+    res_ex = await existing_adapter.execute_query_async("SELECT name FROM products")
+    assert res_ex == [("apple",)]
 
-        # execute_with_feedback_async success
-        adapter3.conn.cursor.return_value.execute.return_value.fetchall.return_value = [("row",)]
-        res_fw = await adapter3.execute_with_feedback_async("SELECT")
-        assert res_fw == (True, [("row",)], None)
+    # Test with 'conn' instead of 'existing_conn'
+    existing_adapter_conn = DuckDBAdapter(db_path, {"conn": conn})
+    res_ex_conn = await existing_adapter_conn.execute_query_async("SELECT name FROM products")
+    assert res_ex_conn == [("apple",)]
+    
+    # Test execute_query_async exception
+    res_err = await existing_adapter.execute_query_async("SELECT * FROM non_existent_table")
+    assert res_err == []
 
-        # execute_with_feedback_async failure
-        adapter3.conn.cursor.return_value.execute.side_effect = ValueError("err")
-        res_fw_err = await adapter3.execute_with_feedback_async("SELECT")
-        assert res_fw_err == (False, [], "err")
+    # Existing connections should not be closed by adapter
+    existing_adapter.close()
+    existing_adapter_conn.close()
+    # The connection should still be open
+    assert conn.execute("SELECT 1").fetchall() == [(1,)]
+    conn.close()
 
-        # execute_query_async success without cursor
-        adapter3.conn.cursor = None
-        del adapter3.conn.cursor
-        adapter3.conn.execute.return_value.fetchall.return_value = [("row2",)]
-        res_q = await adapter3.execute_query_async("SELECT")
-        assert res_q == [("row2",)]
 
-        # execute_query_async failure
-        adapter3.conn.execute.side_effect = ValueError("err2")
-        res_q_err = await adapter3.execute_query_async("SELECT")
-        assert res_q_err == []
+def test_duckdb_adapter_missing_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test DuckDBAdapter raises ImportError when duckdb is missing."""
+    import gemma_4_sql.sdk.adapters.duckdb_adapter as dda
 
-    # test missing duckdb
-    with patch.dict("sys.modules", {"duckdb": None}):
-        da.duckdb = None
-        with pytest.raises(ImportError):
-            da.DuckDBAdapter("path", {}).connect()
+    monkeypatch.setattr(dda, "duckdb", None)
+
+    with pytest.raises(ImportError, match="duckdb is required"):
+        dda.DuckDBAdapter(":memory:", {}).connect()

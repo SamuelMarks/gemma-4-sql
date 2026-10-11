@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 import jax.numpy as jnp
 
 from gemma_4_sql.backends.jax.gemma4.cache import LayerCache, init_cache

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from typing import Any
 
 
 def create_dummy_weight_matrix(rows: int, cols: int, seed: float = 0.42) -> list[list[float]]:
@@ -73,3 +74,30 @@ def compute_snr(original: Sequence[float], reconstructed: Sequence[float]) -> fl
     if signal_power == 0.0:
         return 0.0
     return 10.0 * math.log10(signal_power / noise_power)
+
+
+def assert_tensors_close(actual: Any, expected: Any, backend: str = "pytorch", rtol: float = 1e-3, atol: float = 1e-4) -> None:
+    """Compare tensor values flexibly across frameworks.
+
+    Args:
+        actual: The actual tensor.
+        expected: The expected tensor.
+        backend: Backend framework name.
+        rtol: Relative tolerance.
+        atol: Absolute tolerance.
+
+    Raises:
+        AssertionError: If shapes differ or elements diverge.
+    """
+    if backend == "pytorch":
+        assert list(actual.shape) == list(expected.shape)
+        assert_sequences_close(actual.flatten().tolist(), expected.flatten().tolist(), rtol=rtol, atol=atol)
+    elif backend in ["jax", "mlx"]:
+        import numpy as np
+
+        actual_np = np.array(actual)
+        expected_np = np.array(expected)
+        assert list(actual_np.shape) == list(expected_np.shape)
+        assert_sequences_close(actual_np.flatten().tolist(), expected_np.flatten().tolist(), rtol=rtol, atol=atol)
+    else:
+        raise ValueError(f"Unknown backend for tensor comparison: {backend}")

@@ -111,7 +111,6 @@ def test_run_benchmark_wrapper_paths() -> None:
         hardware="cpu",
         batch_size=2,
         missing_deps=False,
-        missing_status="missing",
         benchmark_fn=lambda: (120.0, 15.0, 256.0),
         latency_samples=[14.0, 15.0, 16.0],
     )
@@ -133,7 +132,6 @@ def test_run_benchmark_wrapper_paths() -> None:
         hardware="cuda",
         batch_size=4,
         missing_deps=False,
-        missing_status="missing",
         benchmark_fn=_fail,
     )
     assert "failed: Benchmark execution crashed" in res_fail["status"]
@@ -146,11 +144,10 @@ def test_run_benchmark_wrapper_paths() -> None:
         hardware="tpu",
         batch_size=8,
         missing_deps=True,
-        missing_status="mocked_missing_deps",
         benchmark_fn=lambda: (0.0, 0.0, 0.0),
         raise_if_missing=False,
     )
-    assert res_miss["status"] == "mocked_missing_deps"
+    assert res_miss["status"] == "backend_unavailable"
 
     # 4. Missing dependencies with raise
     with pytest.raises(DependencyMissingError, match="Dependencies for test_backend benchmarking on tpu are missing"):
@@ -160,7 +157,6 @@ def test_run_benchmark_wrapper_paths() -> None:
             hardware="tpu",
             batch_size=8,
             missing_deps=True,
-            missing_status="mocked_missing_deps",
             benchmark_fn=lambda: (0.0, 0.0, 0.0),
             raise_if_missing=True,
         )

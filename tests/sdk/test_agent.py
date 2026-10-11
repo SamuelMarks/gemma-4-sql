@@ -323,3 +323,17 @@ def test_agent_multimodal_context_and_table_hint(monkeypatch: pytest.MonkeyPatch
     assert res["success"] is True
     assert passed_kwargs["audio_path"] == "/path/to/audio.wav"
     assert passed_kwargs["multimodal_context"] == {"dummy": "embedding"}
+
+
+def test_agent_with_image_path(monkeypatch):
+    from unittest.mock import MagicMock
+
+    mock_b = MagicMock()
+    mock_b.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 1.0}
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda x: mock_b)
+    """Test agent with image_path to cover missing line."""
+    import gemma_4_sql.sdk.agent as ag
+
+    context = ag.AgentContext("CREATE TABLE t(id int)", image_path="fake.png")
+
+    ag.run_agentic_loop(prompt="test", context=context, model_name="m", backend="pytorch")

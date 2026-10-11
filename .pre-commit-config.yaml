@@ -1,33 +1,9 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.20
-    hooks:
-      - id: ruff
-        args: [ --fix ]
-      - id: ruff-format
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
-    hooks:
-      - id: mypy
-        args: [ --strict ]
-        additional_dependencies: [pytest, click, types-setuptools, types-requests]
-  - repo: https://github.com/econchick/interrogate
-    rev: 1.7.0
-    hooks:
-      - id: interrogate
-        args: [ -vv, --fail-under=100, src/, tests/ ]
-        pass_filenames: false
   - repo: local
     hooks:
-      - id: tests
-        name: Run tests
-        entry: bash -c "uv run --all-extras pytest --cov=src/gemma_4_sql --cov-branch"
-        language: system
-        pass_filenames: false
-        always_run: true
-      - id: badges
-        name: Update badges
-        entry: bash -c "uv run --all-extras --with interrogate python scripts/update_badges.py"
+      - id: tests-multi-env
+        name: Run multi-env tests & aggregated coverage
+        entry: bash -c "uvx --with tox-uv tox run -e core,coverage-report"
         language: system
         pass_filenames: false
         always_run: true

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from tests.conftest import requires_mlx
+
+pytestmark = requires_mlx
+
 import pytest
 
 import gemma_4_sql.backends.mlx.serve as mlx_serve

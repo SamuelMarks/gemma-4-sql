@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 from gemma_4_sql.backends.jax import inference
 from gemma_4_sql.backends.jax.inference import generate_sql
 

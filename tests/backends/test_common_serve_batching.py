@@ -109,18 +109,20 @@ async def test_multimodal_request():
 
 def test_serve_model_wrapper():
     """Docstring for test_serve_model_wrapper."""
-    res = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=None, missing_status=None, app_factory=lambda: create_common_app("pytorch", "test"), run_server=False, port=8000)
+    res = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=None, app_factory=lambda: create_common_app("pytorch", "test"), run_server=False, port=8000)
     assert res["status"] == "running_pytorch_serve"
 
     def fail_factory():
         """Docstring for fail_factory."""
         raise RuntimeError("failed factory")
 
-    res2 = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=None, missing_status=None, app_factory=fail_factory, run_server=False, port=8000)
+    res2 = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=None, app_factory=fail_factory, run_server=False, port=8000)
     assert "failed:" in res2["status"]
 
-    res3 = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=RuntimeError("deps"), missing_status="missing_pytorch", app_factory=fail_factory, run_server=False, port=8000)
-    assert res3["status"] == "missing_pytorch"
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    with pytest.raises(DependencyMissingError, match="Dependencies missing for backend: pytorch"):
+        serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=RuntimeError("deps"), app_factory=fail_factory, run_server=False, port=8000)
 
 
 def test_json_response_fallback():

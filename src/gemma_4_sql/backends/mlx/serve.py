@@ -160,7 +160,6 @@ def serve_model(
         port=port,
         max_batch_size=max_batch_size,
         missing_deps=mx is None,
-        missing_status="mocked_missing_mlx",
         app_factory=lambda: _app_factory(model_name),
     )
 

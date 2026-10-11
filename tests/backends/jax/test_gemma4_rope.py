@@ -3,6 +3,10 @@
 import jax.numpy as jnp
 import pytest
 
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
+
 from gemma_4_sql.backends.jax.gemma4.rope import RoPE, apply_rope, default_rope_params, segment_ids_to_positions
 
 
