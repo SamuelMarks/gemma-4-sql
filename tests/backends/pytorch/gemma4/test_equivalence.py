@@ -14,14 +14,11 @@ from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_py
 
 jax = pytest.importorskip("jax")
 
-try:
-    from flax import nnx
+from flax import nnx
 
-    from gemma_4_sql.backends.jax.gemma4 import Gemma4Config as JaxGemma4Config
-    from gemma_4_sql.backends.jax.gemma4.layers import Gemma4RMSNorm as JaxRMSNorm
-    from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM as JaxGemma4ForCausalLM
-except ImportError:
-    pytest.skip("Flax/JAX Gemma4 modeling not available", allow_module_level=True)
+from gemma_4_sql.backends.jax.gemma4 import Gemma4Config as JaxGemma4Config
+from gemma_4_sql.backends.jax.gemma4.layers import Gemma4RMSNorm as JaxRMSNorm
+from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM as JaxGemma4ForCausalLM
 
 
 def test_logit_equivalence() -> None:

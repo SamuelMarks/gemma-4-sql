@@ -3,10 +3,6 @@
 import sys
 from unittest.mock import MagicMock, patch
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError

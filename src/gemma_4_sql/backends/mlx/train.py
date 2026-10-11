@@ -86,7 +86,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
 
         raise DependencyMissingError("MLX dependencies are missing.")
 
-    loaded: Any = load.__call__(model_name)
+    loaded: Any = load(model_name)
     model: ModelType = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
 
     def loss_fn(model_t: Any, inputs: TensorType, targets: TensorType) -> Any:

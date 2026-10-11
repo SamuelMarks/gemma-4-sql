@@ -1,9 +1,9 @@
 """Tests for duckdb support in ETL."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from pathlib import Path
 
 from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
 from gemma_4_sql.type_hints import ETLConfig

@@ -22,7 +22,6 @@ def test_mlx_quantize_imports():
         importlib.reload(quantize_module)
         assert quantize_module.mlx is None
         assert quantize_module.np is None
-    importlib.reload(quantize_module)
 
 
 def test_calibrate_awq_scales():
@@ -40,13 +39,13 @@ def test_calibrate_awq_scales():
 
     quantize_module.np = np
 
-    w = np.random.randn(10, 5)
-    acts = np.random.randn(100, 5)
+    w = np.random.default_rng().standard_normal(size=(10, 5))
+    acts = np.random.default_rng().standard_normal(size=(100, 5))
 
     scales = quantize_module.calibrate_awq_scales(w, acts)
     assert scales.shape == (5,)
 
-    acts_1d = np.random.randn(5)
+    acts_1d = np.random.default_rng().standard_normal(size=5)
     scales2 = quantize_module.calibrate_awq_scales(w, acts_1d)
     assert scales2.shape == (5,)
 
@@ -63,13 +62,13 @@ def test_calibrate_gptq_weights():
 
     quantize_module.np = np
 
-    w = np.random.randn(10, 5)
-    acts = np.random.randn(100, 5)
+    w = np.random.default_rng().standard_normal(size=(10, 5))
+    acts = np.random.default_rng().standard_normal(size=(100, 5))
 
     w_q = quantize_module.calibrate_gptq_weights(w, acts)
     assert w_q.shape == (10, 5)
 
-    acts_1d = np.random.randn(5)
+    acts_1d = np.random.default_rng().standard_normal(size=5)
     w_q2 = quantize_module.calibrate_gptq_weights(w, acts_1d)
     assert w_q2.shape == (10, 5)
 

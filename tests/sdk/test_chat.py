@@ -23,14 +23,13 @@ def test_chat_turn_routing(monkeypatch: pytest.MonkeyPatch) -> None:
         backend_impl = get_backend(backend)
         monkeypatch.setattr(backend_impl, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
         res = chat_turn("foo", [{"role": "user", "content": "hi"}], "prompt", backend=backend)
-        if res["backend"] != backend:
-            raise AssertionError
-        if res["model"] != "foo":
-            raise AssertionError
-        if res["response"] != "SELECT 1":
-            raise AssertionError
-        if len(res["history"]) != int("3"):
-            raise AssertionError
+        assert res["backend"] == backend
+
+        assert res["model"] == "foo"
+
+        assert res["response"] == "SELECT 1"
+
+        assert len(res["history"]) == 3
 
 
 def test_chat_turn_routing_error(monkeypatch: pytest.MonkeyPatch) -> None:

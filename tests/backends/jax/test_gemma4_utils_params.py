@@ -216,28 +216,10 @@ def test_update_state_exceptions(monkeypatch):
     monkeypatch.setattr("gemma_4_sql.backends.jax.gemma4.utils_params.Path.is_dir", lambda self: True)
     monkeypatch.setattr("gemma_4_sql.backends.jax.gemma4.utils_params.safe_open", MagicMock())
 
-    class MockNNX:
-        """Docstring for MockNNX."""
+    def mock_update(*args, **kwargs):
+        raise ValueError("simulated error updating state")
 
-        def update(self, *args):
-            """Docstring for update."""
-            raise ValueError("simulated error updating state")
-
-    mock_nnx = MockNNX()
-
-    import builtins
-
-    original_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name == "flax":
-            mock_flax = MagicMock()
-            mock_flax.nnx = mock_nnx
-            return mock_flax
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
+    monkeypatch.setattr("flax.nnx.update", mock_update)
     up.create_model_from_safe_tensors("dir", MagicMock(), MagicMock(), {})
 
 
@@ -254,22 +236,18 @@ def test_apply_transform_no_permute():
 
 def test_assign_weights_shape_mismatch():
     """Docstring for test_assign_weights_shape_mismatch."""
+    import pytest
+
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
 
     tensor = MagicMock()
     tensor.shape = (1, 2)
     state = {"a": MagicMock(shape=(2, 1))}
-    try:
+    with pytest.raises(ValueError, match="Shape mismatch for a"):
         up.assign_weights(["a"], tensor, state, "a", None)
-        assert False
-    except ValueError as e:
-        assert "Shape mismatch for a" in str(e)
 
-    try:
+    with pytest.raises(ValueError, match="Shape mismatch for a"):
         up.assign_weights_from_eval_shape(["a"], tensor, state, "a", None)
-        assert False
-    except ValueError as e:
-        assert "Shape mismatch for a" in str(e)
 
 
 def test_assign_weights_int_key():

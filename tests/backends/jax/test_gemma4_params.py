@@ -42,14 +42,6 @@ def test_stack_expert_tensors_none_key():
     expert_tensors = {0: {"test_proj": {0: jnp.zeros((1,)), 1: jnp.zeros((1,))}}}
 
     # mapping that returns (None, None) for jax_key
-    class MockMapping:
-        """Docstring for MockMapping."""
-
-        @staticmethod
-        def __getitem__(key):
-            """Docstring for __getitem__."""
-            raise KeyError()  # or whatever map_to_jax_key does.
-
     mapping = {}
 
     jax_state = {}
@@ -155,8 +147,7 @@ def test_create_gemma4_from_pretrained_etils_success(tmp_path, monkeypatch):
     cfg = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16)
 
     # Remove etils from sys.modules to force import
-    if "etils" in sys.modules:
-        monkeypatch.delitem(sys.modules, "etils")
+    monkeypatch.delitem(sys.modules, "etils", raising=False)
 
     with patch("flax.nnx.split") as mock_split:
         mock_split.return_value = (None, {})

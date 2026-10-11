@@ -2,10 +2,6 @@
 
 from gemma_4_sql.backends.maxtext import __all__, get_trainer
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 
 def test_get_trainer():
     """Docstring for test_get_trainer."""

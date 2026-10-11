@@ -11,11 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-try:
-    import torch
-except ImportError:
-    pytest.skip("No torch", allow_module_level=True)
+import torch
 
 from gemma_4_sql.backends.pytorch.inference import generate_sql
 from gemma_4_sql.tokenization import SQLTokenizer
@@ -30,12 +26,9 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path) -> None:
     importlib.reload(etl)
     _get_pytorch_classes = etl._get_pytorch_classes
 
-    try:
-        import torch
-    except ImportError:
-        import pytest
+    import torch
 
-        pytest.skip("No torch")
+    etl.torch = torch
     """Test PyTorch dataset extraction of image and audio items."""
     import torch
 
@@ -86,12 +79,9 @@ def test_pytorch_collate_multimodal() -> None:
     importlib.reload(etl)
     _collate_fn = etl._collate_fn
 
-    try:
-        import torch
-    except ImportError:
-        import pytest
+    import torch
 
-        pytest.skip("No torch")
+    etl.torch = torch
     """Test _collate_fn stacking pixel and audio tensors when present in batch."""
     import torch
 
@@ -128,14 +118,9 @@ def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest
     importlib.reload(inf)
     generate_sql = inf.generate_sql
 
-    try:
-        import torch
-    except ImportError:
-        import pytest
-
-        pytest.skip("No torch")
-    """Test PyTorch native inference accepting multimodal image and audio tensors."""
     import torch
+
+    """Test PyTorch native inference accepting multimodal image and audio tensors."""
 
     dummy_img = tmp_path / "schema.png"
     dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
@@ -182,14 +167,9 @@ def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest
 
 def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Docstring for test_pytorch_inference_multimodal_hf."""
-    try:
-        import torch
-    except ImportError:
-        import pytest
-
-        pytest.skip("No torch")
-    """Test PyTorch Hugging Face inference forwarding multimodal tensors to generate."""
     import torch
+
+    """Test PyTorch Hugging Face inference forwarding multimodal tensors to generate."""
 
     dummy_img = tmp_path / "schema.png"
     dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)

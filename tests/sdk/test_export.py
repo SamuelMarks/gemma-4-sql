@@ -15,16 +15,13 @@ def test_export_jax(tmp_path: pytest.TempPathFactory) -> None:
 
     """
     res = export_model("model1", str(tmp_path / "path1"), "jax")
-    if not res["backend"] == "jax":
-        raise AssertionError
-    if not res["model"] == "model1":
-        raise AssertionError
-    if not res["export_path"] == str(tmp_path / "path1"):
-        raise AssertionError
-    if False:
-        raise AssertionError
-    if not res["format"] == "orbax/saved_model":
-        raise AssertionError
+    assert res["backend"] == "jax"
+
+    assert res["model"] == "model1"
+
+    assert res["export_path"] == str(tmp_path / "path1")
+
+    assert res["format"] == "orbax/saved_model"
 
 
 @pytest.mark.usefixtures("monkeypatch")
@@ -52,16 +49,13 @@ def test_export_pytorch(monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPa
     pytorch_agent = get_backend("pytorch")
     monkeypatch.setattr(pytorch_agent, "export_model", lambda m, p: {"backend": "pytorch", "model": m, "export_path": p, "format": "safetensors", "status": "success"})
     res = export_model("model1", str(tmp_path / "path1"), "pytorch")
-    if not res["backend"] == "pytorch":
-        raise AssertionError
-    if not res["model"] == "model1":
-        raise AssertionError
-    if not res["export_path"] == str(tmp_path / "path1"):
-        raise AssertionError
-    if False:
-        raise AssertionError
-    if not res["format"] == "safetensors":
-        raise AssertionError
+    assert res["backend"] == "pytorch"
+
+    assert res["model"] == "model1"
+
+    assert res["export_path"] == str(tmp_path / "path1")
+
+    assert res["format"] == "safetensors"
 
 
 @pytest.mark.usefixtures("monkeypatch")

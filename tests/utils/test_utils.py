@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from typing import Any
+
+import pytest
 
 from tests.utils import (
     assert_sequences_close,
@@ -58,7 +59,7 @@ def test_tensor_helpers() -> None:
 class FakeDBCursor:
     """Fake DB-API 2.0 cursor for testing."""
 
-    def __init__(self, connection: "FakeDBConnection") -> None:
+    def __init__(self, connection: FakeDBConnection) -> None:
         """Initialize fake cursor.
 
         Args:
@@ -71,7 +72,7 @@ class FakeDBCursor:
         self._results: list[Any] = []
         self._closed = False
 
-    def execute(self, operation: str, parameters: Any = None) -> "FakeDBCursor":
+    def execute(self, operation: str, parameters: Any = None) -> FakeDBCursor:
         """Fake execute method.
 
         Args:
@@ -85,9 +86,9 @@ class FakeDBCursor:
             Exception: If the query matches the failure trigger.
         """
         if self._closed:
-            raise Exception("Cursor closed")
+            raise Exception("Cursor closed")  # noqa: TRY002
         if operation == self.connection._fail_query:
-            raise Exception("Simulated execution failure")
+            raise Exception("Simulated execution failure")  # noqa: TRY002
         self._results = self.connection._results_queue.pop(0) if self.connection._results_queue else []
         self.rowcount = len(self._results)
         if self._results:
@@ -101,7 +102,7 @@ class FakeDBCursor:
             List of result rows.
         """
         if self._closed:
-            raise Exception("Cursor closed")
+            raise Exception("Cursor closed")  # noqa: TRY002
         return self._results
 
     def close(self) -> None:
@@ -127,7 +128,7 @@ class FakeDBConnection:
             A FakeDBCursor instance.
         """
         if self._closed:
-            raise Exception("Connection closed")
+            raise Exception("Connection closed")  # noqa: TRY002
         return FakeDBCursor(self)
 
     def commit(self) -> None:
@@ -226,3 +227,24 @@ def test_assert_tensors_close() -> None:
 
     with pytest.raises(ValueError):
         assert_tensors_close(t1, t2, backend="unknown")
+
+
+def test_assert_tensors_close_jax():
+    """Test assert_tensors_close for jax/mlx backends."""
+
+    from tests.utils.tensor_helpers import assert_tensors_close
+
+    class MockTensor:
+        def __init__(self, data):
+            self.data = data
+
+        def __array__(self):
+            import numpy as np
+
+            return np.array(self.data)
+
+    t1 = MockTensor([[1.0, 2.0], [3.0, 4.0]])
+    t2 = MockTensor([[1.0, 2.0], [3.0, 4.0]])
+
+    assert_tensors_close(t1, t2, backend="jax")
+    assert_tensors_close(t1, t2, backend="mlx")

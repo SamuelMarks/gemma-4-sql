@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 from typing import Any
 
 import pytest
@@ -9,15 +10,8 @@ import pytest
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.benchmark import benchmark
 
-try:
-    import keras
-except ImportError:
-    keras = None
-
-try:
-    import maxtext
-except ImportError:
-    maxtext = None
+has_keras = importlib.util.find_spec("keras") is not None
+has_maxtext = importlib.util.find_spec("maxtext") is not None
 
 
 def test_benchmark_jax() -> None:
@@ -51,10 +45,9 @@ def test_benchmark_keras(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_benchmark_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test benchmark invocation for MaxText backend with fallback when missing."""
-    if maxtext is None:
-        import gemma_4_sql.backends.maxtext.benchmark as mbm
+    import gemma_4_sql.backends.maxtext.benchmark as mbm
 
-        monkeypatch.setattr(mbm, "benchmark_model", lambda *args, **kwargs: {"backend": "maxtext", "status": "completed"})
+    monkeypatch.setattr(mbm, "benchmark_model", lambda *args, **kwargs: {"backend": "maxtext", "status": "completed"})
     res = benchmark("gemma-4", "gpu", 1, "maxtext")
     assert res["backend"] == "maxtext"
 
@@ -85,16 +78,16 @@ def test_benchmark_unknown() -> None:
 
 def test_benchmark_parameter_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test benchmark invocation with varied batch sizes and model names."""
-    import gemma_4_sql.backends.jax.benchmark as jbm
+    import gemma_4_sql.backends.jax as jax_backend
 
     recorded_kwargs: dict[str, Any] = {}
 
     def mock_bench(*args: Any, **kwargs: Any) -> dict[str, Any]:
         """Docstring for mock_bench."""
         recorded_kwargs.update(kwargs)
-        return {"backend": "jax", "batch_size": kwargs.get("batch_size", 1)}
+        return {"backend": "jax", "batch_size": args[2] if len(args) > 2 else kwargs.get("batch_size", 1)}
 
-    monkeypatch.setattr(jbm, "benchmark_model", mock_bench)
+    monkeypatch.setattr(jax_backend, "benchmark_model", mock_bench)
     res = benchmark("custom_gemma", "tpu", 8, "jax")
     assert res["backend"] == "jax"
     assert res["batch_size"] == 8

@@ -1,7 +1,6 @@
 """Module docstring."""
 
 from gemma_4_sql.backends.pytorch import __all__, get_trainer
-
 from tests.conftest import requires_torch
 
 pytestmark = requires_torch

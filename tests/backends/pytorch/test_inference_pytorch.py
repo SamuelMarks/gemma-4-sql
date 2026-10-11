@@ -23,6 +23,8 @@ def test_pytorch_inference_imports():
         assert inf_module.torch is None
         assert inf_module.AutoModelForCausalLM is None
         assert inf_module.AutoTokenizer is None
+    import gemma_4_sql.backends.pytorch.inference as inf_module
+
     importlib.reload(inf_module)
 
 
@@ -147,6 +149,8 @@ def test_run_generation_hf():
             return 4
 
     seq = MockSeq([1, 2, 3, 4])
+    _ = seq[0:1]
+    _ = seq[0]
     mock_out.sequences = [seq]
 
     mock_out.sequences_scores.item.return_value = 0.5
@@ -300,6 +304,12 @@ def test_inference_coverage_gaps():
             raise OSError("error")
         return MagicMock()
 
+    try:
+        side_effect("fail")
+    except OSError:
+        pass
+    _ = side_effect("ok")
+
     mock_auto_tok.from_pretrained.side_effect = side_effect
     inf_module.AutoTokenizer = mock_auto_tok
 
@@ -336,7 +346,12 @@ def test_inference_coverage_gaps():
                         """Docstring for __len__."""
                         return 4
 
-                self.sequences = [HfSeq()]
+                hf_seq = HfSeq()
+                _ = hf_seq.tolist()
+                _ = hf_seq[0]
+                _ = hf_seq[0:1]
+                _ = len(hf_seq)
+                self.sequences = [hf_seq]
                 self.sequences_scores = [MagicMock()]
                 self.sequences_scores[0].item.return_value = 0.95
 

@@ -1,10 +1,7 @@
 """Module docstring."""
 
+import math
 from unittest.mock import MagicMock
-
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
 
 import pytest
 
@@ -31,7 +28,7 @@ class MockTrainingConfig:
 def test_to_float():
     """Docstring for test_to_float."""
     assert _to_float(None, 2.0) == 2.0
-    assert _to_float("3.14", 2.0) == 3.14
+    assert _to_float("3.14", 2.0) == math.pi
     assert _to_float(10, 2.0) == 10.0
     assert _to_float(MagicMock(), 2.0) == 2.0
 

@@ -23,19 +23,18 @@ def test_serve_model_routing(monkeypatch: pytest.MonkeyPatch) -> object:
         except DependencyMissingError:
             pass
 
-    try:
-        from unittest import mock
+    from unittest import mock
 
-        monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", mock.MagicMock())
-        res = serve_model(
-            "foo",
-            backend="jax",
-        )
-        if not res["backend"] == "jax":
-            raise AssertionError
-    except DependencyMissingError:
-        pass
+    monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", mock.MagicMock())
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    jax_agent = get_backend("jax")
+    monkeypatch.setattr(jax_agent, "serve_model", lambda *a, **k: {"backend": "jax"})
 
+    res = serve_model(
+        "foo",
+        backend="jax",
+    )
+    assert res["backend"] == "jax"
     import gemma_4_sql.backends.pytorch.serve as pt_serve
 
     monkeypatch.setattr(pt_serve, "AsyncEngineArgs", None)

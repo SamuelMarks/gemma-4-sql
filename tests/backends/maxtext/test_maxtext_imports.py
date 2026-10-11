@@ -4,14 +4,11 @@ import importlib
 import sys
 from unittest.mock import MagicMock
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 
 def test_maxtext_imports_success():
     """Docstring for test_maxtext_imports_success."""
-    sys.modules["jax"] = MagicMock()
+    sys.modules["datasets"] = MagicMock()
+    sys.modules["jax"] = MagicMock(__spec__=MagicMock())
     sys.modules["jax.numpy"] = MagicMock()
     sys.modules["maxtext"] = MagicMock()
     sys.modules["maxtext.models"] = MagicMock()
@@ -53,10 +50,8 @@ def test_maxtext_imports_success():
 
 def test_maxtext_imports_missing_force():
     """Docstring for test_maxtext_imports_missing_force."""
-    if "maxtext" in sys.modules:
-        del sys.modules["maxtext"]
-    if "jax" in sys.modules:
-        del sys.modules["jax"]
+    sys.modules.pop("maxtext", None)
+    sys.modules.pop("jax", None)
     import gemma_4_sql.backends.maxtext as m_init
 
     importlib.reload(m_init)

@@ -7,6 +7,8 @@ from tests.conftest import requires_torch
 
 pytestmark = requires_torch
 
+import math
+
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
@@ -88,7 +90,7 @@ def test_validate_gguf_file_valid(tmp_path):
         f.write(struct.pack("<Q", 2))
         f.write(b"k4")
         f.write(struct.pack("<I", 6))
-        f.write(struct.pack("<f", 3.14))
+        f.write(struct.pack("<f", math.pi))
 
         # KV 5: Int64
         f.write(struct.pack("<Q", 2))

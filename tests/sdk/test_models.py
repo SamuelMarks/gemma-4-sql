@@ -6,21 +6,6 @@ from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.models import pretrain_model, train_from_scratch
 from gemma_4_sql.type_hints import TrainingConfig
 
-try:
-    import keras
-except ImportError:
-    keras = None
-
-try:
-    import mlx.core as _mx_core
-    import mlx.nn as _mx_nn
-    import mlx.optimizers as _mx_optim
-    from mlx_lm import load as _mx_load
-
-    mlx_available = _mx_core is not None and _mx_nn is not None and _mx_optim is not None and _mx_load is not None
-except (ImportError, AttributeError):
-    mlx_available = False
-
 
 def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test pretraining a model."""
@@ -28,12 +13,9 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     jax_agent = get_backend("jax")
     monkeypatch.setattr(jax_agent, "train_model", lambda cfg, **k: {"backend": cfg.backend, "action": cfg.action, "model": cfg.model_name, "dataset": cfg.dataset, "epochs": cfg.epochs})
     res = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="jax"))
-    if not res["backend"] == "jax":
-        raise AssertionError
-    if not res["action"] == "pretrain":
-        raise AssertionError
-    if not res["model"] == "my-model":
-        raise AssertionError
+    assert res["backend"] == "jax"
+    assert res["action"] == "pretrain"
+    assert res["model"] == "my-model"
 
     # Instead of just pt_train.torch = None, mock train_model to raise the error
     # since other tests might have patched the module
@@ -58,10 +40,8 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(kb, "train_model", mock_train)
 
     res_k = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
-    if not res_k["backend"] == "keras":
-        raise AssertionError
-    if not res_k["action"] == "pretrain":
-        raise AssertionError
+    assert res_k["backend"] == "keras"
+    assert res_k["action"] == "pretrain"
 
     import gemma_4_sql.backends.maxtext.train as mx_train
 
@@ -69,11 +49,21 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="maxtext"))
 
-    try:
-        res_mlx = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="mlx"))
-        assert res_mlx["backend"] == "mlx"
-    except DependencyMissingError:
-        pass
+    # cover mlx pretraining by mocking registry and mlx modules
+    import sys
+    from unittest.mock import Mock
+
+    monkeypatch.setitem(sys.modules, "mlx.core", Mock())
+    monkeypatch.setitem(sys.modules, "mlx.nn", Mock())
+    monkeypatch.setitem(sys.modules, "mlx.optimizers", Mock())
+    monkeypatch.setitem(sys.modules, "mlx_lm", Mock())
+
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    mlx_agent = get_backend("mlx")
+    monkeypatch.setattr(mlx_agent, "train_model", lambda cfg, **k: {"backend": cfg.backend, "action": cfg.action, "model": cfg.model_name, "dataset": cfg.dataset, "epochs": cfg.epochs})
+
+    res_mlx = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="mlx"))
+    assert res_mlx["backend"] == "mlx"
 
 
 def test_pretrain_model_error() -> None:
@@ -84,28 +74,9 @@ def test_pretrain_model_error() -> None:
 
 def test_chat_no_sql(monkeypatch):
     """Test chat no sql functionality."""
-    import builtins
-
     from gemma_4_sql.sdk import chat
 
-    orig_import = builtins.__import__
-
-    def mock_import(name, *a, **k):
-        """Execute mock import helper."""
-        if name == "gemma_4_sql.sdk.registry":
-
-            class MockReg:
-                """Test class for MockReg."""
-
-                @staticmethod
-                def get_backend(b):
-                    """Execute get backend helper."""
-                    return type("Backend", (), {"generate_sql": lambda *a, **k: {}})()
-
-            return MockReg
-        return orig_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda b: type("Backend", (), {"generate_sql": lambda *a, **k: {}})())
 
     with pytest.raises(RuntimeError) as e:
         chat.chat_turn("m", [], "p")
@@ -148,27 +119,6 @@ def test_evaluation_max_batches(monkeypatch):
         def generate_sql(self, *a, **k):
             """Execute generate sql helper."""
             return {"sql": "A", "confidence_score": 0.5}
-
-    import builtins
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *a, **k):
-        """Execute mock import helper."""
-        if name == "gemma_4_sql.sdk.registry":
-
-            class MockReg:
-                """Test class for MockReg."""
-
-                @staticmethod
-                def get_backend(b):
-                    """Execute get backend helper."""
-                    return MockBackend()
-
-            return MockReg
-        return orig_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
 
     # Also need to mock _process_batch_inputs if it is used
     monkeypatch.setattr(ev, "_process_batch_inputs", lambda b: ([1], [2]))
@@ -222,8 +172,7 @@ def test_train_from_scratch_pytorch(monkeypatch: object) -> object:
     pt_train = get_backend("pytorch")
     monkeypatch.setattr(pt_train, "train_model", lambda _config, **_kw: {"status": "mock"})
     res = train_from_scratch(TrainingConfig(action="pretrain", model_name="mock", dataset="mock", backend="pytorch"))
-    if not res == {"status": "mock"}:
-        raise AssertionError
+    assert res == {"status": "mock"}
 
 
 def test_train_from_scratch_unknown() -> object:

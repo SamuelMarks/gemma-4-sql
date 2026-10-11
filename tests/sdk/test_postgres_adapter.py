@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from gemma_4_sql.sdk.adapters.postgres_adapter import PostgresAdapter
-from tests.utils.test_utils import FakeDBConnection, FakeDBCursor
+import pytest
+
+from tests.utils.test_utils import FakeDBConnection
 
 
 @pytest.fixture
@@ -44,11 +44,6 @@ def fake_postgres_module():
 
                 return [MockRecord(row) for row in cur.fetchall()]
 
-            async def execute(self, query, *args):
-                cur = self._conn.cursor()
-                cur.execute(query, args)
-                return f"CMD {cur.rowcount}"
-
             async def close(self):
                 pass
 
@@ -69,7 +64,7 @@ async def test_postgres_adapter_execution(fake_postgres_module, monkeypatch) -> 
     monkeypatch.setattr(pa, "asyncpg", mock_asyncpg)
 
     adapter = pa.PostgresAdapter("host=localhost dbname=test", {})
-    
+
     # Test empty db_path
     empty_adapter = pa.PostgresAdapter("", {})
     empty_adapter.connect()
@@ -114,7 +109,7 @@ async def test_postgres_adapter_missing_deps(monkeypatch: pytest.MonkeyPatch) ->
     # Mock psycopg2 to pass init, but asyncpg is None
     monkeypatch.setattr(pa, "psycopg2", MagicMock())
     monkeypatch.setattr(pa, "asyncpg", None)
-    
+
     adapter = pa.PostgresAdapter("path", {})
     with pytest.raises(ImportError):
         await adapter.connect_async()
@@ -131,11 +126,11 @@ async def test_postgres_adapter_missing_deps(monkeypatch: pytest.MonkeyPatch) ->
         mock_p = MagicMock()
         mock_p.Error = 123
         monkeypatch.setattr(pa, "psycopg2", mock_p)
-        
+
         mock_a = MagicMock()
         mock_a.PostgresError = 123
         monkeypatch.setattr(pa, "asyncpg", mock_a)
-        
+
         assert Exception in dummy_adapter.error_classes
 
 

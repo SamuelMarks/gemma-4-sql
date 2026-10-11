@@ -18,14 +18,10 @@ def test_extract_schema_entities() -> None:
     """
     ddl = "\n\n    CREATE TABLE users (\n        id INT,\n        name VARCHAR,\n        PRIMARY KEY (id)\n    );\n    CREATE TABLE orders (\n        order_id INT,\n        user_id INT,\n        amount DECIMAL,\n        FOREIGN KEY (user_id) REFERENCES users(id)\n    );\n    "
     schema = extract_schema_entities(ddl)
-    if "users" not in schema:
-        raise AssertionError
-    if not schema["users"] == ["id", "name"]:
-        raise AssertionError
-    if "orders" not in schema:
-        raise AssertionError
-    if not schema["orders"] == ["order_id", "user_id", "amount"]:
-        raise AssertionError
+    assert "users" in schema
+    assert schema["users"] == ["id", "name"]
+    assert "orders" in schema
+    assert schema["orders"] == ["order_id", "user_id", "amount"]
 
 
 def test_extract_schema_entities_ignore_comments() -> None:
@@ -37,10 +33,8 @@ def test_extract_schema_entities_ignore_comments() -> None:
     """
     ddl = "\n\n    -- This is a comment\n    CREATE TABLE test (\n        col1 INT\n    );\n    "
     schema = extract_schema_entities(ddl)
-    if "test" not in schema:
-        raise AssertionError
-    if not schema["test"] == ["col1"]:
-        raise AssertionError
+    assert "test" in schema
+    assert schema["test"] == ["col1"]
 
 
 def test_retrieve_relevant_schema() -> None:
@@ -52,15 +46,11 @@ def test_retrieve_relevant_schema() -> None:
     """
     schema = {"users": ["id", "name"], "orders": ["order_id", "user_id", "amount"], "products": ["prod_id", "name", "price"]}
     context = retrieve_relevant_schema("Find all users names", schema)
-    if "Table: users | Columns: id, name" not in context:
-        raise AssertionError
-    if not "Table: orders" not in context:
-        raise AssertionError
-    if not "Table: products" not in context:
-        raise AssertionError
+    assert "Table: users | Columns: id, name" in context
+    assert "Table: orders" not in context
+    assert "Table: products" not in context
     context2 = retrieve_relevant_schema("What is the total amount for orders?", schema)
-    if "Table: orders | Columns: order_id, user_id, amount" not in context2:
-        raise AssertionError
+    assert "Table: orders | Columns: order_id, user_id, amount" in context2
 
 
 def test_retrieve_relevant_schema_fallback() -> None:
@@ -72,8 +62,7 @@ def test_retrieve_relevant_schema_fallback() -> None:
     """
     schema = {"users": ["id", "name"], "orders": ["order_id", "user_id", "amount"]}
     context = retrieve_relevant_schema("Show everything", schema, top_k_tables=1)
-    if "Table: users | Columns: id, name" not in context:
-        raise AssertionError
+    assert "Table: users | Columns: id, name" in context
 
 
 def test_retrieve_relevant_schema_empty() -> None:
@@ -84,8 +73,7 @@ def test_retrieve_relevant_schema_empty() -> None:
 
     """
     context = retrieve_relevant_schema("Show everything", {})
-    if context != "":
-        raise AssertionError
+    assert context == ""
 
 
 class MockSentenceTransformer:
@@ -123,9 +111,7 @@ class MockSimilarities:
             object: Description of return.
 
         """
-        if isinstance(idx, int):
-            return 1.0
-        return self
+        return 1.0
 
 
 def mock_cosine_similarity(_a: object, _b: object) -> list:
@@ -149,8 +135,7 @@ def test_retrieve_relevant_schema_semantic(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(rag, "cosine_similarity", mock_cosine_similarity)
     schema = {"users": ["id", "name"]}
     context = retrieve_relevant_schema("Show everything", schema, top_k_tables=1)
-    if "Table: users | Columns: id, name" not in context:
-        raise AssertionError
+    assert "Table: users | Columns: id, name" in context
 
 
 def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -176,8 +161,7 @@ def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(rag, "cosine_similarity", raise_err)
     schema = {"users": ["id", "name"]}
     context = retrieve_relevant_schema("users", schema, top_k_tables=1)
-    if "Table: users | Columns: id, name" not in context:
-        raise AssertionError
+    assert "Table: users | Columns: id, name" in context
 
 
 def test_build_rag_prompt_no_ddl() -> None:
@@ -187,8 +171,7 @@ def test_build_rag_prompt_no_ddl() -> None:
         AssertionError: Description.
 
     """
-    if not build_rag_prompt("Find users") == "Find users":
-        raise AssertionError
+    assert build_rag_prompt("Find users") == "Find users"
 
 
 def test_build_rag_prompt_with_ddl() -> None:
@@ -201,16 +184,11 @@ def test_build_rag_prompt_with_ddl() -> None:
     ddl = "CREATE TABLE users (id INT, name VARCHAR);"
     prompt = "Find all users"
     rag_prompt = build_rag_prompt(prompt, ddl)
-    if "-- Relevant Schema Context:" not in rag_prompt:
-        raise AssertionError
-    if "-- Table: users | Columns: id, name" not in rag_prompt:
-        raise AssertionError
-    if "-- Request:" not in rag_prompt:
-        raise AssertionError
-    if "-- Find all users" not in rag_prompt:
-        raise AssertionError
-    if "SELECT" not in rag_prompt:
-        raise AssertionError
+    assert "-- Relevant Schema Context:" in rag_prompt
+    assert "-- Table: users | Columns: id, name" in rag_prompt
+    assert "-- Request:" in rag_prompt
+    assert "-- Find all users" in rag_prompt
+    assert "SELECT" in rag_prompt
 
 
 def test_rag_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,8 +197,7 @@ def test_rag_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with monkeypatch.context() as m:
         m.setitem(sys.modules, "sentence_transformers", None)
-        if "gemma_4_sql.sdk.rag" in sys.modules:
-            del sys.modules["gemma_4_sql.sdk.rag"]
+        sys.modules.pop("gemma_4_sql.sdk.rag", None)
         rag = __import__("gemma_4_sql.sdk.rag", fromlist=[""])
         assert rag.SentenceTransformer is None
         assert rag.cosine_similarity is None
@@ -438,8 +415,7 @@ def test_rag_successful_imports():
             "sklearn.metrics.pairwise": mock_smp,
         },
     ):
-        if "gemma_4_sql.sdk.rag" in sys.modules:
-            del sys.modules["gemma_4_sql.sdk.rag"]
+        sys.modules.pop("gemma_4_sql.sdk.rag", None)
         import gemma_4_sql.sdk.rag as rag_module
 
         assert rag_module.SentenceTransformer is not None

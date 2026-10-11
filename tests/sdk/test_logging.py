@@ -1,14 +1,13 @@
 """Tests for Logging SDK module."""
 
+import importlib.util
+
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.logging import log_metrics
 
-try:
-    import tensorflow as tf
-except ImportError:
-    tf = None
+has_tf = importlib.util.find_spec("tensorflow") is not None
 
 
 def test_log_metrics_jax() -> None:
@@ -19,14 +18,13 @@ def test_log_metrics_jax() -> None:
 
     """
     res = log_metrics({"loss": 0.5}, 10, backend="jax")
-    if not res["backend"] == "jax":
-        raise AssertionError
-    if not res["action"] == "log_metrics":
-        raise AssertionError
-    if not res["step"] == int("10"):
-        raise AssertionError
-    if not res["metrics"] == {"loss": 0.5}:
-        raise AssertionError
+    assert res["backend"] == "jax"
+
+    assert res["action"] == "log_metrics"
+
+    assert res["step"] == 10
+
+    assert res["metrics"] == {"loss": 0.5}
 
 
 def test_log_metrics_pytorch() -> None:
@@ -37,13 +35,12 @@ def test_log_metrics_pytorch() -> None:
 
     """
     res = log_metrics({"loss": 0.5}, 10, backend="pytorch")
-    if not res["backend"] == "pytorch":
-        raise AssertionError
-    if not res["metrics"] == {"loss": 0.5}:
-        raise AssertionError
+    assert res["backend"] == "pytorch"
+
+    assert res["metrics"] == {"loss": 0.5}
 
 
-@pytest.mark.skipif(tf is None, reason="TensorFlow is not installed")
+@pytest.mark.skipif(not has_tf, reason="TensorFlow is not installed")
 def test_log_metrics_keras() -> None:
     """Test logging with keras.
 
@@ -52,10 +49,9 @@ def test_log_metrics_keras() -> None:
 
     """
     res = log_metrics({"loss": 0.5}, 10, backend="keras")
-    if not res["backend"] == "keras":
-        raise AssertionError
-    if not res["metrics"] == {"loss": 0.5}:
-        raise AssertionError
+    assert res["backend"] == "keras"
+
+    assert res["metrics"] == {"loss": 0.5}
 
 
 def test_log_metrics_maxtext() -> None:

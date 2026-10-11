@@ -2,10 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 import jax.numpy as jnp
 
 from gemma_4_sql.backends.maxtext import benchmark

@@ -193,3 +193,40 @@ def test_sdk_benchmark(monkeypatch: object) -> None:
     with patch("builtins.__import__", side_effect=mock_import):
         res = benchmark("m", "cpu", 1, "pytorch")
         assert res["status"] == "success"
+
+
+def test_universal_mock():
+    """Test UniversalMock methods."""
+    um = UniversalMock()
+    # 25-27
+    assert isinstance(um(), UniversalMock)
+    assert um(num_records=5) is um
+    # 31
+    assert um.numpy() == 0.0
+    # 35
+    assert um.numel() == 1000
+    # 39
+    assert um.to() is um
+    # 43
+    assert um.eval() is um
+
+
+@pytest.fixture(autouse=True)
+def _mock_import_for_fake(monkeypatch):
+    import importlib
+
+    orig_import = importlib.import_module
+
+    def mock_import(name, *args, **kwargs):
+        if name and "fake_backend" in name:
+            return object()
+        return orig_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", mock_import)
+
+
+@pytest.mark.parametrize("mock_benchmark_backend", ["fake_backend"], indirect=True)
+def test_mock_benchmark_backend_unsupported(mock_benchmark_backend: object) -> None:
+    """Cover the else branch in mock_benchmark_backend."""
+    res = mock_benchmark_backend
+    assert res[0] == "fake_backend"

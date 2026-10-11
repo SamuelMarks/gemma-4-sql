@@ -41,6 +41,7 @@ def test_load_keras_model_error(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
+    __import__("math")
     with pytest.raises(ValueError):
         bm._load_keras_model("name", "bfloat16")
 

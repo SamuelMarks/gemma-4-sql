@@ -1,15 +1,15 @@
 """Global pytest fixtures for gemma-4-sql tests."""
 
-import importlib
-import logging
 import os
 import sys
 import warnings
+from collections.abc import AsyncGenerator, Generator
 from contextlib import contextmanager
-from typing import Any, AsyncGenerator, Generator
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
@@ -88,7 +88,7 @@ def missing_dependency_context() -> Any:
 
     @contextmanager
     def _mock_missing(modules: list[str]) -> Generator[None, None, None]:
-        mocks = {module: None for module in modules}
+        mocks = dict.fromkeys(modules)
         with patch.dict(sys.modules, mocks):
             yield
 

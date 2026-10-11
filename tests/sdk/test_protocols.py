@@ -64,7 +64,16 @@ def test_mock_backend_protocol() -> None:
             return {"status": "benchmarked"}
 
     b = MockBackend()
-    assert b.train_model(TrainingConfig())["status"] == "trained"
+    assert b.train_model(TrainingConfig(action="pretrain", model_name="m", dataset="d", epochs=1))["status"] == "trained"
+    assert b.run_dpo(DPOConfig(model_name="m", dataset="d", beta=0.1))["status"] == "dpo"
+    assert b.build_dataloader(ETLConfig(dataset_name="d", split="train", batch_size=1, distributed=False))["loader"] is None
+    assert b.export_model("m", "p")["status"] == "exported"
+    assert b.log_metrics({}, 1)["status"] == "logged"
+    assert b.apply_lora("m", ["all"], 1, 1, 0.1)["status"] == "lora"
+    assert b.quantize_model("m", "method")["status"] == "quantized"
+    assert b.generate_sql("m", "p")["sql"] == "SELECT 1"
+    assert b.benchmark_model("m")["status"] == "benchmarked"
+    assert b.serve_model("m", 80)["status"] == "served"
 
 
 @pytest.mark.parametrize("backend_name", ["jax", "keras", "maxtext", "pytorch", "pytorch_hf", "pytorch_native", "mlx"])

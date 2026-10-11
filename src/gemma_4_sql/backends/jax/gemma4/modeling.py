@@ -264,11 +264,11 @@ class Gemma4ForCausalLM(nnx.Module):
         image_features = None
         audio_features = None
         if has_vision:
-            vision_outputs = self.vision_tower.__call__(inputs.pixel_values)
-            image_features = self.multi_modal_projector.__call__(vision_outputs)
+            vision_outputs = self.vision_tower(inputs.pixel_values)
+            image_features = self.multi_modal_projector(vision_outputs)
         if has_audio:
-            audio_outputs = self.audio_tower.__call__(inputs.input_features, inputs.input_features_mask)
-            audio_features = self.embed_audio.__call__(audio_outputs)
+            audio_outputs = self.audio_tower(inputs.input_features, inputs.input_features_mask)
+            audio_features = self.embed_audio(audio_outputs)
         inputs_embeds = self._merge_multimodal_features(inputs_embeds, image_features, audio_features, inputs)
         return (inputs_embeds, True)
 

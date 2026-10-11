@@ -2,10 +2,6 @@
 
 import gemma_4_sql.backends.maxtext as m_init
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 
 def test_init_get_trainer() -> None:
     """Execute function.
@@ -14,5 +10,4 @@ def test_init_get_trainer() -> None:
         AssertionError: Description.
 
     """
-    if m_init.get_trainer() != "maxtext_trainer":
-        raise AssertionError
+    assert m_init.get_trainer() == "maxtext_trainer"

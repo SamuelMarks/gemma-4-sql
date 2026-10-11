@@ -4,10 +4,6 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 import pytest
 
 from gemma_4_sql.backends.maxtext.config_generator import (

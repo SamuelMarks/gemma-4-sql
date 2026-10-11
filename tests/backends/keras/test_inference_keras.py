@@ -69,6 +69,7 @@ def test_configure_beam_sampler(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
+    __import__("math")
 
     # with compile
     inf.configure_beam_sampler(mock_model, 2)
@@ -87,6 +88,7 @@ def test_configure_beam_sampler(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import_err)
+    __import__("math")
 
     res = inf.configure_beam_sampler(MagicMock(), 2)
     assert res is None
@@ -122,6 +124,7 @@ def test_generate_sql(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
+    __import__("math")
 
     res = inf.generate_sql("m", "prompt ")
     assert res["status"] == "success"
@@ -155,6 +158,8 @@ def test_generate_sql_outputs(monkeypatch):
             return original_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", mock_import)
+
+    __import__("math")
 
     # dict output
     setup_mock({"text": "prompt SEL", "scores": 0.5})
@@ -204,6 +209,7 @@ def test_configure_beam_sampler_branches(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
+    __import__("math")
 
     inf.configure_beam_sampler(mock_model, 2)
 
@@ -216,6 +222,7 @@ def test_configure_beam_sampler_branches(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import_2)
+    __import__("math")
 
     inf.configure_beam_sampler(mock_model, 2)
 
@@ -247,6 +254,7 @@ def test_generate_sql_outputs_else_block(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
+    __import__("math")
 
     res = inf.generate_sql("m", "")
     assert res["status"] == "success"
@@ -273,7 +281,7 @@ def test_module_load_import_error():
     namespace = {"__name__": "mock_inference", "__builtins__": dict(builtins.__dict__)}
     namespace["__builtins__"]["__import__"] = mock_import
 
-    exec(code, namespace)  
+    exec(code, namespace)
 
     assert namespace.get("keras") is None
     assert namespace.get("tf") is None

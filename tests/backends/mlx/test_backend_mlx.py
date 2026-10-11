@@ -1,7 +1,6 @@
 """Module docstring."""
 
 from gemma_4_sql.backends.mlx import __all__, get_trainer
-
 from tests.conftest import requires_mlx
 
 pytestmark = requires_mlx

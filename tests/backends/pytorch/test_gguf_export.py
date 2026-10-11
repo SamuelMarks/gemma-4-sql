@@ -6,21 +6,13 @@ from tests.conftest import requires_torch
 
 pytestmark = requires_torch
 
+import math
 import struct
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
-from gemma_4_sql.backends.pytorch.quantize import _export_gguf, validate_gguf_file
-from gemma_4_sql.exceptions import ExportError
-
-try:
-    import torch
-except (ImportError, RuntimeError):
-    torch = None
-
-import math
+import torch
 
 from gemma_4_sql.backends.pytorch.gguf import (
     _flatten_values,
@@ -31,6 +23,8 @@ from gemma_4_sql.backends.pytorch.gguf import (
     quantize_tensor_q8_0,
     write_gguf_v3,
 )
+from gemma_4_sql.backends.pytorch.quantize import _export_gguf, validate_gguf_file
+from gemma_4_sql.exceptions import ExportError
 
 
 def test_flatten_values_torch():
@@ -327,17 +321,16 @@ def test_gguf_tensor_quantize_with_numpy_and_torch(monkeypatch: pytest.MonkeyPat
     np_arr = np.array([1.0, 2.0, -1.0, 0.5], dtype=np.float32)
     assert len(quantize_tensor_f16(np_arr)) == 8
 
-    if torch is not None:
-        monkeypatch.setattr(gguf_mod, "torch", torch)
-        t_f16 = torch.tensor([1.0, 2.0, -1.0, 0.5], dtype=torch.float32)
-        assert len(quantize_tensor_f16(t_f16)) == 8
+    monkeypatch.setattr(gguf_mod, "torch", torch)
+    t_f16 = torch.tensor([1.0, 2.0, -1.0, 0.5], dtype=torch.float32)
+    assert len(quantize_tensor_f16(t_f16)) == 8
 
-        t_64 = torch.tensor([float(i) for i in range(64)], dtype=torch.float32)
-        assert len(quantize_tensor_q8_0(t_64, block_size=32)) == 68
-        assert len(quantize_tensor_q4_0(t_64, block_size=32)) == 36
+    t_64 = torch.tensor([float(i) for i in range(64)], dtype=torch.float32)
+    assert len(quantize_tensor_q8_0(t_64, block_size=32)) == 68
+    assert len(quantize_tensor_q4_0(t_64, block_size=32)) == 36
 
-        t_256 = torch.tensor([float(i % 10) for i in range(256)], dtype=torch.float32)
-        assert len(quantize_tensor_q4_k_m(t_256)) == 144
+    t_256 = torch.tensor([float(i % 10) for i in range(256)], dtype=torch.float32)
+    assert len(quantize_tensor_q4_k_m(t_256)) == 144
 
     # Pure Python fallback when np is None
     monkeypatch.setattr(gguf_mod, "np", None)

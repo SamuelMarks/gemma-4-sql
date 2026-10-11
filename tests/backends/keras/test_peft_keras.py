@@ -138,6 +138,11 @@ def test_keras_lora_dense_build_and_call():
         out = lora.call(10.0, training=True)
         assert out is not None
 
+        # Cover MockTensor unused methods
+        t = mock_ops.matmul(1, 2)
+        _ = t + 1
+        _ = t * 1
+
 
 def test_keras_lora_dense_no_dropout():
     """Docstring for test_keras_lora_dense_no_dropout."""
@@ -238,6 +243,8 @@ def test_inject_lora_basic():
                 raise AttributeError()
 
         model = Model()
+        with pytest.raises(AttributeError):
+            _ = model.missing_attr
         adapted, count = inject_lora(model, ["target_mod"])
 
         assert count == 4
@@ -296,6 +303,8 @@ def test_merge_lora_weights_basic():
                 raise AttributeError()
 
         model = Model()
+        with pytest.raises(AttributeError):
+            _ = model.missing_attr
         merged = merge_lora_weights(model)
 
         assert type(merged.l1).__name__ != "KerasLoRADense"

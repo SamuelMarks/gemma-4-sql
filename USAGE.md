@@ -154,7 +154,7 @@ print(f"Exported to: {result['path']}")
 To save compute and memory footprints, you can inject LoRA adapters (PEFT) and quantize models.
 
 *   **JAX (`--backend jax`)**: Injects object-oriented `nnx.LoRALinear` adapters into Flax NNX modules; supports Activation-aware Weight Quantization (`--method awq`) and uniform INT8 (`--method int8`).
-*   **MaxText (`--backend maxtext`)**: Performs functional parameter PyTree surgery decomposing projection matrices; supports Google AQT (`aqt.jax.v2`) numerical INT8 and INT4 quantization (`--method aqt` or `--method int8`).
+*   **MaxText (`--backend maxtext`)**: Performs functional parameter PyTree surgery decomposing projection matrices; supports Google AQT (`aqt.jax.v2`) numerical INT8 and INT4 quantization (`--method int8`).
 *   **PyTorch (`--backend pytorch`)**: Interfaces with Hugging Face `peft` and AWQ / BitsAndBytes / GGUF.
 *   **MLX (`--backend mlx`)**: Utilizes MLX LoRA layers and 4-bit / 8-bit group quantization.
 
@@ -169,7 +169,7 @@ gemma-4-sql peft --model gemma-4 --target-modules q_proj,v_proj --lora-r 16 --ba
 gemma-4-sql quantize --model gemma-4 --method awq --backend jax
 
 # Quantize using Google AQT on MaxText
-gemma-4-sql quantize --model gemma-4 --method aqt --backend maxtext
+gemma-4-sql quantize --model gemma-4 --method int8 --backend maxtext
 
 # Quantize using INT8 on PyTorch
 gemma-4-sql quantize --model gemma-4 --method int8 --backend pytorch
@@ -187,7 +187,7 @@ peft_maxtext = apply_peft(model_name="gemma-4", target_modules=["q_proj", "v_pro
 
 # Quantize: AWQ for JAX, Google AQT for MaxText, int8 for PyTorch
 quantized_jax = quantize_model(model_name="gemma-4", method="awq", backend="jax")
-quantized_maxtext = quantize_model(model_name="gemma-4", method="aqt", backend="maxtext")
+quantized_maxtext = quantize_model(model_name="gemma-4", method="int8", backend="maxtext")
 quantized_pytorch = quantize_model(model_name="gemma-4", method="int8", backend="pytorch")
 ```
 

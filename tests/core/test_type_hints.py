@@ -1,13 +1,11 @@
 """Tests for type hints module."""
 
 import sys
-import pytest
 from unittest.mock import patch
 
 
 def test_type_hints_protocols():
     """Test TensorType and ModelType protocols."""
-    from gemma_4_sql.type_hints import TensorType, ModelType
 
     class DummyTensor:
         shape = (1, 2)
@@ -36,12 +34,20 @@ def test_type_hints_protocols():
 
     t = DummyTensor()
     assert hasattr(t, "shape")
+    t.tolist()
+    t.to("cpu")
+    t.item()
+    t.cpu()
+    t.numpy()
+    t.view()
+    t.reshape()
 
 
 def test_numpy_fallback(monkeypatch):
     """Test fallback when numpy is missing."""
-    import gemma_4_sql.type_hints as th
     import importlib
+
+    import gemma_4_sql.type_hints as th
 
     with patch.dict(sys.modules, {"numpy": None}):
         importlib.reload(th)

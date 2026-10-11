@@ -62,11 +62,10 @@ def test_keras_peft_missing_branches_2():
             return args
 
     with patch.object(mod, "keras", MagicMock()):
-        try:
+        with patch.object(mod.KerasLoRADense, "add_weight", MagicMock()):
             lora = mod.KerasLoRADense(BuiltDense(), 8, 16.0, 0.0)
-            assert lora._lora_built is True
-        except (TypeError, AttributeError) as e:
-            _ = e
+            assert getattr(lora, "_lora_built", False) is True
+            _ = BuiltDense()()
 
     with patch.object(mod, "keras", MagicMock(initializers=None)):
         try:
@@ -121,7 +120,4 @@ def test_keras_peft_missing_branches_2():
         backbone = Backbone()
 
     with patch.object(mod, "keras", MagicMock()):
-        try:
-            mod.apply_lora("name", ["t"], model=Model())
-        except (TypeError, AttributeError) as e:
-            _ = e
+        mod.apply_lora("name", ["t"], model=Model())

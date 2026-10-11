@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
-import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
 
@@ -69,9 +70,10 @@ async def test_sqlite_adapter_live(tmp_path: Path) -> None:
     mem_adapter.close()
 
 
-def test_sqlite_adapter_missing_aiosqlite(monkeypatch: pytest.MonkeyPatch, missing_dependency_context: Any) -> None:
+def test_sqlite_adapter_missing_aiosqlite(monkeypatch: pytest.MonkeyPatch, missing_dependency_context: Any) -> None:  # noqa: F821
     """Test SQLiteAdapter raises ImportError when aiosqlite is missing."""
     import importlib
+
     import gemma_4_sql.sdk.adapters.sqlite_adapter as sa
 
     with missing_dependency_context(["aiosqlite"]):
@@ -101,26 +103,33 @@ async def test_sqlite_adapter_extra_coverage(monkeypatch: pytest.MonkeyPatch) ->
     class SyncMockConn:
         async def execute(self, q, p):
             class SyncMockCursor:
-                def fetchall(self): return []
                 # missing description
-                def close(self): pass
+                def close(self):
+                    pass
+
             return SyncMockCursor()
-        def commit(self): pass
-        def rollback(self): pass
-        def close(self): pass
-    
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
     with patch.object(adapter, "connect_async", return_value=SyncMockConn()):
         await adapter.execute_with_feedback_async("INSERT")
         await adapter.execute_query_async("INSERT")
-        
+
     # Mock connect_async to return an object with NO commit/rollback/close
     class EmptyMockConn:
         async def execute(self, q, p):
             class EmptyMockCursor:
-                def fetchall(self): return []
-                # no close
+                pass
+
             return EmptyMockCursor()
-    
+
     with patch.object(adapter, "connect_async", return_value=EmptyMockConn()):
         await adapter.execute_with_feedback_async("INSERT")
         await adapter.execute_query_async("INSERT")
@@ -128,18 +137,18 @@ async def test_sqlite_adapter_extra_coverage(monkeypatch: pytest.MonkeyPatch) ->
     # Mock exception to hit rollback branches
     class ErrorSyncMockConn(SyncMockConn):
         async def execute(self, q, p):
-            raise Exception("Mock error")
-    
+            raise Exception("Mock error")  # noqa: TRY002
+
     with patch.object(adapter, "connect_async", return_value=ErrorSyncMockConn()):
         with pytest.raises(Exception, match="Mock error"):
             await adapter.execute_with_feedback_async("INSERT")
         with pytest.raises(Exception, match="Mock error"):
             await adapter.execute_query_async("INSERT")
-        
+
     class ErrorEmptyMockConn(EmptyMockConn):
         async def execute(self, q, p):
-            raise Exception("Mock error")
-    
+            raise Exception("Mock error")  # noqa: TRY002
+
     with patch.object(adapter, "connect_async", return_value=ErrorEmptyMockConn()):
         with pytest.raises(Exception, match="Mock error"):
             await adapter.execute_with_feedback_async("INSERT")
@@ -152,8 +161,6 @@ async def test_sqlite_adapter_extra_coverage(monkeypatch: pytest.MonkeyPatch) ->
     adapter.close()
 
     # Mocking to cover asyncio.iscoroutine branches
-    from unittest.mock import MagicMock
-    import asyncio
 
     mock_conn = MagicMock()
     mock_cursor = MagicMock()
@@ -190,7 +197,6 @@ async def test_sqlite_adapter_extra_coverage(monkeypatch: pytest.MonkeyPatch) ->
 
     # Force error to cover rollback
     async def mock_execute_err(q, p):
-        import sqlite3
 
         raise sqlite3.Error("err")
 

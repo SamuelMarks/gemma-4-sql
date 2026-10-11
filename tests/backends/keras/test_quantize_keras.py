@@ -30,7 +30,7 @@ def test_module_load_import_error(monkeypatch):
     namespace = {"__name__": "mock_quantize", "__builtins__": dict(builtins.__dict__)}
     namespace["__builtins__"]["__import__"] = mock_import
 
-    exec(code, namespace)  
+    exec(code, namespace)
 
     assert namespace.get("keras") is None
     assert namespace.get("np") is None

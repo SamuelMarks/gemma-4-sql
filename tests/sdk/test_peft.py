@@ -14,15 +14,11 @@ def test_apply_peft_jax() -> object:
 
     """
     res = apply_peft(model_name="test-model", target_modules=["all"], lora_r=16, lora_alpha=32, lora_dropout=0.1, backend="jax")
-    if not res["target_modules"] == ["all"]:
-        raise AssertionError
-    if not res["lora_r"] == int("16"):
-        raise AssertionError
-    if not res["lora_alpha"] == int("32"):
-        raise AssertionError
+    assert res["target_modules"] == ["all"]
+    assert res["lora_r"] == int("16")
+    assert res["lora_alpha"] == int("32")
     expected_dropout = 0.1
-    if not res["lora_dropout"] == expected_dropout:
-        raise AssertionError
+    assert res["lora_dropout"] == expected_dropout
 
 
 def test_apply_peft_pytorch(monkeypatch: pytest.MonkeyPatch) -> object:
@@ -32,37 +28,22 @@ def test_apply_peft_pytorch(monkeypatch: pytest.MonkeyPatch) -> object:
         apply_peft(model_name="test-model", backend="pytorch")
 
 
-try:
-    import keras
-except ImportError:
-    keras = None
-
-try:
-    from mlx import nn as _mx_nn
-    from mlx_lm import load as _mx_load
-
-    mlx_peft_available = _mx_nn is not None and _mx_load is not None
-except (ImportError, AttributeError):
-    mlx_peft_available = False
-
-
-def test_apply_peft_keras() -> object:
+def test_apply_peft_keras(monkeypatch) -> object:
     """Initialize function test_apply_peft_keras."""
-    if keras is not None:
-        res = apply_peft(model_name="test-model", backend="keras")
-        assert res["backend"] == "keras"
-    else:
-        with pytest.raises(DependencyMissingError):
-            apply_peft(model_name="test-model", backend="keras")
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    keras_agent = get_backend("keras")
+    monkeypatch.setattr(keras_agent, "apply_lora", lambda *a, **k: {"backend": "keras"}, raising=False)
+    res = apply_peft(model_name="test-model", backend="keras")
+    assert res["backend"] == "keras"
 
 
-def test_apply_peft_mlx() -> object:
+def test_apply_peft_mlx(monkeypatch) -> object:
     """Initialize function test_apply_peft_mlx."""
-    try:
-        res = apply_peft(model_name="test-model", backend="mlx")
-        assert res["backend"] == "mlx"
-    except DependencyMissingError:
-        pass
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    mlx_agent = get_backend("mlx")
+    monkeypatch.setattr(mlx_agent, "apply_lora", lambda *a, **k: {"backend": "mlx"}, raising=False)
+    res = apply_peft(model_name="test-model", backend="mlx")
+    assert res["backend"] == "mlx"
 
 
 def test_apply_peft_maxtext() -> object:

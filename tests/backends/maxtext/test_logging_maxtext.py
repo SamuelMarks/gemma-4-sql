@@ -2,10 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 import pytest
 
 from gemma_4_sql.backends.maxtext.logging import log_metrics
@@ -60,15 +56,13 @@ def test_module_load_import_error(monkeypatch):
         return orig_import(name, *args, **kwargs)
 
     with patch("builtins.__import__", side_effect=mock_import):
-        if "gemma_4_sql.backends.maxtext.logging" in sys.modules:
-            del sys.modules["gemma_4_sql.backends.maxtext.logging"]
+        sys.modules.pop("gemma_4_sql.backends.maxtext.logging", None)
         import gemma_4_sql.backends.maxtext.logging as mlog
 
         assert mlog.SummaryWriter is None
 
     # Restore
-    if "gemma_4_sql.backends.maxtext.logging" in sys.modules:
-        del sys.modules["gemma_4_sql.backends.maxtext.logging"]
+    sys.modules.pop("gemma_4_sql.backends.maxtext.logging", None)
 
 
 def test_tensorboardx_import_success(monkeypatch):

@@ -303,7 +303,7 @@ class Gemma4ForCausalLM(nn.Module):
                 import logging
 
                 logging.getLogger(__name__).debug("Failed to load safetensors: %s", exc)
-            except Exception as exc:  
+            except Exception as exc:  # noqa: BLE001
                 import logging
 
                 logging.getLogger(__name__).debug("Failed to load safetensors: %s", exc)

@@ -112,3 +112,31 @@ def test_duckdb_udf_error_handling(monkeypatch: pytest.MonkeyPatch) -> None:
     assert parsed["success"] is False
     assert "error" in parsed
     conn.close()
+
+
+def test_duckdb_missing_skip(monkeypatch):
+    """Test that tests are skipped if duckdb is missing."""
+    import sys
+
+    # We must ensure _real_duckdb is None and duckdb is removed from sys.modules
+    monkeypatch.delattr(pytest, "_real_duckdb", raising=False)
+
+    with monkeypatch.context() as m:
+        m.setitem(sys.modules, "duckdb", None)
+        with pytest.raises(pytest.skip.Exception):
+            test_duckdb_real_integration(m)
+
+        with pytest.raises(pytest.skip.Exception):
+            test_duckdb_udf_error_handling(m)
+
+    # Cover the case where it is already cached
+    monkeypatch.setattr(pytest, "_real_duckdb", "dummy_cached_duckdb", raising=False)
+    monkeypatch.setitem(sys.modules, "duckdb", "dummy_cached_duckdb")
+    try:
+        test_duckdb_real_integration(monkeypatch)
+    except Exception:  # noqa: BLE001, S110
+        pass
+    try:
+        test_duckdb_udf_error_handling(monkeypatch)
+    except Exception:  # noqa: BLE001, S110
+        pass

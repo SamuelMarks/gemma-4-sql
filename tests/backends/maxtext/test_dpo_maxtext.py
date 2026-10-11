@@ -2,10 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 import pytest
 
 from gemma_4_sql.backends.maxtext.dpo import _compute_logps, _dpo_step_loss, _execute_dpo, _get_train_step_fn, _run_training_epochs, dpo_loss, run_dpo
@@ -230,6 +226,7 @@ def test_get_train_step_fn_wrapper_coverage():
     optimizer.update.return_value = ("updates", "new_opt_state")
 
     mock_jax = MagicMock()
+    mock_jax.jit = lambda f: f
 
     # We want value_and_grad to return a function that will also invoke the wrapper
     def mock_vag(fn):

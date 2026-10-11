@@ -51,8 +51,7 @@ def test_utils() -> object:
     sharding = {"a": jax.sharding.NamedSharding(jax.sharding.Mesh(np.array(jax.devices()), ("x",)), jax.sharding.PartitionSpec("x"))}
     with contextlib.suppress(ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError):
         assign_weights(["a"], jnp.ones((2, 2)), state2, "k", None, sharding)
-    if not stoi("123") == EXPECTED_VAL:
-        raise AssertionError
+    assert stoi("123") == EXPECTED_VAL
 
 
 def test_utils_part1() -> object:
@@ -62,8 +61,7 @@ def test_utils_part1() -> object:
         AssertionError: Description.
 
     """
-    if not stoi("abc") == "abc":
-        raise AssertionError
+    assert stoi("abc") == "abc"
     mapping = {"abc\\.(\\d+)": ("def.xyz", None), "cde": ("uvw", None)}
     map_to_jax_key(mapping, "abc.123")
     map_to_jax_key(mapping, "cde")
@@ -99,6 +97,9 @@ class MockSafeOpen:
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> object:
         """Execute function."""
 
+    def __iter__(self) -> object:
+        return iter(self.keys())
+
     def keys(self) -> object:
         """Execute function.
 
@@ -132,8 +133,7 @@ def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_pat
     monkeypatch.setattr(ut, "safe_open", MockSafeOpen)
     mapping = {"layer1\\.weight": ("layer1.w", None), "layer2\\.weight": ("layer2.w", None)}
     model = create_model_from_safe_tensors(str(d), MockModelCls, "config", mapping)
-    if not model.cfg == "config":
-        raise AssertionError
+    assert model.cfg == "config"
 
 
 def test_create_model_from_safe_tensors_missing_dir(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,8 +145,7 @@ def test_create_model_from_safe_tensors_missing_dir(monkeypatch: pytest.MonkeyPa
     """
     monkeypatch.setattr(ut, "safe_open", MockSafeOpen)
     model = create_model_from_safe_tensors("nonexistent_dir", MockModelCls, "config", {})
-    if not model.cfg == "config":
-        raise AssertionError
+    assert model.cfg == "config"
 
 
 def test_assign_weights_int_to_str_keys() -> None:
@@ -186,8 +185,7 @@ def test_create_model_from_safe_tensors_no_safetensors(monkeypatch: pytest.Monke
     """
     monkeypatch.setattr(ut, "safe_open", None)
     model = create_model_from_safe_tensors(str(tmp_path), MockModelCls, "config", {})
-    if not model.cfg == "config":
-        raise AssertionError
+    assert model.cfg == "config"
 
 
 def test_utils_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,8 +223,7 @@ def test_assign_weights_value_attribute() -> None:
     transform = None
     state = {"a": type("S", (), {"value": type("V", (), {"shape": (2, 4)})()})()}
     assign_weights(["a"], tensor, state, "st_key", transform)
-    if not hasattr(state["a"], "value"):
-        raise AssertionError
+    assert hasattr(state["a"], "value")
 
 
 class MockF:

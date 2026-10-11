@@ -25,8 +25,7 @@ def test_route_backend_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
 
     """
     res = _route_backend(ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False), "pytorch")
-    if not res["backend"] == "pytorch":
-        raise AssertionError
+    assert res["backend"] == "pytorch"
 
 
 def test_etl_pretrain(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,10 +57,8 @@ def test_etl_sft(monkeypatch: pytest.MonkeyPatch) -> None:
     keras_agent = get_backend("keras")
     monkeypatch.setattr(keras_agent, "build_dataloader", lambda *a, **k: {"backend": "keras", "dataset": "dummy/data", "batch_size": 16})
     res = etl_sft(config, backend="keras")
-    if not res["dataset"] == "dummy/data":
-        raise AssertionError
-    if not res["batch_size"] == int("16"):
-        raise AssertionError
+    assert res["dataset"] == "dummy/data"
+    assert res["batch_size"] == 16
 
 
 def test_etl_posttrain(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,7 +73,5 @@ def test_etl_posttrain(monkeypatch: pytest.MonkeyPatch) -> None:
     maxtext_agent = get_backend("maxtext")
     monkeypatch.setattr(maxtext_agent, "build_dataloader", lambda *a, **k: {"backend": "maxtext", "dataset": "dummy/data", "batch_size": 16})
     res = etl_posttrain(config, backend="maxtext")
-    if not res["dataset"] == "dummy/data":
-        raise AssertionError
-    if not res["batch_size"] == int("16"):
-        raise AssertionError
+    assert res["dataset"] == "dummy/data"
+    assert res["batch_size"] == 16

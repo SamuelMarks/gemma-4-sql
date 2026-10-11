@@ -21,10 +21,8 @@ def test_agentic_loop_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     jax_agent = get_backend("jax")
     monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
     res = run_agentic_loop(model_name="model", prompt="prompt", backend="jax")
-    if res["backend"] != "jax":
-        raise AssertionError
-    if res["status"] != "completed":
-        raise AssertionError
+    assert res["backend"] == "jax"
+    assert res["status"] == "completed"
 
 
 def test_agentic_loop_keras(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -38,10 +36,8 @@ def test_agentic_loop_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     keras_agent = get_backend("keras")
     monkeypatch.setattr(keras_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
     res = run_agentic_loop(model_name="model", prompt="prompt", backend="keras")
-    if res["backend"] != "keras":
-        raise AssertionError
-    if res["status"] != "completed":
-        raise AssertionError
+    assert res["backend"] == "keras"
+    assert res["status"] == "completed"
 
 
 def test_agentic_loop_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,10 +51,8 @@ def test_agentic_loop_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     maxtext_agent = get_backend("maxtext")
     monkeypatch.setattr(maxtext_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
     res = run_agentic_loop(model_name="model", prompt="prompt", backend="maxtext")
-    if res["backend"] != "maxtext":
-        raise AssertionError
-    if res["status"] != "completed":
-        raise AssertionError
+    assert res["backend"] == "maxtext"
+    assert res["status"] == "completed"
 
 
 def test_agentic_loop_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,10 +66,8 @@ def test_agentic_loop_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     pytorch_agent = get_backend("pytorch")
     monkeypatch.setattr(pytorch_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
     res = run_agentic_loop(model_name="model", prompt="prompt", backend="pytorch")
-    if res["backend"] != "pytorch":
-        raise AssertionError
-    if res["status"] != "completed":
-        raise AssertionError
+    assert res["backend"] == "pytorch"
+    assert res["status"] == "completed"
 
 
 def test_agentic_loop_invalid_backend() -> None:

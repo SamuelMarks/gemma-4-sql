@@ -448,6 +448,7 @@ def test_lora_optimizer_gradient_flow_and_freeze_state() -> None:
         grad_fn = nnx.value_and_grad(loss_fn, argnums=nnx.DiffState(0, pt.LoRAParam))  # type: ignore[attr-defined]
     else:
         grad_fn = nnx.value_and_grad(loss_fn, wrt=pt.LoRAParam)
+
     x = jnp.ones((1, 4))
     target = jnp.zeros((1, 4))
 

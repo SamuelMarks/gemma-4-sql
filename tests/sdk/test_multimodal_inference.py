@@ -86,7 +86,7 @@ def test_load_image_bytes(tmp_path: Path) -> None:
         pil_img = Image.new("RGB", (32, 32), color="blue")
         loaded_pil = load_image_bytes(pil_img)
         assert len(loaded_pil) > 0
-    except ImportError:
+    except ImportError:  # pragma: no cover
 
         class _MockPILInstance:
             """Mock PIL Image instance for load_image_bytes testing."""
@@ -127,7 +127,7 @@ def test_process_image(tmp_path: Path) -> None:
         img = PILImage.new("RGB", (32, 32), color=(255, 0, 0))
         img.save(buf, format="PNG")
         valid_png = buf.getvalue()
-    except ImportError:
+    except ImportError:  # pragma: no cover
         valid_png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
 
     res = process_image(valid_png, target_size=(224, 224), patch_size=14)
@@ -379,11 +379,10 @@ async def test_common_serve_multimodal() -> None:
 
     generate_route = next(r.endpoint for r in app.routes if getattr(r, "path", None) == "/generate")
     res = await generate_route(MockReq(req_payload))
-    body = res.body if hasattr(res, "body") else res
-    if isinstance(body, bytes):
-        import json
+    body_raw = res.body if hasattr(res, "body") else res
+    import json
 
-        body = json.loads(body.decode("utf-8"))
+    body = json.loads(body_raw.decode("utf-8")) if hasattr(body_raw, "decode") else body_raw
     assert "sql" in body
     assert body["modality"] == "vision"
     assert "<image>" in body["sql"]
@@ -462,7 +461,7 @@ def test_multimodal_edge_cases() -> None:
         res_img_no_np = cm.process_image(png_bytes, target_size=(14, 14), patch_size=14)
         assert res_img_no_np["num_patches"] == 1
         monkeypatch.undo()
-    except ImportError:
+    except ImportError:  # pragma: no cover
 
         class _MockPILResampling:
             """Mock PIL Resampling constants."""
@@ -531,7 +530,7 @@ def test_multimodal_edge_cases() -> None:
 
     # PIL open raising OSError handled gracefully
     corrupted_img = b"corrupted"
-    if cm.Image is None:
+    if cm.Image is None:  # pragma: no cover
 
         class _MockFailingPIL:
             """Mock PIL Image raising OSError on open."""

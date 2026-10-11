@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -9,12 +10,8 @@ import pytest
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import TrainingConfig
 
-try:
-    import keras
-    import tensorflow as tf
-except ImportError:
-    keras = None
-    tf = None
+has_keras = importlib.util.find_spec("keras") is not None
+has_tf = importlib.util.find_spec("tensorflow") is not None
 
 
 def test_jax_dpo_missing_jnn(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -41,10 +38,12 @@ def test_jax_export_model1(tmp_path: Path) -> None:
     import sys
 
     for m in ["jax", "jax.numpy", "orbax.checkpoint", "gemma_4_sql.backends.jax.export"]:
-        if m in sys.modules and sys.modules[m] is None:
-            del sys.modules[m]
-    if "gemma_4_sql.backends.jax.export" in sys.modules:
-        importlib.reload(sys.modules["gemma_4_sql.backends.jax.export"])
+        _ = sys.modules.pop(m, None) if sys.modules.get(m) is None else None
+
+    import gemma_4_sql.backends.jax.export as jexp
+
+    importlib.reload(jexp)
+
     import gemma_4_sql.backends.jax.export as jexp
 
     res = jexp.export_model("model1", str(tmp_path / "jax_export"))
@@ -104,15 +103,14 @@ def test_keras_inference_missing_tf(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Due to module reloading in other tests, kinf might be stale.
     # Get the latest from sys.modules if present
-    if "gemma_4_sql.backends.keras.inference" in sys.modules:
-        kinf = sys.modules["gemma_4_sql.backends.keras.inference"]
+    kinf = sys.modules.get("gemma_4_sql.backends.keras.inference", kinf)
 
     monkeypatch.setattr(kinf, "tf", None)
     with pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
         kinf.generate_sql("foo", "bar")
 
 
-@pytest.mark.skipif(keras is None or tf is None, reason="Keras or TensorFlow is not installed")
+@pytest.mark.skipif(not has_keras or not has_tf, reason="Keras or TensorFlow is not installed")
 def test_keras_inference_test_mode() -> None:
     """Test Keras inference handles missing keras_nlp gracefully."""
     import gemma_4_sql.backends.keras.inference as kinf

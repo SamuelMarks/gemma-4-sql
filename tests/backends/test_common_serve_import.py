@@ -19,7 +19,7 @@ def test_fastapi_missing(monkeypatch):
     from gemma_4_sql.exceptions import DependencyMissingError
 
     with pytest.raises(DependencyMissingError):
-        mod.serve_model_wrapper(backend_name="pytorch", model_name="test", max_batch_size=32, missing_deps=None, missing_status=None, app_factory=lambda: None, port=8000)
+        mod.serve_model_wrapper(backend_name="pytorch", model_name="test", max_batch_size=32, missing_deps=None, app_factory=lambda: None, port=8000)
 
     # Restore
     monkeypatch.delitem(sys.modules, "fastapi", raising=False)
@@ -49,5 +49,5 @@ def test_serve_model_wrapper_run_server():
 
         mp.setattr(mod, "uvicorn", MockUvicorn())
 
-        mod.serve_model_wrapper(backend_name="pytorch", model_name="test", max_batch_size=32, missing_deps=None, missing_status=None, app_factory=lambda: "fake_app", run_server=True, port=8000)
+        mod.serve_model_wrapper(backend_name="pytorch", model_name="test", max_batch_size=32, missing_deps=None, app_factory=lambda: "fake_app", run_server=True, port=8000)
         assert len(called) == 1

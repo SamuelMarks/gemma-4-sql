@@ -4,10 +4,6 @@ import builtins
 import importlib
 from unittest.mock import MagicMock, patch
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 import gemma_4_sql.backends.maxtext.dpo as mod
 
 
@@ -42,11 +38,13 @@ def test_maxtext_dpo_train_step():
 
         return return_fn
 
-    with patch.object(mod, "jax", MagicMock(value_and_grad=fake_value_and_grad)):
+    with patch.object(mod, "jax", MagicMock(value_and_grad=fake_value_and_grad, jit=lambda f: f)):
         with patch.object(mod, "optax", MagicMock()):
+            optimizer = MagicMock()
+            optimizer.update.return_value = ({}, {})
             with patch.object(mod, "_dpo_step_loss", return_value="loss"):
-                train_step = mod._get_train_step_fn(MagicMock(), MagicMock(), MagicMock(), 0.1)
-                train_step({}, {}, {})
+                train_step = mod._get_train_step_fn(MagicMock(), MagicMock(), optimizer, 0.1)
+                train_step({}, {}, {}, {})
 
 
 def test_maxtext_dpo_compute_logps_with_numpy(monkeypatch):

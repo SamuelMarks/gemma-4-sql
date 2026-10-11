@@ -2,10 +2,6 @@
 
 from unittest.mock import MagicMock, patch
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 import numpy as np
 import pytest
 
@@ -24,7 +20,7 @@ def mock_dependencies(monkeypatch):
     mock_jax.nn.log_softmax.side_effect = lambda x, axis: x  # Dummy softmax
 
     # argsort returns indices sorting ascending, so we reverse it for descending
-    mock_jnp.argsort.side_effect = lambda x: np.argsort(x)
+    mock_jnp.argsort.side_effect = np.argsort
     mock_jnp.concatenate.side_effect = lambda x, axis: np.concatenate(x, axis=axis)
 
     monkeypatch.setattr(inference, "jax", mock_jax)

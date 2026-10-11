@@ -87,7 +87,6 @@ def test_common_logging_file_fallback(tmp_path):
         extra_fields={"epoch": "2"},
         step_duration_s=1.25,
     )
-    assert res["status"] == "backend_unavailable"
     assert "fallback_file" in res
 
     metrics_file = tmp_path / "fallback_logs" / "metrics.jsonl"
@@ -128,30 +127,32 @@ def test_common_logging_file_fallback(tmp_path):
     assert res_no_close["status"] == "success"
 
 
+from gemma_4_sql.exceptions import DependencyMissingError
+
+
 def test_common_quantize():
     """Test common quantize functionality."""
-    res1 = quantize_model_wrapper("test", "model", "int8", True, "missing", lambda: (0.5, "quantized"))
-    assert res1["status"] == "missing"
+    with pytest.raises(DependencyMissingError):
+        quantize_model_wrapper("test", "model", "int8", True, lambda: (0.5, "quantized"))
 
-    res2 = quantize_model_wrapper("test", "model", "int8", False, "", lambda: (0.5, "quantized"))
+    res2 = quantize_model_wrapper("test", "model", "int8", False, lambda: (0.5, "quantized"))
     assert res2["status"] == "quantized"
 
 
 def test_common_serve_missing():
     """Test common serve missing functionality."""
-    res = serve_model_wrapper("test", "model", 8000, 32, True, "missing", lambda: None)
-    assert res["status"] == "missing"
+    with pytest.raises(DependencyMissingError):
+        serve_model_wrapper("test", "model", 8000, 32, True, lambda: None)
 
 
 def test_quantize_missing_bitsandbytes():
     """Test quantize missing bitsandbytes functionality."""
-    res = apply_bits_and_bytes_quantization("int8", None, None)
-    assert res[1] == "backend_unavailable"
+    with pytest.raises(DependencyMissingError):
+        apply_bits_and_bytes_quantization("int8", None, None)
 
 
 def test_apply_bits_and_bytes_quantization():
     """Test int8, int4, skip modules, and unsupported methods in apply_bits_and_bytes_quantization."""
-    from gemma_4_sql.exceptions import DependencyMissingError
 
     called_kwargs: list[dict] = []
 
@@ -185,10 +186,6 @@ def test_apply_bits_and_bytes_quantization():
     assert stat_unsupp == "unsupported_method_awq"
     assert red_unsupp == 0.0
 
-    # Test raise_if_missing
-    with pytest.raises(DependencyMissingError, match="bitsandbytes and transformers are required"):
-        apply_bits_and_bytes_quantization("int8", None, None, raise_if_missing=True)
-
     # Test model with config attribute
     class ModelWithConfig:
         """Model with config."""
@@ -220,7 +217,7 @@ def test_quantize_model_wrapper_error_handling():
         """Docstring for fail_apply."""
         raise RuntimeError("Quantization execution failed")
 
-    res = quantize_model_wrapper("test", "model", "int8", False, "", fail_apply)
+    res = quantize_model_wrapper("test", "model", "int8", False, fail_apply)
     assert "failed: Quantization execution failed" in res["status"]
     assert res["memory_reduction_factor"] == 0.0
 
@@ -239,7 +236,6 @@ def test_serve_model_wrapper_run_server(monkeypatch):
         port=8000,
         max_batch_size=32,
         missing_deps=False,
-        missing_status="",
         app_factory=lambda: "mock_app",
         run_server=True,
     )
@@ -254,7 +250,6 @@ def test_serve_model_wrapper_run_server(monkeypatch):
         port=8000,
         max_batch_size=32,
         missing_deps=False,
-        missing_status="",
         app_factory=lambda: "mock_app",
         run_server=False,
     )
@@ -268,7 +263,6 @@ def test_serve_model_wrapper_run_server(monkeypatch):
         port=8000,
         max_batch_size=32,
         missing_deps=False,
-        missing_status="",
         app_factory=lambda: "mock_app",
     )
     assert res3["status"] == "running_test_serve"

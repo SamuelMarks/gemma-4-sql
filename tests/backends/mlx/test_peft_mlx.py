@@ -287,7 +287,7 @@ def test_mlx_lm_import_success_exec():
     namespace = {"__name__": "mock_peft", "__builtins__": dict(builtins.__dict__)}
     namespace["__builtins__"]["__import__"] = mock_import
 
-    exec(code, namespace)  
+    exec(code, namespace)
 
     assert namespace.get("load") == "MockLoad"
 

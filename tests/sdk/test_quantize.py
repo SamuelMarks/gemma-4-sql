@@ -14,12 +14,9 @@ def test_quantize_jax() -> None:
 
     """
     res = quantize_model("model1", "int8", backend="jax")
-    if not res["backend"] == "jax":
-        raise AssertionError
-    if not res["model"] == "model1":
-        raise AssertionError
-    if not res["method"] == "int8":
-        raise AssertionError
+    assert res["backend"] == "jax"
+    assert res["model"] == "model1"
+    assert res["method"] == "int8"
 
 
 def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -36,29 +33,27 @@ def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
         quantize_model("model2", "int4", backend="pytorch")
 
 
-try:
-    import keras
-except ImportError:
-    keras = None
-
-
-def test_quantize_keras() -> None:
+def test_quantize_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test Keras quantization through SDK."""
     from gemma_4_sql.exceptions import UnsupportedQuantizationMethodError
 
-    if keras is not None:
-        res = quantize_model("model3", "int8", backend="keras")
-        if not res["backend"] == "keras":
-            raise AssertionError
-        if not res["model"] == "model3":
-            raise AssertionError
-        assert res["status"] == "quantized_int8"
+    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    keras_agent = get_backend("keras")
+    monkeypatch.setattr(keras_agent, "quantize_model", lambda m, method, **k: {"backend": "keras", "model": m, "method": method, "status": f"quantized_{method}"})
 
-        with pytest.raises(UnsupportedQuantizationMethodError):
-            quantize_model("model3", "awq", backend="keras")
-    else:
-        with pytest.raises(DependencyMissingError):
-            quantize_model("model3", "int8", backend="keras")
+    res = quantize_model("model3", "int8", backend="keras")
+    assert res["backend"] == "keras"
+    assert res["model"] == "model3"
+    assert res["status"] == "quantized_int8"
+
+    # For the unsupported method error, we need to mock it raising it
+    def raise_unsupported(*args, **kwargs):
+        raise UnsupportedQuantizationMethodError("awq is not supported")
+
+    monkeypatch.setattr(keras_agent, "quantize_model", raise_unsupported)
+
+    with pytest.raises(UnsupportedQuantizationMethodError):
+        quantize_model("model3", "awq", backend="keras")
 
 
 def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:

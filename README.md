@@ -9,6 +9,7 @@ Natural text to SQL with Gemma 4; with [DuckDB](https://duckdb.org/) support and
 **Documentation:**
 - [Extending / Custom Backends](EXTENDING.md)
 - [Deployment & CI/CD](DEPLOY.md)
+- [Google Cloud TPU Deployment](DEPLOY_TO_TPU.md)
 - [DuckDB Support](DUCKDB_SUPPORT.md)
 - [SQL Dataset Analysis](SQL_DATASET_ANALYSIS.md)
 - [Architecture Details](ARCHITECTURE.md)
@@ -99,6 +100,10 @@ All CLI commands support direct standard output (stdout) reporting:
 *   `gemma-4-sql evaluate --dataset "..."`: Displays formatted evaluation metrics table.
 *   `gemma-4-sql tokenize --encode "..."`: Emits JSON token IDs array.
 *   `gemma-4-sql execute --query "..."`: Outputs query execution results and error status.
+*   `gemma-4-sql few-shot --prompt "..." --examples "..."`: Generates few-shot prompt or SQL response.
+*   `gemma-4-sql rag --prompt "..." --ddl "..."`: Formats retrieved schema context and RAG prompt.
+*   `gemma-4-sql embed-duckdb --prompt "..."`: Registers and queries the native `ask_gemma` UDF.
+*   `gemma-4-sql log --step 100 --metrics "..."`: Emits training metrics to TensorBoard logs.
 
 ## Documentation & Usage
 

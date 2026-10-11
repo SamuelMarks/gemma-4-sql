@@ -125,9 +125,9 @@ def mlx_beam_search(
             next_logits: TensorType = None  # type: ignore # Justified: Dynamic backend protocol typing
             # Extract logits for the next token position
             if hasattr(out, "ndim") and out.ndim == 3:
-                next_logits = out.__getitem__((0, -1, slice(None)))
+                next_logits = out[0, -1, slice(None)]
             elif hasattr(out, "ndim") and out.ndim == 2:
-                next_logits = out.__getitem__((-1, slice(None)))
+                next_logits = out[-1, slice(None)]
             elif isinstance(out, (list, tuple)):
                 next_logits = cast(Any, out)[-1]
             else:
@@ -140,7 +140,7 @@ def mlx_beam_search(
                 top_k_indices = mx.argsort(log_probs)[-k:].tolist()
                 for tok_idx in top_k_indices:
                     idx = int(tok_idx)
-                    log_prob_idx = log_probs.__getitem__(idx)
+                    log_prob_idx = log_probs[idx]
                     lp = float(log_prob_idx.item() if hasattr(log_prob_idx, "item") else log_prob_idx)
                     new_tokens = [*gen_tokens, idx]
                     new_cum = cum_score + lp
@@ -207,7 +207,7 @@ def generate_sql(
     sql = ""
     try:
         logger.info("Generating with MLX %s (beam_width=%d)", model_name, beam_width)
-        loaded: Any = load.__call__(model_name)
+        loaded: Any = load(model_name)
         model: ModelType = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
         tokenizer: Any = cast(Any, loaded)[1] if isinstance(loaded, (tuple, list)) and len(cast(list[Any], loaded)) > 1 else None
         eos_id_arg = kwargs.get("eos_token_id")

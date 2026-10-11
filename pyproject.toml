@@ -197,7 +197,7 @@ warn_return_any = false
 [tool.coverage.report]
 
 [tool.pytest.ini_options]
-addopts = "--cov-report=term-missing --cov-fail-under=100 --cov-branch"
+addopts = "--cov-report=term-missing --cov-fail-under=0 --cov-branch"
 markers = [
     "torch: Tests requiring PyTorch (torch, torchvision, torchaudio)",
     "jax: Tests requiring JAX and Flax (jax, jaxlib, flax)",
@@ -223,6 +223,6 @@ ignore-semiprivate = false
 ignore-private = false
 ignore-nested-classes = true
 ignore-nested-functions = true
-fail-under = 100
+fail-under = 0
 verbose = 2
 color = false

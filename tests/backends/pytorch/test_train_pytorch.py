@@ -229,11 +229,31 @@ def test_pytorch_train_successful_imports():
             "transformers.models.gemma4": mock_gemma4,
         },
     ):
-        if "gemma_4_sql.backends.pytorch.train" in sys.modules:
-            del sys.modules["gemma_4_sql.backends.pytorch.train"]
+        import importlib
+
         import gemma_4_sql.backends.pytorch.train as train_module
+
+        importlib.reload(train_module)
 
         assert train_module.torch is mock_torch
         assert train_module.nn is not None
         assert train_module.optim is not None
         assert train_module.Gemma4ForCausalLM is not None
+
+    with patch.dict(
+        sys.modules,
+        {
+            "torch": None,
+            "torch.nn": None,
+            "torch.optim": None,
+            "transformers": None,
+            "transformers.models": None,
+            "transformers.models.gemma4": None,
+        },
+    ):
+        import importlib
+
+        import gemma_4_sql.backends.pytorch.train as train_module2
+
+        importlib.reload(train_module2)
+        assert train_module2.torch is None

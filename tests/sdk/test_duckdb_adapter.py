@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import sys
-import pytest
 from pathlib import Path
-from unittest.mock import patch
+
+import pytest
 
 from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
 from tests.conftest import requires_duckdb
@@ -62,7 +61,7 @@ async def test_duckdb_adapter_live(tmp_path: Path) -> None:
     existing_adapter_conn = DuckDBAdapter(db_path, {"conn": conn})
     res_ex_conn = await existing_adapter_conn.execute_query_async("SELECT name FROM products")
     assert res_ex_conn == [("apple",)]
-    
+
     # Test execute_query_async exception
     res_err = await existing_adapter.execute_query_async("SELECT * FROM non_existent_table")
     assert res_err == []

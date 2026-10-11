@@ -58,15 +58,15 @@ def test_missing_dependencies():
         with pytest.raises(Exception, match="Grain dependency is missing."):
             jax_etl._get_sampler(10, False)
 
+        config = MagicMock()
+        config.dataset_name = "test"
+        config.split = "train"
+        config.batch_size = 1
+        config.distributed = False
+        config.tokenizer_name = "t"
+        config.duckdb_path = None
+        config.duckdb_table = None
         with pytest.raises(Exception, match="Missing grain or datasets. Cannot load"):
-            config = MagicMock()
-            config.dataset_name = "test"
-            config.split = "train"
-            config.batch_size = 1
-            config.distributed = False
-            config.tokenizer_name = "t"
-            config.duckdb_path = None
-            config.duckdb_table = None
             jax_etl.build_dataloader(config)
 
 

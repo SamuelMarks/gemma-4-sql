@@ -52,6 +52,7 @@ def test_pytorch_etl_duckdb_missing() -> object:
     try:
         etl_pytorch.duckdb = None
         etl_pytorch.datasets = MockDatasets()
+        _ = MockDatasets.load_dataset()
         etl_pytorch.DataLoader = MockDataLoader()
         etl_pytorch.Dataset = MockDataset()
         etl_pytorch.torch = MockTorch()

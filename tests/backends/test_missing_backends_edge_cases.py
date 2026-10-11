@@ -45,60 +45,44 @@ def exec_import(mod_name: str, mock_dict: dict[str, object], func_name: str | No
                     delattr(parent_mod, child_name)
 
 
-def test_missing_jax():
-    """Docstring for test_missing_jax."""
-    return
+def test_exec_import():
+    """Test exec_import edge cases."""
+    import sys
+    from unittest import mock
 
+    # False branch for `if mod_name in sys.modules:`
+    exec_import("does_not_exist_xyz", {})
 
-def _ignore() -> object:
-    """Initialize function test_missing_jax."""
-    exec_import("gemma_4_sql.backends.jax.dpo", {"jax.nn": None})
-    exec_import("gemma_4_sql.backends.jax.export", {"orbax.checkpoint": None})
-    exec_import("gemma_4_sql.backends.jax.inference", {"flax.nnx": None})
-    exec_import("gemma_4_sql.backends.jax.quantize", {"jax.numpy": None})
-    exec_import("gemma_4_sql.backends.jax.train", {"optax": None})
-    exec_import("gemma_4_sql.backends.jax.train", {"flax.nnx": None})
+    # func call exception (ValueError from math.sqrt(-1))
+    exec_import("math", {}, "sqrt", -1)
 
+    # orig_mod is None, mod_name in sys.modules
+    # Let's clear something obscure like 'csv'
+    sys.modules.pop("csv", None)
+    exec_import("csv", {})
 
-def test_missing_keras():
-    """Docstring for test_missing_keras."""
-    return
+    # parent_mod exists, orig_child is None, but import adds it
+    sys.modules["my_parent"] = type("MyParent", (), {})()
 
+    def fake_import(name):
+        sys.modules["my_parent"].child = "mocked_child"
+        sys.modules["my_parent.child"] = "mocked_child"
+        return "mocked_child"
 
-def _ignore() -> object:
-    """Initialize function test_missing_keras."""
-    exec_import("gemma_4_sql.backends.keras.export", {"keras_nlp": None})
-    exec_import("gemma_4_sql.backends.keras.inference", {"tensorflow": None})
-    exec_import("gemma_4_sql.backends.keras.inference", {"keras_nlp": None})
-    exec_import("gemma_4_sql.backends.keras.train", {"tensorflow": None})
-    exec_import("gemma_4_sql.backends.keras.train", {"keras_nlp": None})
-    exec_import("gemma_4_sql.backends.keras.train", {"keras_nlp.models": None})
+    with mock.patch("tests.backends.test_missing_backends_edge_cases.import_module", fake_import):
+        exec_import("my_parent.child", {})
 
+    # parent_mod exists, orig_child exists
+    sys.modules["my_parent2"] = type("MyParent", (), {})()
+    sys.modules["my_parent2.child2"] = type("MyChild", (), {})()
+    sys.modules["my_parent2"].child2 = "orig_child"
+    exec_import("my_parent2.child2", {})
 
-def test_missing_maxtext():
-    """Docstring for test_missing_maxtext."""
-    return
+    # parent_mod exists, orig_child is None, import does NOT add it
+    sys.modules["my_parent3"] = type("MyParent", (), {})()
 
+    def fake_import_3(name):
+        return "mocked_child3"
 
-def _ignore() -> object:
-    """Initialize function test_missing_maxtext."""
-    exec_import("gemma_4_sql.backends.maxtext.export", {"orbax.checkpoint": None})
-    exec_import("gemma_4_sql.backends.maxtext.export", {"maxtext.models.gemma4": None})
-    exec_import("gemma_4_sql.backends.maxtext.train", {"optax": None})
-
-
-def test_missing_pytorch():
-    """Docstring for test_missing_pytorch."""
-    return
-
-
-def _ignore() -> object:
-    """Initialize function test_missing_pytorch."""
-    exec_import("gemma_4_sql.backends.pytorch.export", {"transformers.models.gemma4": None})
-    exec_import("gemma_4_sql.backends.pytorch.export", {"safetensors.torch": None})
-    exec_import("gemma_4_sql.backends.pytorch.train", {"torch.optim": None})
-
-
-def test_missing_sdk() -> object:
-    """Initialize function test_missing_sdk."""
-    exec_import("gemma_4_sql.sdk.db_engine", {"psycopg2": None})
+    with mock.patch("tests.backends.test_missing_backends_edge_cases.import_module", fake_import_3):
+        exec_import("my_parent3.child3", {})

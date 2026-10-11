@@ -1,11 +1,6 @@
 """Module docstring."""
 
-import pytest
-
-try:
-    import torch
-except ImportError:
-    pytest.skip("No torch", allow_module_level=True)
+import torch
 
 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
 from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM

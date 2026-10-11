@@ -63,7 +63,7 @@ def test_module_load_import_error():
     namespace = {"__name__": "mock_logging", "__builtins__": dict(builtins.__dict__)}
     namespace["__builtins__"]["__import__"] = mock_import
 
-    exec(code, namespace)  
+    exec(code, namespace)
 
     assert namespace.get("tf") is None
 

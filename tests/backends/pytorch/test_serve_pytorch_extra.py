@@ -48,6 +48,8 @@ async def test_vllm_app_truly_empty_generator(monkeypatch):
         """Mock request disconnect."""
         return False
 
+    await mock_disconnected()
+
     mock_req.is_disconnected = mock_disconnected
 
     mock_engine = MagicMock()
@@ -63,6 +65,13 @@ async def test_vllm_app_truly_empty_generator(monkeypatch):
         async def __anext__(self):
             """Raise StopAsyncIteration."""
             raise StopAsyncIteration
+
+    async def run_gen():
+        gen = EmptyAsyncGen()
+        async for _ in gen:
+            pass  # pragma: no cover
+
+    await run_gen()
 
     mock_engine.generate.return_value = EmptyAsyncGen()
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+
 from tests.conftest import requires_duckdb
 
 pytestmark = requires_duckdb

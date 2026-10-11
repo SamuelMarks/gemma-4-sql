@@ -57,7 +57,7 @@ def _load_mlx_model_and_device(model_name: str, hardware: str) -> tuple[Any, str
 
     from typing import cast
 
-    loaded: Any = load.__call__(model_name) if load is not None else None
+    loaded: Any = load(model_name) if load is not None else None
     model_any: Any = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
     return (model_any, target_device)
 

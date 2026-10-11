@@ -3,10 +3,6 @@
 import builtins
 import importlib
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 import gemma_4_sql.backends.maxtext.peft as mod
 
 

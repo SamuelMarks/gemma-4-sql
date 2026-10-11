@@ -76,14 +76,6 @@ def test_compute_logps_with_numpy(monkeypatch):
             """Docstring for __eq__."""
             return self.val == other
 
-        def numpy(self):
-            """Docstring for numpy."""
-            return self.val
-
-        def __mul__(self, other):
-            """Docstring for __mul__."""
-            return FakeTensor(self.val * other)
-
     mock_tf.reduce_sum = lambda x, axis: FakeTensor(-1.0) if x == "case1" else FakeTensor(-1.5)
     mock_tf.cast = lambda x, y: x
     mock_tf.expand_dims = lambda x, axis: x
@@ -200,6 +192,7 @@ def test_execute_dpo_error(monkeypatch):
         return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import)
+    __import__("math")
 
     with pytest.raises(ValueError):
         dpo._execute_dpo("m", "d", 0.1, 1, 0.1)

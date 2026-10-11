@@ -20,8 +20,7 @@ def test_top_level_import_failures(monkeypatch):
         return orig_import(name, *args, **kwargs)
 
     # Remove the module from sys.modules so we can cleanly reload it
-    if "gemma_4_sql.backends.common_multimodal" in sys.modules:
-        del sys.modules["gemma_4_sql.backends.common_multimodal"]
+    sys.modules.pop("gemma_4_sql.backends.common_multimodal", None)
 
     with patch("builtins.__import__", side_effect=mock_import):
         import gemma_4_sql.backends.common_multimodal as mod_reloaded
@@ -83,6 +82,10 @@ def test_missing_np_import(monkeypatch):
     with patch("gemma_4_sql.backends.common_multimodal.logger.debug") as mock_debug:
         monkeypatch.setattr(mod, "np", None)
 
+        import sys
+
+        sys.modules.pop("numpy", None)
+
         import builtins
 
         orig_import = builtins.__import__
@@ -101,10 +104,6 @@ def test_missing_np_import(monkeypatch):
             # Also test the else branch when audio_input is not str/bytes
             class DummyAudio:
                 """Docstring for DummyAudio."""
-
-                def read(self):
-                    """Docstring for read."""
-                    return wav_header
 
             try:
                 mod.process_audio(DummyAudio())

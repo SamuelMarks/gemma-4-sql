@@ -23,10 +23,7 @@ def test_multimodal_lazy_numpy_import_branch(monkeypatch):
 
     monkeypatch.setattr(cm, "np", None)
 
-    try:
-        cm.process_audio(b"1234")
-    except ValueError:
-        pass
+    cm.process_audio(b"1234")
 
 
 def test_multimodal_lazy_numpy_import_error(monkeypatch):
@@ -58,10 +55,7 @@ def test_multimodal_lazy_numpy_import_error(monkeypatch):
     mock_logger = MagicMock()
     monkeypatch.setattr(cm, "logger", mock_logger)
 
-    try:
-        cm.process_audio(b"1234")
-    except ValueError:
-        pass
+    cm.process_audio(b"1234")
 
     any("Failed to import numpy" in str(c) for c in mock_logger.debug.call_args_list)
 
@@ -98,12 +92,9 @@ def test_multimodal_lazy_numpy_import_error_reach(monkeypatch):
 
     importlib.reload(cm)
     monkeypatch.setattr(cm, "logger", mock_logger)
-    try:
-        monkeypatch.setattr(cm, "load_audio_bytes", lambda x: b"")
-        monkeypatch.setattr(cm, "_parse_wav_samples", lambda x: ([0.0], 16000))
-        cm.process_audio(b"fake")
-    except ValueError:
-        pass
+    monkeypatch.setattr(cm, "load_audio_bytes", lambda x: b"")
+    monkeypatch.setattr(cm, "_parse_wav_samples", lambda x: ([0.0], 16000))
+    cm.process_audio(b"fake")
 
     found = any("Failed to import numpy" in str(c) for c in mock_logger.debug.call_args_list)
     assert found
@@ -246,8 +237,9 @@ def test_load_image_bytes_base64():
 
 
 def test_process_image_invalid_size():
-    import gemma_4_sql.backends.common_multimodal as cm
     import pytest
+
+    import gemma_4_sql.backends.common_multimodal as cm
 
     with pytest.raises(ValueError, match="target_size dimensions must be positive"):
         cm.process_image(b"", target_size=(0, 0))
@@ -256,9 +248,11 @@ def test_process_image_invalid_size():
 
 
 def test_process_image_pil_success():
-    import gemma_4_sql.backends.common_multimodal as cm
     import io
+
     from PIL import Image
+
+    import gemma_4_sql.backends.common_multimodal as cm
 
     img = Image.new("RGB", (224, 224), color="red")
     buf = io.BytesIO()
@@ -271,9 +265,10 @@ def test_process_image_pil_success():
 
 
 def test_process_image_pil_failure(monkeypatch):
-    import gemma_4_sql.backends.common_multimodal as cm
-    import io
+
     from PIL import Image
+
+    import gemma_4_sql.backends.common_multimodal as cm
 
     monkeypatch.setattr(Image, "open", lambda *a, **k: exec("raise ValueError('PIL error')"))
     res = cm.process_image(b"bad", target_size=(224, 224), patch_size=14)

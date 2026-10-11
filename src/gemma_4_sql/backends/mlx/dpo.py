@@ -137,9 +137,9 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
         raise DependencyMissingError("MLX dependencies are missing.")
     final_loss = 0.0
     try:
-        loaded_p: Any = load.__call__(model_name)
+        loaded_p: Any = load(model_name)
         policy_model: ModelType = cast(Any, loaded_p)[0] if isinstance(loaded_p, (tuple, list)) else loaded_p
-        loaded_r: Any = load.__call__(model_name)
+        loaded_r: Any = load(model_name)
         ref_model: ModelType = cast(Any, loaded_r)[0] if isinstance(loaded_r, (tuple, list)) else loaded_r
         optimizer = optim.AdamW(learning_rate=learning_rate)
         batch_size = getattr(config, "batch_size", 2)

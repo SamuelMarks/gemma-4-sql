@@ -1,9 +1,21 @@
 repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.0
+    hooks:
+      - id: ruff
+        args: [ --fix ]
+      - id: ruff-format
   - repo: local
     hooks:
       - id: tests-multi-env
         name: Run multi-env tests & aggregated coverage
         entry: bash -c "uvx --with tox-uv tox run -e core,coverage-report"
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: update-badges
+        name: Update doc and test coverage badges
+        entry: bash -c "uv run --extra dev python scripts/update_badges.py"
         language: system
         pass_filenames: false
         always_run: true

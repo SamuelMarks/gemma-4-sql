@@ -7,7 +7,10 @@ import sys
 from contextlib import redirect_stdout, suppress
 from pathlib import Path
 
-from interrogate.cli import main as interrogate_main
+try:
+    from interrogate.cli import main as interrogate_main
+except ImportError:
+    interrogate_main = None
 
 
 def get_color(pct: int) -> str:
@@ -90,10 +93,14 @@ def main() -> None:
         cov_matches = re.findall(r"TOTAL\s+\d+\s+\d+\s+(\d+)%", cov_out_str)
     cov_pct = int(cov_matches[-1]) if cov_matches else 0
 
-    doc_stdout = io.StringIO()
-    with redirect_stdout(doc_stdout), suppress(SystemExit):
-        interrogate_main(["-v", "src"])
-    doc_out_str = doc_stdout.getvalue()
+    if interrogate_main is not None:
+        doc_stdout = io.StringIO()
+        with redirect_stdout(doc_stdout), suppress(SystemExit):
+            interrogate_main(["-v", "src"])
+        doc_out_str = doc_stdout.getvalue()
+    else:
+        res = subprocess.run(["uvx", "interrogate", "-v", "src"], capture_output=True, text=True, check=False)
+        doc_out_str = res.stdout
     doc_match = re.search(r"actual: (\d+\.?\d*)%", doc_out_str)
     doc_pct = int(float(doc_match.group(1))) if doc_match else 0
     readme_path = Path("README.md")

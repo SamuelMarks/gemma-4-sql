@@ -25,10 +25,6 @@ def test_inference_compute_step_probs(monkeypatch):
             self.shape = s
             self.item = lambda: 0.1
 
-        def __getitem__(self, idx):
-            """Docstring for __getitem__."""
-            return self
-
     mock_jnp.zeros.return_value = MockOutput((2,))
     mock_jnp.log.return_value = MockOutput((2,))
 

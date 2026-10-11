@@ -40,21 +40,22 @@ def test_mlx_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_load_mlx_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     """Docstring for test_load_mlx_model_missing_deps."""
     monkeypatch.setattr(mlx_serve, "mx", None)
+    # We simulate what happens if mlx_lm is missing
+    # mlx_lm is required for load
+    # Let's mock mlx_lm load
+    import builtins
+
+    real_import = builtins.__import__
+
+    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
+        """Docstring for mock_import."""
+        if name == "mlx_lm":
+            raise ImportError("No module named mlx_lm")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", mock_import)
+    __import__("math")
     with pytest.raises(ImportError):
-        # We simulate what happens if mlx_lm is missing
-        # mlx_lm is required for load
-        # Let's mock mlx_lm load
-        import builtins
-
-        real_import = builtins.__import__
-
-        def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
-            """Docstring for mock_import."""
-            if name == "mlx_lm":
-                raise ImportError("No module named mlx_lm")
-            return real_import(name, globals, locals, fromlist, level)
-
-        monkeypatch.setattr(builtins, "__import__", mock_import)
         _load_mlx_model("test")
 
 
@@ -125,6 +126,7 @@ def test_load_mlx_model_cache_and_branches(monkeypatch):
         return orig_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import_single)
+    __import__("math")
     m3, t3 = mlx_serve._load_mlx_model("test_single")
     assert m3 == "model_only"
     assert t3 is None

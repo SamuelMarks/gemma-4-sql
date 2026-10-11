@@ -12,16 +12,16 @@ The system is composed of several key modules:
 
 ### 1.1 CLI & SDK Layer (`src/gemma_4_sql/cli.py`, `cli_*.py`, and `sdk/`)
 This is the entry point. The CLI maps shell commands directly to Python SDK functions. The SDK exposes high-level orchestration abstractions:
-*   `train_from_scratch`, `pretrain`, `sft`, `posttrain`, `dpo`
-*   `evaluate`, `export`, `generate`
-*   `agent`, `chat`, `serve`
-*   `rag`, `few_shot`, `etl`
+*   `train_from_scratch`, `pretrain_model`, `sft_model`, `posttrain_model`, `run_dpo`
+*   `evaluate`, `export_model`, `generate` (and `generate_sql`)
+*   `run_agentic_loop`, `chat_turn`, `serve_model`
+*   `build_rag_prompt`, `extract_schema_entities`, `retrieve_relevant_schema`, `build_few_shot_prompt`, `generate_few_shot_sql`, `etl_pretrain`, `etl_sft`, `etl_posttrain`
 
 ### 1.2 The Dispatcher (`models.py`)
 All high-level training commands pass through the dispatcher. Based on the `--backend` flag provided by the user, the dispatcher dynamically loads the corresponding backend module (e.g., `gemma_4_sql.backends.jax.train` or `gemma_4_sql.backends.pytorch.train`) and proxies the execution parameters.
 
 ### 1.3 Swappable Execution Backends (`backends/`)
-Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`) implements identical interfaces for training, exporting, and inference. This ensures that switching from a PyTorch local setup to a MaxText TPU pod is a simple flag change.
+Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`, `mlx`) implements identical interfaces for training, exporting, and inference. This ensures that switching from a PyTorch local setup to a MaxText TPU pod is a simple flag change.
 
 *Architectural Note: This codebase deliberately avoids abstracting or deduplicating core logic (like training loops or data loading) across different backends. The goal is to demonstrate and utilize the ecosystem-recommended, idiomatic ways of performing these tasks within each framework (e.g., using `grain` for JAX/MaxText/Keras vs. standard `DataLoaders` for PyTorch). As such, some boilerplate duplication across `backends/` is intentional and preferred over a non-standard meta-framework.*
 
@@ -117,5 +117,6 @@ To provide a unified MLOps experience, `gemma-4-sql` abstracts metric logging th
 *   **JAX / MaxText:** Emits metrics via `tensorboardX.SummaryWriter`.
 *   **Keras:** Uses standard `tensorflow.summary` writers.
 *   **PyTorch:** Uses `torch.utils.tensorboard.SummaryWriter`.
+*   **MLX:** Uses `mlx.utils.tensorboard.SummaryWriter`.
 
 This abstraction allows user scripts and internal training loops to simply call `log_metrics(metrics={"loss": 0.5}, step=100, log_dir="logs", backend="...")` without having to implement backend-specific tensorboard graph connections.

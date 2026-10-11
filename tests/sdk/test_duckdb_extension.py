@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from gemma_4_sql.sdk.duckdb_extension import embed_in_duckdb
 from tests.conftest import requires_duckdb
@@ -37,10 +38,11 @@ def test_embed_in_duckdb_success() -> None:
         assert "CREATE TABLE users" in kwargs["context"].ddl
 
 
-def test_embed_in_duckdb_missing(missing_dependency_context: Any) -> None:
+def test_embed_in_duckdb_missing(missing_dependency_context: Any) -> None:  # noqa: F821
     """Test when duckdb is missing."""
     with missing_dependency_context(["duckdb"]):
         import importlib
+
         import gemma_4_sql.sdk.duckdb_extension as de
 
         importlib.reload(de)

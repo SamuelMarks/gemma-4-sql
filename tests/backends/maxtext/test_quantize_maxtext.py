@@ -4,10 +4,6 @@ import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
-from tests.conftest import requires_maxtext
-
-pytestmark = requires_maxtext
-
 import numpy as np
 import pytest
 

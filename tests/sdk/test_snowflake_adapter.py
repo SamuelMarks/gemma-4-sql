@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from tests.utils.test_utils import FakeDBConnection, FakeDBCursor
+import pytest
+
+from tests.utils.test_utils import FakeDBConnection
 
 
 @pytest.fixture
@@ -32,21 +33,21 @@ async def test_snowflake_adapter_execution(fake_snowflake_module, monkeypatch) -
 
     with patch.dict("sys.modules", {"snowflake": mock_snowflake, "snowflake.connector": mock_snowflake.connector}):
         adapter = sa.SnowflakeAdapter("account", {})
-    
+
         # test connect and connect_async
         c1 = adapter.connect()
         assert c1 == conn
-    
+
         c2 = await adapter.connect_async()
         assert c2 == conn
-        
+
         # test error classes
         assert SnowflakeError in adapter.error_classes
-        
+
         # test error classes exception branch
         mock_snowflake.connector.errors.Error = 123
         assert Exception in adapter.error_classes
-    
+
         # test connect exception
         original_connector = mock_snowflake.connector
         del mock_snowflake.connector
@@ -54,7 +55,7 @@ async def test_snowflake_adapter_execution(fake_snowflake_module, monkeypatch) -
         with pytest.raises(ImportError, match="snowflake connect function could not be resolved"):
             adapter.connect()
         mock_snowflake.connector = original_connector
-    
+
         # execute_query_async delegates to sync
         conn.set_results([[(1, "apple")]])
         res = await adapter.execute_query_async("SELECT")
@@ -84,7 +85,7 @@ async def test_snowflake_adapter_missing_deps(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(sa, "snowflake", None)
     with pytest.raises(ImportError):
         sa.SnowflakeAdapter("path", {})
-    
+
     # Test error_classes import error branch
     with patch.dict("sys.modules", {"snowflake.connector": None}):
         # Mock __init__ to bypass connection init
@@ -108,14 +109,14 @@ def test_snowflake_adapter_schema(fake_snowflake_module, monkeypatch) -> None:
     with pytest.raises(Exception):
         adapter.setup_schema("FAIL")
     assert conn._transactions_rolled_back == 1
-    
+
     # Test missing commit/rollback attributes
     adapter.conn = MagicMock()
     del adapter.conn.commit
     del adapter.conn.rollback
-    
+
     adapter.setup_schema("CREATE TABLE t2 (a INT)")
-    
+
     adapter.conn.cursor.return_value.execute.side_effect = Exception("Mock error")
     with pytest.raises(Exception, match="Mock error"):
         adapter.setup_schema("FAIL2")

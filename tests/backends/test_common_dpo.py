@@ -127,6 +127,12 @@ def test_generic_dpo_loss_without_methods():
         """Docstring for log_sigmoid."""
         return SimpleTensor(x.val * 2)
 
+    # Test SimpleTensor * SimpleTensor (line 109)
+    t1 = SimpleTensor(2.0)
+    t2 = SimpleTensor(3.0)
+    t3 = t1 * t2
+    assert t3.val == 6.0
+
     loss, chosen_rewards, rejected_rewards = generic_dpo_loss(policy_chosen, policy_rejected, ref_chosen, ref_rejected, beta, log_sigmoid)
 
     assert loss.val == pytest.approx(-0.02)
@@ -187,3 +193,31 @@ def test_generic_run_training_epochs_no_len_dataloader():
 
     final_loss = generic_run_training_epochs(state, step_fn)
     assert final_loss == 1.5
+
+
+def test_dummy_tensor_edge_cases():
+    """Test edge cases in DummyTensor."""
+    # Line 24: DummyTensor * DummyTensor
+    t1 = DummyTensor(2.0)
+    t2 = DummyTensor(3.0)
+    t3 = t1 * t2
+    assert t3.value == 6.0
+
+    # Line 38 & 44: detach and mean when flags are false
+    t_no_detach = DummyTensor(1.0, has_detach=False)
+    with pytest.raises(AttributeError, match="no detach"):
+        t_no_detach.detach()
+
+    t_no_mean = DummyTensor(1.0, has_mean=False)
+    with pytest.raises(AttributeError, match="no mean"):
+        t_no_mean.mean()
+
+    # Lines 53-57: getattr fallbacks called explicitly
+    with pytest.raises(AttributeError):
+        _ = t_no_detach.detach
+
+    with pytest.raises(AttributeError):
+        _ = t_no_mean.mean
+
+    with pytest.raises(AttributeError):
+        _ = t1.nonexistent_attr

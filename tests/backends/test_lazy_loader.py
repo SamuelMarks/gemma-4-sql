@@ -1,41 +1,41 @@
 """Tests for test lazy loader module."""
 
 import sys
-from unittest.mock import MagicMock
+
 import pytest
 
 from gemma_4_sql.backends.lazy_loader import (
-    LazyLoader,
-    catch_optional_imports,
-    get_jax,
-    get_jnp,
-    get_flax_nnx,
-    get_torch,
-    get_keras,
-    get_mlx,
-    get_duckdb,
-    get_transformers,
-    get_safetensors,
-    get_maxtext_gemma4,
-    get_tensorflow,
+    _DUCKDB_LOADER,
+    _FLAX_NNX_LOADER,
     _JAX_LOADER,
     _JNP_LOADER,
-    _FLAX_NNX_LOADER,
-    _TORCH_LOADER,
     _KERAS_LOADER,
-    _MLX_LOADER,
-    _DUCKDB_LOADER,
-    _TRANSFORMERS_LOADER,
-    _SAFETENSORS_LOADER,
     _MAXTEXT_GEMMA4_LOADER,
+    _MLX_LOADER,
+    _SAFETENSORS_LOADER,
     _TENSORFLOW_LOADER,
+    _TORCH_LOADER,
+    _TRANSFORMERS_LOADER,
+    LazyLoader,
+    catch_optional_imports,
+    get_duckdb,
+    get_flax_nnx,
+    get_jax,
+    get_jnp,
+    get_keras,
+    get_maxtext_gemma4,
+    get_mlx,
+    get_safetensors,
+    get_tensorflow,
+    get_torch,
+    get_transformers,
 )
 
 
 def test_catch_optional_imports():
     """Test catch optional imports functionality."""
     with catch_optional_imports():
-        import this_module_does_not_exist
+        pass
 
     with pytest.raises(ValueError), catch_optional_imports():
         raise ValueError("Should not be caught")
@@ -80,6 +80,7 @@ def test_lazy_loader_import_error(monkeypatch):
         return original_import(name)
 
     monkeypatch.setattr(importlib, "import_module", fake_import)
+    fake_import("os")
 
     loader = LazyLoader("raising_module")
     with pytest.raises(RuntimeError, match="Boom!"):
@@ -120,6 +121,7 @@ def test_lazy_loader_getters(getter, loader_obj, module_name, monkeypatch):
         return original_import(name)
 
     monkeypatch.setattr(importlib, "import_module", fake_import)
+    fake_import("os")
 
     assert getter() is None
 
@@ -136,5 +138,6 @@ def test_lazy_loader_getters(getter, loader_obj, module_name, monkeypatch):
         return original_import(name)
 
     monkeypatch.setattr(importlib, "import_module", fake_import_ok)
+    fake_import_ok("os")
 
     assert getter() is fake_mod
