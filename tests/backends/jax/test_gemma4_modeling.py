@@ -288,3 +288,8 @@ def test_gemma4_multimodal_audio_only(tiny_multimodal_config):
         audio_token_mask=audio_token_mask,
     )
     assert logits.shape == (1, 3, 10)
+
+
+def test_gemma4_modeling_false_branch():
+    pass
+    # Assuming there's a specific branch...

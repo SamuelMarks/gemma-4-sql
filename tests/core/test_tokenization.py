@@ -200,3 +200,11 @@ def test_sql_tokenizer_custom_vocab_bounds() -> None:
     out_of_bound_ids = [-5, 0, 65, 255, 300]
     decoded = tok_small.decode(out_of_bound_ids)
     assert isinstance(decoded, str)
+
+
+def test_tokenizer_decode_invalid_type():
+    from gemma_4_sql.tokenization import SQLTokenizer
+
+    tokenizer = SQLTokenizer(vocab_size=256)
+    res = tokenizer.decode([65, "bad", 66])
+    assert res == "AB"

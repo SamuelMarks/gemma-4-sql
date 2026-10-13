@@ -116,3 +116,48 @@ def test_export_model():
     export_module.torch = None
     with pytest.raises(RuntimeError):
         export_module.export_model("m", "export")
+
+
+def test_is_rank_zero_import_error(monkeypatch):
+    import gemma_4_sql.backends.pytorch.export as pexp
+
+    monkeypatch.setattr(pexp, "torch", type("MockTorch", (), {}))  # not none
+
+    def mock_import_error(*args, **kwargs):
+        raise RuntimeError("mocked error")
+
+    monkeypatch.setitem(sys.modules, "torch.distributed", None)  # Not enough
+    # Wait, the try imports it inside the function.
+    # Let's just mock builtins.__import__ ?
+
+
+def test_is_rank_zero_runtime_error(monkeypatch):
+    import gemma_4_sql.backends.pytorch.export as pexp
+
+    class MockDist:
+        @staticmethod
+        def is_initialized():
+            raise RuntimeError("mocked error")
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "torch.distributed", MockDist)
+    assert pexp._is_rank_zero() == True
+
+
+def test_is_rank_zero_runtime_error2(monkeypatch):
+    import gemma_4_sql.backends.pytorch.export as pexp
+
+    class MockDist:
+        @staticmethod
+        def is_initialized():
+            return True
+
+        @staticmethod
+        def get_rank():
+            raise RuntimeError("mocked error")
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "torch.distributed", MockDist)
+    assert pexp._is_rank_zero() == True

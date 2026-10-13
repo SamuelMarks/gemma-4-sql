@@ -25,3 +25,31 @@ def test_translate_jax_to_pytorch():
 
     assert "some_other_param" in pytorch_state_dict
     assert torch.allclose(pytorch_state_dict["some_other_param"], torch.tensor([1.0, 2.0]))
+
+
+def test_translate_jax_to_pytorch_kernel_dim3():
+    import numpy as np
+
+    from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_pytorch
+
+    jax_params = {
+        "some.kernel": np.zeros((2, 3, 4)),
+    }
+    state = translate_jax_to_pytorch(jax_params)
+    assert "some.weight" in state
+    assert state["some.weight"].shape == (12, 2)  # (2, 12) transposed
+
+
+def test_translate_jax_to_pytorch_routed_experts():
+    import numpy as np
+
+    from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_pytorch
+
+    jax_params = {
+        "routed_experts.kernel": np.zeros((2, 3, 4)),
+    }
+    state = translate_jax_to_pytorch(jax_params)
+    # The 'kernel' is transposed so (2,3,4) -> (2,4,3)
+    assert "experts.0.weight" in state
+    assert state["experts.0.weight"].shape == (4, 3)
+    assert "experts.1.weight" in state
