@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 try:
     import mlx.core as _mx
 
-    mx: Any = _mx
+    mx: types.ModuleType | None = _mx
 except (ImportError, AttributeError):
     mx = None
 
@@ -41,10 +42,10 @@ def _load_mlx_model(model_name: str) -> tuple[Any, Any]:
     try:
         import mlx_lm
 
-        loaded: Any = mlx_lm.load(model_name)
+        loaded = mlx_lm.load(model_name)
         if isinstance(loaded, (tuple, list)):
             model: ModelType = cast(list[Any], loaded)[0]
-            tokenizer: Any = cast(list[Any], loaded)[1] if len(cast(list[Any], loaded)) > 1 else None
+            tokenizer = cast(list[Any], loaded)[1] if len(cast(list[Any], loaded)) > 1 else None
         else:
             model = loaded
             tokenizer = None

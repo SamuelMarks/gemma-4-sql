@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
@@ -17,8 +18,8 @@ try:
     import torch as _torch
     from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
 
-    torch: Any = _torch
-    AutoModelForCausalLM: Any = _AutoModelForCausalLM
+    torch: types.ModuleType | None = _torch
+    AutoModelForCausalLM: Any | None = _AutoModelForCausalLM
 except (ImportError, AttributeError):
     torch = None
     AutoModelForCausalLM = None

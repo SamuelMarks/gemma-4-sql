@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -13,9 +14,9 @@ try:
     import jax.numpy as _jnp
     import orbax.checkpoint as _ocp
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    ocp: Any = _ocp
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    ocp: types.ModuleType | None = _ocp
 except (ImportError, AttributeError):
     jax = None
     jnp = None
@@ -24,7 +25,7 @@ except (ImportError, AttributeError):
 try:
     import maxtext.models.gemma4 as _gemma4
 
-    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
+    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     Gemma4Model = None
 
@@ -52,7 +53,7 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
 
     Path(export_path).mkdir(parents=True, exist_ok=True)
 
-    weights: Any = kwargs.get("params", kwargs.get("weights"))
+    weights = kwargs.get("params", kwargs.get("weights"))
     if weights is None:
         if Gemma4Model is None:
             raise DependencyMissingError("MaxText dependency (maxtext.models.gemma4.Gemma4Model) is missing.")

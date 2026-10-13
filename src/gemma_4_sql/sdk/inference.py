@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.sdk.registry import get_backend
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -38,7 +40,7 @@ def generate(
         A dictionary containing the generated SQL and generation metadata.
 
     """
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+
     backend_impl = get_backend(backend)
     result = backend_impl.generate_sql(
         model_name,

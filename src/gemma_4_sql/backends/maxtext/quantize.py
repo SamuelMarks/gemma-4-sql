@@ -13,6 +13,7 @@ Implements:
 from __future__ import annotations
 
 import logging
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
@@ -26,8 +27,8 @@ try:
     import jax as _jax
     import jax.numpy as _jnp
 
-    jax: Any = _jax
-    jnp: Any = _jnp
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
 except (ImportError, AttributeError):
     jax = None
     jnp = None
@@ -35,14 +36,14 @@ except (ImportError, AttributeError):
 try:
     import aqt.jax.v2 as _aqt
 
-    aqt: Any = _aqt
+    aqt: types.ModuleType | None = _aqt
 except (ImportError, AttributeError):
     aqt = None
 
 try:
     import maxtext.models.gemma4 as _gemma4
 
-    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
+    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     Gemma4Model = None
 

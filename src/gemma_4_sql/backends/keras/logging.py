@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import types
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -10,7 +11,7 @@ if TYPE_CHECKING:
 try:
     import tensorflow as _tf
 
-    tf: Any = _tf
+    tf: types.ModuleType | None = _tf
 except (ImportError, AttributeError):
     tf = None
 

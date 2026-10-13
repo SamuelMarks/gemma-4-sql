@@ -14,26 +14,16 @@ import gemma_4_sql.backends.keras.quantize as q
 
 def test_module_load_import_error(monkeypatch):
     """Docstring for test_module_load_import_error."""
-    with open(q.__file__) as f:
-        code = f.read()
+    import importlib
+    import sys
+    from unittest.mock import patch
 
-    import builtins
+    with patch.dict(sys.modules, {"keras": None, "numpy": None}):
+        importlib.reload(q)
+        assert getattr(q, "keras", None) is None
+        assert getattr(q, "np", None) is None
 
-    orig_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name in ("keras", "numpy"):
-            raise ImportError("simulated missing import")
-        return orig_import(name, *args, **kwargs)
-
-    namespace = {"__name__": "mock_quantize", "__builtins__": dict(builtins.__dict__)}
-    namespace["__builtins__"]["__import__"] = mock_import
-
-    exec(code, namespace)
-
-    assert namespace.get("keras") is None
-    assert namespace.get("np") is None
+    importlib.reload(q)
 
 
 def test_quantize_layer_weights(monkeypatch):

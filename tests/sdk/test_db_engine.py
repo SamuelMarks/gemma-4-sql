@@ -38,7 +38,7 @@ def test_db_engine_unsupported() -> None:
 def test_db_engine_safety() -> None:
     """Test _validate_safety against malicious SQL."""
     engine = LiveDatabaseEngine(db_type="sqlite", db_path=":memory:", read_only=True)
-    engine.execute_query("CREATE TABLE t (id INT)")  # setup schema
+    engine.setup_schema("CREATE TABLE t (id INT)")  # setup schema
 
     # test safe query
     suc, res, err = engine.execute_with_feedback("SELECT * FROM t")

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
+from gemma_4_sql.sdk.registry import get_backend
 
 MAX_ERR_LEN = 500
 if TYPE_CHECKING:
@@ -102,10 +103,7 @@ async def _process_single_prompt(
         if context.multimodal_context is not None:
             other_kwargs["multimodal_context"] = context.multimodal_context
 
-        try:
-            gen_res = backend_impl.generate_sql(model_name, current_prompt, beam_width=b_width, max_length=m_len, **other_kwargs)
-        except TypeError:
-            gen_res = backend_impl.generate_sql(model_name, current_prompt)
+        gen_res = backend_impl.generate_sql(model_name, current_prompt, beam_width=b_width, max_length=m_len, **other_kwargs)
         sql = str(gen_res.get("sql", ""))
         confidence_score = float(str(gen_res.get("confidence_score", 1.0)))
         if context.min_confidence and confidence_score < context.min_confidence:
@@ -163,7 +161,7 @@ def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "j
     db_kwargs = kwargs.get("db_kwargs")
     gen_kwargs = {k: v for k, v in kwargs.items() if k != "db_kwargs"}
     engine = LiveDatabaseEngine(db_path=context.db_path, ddl=context.ddl, db_type=context.db_type, db_kwargs=db_kwargs)
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+
     backend_impl = get_backend(backend)
     prompts = prompt if isinstance(prompt, list) else [prompt]
 
@@ -193,3 +191,6 @@ def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "j
     finally:
         engine.close()
     return results if isinstance(prompt, list) else results[0]
+
+
+__all__ = ["MAX_ERR_LEN", "AgentContext", "run_agentic_loop"]

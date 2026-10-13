@@ -15,7 +15,7 @@ repos:
         always_run: true
       - id: update-badges
         name: Update doc and test coverage badges
-        entry: bash -c "uv run --extra dev python scripts/update_badges.py"
+        entry: bash -c "rm -rf .venv && uv run --extra dev python scripts/update_badges.py"
         language: system
         pass_filenames: false
         always_run: true

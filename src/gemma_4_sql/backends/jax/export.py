@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -13,9 +14,9 @@ try:
     import jax.numpy as _jnp
     import orbax.checkpoint as _ocp
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    ocp: Any = _ocp
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    ocp: types.ModuleType | None = _ocp
 except (ImportError, AttributeError):
     jax = None
     jnp = None

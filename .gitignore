@@ -175,3 +175,13 @@ find_deleter.py
 *.patch
 b/
 bar/
+
+# Accidental SQL DDL and temporary test metrics
+*.jsonl
+CREATE TABLE*
+*.db
+*.sqlite
+*.sqlite3
+*.db3
+test/
+

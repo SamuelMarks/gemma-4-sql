@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import types
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
@@ -22,11 +23,11 @@ try:
     from fastapi import Request as _Request
     from fastapi.responses import JSONResponse as _JSONResponse
 
-    uvicorn: Any = _uvicorn
-    FastAPI: Any = _FastAPI
-    HTTPException: Any = _HTTPException
-    Request: Any = _Request
-    JSONResponse: Any = _JSONResponse
+    uvicorn: types.ModuleType | None = _uvicorn
+    FastAPI: Any | None = _FastAPI
+    HTTPException: Any | None = _HTTPException
+    Request: Any | None = _Request
+    JSONResponse: Any | None = _JSONResponse
 except (ImportError, AttributeError):
     uvicorn = None
     FastAPI = None
@@ -202,7 +203,7 @@ def create_common_app(
             except RuntimeError:
                 worker_task = None
 
-        data: Any = await request.json()
+        data = await request.json()
         validated_req = GenerateRequest.from_dict(cast(dict[str, Any], data))
         prompt = validated_req.prompt
         if validated_req.image_base64 or validated_req.audio_base64 or validated_req.image_path or validated_req.audio_path:

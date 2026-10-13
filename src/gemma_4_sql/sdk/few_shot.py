@@ -161,3 +161,6 @@ def generate_few_shot_sql(
         "status": gen_res.get("status", "success"),
         "num_examples": prompt_res.get("num_examples", 0),
     }
+
+
+__all__ = ["build_few_shot_prompt", "generate_few_shot_sql", "select_relevant_examples"]

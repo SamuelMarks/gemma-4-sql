@@ -73,7 +73,7 @@ class Gemma4RMSNorm(nnx.Module):
         """
         self.eps = eps
         self.with_scale = with_scale
-        self.dtype: Any = kwargs.get("dtype", jnp.float32)
+        self.dtype = kwargs.get("dtype", jnp.float32)
         if self.with_scale:
             self.scale = nnx.Param(jax.nn.initializers.zeros(rngs.params(), (dim,), dtype=self.dtype))
         else:

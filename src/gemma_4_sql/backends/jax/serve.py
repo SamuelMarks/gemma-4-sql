@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+import types
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
 
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 try:
     import jax as _jax
 
-    jax: Any = _jax
+    jax: types.ModuleType | None = _jax
 except (ImportError, AttributeError):
     jax = None
 

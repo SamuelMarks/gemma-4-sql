@@ -52,7 +52,11 @@ class SQLTokenizer:
         """
         if self.hf_tokenizer is not None and hasattr(self.hf_tokenizer, "get_vocab"):
             return dict(self.hf_tokenizer.get_vocab())
-        return {chr(b) if 32 <= b <= 126 else f"<byte_{b}>": b for b in range(min(256, self.vocab_size))}
+
+        vocab = {}
+        for b in range(self.vocab_size):
+            vocab[chr(b) if 32 <= b <= 126 else f"<byte_{b}>"] = b
+        return vocab
 
     def encode(self, text: str) -> list[int]:
         """Encode a string into a list of token IDs.
@@ -67,13 +71,8 @@ class SQLTokenizer:
         if self.hf_tokenizer is not None:
             res: Any = self.hf_tokenizer.encode(text, add_special_tokens=False)
             return cast(list[int], res)
-        try:
-            return list(text.encode("utf-8"))
-        except (UnicodeEncodeError, AttributeError):
-            try:
-                return list(str(text).encode("utf-8", errors="replace"))
-            except (UnicodeEncodeError, AttributeError, RuntimeError):
-                return [ord(c) % self.vocab_size for c in str(text)]
+
+        return [b % self.vocab_size for b in str(text).encode("utf-8", errors="replace")]
 
     def decode(self, tokens: list[int]) -> str:
         """Decode a list of token IDs back into a string.
@@ -87,7 +86,16 @@ class SQLTokenizer:
         """
         if self.hf_tokenizer is not None:
             return str(self.hf_tokenizer.decode(tokens))
-        try:
-            return bytes([int(t) % 256 for t in tokens]).decode("utf-8", errors="replace")
-        except (ValueError, TypeError):
-            return "".join(chr(int(t) % self.vocab_size) for t in tokens if hasattr(t, "__int__"))
+
+        valid_bytes = []
+        for t in tokens:
+            try:
+                t_int = int(t)
+            except (ValueError, TypeError):
+                continue
+
+            # Map negative and out-of-bounds to valid byte range
+            # using modulo operation
+            valid_bytes.append(t_int % min(256, self.vocab_size))
+
+        return bytes(valid_bytes).decode("utf-8", errors="replace")

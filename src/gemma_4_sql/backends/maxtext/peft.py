@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -20,10 +21,10 @@ try:
     import numpy as _np
     import optax as _optax
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    np: Any = _np
-    optax: Any = _optax
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    np: types.ModuleType | None = _np
+    optax: types.ModuleType | None = _optax
 except (ImportError, AttributeError):
     jax = None
     jnp = None
@@ -33,7 +34,7 @@ except (ImportError, AttributeError):
 try:
     import maxtext.models.gemma4 as _gemma4
 
-    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
+    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     Gemma4Model = None
 
@@ -45,7 +46,7 @@ def transform_params_to_lora(
     lora_alpha: float = 16.0,
     lora_dropout: float = 0.05,
     *,
-    rng: Any = None,
+    rng=None,
 ) -> tuple[dict[str, Any], int]:
     """Transform a MaxText parameter PyTree by injecting low-rank adapter matrices.
 
@@ -93,7 +94,7 @@ def transform_params_to_lora(
                 v_dict = cast(dict[str, Any], v)
                 # Check if this leaf dictionary represents a target projection module containing 'kernel'
                 if "kernel" in v_dict and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in target_modules):
-                    kernel: Any = v_dict["kernel"]
+                    kernel = v_dict["kernel"]
                     d_in, d_out = kernel.shape
                     scale_init = 1.0 / math.sqrt(lora_r)
                     rng, sub_rng = jax.random.split(rng)
@@ -390,7 +391,7 @@ def apply_lora(
             model = Gemma4Model(model_name)
             rng = jax.random.PRNGKey(0)
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-            params_any: Any = model.init(rng, dummy_input)
+            params_any = model.init(rng, dummy_input)
             params = cast(dict[str, Any], params_any) if isinstance(params_any, dict) else {}
 
         params, injected_count = transform_params_to_lora(

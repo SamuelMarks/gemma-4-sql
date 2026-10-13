@@ -56,8 +56,8 @@ def test_load_mlx_model_and_device():
     benchmark_module.mx = mock_mx
     benchmark_module.load = mock_load
 
-    # Mock __call__ attribute specifically if it's accessed that way
-    mock_load.__call__ = MagicMock(return_value=["model", "tokenizer"])
+    # Mock return_value specifically
+    mock_load.return_value = ["model", "tokenizer"]
 
     # cpu
     model, device = benchmark_module._load_mlx_model_and_device("model", "cpu")
@@ -70,7 +70,7 @@ def test_load_mlx_model_and_device():
     assert device == "gpu"
 
     # not tuple
-    mock_load.__call__ = MagicMock(return_value="model_only")
+    mock_load.return_value = "model_only"
     model, device = benchmark_module._load_mlx_model_and_device("model", "gpu")
     assert model == "model_only"
 

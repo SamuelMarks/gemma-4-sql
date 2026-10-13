@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.type_hints import ModelType, TensorType
@@ -20,11 +21,11 @@ try:
     from .gemma4 import Gemma4Config as _Gemma4Config
     from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    nnx: Any = _nnx
-    Gemma4Config: Any = _Gemma4Config
-    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    nnx: types.ModuleType | None = _nnx
+    Gemma4Config: Any | None = _Gemma4Config
+    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
 except (ImportError, AttributeError):
     jax = None
     jnp = None
@@ -157,7 +158,7 @@ def quantize_awq(
     # Determine channel dimension (first axis in Flax NNX kernel: in_features)
     in_channels = tensor.shape[0]
 
-    act_magnitude: Any = None
+    act_magnitude = None
     if channel_activations is not None:
         if hasattr(channel_activations, "ndim") and channel_activations.ndim > 1 and channel_activations.shape[-1] == in_channels:
             act_magnitude = compute_channel_activation_statistics(channel_activations)

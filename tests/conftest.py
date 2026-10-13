@@ -1,3 +1,5 @@
+import pytest_asyncio
+
 """Global pytest fixtures for gemma-4-sql tests."""
 
 import os
@@ -53,7 +55,7 @@ def in_memory_duckdb() -> Generator[Any, None, None]:
     conn.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def in_memory_sqlite() -> AsyncGenerator[Any, None]:
     """Provide an isolated in-memory SQLite / aiosqlite database.
 

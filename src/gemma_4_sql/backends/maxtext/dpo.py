@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
@@ -21,10 +22,10 @@ try:
     import maxtext.models.gemma4 as _gemma4
     import optax as _optax
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    optax: Any = _optax
-    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    optax: types.ModuleType | None = _optax
+    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     jax, jnp, optax, Gemma4Model = None, None, None, None
     jax = None

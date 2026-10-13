@@ -10,9 +10,16 @@ from gemma_4_sql.backends.keras.serve import serve_model
 from gemma_4_sql.exceptions import DependencyMissingError
 
 
-def test_serve_model() -> None:
+def test_serve_model(monkeypatch) -> None:
     """Docstring for test_serve_model."""
-    res = serve_model("dummy_model", port=8080, max_batch_size=128)
+    from unittest.mock import MagicMock
+
+    import gemma_4_sql.backends.keras.serve as serve_module
+
+    monkeypatch.setattr(serve_module, "tf", MagicMock())
+    monkeypatch.setattr(serve_module, "keras", MagicMock())
+
+    res = serve_module.serve_model("dummy_model", port=8080, max_batch_size=128)
     assert res["status"] == "running_keras_serve"
     assert res["backend"] == "keras"
     assert res["model"] == "dummy_model"

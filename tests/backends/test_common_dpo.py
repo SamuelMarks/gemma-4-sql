@@ -32,28 +32,20 @@ class DummyTensor:
         """Docstring for __neg__."""
         return DummyTensor(-self.value, self.has_detach, self.has_mean)
 
-    def detach(self):
-        """Docstring for detach."""
-        if not self.has_detach:
-            raise AttributeError("no detach")
-        return DummyTensor(self.value, self.has_detach, self.has_mean)
-
-    def mean(self):
-        """Docstring for mean."""
-        if not self.has_mean:
-            raise AttributeError("no mean")
-        return self.value
-
     def item(self):
         """Docstring for item."""
         return self.value
 
     def __getattr__(self, name):
         """Docstring for __getattr__."""
-        if name == "detach" and not self.has_detach:
-            raise AttributeError
-        if name == "mean" and not self.has_mean:
-            raise AttributeError
+        if name == "detach":
+            if not self.has_detach:
+                raise AttributeError("no detach")
+            return lambda: DummyTensor(self.value, self.has_detach, self.has_mean)
+        if name == "mean":
+            if not self.has_mean:
+                raise AttributeError("no mean")
+            return lambda: self.value
         raise AttributeError(name)
 
 

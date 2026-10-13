@@ -81,7 +81,7 @@ def _make_spec(*partitions: Any) -> PartitionSpec:
         PartitionSpec: Created PartitionSpec instance.
 
     """
-    spec_cls: Any = PartitionSpec
+    spec_cls = PartitionSpec
     return cast(PartitionSpec, spec_cls(*partitions))
 
 

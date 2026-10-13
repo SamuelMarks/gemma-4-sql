@@ -21,20 +21,20 @@ def test_mlx_imports():
     assert mlx_init.get_trainer() == "mlx_trainer"
 
 
-def test_mlx_logging_missing_tb(monkeypatch):
+def test_mlx_logging_missing_tb(monkeypatch, tmp_path):
     """Docstring for test_mlx_logging_missing_tb."""
     import gemma_4_sql.backends.mlx.logging as m_log
 
     monkeypatch.setattr(m_log, "SummaryWriter", None)
-    res = m_log.log_metrics({"loss": 1.0}, 1, "test")
+    res = m_log.log_metrics({"loss": 1.0}, 1, str(tmp_path / "test"))
     assert "backend_unavailable" in res["status"]
 
 
-def test_mlx_logging_success(monkeypatch):
+def test_mlx_logging_success(monkeypatch, tmp_path):
     """Docstring for test_mlx_logging_success."""
     import gemma_4_sql.backends.mlx.logging as m_log
 
     mock_sw = MagicMock()
     monkeypatch.setattr(m_log, "SummaryWriter", mock_sw)
-    res = m_log.log_metrics({"loss": 1.0}, 1, "test")
+    res = m_log.log_metrics({"loss": 1.0}, 1, str(tmp_path / "test"))
     assert res["status"] == "success"

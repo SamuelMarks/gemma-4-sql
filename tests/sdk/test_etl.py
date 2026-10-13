@@ -75,3 +75,28 @@ def test_etl_posttrain(monkeypatch: pytest.MonkeyPatch) -> None:
     res = etl_posttrain(config, backend="maxtext")
     assert res["dataset"] == "dummy/data"
     assert res["batch_size"] == 16
+
+
+def test_etl_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test etl defaults functionality."""
+    from gemma_4_sql.constants import DEFAULT_POSTTRAIN_DATASET, DEFAULT_SFT_DATASET
+    from gemma_4_sql.sdk import etl
+
+    monkeypatch.setattr(etl, "_route_backend", lambda c, b: (c, b))
+
+    from gemma_4_sql.type_hints import ETLConfig
+
+    res = etl.etl_pretrain(ETLConfig(dataset_name="d", split="train"))
+    assert res[0].dataset_name == "d"
+    res_none = etl.etl_pretrain(None)
+    assert res_none[0].dataset_name == "my-custom-dataset"
+
+    res = etl.etl_sft(ETLConfig(dataset_name="d2", split="train"))
+    assert res[0].dataset_name == "d2"
+    res_none = etl.etl_sft(None)
+    assert res_none[0].dataset_name == DEFAULT_SFT_DATASET
+
+    res = etl.etl_posttrain(ETLConfig(dataset_name="d3", split="train"))
+    assert res[0].dataset_name == "d3"
+    res_none = etl.etl_posttrain(None)
+    assert res_none[0].dataset_name == DEFAULT_POSTTRAIN_DATASET

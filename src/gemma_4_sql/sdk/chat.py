@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.sdk.registry import get_backend
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
@@ -28,7 +30,7 @@ def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, b
         RuntimeError: If chat turn execution fails.
 
     """
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+
     backend_impl = get_backend(backend)
     try:
         full_prompt = ""
@@ -47,3 +49,6 @@ def chat_turn(model_name: str, history: list[dict[str, str]], new_prompt: str, b
     updated_history = list(history)
     updated_history.extend(({"role": "user", "content": new_prompt}, {"role": "assistant", "content": response}))
     return {"backend": backend, "model": model_name, "response": response, "history": updated_history, "status": status}
+
+
+__all__ = ["chat_turn"]

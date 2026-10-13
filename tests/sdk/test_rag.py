@@ -396,15 +396,29 @@ def test_rag_bm25_search() -> None:
 
 
 def test_rag_successful_imports():
-    """Test rag successful imports."""
+    """Test rag successful imports and semantic search."""
     import sys
     from unittest.mock import MagicMock, patch
 
     mock_st = MagicMock()
+    mock_st_class = MagicMock()
+    mock_st.SentenceTransformer = mock_st_class
+
+    # Mock encode to return 2D array of vectors
+    mock_model = MagicMock()
+    import numpy as np
+
+    mock_model.encode.side_effect = lambda texts: np.array([[1.0, 0.0]] * len(texts))
+    mock_st_class.return_value = mock_model
+
     mock_smp = MagicMock()
+    # Mock cosine_similarity to return a 2D array of scores
+    mock_smp.cosine_similarity.return_value = np.array([[0.9, 0.1]])
+
     mock_sklearn = MagicMock()
     mock_sklearn.metrics = MagicMock()
     mock_sklearn.metrics.pairwise = mock_smp
+    mock_sklearn.metrics.pairwise.cosine_similarity = mock_smp.cosine_similarity
 
     with patch.dict(
         sys.modules,
@@ -418,5 +432,13 @@ def test_rag_successful_imports():
         sys.modules.pop("gemma_4_sql.sdk.rag", None)
         import gemma_4_sql.sdk.rag as rag_module
 
-        assert rag_module.SentenceTransformer is not None
-        assert rag_module.cosine_similarity is not None
+        schema = {"table1": ["col1"], "table2": ["col2"]}
+        res = rag_module._semantic_search("query", schema, ["table1", "table2"], top_k_tables=1)
+
+        # Since table1 has score 0.9 and table2 has 0.1, table1 should be first
+        assert res == ["table1"]
+
+        # Verify encode was called with correct inputs
+        assert mock_model.encode.call_count == 2
+
+        mock_smp.cosine_similarity.assert_called_once()

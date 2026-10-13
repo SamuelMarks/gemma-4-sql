@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.sdk.registry import get_backend
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 
@@ -26,5 +28,8 @@ def apply_peft(model_name: str, target_modules: list[str] | None = None, lora_r:
     backend = kwargs.get("backend", "jax")
     if target_modules is None:
         target_modules = ["q_proj", "v_proj"]
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+
     return get_backend(backend).apply_lora(model_name, target_modules, lora_r, lora_alpha, lora_dropout)
+
+
+__all__ = ["apply_peft"]

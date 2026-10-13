@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
@@ -17,15 +18,15 @@ logger = logging.getLogger(__name__)
 try:
     import mlx.core as _mx
 
-    mx: Any = _mx
+    mx: types.ModuleType | None = _mx
 except (ImportError, AttributeError):
     mx = None
 
 try:
     import mlx_lm
 
-    load: Any = getattr(mlx_lm, "load", None)
-    generate: Any = getattr(mlx_lm, "generate", None)
+    load = getattr(mlx_lm, "load", None)
+    generate = getattr(mlx_lm, "generate", None)
 except (ImportError, AttributeError):
     load = None
     generate = None
@@ -207,9 +208,9 @@ def generate_sql(
     sql = ""
     try:
         logger.info("Generating with MLX %s (beam_width=%d)", model_name, beam_width)
-        loaded: Any = load(model_name)
+        loaded = load(model_name)
         model: ModelType = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
-        tokenizer: Any = cast(Any, loaded)[1] if isinstance(loaded, (tuple, list)) and len(cast(list[Any], loaded)) > 1 else None
+        tokenizer = cast(Any, loaded)[1] if isinstance(loaded, (tuple, list)) and len(cast(list[Any], loaded)) > 1 else None
         eos_id_arg = kwargs.get("eos_token_id")
         eos_id = int(eos_id_arg) if isinstance(eos_id_arg, (int, str, float)) else None
         sql, confidence_score = mlx_beam_search(

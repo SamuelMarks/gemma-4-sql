@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
@@ -18,9 +19,9 @@ try:
     import jax.numpy as _jnp
     import maxtext.models.gemma4 as _gemma4
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     jax = None
     jnp = None

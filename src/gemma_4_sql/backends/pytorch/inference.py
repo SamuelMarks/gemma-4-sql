@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
@@ -17,9 +18,9 @@ try:
     from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
     from transformers import AutoTokenizer as _AutoTokenizer
 
-    torch: Any = _torch
-    AutoModelForCausalLM: Any = _AutoModelForCausalLM
-    AutoTokenizer: Any = _AutoTokenizer
+    torch: types.ModuleType | None = _torch
+    AutoModelForCausalLM: Any | None = _AutoModelForCausalLM
+    AutoTokenizer: Any | None = _AutoTokenizer
 except (ImportError, AttributeError):
     torch = None
     AutoModelForCausalLM = None

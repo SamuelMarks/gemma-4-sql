@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import struct
+import types
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
@@ -19,14 +20,14 @@ logger = logging.getLogger(__name__)
 try:
     import numpy as _np
 
-    np: Any = _np
+    np: types.ModuleType | None = _np
 except (ImportError, AttributeError):
     np = None
 
 try:
     import torch as _torch
 
-    torch: Any = _torch
+    torch: types.ModuleType | None = _torch
 except (ImportError, AttributeError):
     torch = None
 
@@ -319,7 +320,7 @@ def extract_pytorch_state_dict(model_or_name: Any) -> dict[str, Any]:
             try:
                 from transformers import AutoModelForCausalLM
 
-                mod: Any = AutoModelForCausalLM.from_pretrained(str(p), local_files_only=True)
+                mod = AutoModelForCausalLM.from_pretrained(str(p), local_files_only=True)
                 state_dict_res = mod.state_dict()
                 raw_dict = {str(k): v for k, v in state_dict_res.items()}
                 loaded = True

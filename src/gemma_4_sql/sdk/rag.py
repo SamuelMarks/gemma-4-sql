@@ -309,3 +309,6 @@ def build_rag_prompt(prompt: str, ddl: str | None = None) -> str:
     schema = extract_schema_entities(ddl)
     context = retrieve_relevant_schema(prompt, schema)
     return f"{context}\n\n-- Request:\n-- {prompt}\n\nSELECT"
+
+
+__all__ = ["MIN_SIMILARITY", "build_rag_prompt", "extract_schema_entities", "retrieve_relevant_schema"]

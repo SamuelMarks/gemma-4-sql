@@ -263,28 +263,18 @@ def test_generate_sql_outputs_else_block(monkeypatch):
 
 def test_module_load_import_error():
     """Docstring for test_module_load_import_error."""
+    import importlib
+    import sys
+    from unittest.mock import patch
+
     import gemma_4_sql.backends.keras.inference as q
 
-    with open(q.__file__) as f:
-        code = f.read()
+    with patch.dict(sys.modules, {"keras": None, "tensorflow": None}):
+        importlib.reload(q)
+        assert q.keras is None
+        assert getattr(q, "tf", None) is None
 
-    import builtins
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name in ("keras", "tensorflow"):
-            raise ImportError("simulated missing import")
-        return orig_import(name, *args, **kwargs)
-
-    namespace = {"__name__": "mock_inference", "__builtins__": dict(builtins.__dict__)}
-    namespace["__builtins__"]["__import__"] = mock_import
-
-    exec(code, namespace)
-
-    assert namespace.get("keras") is None
-    assert namespace.get("tf") is None
+    importlib.reload(q)
 
 
 def test_module_load_import_error_coverage(monkeypatch):

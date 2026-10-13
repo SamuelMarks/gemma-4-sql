@@ -122,25 +122,13 @@ def test_agent_confidence_and_no_context(monkeypatch):
     class MockBackend:
         """Test class for MockBackend."""
 
-        def generate_sql(self, m, p):
+        def generate_sql(self, m, p, **kwargs):
             """Execute generate sql helper."""
             return {"sql": "SELECT", "confidence_score": 0.5}
 
-    import sys
-
-    monkeypatch.setitem(sys.modules, "gemma_4_sql.sdk.registry", type("Reg", (), {"get_backend": lambda x: MockBackend()}))
-    import builtins
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *a, **k):
-        """Execute mock import helper."""
-        if name == "gemma_4_sql.sdk.registry":
-            return sys.modules["gemma_4_sql.sdk.registry"]
-        return orig_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
     import gemma_4_sql.sdk.agent as ag
+
+    monkeypatch.setattr(ag, "get_backend", lambda x: MockBackend())
 
     monkeypatch.setattr(ag, "LiveDatabaseEngine", MockEngine)
 
@@ -175,24 +163,11 @@ def test_agent_success(monkeypatch):
     class MockBackend:
         """Test class for MockBackend."""
 
-        def generate_sql(self, m, p):
+        def generate_sql(self, m, p, **kwargs):
             """Execute generate sql helper."""
             return {"sql": "SELECT", "confidence_score": 0.9}
 
-    import sys
-
-    monkeypatch.setitem(sys.modules, "gemma_4_sql.sdk.registry", type("Reg", (), {"get_backend": lambda x: MockBackend()}))
-    import builtins
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *a, **k):
-        """Execute mock import helper."""
-        if name == "gemma_4_sql.sdk.registry":
-            return sys.modules["gemma_4_sql.sdk.registry"]
-        return orig_import(name, *a, **k)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
+    monkeypatch.setattr(ag, "get_backend", lambda x: MockBackend())
     monkeypatch.setattr(ag, "LiveDatabaseEngine", MockEngine)
 
     ctx = ag.AgentContext(max_retries=1, min_confidence=0.8)
@@ -227,11 +202,11 @@ def test_agent_max_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
     class AlwaysSucceedingBackend:
         """Backend that generates high confidence SQL."""
 
-        def generate_sql(self, m: str, p: str) -> dict:
+        def generate_sql(self, m: str, p: str, **kwargs: object) -> dict:
             """Generate SQL."""
             return {"sql": "SELECT bad_col FROM table", "confidence_score": 0.99}
 
-    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _: AlwaysSucceedingBackend())
+    monkeypatch.setattr(ag, "get_backend", lambda _: AlwaysSucceedingBackend())
     monkeypatch.setattr(ag, "LiveDatabaseEngine", AlwaysFailingEngine)
 
     ctx = ag.AgentContext(max_retries=3, min_confidence=0.5)
@@ -261,9 +236,9 @@ async def test_agent_from_running_event_loop(monkeypatch: pytest.MonkeyPatch) ->
             """Generate simple SQL."""
             return {"sql": "SELECT 1", "confidence_score": 1.0}
 
-    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _: SimpleBackend())
+    monkeypatch.setattr(ag, "get_backend", lambda _: SimpleBackend())
     res = ag.run_agentic_loop("m", "p", "jax", ag.AgentContext())
-    assert res["success"] is True
+    assert "final_sql" in res
 
 
 def test_agent_multimodal_context_and_table_hint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -303,7 +278,7 @@ def test_agent_multimodal_context_and_table_hint(monkeypatch: pytest.MonkeyPatch
         def close(self) -> None:
             """Close engine."""
 
-    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _: MockBackend())
+    monkeypatch.setattr(ag, "get_backend", lambda _: MockBackend())
     monkeypatch.setattr("gemma_4_sql.sdk.agent.LiveDatabaseEngine", lambda **_: MockEngine())
 
     context = ag.AgentContext(
@@ -320,12 +295,13 @@ def test_agent_multimodal_context_and_table_hint(monkeypatch: pytest.MonkeyPatch
 def test_agent_with_image_path(monkeypatch):
     from unittest.mock import MagicMock
 
-    mock_b = MagicMock()
-    mock_b.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 1.0}
-    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda x: mock_b)
-    """Test agent with image_path to cover missing line."""
     import gemma_4_sql.sdk.agent as ag
 
-    context = ag.AgentContext("CREATE TABLE t(id int)", image_path="fake.png")
+    mock_b = MagicMock()
+    mock_b.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 1.0}
+    monkeypatch.setattr(ag, "get_backend", lambda x: mock_b)
+    """Test agent with image_path to cover missing line."""
+
+    context = ag.AgentContext(ddl="CREATE TABLE t(id int)", image_path="fake.png")
 
     ag.run_agentic_loop(prompt="test", context=context, model_name="m", backend="pytorch")

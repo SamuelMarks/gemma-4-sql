@@ -9,6 +9,7 @@ Supports:
 from __future__ import annotations
 
 import logging
+import types
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
@@ -25,8 +26,8 @@ try:
     import mlx.core as _mlx
     import numpy as _np
 
-    mlx: Any = _mlx
-    np: Any = _np
+    mlx: types.ModuleType | None = _mlx
+    np: types.ModuleType | None = _np
 except (ImportError, AttributeError):
     mlx = None
     np = None
@@ -195,7 +196,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
         model: ModelType = kwargs.get("model")  # type: ignore # Justified: Dynamic backend protocol typing
         if model is None:
             try:
-                loaded: Any = mlx_lm.load(model_name)
+                loaded = mlx_lm.load(model_name)
                 model = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
             except Exception as exc:
                 logger.warning("mlx_lm.load failed for model '%s': %s", model_name, exc)
@@ -221,7 +222,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
             dummy_acts = np.random.randn(8, 64).astype(np.float32) if np is not None else [1.0] * 64
             dummy_w = np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64
             calibrate_awq_scales(dummy_w, dummy_acts)  # type: ignore # Justified: Dynamic backend protocol typing
-            nn.quantize(__import__("typing").cast(__import__("typing").Any, model), group_size=group_size, bits=4)
+            nn.quantize(cast(Any, model), group_size=group_size, bits=4)
             return (0.75, "quantized_awq")
 
         if method == "gptq":
@@ -229,11 +230,11 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
             dummy_acts = np.random.randn(16, 64).astype(np.float32) if np is not None else [1.0] * 64
             dummy_w = np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64
             calibrate_gptq_weights(dummy_w, dummy_acts)  # type: ignore # Justified: Dynamic backend protocol typing
-            nn.quantize(__import__("typing").cast(__import__("typing").Any, model), group_size=group_size, bits=4)
+            nn.quantize(cast(Any, model), group_size=group_size, bits=4)
             return (0.75, "quantized_gptq")
 
         # Standard int8 / int4 weight-only quantization
-        nn.quantize(__import__("typing").cast(__import__("typing").Any, model), group_size=group_size, bits=bits)
+        nn.quantize(cast(Any, model), group_size=group_size, bits=bits)
         reduction = 0.75 if bits == 4 else 0.5
         return (reduction, f"quantized_{method}")
 

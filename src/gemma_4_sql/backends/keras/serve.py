@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+import types
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
@@ -17,8 +18,8 @@ try:
     import keras as _keras
     import tensorflow as _tf
 
-    keras: Any = _keras
-    tf: Any = _tf
+    keras: types.ModuleType | None = _keras
+    tf: types.ModuleType | None = _tf
 except (ImportError, AttributeError):
     keras = None
     tf = None

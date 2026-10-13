@@ -247,38 +247,65 @@ def test_process_image_invalid_size():
         cm.process_image(b"", target_size=(224, 224), patch_size=15)
 
 
-def test_process_image_pil_success():
-    import io
-
-    from PIL import Image
+def test_process_image_pil_success(monkeypatch):
 
     import gemma_4_sql.backends.common_multimodal as cm
 
-    img = Image.new("RGB", (224, 224), color="red")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    byte_im = buf.getvalue()
+    class _MockPILResampling:
+        BILINEAR = 2
 
-    res = cm.process_image(byte_im, target_size=(224, 224), patch_size=14)
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            return cm.np.zeros((224, 224, 3), dtype=cm.np.float32)
+
+    class _MockPILImage:
+        Resampling = _MockPILResampling
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch.setattr(cm, "Image", _MockPILImage)
+    res = cm.process_image(b"fakebytes", target_size=(224, 224), patch_size=14)
     assert res["num_patches"] == 256
     assert res["shape"] == (3, 224, 224)
 
 
 def test_process_image_pil_failure(monkeypatch):
-
-    from PIL import Image
+    import pytest
 
     import gemma_4_sql.backends.common_multimodal as cm
 
-    monkeypatch.setattr(Image, "open", lambda *a, **k: exec("raise ValueError('PIL error')"))
-    res = cm.process_image(b"bad", target_size=(224, 224), patch_size=14)
-    assert res["num_patches"] == 256
+    class _MockPILImage:
+        @staticmethod
+        def open(buf):
+            raise ValueError("PIL error")
+
+    monkeypatch.setattr(cm, "Image", _MockPILImage)
+    with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
+        cm.process_image(b"fakebytes", target_size=(224, 224), patch_size=14)
 
 
 def test_process_image_no_np(monkeypatch):
+    import pytest
+
     import gemma_4_sql.backends.common_multimodal as cm
 
     monkeypatch.setattr(cm, "np", None)
-    res = cm.process_image(b"bad", target_size=(224, 224), patch_size=14)
-    assert res["num_patches"] == 256
-    assert len(res["pixel_values"]) == 3
+    with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
+        cm.process_image(b"bad", target_size=(224, 224), patch_size=14)

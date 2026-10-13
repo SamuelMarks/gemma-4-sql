@@ -15,7 +15,6 @@ from gemma_4_sql.backends.common_multimodal import (
     load_audio_bytes,
     load_image_bytes,
     process_audio,
-    process_image,
 )
 from gemma_4_sql.backends.common_serve import GenerateRequest, create_common_app
 from gemma_4_sql.sdk.agent import AgentContext, run_agentic_loop
@@ -80,31 +79,6 @@ def test_load_image_bytes(tmp_path: Path) -> None:
     assert len(load_image_bytes(long_b64)) > 0
 
     # PIL Image if available (or mocked fallback)
-    try:
-        from PIL import Image
-
-        pil_img = Image.new("RGB", (32, 32), color="blue")
-        loaded_pil = load_image_bytes(pil_img)
-        assert len(loaded_pil) > 0
-    except ImportError:  # pragma: no cover
-
-        class _MockPILInstance:
-            """Mock PIL Image instance for load_image_bytes testing."""
-
-            def save(self, buf: io.BytesIO, format: str = "PNG") -> None:
-                """Mock save writing dummy PNG bytes."""
-                buf.write(b"\x89PNG\r\n\x1a\n")
-
-        class _MockPILClass:
-            """Mock PIL Image class."""
-
-            Image = _MockPILInstance
-
-        monkeypatch_load = pytest.MonkeyPatch()
-        monkeypatch_load.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILClass)
-        loaded_pil = load_image_bytes(_MockPILInstance())
-        assert len(loaded_pil) > 0
-        monkeypatch_load.undo()
 
     # Error conditions
     with pytest.raises(ValueError, match="image_input cannot be None"):
@@ -119,33 +93,59 @@ def test_load_image_bytes(tmp_path: Path) -> None:
 
 def test_process_image(tmp_path: Path) -> None:
     """Test image resizing, normalization, and patch extraction."""
-    valid_png: bytes
-    try:
-        from PIL import Image as PILImage
+    import numpy as np
+    import pytest
 
-        buf = io.BytesIO()
-        img = PILImage.new("RGB", (32, 32), color=(255, 0, 0))
-        img.save(buf, format="PNG")
-        valid_png = buf.getvalue()
-    except ImportError:  # pragma: no cover
-        valid_png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+    import gemma_4_sql.backends.common_multimodal as cm
 
-    res = process_image(valid_png, target_size=(224, 224), patch_size=14)
+    class _MockPILResampling:
+        BILINEAR = 2
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        Resampling = _MockPILResampling
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+    monkeypatch_fix.setattr(cm, "Image", _MockPILImage)
+
+    valid_png = b"fakebytes"
+
+    res = cm.process_image(valid_png, target_size=(224, 224), patch_size=14)
     assert "pixel_values" in res
     assert "patches" in res
     assert res["num_patches"] == 256
     assert res["shape"] == (3, 224, 224)
 
-    raw = b"\x89PNG\r\n\x1a\n"
-    res_fallback = process_image(raw, target_size=(224, 224), patch_size=14)
-    assert res_fallback["num_patches"] == 256
-
     # Validation errors
     with pytest.raises(ValueError, match="target_size dimensions must be positive"):
-        process_image(raw, target_size=(0, 224))
+        cm.process_image(b"fake", target_size=(0, 224))
 
-    with pytest.raises(ValueError, match="must be divisible by patch_size"):
-        process_image(raw, target_size=(224, 224), patch_size=13)
+    with pytest.raises(ValueError, match="target dimensions"):
+        cm.process_image(b"fake", target_size=(224, 224), patch_size=15)
+
+    monkeypatch_fix.undo()
 
 
 def test_load_audio_bytes(tmp_path: Path) -> None:
@@ -265,10 +265,10 @@ def test_sdk_inference_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
             captured.update(kwargs)
             return {"sql": "SELECT 1", "confidence_score": 0.99}
 
-    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _b: MockBackend())
+    monkeypatch.setattr("gemma_4_sql.sdk.inference.get_backend", lambda _b: MockBackend())
 
     res = generate_sql(
-        "gemma-4",
+        "test-model",
         "Select users",
         backend="pytorch",
         image_path="/path/to/diagram.png",
@@ -298,7 +298,7 @@ def test_sdk_agent_multimodal_preservation(monkeypatch: pytest.MonkeyPatch) -> N
                 return {"sql": "SELECT invalid_col FROM users", "confidence_score": 0.9}
             return {"sql": "SELECT id FROM users", "confidence_score": 0.9}
 
-    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _b: MockFailingThenSuccessBackend())
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: MockFailingThenSuccessBackend())
 
     ctx = AgentContext(
         db_path=":memory:",
@@ -307,7 +307,7 @@ def test_sdk_agent_multimodal_preservation(monkeypatch: pytest.MonkeyPatch) -> N
         image_path="schema.png",
         modality="vision",
     )
-    result = run_agentic_loop("gemma-4", "List users", backend="jax", context=ctx)
+    result = run_agentic_loop("test-model", "List users", backend="jax", context=ctx)
     assert result["success"] is True
     assert result["attempts"] == 2
     # Verify that <image> placeholder is retained in retry prompt
@@ -334,10 +334,10 @@ def test_sdk_evaluation_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
             assert kwargs.get("modality") == "vision"
             return {"sql": "SELECT * FROM t", "confidence_score": 0.95}
 
-    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _b: MockEvalBackend())
+    monkeypatch.setattr("gemma_4_sql.sdk.evaluation.get_backend", lambda _b: MockEvalBackend())
 
     res = evaluate(
-        "gemma-4",
+        "test-model",
         "spider_erd",
         backend="jax",
         image_path="/path/to/erd.png",
@@ -353,7 +353,7 @@ async def test_common_serve_multimodal() -> None:
     """Test FastAPI continuous batching server with multimodal attachments."""
     app = create_common_app(
         backend_name="pytorch",
-        model_name="gemma-4",
+        model_name="test-model",
         generate_logic=lambda prompt: f"SELECT * FROM test WHERE p='{prompt}'",
     )
 
@@ -400,10 +400,8 @@ def test_common_multimodal_pure_python_fallbacks(monkeypatch: pytest.MonkeyPatch
 
     # Process image with pure python fallback
     raw_img = b"fake_image_bytes"
-    res_img = cm.process_image(raw_img, target_size=(28, 28), patch_size=14)
-    assert res_img["num_patches"] == 4
-    assert len(res_img["pixel_values"]) == 3
-    assert len(res_img["patches"]) == 4
+    with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
+        cm.process_image(raw_img, target_size=(28, 28), patch_size=14)
 
     # Process audio with pure python fallback
     raw_audio = b"fake_audio_bytes" * 50
@@ -448,7 +446,6 @@ def test_multimodal_edge_cases() -> None:
     assert len(samples_j) > 0
 
     # Image available but numpy is None (covers 126->131)
-    import io
 
     try:
         from PIL import Image as PILImage
@@ -495,6 +492,9 @@ def test_multimodal_edge_cases() -> None:
                         """Mock image resize."""
                         return self
 
+                    def getpixel(self, coords):
+                        raise ValueError("No getpixel")
+
                     def __array__(self, *args: object, **kwargs: object) -> Any:
                         """Provide numpy array representation."""
                         current_np = getattr(cm, "np", None)
@@ -507,8 +507,8 @@ def test_multimodal_edge_cases() -> None:
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(cm, "Image", _MockPILImage)
         monkeypatch.setattr(cm, "np", None)
-        res_img_no_np = cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
-        assert res_img_no_np["num_patches"] == 1
+        with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
+            cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
         monkeypatch.undo()
 
         current_np = getattr(cm, "np", None)
@@ -542,12 +542,12 @@ def test_multimodal_edge_cases() -> None:
 
         monkeypatch_pil = pytest.MonkeyPatch()
         monkeypatch_pil.setattr(cm, "Image", _MockFailingPIL)
-        res_corrupt = cm.process_image(corrupted_img, target_size=(14, 14), patch_size=14)
-        assert res_corrupt["num_patches"] == 1
+        with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
+            cm.process_image(corrupted_img, target_size=(14, 14), patch_size=14)
         monkeypatch_pil.undo()
     else:
-        res_corrupt = cm.process_image(corrupted_img, target_size=(14, 14), patch_size=14)
-        assert res_corrupt["num_patches"] == 1
+        with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
+            cm.process_image(corrupted_img, target_size=(14, 14), patch_size=14)
 
     # Audio file not found
     with pytest.raises(FileNotFoundError, match="Audio file not found"):
@@ -583,14 +583,15 @@ def test_multimodal_edge_cases() -> None:
     assert len(samples_empty) == 1600
 
     # Corrupt image bytes triggering PIL exception and synthetic fallback
-    res_corrupt = cm.process_image(b"NOT_A_VALID_IMAGE_BYTES_PAYLOAD")
-    assert "pixel_values" in res_corrupt
+    with pytest.raises(ValueError):
+        cm.process_image(b"NOT_A_VALID_IMAGE_BYTES_PAYLOAD")
 
     # Synthetic image fallback when numpy is None
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(cm, "np", None)
-    res_no_np = cm.process_image(b"NOT_A_VALID_IMAGE")
-    assert "pixel_values" in res_no_np
+    with pytest.raises(ValueError):
+        cm.process_image(b"NOT_A_VALID_IMAGE")
+
     monkeypatch.undo()
 
     # Truncated WAV header triggering struct.error in WAV parser

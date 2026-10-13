@@ -45,27 +45,17 @@ def test_log_metrics(monkeypatch):
 
 def test_module_load_import_error():
     """Docstring for test_module_load_import_error."""
+    import importlib
+    import sys
+    from unittest.mock import patch
+
     import gemma_4_sql.backends.keras.logging as q
 
-    with open(q.__file__) as f:
-        code = f.read()
+    with patch.dict(sys.modules, {"tensorflow": None, "tensorboard": None}):
+        importlib.reload(q)
+        assert getattr(q, "tf", None) is None
 
-    import builtins
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name == "tensorflow":
-            raise ImportError("simulated missing import")
-        return orig_import(name, *args, **kwargs)
-
-    namespace = {"__name__": "mock_logging", "__builtins__": dict(builtins.__dict__)}
-    namespace["__builtins__"]["__import__"] = mock_import
-
-    exec(code, namespace)
-
-    assert namespace.get("tf") is None
+    importlib.reload(q)
 
 
 def test_module_load_import_error_coverage(monkeypatch):

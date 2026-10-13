@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import types
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -16,11 +17,11 @@ try:
     from peft import get_peft_model as _get_peft_model
     from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
 
-    peft: Any = _peft
-    torch: Any = _torch
-    LoraConfig: Any = _LoraConfig
-    get_peft_model: Any = _get_peft_model
-    AutoModelForCausalLM: Any = _AutoModelForCausalLM
+    peft: types.ModuleType | None = _peft
+    torch: types.ModuleType | None = _torch
+    LoraConfig: Any | None = _LoraConfig
+    get_peft_model: types.ModuleType | None = _get_peft_model
+    AutoModelForCausalLM: Any | None = _AutoModelForCausalLM
 except (ImportError, AttributeError):
     peft = None
     torch = None

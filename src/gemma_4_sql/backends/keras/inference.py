@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
@@ -18,8 +19,8 @@ try:
     import keras as _keras
     import tensorflow as _tf
 
-    keras: Any = _keras
-    tf: Any = _tf
+    keras: types.ModuleType | None = _keras
+    tf: types.ModuleType | None = _tf
 except (ImportError, AttributeError):
     keras = None
     tf = None
@@ -103,8 +104,8 @@ def configure_beam_sampler(model: ModelType, beam_width: int) -> Any:
     try:
         import keras_nlp
 
-        samplers: Any = getattr(keras_nlp, "samplers", None)
-        beam_sampler_cls: Any = getattr(samplers, "BeamSampler", None)
+        samplers = getattr(keras_nlp, "samplers", None)
+        beam_sampler_cls = getattr(samplers, "BeamSampler", None)
         if beam_sampler_cls is not None:
             sampler = beam_sampler_cls(num_beams=beam_width)
     except (ImportError, AttributeError, ValueError) as e:
@@ -161,7 +162,7 @@ def generate_sql(
         # Execute generation
         output = model.generate(prompt, max_length=max_length)
 
-        scores: Any = None
+        scores = None
         if isinstance(output, dict):
             output_dict = cast(dict[str, Any], output)
             raw_text = str(output_dict.get("text", ""))

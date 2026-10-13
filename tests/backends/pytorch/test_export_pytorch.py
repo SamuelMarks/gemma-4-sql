@@ -18,9 +18,8 @@ def test_pytorch_export_imports():
         import gemma_4_sql.backends.pytorch.export as export_module
 
         importlib.reload(export_module)
-        assert export_module.torch is None
-        assert export_module.save_file is None
-    importlib.reload(export_module)
+        assert getattr(export_module, "torch", None) is None
+        assert getattr(export_module, "save_file", None) is None
 
 
 def test_is_rank_zero():
@@ -31,22 +30,14 @@ def test_is_rank_zero():
     assert export_module._is_rank_zero() is True
 
     export_module.torch = MagicMock()
-    with patch("builtins.__import__") as mock_import:
-        mock_dist = MagicMock()
-        mock_dist.is_initialized.return_value = False
-        mock_import.return_value = mock_dist
-
+    with patch("torch.distributed.is_initialized", return_value=False):
         assert export_module._is_rank_zero() is True
 
-        mock_dist.is_initialized.return_value = True
-        mock_dist.get_rank.return_value = 0
+    with patch("torch.distributed.is_initialized", return_value=True), patch("torch.distributed.get_rank", return_value=0):
         assert export_module._is_rank_zero() is True
 
-        mock_dist.get_rank.return_value = 1
+    with patch("torch.distributed.is_initialized", return_value=True), patch("torch.distributed.get_rank", return_value=1):
         assert export_module._is_rank_zero() is False
-
-        mock_import.side_effect = ImportError("error")
-        assert export_module._is_rank_zero() is True
 
 
 def test_save_real_model(tmp_path):

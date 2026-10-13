@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.constants import DEFAULT_POSTTRAIN_DATASET, DEFAULT_SFT_DATASET
+from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.type_hints import ETLConfig
 
 if TYPE_CHECKING:
@@ -23,7 +24,7 @@ def _route_backend(config: ETLConfig, backend: str, **kwargs: JSONValue) -> JSON
             A dictionary containing the results.
 
     """
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+
     return get_backend(backend).build_dataloader(config, **kwargs)
 
 
@@ -79,3 +80,6 @@ def etl_posttrain(config: ETLConfig | None = None, backend: str = "jax") -> JSON
     if config is None:
         config = ETLConfig(dataset_name=DEFAULT_POSTTRAIN_DATASET, split="train")
     return _route_backend(config, backend)
+
+
+__all__ = ["etl_posttrain", "etl_pretrain", "etl_sft"]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import operator
+import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.tokenization import SQLTokenizer
@@ -17,8 +18,8 @@ try:
     import jax as _jax
     import jax.numpy as _jnp
 
-    jax: Any = _jax
-    jnp: Any = _jnp
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
 except (ImportError, AttributeError):
     jax = None
     jnp = None
@@ -26,7 +27,7 @@ except (ImportError, AttributeError):
 try:
     import maxtext.models.gemma4 as _gemma4
 
-    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
+    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
 except (ImportError, AttributeError):
     Gemma4Model = None
 

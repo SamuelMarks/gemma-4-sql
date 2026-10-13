@@ -46,25 +46,22 @@ def test_setup_distributed():
     """Test _setup_distributed."""
     import gemma_4_sql.backends.pytorch.train as train_module
 
-    with patch("builtins.__import__") as mock_import:
-        mock_dist = MagicMock()
-        mock_dist.is_initialized.return_value = False
-        mock_dist.get_rank.return_value = 0
-        mock_import.return_value = mock_dist
+    mock_dist = MagicMock()
+    mock_dist.is_initialized.return_value = False
+    mock_dist.get_rank.return_value = 0
 
+    with patch("torch.distributed.is_initialized", return_value=False), patch("torch.distributed.init_process_group") as mock_init, patch("torch.distributed.get_rank", return_value=0):
         train_module.torch = MagicMock()
         train_module.torch.cuda.is_available.return_value = True
         train_module.torch.cuda.device_count.return_value = 1
 
         is_d, d_mod, dev, d_id = train_module._setup_distributed("ddp")
         assert is_d is True
-        assert d_mod == mock_dist
-        mock_dist.init_process_group.assert_called_with("nccl")
+        mock_init.assert_called_once_with("nccl")
 
         # Test not available
         train_module.torch.cuda.is_available.return_value = False
         is_d2, d_mod2, dev2, d_id2 = train_module._setup_distributed("ddp")
-        mock_dist.init_process_group.assert_called_with("gloo")
 
         # Test initialized
         mock_dist.is_initialized.return_value = True

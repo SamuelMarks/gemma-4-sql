@@ -101,7 +101,8 @@ class Gemma4Model(nnx.Module):
         self.config = config
         shd = config.shd_cfg
         self.embed_tokens = make_embed(config.vocab_size, config.hidden_size, embedding_metadata={}, rngs=rngs)
-        math = __import__("math")
+        import math
+
         self.embed_scale = float(math.sqrt(config.hidden_size))
         if config.hidden_size_per_layer_input:
             vocab_size_per_layer = config.vocab_size_per_layer_input if config.vocab_size_per_layer_input is not None else config.vocab_size
@@ -164,10 +165,15 @@ class Gemma4Model(nnx.Module):
             if per_layer_inputs is None:
                 per_layer_inputs = self.get_per_layer_inputs(input_ids)
             per_layer_inputs = self.project_per_layer_inputs(x, cast(Any, per_layer_inputs))
-        for i, layer in enumerate(self.layers):
-            layer_cache = cache[i] if cache is not None else None
-            layer_ple = cast(Any, per_layer_inputs)[:, :, i, :] if per_layer_inputs is not None else None
-            x = layer(x, positions, layer_cache, attention_mask=cast(Any, attention_mask), per_layer_input=layer_ple)
+        if len(self.layers) > 0:
+            for i in range(len(self.layers)):
+                try:
+                    layer = getattr(self.layers, str(i))
+                except AttributeError:
+                    continue
+                layer_cache = cache[i] if cache is not None else None
+                layer_ple = cast(Any, per_layer_inputs)[:, :, i, :] if per_layer_inputs is not None else None
+                x = layer(x, positions, layer_cache, attention_mask=cast(Any, attention_mask), per_layer_input=layer_ple)
         return self.norm(x)
 
 
@@ -181,7 +187,7 @@ def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = 
         ValueError: If the operation encounters an unexpected ValueError.
 
     """
-    snapshot_download = __import__("huggingface_hub", fromlist=["snapshot_download"]).snapshot_download
+    from huggingface_hub import snapshot_download
 
     if config is None:
         config_map: dict[str, Any] = {
@@ -338,7 +344,7 @@ def _default_jit(x: Any) -> Any:
     return x
 
 
-_jit: Any = getattr(nnx, "jit", _default_jit)
+_jit = getattr(nnx, "jit", _default_jit)
 
 
 @_jit

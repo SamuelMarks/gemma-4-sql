@@ -3,8 +3,11 @@
 Provides parameter matching and checkpoint utilities.
 """
 
+from __future__ import annotations
+
 import logging
 import re
+import types
 from typing import Any, cast
 
 import jax
@@ -21,7 +24,7 @@ logger = logging.getLogger(__name__)
 try:
     import safetensors as _safetensors
 
-    safetensors: Any = _safetensors
+    safetensors: types.ModuleType | None = _safetensors
 except ImportError:
     safetensors = None
 
@@ -247,8 +250,10 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
         ValueError: If the operation encounters an unexpected ValueError.
 
     """
-    gc = __import__("gc")
-    epath_any: Any = getattr(__import__("sys").modules.get("etils", None), "epath", None)
+    import gc
+    import sys
+
+    epath_any = getattr(sys.modules.get("etils", None), "epath", None)
     if epath_any is None:
         try:
             from etils import epath
@@ -262,9 +267,9 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
         raise ValueError(msg)
     gemma4 = nnx.eval_shape(lambda: model_lib.Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0)))
     (graph_def, abs_state) = nnx.split(gemma4)
-    state_any: Any = abs_state
+    state_any = abs_state
     if hasattr(state_any, "to_pure_dict"):
-        state_dict_raw: Any = state_any.to_pure_dict()
+        state_dict_raw = state_any.to_pure_dict()
     elif hasattr(state_any, "to_flat_dict"):
         state_dict_raw = state_any.to_flat_dict()
     else:

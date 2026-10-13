@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 try:
     from torch.utils.tensorboard import SummaryWriter as _SummaryWriter
 
-    SummaryWriter: Any = _SummaryWriter
+    SummaryWriter: Any | None = _SummaryWriter
 except (ImportError, AttributeError):
     SummaryWriter = None
 

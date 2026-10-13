@@ -31,11 +31,10 @@ def test_run_dpo_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import MagicMock
 
     import gemma_4_sql.sdk.dpo as sdk_dpo
-    from gemma_4_sql.sdk import registry
 
     mock_be = MagicMock()
     mock_be.run_dpo.return_value = {"backend": "pytorch", "action": "dpo", "model": "model2", "dataset": "data2", "beta": 0.2}
-    monkeypatch.setattr(registry, "get_backend", lambda x: mock_be)
+    monkeypatch.setattr(sdk_dpo, "get_backend", lambda x: mock_be)
 
     res = sdk_dpo.run_dpo(model_name="model2", dataset="data2", beta=0.2, backend="pytorch")
 

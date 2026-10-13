@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.mlx.etl import build_dataloader
@@ -15,9 +16,9 @@ try:
     import mlx.nn as _nn
     import mlx.optimizers as _optim
 
-    mx: Any = _mx
-    nn: Any = _nn
-    optim: Any = _optim
+    mx: types.ModuleType | None = _mx
+    nn: types.ModuleType | None = _nn
+    optim: types.ModuleType | None = _optim
 except (ImportError, AttributeError):
     mx = None
     nn = None
@@ -26,7 +27,7 @@ except (ImportError, AttributeError):
 try:
     import mlx_lm
 
-    load: Any = getattr(mlx_lm, "load", None)
+    load = getattr(mlx_lm, "load", None)
 except (ImportError, AttributeError):
     load = None
 
@@ -86,7 +87,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
 
         raise DependencyMissingError("MLX dependencies are missing.")
 
-    loaded: Any = load(model_name)
+    loaded = load(model_name)
     model: ModelType = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
 
     def loss_fn(model_t: Any, inputs: TensorType, targets: TensorType) -> Any:

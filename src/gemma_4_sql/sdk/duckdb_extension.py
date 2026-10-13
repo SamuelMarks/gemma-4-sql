@@ -93,3 +93,6 @@ def embed_in_duckdb(
             })
 
     duck_conn.create_function("ask_gemma", ask_gemma, [str], str)
+
+
+__all__ = ["embed_in_duckdb"]

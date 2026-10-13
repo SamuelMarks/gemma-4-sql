@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.type_hints import ModelType
@@ -25,13 +26,13 @@ try:
     from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
     from .gemma4.decoder_layer import Gemma4DecoderLayer as _Gemma4DecoderLayer
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    optax: Any = _optax
-    nnx: Any = _nnx
-    Gemma4Config: Any = _Gemma4Config
-    Gemma4DecoderLayer: Any = _Gemma4DecoderLayer
-    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    optax: types.ModuleType | None = _optax
+    nnx: types.ModuleType | None = _nnx
+    Gemma4Config: Any | None = _Gemma4Config
+    Gemma4DecoderLayer: Any | None = _Gemma4DecoderLayer
+    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
 except (ImportError, AttributeError):
     jax = None
     jnp = None
@@ -41,11 +42,11 @@ except (ImportError, AttributeError):
     Gemma4DecoderLayer = None
     Gemma4ForCausalLM = None
 
-_ModuleBase: Any = nnx.Module if nnx is not None else object
-_ParamBase: Any = nnx.Param if nnx is not None else object
+_ModuleBase = nnx.Module if nnx is not None else object
+_ParamBase = nnx.Param if nnx is not None else object
 
 if nnx is not None and hasattr(nnx, "Param"):
-    _ParamCls: Any = nnx.Param
+    _ParamCls = nnx.Param
     if not hasattr(_ParamCls, "shape"):
         _ParamCls.shape = property(lambda self: self.value.shape if hasattr(self, "value") else ())
     if not hasattr(_ParamCls, "dtype"):
@@ -109,9 +110,9 @@ class NNXLoRALinear(_ModuleBase):
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
         use_bias: bool = False,
-        dtype: Any = None,
+        dtype=None,
         *,
-        rngs: Any = None,
+        rngs=None,
     ) -> None:
         """Initialize the NNX LoRA linear layer.
 
@@ -228,7 +229,7 @@ class NNXLoRALinear(_ModuleBase):
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
         *,
-        rngs: Any = None,
+        rngs=None,
     ) -> NNXLoRALinear:
         """Construct an NNXLoRALinear module wrapping an existing nnx.Linear.
 
@@ -302,7 +303,7 @@ def inject_lora_to_layer(
     lora_alpha: float = 16.0,
     lora_dropout: float = 0.05,
     *,
-    rngs: Any = None,
+    rngs=None,
 ) -> int:
     """Inject LoRA adapters into designated projection layers of a Gemma4DecoderLayer.
 
@@ -371,7 +372,7 @@ def inject_lora(
     lora_alpha: float = 16.0,
     lora_dropout: float = 0.05,
     *,
-    rngs: Any = None,
+    rngs=None,
 ) -> tuple[Any, int]:
     """Inject LoRA adapters into designated projection modules of a JAX/Flax NNX model.
 
@@ -466,7 +467,7 @@ def inject_lora(
 
 def create_lora_optimizer(
     model: ModelType,
-    tx: Any = None,
+    tx=None,
 ) -> Any:
     """Create a Flax NNX Optimizer configured to update only LoRA adapter parameters.
 

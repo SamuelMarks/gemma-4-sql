@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
@@ -19,10 +20,10 @@ try:
     from torch import optim as _optim
     from torch.nn import functional as _functional
 
-    torch: Any = _torch
-    nn: Any = _nn
-    optim: Any = _optim
-    functional: Any = _functional
+    torch: types.ModuleType | None = _torch
+    nn: types.ModuleType | None = _nn
+    optim: types.ModuleType | None = _optim
+    functional: types.ModuleType | None = _functional
 except (ImportError, AttributeError):
     torch = None
     nn = None

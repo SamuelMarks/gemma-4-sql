@@ -7,6 +7,7 @@ import typing
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
+from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.tokenization import SQLTokenizer
 
 MAX_BATCHES = 10
@@ -17,8 +18,11 @@ if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 
 
+import re
+
+
 def normalize_sql(sql: str) -> str:
-    """Normalize SQL by stripping whitespace and lowercasing.
+    """Normalize SQL by stripping whitespace and lowercasing unquoted text.
 
     Args:
         sql: The string representing the SQL query.
@@ -27,7 +31,17 @@ def normalize_sql(sql: str) -> str:
         The normalized SQL query string.
 
     """
-    return " ".join(sql.strip().lower().split())
+    # Strip comments
+    cleaned = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
+    cleaned = re.sub(r"--[^\n]*", " ", cleaned)
+
+    # Split by string literals and quoted identifiers
+    parts = re.split(r"('[^']*'|\"(?:[^\"]|\"\")*\"|`[^`]*`|\[[^\]]*\])", cleaned)
+    for i in range(0, len(parts), 2):
+        parts[i] = parts[i].lower()
+
+    res = "".join(parts)
+    return " ".join(res.strip().split())
 
 
 async def compute_metrics_async(
@@ -45,29 +59,39 @@ async def compute_metrics_async(
     Returns:
         A dictionary containing exact_match, valid_sql, and execution_accuracy metrics.
 
+    Raises:
+        ValueError: If predictions and ground truths lengths differ.
+
     """
+    if len(preds) != len(truths):
+        msg = f"Length mismatch: {len(preds)} predictions vs {len(truths)} truths"
+        raise ValueError(msg)
+
     exact_matches = 0
     valid_sqls = 0
     exec_matches = 0
 
     async def process_pair(p: str, t: str) -> tuple[int, int, int]:
-        """Process a single prediction and ground truth pair.
-
-        Args:
-            p: Predicted SQL query string.
-            t: Ground truth SQL query string.
-
-        Returns:
-            Tuple of (exact_match, valid_sql, execution_match) indicator flags (0 or 1).
-
-        """
+        """Process a single prediction and ground truth pair."""
         em = 1 if normalize_sql(p) == normalize_sql(t) else 0
-        (p_success, p_results, _) = await engine.execute_with_feedback_async(p)
-        vs = 1 if p_success else 0
-        (t_success, t_results, _) = await engine.execute_with_feedback_async(t)
+        try:
+            (p_success, p_results, _) = await engine.execute_with_feedback_async(p)
+            vs = 1 if p_success else 0
+            (t_success, t_results, _) = await engine.execute_with_feedback_async(t)
 
-        # Execution accuracy requires valid execution on both and matching results
-        ex = 1 if (p_success and t_success and p_results == t_results) else 0
+            # Execution accuracy requires valid execution on both and matching results
+            if p_success and t_success:
+                strict_order = getattr(engine, "_has_top_level_order_by", lambda x: False)(t)
+                compare_fn = getattr(engine, "_compare_results", lambda p, t, s: p == t)
+                ex = 1 if compare_fn(p_results, t_results, strict_order) else 0
+            else:
+                ex = 0
+        except Exception as exc:  # noqa: BLE001
+            import logging
+
+            logging.getLogger(__name__).warning("Query execution failed: %s", exc)
+            vs = 0
+            ex = 0
         return (em, vs, ex)
 
     results = await asyncio.gather(*[process_pair(p, t) for p, t in zip(preds, truths)])
@@ -192,10 +216,7 @@ def _run_evaluation_inference(
         elif isinstance(batch, dict) and "audio_values" in batch:
             gen_kwargs["audio_values"] = batch["audio_values"]
 
-        try:
-            gen_res = backend_impl.generate_sql(model_name, prompt_text, **gen_kwargs)
-        except TypeError:
-            gen_res = backend_impl.generate_sql(model_name, prompt_text)
+        gen_res = backend_impl.generate_sql(model_name, prompt_text, **gen_kwargs)
         preds.append(str(gen_res.get("sql", "")))
         confidence_scores.append(float(str(gen_res.get("confidence_score", 0.0))))
         truths.append(truth_text)
@@ -232,7 +253,7 @@ def evaluate(
     modality = str(kwargs.get("modality", "text"))
 
     engine = LiveDatabaseEngine(db_path=db_path, ddl=ddl, db_type=str(db_type), db_kwargs=db_kwargs_dict)
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+
     backend_impl = get_backend(backend)
 
     eval_kwargs = dict(kwargs)
@@ -267,3 +288,6 @@ def evaluate(
     if audio_path:
         res["audio_path"] = str(audio_path)
     return res
+
+
+__all__ = ["MAX_BATCHES", "compute_metrics", "compute_metrics_async", "evaluate", "normalize_sql"]

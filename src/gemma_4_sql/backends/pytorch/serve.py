@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
@@ -15,7 +16,7 @@ logger = logging.getLogger(__name__)
 try:
     import torch as _torch
 
-    torch: Any = _torch
+    torch: types.ModuleType | None = _torch
 except (ImportError, AttributeError, RuntimeError):
     torch = None
 
@@ -24,16 +25,16 @@ try:
     from fastapi import Request as _Request
     from fastapi.responses import JSONResponse as _JSONResponse
 
-    FastAPI: Any = _FastAPI
-    Request: Any = _Request
-    JSONResponse: Any = _JSONResponse
+    FastAPI: Any | None = _FastAPI
+    Request: Any | None = _Request
+    JSONResponse: Any | None = _JSONResponse
     try:
         import vllm
 
-        vllm_utils: Any = getattr(vllm, "utils", None)
-        AsyncEngineArgs_Any: Any = getattr(vllm, "AsyncEngineArgs", None)
-        AsyncLLMEngine_Any: Any = getattr(vllm, "AsyncLLMEngine", None)
-        random_uuid_Any: Any = getattr(vllm_utils, "random_uuid", None) if vllm_utils else None
+        vllm_utils = getattr(vllm, "utils", None)
+        AsyncEngineArgs_Any = getattr(vllm, "AsyncEngineArgs", None)
+        AsyncLLMEngine_Any = getattr(vllm, "AsyncLLMEngine", None)
+        random_uuid_Any = getattr(vllm_utils, "random_uuid", None) if vllm_utils else None
 
         AsyncEngineArgs = AsyncEngineArgs_Any
         AsyncLLMEngine = AsyncLLMEngine_Any
@@ -63,7 +64,7 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
         The FastAPI application instance.
 
     """
-    engine_args: Any = (
+    engine_args = (
         AsyncEngineArgs.__call__(
             model=model_name,
             max_num_batched_tokens=max_batch_size * 256,
@@ -73,9 +74,9 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
         if AsyncEngineArgs is not None
         else None
     )
-    engine: Any = AsyncLLMEngine.from_engine_args(engine_args) if AsyncLLMEngine is not None else None
+    engine = AsyncLLMEngine.from_engine_args(engine_args) if AsyncLLMEngine is not None else None
 
-    app: Any = FastAPI.__call__(title=f"vLLM Serve: {model_name}") if FastAPI is not None else None
+    app = FastAPI.__call__(title=f"vLLM Serve: {model_name}") if FastAPI is not None else None
 
     if app is not None and JSONResponse is not None:
 

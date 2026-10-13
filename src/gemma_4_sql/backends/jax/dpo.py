@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import types
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.jax.etl import build_dataloader
@@ -21,13 +22,13 @@ try:
     from .gemma4 import Gemma4Config as _Gemma4Config
     from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
 
-    jax: Any = _jax
-    jnn: Any = _jnn
-    jnp: Any = _jnp
-    optax: Any = _optax
-    nnx: Any = _nnx
-    Gemma4Config: Any = _Gemma4Config
-    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+    jax: types.ModuleType | None = _jax
+    jnn: types.ModuleType | None = _jnn
+    jnp: types.ModuleType | None = _jnp
+    optax: types.ModuleType | None = _optax
+    nnx: types.ModuleType | None = _nnx
+    Gemma4Config: Any | None = _Gemma4Config
+    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
 except (ImportError, AttributeError):
     jax = None
     jnn = None
@@ -79,7 +80,7 @@ def _compute_logps(model: ModelType, inputs: TensorType, labels: TensorType) -> 
     # Remove the extra dimension and sum over the sequence length
     selected_log_probs = jnp.squeeze(selected_log_probs, axis=-1)
     # We might want to mask out padding tokens in the future, assuming non-zero labels are valid tokens for now
-    mask = __import__("typing").cast(__import__("typing").Any, labels) != 0  # Justified: Dynamic backend protocol typing
+    mask = cast(Any, labels) != 0  # Justified: Dynamic backend protocol typing
     return jnp.sum(selected_log_probs * mask, axis=-1)
 
 

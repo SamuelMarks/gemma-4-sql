@@ -135,7 +135,9 @@ def _get_sampler(pt_dataset: typing.Any, distributed: bool) -> object:
     """
     if not distributed:
         return None
-    distributed_sampler_cls = __import__("torch.utils.data.distributed", fromlist=["DistributedSampler"]).DistributedSampler
+    from torch.utils.data.distributed import DistributedSampler
+
+    distributed_sampler_cls = DistributedSampler
     try:
         return distributed_sampler_cls(pt_dataset)
     except (RuntimeError, ValueError):

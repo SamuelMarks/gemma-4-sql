@@ -29,7 +29,8 @@ class SiglipVisionEmbeddings(nnx.Module):
         """
         self.config = config
         self.num_patches = (config.image_size // config.patch_size) ** 2
-        functools = __import__("functools")
+        import functools
+
         ki = functools.partial(jax.nn.initializers.lecun_normal())
         bi = functools.partial(jax.nn.initializers.zeros)
         self.patch_embedding = nnx.Conv(config.num_channels, config.hidden_size, kernel_size=(config.patch_size, config.patch_size), strides=(config.patch_size, config.patch_size), padding="valid", kernel_init=ki, bias_init=bi, rngs=rngs)

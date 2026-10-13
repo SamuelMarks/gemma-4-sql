@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import logging
 from contextlib import contextmanager, suppress
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 if TYPE_CHECKING:
     import types
@@ -26,7 +26,10 @@ def catch_optional_imports() -> Generator[None, None, None]:
         yield
 
 
-class LazyLoader:
+T = TypeVar("T", bound="types.ModuleType")
+
+
+class LazyLoader(Generic[T]):
     """Lazily load an optional dependency."""
 
     def __init__(self, module_name: str) -> None:
@@ -37,10 +40,10 @@ class LazyLoader:
 
         """
         self.module_name = module_name
-        self._module: types.ModuleType | None = None
+        self._module: T | None = None
         self._loaded = False
 
-    def get_module(self) -> types.ModuleType | None:
+    def get_module(self) -> T | None:
         """Provide the module if available, otherwise return None.
 
         Returns:
@@ -74,7 +77,7 @@ _SAFETENSORS_LOADER = LazyLoader("safetensors")
 _MAXTEXT_GEMMA4_LOADER = LazyLoader("maxtext.models.gemma4")
 
 
-def get_jax() -> types.ModuleType | None:
+def get_jax() -> T | None:
     """Provide the jax module.
 
     Returns:
@@ -84,7 +87,7 @@ def get_jax() -> types.ModuleType | None:
     return _JAX_LOADER.get_module()
 
 
-def get_jnp() -> types.ModuleType | None:
+def get_jnp() -> T | None:
     """Provide the jax.numpy module.
 
     Returns:
@@ -94,7 +97,7 @@ def get_jnp() -> types.ModuleType | None:
     return _JNP_LOADER.get_module()
 
 
-def get_flax_nnx() -> types.ModuleType | None:
+def get_flax_nnx() -> T | None:
     """Provide the flax.nnx module.
 
     Returns:
@@ -104,7 +107,7 @@ def get_flax_nnx() -> types.ModuleType | None:
     return _FLAX_NNX_LOADER.get_module()
 
 
-def get_tensorflow() -> types.ModuleType | None:
+def get_tensorflow() -> T | None:
     """Provide the tensorflow module.
 
     Returns:
@@ -114,7 +117,7 @@ def get_tensorflow() -> types.ModuleType | None:
     return _TENSORFLOW_LOADER.get_module()
 
 
-def get_keras() -> types.ModuleType | None:
+def get_keras() -> T | None:
     """Provide the keras module.
 
     Returns:
@@ -124,7 +127,7 @@ def get_keras() -> types.ModuleType | None:
     return _KERAS_LOADER.get_module()
 
 
-def get_torch() -> types.ModuleType | None:
+def get_torch() -> T | None:
     """Provide the torch module.
 
     Returns:
@@ -134,7 +137,7 @@ def get_torch() -> types.ModuleType | None:
     return _TORCH_LOADER.get_module()
 
 
-def get_mlx() -> types.ModuleType | None:
+def get_mlx() -> T | None:
     """Provide the mlx module.
 
     Returns:
@@ -144,7 +147,7 @@ def get_mlx() -> types.ModuleType | None:
     return _MLX_LOADER.get_module()
 
 
-def get_duckdb() -> types.ModuleType | None:
+def get_duckdb() -> T | None:
     """Provide the duckdb module.
 
     Returns:
@@ -154,7 +157,7 @@ def get_duckdb() -> types.ModuleType | None:
     return _DUCKDB_LOADER.get_module()
 
 
-def get_transformers() -> types.ModuleType | None:
+def get_transformers() -> T | None:
     """Provide the transformers module.
 
     Returns:
@@ -164,7 +167,7 @@ def get_transformers() -> types.ModuleType | None:
     return _TRANSFORMERS_LOADER.get_module()
 
 
-def get_safetensors() -> types.ModuleType | None:
+def get_safetensors() -> T | None:
     """Provide the safetensors module.
 
     Returns:
@@ -174,7 +177,7 @@ def get_safetensors() -> types.ModuleType | None:
     return _SAFETENSORS_LOADER.get_module()
 
 
-def get_maxtext_gemma4() -> types.ModuleType | None:
+def get_maxtext_gemma4() -> T | None:
     """Provide the maxtext.models.gemma4 module.
 
     Returns:

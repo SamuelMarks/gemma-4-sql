@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
@@ -21,11 +22,11 @@ try:
     from .gemma4 import Gemma4Config as _Gemma4Config
     from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    nnx: Any = _nnx
-    Gemma4Config: Any = _Gemma4Config
-    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    nnx: types.ModuleType | None = _nnx
+    Gemma4Config: Any | None = _Gemma4Config
+    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
 except (ImportError, AttributeError):
     jax = None
     jnp = None

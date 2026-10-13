@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.common_logging import log_metrics_wrapper
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 try:
     import mlx.utils.tensorboard as mlx_tb
 
-    SummaryWriter: Any = getattr(mlx_tb, "SummaryWriter", None)
+    SummaryWriter = getattr(mlx_tb, "SummaryWriter", None)
 except (ImportError, AttributeError):
     SummaryWriter = None
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import struct
+import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -30,11 +31,11 @@ try:
     from transformers import AutoTokenizer as _AutoTokenizer
     from transformers import BitsAndBytesConfig as _BitsAndBytesConfig
 
-    torch: Any = _torch
-    np: Any = _np
-    BitsAndBytesConfig: Any = _BitsAndBytesConfig
-    AutoModelForCausalLM: Any = _AutoModelForCausalLM
-    AutoTokenizer: Any = _AutoTokenizer
+    torch: types.ModuleType | None = _torch
+    np: types.ModuleType | None = _np
+    BitsAndBytesConfig: Any | None = _BitsAndBytesConfig
+    AutoModelForCausalLM: Any | None = _AutoModelForCausalLM
+    AutoTokenizer: Any | None = _AutoTokenizer
 except (ImportError, AttributeError):
     torch = None
     np = None
@@ -188,8 +189,8 @@ def _apply_awq_quantization(
         import awq
         from transformers import AutoTokenizer as _AutoTokenizer
 
-        tok_cls: Any = _AutoTokenizer
-        awq_cls: Any = getattr(awq, "AutoAWQForCausalLM", None)
+        tok_cls = _AutoTokenizer
+        awq_cls = getattr(awq, "AutoAWQForCausalLM", None)
     except (ImportError, AttributeError) as exc:
         raise DependencyMissingError(f"AutoAWQ is required for AWQ quantization: {exc!s}") from exc
 
@@ -250,13 +251,13 @@ def _apply_gptq_quantization(
         from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
         from transformers import AutoTokenizer as _AutoTokenizer
 
-        tok_cls: Any = _AutoTokenizer
-        model_cls: Any = _AutoModelForCausalLM
-        quantizer_cls: Any = getattr(getattr(optimum, "gptq", None), "GPTQQuantizer", None)
+        tok_cls = _AutoTokenizer
+        model_cls = _AutoModelForCausalLM
+        quantizer_cls = getattr(getattr(optimum, "gptq", None), "GPTQQuantizer", None)
     except (ImportError, AttributeError) as exc:
         raise DependencyMissingError(f"Optimum is required for GPTQ quantization: {exc!s}") from exc
 
-    quantizer: Any = quantizer_cls(
+    quantizer = quantizer_cls(
         bits=bits,
         dataset=dataset,
         group_size=group_size,

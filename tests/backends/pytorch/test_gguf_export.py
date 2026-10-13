@@ -475,7 +475,7 @@ def test_gguf_export_corrupted_file_validation(tmp_path: Path) -> None:
 
     truncated = tmp_path / "truncated.gguf"
     truncated.write_bytes(b"GGUF\x00")
-    with pytest.raises((ValueError, struct.error)):
+    with pytest.raises(struct.error):
         validate_gguf_file(truncated)
 
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -11,7 +12,7 @@ if TYPE_CHECKING:
 try:
     import keras as _keras
 
-    keras: Any = _keras
+    keras: types.ModuleType | None = _keras
 except (ImportError, AttributeError):
     keras = None
 

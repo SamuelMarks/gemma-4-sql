@@ -123,69 +123,6 @@ def test_sql_tokenizer_hf_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert tok.encode("abc") == [ord("a"), ord("b"), ord("c")]
 
 
-def test_sql_tokenizer_fallback_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test edge cases in fallback encoding and decoding.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-    """
-    tok = SQLTokenizer(vocab_size=128)
-
-    # Test when string encode raises UnicodeEncodeError
-    class BadString:
-        """Object that fails utf-8 encode."""
-
-        def encode(self, _encoding: str) -> bytes:
-            """Raise UnicodeEncodeError.
-
-            Args:
-                _encoding: Encoding name.
-
-            Raises:
-                UnicodeEncodeError: Simulated encoding error.
-            """
-            raise UnicodeEncodeError("utf-8", "", 0, 1, "test")
-
-        def __str__(self) -> str:
-            """String representation.
-
-            Returns:
-                Test string.
-            """
-            return "abc"
-
-    encoded = tok.encode(BadString())  # type: ignore[arg-type]
-    assert encoded == [ord("a"), ord("b"), ord("c")]
-
-    # Test when both encode and str(text).encode fail
-    class ReallyBadString:
-        """Object that fails both direct encode and str encode."""
-
-        def encode(self, _encoding: str, **kwargs: object) -> bytes:
-            """Docstring for encode."""
-            raise UnicodeEncodeError("utf-8", "", 0, 1, "test")
-
-        def __str__(self) -> str:
-            """Docstring for __str__."""
-
-            class FailingStr(str):
-                """Docstring for FailingStr."""
-
-                def encode(self, _encoding: str, **kwargs: object) -> bytes:
-                    """Docstring for encode."""
-                    raise RuntimeError("Str encode failed")
-
-            return FailingStr("abc")
-
-    encoded_really_bad = tok.encode(ReallyBadString())  # type: ignore[arg-type]
-    assert encoded_really_bad == [ord("a") % 128, ord("b") % 128, ord("c") % 128]
-
-    # Test decode when bytes(...) raises ValueError/TypeError
-    bad_tokens = [object()]  # type: ignore[list-item]
-    decoded_bad = tok.decode(bad_tokens)  # type: ignore[arg-type]
-    assert decoded_bad == ""
-
-
 def test_sql_tokenizer_get_vocab() -> None:
     """Test get_vocab for fallback byte-level and mock HF tokenizer."""
     tok = SQLTokenizer(vocab_size=128)

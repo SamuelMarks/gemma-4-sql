@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
 try:
     import mlx.core as _mx
 
-    mx: Any = _mx
+    mx: types.ModuleType | None = _mx
 except (ImportError, AttributeError):
     mx = None
 

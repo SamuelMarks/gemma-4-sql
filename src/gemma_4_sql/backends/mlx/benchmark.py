@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
@@ -18,14 +19,14 @@ logger = logging.getLogger(__name__)
 try:
     import mlx.core as _mx
 
-    mx: Any = _mx
+    mx: types.ModuleType | None = _mx
 except (ImportError, AttributeError):
     mx = None
 
 try:
     import mlx_lm
 
-    load: Any = getattr(mlx_lm, "load", None)
+    load = getattr(mlx_lm, "load", None)
 except (ImportError, AttributeError):
     load = None
 
@@ -57,8 +58,8 @@ def _load_mlx_model_and_device(model_name: str, hardware: str) -> tuple[Any, str
 
     from typing import cast
 
-    loaded: Any = load(model_name) if load is not None else None
-    model_any: Any = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
+    loaded = load(model_name) if load is not None else None
+    model_any = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
     return (model_any, target_device)
 
 

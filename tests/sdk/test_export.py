@@ -2,7 +2,7 @@
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError, ExportError
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.export import export_model
 
 
@@ -27,13 +27,13 @@ def test_export_jax(tmp_path: pytest.TempPathFactory) -> None:
 @pytest.mark.usefixtures("monkeypatch")
 def test_export_keras(tmp_path: pytest.TempPathFactory) -> None:
     """Test export with keras."""
-    with pytest.raises((ValueError, DependencyMissingError)):
+    with pytest.raises(ValueError):
         export_model("model1", str(tmp_path / "path1"), "keras")
 
 
 def test_export_maxtext(tmp_path: pytest.TempPathFactory) -> None:
     """Test export with maxtext."""
-    with pytest.raises((ExportError, DependencyMissingError)):
+    with pytest.raises(DependencyMissingError):
         export_model("model1", str(tmp_path / "path1"), "maxtext")
 
 

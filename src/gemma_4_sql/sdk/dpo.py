@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.sdk.registry import get_backend
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 
@@ -34,7 +36,7 @@ def run_dpo(
         A dictionary containing the results.
 
     """
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+
     DPOConfig = __import__("gemma_4_sql.type_hints", fromlist=["DPOConfig"]).DPOConfig
     return get_backend(backend).run_dpo(
         DPOConfig(
@@ -46,3 +48,6 @@ def run_dpo(
             batch_size=batch_size,
         )
     )
+
+
+__all__ = ["run_dpo"]

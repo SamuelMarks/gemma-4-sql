@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
@@ -16,9 +17,9 @@ try:
     from torch import nn as _nn
     from torch import optim as _optim
 
-    torch: Any = _torch
-    nn: Any = _nn
-    optim: Any = _optim
+    torch: types.ModuleType | None = _torch
+    nn: types.ModuleType | None = _nn
+    optim: types.ModuleType | None = _optim
 except (ImportError, AttributeError, RuntimeError):
     torch = None
     nn = None
@@ -27,7 +28,7 @@ except (ImportError, AttributeError, RuntimeError):
 try:
     from transformers.models.gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
 
-    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
 except (ImportError, AttributeError):
     Gemma4ForCausalLM = None
 
@@ -46,7 +47,8 @@ def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object,
     dist = None
     device_id = 0
     if is_distributed:
-        dist = __import__("torch.distributed", fromlist=[""])
+        import torch.distributed as dist
+
         if not dist.is_initialized():
             dist.init_process_group("nccl" if torch.cuda.is_available() else "gloo")
         rank = dist.get_rank()

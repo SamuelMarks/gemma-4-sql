@@ -28,31 +28,7 @@ from gemma_4_sql.cli_parsers import (
 from gemma_4_sql.cli_serve import agent_cmd, chat_cmd, evaluate_cmd, few_shot_cmd, generate_cmd, serve_cmd
 from gemma_4_sql.cli_train import dpo_cmd, peft_cmd, posttrain_cmd, pretrain_cmd, sft_cmd, train_cmd
 
-# Backward-compatible internal aliases
-_add_etl_subparser = add_etl_subparser
-_add_etl_parsers = add_etl_parsers
-_add_peft_quantize_parsers = add_peft_quantize_parsers
-_add_training_subparser = add_training_subparser
-_add_training_parsers = add_training_parsers
-_add_evaluate_parsers = add_evaluate_parsers
-_add_serve_export_parsers = add_serve_export_parsers
-_add_generate_agent_parsers = add_generate_agent_parsers
-_add_inference_parsers = add_inference_parsers
-_add_tokenize_execute_parsers = add_db_parsers
-_add_misc_parsers = add_misc_parsers
-
 __all__ = [
-    "_add_etl_parsers",
-    "_add_etl_subparser",
-    "_add_evaluate_parsers",
-    "_add_generate_agent_parsers",
-    "_add_inference_parsers",
-    "_add_misc_parsers",
-    "_add_peft_quantize_parsers",
-    "_add_serve_export_parsers",
-    "_add_tokenize_execute_parsers",
-    "_add_training_parsers",
-    "_add_training_subparser",
     "add_benchmark_parser",
     "add_db_parsers",
     "add_etl_parsers",

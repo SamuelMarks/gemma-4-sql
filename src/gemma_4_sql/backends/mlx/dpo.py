@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
@@ -20,12 +21,12 @@ try:
     import mlx.optimizers as _optim
     import mlx_lm
 
-    mlx: Any = _mlx
-    mx: Any = _mx
-    nn: Any = _nn
-    mx_nn: Any = _nn
-    optim: Any = _optim
-    load: Any = getattr(mlx_lm, "load", None)
+    mlx: types.ModuleType | None = _mlx
+    mx: types.ModuleType | None = _mx
+    nn: types.ModuleType | None = _nn
+    mx_nn: types.ModuleType | None = _nn
+    optim: types.ModuleType | None = _optim
+    load = getattr(mlx_lm, "load", None)
 except (ImportError, AttributeError):
     mlx = None
     mx = None
@@ -56,7 +57,7 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
         """Docstring for _fallback_log_sig."""
         return mx.negative(x) if hasattr(mx, "negative") else -x
 
-    log_sig_fn: Any = getattr(getattr(mx_nn, "losses", None), "log_sigmoid", _fallback_log_sig)
+    log_sig_fn = getattr(getattr(mx_nn, "losses", None), "log_sigmoid", _fallback_log_sig)
     return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, log_sig_fn)
 
 
@@ -137,9 +138,9 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
         raise DependencyMissingError("MLX dependencies are missing.")
     final_loss = 0.0
     try:
-        loaded_p: Any = load(model_name)
+        loaded_p = load(model_name)
         policy_model: ModelType = cast(Any, loaded_p)[0] if isinstance(loaded_p, (tuple, list)) else loaded_p
-        loaded_r: Any = load(model_name)
+        loaded_r = load(model_name)
         ref_model: ModelType = cast(Any, loaded_r)[0] if isinstance(loaded_r, (tuple, list)) else loaded_r
         optimizer = optim.AdamW(learning_rate=learning_rate)
         batch_size = getattr(config, "batch_size", 2)

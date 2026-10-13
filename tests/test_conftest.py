@@ -10,19 +10,8 @@ def test_duckdb_conn(in_memory_duckdb):
 
 
 @pytest.mark.asyncio
-async def test_sqlite_conn(in_memory_sqlite):
-    import inspect
-
-    if inspect.isasyncgen(in_memory_sqlite):
-        conn = await in_memory_sqlite.__anext__()
-        assert conn is not None
-        # teardown
-        try:
-            await in_memory_sqlite.__anext__()
-        except StopAsyncIteration:
-            pass
-    else:
-        assert in_memory_sqlite is not None
+async def test_sqlite_conn(in_memory_sqlite) -> None:
+    assert in_memory_sqlite is not None
 
 
 def test_mock_dataset(synthetic_dataset):

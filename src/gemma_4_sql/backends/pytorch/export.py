@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -12,9 +13,11 @@ if TYPE_CHECKING:
 try:
     import torch as _torch
 
-    torch: Any = _torch
-    save_file_fn: Any = __import__("safetensors.torch", fromlist=["save_file"]).save_file
-    save_file: Any = save_file_fn
+    torch: types.ModuleType | None = _torch
+    from safetensors.torch import save_file
+
+    save_file_fn = save_file
+    save_file = save_file_fn
 except (ImportError, AttributeError):
     torch = None
     save_file = None
@@ -30,7 +33,8 @@ def _is_rank_zero() -> bool:
     if torch is None:
         return True
     try:
-        dist = __import__("torch.distributed", fromlist=[""])
+        import torch.distributed as dist
+
         if dist.is_initialized():
             return dist.get_rank() == 0
     except (ImportError, RuntimeError) as e:
@@ -78,7 +82,9 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
             model = NativeGemma4(cast(Any, cfg))
             tensors = {k: v.clone() if k == "lm_head.weight" else v for k, v in model.state_dict().items()}
         else:
-            gemma4_for_causal_lm_cls = __import__("transformers.models.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
+            from transformers.models.gemma4 import Gemma4ForCausalLM
+
+            gemma4_for_causal_lm_cls = Gemma4ForCausalLM
             model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
             tensors = model.state_dict()
     except (ImportError, ValueError, OSError) as e:

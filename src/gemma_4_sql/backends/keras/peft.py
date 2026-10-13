@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.type_hints import ModelType, TensorType
@@ -16,13 +17,13 @@ logger = logging.getLogger(__name__)
 try:
     import keras as _keras
 
-    ops: Any = getattr(_keras, "ops", None)
-    keras: Any = _keras
+    ops = getattr(_keras, "ops", None)
+    keras: types.ModuleType | None = _keras
 except (ImportError, AttributeError):
     keras = None
     ops = None
 
-_LayerBase: Any = getattr(getattr(keras, "layers", None), "Layer", object) if keras is not None else object
+_LayerBase = getattr(getattr(keras, "layers", None), "Layer", object) if keras is not None else object
 
 
 class KerasLoRADense(_LayerBase):
@@ -91,7 +92,7 @@ class KerasLoRADense(_LayerBase):
         if getattr(self.dense, "built", False):
             self.build()
 
-    def build(self, input_shape: Any = None) -> None:
+    def build(self, input_shape=None) -> None:
         """Build the LoRA layer parameters.
 
         Args:
@@ -260,7 +261,7 @@ def inject_lora(
         if has_tracker:
             curr._tracker.unlock()
 
-        curr_any: Any = curr
+        curr_any = curr
         try:
             attrs: list[str] = list(cast(dict[str, Any], vars(curr_any)).keys()) if hasattr(curr_any, "__dict__") else []
             if hasattr(curr_any, "_modules") and isinstance(curr_any._modules, dict):
@@ -344,7 +345,7 @@ def merge_lora_weights(model: ModelType) -> Any:
         if has_tracker:
             curr._tracker.unlock()
 
-        curr_any: Any = curr
+        curr_any = curr
         try:
             attrs: list[str] = list(cast(dict[str, Any], vars(curr_any)).keys()) if hasattr(curr_any, "__dict__") else []
             if hasattr(curr_any, "_modules") and isinstance(curr_any._modules, dict):
@@ -433,7 +434,7 @@ def apply_lora(
             gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
             model = gemma_causal_lm_cls.from_preset(model_name)
 
-        model_any: Any = model
+        model_any = model
         if hasattr(model_any, "backbone") and hasattr(model_any.backbone, "enable_lora"):
             model_any.backbone.enable_lora(rank=lora_r)
             # Explicitly freeze non-adapter layers

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -18,8 +19,8 @@ try:
     import mlx.core as _mx
     import mlx.nn as _nn
 
-    mx: Any = _mx
-    nn: Any = _nn
+    mx: types.ModuleType | None = _mx
+    nn: types.ModuleType | None = _nn
 except (ImportError, AttributeError):
     mx = None
     nn = None
@@ -27,11 +28,11 @@ except (ImportError, AttributeError):
 try:
     from mlx_lm import load as _load
 
-    load: Any = _load
+    load: types.ModuleType | None = _load
 except (ImportError, AttributeError):
     load = None
 
-_ModuleBase: Any = nn.Module if nn is not None else object
+_ModuleBase = nn.Module if nn is not None else object
 
 
 class MLXLoRALinear(_ModuleBase):
@@ -303,7 +304,7 @@ def inject_lora(
     injected_count = 0
     for name, submodule in to_replace:
         parts = name.split(".")
-        curr: Any = model
+        curr = model
         for part in parts[:-1]:
             if (part.isdigit() and isinstance(curr, list)) or (part.isdigit() and isinstance(curr, tuple)):
                 curr = curr[int(part)]
@@ -349,7 +350,7 @@ def save_adapter_weights(model: ModelType, save_path: str | Path) -> None:
         raise DependencyMissingError("MLX dependencies are missing.")
     import mlx.utils as _mlx_utils
 
-    tree_flatten: Any = getattr(_mlx_utils, "tree_flatten", None)
+    tree_flatten = getattr(_mlx_utils, "tree_flatten", None)
 
     path = Path(save_path)
     if path.is_dir() or path.suffix != ".safetensors":
@@ -428,7 +429,7 @@ def apply_lora(
         )
 
         if "output_dir" in kwargs and kwargs["output_dir"] is not None:
-            save_adapter_weights(__import__("typing").cast(__import__("typing").Any, model), str(kwargs["output_dir"]))
+            save_adapter_weights(cast(Any, model), str(kwargs["output_dir"]))
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to apply LoRA: ")
         status = f"failed: {e!s}"

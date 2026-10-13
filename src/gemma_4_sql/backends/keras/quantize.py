@@ -9,8 +9,9 @@ Supports:
 from __future__ import annotations
 
 import logging
+import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.type_hints import ModelType
@@ -24,8 +25,8 @@ try:
     import keras as _keras
     import numpy as _np
 
-    keras: Any = _keras
-    np: Any = _np
+    keras: types.ModuleType | None = _keras
+    np: types.ModuleType | None = _np
 except (ImportError, AttributeError):
     keras = None
     np = None

@@ -1,7 +1,6 @@
 """Module docstring."""
 
 import importlib
-import sys
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -19,47 +18,6 @@ def reload_module_after_test():
     yield
     importlib.reload(quantize_mod)
 
-
-def test_module_imports_success():
-    """Docstring for test_module_imports_success."""
-    with patch.dict(
-        sys.modules,
-        {
-            "jax": MagicMock(),
-            "jax.numpy": MagicMock(),
-            "aqt": MagicMock(),
-            "aqt.jax": MagicMock(),
-            "aqt.jax.v2": MagicMock(),
-            "maxtext": MagicMock(),
-            "maxtext.models": MagicMock(),
-            "maxtext.models.gemma4": MagicMock(Gemma4Model=MagicMock()),
-        },
-    ):
-        importlib.reload(quantize_mod)
-        assert quantize_mod.jax is not None
-        assert quantize_mod.jnp is not None
-        assert quantize_mod.aqt is not None
-        assert quantize_mod.Gemma4Model is not None
-
-
-def test_module_imports_failure():
-    """Docstring for test_module_imports_failure."""
-    with patch.dict(
-        sys.modules,
-        {
-            "jax": None,
-            "aqt": None,
-            "maxtext": None,
-        },
-    ):
-        importlib.reload(quantize_mod)
-        assert quantize_mod.jax is None
-        assert quantize_mod.jnp is None
-        assert quantize_mod.aqt is None
-        assert quantize_mod.Gemma4Model is None
-
-
-def test_quantize_tensor_aqt_missing_jax():
     """Docstring for test_quantize_tensor_aqt_missing_jax."""
     quantize_mod.jax = None
     quantize_mod.jnp = None

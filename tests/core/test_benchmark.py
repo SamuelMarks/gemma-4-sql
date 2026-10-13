@@ -164,7 +164,7 @@ def test_run_benchmark_wrapper_paths() -> None:
 
 def test_sdk_benchmark(monkeypatch: object) -> None:
     """Docstring for test_sdk_benchmark."""
-    from unittest.mock import patch
+    import sys
 
     from gemma_4_sql.sdk.benchmark import benchmark
 
@@ -175,24 +175,14 @@ def test_sdk_benchmark(monkeypatch: object) -> None:
             """Docstring for benchmark_model."""
             return {"status": "success"}
 
-    class FakeRegistry:
-        """Docstring for FakeRegistry."""
+    def mock_get_backend(x):
+        """Docstring for mock_get_backend."""
+        return FakeBackend()
 
-        def get_backend(x):
-            """Docstring for get_backend."""
-            return FakeBackend()
-
-    original_import = __import__
-
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
-        """Docstring for mock_import."""
-        if name == "gemma_4_sql.sdk.registry":
-            return FakeRegistry
-        return original_import(name, globals, locals, fromlist, level)
-
-    with patch("builtins.__import__", side_effect=mock_import):
-        res = benchmark("m", "cpu", 1, "pytorch")
-        assert res["status"] == "success"
+    bench_mod = sys.modules["gemma_4_sql.sdk.benchmark"]
+    monkeypatch.setattr(bench_mod, "get_backend", mock_get_backend)
+    res = benchmark("m", "cpu", 1, "pytorch")
+    assert res["status"] == "success"
 
 
 def test_universal_mock():

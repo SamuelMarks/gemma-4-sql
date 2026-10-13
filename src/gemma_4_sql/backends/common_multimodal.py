@@ -138,14 +138,13 @@ def process_image(
                 pil_resized = pil_img.convert("RGB").resize((target_w, target_h), Image.Resampling.BILINEAR)
                 if np is not None:
                     rgb_array = np.array(pil_resized, dtype=np.float32) / 255.0
-        except (OSError, ValueError, TypeError, KeyError) as e:
-            logger.debug("PIL image decoding failed: %s; using synthetic tensor fallback", e)
+                else:
+                    rgb_array = [[[p / 255.0 for p in pil_resized.getpixel((x, y))] for x in range(target_w)] for y in range(target_h)]
+        except Exception as e:
+            raise ValueError(f"Corrupted or unreadable image: {e}") from e
 
     if rgb_array is None:
-        if np is not None:
-            rgb_array = np.zeros((target_h, target_w, 3), dtype=np.float32)
-        else:
-            rgb_array = [[[0.0, 0.0, 0.0] for _ in range(target_w)] for _ in range(target_h)]
+        raise ValueError("Corrupted or unreadable image: Pillow library is required but missing.")
 
     # Standard ImageNet normalization: (x - mean) / std
     mean = [0.485, 0.456, 0.406]

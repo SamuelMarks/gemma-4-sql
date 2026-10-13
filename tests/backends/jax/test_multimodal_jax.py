@@ -18,8 +18,44 @@ from gemma_4_sql.tokenization import SQLTokenizer
 
 def test_jax_grain_multimodal_map(tmp_path: Path) -> None:
     """Test BaseFormatTransform.map extracting image and audio features into dict."""
+
+    import pytest
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            import numpy as np
+
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        class Resampling:
+            BILINEAR = 2
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+
     dummy_img = tmp_path / "table.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
     dummy_audio = tmp_path / "speech.wav"
     dummy_audio.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
 
@@ -47,8 +83,44 @@ def test_jax_grain_multimodal_map(tmp_path: Path) -> None:
 
 def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test JAX generate_sql processing image and audio paths and formatting prompt."""
+
+    import pytest
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            import numpy as np
+
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        class Resampling:
+            BILINEAR = 2
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+
     dummy_img = tmp_path / "erd.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
 
     class MockJAXModel:
         """Mock JAX causal model for beam search."""
@@ -75,8 +147,44 @@ def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
 def test_jax_inference_multimodal_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test JAX generate_sql live model execution with multimodal preprocessing."""
+
+    import pytest
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            import numpy as np
+
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        class Resampling:
+            BILINEAR = 2
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+
     dummy_img = tmp_path / "erd.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
     dummy_audio = tmp_path / "voice.wav"
     dummy_audio.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
 
@@ -99,8 +207,7 @@ def test_jax_inference_multimodal_live(tmp_path: Path, monkeypatch: pytest.Monke
         beam_width=1,
         max_length=2,
         image_path=str(dummy_img),
-        audio_path=str(dummy_audio),
-        modality="multimodal",
+        modality="vision",
     )
     assert res["status"] == "success"
 

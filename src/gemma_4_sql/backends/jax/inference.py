@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import operator
+import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.tokenization import SQLTokenizer
@@ -19,11 +20,11 @@ try:
     from .gemma4 import Gemma4Config as _Gemma4Config
     from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    nnx: Any = _nnx
-    Gemma4Config: Any = _Gemma4Config
-    Gemma4ForCausalLM: Any = _Gemma4ForCausalLM
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    nnx: types.ModuleType | None = _nnx
+    Gemma4Config: Any | None = _Gemma4Config
+    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
 except (ImportError, AttributeError):
     jax = None
     jnp = None
@@ -191,8 +192,8 @@ def generate_sql(
             try:
                 import orbax.checkpoint as ocp
 
-                checkpointer: Any = ocp.PyTreeCheckpointer()
-                restored: Any = checkpointer.restore(model_path)
+                checkpointer = ocp.PyTreeCheckpointer()
+                restored = checkpointer.restore(model_path)
                 if restored is not None and nnx is not None and hasattr(nnx, "update"):
                     nnx.update(model, restored)
             except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):

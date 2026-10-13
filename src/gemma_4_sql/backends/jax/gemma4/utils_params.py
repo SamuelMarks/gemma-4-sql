@@ -6,6 +6,7 @@ import contextlib
 import logging
 import os
 import re
+import types
 from pathlib import Path
 from typing import Any, Optional
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 try:
     from safetensors import safe_open as _safe_open
 
-    safe_open: Any = _safe_open
+    safe_open: types.ModuleType | None = _safe_open
 except ImportError:
     safe_open = None
 
@@ -107,7 +108,7 @@ def assign_weights(keys: list[str], tensor: TensorType, state_dict: Any, st_key:
     """
     sharding_dict = kwargs.get("sharding_dict")
     (key, *rest) = keys
-    resolved_key: Any = key
+    resolved_key = key
     if hasattr(state_dict, "__contains__") and resolved_key not in state_dict:
         if isinstance(resolved_key, str) and resolved_key.isdigit() and int(resolved_key) in state_dict:
             resolved_key = int(resolved_key)
@@ -118,7 +119,7 @@ def assign_weights(keys: list[str], tensor: TensorType, state_dict: Any, st_key:
         if tensor.shape != (state_dict[resolved_key].value.shape if hasattr(state_dict[resolved_key], "value") else getattr(state_dict[resolved_key], "shape", ())):
             msg = f"Shape mismatch for {st_key}: {tensor.shape} vs {(state_dict[resolved_key].value.shape if hasattr(state_dict[resolved_key], 'value') else getattr(state_dict[resolved_key], 'shape', ()))}"
             raise ValueError(msg)
-        val: Any = jax.device_put(tensor, sharding_dict[resolved_key]) if sharding_dict is not None else jax.device_put(tensor)
+        val = jax.device_put(tensor, sharding_dict[resolved_key]) if sharding_dict is not None else jax.device_put(tensor)
         if hasattr(state_dict[resolved_key], "value"):
             state_dict[resolved_key].value = val
         else:
@@ -143,7 +144,7 @@ def assign_weights_from_eval_shape(keys: list[str], tensor: TensorType, state_di
 
     """
     (key, *rest) = keys
-    resolved_key: Any = key
+    resolved_key = key
     if hasattr(state_dict, "__contains__") and resolved_key not in state_dict:
         if isinstance(resolved_key, str) and resolved_key.isdigit() and int(resolved_key) in state_dict:
             resolved_key = int(resolved_key)

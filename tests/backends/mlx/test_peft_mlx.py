@@ -264,34 +264,6 @@ def test_inject_lora_coverage():
     assert count2 == 0
 
 
-def test_mlx_lm_import_success_exec():
-    """Docstring for test_mlx_lm_import_success_exec."""
-    import gemma_4_sql.backends.mlx.peft as q
-
-    with open(q.__file__) as f:
-        code = f.read()
-
-    import builtins
-
-    orig_import = builtins.__import__
-    from unittest.mock import MagicMock
-
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name == "mlx_lm":
-            mock_mlxlm = MagicMock()
-            mock_mlxlm.load = "MockLoad"
-            return mock_mlxlm
-        return orig_import(name, *args, **kwargs)
-
-    namespace = {"__name__": "mock_peft", "__builtins__": dict(builtins.__dict__)}
-    namespace["__builtins__"]["__import__"] = mock_import
-
-    exec(code, namespace)
-
-    assert namespace.get("load") == "MockLoad"
-
-
 def test_mlx_lm_import_success_real(monkeypatch):
     """Docstring for test_mlx_lm_import_success_real."""
     import sys

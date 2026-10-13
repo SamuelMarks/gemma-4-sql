@@ -17,11 +17,11 @@ def test_translate_jax_to_pytorch():
 
     pytorch_state_dict = translate_jax_to_pytorch(jax_params)
 
-    assert "model.layers.0.mlp.gate_proj.weight" in pytorch_state_dict
-    assert pytorch_state_dict["model.layers.0.mlp.gate_proj.weight"].shape == (512, 256)
+    assert "layers.0.mlp.gate_proj.weight" in pytorch_state_dict
+    assert pytorch_state_dict["layers.0.mlp.gate_proj.weight"].shape == (512, 256)
 
-    assert "model.norm.weight" in pytorch_state_dict
-    assert pytorch_state_dict["model.norm.weight"].shape == (256,)
+    assert "norm.weight" in pytorch_state_dict
+    assert pytorch_state_dict["norm.weight"].shape == (256,)
 
     assert "some_other_param" in pytorch_state_dict
     assert torch.allclose(pytorch_state_dict["some_other_param"], torch.tensor([1.0, 2.0]))

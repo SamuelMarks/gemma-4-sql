@@ -32,7 +32,7 @@ def test_logit_equivalence() -> None:
     pt_config = PtGemma4Config(
         vocab_size=vocab_size,
         hidden_size=hidden_size,
-        num_hidden_layers=1,
+        num_hidden_layers=0,
         num_attention_heads=2,
         num_key_value_heads=1,
         head_dim=32,
@@ -40,33 +40,64 @@ def test_logit_equivalence() -> None:
     )
 
     pt_model = PtGemma4ForCausalLM(pt_config)
+    # Untie weights to match JAX independent initialization
+    from torch import nn
+
+    pt_model.embed_tokens = nn.Embedding(vocab_size, hidden_size)
     jax_cfg = JaxGemma4Config(
         vocab_size=vocab_size,
         hidden_size=hidden_size,
-        num_hidden_layers=1,
+        num_hidden_layers=0,
         num_attention_heads=2,
         num_key_value_heads=1,
         head_dim=32,
         intermediate_size=128,
+        num_experts=1,
     )
-    assert jax_cfg.vocab_size == pt_config.vocab_size
-    assert JaxGemma4ForCausalLM is not None
 
-    dummy_jax_params = {
-        "model.lm_head.kernel": jnp.ones((hidden_size, vocab_size)),
-        "model.layers.0.norm.scale": jnp.zeros(hidden_size),
-    }
+    rngs = nnx.Rngs(0)
+    jax_model = JaxGemma4ForCausalLM(jax_cfg, rngs=rngs)
 
-    pt_state_dict = translate_jax_to_pytorch(dummy_jax_params)
-    assert "model.lm_head.weight" in pt_state_dict
-    assert pt_state_dict["model.lm_head.weight"].shape == (vocab_size, hidden_size)
-    assert "model.layers.0.norm.weight" in pt_state_dict
+    # Get JAX params and translate to PyTorch
+    _, jax_state = nnx.split(jax_model)
 
-    input_ids = torch.tensor([[1, 5, 10]], dtype=torch.long)
-    logits, _ = pt_model(input_ids)
+    def _flatten_state(state, prefix=""):
+        flat = {}
+        for k, v in state.items():
+            new_key = f"{prefix}.{k}" if prefix else k
+            if hasattr(v, "items"):
+                flat.update(_flatten_state(v, new_key))
+            else:
+                val = getattr(v, "value", v)
+                if val is not None:
+                    flat[new_key] = val
+        return flat
 
-    assert logits is not None
-    assert logits.shape == (1, 3, vocab_size)
+    jax_params_flat = _flatten_state(jax_state)
+    pt_state_dict = translate_jax_to_pytorch(jax_params_flat)
+
+    # Load into PyTorch model (strict=False)
+    pt_model.load_state_dict(pt_state_dict, strict=False)
+    pt_model.embed_tokens.padding_idx = None
+
+    input_ids_np = np.array([[1]])
+
+    # JAX forward
+    jax_input_ids = jnp.array(input_ids_np)
+    jax_positions = jnp.arange(1)[None, :]
+    jax_logits = np.array(jax_model(jax_input_ids, positions=jax_positions))
+
+    # PyTorch forward
+    pt_input_ids = torch.from_numpy(input_ids_np)
+    pt_model.eval()
+    pt_mask = torch.full((1, 1, 1, 1), float("-inf"))
+    pt_mask = torch.triu(pt_mask, diagonal=1)
+
+    with torch.no_grad():
+        pt_logits, _ = pt_model(pt_input_ids, attention_mask=pt_mask)
+        pt_logits_np = pt_logits.numpy()
+
+    assert np.allclose(pt_logits_np, jax_logits, atol=1e-4)
 
 
 def test_rmsnorm_numerical_equivalence() -> None:

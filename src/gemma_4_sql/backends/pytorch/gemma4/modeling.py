@@ -154,7 +154,7 @@ class Gemma4ForCausalLM(nn.Module):
             Tuple containing output logits and updated past key values.
 
         """
-        hidden_states = self.embed_tokens(input_ids)
+        hidden_states = self.embed_tokens(input_ids) * (self.config.hidden_size**0.5)
 
         if pixel_values is not None:
             vision_outputs = self.vision_model(pixel_values)

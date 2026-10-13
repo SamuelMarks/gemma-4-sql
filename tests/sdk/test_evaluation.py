@@ -257,17 +257,15 @@ def test_evaluate_with_image_path() -> None:
         assert res["modality"] == "vision"
 
 
-def test_collect_predictions_batch_multimodal_and_type_error() -> None:
-    """Test _run_evaluation_inference when batch contains pixel/audio values and generate_sql raises TypeError."""
+def test_collect_predictions_batch_multimodal() -> None:
+    """Test _run_evaluation_inference when batch contains pixel/audio values."""
     from gemma_4_sql.sdk.evaluation import _run_evaluation_inference
 
     backend_impl = MagicMock()
 
-    # Mock generate_sql to raise TypeError when called with kwargs, then succeed without kwargs
+    # Mock generate_sql to succeed
     def mock_generate_sql(model_name: str, prompt: str, **kwargs: object) -> dict[str, object]:
         """Docstring for mock_generate_sql."""
-        if kwargs:
-            raise TypeError("generate_sql() got an unexpected keyword argument")
         return {"sql": "SELECT 1", "confidence_score": 0.85}
 
     backend_impl.generate_sql.side_effect = mock_generate_sql

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+import types
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.keras.etl import build_dataloader
@@ -17,8 +18,8 @@ try:
     import keras as _keras
     import tensorflow as _tf
 
-    keras: Any = _keras
-    tf: Any = _tf
+    keras: types.ModuleType | None = _keras
+    tf: types.ModuleType | None = _tf
 except (ImportError, AttributeError):
     keras = None
     tf = None
@@ -66,7 +67,7 @@ def _compute_logps(model: ModelType, inputs: TensorType, labels: TensorType) -> 
     # Remove the extra dimension and sum over the sequence length
     selected_log_probs = tf.squeeze(selected_log_probs, axis=-1)
     # We might want to mask out padding tokens in the future, assuming non-zero labels are valid tokens for now
-    mask = tf.cast(__import__("typing").cast(__import__("typing").Any, labels) != 0, tf.float32)  # Justified: Dynamic backend protocol typing
+    mask = tf.cast(cast(Any, labels) != 0, tf.float32)  # Justified: Dynamic backend protocol typing
     return tf.reduce_sum(selected_log_probs * mask, axis=-1)
 
 

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+import types
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import catch_optional_imports
@@ -16,8 +17,8 @@ try:
     import jax as _jax
     import maxtext.models.gemma4 as _gemma4
 
-    jax: Any = _jax
-    gemma4: Any = _gemma4
+    jax: types.ModuleType | None = _jax
+    gemma4: types.ModuleType | None = _gemma4
 except (ImportError, AttributeError):
     jax = None
     gemma4 = None

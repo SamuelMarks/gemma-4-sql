@@ -39,14 +39,14 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
         num_rep = num_heads // num_kv_heads
         k = jnp.repeat(k, num_rep, axis=2)
         v = jnp.repeat(v, num_rep, axis=2)
-    scores: Any = jnp.einsum("bqhd,bkhd->bhqk", q, k) * scale
+    scores = jnp.einsum("bqhd,bkhd->bhqk", q, k) * scale
     if soft_cap is not None:
         scores /= soft_cap
         scores = jnp.tanh(scores) * soft_cap
     if attention_mask is not None:
         scores = scores + attention_mask
     weights = jax.nn.softmax(scores, axis=-1)
-    out: Any = jnp.einsum("bhqk,bkhd->bqhd", weights, v)
+    out = jnp.einsum("bhqk,bkhd->bqhd", weights, v)
     return out.reshape((out.shape[0], out.shape[1], -1))
 
 

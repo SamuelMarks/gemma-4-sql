@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,12 +23,12 @@ try:
     import optax as _optax
     import orbax.checkpoint as _ocp
 
-    jax: Any = _jax
-    jnp: Any = _jnp
-    optax: Any = _optax
-    maxtext_train: Any = _maxtext_train
-    Gemma4Model: Any = getattr(_gemma4, "Gemma4Model", None)
-    ocp: Any = _ocp
+    jax: types.ModuleType | None = _jax
+    jnp: types.ModuleType | None = _jnp
+    optax: types.ModuleType | None = _optax
+    maxtext_train: types.ModuleType | None = _maxtext_train
+    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
+    ocp: types.ModuleType | None = _ocp
 except (ImportError, AttributeError):
     jax = None
     jnp = None

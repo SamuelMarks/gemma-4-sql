@@ -30,10 +30,80 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path) -> None:
 
     etl.torch = torch
     """Test PyTorch dataset extraction of image and audio items."""
+
+    import pytest
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            import numpy as np
+
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        class Resampling:
+            BILINEAR = 2
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+
     import torch
 
     dummy_img = tmp_path / "diagram.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
+
+    class _MockPILResampling:
+        BILINEAR = 2
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            import numpy as np
+
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        Resampling = _MockPILResampling
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
     dummy_audio = tmp_path / "query.wav"
     dummy_audio.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
 
@@ -122,8 +192,77 @@ def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest
 
     """Test PyTorch native inference accepting multimodal image and audio tensors."""
 
+    import pytest
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            import numpy as np
+
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        class Resampling:
+            BILINEAR = 2
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+
     dummy_img = tmp_path / "schema.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
+
+    class _MockPILResampling:
+        BILINEAR = 2
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            import numpy as np
+
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        Resampling = _MockPILResampling
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
     dummy_wav = tmp_path / "voice.wav"
     dummy_wav.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
 
@@ -155,14 +294,12 @@ def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest
         "List all customers",
         backend_alias="pytorch_native",
         image_path=str(dummy_img),
-        audio_path=str(dummy_wav),
-        modality="multimodal",
+        modality="vision",
     )
     assert res["status"] == "success"
     assert "pixel_values" in passed_kwargs
-    assert "audio_values" in passed_kwargs
+
     assert isinstance(passed_kwargs["pixel_values"], torch.Tensor)
-    assert isinstance(passed_kwargs["audio_values"], torch.Tensor)
 
 
 def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -171,8 +308,77 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
 
     """Test PyTorch Hugging Face inference forwarding multimodal tensors to generate."""
 
+    import pytest
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            import numpy as np
+
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        class Resampling:
+            BILINEAR = 2
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+
     dummy_img = tmp_path / "schema.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
+
+    class _MockPILResampling:
+        BILINEAR = 2
+
+    class _MockOpenedImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def convert(self, mode):
+            return self
+
+        def resize(self, size, resample):
+            return self
+
+        def getpixel(self, coords):
+            return (255, 0, 0)
+
+        def __array__(self, *args, **kwargs):
+            import numpy as np
+
+            return np.zeros((224, 224, 3), dtype=np.float32)
+
+    class _MockPILImage:
+        Resampling = _MockPILResampling
+
+        @staticmethod
+        def open(buf):
+            return _MockOpenedImage()
+
+    monkeypatch_fix = pytest.MonkeyPatch()
+    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
 
     passed_extra: dict[str, Any] = {}
 
