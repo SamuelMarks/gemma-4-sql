@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for logging jax."""
 
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +10,7 @@ from gemma_4_sql.backends.jax.logging import log_metrics
 
 
 def test_log_metrics():
-    """Docstring for test_log_metrics."""
+    """Verify behavior of test_log_metrics."""
     with patch("gemma_4_sql.backends.jax.logging.log_metrics_wrapper") as mock_wrapper:
         mock_wrapper.return_value = {"status": "success"}
 
@@ -27,7 +27,7 @@ def test_log_metrics():
 
 
 def test_log_metrics_success_import(monkeypatch):
-    """Docstring for test_log_metrics_success_import."""
+    """Verify behavior of test_log_metrics_success_import."""
     mock_tbx = MagicMock()
     mock_tbx.SummaryWriter = "MockWriter"
     import sys

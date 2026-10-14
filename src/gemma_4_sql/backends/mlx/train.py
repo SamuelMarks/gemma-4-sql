@@ -2,44 +2,30 @@
 
 from __future__ import annotations
 
-import types
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.mlx.etl import build_dataloader
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ETLConfig, ModelType, TensorType, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 
-try:
-    import mlx.core as _mx
-    import mlx.nn as _nn
-    import mlx.optimizers as _optim
-
-    mx: types.ModuleType | None = _mx
-    nn: types.ModuleType | None = _nn
-    optim: types.ModuleType | None = _optim
-except (ImportError, AttributeError):
-    mx = None
-    nn = None
-    optim = None
-
-try:
-    import mlx_lm
-
-    load = getattr(mlx_lm, "load", None)
-except (ImportError, AttributeError):
-    load = None
+mx = optional_import("mlx.core")
+nn = optional_import("mlx.nn")
+optim = optional_import("mlx.optimizers")
+load = optional_attr("mlx_lm", "load")
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    """Execute function.
+    """Run MLX supervised training epochs over the dataloader.
 
     Args:
-        state: The state.
+        state: `TrainerState` holding model, optimizer, dataloader, and value_and_grad function.
 
     Returns:
-        The computed float value.
+        Mean batch loss from the final epoch.
 
     """
     dataloader = state.dataloader
@@ -52,12 +38,12 @@ def _run_training_epochs(state: TrainerState) -> float:
     for _epoch in range(epochs):
         epoch_loss = 0.0
         batch_count = 0
-        for batch in dataloader:  # type: ignore # Justified: Dynamic backend protocol typing
-            inputs = mx.array(batch["inputs"])  # type: ignore # Justified: Dynamic backend protocol typing
-            targets = mx.array(batch["targets"])  # type: ignore # Justified: Dynamic backend protocol typing
-            (loss, grads) = loss_and_grad_fn(model, inputs, targets)  # type: ignore # Justified: Dynamic backend protocol typing
-            optimizer.update(model, grads)  # type: ignore # Justified: Dynamic backend protocol typing
-            mx.eval(model.parameters(), optimizer.state)  # type: ignore # Justified: Dynamic backend protocol typing
+        for batch in dataloader:
+            inputs = mx.array(batch["inputs"])
+            targets = mx.array(batch["targets"])
+            (loss, grads) = loss_and_grad_fn(model, inputs, targets)
+            optimizer.update(model, grads)
+            mx.eval(model.parameters(), optimizer.state)
             epoch_loss += float(loss.item() if hasattr(loss, "item") else loss)
             batch_count += 1
         final_loss = epoch_loss / max(1, batch_count)
@@ -83,8 +69,6 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
 
     """
     if mx is None or nn is None or optim is None or load is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MLX dependencies are missing.")
 
     loaded = load(model_name)
@@ -139,8 +123,6 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     final_loss = 0.0
     status = "completed"
     if mx is None or nn is None or optim is None or load is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MLX dependencies are missing.")
     try:
         batch_size = getattr(config, "batch_size", 2)

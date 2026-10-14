@@ -1,4 +1,4 @@
-"""Core functionality for the __init__ module."""
+"""JAX/Flax NNX Gemma 4 model architecture, cache, and pretrained parameter loader."""
 
 from __future__ import annotations
 

@@ -4,26 +4,20 @@ from __future__ import annotations
 
 import logging
 import math
-import types
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import InferenceResultDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
-try:
-    import keras as _keras
-    import tensorflow as _tf
-
-    keras: types.ModuleType | None = _keras
-    tf: types.ModuleType | None = _tf
-except (ImportError, AttributeError):
-    keras = None
-    tf = None
+keras = optional_import("keras")
+tf = optional_import("tensorflow")
+GemmaCausalLM = optional_attr("keras_nlp.models", "GemmaCausalLM")
 
 
 def _extract_flat_scores(scores: object) -> list[float]:
@@ -126,7 +120,7 @@ def generate_sql(
     beam_width: int = 3,
     max_length: int = 50,
     **kwargs: JSONValue,
-) -> JSONDict:
+) -> InferenceResultDict:
     """Generate a SQL query from a natural language prompt using Keras.
 
     Configures BeamSampler with the requested beam_width, executes generation,
@@ -153,7 +147,9 @@ def generate_sql(
     sql = ""
     try:
         logger.info("Generating with Keras %s (beam_width=%d)", model_name, beam_width)
-        gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
+        gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM")
+        if gemma_causal_lm_cls is None:
+            raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
         model = gemma_causal_lm_cls.from_preset(model_name)
 
         # Configure beam search sampler

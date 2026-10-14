@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import logging
 import re
-import types
 from typing import Any, cast
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 
 from . import modeling as model_lib
@@ -21,12 +21,7 @@ from .utils_params import assign_weights_from_eval_shape, map_to_jax_key, stoi
 
 logger = logging.getLogger(__name__)
 
-try:
-    import safetensors as _safetensors
-
-    safetensors: types.ModuleType | None = _safetensors
-except ImportError:
-    safetensors = None
+safetensors = optional_import("safetensors")
 
 
 def _get_text_mappings(transform_cls: Any) -> dict[str, tuple[str, object]]:
@@ -241,13 +236,18 @@ def _fix_jax_state_embeddings(jax_state: Any, gemma4: Any, cfg: model_lib.ModelC
 
 
 def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> object:
-    """Load safetensor weights from a file, then convert & merge into a flax.nnx model.
+    """Load safetensor weights from a directory and merge them into a `Gemma4ForCausalLM` model.
+
+    Args:
+        file_dir: Directory containing `.safetensors` checkpoint files.
+        cfg: Target `ModelConfig` specification.
 
     Returns:
-        object: The resulting output from the operation.
+        Initialized `Gemma4ForCausalLM` instance populated with pretrained weights.
 
     Raises:
-        ValueError: If the operation encounters an unexpected ValueError.
+        DependencyMissingError: If `etils` or `safetensors` is missing.
+        ValueError: If no `.safetensors` files are found in `file_dir`.
 
     """
     import gc
@@ -267,7 +267,7 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
         raise ValueError(msg)
     gemma4 = nnx.eval_shape(lambda: model_lib.Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0)))
     (graph_def, abs_state) = nnx.split(gemma4)
-    state_any = abs_state
+    state_any: Any = abs_state
     if hasattr(state_any, "to_pure_dict"):
         state_dict_raw = state_any.to_pure_dict()
     elif hasattr(state_any, "to_flat_dict"):

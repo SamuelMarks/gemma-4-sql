@@ -5,26 +5,31 @@ from __future__ import annotations
 import typing
 from typing import Any
 
-from gemma_4_sql.backends.common_data import get_grain_classes, load_duckdb_dataset
+from gemma_4_sql.backends.common_data import (
+    build_grain_dataloader,
+    get_grain_classes,
+    get_grain_sampler,
+    load_duckdb_dataset,
+    load_hf_or_duckdb_dataset,
+)
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig
 
 if typing.TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import ETLResultDict, JSONDict, JSONValue
 
-try:
-    import datasets as _datasets
-    import grain.python as _grain
-
-    datasets: typing.Any = _datasets
-    grain: typing.Any = _grain
-except (ImportError, AttributeError):
-    datasets = None
-    grain = None
+datasets: typing.Any = optional_import("datasets")
+grain: typing.Any = optional_import("grain.python")
 duckdb = None
 
 
-def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, duckdb_table: str | None) -> object:
+def _load_hf_or_duckdb(
+    dataset_name: str,
+    split: str,
+    duckdb_path: str | None,
+    duckdb_table: str | None,
+) -> object:
     """Load a dataset from Hugging Face or DuckDB.
 
     Args:
@@ -40,13 +45,14 @@ def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, d
         DependencyMissingError: If datasets dependency is missing.
 
     """
-    if duckdb_path and duckdb_table:
-        return load_duckdb_dataset(duckdb_path, duckdb_table)
-    if datasets is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError("Datasets dependency is missing.")
-    return datasets.load_dataset(dataset_name, split=split)
+    return load_hf_or_duckdb_dataset(
+        dataset_name,
+        split,
+        duckdb_path,
+        duckdb_table,
+        datasets,
+        load_duckdb_fn=load_duckdb_dataset,
+    )
 
 
 def _get_sampler(source_len: int, distributed: bool) -> object:
@@ -63,15 +69,42 @@ def _get_sampler(source_len: int, distributed: bool) -> object:
         DependencyMissingError: If Grain dependency is missing.
 
     """
-    if grain is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError("Grain dependency is missing.")
-    shard_options = getattr(grain, "JAXDistributedSharding", lambda: None)() if distributed else getattr(grain, "NoSharding", lambda: None)()
-    return grain.IndexSampler(num_records=source_len, shard_options=shard_options, shuffle=False, num_epochs=1)
+    return get_grain_sampler(source_len, distributed, grain)
 
 
-def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
+def _wrap_maxtext_transform(base_transform_cls: Any) -> Any:
+    """Wrap the base Grain transform class to inject MaxText `segment_ids` and `positions`.
+
+    Args:
+        base_transform_cls: Base transform class from `get_grain_classes`.
+
+    Returns:
+        `MaxTextFormatTransform` subclass.
+
+    """
+
+    class MaxTextFormatTransform(base_transform_cls):
+        """Transforms data into MaxText expected format with segment_ids and positions."""
+
+        def map(self, element: JSONDict) -> JSONDict:
+            """Map an element with MaxText specific features.
+
+            Args:
+                element: Input dataset element dictionary.
+
+            Returns:
+                Tokenized dictionary augmented with `segment_ids` and `positions`.
+
+            """
+            result: dict[str, Any] = super().map(element)
+            result["segment_ids"] = [1]
+            result["positions"] = [0]
+            return result
+
+    return MaxTextFormatTransform
+
+
+def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> ETLResultDict:
     """Build a MaxText-specific Grain dataloader.
 
     Args:
@@ -85,40 +118,15 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
         DependencyMissingError: If grain or datasets are missing.
 
     """
-    dataset_name = config.dataset_name
-    split = config.split
-    batch_size = config.batch_size
-    distributed = config.distributed
-    tokenizer_name = config.tokenizer_name
-    duckdb_path = str(config.duckdb_path or kwargs.get("duckdb_path") or "")
-    duckdb_table = str(config.duckdb_table or kwargs.get("duckdb_table") or "")
-    if datasets is None or grain is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError(f"Missing grain or datasets. Cannot load {dataset_name}.")
-    hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)
-    (data_source_cls, base_transform_cls) = get_grain_classes(grain)
-
-    class MaxTextFormatTransform(base_transform_cls):  # type: ignore[misc, valid-type]
-        """Transforms data into MaxText expected format."""
-
-        def map(self, element: JSONDict) -> JSONDict:
-            """Map an element with MaxText specific features.
-
-            Args:
-                element: The element.
-
-            Returns:
-                The execution result.
-
-            """
-            result: dict[str, Any] = super().map(element)
-            result["segment_ids"] = [1]
-            result["positions"] = [0]
-            return result
-
-    source = data_source_cls(hf_dataset)
-    tokenizer = SQLTokenizer(model_name=tokenizer_name)
-    sampler = _get_sampler(len(source), distributed)
-    dataloader = grain.DataLoader(data_source=source, sampler=sampler, operations=[MaxTextFormatTransform(tokenizer=tokenizer), grain.Batch(batch_size=batch_size)])
-    return {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "maxtext", "distributed": distributed, "loader": dataloader}
+    return build_grain_dataloader(
+        config,
+        backend_name="maxtext",
+        datasets_module=datasets,
+        grain_module=grain,
+        load_fn=_load_hf_or_duckdb,
+        grain_classes_fn=get_grain_classes,
+        tokenizer_cls=SQLTokenizer,
+        sampler_fn=_get_sampler,
+        transform_wrapper=_wrap_maxtext_transform,
+        **kwargs,
+    )

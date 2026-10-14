@@ -16,7 +16,7 @@ def test_create_hf_data_source():
     """Test _create_hf_data_source."""
 
     class DummyBase:
-        """Docstring for DummyBase."""
+        """Verify behavior of DummyBase."""
 
     HFDataSource = _create_hf_data_source(DummyBase)
 
@@ -33,7 +33,7 @@ def test_create_base_format_transform():
     """Test _create_base_format_transform."""
 
     class DummyBaseMap:
-        """Docstring for DummyBaseMap."""
+        """Verify behavior of DummyBaseMap."""
 
     BaseFormatTransform = _create_base_format_transform(DummyBaseMap)
 
@@ -131,3 +131,40 @@ def test_load_duckdb_dataset_exception():
     mock_duckdb.connect.side_effect = Exception("duckdb error")
     with patch("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", return_value=mock_duckdb), pytest.raises(RuntimeError, match="DuckDB error"):
         load_duckdb_dataset("test.db", "test_table")
+
+
+def test_load_hf_or_duckdb_and_grain_dataloader() -> None:
+    """Verify load_hf_or_duckdb_dataset, get_grain_sampler, and build_grain_dataloader."""
+    from gemma_4_sql.backends.common_data import (
+        build_grain_dataloader,
+        get_grain_sampler,
+        load_hf_or_duckdb_dataset,
+    )
+    from gemma_4_sql.exceptions import DependencyMissingError
+    from gemma_4_sql.type_hints import ETLConfig
+
+    assert load_hf_or_duckdb_dataset("ds", "train", "db.duckdb", "tbl", None, load_duckdb_fn=lambda p, t: f"{p}:{t}") == "db.duckdb:tbl"
+    with pytest.raises(DependencyMissingError):
+        load_hf_or_duckdb_dataset("ds", "train", None, None, None)
+
+    mock_datasets = MagicMock()
+    mock_datasets.load_dataset.return_value = [{"sql_prompt": "q", "sql": "SELECT 1"}]
+    assert len(load_hf_or_duckdb_dataset("ds", "train", None, None, mock_datasets)) == 1  # type: ignore[arg-type]
+
+    with pytest.raises(DependencyMissingError):
+        get_grain_sampler(10, False, None)
+
+    mock_grain = MagicMock()
+    assert get_grain_sampler(10, True, mock_grain) is not None
+    assert get_grain_sampler(10, False, mock_grain) is not None
+
+    cfg = ETLConfig(dataset_name="ds", split="train", batch_size=2, distributed=False)
+    with pytest.raises(DependencyMissingError):
+        build_grain_dataloader(cfg, "jax", None, mock_grain)
+
+    res = build_grain_dataloader(cfg, "jax", mock_datasets, mock_grain, transform_wrapper=lambda cls: cls)
+    assert res["status"] == "loaded"
+    assert res["backend"] == "jax"
+
+    res_no_wrap = build_grain_dataloader(cfg, "jax", mock_datasets, mock_grain)
+    assert res_no_wrap["status"] == "loaded"

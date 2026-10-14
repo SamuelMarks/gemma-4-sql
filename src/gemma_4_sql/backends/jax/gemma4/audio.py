@@ -1,4 +1,4 @@
-"""Core functionality for the audio module."""
+"""JAX/Flax NNX audio encoder layers and Universal Speech Model transformer for Gemma 4."""
 
 from __future__ import annotations
 
@@ -50,11 +50,11 @@ class Gemma4AudioLayer(nnx.Module):
     """A single layer of the audio transformer model."""
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__.
+        """Initialize the audio transformer layer.
 
         Args:
-            config: The configuration parameters.
-            rngs: The rngs.
+            config: Audio encoder configuration parameters.
+            rngs: Flax NNX random number generators.
 
         """
         self.feed_forward1 = Gemma4AudioFeedForward(config, rngs=rngs)
@@ -69,8 +69,13 @@ class Gemma4AudioLayer(nnx.Module):
     def __call__(self, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None) -> jax.Array:
         """Apply a single audio transformer layer.
 
+        Args:
+            x: Input audio hidden state tensor.
+            pos_emb: Sinusoidal relative positional embeddings.
+            mask: Optional blocked attention mask.
+
         Returns:
-            object: The resulting output from the operation.
+            Transformed audio representation tensor.
 
         """
         x = self.feed_forward1(x)
@@ -91,7 +96,13 @@ class Gemma4AudioModel(nnx.Module):
     """An audio encoder based on the Universal Speech Model architecture."""
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize the Gemma 4 audio encoder model.
+
+        Args:
+            config: Audio encoder configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         self.config = config
         self.subsample_conv_projection = Gemma4AudioSubSampleConvProjection(config, rngs=rngs)
         self.rel_pos_enc = Gemma4AudioRelPositionalEncoding(config)
@@ -101,8 +112,11 @@ class Gemma4AudioModel(nnx.Module):
     def _convert_4d_mask_to_blocked_5d(self, mask_4d: jax.Array) -> jax.Array:
         """Convert a 4D attention mask to a 5D blocked format.
 
+        Args:
+            mask_4d: Pairwise 4D attention mask tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Blocked 5D local context attention mask tensor.
 
         """
         (batch_size, _, seq_len, _) = mask_4d.shape
@@ -124,8 +138,12 @@ class Gemma4AudioModel(nnx.Module):
     def __call__(self, input_features: jax.Array, attention_mask: jax.Array | None = None) -> jax.Array:
         """Forward pass for the Gemma 4 Audio model.
 
+        Args:
+            input_features: Mel-spectrogram audio features tensor.
+            attention_mask: Optional frame-level mask tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Projected audio feature embeddings.
 
         """
         (x, mask) = self.subsample_conv_projection(input_features, attention_mask)

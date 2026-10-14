@@ -1,6 +1,5 @@
 """Tests for PyTorch train."""
 
-import sys
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_torch
@@ -10,36 +9,59 @@ pytestmark = requires_torch
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import TrainingConfig
+from gemma_4_sql.type_hints import TrainerState, TrainingConfig
 
 
-def test_pytorch_train_imports(monkeypatch):
-    """Test pytorch train imports fallback."""
-    import builtins
-    import importlib
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        if name.split(".")[0] in ("torch", "transformers"):
-            raise ImportError("Simulated")
-        return orig_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
-    monkeypatch.delitem(sys.modules, "torch", raising=False)
-    monkeypatch.delitem(sys.modules, "transformers", raising=False)
-    monkeypatch.delitem(sys.modules, "transformers.models.gemma4", raising=False)
-
+@pytest.fixture(autouse=True)
+def _restore_train_mod(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure train_module globals are restored after each test."""
     import gemma_4_sql.backends.pytorch.train as train_module
 
-    importlib.reload(train_module)
-    assert train_module.torch is None
-    assert train_module.nn is None
-    assert train_module.optim is None
-    assert train_module.Gemma4ForCausalLM is None
+    monkeypatch.setattr(train_module, "torch", train_module.torch)
+    monkeypatch.setattr(train_module, "nn", train_module.nn)
+    monkeypatch.setattr(train_module, "optim", train_module.optim)
+    monkeypatch.setattr(train_module, "Gemma4ForCausalLM", train_module.Gemma4ForCausalLM)
 
-    monkeypatch.undo()
-    importlib.reload(train_module)
+
+def test_real_tiny_pytorch_training_step() -> None:
+    """Verify forward pass, cross-entropy loss, backward pass, and optimizer step on a real tiny Gemma4ForCausalLM."""
+    import torch
+
+    import gemma_4_sql.backends.pytorch.train as train_module
+    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config, Gemma4ForCausalLM
+
+    cfg = Gemma4Config(
+        vocab_size=64,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=8,
+        num_experts=2,
+        num_experts_per_tok=1,
+        layer_types=["sliding_attention"],
+        hidden_size_per_layer_input=0,
+        num_kv_shared_layers=0,
+    )
+    model = Gemma4ForCausalLM(cfg)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+    criterion = torch.nn.CrossEntropyLoss()
+    batch = {
+        "inputs": torch.tensor([[1, 2, 3, 4]], dtype=torch.long),
+        "targets": torch.tensor([[2, 3, 4, 5]], dtype=torch.long),
+    }
+    state = TrainerState(
+        policy_model=model,
+        optimizer=optimizer,
+        criterion=criterion,
+        dataloader=[batch],
+        epochs=2,
+        device=torch.device("cpu"),
+    )
+    loss_val = train_module._run_training_epochs(state)
+    assert isinstance(loss_val, float)
+    assert loss_val > 0.0
 
 
 def test_setup_distributed():
@@ -100,7 +122,7 @@ def test_run_training_epochs():
 
     # Check outputs obj
     class Obj:
-        """Docstring for Obj."""
+        """Verify behavior of Obj."""
 
         logits = MagicMock()
 
@@ -202,55 +224,3 @@ def test_train_model():
     train_module.torch = None
     with pytest.raises(DependencyMissingError):
         train_module.train_model(config)
-
-
-def test_pytorch_train_successful_imports():
-    """Test pytorch train successful imports."""
-    import sys
-    from unittest.mock import MagicMock
-
-    mock_torch = MagicMock()
-    mock_nn = MagicMock()
-    mock_optim = MagicMock()
-    mock_transformers = MagicMock()
-    mock_gemma4 = MagicMock()
-
-    with patch.dict(
-        sys.modules,
-        {
-            "torch": mock_torch,
-            "torch.nn": mock_nn,
-            "torch.optim": mock_optim,
-            "transformers": mock_transformers,
-            "transformers.models": MagicMock(),
-            "transformers.models.gemma4": mock_gemma4,
-        },
-    ):
-        import importlib
-
-        import gemma_4_sql.backends.pytorch.train as train_module
-
-        importlib.reload(train_module)
-
-        assert train_module.torch is mock_torch
-        assert train_module.nn is not None
-        assert train_module.optim is not None
-        assert train_module.Gemma4ForCausalLM is not None
-
-    with patch.dict(
-        sys.modules,
-        {
-            "torch": None,
-            "torch.nn": None,
-            "torch.optim": None,
-            "transformers": None,
-            "transformers.models": None,
-            "transformers.models.gemma4": None,
-        },
-    ):
-        import importlib
-
-        import gemma_4_sql.backends.pytorch.train as train_module2
-
-        importlib.reload(train_module2)
-        assert train_module2.torch is None

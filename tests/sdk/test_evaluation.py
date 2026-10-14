@@ -1,125 +1,145 @@
-"""Tests for SDK Evaluation module."""
+"""Behavioral unit and integration tests for the SDK Evaluation module."""
 
+from __future__ import annotations
+
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.sdk.evaluation import _run_evaluation_inference, compute_metrics, evaluate
+from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
+from gemma_4_sql.sdk.evaluation import (
+    _process_batch_inputs,
+    _run_evaluation_inference,
+    compute_metrics,
+    compute_metrics_async,
+    evaluate,
+    normalize_sql,
+)
+from gemma_4_sql.sdk.registry import get_backend
+from gemma_4_sql.tokenization import SQLTokenizer
 
 
 def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test evaluate with jax."""
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    """Verify evaluate propagates DependencyMissingError when JAX dataloader dependencies are missing."""
     jax_agent = get_backend("jax")
     monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
 
-    def raise_err(*a: object, **k: object) -> None:
-        """Mock error when building dataloader."""
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError("Mocked missing JAX")
+    def raise_err(*_a: Any, **_k: Any) -> None:
+        """Raise DependencyMissingError when building dataloader."""
+        raise DependencyMissingError("Mocked missing JAX", backend="jax")
 
     monkeypatch.setattr(jax_agent, "build_dataloader", raise_err)
-    with pytest.raises(DependencyMissingError):
+    with pytest.raises(DependencyMissingError, match="Mocked missing JAX"):
         evaluate("model1", "data1", "jax")
 
 
-def test_evaluate_keras(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test evaluate with keras.
+def test_evaluate_keras_with_live_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify end-to-end evaluation with Keras backend against a seeded in-memory SQLite database."""
+    tokenizer = SQLTokenizer(model_name=None)
+    target_sql = "SELECT id, name FROM users WHERE id = 1"
+    encoded_target = tokenizer.encode(target_sql)
+    encoded_prompt = tokenizer.encode("Get user 1 id and name")
 
-    Raises:
-        AssertionError: Description.
-
-    """
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     keras_agent = get_backend("keras")
-    monkeypatch.setattr(keras_agent, "build_dataloader", lambda *args, **kwargs: {"loader": [{"inputs": [[1]], "targets": [[1]]}]})
-    monkeypatch.setattr(keras_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
-    res = evaluate("model1", "data1", "keras")
+    monkeypatch.setattr(
+        keras_agent,
+        "build_dataloader",
+        lambda *_args, **_kwargs: {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_target]}]},
+    )
+    # Semantically and structurally equivalent query with extra whitespace, comma spacing, and trailing semicolon
+    monkeypatch.setattr(
+        keras_agent,
+        "generate_sql",
+        lambda *_args, **_kwargs: {"sql": "  select  id , name  FROM users  where  id = 1 ; ", "confidence_score": 0.92},
+    )
+    ddl = "CREATE TABLE users (id INT, name TEXT); INSERT INTO users VALUES (1, 'Alice'); INSERT INTO users VALUES (2, 'Bob');"
+    res = evaluate("model1", "data1", "keras", ddl=ddl)
     assert res["backend"] == "keras"
     assert res["model"] == "model1"
     assert res["dataset"] == "data1"
-    assert "metrics" in res
+    assert res["metrics"]["exact_match"] == pytest.approx(1.0)
+    assert res["metrics"]["valid_sql"] == pytest.approx(1.0)
+    assert res["metrics"]["execution_accuracy"] == pytest.approx(1.0)
+    assert res["metrics"]["mean_confidence"] == pytest.approx(0.92)
 
 
 def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test evaluate with maxtext.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    """Verify evaluate with MaxText backend computes exact match and execution accuracy."""
     maxtext_agent = get_backend("maxtext")
     monkeypatch.setattr(maxtext_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
-    monkeypatch.setattr(maxtext_agent, "build_dataloader", lambda *_args, **_kwargs: {"loader": [{"inputs": [[1]], "targets": [[2]]}]})
+    monkeypatch.setattr(
+        maxtext_agent,
+        "build_dataloader",
+        lambda *_args, **_kwargs: {"loader": [{"inputs": [[1]], "targets": [[2]]}]},
+    )
     res = evaluate("model1", "data1", "maxtext")
     assert res["backend"] == "maxtext"
     assert res["model"] == "model1"
     assert res["dataset"] == "data1"
-    assert "metrics" in res
+    assert res["metrics"]["valid_sql"] == pytest.approx(1.0)
 
 
 def test_evaluate_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test evaluate with pytorch.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    """Verify evaluate with PyTorch backend handles tuple batches from DataLoader."""
     pytorch_agent = get_backend("pytorch")
     monkeypatch.setattr(pytorch_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
-    monkeypatch.setattr(pytorch_agent, "build_dataloader", lambda *_args, **_kwargs: {"loader": [([[1]], [[2]])]})
+    monkeypatch.setattr(
+        pytorch_agent,
+        "build_dataloader",
+        lambda *_args, **_kwargs: {"loader": [([[1]], [[2]])]},
+    )
     res = evaluate("model1", "data1", "pytorch")
     assert res["backend"] == "pytorch"
     assert res["model"] == "model1"
     assert res["dataset"] == "data1"
-    assert "metrics" in res
+    assert res["metrics"]["valid_sql"] == pytest.approx(1.0)
 
 
-@pytest.mark.usefixtures("monkeypatch")
 def test_evaluate_invalid() -> None:
-    """Test evaluate with invalid backend."""
+    """Verify evaluate raises ValueError on an unknown backend identifier."""
     with pytest.raises(ValueError, match="Unknown backend: invalid"):
         evaluate("model1", "data1", "invalid")
 
 
-def test_compute_metrics() -> None:
-    """Test compute metrics."""
-    engine = MagicMock()
-
-    async def mock_execute(*args: object, **kwargs: object) -> tuple[bool, list, None]:
-        """Docstring."""
-        return True, [(1,)], None
-
-    engine.execute_with_feedback_async.side_effect = mock_execute
-
-    res = compute_metrics(engine, ["SELECT 1"], ["SELECT 2"])
-    # If compare returns True, then exact_match won't be true, but execution_accuracy will be?
-    # Actually, compute_metrics_async logic uses compare_queries_async for semantic equivalence
-    # Let's just check the result isn't empty, but the coverage is the goal.
-    assert res is getattr(res, "self", res)  # arbitrary assert
+def test_compute_metrics_with_live_sqlite() -> None:
+    """Verify compute_metrics distinguishes exact match, execution equivalence, and wrong results."""
+    ddl = "CREATE TABLE users (id INT, name TEXT); INSERT INTO users VALUES (1, 'Alice'), (2, 'Bob');"
+    engine = LiveDatabaseEngine(":memory:", ddl=ddl, db_type="sqlite")
+    try:
+        preds = [
+            "SELECT id, name FROM users",  # Exact match & execution match
+            "SELECT id, name FROM users WHERE 1=1",  # Not exact match, but execution match!
+            "SELECT name, id FROM users",  # Valid SQL, but different column order -> execution mismatch
+        ]
+        truths = [
+            "SELECT id, name FROM users;",
+            "SELECT id, name FROM users",
+            "SELECT id, name FROM users",
+        ]
+        res = compute_metrics(engine, preds, truths)
+        assert res["exact_match"] == pytest.approx(1.0 / 3.0)
+        assert res["valid_sql"] == pytest.approx(1.0)
+        assert res["execution_accuracy"] == pytest.approx(2.0 / 3.0)
+    finally:
+        engine.close()
 
 
 def test_evaluate_mock_predictions() -> None:
-    """Test evaluate with simulated inference predictions."""
-    with patch("gemma_4_sql.sdk.evaluation.compute_metrics_async") as mock_compute:
-
-        async def mock_compute_async(*args: object, **kwargs: object) -> dict:
-            """Docstring."""
-            return {"exact_match": 1.0}
-
-        mock_compute.side_effect = mock_compute_async
-        with patch("gemma_4_sql.sdk.registry.get_backend"), patch("gemma_4_sql.sdk.evaluation._run_evaluation_inference", return_value=(["s1"], ["s1"], [1.0])):
-            res = evaluate("model", "dataset")
-            assert res["metrics"]["exact_match"] == pytest.approx(1.0)
-            assert res["metrics"]["mean_confidence"] == pytest.approx(1.0)
+    """Verify evaluate aggregates confidence scores and metrics."""
+    with (
+        patch("gemma_4_sql.sdk.evaluation.compute_metrics", return_value={"exact_match": 1.0, "valid_sql": 1.0, "execution_accuracy": 1.0}),
+        patch("gemma_4_sql.sdk.registry.get_backend"),
+        patch("gemma_4_sql.sdk.evaluation._run_evaluation_inference", return_value=(["s1"], ["s1"], [1.0])),
+    ):
+        res = evaluate("model", "dataset")
+        assert res["metrics"]["exact_match"] == pytest.approx(1.0)
+        assert res["metrics"]["mean_confidence"] == pytest.approx(1.0)
 
 
 def test_run_evaluation_inference_no_dataloader() -> None:
-    """Test run evaluation inference raises ValueError when dataloader is missing."""
+    """Verify _run_evaluation_inference raises ValueError when dataloader is None."""
     backend_impl = MagicMock()
     backend_impl.build_dataloader.return_value = {"loader": None}
     with pytest.raises(ValueError, match="Valid iterable dataloader is required for evaluation"):
@@ -128,75 +148,57 @@ def test_run_evaluation_inference_no_dataloader() -> None:
 
 @pytest.mark.asyncio
 async def test_negative_execution_accuracy_syntax_error() -> None:
-    """Test compute_metrics_async when predicted SQL has a syntax error.
-
-    Returns:
-        None.
-    """
-    from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
-    from gemma_4_sql.sdk.evaluation import compute_metrics_async
-
+    """Verify compute_metrics_async records 0.0 valid_sql and execution_accuracy on syntax errors."""
     engine = LiveDatabaseEngine(":memory:", db_type="sqlite")
-    preds = ["SELEKT INVALID SQL FROM tbl"]
-    truths = ["SELECT 1"]
+    try:
+        preds = ["SELEKT INVALID SQL FROM tbl"]
+        truths = ["SELECT 1"]
 
-    metrics = await compute_metrics_async(engine, preds, truths)
-    assert metrics["valid_sql"] == pytest.approx(0.0)
-    assert metrics["execution_accuracy"] == pytest.approx(0.0)
-    assert metrics["exact_match"] == pytest.approx(0.0)
+        metrics = await compute_metrics_async(engine, preds, truths)
+        assert metrics["valid_sql"] == pytest.approx(0.0)
+        assert metrics["execution_accuracy"] == pytest.approx(0.0)
+        assert metrics["exact_match"] == pytest.approx(0.0)
+    finally:
+        engine.close()
 
 
 @pytest.mark.asyncio
 async def test_negative_execution_accuracy_both_invalid() -> None:
-    """Test compute_metrics_async when both predicted and truth SQL queries are invalid.
-
-    Returns:
-        None.
-    """
-    from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
-    from gemma_4_sql.sdk.evaluation import compute_metrics_async
-
+    """Verify compute_metrics_async records 0.0 execution_accuracy when both queries are invalid."""
     engine = LiveDatabaseEngine(":memory:", db_type="sqlite")
-    preds = ["BROKEN QUERY ONE"]
-    truths = ["BROKEN QUERY TWO"]
+    try:
+        preds = ["BROKEN QUERY ONE"]
+        truths = ["BROKEN QUERY TWO"]
 
-    metrics = await compute_metrics_async(engine, preds, truths)
-    assert metrics["valid_sql"] == pytest.approx(0.0)
-    assert metrics["execution_accuracy"] == pytest.approx(0.0)
-    assert metrics["exact_match"] == pytest.approx(0.0)
+        metrics = await compute_metrics_async(engine, preds, truths)
+        assert metrics["valid_sql"] == pytest.approx(0.0)
+        assert metrics["execution_accuracy"] == pytest.approx(0.0)
+        assert metrics["exact_match"] == pytest.approx(0.0)
+    finally:
+        engine.close()
 
 
 def test_extract_batch_ids_fallback() -> None:
-    """Test _process_batch_inputs with unexpected batch object.
-
-    Returns:
-        None.
-    """
-    from gemma_4_sql.sdk.evaluation import _process_batch_inputs
-
+    """Verify _process_batch_inputs returns empty lists for unsupported batch types."""
     inputs, targets = _process_batch_inputs(None)
     assert inputs == []
     assert targets == []
 
 
 def test_evaluate_empty_confidence_scores() -> None:
-    """Test evaluate with empty mock predictions to cover confidence_scores False branch.
-
-    Returns:
-        None.
-    """
-    from gemma_4_sql.sdk.evaluation import evaluate
-
-    with patch("gemma_4_sql.sdk.registry.get_backend"), patch("gemma_4_sql.sdk.evaluation._run_evaluation_inference", return_value=([], [], [])):
+    """Verify evaluate omits mean_confidence when no predictions are generated."""
+    with (
+        patch("gemma_4_sql.sdk.registry.get_backend"),
+        patch("gemma_4_sql.sdk.evaluation._run_evaluation_inference", return_value=([], [], [])),
+    ):
         res = evaluate("model", "dataset", "jax")
         assert res["status"] == "completed"
         assert "mean_confidence" not in res["metrics"]
 
 
 def test_run_evaluation_inference_max_batches() -> None:
-    """Test _run_evaluation_inference breaks after MAX_BATCHES."""
+    """Verify _run_evaluation_inference respects MAX_BATCHES and custom max_batches."""
     backend_impl = MagicMock()
-    # Provide 15 batches
     mock_loader = [({"inputs": [[1]], "targets": [[1]]}) for _ in range(15)]
     backend_impl.build_dataloader.return_value = {"loader": mock_loader}
     backend_impl.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 0.9}
@@ -206,12 +208,19 @@ def test_run_evaluation_inference_max_batches() -> None:
     assert len(truths) == 10
     assert len(scores) == 10
 
+    preds_custom, _, _ = _run_evaluation_inference("model", "dataset", backend_impl, max_batches=4)
+    assert len(preds_custom) == 4
+
 
 def test_evaluate_with_db_kwargs_and_ddl() -> None:
-    """Test evaluate with explicit db_kwargs dict and ddl parameter."""
-    from gemma_4_sql.sdk.evaluation import evaluate
-
-    with patch("gemma_4_sql.sdk.registry.get_backend"), patch("gemma_4_sql.sdk.evaluation._run_evaluation_inference", return_value=(["SELECT * FROM items"], ["SELECT * FROM items"], [0.95])):
+    """Verify evaluate initializes schema DDL and executes queries against the live engine."""
+    with (
+        patch("gemma_4_sql.sdk.registry.get_backend"),
+        patch(
+            "gemma_4_sql.sdk.evaluation._run_evaluation_inference",
+            return_value=(["SELECT * FROM items"], ["SELECT * FROM items"], [0.95]),
+        ),
+    ):
         res = evaluate(
             "model",
             "dataset",
@@ -221,12 +230,11 @@ def test_evaluate_with_db_kwargs_and_ddl() -> None:
         )
         assert res["status"] == "completed"
         assert res["metrics"]["exact_match"] == pytest.approx(1.0)
+        assert res["metrics"]["execution_accuracy"] == pytest.approx(1.0)
 
 
 def test_evaluate_with_audio_path() -> None:
-    """Test evaluate with audio_path preserves audio_path in returned payload."""
-    from gemma_4_sql.sdk.evaluation import evaluate
-
+    """Verify evaluate preserves audio_path and modality in returned payload."""
     with (
         patch("gemma_4_sql.sdk.registry.get_backend"),
         patch(
@@ -241,9 +249,7 @@ def test_evaluate_with_audio_path() -> None:
 
 
 def test_evaluate_with_image_path() -> None:
-    """Test evaluate with image_path preserves image_path in returned payload."""
-    from gemma_4_sql.sdk.evaluation import evaluate
-
+    """Verify evaluate preserves image_path and modality in returned payload."""
     with (
         patch("gemma_4_sql.sdk.registry.get_backend"),
         patch(
@@ -258,14 +264,11 @@ def test_evaluate_with_image_path() -> None:
 
 
 def test_collect_predictions_batch_multimodal() -> None:
-    """Test _run_evaluation_inference when batch contains pixel/audio values."""
-    from gemma_4_sql.sdk.evaluation import _run_evaluation_inference
-
+    """Verify _run_evaluation_inference forwards pixel_values and audio_values from batches."""
     backend_impl = MagicMock()
 
-    # Mock generate_sql to succeed
-    def mock_generate_sql(model_name: str, prompt: str, **kwargs: object) -> dict[str, object]:
-        """Docstring for mock_generate_sql."""
+    def mock_generate_sql(model_name: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
+        """Return simulated SQL and confidence score."""
         return {"sql": "SELECT 1", "confidence_score": 0.85}
 
     backend_impl.generate_sql.side_effect = mock_generate_sql
@@ -299,21 +302,48 @@ def test_collect_predictions_batch_multimodal() -> None:
 
 
 def test_evaluate_syntax_variations() -> None:
-    """Test SQL normalization helper with case-insensitive and whitespace-variant SQL strings."""
-    from gemma_4_sql.sdk.evaluation import normalize_sql
-
-    sql1 = "  SELECT   id,  name  FROM users;  "
-    sql2 = "select id, name from users;"
+    """Verify normalize_sql handles case, comma spacing, parenthesis spacing, and comments."""
+    sql1 = """  SELECT   id,name  FROM users WHERE ( id = 1 ) -- trailing comment
+;  """
+    sql2 = "select id, name from users where (id = 1);"
     assert normalize_sql(sql1) == normalize_sql(sql2)
 
 
-def test_evaluate_empty_metrics() -> None:
-    """Test compute_metrics with empty prediction and ground-truth sequences."""
-    from unittest.mock import MagicMock
-
-    from gemma_4_sql.sdk.evaluation import compute_metrics
-
+def test_evaluate_empty_metrics(synthetic_dataset: list[dict[str, str]]) -> None:
+    """Verify compute_metrics returns 0.0 metrics for empty input lists and synthetic_dataset has expected items."""
+    assert len(synthetic_dataset) == 2
     mock_engine = MagicMock()
     metrics = compute_metrics(mock_engine, [], [])
     assert metrics.get("exact_match") == 0.0
     assert metrics.get("execution_accuracy") == 0.0
+
+
+def test_extract_batch_ids_dict_edge_cases() -> None:
+    """Verify _process_batch_inputs handles dicts with missing keys or non-subscriptable values."""
+    inputs, targets = _process_batch_inputs({"foo": "bar"})
+    assert inputs == []
+    assert targets == []
+
+    inputs2, targets2 = _process_batch_inputs({"inputs": 123, "targets": 456})
+    assert inputs2 == []
+    assert targets2 == []
+
+
+@pytest.mark.asyncio
+async def test_compute_metrics_async_mismatch_and_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify compute_metrics_async raises ValueError on length mismatch and handles execution exceptions."""
+    engine = LiveDatabaseEngine(":memory:")
+    try:
+        with pytest.raises(ValueError, match="Length mismatch"):
+            await compute_metrics_async(engine, ["a", "b"], ["a"])
+
+        async def mock_exec(_query: str) -> tuple[bool, list[Any], str | None]:
+            """Raise RuntimeError during execution."""
+            raise RuntimeError("Mock error")
+
+        monkeypatch.setattr(engine, "execute_with_feedback_async", mock_exec)
+        metrics = await compute_metrics_async(engine, ["a"], ["a"])
+        assert metrics["valid_sql"] == 0.0
+        assert metrics["execution_accuracy"] == 0.0
+    finally:
+        engine.close()

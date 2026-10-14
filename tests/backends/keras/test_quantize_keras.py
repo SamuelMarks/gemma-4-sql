@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for quantize keras."""
 
 from unittest.mock import MagicMock
 
@@ -12,22 +12,8 @@ import pytest
 import gemma_4_sql.backends.keras.quantize as q
 
 
-def test_module_load_import_error(monkeypatch):
-    """Docstring for test_module_load_import_error."""
-    import importlib
-    import sys
-    from unittest.mock import patch
-
-    with patch.dict(sys.modules, {"keras": None, "numpy": None}):
-        importlib.reload(q)
-        assert getattr(q, "keras", None) is None
-        assert getattr(q, "np", None) is None
-
-    importlib.reload(q)
-
-
 def test_quantize_layer_weights(monkeypatch):
-    """Docstring for test_quantize_layer_weights."""
+    """Verify behavior of test_quantize_layer_weights."""
     mock_layer = MagicMock()
     mock_layer.name = "dense"
 
@@ -75,7 +61,7 @@ def test_quantize_layer_weights(monkeypatch):
 
 
 def test_quantize_model(monkeypatch, tmp_path):
-    """Docstring for test_quantize_model."""
+    """Verify behavior of test_quantize_model."""
     from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 
     # 1. Missing keras
@@ -118,7 +104,7 @@ def test_quantize_model(monkeypatch, tmp_path):
     original_import = builtins.__import__
 
     def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
+        """Verify behavior of mock_import."""
         if name == "keras_nlp.models":
             mock_models = MagicMock()
             mock_models.GemmaCausalLM.from_preset.return_value = mock_model
@@ -131,9 +117,11 @@ def test_quantize_model(monkeypatch, tmp_path):
     assert res["status"] == "quantized_int8"
 
     # 6. Load model from preset error
-    def mock_import_err(*args, **kwargs):
-        """Docstring for mock_import_err."""
-        raise ValueError("sim")
+    def mock_import_err(name, *args, **kwargs):
+        """Raise ValueError when importing keras_nlp.models."""
+        if name == "keras_nlp.models":
+            raise ValueError("sim")
+        return original_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", mock_import_err)
 
@@ -152,18 +140,3 @@ def test_quantize_model(monkeypatch, tmp_path):
     mock_model_nosave.layers = [mock_layer]
     res = q.quantize_model("m", "int8", model=mock_model_nosave, export_path=str(export_dir))
     assert res["status"] == "quantized_int8"
-
-
-def test_module_load_import_error_coverage(monkeypatch):
-    """Docstring for test_module_load_import_error_coverage."""
-    import importlib
-    import sys
-
-    import gemma_4_sql.backends.keras.quantize as q
-
-    monkeypatch.setitem(sys.modules, "keras", None)
-    importlib.reload(q)
-    assert q.keras is None
-    assert q.np is None
-    monkeypatch.undo()
-    importlib.reload(q)

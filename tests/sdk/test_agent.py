@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -74,6 +75,15 @@ def test_agentic_loop_invalid_backend() -> None:
     """Test run_agentic_loop with invalid backend."""
     with pytest.raises(ValueError, match="Unknown backend: invalid"):
         run_agentic_loop(model_name="model", prompt="prompt", backend="invalid")
+    assert ag_extract("```sql\nSELECT 1;\n```") == "SELECT 1;"
+    assert ag_extract("SELECT 2;") == "SELECT 2;"
+
+
+def ag_extract(raw: str) -> str:
+    """Invoke _extract_sql_from_response."""
+    from gemma_4_sql.sdk.agent import _extract_sql_from_response
+
+    return _extract_sql_from_response(raw)
 
 
 @pytest.mark.asyncio
@@ -189,7 +199,7 @@ def test_agent_max_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
     class AlwaysFailingEngine:
         """Engine that always fails."""
 
-        def __init__(self, **kwargs: object) -> None:
+        def __init__(self, **kwargs: Any) -> None:
             """Initialize."""
 
         def close(self) -> None:
@@ -202,7 +212,7 @@ def test_agent_max_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
     class AlwaysSucceedingBackend:
         """Backend that generates high confidence SQL."""
 
-        def generate_sql(self, m: str, p: str, **kwargs: object) -> dict:
+        def generate_sql(self, m: str, p: str, **kwargs: Any) -> dict:
             """Generate SQL."""
             return {"sql": "SELECT bad_col FROM table", "confidence_score": 0.99}
 
@@ -232,7 +242,7 @@ async def test_agent_from_running_event_loop(monkeypatch: pytest.MonkeyPatch) ->
     class SimpleBackend:
         """Simple mock backend."""
 
-        def generate_sql(self, m: str, p: str, **k: object) -> dict:
+        def generate_sql(self, m: str, p: str, **k: Any) -> dict:
             """Generate simple SQL."""
             return {"sql": "SELECT 1", "confidence_score": 1.0}
 
@@ -252,12 +262,12 @@ def test_agent_multimodal_context_and_table_hint(monkeypatch: pytest.MonkeyPatch
     """
     import gemma_4_sql.sdk.agent as ag
 
-    passed_kwargs: dict[str, object] = {}
+    passed_kwargs: dict[str, Any] = {}
 
     class MockBackend:
         """Mock backend capturing keyword arguments."""
 
-        def generate_sql(self, m: str, p: str, **k: object) -> dict[str, object]:
+        def generate_sql(self, m: str, p: str, **k: Any) -> dict[str, Any]:
             """Capture kwargs and return SQL."""
             passed_kwargs.update(k)
             # Second attempt succeeds
@@ -292,16 +302,15 @@ def test_agent_multimodal_context_and_table_hint(monkeypatch: pytest.MonkeyPatch
     assert passed_kwargs["multimodal_context"] == {"dummy": "embedding"}
 
 
-def test_agent_with_image_path(monkeypatch):
-    from unittest.mock import MagicMock
-
+def test_agent_with_image_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test agent with image_path to cover multimodal RAG prompt formatting."""
     import gemma_4_sql.sdk.agent as ag
 
     mock_b = MagicMock()
     mock_b.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 1.0}
-    monkeypatch.setattr(ag, "get_backend", lambda x: mock_b)
-    """Test agent with image_path to cover missing line."""
+    monkeypatch.setattr(ag, "get_backend", lambda _x: mock_b)
 
     context = ag.AgentContext(ddl="CREATE TABLE t(id int)", image_path="fake.png")
 
-    ag.run_agentic_loop(prompt="test", context=context, model_name="m", backend="pytorch")
+    res = ag.run_agentic_loop(prompt="test", context=context, model_name="m", backend="pytorch")
+    assert res["status"] == "completed"

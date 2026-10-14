@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for benchmark maxtext."""
 
 from unittest.mock import MagicMock, patch
 
@@ -8,7 +8,7 @@ from gemma_4_sql.backends.maxtext import benchmark
 
 
 def test_get_device():
-    """Docstring for test_get_device."""
+    """Verify behavior of test_get_device."""
     mock_jax = MagicMock()
     mock_jax.devices.side_effect = lambda x: ["tpu0"] if x == "tpu" else ["gpu0"] if x == "gpu" else ["cpu0"]
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", mock_jax):
@@ -18,11 +18,11 @@ def test_get_device():
 
 
 def test_get_device_runtime_error():
-    """Docstring for test_get_device_runtime_error."""
+    """Verify behavior of test_get_device_runtime_error."""
     mock_jax = MagicMock()
 
     def mock_devices(t):
-        """Docstring for mock_devices."""
+        """Verify behavior of mock_devices."""
         if t == "cpu":
             return ["cpu0"]
         raise RuntimeError()
@@ -33,13 +33,13 @@ def test_get_device_runtime_error():
 
 
 def test_get_device_no_jax():
-    """Docstring for test_get_device_no_jax."""
+    """Verify behavior of test_get_device_no_jax."""
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", None):
         assert benchmark._get_device("tpu") is None
 
 
 def test_run_benchmark_pass():
-    """Docstring for test_run_benchmark_pass."""
+    """Verify behavior of test_run_benchmark_pass."""
     mock_model = MagicMock()
     mock_model.apply.return_value = jnp.zeros((2, 32, 256))
 
@@ -75,7 +75,7 @@ def test_run_benchmark_pass():
 
 
 def test_benchmark_model():
-    """Docstring for test_benchmark_model."""
+    """Verify behavior of test_benchmark_model."""
     with (
         patch("gemma_4_sql.backends.maxtext.benchmark.Gemma4Model", MagicMock()),
         patch("gemma_4_sql.backends.maxtext.benchmark.jax", MagicMock()),
@@ -100,45 +100,7 @@ def test_benchmark_model():
 
 
 def test_benchmark_model_error():
-    """Docstring for test_benchmark_model_error."""
+    """Verify behavior of test_benchmark_model_error."""
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", None):
         res = benchmark.benchmark_model("gemma4", "cpu", 2)
         assert res["status"] == "backend_unavailable"
-
-
-def test_import_error():
-    """Docstring for test_import_error."""
-    import importlib
-
-    with patch.dict("sys.modules", {"jax": None}):
-        importlib.reload(benchmark)
-        assert benchmark.jax is None
-    # Restore
-    importlib.reload(benchmark)
-
-
-def test_import_success():
-    """Docstring for test_import_success."""
-    import importlib
-
-    mock_jax = MagicMock()
-    mock_jnp = MagicMock()
-
-    mock_maxtext = MagicMock()
-    mock_maxtext.models.gemma4.Gemma4Model = "FakeGemma"
-
-    with patch.dict(
-        "sys.modules",
-        {
-            "jax": mock_jax,
-            "jax.numpy": mock_jnp,
-            "maxtext": mock_maxtext,
-            "maxtext.models": mock_maxtext.models,
-            "maxtext.models.gemma4": mock_maxtext.models.gemma4,
-        },
-    ):
-        importlib.reload(benchmark)
-        assert benchmark.Gemma4Model == "FakeGemma"
-
-    # Restore
-    importlib.reload(benchmark)

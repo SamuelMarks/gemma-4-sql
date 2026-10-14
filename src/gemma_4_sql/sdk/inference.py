@@ -9,7 +9,7 @@ from gemma_4_sql.sdk.registry import get_backend
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import InferenceResultDict, JSONValue
 
 
 def generate(
@@ -21,8 +21,8 @@ def generate(
     image_path: str | Path | None = None,
     audio_path: str | Path | None = None,
     modality: str = "text",
-    **kwargs: object,
-) -> JSONDict:
+    **kwargs: JSONValue,
+) -> InferenceResultDict:
     """Generate a SQL query from a natural language prompt using Beam Search.
 
     Args:
@@ -47,8 +47,8 @@ def generate(
         prompt,
         beam_width=beam_width,
         max_length=max_length,
-        image_path=image_path,
-        audio_path=audio_path,
+        image_path=str(image_path) if image_path is not None else None,
+        audio_path=str(audio_path) if audio_path is not None else None,
         modality=modality,
         **kwargs,
     )

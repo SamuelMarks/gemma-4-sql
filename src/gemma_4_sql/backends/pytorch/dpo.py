@@ -3,32 +3,22 @@
 from __future__ import annotations
 
 import logging
-import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
 
-try:
-    import torch as _torch
-    from torch import nn as _nn
-    from torch import optim as _optim
-    from torch.nn import functional as _functional
-
-    torch: types.ModuleType | None = _torch
-    nn: types.ModuleType | None = _nn
-    optim: types.ModuleType | None = _optim
-    functional: types.ModuleType | None = _functional
-except (ImportError, AttributeError):
-    torch = None
-    nn = None
-    optim = None
-    functional = None
+torch = optional_import("torch")
+nn = optional_import("torch.nn")
+optim = optional_import("torch.optim")
+functional = optional_import("torch.nn.functional")
 
 
 def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[Any, Any, Any]:
@@ -50,11 +40,18 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
     return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, functional.logsigmoid)
 
 
-def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: object, batch: JSONDict, beta: float) -> Any:
-    """Run a single DPO training step.
+def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: Any, batch: JSONDict, beta: float) -> Any:
+    """Run a single PyTorch DPO optimization step.
+
+    Args:
+        policy_model: Trainable PyTorch policy model.
+        ref_model: Frozen PyTorch reference model.
+        optimizer: PyTorch optimizer instance.
+        batch: Preference batch dictionary.
+        beta: KL penalty temperature coefficient.
 
     Returns:
-        object: The resulting output from the operation.
+        Scalar DPO step loss tensor.
 
     """
     if hasattr(optimizer, "zero_grad"):
@@ -77,10 +74,13 @@ def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: obje
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    """Execute function.
+    """Run PyTorch DPO training epochs over the preference dataloader.
+
+    Args:
+        state: `TrainerState` holding models, optimizer, dataloader, and beta.
 
     Returns:
-        The execution result.
+        Mean batch loss from the final epoch.
 
     """
     dataloader = state.dataloader
@@ -92,11 +92,11 @@ def _run_training_epochs(state: TrainerState) -> float:
     final_loss = 0.0
     for _epoch in range(epochs):
         epoch_loss = 0.0
-        for batch in dataloader:  # type: ignore # Justified: Dynamic backend protocol typing
-            loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)  # type: ignore # Justified: Dynamic backend protocol typing
+        for batch in dataloader:
+            loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)
             loss_val = float(loss.item() if hasattr(loss, "item") else loss)
             epoch_loss += loss_val
-        final_loss = epoch_loss / max(1, len(dataloader))  # type: ignore # Justified: Dynamic backend protocol typing
+        final_loss = epoch_loss / max(1, len(dataloader))
     return float(final_loss)
 
 
@@ -122,8 +122,6 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     learning_rate = getattr(config, "learning_rate", 1e-05)
 
     if torch is None or nn is None or optim is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("PyTorch dependencies are missing.")
 
     try:

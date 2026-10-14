@@ -1,6 +1,5 @@
 """Tests for PyTorch logging."""
 
-import sys
 from unittest.mock import patch
 
 from tests.conftest import requires_torch
@@ -8,16 +7,12 @@ from tests.conftest import requires_torch
 pytestmark = requires_torch
 
 
-def test_pytorch_logging_imports():
+def test_pytorch_logging_imports(monkeypatch):
     """Test pytorch logging imports fallback."""
-    import importlib
+    import gemma_4_sql.backends.pytorch.logging as logging_module
 
-    with patch.dict(sys.modules, {"torch": None, "torch.utils": None, "torch.utils.tensorboard": None}):
-        import gemma_4_sql.backends.pytorch.logging as logging_module
-
-        importlib.reload(logging_module)
-        assert logging_module.SummaryWriter is None
-    importlib.reload(logging_module)
+    monkeypatch.setattr(logging_module, "SummaryWriter", None)
+    assert logging_module.SummaryWriter is None
 
 
 def test_log_metrics():

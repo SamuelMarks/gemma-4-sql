@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for gemma4 moe."""
 
 import jax
 import jax.numpy as jnp
@@ -13,7 +13,7 @@ from gemma_4_sql.backends.jax.gemma4.moe import Gemma4MoE, Gemma4RoutedExperts
 
 
 def test_gemma4_routed_experts():
-    """Docstring for test_gemma4_routed_experts."""
+    """Verify behavior of test_gemma4_routed_experts."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -31,7 +31,7 @@ def test_gemma4_routed_experts():
 
 
 def test_gemma4_routed_experts_moe_intermediate():
-    """Docstring for test_gemma4_routed_experts_moe_intermediate."""
+    """Verify behavior of test_gemma4_routed_experts_moe_intermediate."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -50,7 +50,7 @@ def test_gemma4_routed_experts_moe_intermediate():
 
 
 def test_gemma4_moe():
-    """Docstring for test_gemma4_moe."""
+    """Verify behavior of test_gemma4_moe."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -67,7 +67,7 @@ def test_gemma4_moe():
 
 
 def test_gemma4_moe_no_gate_logits():
-    """Docstring for test_gemma4_moe_no_gate_logits."""
+    """Verify behavior of test_gemma4_moe_no_gate_logits."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -85,7 +85,7 @@ def test_gemma4_moe_no_gate_logits():
 
 
 def test_gemma4_moe_no_gate_attr():
-    """Docstring for test_gemma4_moe_no_gate_attr."""
+    """Verify behavior of test_gemma4_moe_no_gate_attr."""
     # Simulate if gate is somehow missing or None
     rngs = nnx.Rngs(0)
     config = ModelConfig(

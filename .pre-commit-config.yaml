@@ -9,13 +9,13 @@ repos:
     hooks:
       - id: tests-multi-env
         name: Run multi-env tests & aggregated coverage
-        entry: bash -c "uvx --with tox-uv tox run -e core,coverage-report"
+        entry: bash -c "if [ -f .tox/.coverage.core ] && [ -f .tox/.coverage.pytorch ] && [ -f .tox/.coverage.jax ] && [ -f .tox/.coverage.keras ] && [ -f .tox/.coverage.maxtext ] && [ -f .tox/.coverage.mlx ]; then uvx --with tox-uv tox run --skip-pkg-install -e coverage-report; else uvx --with tox-uv tox run-parallel --skip-pkg-install -e core,pytorch,jax,keras,maxtext,mlx && uvx --with tox-uv tox run --skip-pkg-install -e coverage-report; fi"
         language: system
         pass_filenames: false
         always_run: true
       - id: update-badges
         name: Update doc and test coverage badges
-        entry: bash -c "rm -rf .venv && uv run --extra dev python scripts/update_badges.py"
+        entry: bash -c "uv run --extra dev python scripts/update_badges.py"
         language: system
         pass_filenames: false
         always_run: true

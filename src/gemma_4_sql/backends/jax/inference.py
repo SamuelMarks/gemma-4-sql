@@ -3,34 +3,20 @@
 from __future__ import annotations
 
 import operator
-import types
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-    from flax import nnx as _nnx
-
-    from .gemma4 import Gemma4Config as _Gemma4Config
-    from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-    nnx: types.ModuleType | None = _nnx
-    Gemma4Config: Any | None = _Gemma4Config
-    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-    nnx = None
-    Gemma4Config = None
-    Gemma4ForCausalLM = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+nnx = optional_import("flax.nnx")
+Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
+Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
 _MODEL_CACHE: dict[str, object] = {}
 

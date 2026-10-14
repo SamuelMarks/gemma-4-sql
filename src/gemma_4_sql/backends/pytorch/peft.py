@@ -3,31 +3,20 @@
 from __future__ import annotations
 
 import logging
-import types
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
 
-try:
-    import peft as _peft
-    import torch as _torch
-    from peft import LoraConfig as _LoraConfig
-    from peft import get_peft_model as _get_peft_model
-    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
-
-    peft: types.ModuleType | None = _peft
-    torch: types.ModuleType | None = _torch
-    LoraConfig: Any | None = _LoraConfig
-    get_peft_model: types.ModuleType | None = _get_peft_model
-    AutoModelForCausalLM: Any | None = _AutoModelForCausalLM
-except (ImportError, AttributeError):
-    peft = None
-    torch = None
-    LoraConfig = None
-    get_peft_model = None
-    AutoModelForCausalLM = None
+peft = optional_import("peft")
+torch = optional_import("torch")
+LoraConfig = optional_attr("peft", "LoraConfig")
+get_peft_model = optional_attr("peft", "get_peft_model")
+AutoModelForCausalLM = optional_attr("transformers", "AutoModelForCausalLM")
 
 
 def apply_lora(
@@ -56,8 +45,6 @@ def apply_lora(
 
     """
     if peft is None or torch is None or AutoModelForCausalLM is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("PyTorch PEFT dependencies are missing.")
     status = "completed"
     try:

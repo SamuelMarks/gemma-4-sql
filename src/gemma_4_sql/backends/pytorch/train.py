@@ -3,34 +3,20 @@
 from __future__ import annotations
 
 import importlib
-import types
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ETLConfig, ModelType, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import TrainResultDict
 
-try:
-    import torch as _torch
-    from torch import nn as _nn
-    from torch import optim as _optim
-
-    torch: types.ModuleType | None = _torch
-    nn: types.ModuleType | None = _nn
-    optim: types.ModuleType | None = _optim
-except (ImportError, AttributeError, RuntimeError):
-    torch = None
-    nn = None
-    optim = None
-
-try:
-    from transformers.models.gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
-
-    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
-except (ImportError, AttributeError):
-    Gemma4ForCausalLM = None
+torch = optional_import("torch")
+nn = optional_import("torch.nn")
+optim = optional_import("torch.optim")
+Gemma4ForCausalLM = optional_attr("transformers.models.gemma4", "Gemma4ForCausalLM")
 
 
 def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object, int]:
@@ -44,31 +30,32 @@ def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object,
 
     """
     is_distributed = distributed_strategy in {"ddp", "fsdp"}
-    dist = None
+    dist_mod: Any = None
     device_id = 0
     if is_distributed:
         import torch.distributed as dist
 
-        if not dist.is_initialized():
-            dist.init_process_group("nccl" if torch.cuda.is_available() else "gloo")
-        rank = dist.get_rank()
+        dist_mod = dist
+        if not dist_mod.is_initialized():
+            dist_mod.init_process_group("nccl" if torch.cuda.is_available() else "gloo")
+        rank = dist_mod.get_rank()
         device_id = rank % max(1, torch.cuda.device_count())
         device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
             torch.cuda.set_device(device)
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return (is_distributed, dist, device, device_id)
+    return (is_distributed, dist_mod, device, device_id)
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    """Execute function.
+    """Run PyTorch supervised training epochs over the dataloader.
 
     Args:
-        state: The state.
+        state: `TrainerState` holding model, optimizer, criterion, dataloader, and device.
 
     Returns:
-        The computed float value.
+        Mean batch loss from the final epoch.
 
     """
     dataloader = state.dataloader
@@ -77,29 +64,23 @@ def _run_training_epochs(state: TrainerState) -> float:
     optimizer = state.optimizer
     criterion = state.criterion
     device = state.device
-    """Run training epochs.
-
-    Returns:
-        object: The resulting output from the operation.
-
-    """
     final_loss = 0.0
     for _epoch in range(epochs):
         epoch_loss = 0.0
-        for batch in dataloader:  # type: ignore # Justified: Dynamic backend protocol typing
-            inputs = batch["inputs"].to(device)  # type: ignore # Justified: Dynamic backend protocol typing
-            targets = batch["targets"].to(device)  # type: ignore # Justified: Dynamic backend protocol typing
-            optimizer.zero_grad()  # type: ignore # Justified: Dynamic backend protocol typing
-            outputs = model(inputs)  # type: ignore # Justified: Dynamic backend protocol typing
+        for batch in dataloader:
+            inputs = batch["inputs"].to(device)
+            targets = batch["targets"].to(device)
+            optimizer.zero_grad()
+            outputs = model(inputs)
             if isinstance(outputs, tuple):
                 logits_any = cast(Any, outputs)[0]
             else:
                 logits_any = getattr(outputs, "logits", outputs)
-            loss = criterion(logits_any.view(-1, logits_any.size(-1)), targets.view(-1))  # type: ignore # Justified: Dynamic backend protocol typing
+            loss = criterion(logits_any.view(-1, logits_any.size(-1)), targets.view(-1))
             loss.backward()
-            optimizer.step()  # type: ignore # Justified: Dynamic backend protocol typing
+            optimizer.step()
             epoch_loss += loss.item()
-        final_loss = epoch_loss / max(1, len(dataloader))  # type: ignore # Justified: Dynamic backend protocol typing
+        final_loss = epoch_loss / max(1, len(dataloader))
     return final_loss
 
 
@@ -168,8 +149,6 @@ def _execute_train(
 
     """
     if torch is None or nn is None or optim is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("PyTorch dependencies are missing.")
 
     dist_module = None
@@ -197,7 +176,7 @@ def _execute_train(
         raise
 
 
-def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
+def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
     """Train a Text-to-SQL model using the PyTorch backend.
 
     Args:
@@ -222,8 +201,6 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     final_loss = 0.0
     status = "completed"
     if torch is None or optim is None or (nn is None) or (backend_alias != "pytorch_native" and Gemma4ForCausalLM is None):
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("PyTorch dependencies are missing.")
     try:
         batch_size = getattr(config, "batch_size", 2)
@@ -250,6 +227,6 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
         "epochs": epochs,
         "learning_rate": learning_rate,
         "status": status,
-        "final_loss": float(str(final_loss)),
+        "final_loss": float(final_loss),
         "distributed_strategy": distributed_strategy,
     }

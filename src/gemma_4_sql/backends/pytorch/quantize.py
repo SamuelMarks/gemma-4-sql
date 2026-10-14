@@ -11,37 +11,24 @@ from __future__ import annotations
 
 import logging
 import struct
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization, quantize_model_wrapper
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import QuantizeResultDict
 
 logger = logging.getLogger(__name__)
 
-try:
-    import numpy as _np
-    import torch as _torch
-    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
-    from transformers import AutoTokenizer as _AutoTokenizer
-    from transformers import BitsAndBytesConfig as _BitsAndBytesConfig
-
-    torch: types.ModuleType | None = _torch
-    np: types.ModuleType | None = _np
-    BitsAndBytesConfig: Any | None = _BitsAndBytesConfig
-    AutoModelForCausalLM: Any | None = _AutoModelForCausalLM
-    AutoTokenizer: Any | None = _AutoTokenizer
-except (ImportError, AttributeError):
-    torch = None
-    np = None
-    BitsAndBytesConfig = None
-    AutoModelForCausalLM = None
-    AutoTokenizer = None
+torch = optional_import("torch")
+np = optional_import("numpy")
+BitsAndBytesConfig = optional_attr("transformers", "BitsAndBytesConfig")
+AutoModelForCausalLM = optional_attr("transformers", "AutoModelForCausalLM")
+AutoTokenizer = optional_attr("transformers", "AutoTokenizer")
 
 
 def validate_gguf_file(file_path: str | Path) -> dict[str, Any]:
@@ -189,8 +176,8 @@ def _apply_awq_quantization(
         import awq
         from transformers import AutoTokenizer as _AutoTokenizer
 
-        tok_cls = _AutoTokenizer
-        awq_cls = getattr(awq, "AutoAWQForCausalLM", None)
+        tok_cls: Any = _AutoTokenizer
+        awq_cls: Any = getattr(awq, "AutoAWQForCausalLM", None)
     except (ImportError, AttributeError) as exc:
         raise DependencyMissingError(f"AutoAWQ is required for AWQ quantization: {exc!s}") from exc
 
@@ -251,9 +238,9 @@ def _apply_gptq_quantization(
         from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
         from transformers import AutoTokenizer as _AutoTokenizer
 
-        tok_cls = _AutoTokenizer
-        model_cls = _AutoModelForCausalLM
-        quantizer_cls = getattr(getattr(optimum, "gptq", None), "GPTQQuantizer", None)
+        tok_cls: Any = _AutoTokenizer
+        model_cls: Any = _AutoModelForCausalLM
+        quantizer_cls: Any = getattr(getattr(optimum, "gptq", None), "GPTQQuantizer", None)
     except (ImportError, AttributeError) as exc:
         raise DependencyMissingError(f"Optimum is required for GPTQ quantization: {exc!s}") from exc
 
@@ -316,7 +303,7 @@ def _export_gguf(
     return (0.6, "quantized_gguf")
 
 
-def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> JSONDict:
+def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> QuantizeResultDict:
     """Quantize a PyTorch model using BitsAndBytes, AWQ, GPTQ, or GGUF.
 
     Args:

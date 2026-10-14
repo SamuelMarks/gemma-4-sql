@@ -1,4 +1,4 @@
-"""Configuration classes for Gemma 4 PyTorch implementation."""
+"""Configuration classes and architectural presets for the Gemma 4 PyTorch implementation."""
 
 from __future__ import annotations
 
@@ -17,8 +17,19 @@ class Gemma4VisionConfig:
         patch_size: int = 14,
         image_size: int = 224,
         **kwargs: Any,
-    ):
-        """Initialize the Gemma4VisionConfig."""
+    ) -> None:
+        """Initialize the Gemma4VisionConfig.
+
+        Args:
+            hidden_size: Vision hidden embedding dimension.
+            intermediate_size: Vision MLP intermediate dimension.
+            num_hidden_layers: Number of transformer encoder layers.
+            num_attention_heads: Number of vision attention heads.
+            patch_size: Spatial patch size in pixels.
+            image_size: Input image height/width in pixels.
+            **kwargs: Additional configuration attributes.
+
+        """
         self.hidden_size = hidden_size
         self.intermediate_size = intermediate_size
         self.num_hidden_layers = num_hidden_layers
@@ -38,8 +49,16 @@ class Gemma4AudioConfig:
         num_hidden_layers: int = 12,
         num_attention_heads: int = 12,
         **kwargs: Any,
-    ):
-        """Initialize the Gemma4AudioConfig."""
+    ) -> None:
+        """Initialize the Gemma4AudioConfig.
+
+        Args:
+            hidden_size: Audio encoder hidden dimension.
+            num_hidden_layers: Number of audio conformer layers.
+            num_attention_heads: Number of audio attention heads.
+            **kwargs: Additional configuration attributes.
+
+        """
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
@@ -66,15 +85,40 @@ class Gemma4Config:
         num_experts: int = 8,
         num_experts_per_tok: int = 2,
         router_jitter_noise: float = 0.0,
-        sliding_window: int = 4096,
+        sliding_window: int | None = 4096,
         global_attn_layers: list[int] | None = None,
         rope_theta: float = 10000.0,
         partial_rotary_factor: float = 1.0,
         vision_config: dict[str, Any] | None = None,
         audio_config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ):
-        """Initialize the Gemma4Config."""
+    ) -> None:
+        """Initialize the Gemma4Config.
+
+        Args:
+            vocab_size: Vocabulary size.
+            hidden_size: Model hidden dimension.
+            num_hidden_layers: Number of decoder layers.
+            num_attention_heads: Number of query attention heads.
+            num_key_value_heads: Number of key-value heads (GQA/MQA).
+            intermediate_size: Dense MLP intermediate size.
+            rms_norm_eps: RMSNorm epsilon constant.
+            head_dim: Attention head dimension.
+            pad_token_id: Padding token ID.
+            image_token_id: Image placeholder token ID.
+            audio_token_id: Audio placeholder token ID.
+            num_experts: Total number of routed MoE experts.
+            num_experts_per_tok: Number of active experts per token.
+            router_jitter_noise: Router jitter noise during training.
+            sliding_window: Sliding window attention span.
+            global_attn_layers: Indices of global attention layers.
+            rope_theta: Rotary positional embedding base frequency.
+            partial_rotary_factor: Fraction of head dimension receiving RoPE.
+            vision_config: Optional vision sub-configuration dictionary.
+            audio_config: Optional audio sub-configuration dictionary.
+            **kwargs: Additional configuration attributes.
+
+        """
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
@@ -109,3 +153,101 @@ class Gemma4Config:
 
         for key, value in kwargs.items():
             setattr(self, key, value)
+
+    @classmethod
+    def gemma4_e2b(cls) -> Gemma4Config:
+        """Return preset configuration for Gemma 4 E2B matching the JAX specification.
+
+        Returns:
+            Configured `Gemma4Config` for E2B.
+
+        """
+        return cls(
+            num_hidden_layers=35,
+            hidden_size=1024,
+            intermediate_size=4096,
+            num_attention_heads=8,
+            num_key_value_heads=4,
+            head_dim=256,
+            num_experts=1,
+            vocab_size=262144,
+        )
+
+    @classmethod
+    def gemma4_e4b(cls) -> Gemma4Config:
+        """Return preset configuration for Gemma 4 E4B matching the JAX specification.
+
+        Returns:
+            Configured `Gemma4Config` for E4B.
+
+        """
+        return cls(
+            num_hidden_layers=42,
+            hidden_size=2560,
+            intermediate_size=10240,
+            num_attention_heads=10,
+            num_key_value_heads=1,
+            head_dim=256,
+            num_experts=1,
+            vocab_size=262144,
+        )
+
+    @classmethod
+    def gemma4_26b_a4b(cls) -> Gemma4Config:
+        """Return preset configuration for Gemma 4 26B-A4B (MoE) matching the JAX specification.
+
+        Returns:
+            Configured `Gemma4Config` for 26B-A4B.
+
+        """
+        return cls(
+            num_hidden_layers=30,
+            hidden_size=2816,
+            intermediate_size=2112,
+            moe_intermediate_size=704,
+            num_attention_heads=8,
+            num_key_value_heads=4,
+            head_dim=256,
+            num_experts=128,
+            num_experts_per_tok=2,
+            vocab_size=262144,
+        )
+
+    @classmethod
+    def gemma4_31b(cls) -> Gemma4Config:
+        """Return preset configuration for Gemma 4 31B matching the JAX specification.
+
+        Returns:
+            Configured `Gemma4Config` for 31B.
+
+        """
+        return cls(
+            num_hidden_layers=60,
+            hidden_size=5376,
+            intermediate_size=21504,
+            num_attention_heads=32,
+            num_key_value_heads=16,
+            head_dim=256,
+            num_experts=1,
+            vocab_size=262144,
+        )
+
+    @classmethod
+    def from_preset(cls, model_name: str) -> Gemma4Config:
+        """Resolve a `Gemma4Config` preset from a model identifier string.
+
+        Args:
+            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`, `'gemma-4-26B-A4B'`, `'gemma-4-31B'`).
+
+        Returns:
+            Matching `Gemma4Config` preset instance.
+
+        """
+        lowered = model_name.lower()
+        if "31b" in lowered:
+            return cls.gemma4_31b()
+        if "26b" in lowered or "a4b" in lowered:
+            return cls.gemma4_26b_a4b()
+        if "e4b" in lowered:
+            return cls.gemma4_e4b()
+        return cls.gemma4_e2b()

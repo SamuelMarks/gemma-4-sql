@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for gemma4 decoder layer."""
 
 import jax.numpy as jnp
 from flax import nnx
@@ -12,7 +12,7 @@ from gemma_4_sql.backends.jax.gemma4.decoder_layer import Gemma4DecoderLayer
 
 
 def test_decoder_layer_mlp():
-    """Docstring for test_decoder_layer_mlp."""
+    """Verify behavior of test_decoder_layer_mlp."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -29,10 +29,10 @@ def test_decoder_layer_mlp():
 
     # Test with cache and mask
     class DummyCache:
-        """Docstring for DummyCache."""
+        """Verify behavior of DummyCache."""
 
         def __init__(self):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
             import jax.numpy as jnp
             from flax import nnx
 
@@ -51,7 +51,7 @@ def test_decoder_layer_mlp():
 
 
 def test_decoder_layer_moe():
-    """Docstring for test_decoder_layer_moe."""
+    """Verify behavior of test_decoder_layer_moe."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -70,7 +70,7 @@ def test_decoder_layer_moe():
 
 
 def test_decoder_layer_per_layer_input():
-    """Docstring for test_decoder_layer_per_layer_input."""
+    """Verify behavior of test_decoder_layer_per_layer_input."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,

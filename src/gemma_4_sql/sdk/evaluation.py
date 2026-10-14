@@ -1,28 +1,28 @@
-"""SDK Evaluation module."""
+"""SDK Evaluation module for Text-to-SQL exact match and execution accuracy."""
 
 from __future__ import annotations
 
 import asyncio
+import re
 import typing
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.tokenization import SQLTokenizer
+from gemma_4_sql.type_hints import ETLConfig
 
 MAX_BATCHES = 10
 if TYPE_CHECKING:
     from pathlib import Path
 
     from gemma_4_sql.sdk.protocols import BackendProtocol
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
-
-
-import re
+    from gemma_4_sql.type_hints import EvaluationMetricsDict, EvaluationResultDict, JSONValue
 
 
 def normalize_sql(sql: str) -> str:
-    """Normalize SQL by stripping whitespace and lowercasing unquoted text.
+    """Normalize SQL by stripping comments, standardizing punctuation spacing, and lowercasing unquoted text.
 
     Args:
         sql: The string representing the SQL query.
@@ -31,24 +31,26 @@ def normalize_sql(sql: str) -> str:
         The normalized SQL query string.
 
     """
-    # Strip comments
     cleaned = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
-    cleaned = re.sub(r"--[^\n]*", " ", cleaned)
+    cleaned = re.sub(r"--.*$", " ", cleaned, flags=re.MULTILINE)
 
-    # Split by string literals and quoted identifiers
-    parts = re.split(r"('[^']*'|\"(?:[^\"]|\"\")*\"|`[^`]*`|\[[^\]]*\])", cleaned)
+    parts = re.split(r"""('[^']*'|"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\])""", cleaned)
     for i in range(0, len(parts), 2):
-        parts[i] = parts[i].lower()
+        segment = parts[i].lower()
+        segment = re.sub(r"\s*,\s*", ", ", segment)
+        segment = re.sub(r"\(\s+", "(", segment)
+        segment = re.sub(r"\s+\)", ")", segment)
+        parts[i] = segment
 
     res = "".join(parts)
-    return " ".join(res.strip().split())
+    return " ".join(res.strip().rstrip(";").split())
 
 
 async def compute_metrics_async(
     engine: LiveDatabaseEngine,
     preds: list[str],
     truths: list[str],
-) -> dict[str, float]:
+) -> EvaluationMetricsDict:
     """Compute exact match, valid SQL, and execution accuracy asynchronously.
 
     Args:
@@ -57,7 +59,7 @@ async def compute_metrics_async(
         truths: List of ground truth SQL query strings.
 
     Returns:
-        A dictionary containing exact_match, valid_sql, and execution_accuracy metrics.
+        A dictionary containing `exact_match`, `valid_sql`, and `execution_accuracy` metrics.
 
     Raises:
         ValueError: If predictions and ground truths lengths differ.
@@ -79,11 +81,9 @@ async def compute_metrics_async(
             vs = 1 if p_success else 0
             (t_success, t_results, _) = await engine.execute_with_feedback_async(t)
 
-            # Execution accuracy requires valid execution on both and matching results
             if p_success and t_success:
-                strict_order = getattr(engine, "_has_top_level_order_by", lambda x: False)(t)
-                compare_fn = getattr(engine, "_compare_results", lambda p, t, s: p == t)
-                ex = 1 if compare_fn(p_results, t_results, strict_order) else 0
+                strict_order = engine._has_top_level_order_by(t)
+                ex = 1 if engine._compare_results(p_results, t_results, strict_order) else 0
             else:
                 ex = 0
         except Exception as exc:  # noqa: BLE001
@@ -111,8 +111,8 @@ def compute_metrics(
     engine: LiveDatabaseEngine,
     preds: list[str],
     truths: list[str],
-) -> dict[str, float]:
-    """Compute exact match, valid SQL, and execution accuracy.
+) -> EvaluationMetricsDict:
+    """Compute exact match, valid SQL, and execution accuracy synchronously.
 
     Args:
         engine: The LiveDatabaseEngine instance.
@@ -120,7 +120,7 @@ def compute_metrics(
         truths: A sequence of ground truth SQL queries.
 
     Returns:
-        Dictionary containing exact_match, valid_sql, and execution_accuracy metrics.
+        Dictionary containing `exact_match`, `valid_sql`, and `execution_accuracy` metrics.
 
     """
     return asyncio.run(compute_metrics_async(engine, preds, truths))
@@ -133,7 +133,7 @@ def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
         batch: The batch data structure (tuple, list, or mapping).
 
     Returns:
-        Tuple of (input_ids, target_ids) lists.
+        Tuple of `(input_ids, target_ids)` lists.
 
     """
     min_batch_tuple_length = 2
@@ -165,6 +165,7 @@ def _run_evaluation_inference(
     image_path: str | Path | None = None,
     audio_path: str | Path | None = None,
     modality: str = "text",
+    max_batches: int | None = MAX_BATCHES,
     **kwargs: object,
 ) -> tuple[list[str], list[str], list[float]]:
     """Run inference for evaluation across text and multimodal benchmarks.
@@ -176,10 +177,11 @@ def _run_evaluation_inference(
         image_path: Optional path to schema diagram or ERD image.
         audio_path: Optional path to recorded query audio.
         modality: Explicit modality selector ('text', 'vision', 'audio', 'multimodal').
+        max_batches: Maximum number of batches to evaluate (`None` for default `MAX_BATCHES`).
         **kwargs: Additional inference arguments.
 
     Returns:
-        Tuple of (predictions, truths, confidence_scores).
+        Tuple of `(predictions, truths, confidence_scores)`.
 
     Raises:
         ValueError: If valid iterable dataloader is missing.
@@ -188,7 +190,6 @@ def _run_evaluation_inference(
     preds: list[str] = []
     truths: list[str] = []
     confidence_scores: list[float] = []
-    ETLConfig = __import__("gemma_4_sql.type_hints", fromlist=["ETLConfig"]).ETLConfig
     data_dict = backend_impl.build_dataloader(ETLConfig(dataset_name=dataset_name, split="test", batch_size=1, modality=modality))
     dataloader = data_dict.get("loader", None)
     tokenizer = SQLTokenizer(model_name=None)
@@ -196,8 +197,9 @@ def _run_evaluation_inference(
         msg = "Valid iterable dataloader is required for evaluation; dataset could not be constructed."
         raise ValueError(msg)
 
+    limit = MAX_BATCHES if max_batches is None else int(max_batches)
     for i, batch in enumerate(cast(typing.Iterable[Any], dataloader)):
-        if i >= MAX_BATCHES:
+        if i >= limit:
             break
 
         (input_ids, target_ids) = _process_batch_inputs(batch)
@@ -226,12 +228,13 @@ def _run_evaluation_inference(
 def evaluate(
     model_name: str,
     dataset_name: str,
-    backend: str = "jax",
+    backend: str = DEFAULT_BACKEND,
     db_path: str = ":memory:",
     ddl: str | None = None,
+    max_batches: int = MAX_BATCHES,
     **kwargs: JSONValue,
-) -> JSONDict:
-    """Evaluate a Text-to-SQL model.
+) -> EvaluationResultDict:
+    """Evaluate a Text-to-SQL model on exact match and execution accuracy.
 
     Args:
         model_name: The name or path of the model.
@@ -239,7 +242,8 @@ def evaluate(
         backend: The backend framework ('jax', 'keras', 'pytorch', etc.).
         db_path: Path to the database for execution accuracy.
         ddl: Optional DDL to set up the schema.
-        **kwargs: Additional options such as db_type and db_kwargs.
+        max_batches: Maximum number of dataset batches to evaluate.
+        **kwargs: Additional options such as `db_type`, `db_kwargs`, `image_path`, and `audio_path`.
 
     Returns:
         Evaluation results dictionary containing status and metrics.
@@ -260,6 +264,8 @@ def evaluate(
     eval_kwargs.pop("image_path", None)
     eval_kwargs.pop("audio_path", None)
     eval_kwargs.pop("modality", None)
+    raw_max_batches = eval_kwargs.pop("max_batches", max_batches)
+    resolved_max_batches = int(raw_max_batches) if isinstance(raw_max_batches, (int, float, str)) else max_batches
 
     (preds, truths, confidence_scores) = _run_evaluation_inference(
         model_name,
@@ -268,14 +274,15 @@ def evaluate(
         image_path=str(image_path) if image_path else None,
         audio_path=str(audio_path) if audio_path else None,
         modality=modality,
+        max_batches=resolved_max_batches,
         **eval_kwargs,
     )
 
-    metrics = asyncio.run(compute_metrics_async(engine, preds, truths))
+    metrics = compute_metrics(engine, preds, truths)
     if confidence_scores:
         metrics["mean_confidence"] = sum(confidence_scores) / len(confidence_scores)
     engine.close()
-    res: JSONDict = {
+    res: EvaluationResultDict = {
         "backend": backend,
         "model": model_name,
         "dataset": dataset_name,

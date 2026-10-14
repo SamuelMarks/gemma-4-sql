@@ -211,14 +211,19 @@ def test_assert_tensors_close() -> None:
     from tests.utils.tensor_helpers import assert_tensors_close
 
     class DummyTensor:
+        """Dummy tensor for testing assert_tensors_close."""
+
         def __init__(self, data):
+            """Initialize DummyTensor."""
             self.data = data
             self.shape = (len(data),)
 
         def flatten(self):
+            """Return flattened tensor."""
             return self
 
         def tolist(self):
+            """Return tensor elements as list."""
             return self.data
 
     t1 = DummyTensor([1.0, 2.0])
@@ -235,10 +240,14 @@ def test_assert_tensors_close_jax():
     from tests.utils.tensor_helpers import assert_tensors_close
 
     class MockTensor:
+        """Mock tensor with __array__ protocol."""
+
         def __init__(self, data):
+            """Initialize MockTensor."""
             self.data = data
 
         def __array__(self):
+            """Return numpy array representation."""
             import numpy as np
 
             return np.array(self.data)

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from gemma_4_sql.sdk.registry import get_backend
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import BenchmarkResultDict
 
 
 def benchmark(
@@ -20,7 +20,7 @@ def benchmark(
     max_new_tokens: int = 128,
     warmup_steps: int = 5,
     **kwargs: object,
-) -> JSONDict:
+) -> BenchmarkResultDict:
     """Benchmarks a model on specific hardware.
 
     Args:

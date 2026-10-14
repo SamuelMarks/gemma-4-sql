@@ -1,6 +1,11 @@
-"""Tests for test lazy loader module."""
+"""Unit tests for LazyLoader and optional dependency resolution across backends."""
 
+from __future__ import annotations
+
+import importlib
 import sys
+import types
+from typing import Any
 
 import pytest
 
@@ -29,66 +34,88 @@ from gemma_4_sql.backends.lazy_loader import (
     get_tensorflow,
     get_torch,
     get_transformers,
+    optional_attr,
+    optional_import,
 )
 
 
-def test_catch_optional_imports():
-    """Test catch optional imports functionality."""
+def test_catch_optional_imports() -> None:
+    """Verify catch_optional_imports suppresses ImportError/ModuleNotFoundError and propagates ValueError."""
     with catch_optional_imports():
-        pass
+        raise ModuleNotFoundError("optional_dep_xyz")
 
-    with pytest.raises(ValueError), catch_optional_imports():
+    with pytest.raises(ValueError, match="Should not be caught"), catch_optional_imports():
         raise ValueError("Should not be caught")
 
 
-def test_lazy_loader_installed(monkeypatch):
-    """Test lazy loader functionality with installed module."""
-    monkeypatch.setitem(sys.modules, "my_fake_module", type("Fake", (), {}))
-    loader = LazyLoader("my_fake_module")
+def test_lazy_loader_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify LazyLoader loads and caches an installed module."""
+    fake_mod = types.ModuleType("my_fake_module")
+    monkeypatch.setitem(sys.modules, "my_fake_module", fake_mod)
+    loader: LazyLoader[types.ModuleType] = LazyLoader("my_fake_module")
     assert not loader._loaded
     mod = loader.get_module()
-    assert mod is not None
+    assert mod is fake_mod
     assert loader._loaded
     assert loader.is_available
-
-    # Check repeated calls return cached
-    assert loader.get_module() is mod
+    assert loader.get_module() is fake_mod
 
 
-def test_lazy_loader_missing():
-    """Test lazy loader functionality with missing module."""
-    loader = LazyLoader("this_module_does_not_exist_ever")
+def test_lazy_loader_missing() -> None:
+    """Verify LazyLoader returns None and caches result when module is missing."""
+    loader: LazyLoader[types.ModuleType] = LazyLoader("this_module_does_not_exist_ever")
     assert not loader._loaded
     mod = loader.get_module()
     assert mod is None
     assert loader._loaded
     assert not loader.is_available
-
-    # Check repeated calls return cached None
     assert loader.get_module() is None
 
 
-def test_lazy_loader_import_error(monkeypatch):
-    """Test lazy loader functionality when module raises non-ImportError on import."""
-    import importlib
+def test_lazy_loader_submodule_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify LazyLoader resolves submodules and optional_import / optional_attr work."""
+    fake_pkg = types.ModuleType("fake_pkg_test")
+    fake_sub = types.ModuleType("fake_pkg_test.sub")
+    fake_sub.val = "ok"  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "fake_pkg_test", fake_pkg)
+    monkeypatch.setitem(sys.modules, "fake_pkg_test.sub", fake_sub)
 
+    assert optional_import("fake_pkg_test.sub") is fake_sub
+    assert optional_attr("fake_pkg_test.sub", "val") == "ok"
+    assert optional_attr("fake_pkg_test.sub", "nonexistent") is None
+    assert optional_attr("nonexistent_module_xyz", "val") is None
+
+    class RaisingAttrModule(types.ModuleType):
+        """Module whose __getattr__ raises ImportError (simulating transformers lazy objects)."""
+
+        def __getattr__(self, _name: str) -> Any:
+            """Raise ImportError."""
+            raise ImportError("lazy attr failed")
+
+    monkeypatch.setitem(sys.modules, "raising_attr_mod", RaisingAttrModule("raising_attr_mod"))
+    assert optional_attr("raising_attr_mod", "some_cls") is None
+
+
+def test_lazy_loader_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify LazyLoader propagates non-ImportError/AttributeError exceptions."""
     original_import = importlib.import_module
 
-    def fake_import(name):
+    def fake_import(name: str, package: str | None = None) -> types.ModuleType:
+        """Raise RuntimeError for raising_module, else delegate to importlib.import_module."""
         if name == "raising_module":
             raise RuntimeError("Boom!")
-        return original_import(name)
+        return original_import(name, package)
 
     monkeypatch.setattr(importlib, "import_module", fake_import)
-    fake_import("os")
+    assert fake_import("os") is not None
 
-    loader = LazyLoader("raising_module")
+    loader: LazyLoader[types.ModuleType] = LazyLoader("raising_module")
     with pytest.raises(RuntimeError, match="Boom!"):
         loader.get_module()
 
 
 @pytest.mark.parametrize(
-    "getter, loader_obj, module_name",
+    ("getter", "loader_obj", "module_name"),
     [
         (get_jax, _JAX_LOADER, "jax"),
         (get_jnp, _JNP_LOADER, "jax.numpy"),
@@ -103,41 +130,40 @@ def test_lazy_loader_import_error(monkeypatch):
         (get_maxtext_gemma4, _MAXTEXT_GEMMA4_LOADER, "maxtext.models.gemma4"),
     ],
 )
-def test_lazy_loader_getters(getter, loader_obj, module_name, monkeypatch):
-    """Test all specific getters under available and missing conditions."""
+def test_lazy_loader_getters(
+    getter: Any,
+    loader_obj: LazyLoader[types.ModuleType],
+    module_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify all specific module getters under both missing and available conditions."""
     loader_obj._loaded = False
     loader_obj._module = None
-
-    # Missing condition
-    monkeypatch.setitem(sys.modules, module_name, None)
-
-    import importlib
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
 
     original_import = importlib.import_module
 
-    def fake_import(name):
+    def fake_import(name: str, package: str | None = None) -> types.ModuleType:
+        """Simulate missing module."""
         if name == module_name:
             raise ImportError("Fake missing")
-        return original_import(name)
+        return original_import(name, package)
 
     monkeypatch.setattr(importlib, "import_module", fake_import)
-    fake_import("os")
-
+    assert fake_import("os") is not None
     assert getter() is None
 
     loader_obj._loaded = False
     loader_obj._module = None
 
-    # Available condition
-    fake_mod = type("Fake", (), {})
-    monkeypatch.setitem(sys.modules, module_name, fake_mod)
+    fake_mod = types.ModuleType(module_name)
 
-    def fake_import_ok(name):
+    def fake_import_ok(name: str, package: str | None = None) -> types.ModuleType:
+        """Simulate installed module."""
         if name == module_name:
             return fake_mod
-        return original_import(name)
+        return original_import(name, package)
 
     monkeypatch.setattr(importlib, "import_module", fake_import_ok)
-    fake_import_ok("os")
-
+    assert fake_import_ok("os") is not None
     assert getter() is fake_mod

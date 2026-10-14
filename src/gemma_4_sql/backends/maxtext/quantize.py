@@ -13,8 +13,10 @@ Implements:
 from __future__ import annotations
 
 import logging
-import types
 from typing import TYPE_CHECKING, Any, cast
+
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
 
 if TYPE_CHECKING:
     from jax import Array
@@ -23,29 +25,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-
-try:
-    import aqt.jax.v2 as _aqt
-
-    aqt: types.ModuleType | None = _aqt
-except (ImportError, AttributeError):
-    aqt = None
-
-try:
-    import maxtext.models.gemma4 as _gemma4
-
-    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
-except (ImportError, AttributeError):
-    Gemma4Model = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+aqt = optional_import("aqt.jax.v2")
+Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
 
 DEFAULT_AQT_TARGETS: tuple[str, ...] = (
     "q_proj",
@@ -140,7 +123,7 @@ def apply_aqt_quantization(
 
     injected_count = 0
 
-    def _traverse(curr: dict[str, Any], current_path: str = "") -> dict[str, Any]:
+    def _traverse(curr: Any, current_path: str = "") -> dict[str, Any]:
         """Traverse parameters recursively to quantize targeted kernels."""
         nonlocal injected_count
         if not isinstance(curr, dict):
@@ -204,8 +187,6 @@ def quantize_model(
 
     """
     if jax is None or jnp is None or (Gemma4Model is None and "params" not in kwargs):
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MaxText dependencies are missing.")
 
     status = f"quantized_{method}"
@@ -217,8 +198,6 @@ def quantize_model(
             params = kwargs["params"]
         else:
             if Gemma4Model is None:
-                from gemma_4_sql.exceptions import DependencyMissingError
-
                 raise DependencyMissingError("MaxText dependency missing.")
             model = Gemma4Model(model_name)
             rng = jax.random.PRNGKey(0)
@@ -238,6 +217,8 @@ def quantize_model(
             logger.info("AQT quantization applied to %d modules with reduction %f", count, memory_reduction)
         else:
             metadata = {"method": method, "memory_reduction_factor": memory_reduction}
+    except (DependencyMissingError, ConfigurationError):
+        raise
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to apply MaxText quantization: ")
         status = f"failed: {e!s}"

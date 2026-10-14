@@ -4,39 +4,22 @@ from __future__ import annotations
 
 import logging
 import math
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-    import numpy as _np
-    import optax as _optax
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-    np: types.ModuleType | None = _np
-    optax: types.ModuleType | None = _optax
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-    np = None
-    optax = None
-
-try:
-    import maxtext.models.gemma4 as _gemma4
-
-    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
-except (ImportError, AttributeError):
-    Gemma4Model = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+np = optional_import("numpy")
+optax = optional_import("optax")
+Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
 
 
 def transform_params_to_lora(
@@ -46,7 +29,7 @@ def transform_params_to_lora(
     lora_alpha: float = 16.0,
     lora_dropout: float = 0.05,
     *,
-    rng=None,
+    rng: Any = None,
 ) -> tuple[dict[str, Any], int]:
     """Transform a MaxText parameter PyTree by injecting low-rank adapter matrices.
 
@@ -82,7 +65,7 @@ def transform_params_to_lora(
 
     injected_count = 0
 
-    def _inject(curr: dict[str, Any], current_path: str = "") -> dict[str, Any]:
+    def _inject(curr: Any, current_path: str = "") -> dict[str, Any]:
         """Inject LoRA factors into matching parameter dictionaries."""
         nonlocal injected_count, rng
         if not isinstance(curr, dict):
@@ -135,7 +118,7 @@ def segregate_adapter_params(params: dict[str, Any]) -> tuple[dict[str, Any], di
     trainable: dict[str, Any] = {}
     frozen: dict[str, Any] = {}
 
-    def _split(src: dict[str, Any], dst_trainable: dict[str, Any], dst_frozen: dict[str, Any]) -> None:
+    def _split(src: Any, dst_trainable: dict[str, Any], dst_frozen: dict[str, Any]) -> None:
         """Split parameters into trainable and frozen PyTrees recursively."""
         if not isinstance(src, dict):
             # If a scalar or array is passed directly, treat it as frozen base weight unless the caller knows otherwise.
@@ -202,7 +185,7 @@ def create_maxtext_lora_optimizer(
     )
 
 
-def merge_lora_weights(params: dict[str, Any]) -> dict[str, Any]:
+def merge_lora_weights(params: Any) -> dict[str, Any]:
     """Fold LoRA adapter weights back into base MaxText weights.
 
     Computes:
@@ -259,7 +242,7 @@ def save_maxtext_adapters(params: dict[str, Any], save_path: str | Path) -> None
 
     adapters: dict[str, Any] = {}
 
-    def _collect(curr: dict[str, Any], current_path: str = "") -> None:
+    def _collect(curr: Any, current_path: str = "") -> None:
         """Collect adapter arrays from parameter tree into flat dict."""
         if not isinstance(curr, dict):
             return
@@ -332,7 +315,7 @@ def count_maxtext_parameters(params: dict[str, Any]) -> tuple[int, int]:
     trainable_count = 0
     total_count = 0
 
-    def _count(curr: dict[str, Any]) -> None:
+    def _count(curr: Any) -> None:
         """Count parameters recursively in parameter dictionary."""
         nonlocal trainable_count, total_count
         if not isinstance(curr, dict):
@@ -409,6 +392,8 @@ def apply_lora(
             params = merge_lora_weights(params)
 
         logger.info("MaxText LoRA applied to %d modules", injected_count)
+    except (DependencyMissingError, ConfigurationError):
+        raise
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to apply LoRA: ")
         status = f"failed: {e!s}"

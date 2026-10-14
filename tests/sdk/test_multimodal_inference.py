@@ -99,32 +99,44 @@ def test_process_image(tmp_path: Path) -> None:
     import gemma_4_sql.backends.common_multimodal as cm
 
     class _MockPILResampling:
+        """Mock PIL Resampling constants."""
+
         BILINEAR = 2
 
     class _MockOpenedImage:
+        """Mock opened PIL image."""
+
         def __enter__(self):
+            """Enter context manager."""
             return self
 
         def __exit__(self, *args):
-            pass
+            """Exit context manager."""
 
         def convert(self, mode):
+            """Convert image mode."""
             return self
 
         def resize(self, size, resample):
+            """Resize image."""
             return self
 
         def getpixel(self, coords):
+            """Get pixel RGB tuple."""
             return (255, 0, 0)
 
         def __array__(self, *args, **kwargs):
+            """Return numpy array representation."""
             return np.zeros((224, 224, 3), dtype=np.float32)
 
     class _MockPILImage:
+        """Mock PIL Image module."""
+
         Resampling = _MockPILResampling
 
         @staticmethod
         def open(buf):
+            """Open mock image from buffer."""
             return _MockOpenedImage()
 
     monkeypatch_fix = pytest.MonkeyPatch()
@@ -252,13 +264,13 @@ def test_format_multimodal_prompt() -> None:
 
 def test_sdk_inference_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test SDK generate and generate_sql functions with multimodal arguments."""
-    captured: dict[str, object] = {}
+    captured: dict[str, Any] = {}
 
     class MockBackend:
         """Mock backend implementation for inference."""
 
         @staticmethod
-        def generate_sql(model_name: str, prompt: str, **kwargs: object) -> dict[str, object]:
+        def generate_sql(model_name: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
             """Capture arguments."""
             captured["model_name"] = model_name
             captured["prompt"] = prompt
@@ -289,7 +301,7 @@ def test_sdk_agent_multimodal_preservation(monkeypatch: pytest.MonkeyPatch) -> N
         """Mock backend returning error on first attempt and success on second."""
 
         @staticmethod
-        def generate_sql(model_name: str, prompt: str, **kwargs: object) -> dict[str, object]:
+        def generate_sql(model_name: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
             """Record prompt and kwargs."""
             attempts_seen.append(prompt)
             assert kwargs.get("image_path") == "schema.png"
@@ -323,12 +335,12 @@ def test_sdk_evaluation_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
         """Mock evaluation backend."""
 
         @staticmethod
-        def build_dataloader(config: object) -> dict[str, object]:
+        def build_dataloader(config: Any) -> dict[str, Any]:
             """Return mock dataloader with sample batch."""
             return {"loader": [{"inputs": [[1, 2]], "targets": [[3, 4]], "pixel_values": [[0.0]]}]}
 
         @staticmethod
-        def generate_sql(model_name: str, prompt: str, **kwargs: object) -> dict[str, object]:
+        def generate_sql(model_name: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
             """Return mock generation."""
             assert "pixel_values" in kwargs or "image_path" in kwargs
             assert kwargs.get("modality") == "vision"
@@ -369,11 +381,11 @@ async def test_common_serve_multimodal() -> None:
     class MockReq:
         """Mock async request."""
 
-        def __init__(self, data: dict[str, object]) -> None:
+        def __init__(self, data: dict[str, Any]) -> None:
             """Initialize MockReq."""
             self._data = data
 
-        async def json(self) -> dict[str, object]:
+        async def json(self) -> dict[str, Any]:
             """Return mock JSON."""
             return self._data
 
@@ -493,9 +505,10 @@ def test_multimodal_edge_cases() -> None:
                         return self
 
                     def getpixel(self, coords):
+                        """Raise ValueError to simulate missing getpixel."""
                         raise ValueError("No getpixel")
 
-                    def __array__(self, *args: object, **kwargs: object) -> Any:
+                    def __array__(self, *args: Any, **kwargs: Any) -> Any:
                         """Provide numpy array representation."""
                         current_np = getattr(cm, "np", None)
                         if current_np is not None:

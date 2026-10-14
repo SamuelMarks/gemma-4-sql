@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any
 from gemma_4_sql.sdk.registry import get_backend
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import ExportResultDict
 
 
-def export_model(model_name: str, export_path: str, backend: str = "jax", **kwargs: Any) -> JSONDict:
+def export_model(model_name: str, export_path: str, backend: str = "jax", **kwargs: Any) -> ExportResultDict:
     """Export a trained Text-to-SQL model.
 
     Args:

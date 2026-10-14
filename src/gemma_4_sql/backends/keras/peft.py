@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import math
-import types
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
@@ -14,16 +15,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-try:
-    import keras as _keras
+keras = optional_import("keras")
+ops = optional_attr("keras", "ops")
 
-    ops = getattr(_keras, "ops", None)
-    keras: types.ModuleType | None = _keras
-except (ImportError, AttributeError):
-    keras = None
-    ops = None
-
-_LayerBase = getattr(getattr(keras, "layers", None), "Layer", object) if keras is not None else object
+_LayerBase: Any = getattr(getattr(keras, "layers", None), "Layer", object) if keras is not None else object
 
 
 class KerasLoRADense(_LayerBase):
@@ -92,7 +87,7 @@ class KerasLoRADense(_LayerBase):
         if getattr(self.dense, "built", False):
             self.build()
 
-    def build(self, input_shape=None) -> None:
+    def build(self, input_shape: Any = None) -> None:
         """Build the LoRA layer parameters.
 
         Args:
@@ -237,8 +232,6 @@ def inject_lora(
 
     """
     if keras is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("Keras dependencies are missing.")
 
     if not target_modules or not hasattr(model, "__dict__"):
@@ -303,11 +296,11 @@ def inject_lora(
                                 list_modified = True
                             else:
                                 __import__("typing").cast(__import__("typing").Any, item).trainable = False
-                        elif (keras is not None and isinstance(item, getattr(getattr(keras, "layers", None), "Layer", type(None)))) or hasattr(item, "__dict__"):
+                        else:
                             _traverse(item)
                     if list_modified:
                         setattr(curr_any, attr_name, list(val))
-                elif (keras is not None and isinstance(val, getattr(getattr(keras, "layers", None), "Layer", type(None)))) or hasattr(val, "__dict__"):
+                elif hasattr(val, "__dict__"):
                     _traverse(val)
         finally:
             if has_tracker:
@@ -366,11 +359,11 @@ def merge_lora_weights(model: ModelType) -> Any:
                         if isinstance(item, KerasLoRADense):
                             val[idx] = item.merge_weights()
                             list_modified = True
-                        elif (keras is not None and isinstance(item, getattr(getattr(keras, "layers", None), "Layer", type(None)))) or hasattr(item, "__dict__"):
+                        else:
                             _traverse(item)
                     if list_modified:
                         setattr(curr_any, attr_name, list(val))
-                elif (keras is not None and isinstance(val, getattr(getattr(keras, "layers", None), "Layer", type(None)))) or hasattr(val, "__dict__"):
+                elif hasattr(val, "__dict__"):
                     _traverse(val)
         finally:
             if has_tracker:
@@ -422,8 +415,6 @@ def apply_lora(
     """
     status = "completed"
     if keras is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("Keras dependencies are missing.")
 
     injected_count = 0
@@ -431,10 +422,12 @@ def apply_lora(
         if "model" in kwargs and kwargs["model"] is not None:
             model = kwargs["model"]
         else:
-            gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
+            gemma_causal_lm_cls = optional_attr("keras_nlp.models", "GemmaCausalLM")
+            if gemma_causal_lm_cls is None:
+                raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
             model = gemma_causal_lm_cls.from_preset(model_name)
 
-        model_any = model
+        model_any: Any = model
         if hasattr(model_any, "backbone") and hasattr(model_any.backbone, "enable_lora"):
             model_any.backbone.enable_lora(rank=lora_r)
             # Explicitly freeze non-adapter layers

@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for logging keras."""
 
 from unittest.mock import MagicMock
 
@@ -10,7 +10,7 @@ import pytest
 
 
 def test_log_metrics(monkeypatch):
-    """Docstring for test_log_metrics."""
+    """Verify behavior of test_log_metrics."""
     import gemma_4_sql.backends.keras.logging as log_keras
     from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -22,17 +22,17 @@ def test_log_metrics(monkeypatch):
     monkeypatch.setattr(log_keras, "tf", mock_tf)
 
     class MockWriter:
-        """Docstring for MockWriter."""
+        """Verify behavior of MockWriter."""
 
         def __init__(self, *args, **kwargs):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
 
         def as_default(self):
-            """Docstring for as_default."""
+            """Verify behavior of as_default."""
             return MagicMock()
 
         def close(self):
-            """Docstring for close."""
+            """Verify behavior of close."""
 
     mock_tf.summary.create_file_writer.return_value = MockWriter()
     res = log_keras.log_metrics({"a": 1.0}, 1)
@@ -44,7 +44,7 @@ def test_log_metrics(monkeypatch):
 
 
 def test_module_load_import_error():
-    """Docstring for test_module_load_import_error."""
+    """Verify behavior of test_module_load_import_error."""
     import importlib
     import sys
     from unittest.mock import patch
@@ -59,7 +59,7 @@ def test_module_load_import_error():
 
 
 def test_module_load_import_error_coverage(monkeypatch):
-    """Docstring for test_module_load_import_error_coverage."""
+    """Verify behavior of test_module_load_import_error_coverage."""
     import importlib
     import sys
 

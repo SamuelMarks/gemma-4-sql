@@ -24,12 +24,12 @@ class Gemma4DecoderLayer(nnx.Module):
     mlp: Gemma4MLP | Gemma4MoE
 
     def __init__(self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__.
+        """Initialize the Gemma 4 decoder layer.
 
         Args:
-            config: The configuration parameters.
-            attention_type: The attention type.
-            rngs: The rngs.
+            config: Model configuration parameters.
+            attention_type: Attention mechanism variant (`GLOBAL` or `LOCAL_SLIDING`).
+            rngs: Flax NNX random number generators.
 
         """
         self.config = config
@@ -53,8 +53,15 @@ class Gemma4DecoderLayer(nnx.Module):
     def __call__(self, x: Array, positions: Array, layer_cache: LayerCache | None = None, attention_mask: Array | None = None, per_layer_input: Array | None = None) -> Array:
         """Apply the decoder layer.
 
+        Args:
+            x: Input hidden state tensor.
+            positions: Token position indices tensor.
+            layer_cache: Optional KV cache for this decoder layer.
+            attention_mask: Optional additive attention mask.
+            per_layer_input: Optional per-layer embedding input tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Output hidden state tensor after self-attention, MLP/MoE, and PLE gating.
 
         """
         lnx = self.pre_self_attention_norm(x)

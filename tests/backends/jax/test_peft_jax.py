@@ -38,7 +38,7 @@ class MockGemma4Config:
     """Mock Gemma4Config for dependency isolation testing."""
 
     @staticmethod
-    def gemma4_e2b() -> object:
+    def gemma4_e2b() -> Any:
         """Return dummy configuration string."""
         return "config"
 
@@ -46,7 +46,7 @@ class MockGemma4Config:
 class MockGemma4ForCausalLM:
     """Mock Gemma4ForCausalLM for dependency isolation testing."""
 
-    def __init__(self, config: object, rngs: object = None, **kwargs: object) -> None:
+    def __init__(self, config: Any, rngs: Any = None, **kwargs: Any) -> None:
         """Initialize mock Gemma4ForCausalLM."""
 
 
@@ -63,7 +63,7 @@ class MockNNX:
             """Initialize mock Rngs."""
 
     @staticmethod
-    def split(model: object, *_args: object, **_kwargs: object) -> tuple[Any, ...]:
+    def split(model: Any, *_args: Any, **_kwargs: Any) -> tuple[Any, ...]:
         """Return mock split tuple."""
         return (model, {}, {})
 
@@ -94,7 +94,7 @@ def test_apply_lora_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
     monkeypatch.setattr(pt, "Gemma4Config", MockGemma4Config)
 
-    def mock_split(*_args: object, **_kwargs: object) -> tuple[Any, ...]:
+    def mock_split(*_args: Any, **_kwargs: Any) -> tuple[Any, ...]:
         """Raise intentional ValueError to simulate split error."""
         raise ValueError("split error")
 
@@ -518,21 +518,6 @@ def test_missing_dependencies_exceptions(monkeypatch: pytest.MonkeyPatch) -> Non
         pt.count_parameters(object())
 
 
-def test_peft_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test reloading module when dependencies are missing."""
-    import importlib
-    import sys
-
-    mdl = sys.modules["gemma_4_sql.backends.jax.peft"]
-    monkeypatch.setitem(sys.modules, "jax", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    monkeypatch.setitem(sys.modules, "flax", None)
-    importlib.reload(mdl)
-    monkeypatch.undo()
-    importlib.reload(mdl)
-
-
 def test_lora_linear_no_dropout() -> None:
     """Test NNXLoRALinear forward pass when lora_dropout is 0.0."""
     rngs = nnx.Rngs(params=0, dropout=1)
@@ -551,28 +536,23 @@ def test_lora_linear_no_dropout() -> None:
     assert out.shape == (1, 4)
 
 
-def test_peft_param_monkeypatch_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test monkeypatching helpers for nnx.Param lacking shape, dtype, and indexing."""
-    import importlib
-    import sys
-
-    import flax.nnx as real_nnx
+def test_peft_param_monkeypatch_helpers() -> None:
+    """Test _ensure_param_compat helper for nnx.Param lacking shape, dtype, and indexing."""
 
     class DummyParam:
         """Dummy parameter class."""
 
-        def __init__(self, value: object = None) -> None:
+        def __init__(self, value: Any = None) -> None:
             """Initialize dummy param."""
             self.value = value
 
-    mock_nnx = type("MockNNXModule", (), {"Param": DummyParam, "Module": real_nnx.Module})()
-    monkeypatch.setattr("flax.nnx", mock_nnx)
-    peft_mod = sys.modules.get("gemma_4_sql.backends.jax.peft")
-    if peft_mod:
-        importlib.reload(peft_mod)
+    pt._ensure_param_compat(None)
+    pt._ensure_param_compat(DummyParam)
+    # Second call exercises the false branches when attributes already exist
+    pt._ensure_param_compat(DummyParam)
 
     # Test the dynamically attached properties and methods
-    p = DummyParam(jnp.zeros((2, 3)))
+    p: Any = DummyParam(jnp.zeros((2, 3)))
     assert p.shape == (2, 3)
     assert p.dtype is not None
     assert p[0] is not None
@@ -581,21 +561,16 @@ def test_peft_param_monkeypatch_helpers(monkeypatch: pytest.MonkeyPatch) -> None
     p[0] = jnp.zeros((3,))
     assert float(p.value[0, 0]) == 0.0
 
-    # Test without .at (hits line 63)
-    p_no_at = DummyParam([1, 2, 3])
+    # Test without .at
+    p_no_at: Any = DummyParam([1, 2, 3])
     p_no_at[0] = [9, 9, 9]
     assert p_no_at.value == [9, 9, 9]
 
     # Test without value attribute
-    p_empty = DummyParam(None)
+    p_empty: Any = DummyParam(None)
     del p_empty.value
     assert p_empty.shape == ()
     assert p_empty.dtype is None
     assert p_empty[0] is None
     p_empty[...] = 5
     assert p_empty.value == 5
-
-    # Reload again to restore normal state
-    monkeypatch.undo()
-    if peft_mod:
-        importlib.reload(peft_mod)

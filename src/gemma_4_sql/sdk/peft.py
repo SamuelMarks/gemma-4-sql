@@ -7,10 +7,17 @@ from typing import TYPE_CHECKING
 from gemma_4_sql.sdk.registry import get_backend
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import JSONValue, PEFTResultDict
 
 
-def apply_peft(model_name: str, target_modules: list[str] | None = None, lora_r: int = 8, lora_alpha: int = 16, lora_dropout: float = 0.05, **kwargs: JSONValue) -> JSONDict:
+def apply_peft(
+    model_name: str,
+    target_modules: list[str] | None = None,
+    lora_r: int = 8,
+    lora_alpha: int = 16,
+    lora_dropout: float = 0.05,
+    **kwargs: JSONValue,
+) -> PEFTResultDict:
     """Apply Parameter-Efficient Fine-Tuning (PEFT / LoRA) to a model.
 
     Args:
@@ -19,17 +26,25 @@ def apply_peft(model_name: str, target_modules: list[str] | None = None, lora_r:
         lora_r: The rank of the LoRA update matrices.
         lora_alpha: The scaling factor for LoRA.
         lora_dropout: The dropout probability for LoRA layers.
-        **kwargs: Backend-specific LoRA parameters.
+        **kwargs: Backend-specific LoRA parameters (including optional `backend`).
 
     Returns:
-            A dictionary containing the results.
+        A dictionary containing the results.
 
     """
-    backend = kwargs.get("backend", "jax")
+    call_kwargs = dict(kwargs)
+    backend = str(call_kwargs.pop("backend", "jax"))
     if target_modules is None:
         target_modules = ["q_proj", "v_proj"]
 
-    return get_backend(backend).apply_lora(model_name, target_modules, lora_r, lora_alpha, lora_dropout)
+    return get_backend(backend).apply_lora(
+        model_name,
+        target_modules,
+        lora_r,
+        lora_alpha,
+        lora_dropout,
+        **call_kwargs,
+    )
 
 
 __all__ = ["apply_peft"]

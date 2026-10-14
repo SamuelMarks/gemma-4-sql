@@ -4,36 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import types
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import JSONDict
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from gemma_4_sql.type_hints import ServeResultDict
+
 logger = logging.getLogger(__name__)
 
-try:
-    import uvicorn as _uvicorn
-    from fastapi import FastAPI as _FastAPI
-    from fastapi import HTTPException as _HTTPException
-    from fastapi import Request as _Request
-    from fastapi.responses import JSONResponse as _JSONResponse
-
-    uvicorn: types.ModuleType | None = _uvicorn
-    FastAPI: Any | None = _FastAPI
-    HTTPException: Any | None = _HTTPException
-    Request: Any | None = _Request
-    JSONResponse: Any | None = _JSONResponse
-except (ImportError, AttributeError):
-    uvicorn = None
-    FastAPI = None
-    HTTPException = None
-    Request = None
-    JSONResponse = None
+uvicorn = optional_import("uvicorn")
+FastAPI = optional_attr("fastapi", "FastAPI")
+HTTPException = optional_attr("fastapi", "HTTPException")
+Request = optional_attr("fastapi", "Request")
+JSONResponse = optional_attr("fastapi.responses", "JSONResponse")
 
 
 @dataclass
@@ -178,7 +167,7 @@ def create_common_app(
                     item["future"].set_result(sql)
 
     @app.post("/generate", response_model=None)
-    async def generate(request: Request) -> Any:
+    async def generate(request: Request) -> Any:  # type: ignore[valid-type]
         """Handle continuous batching Text-to-SQL generation.
 
         Args:
@@ -203,7 +192,8 @@ def create_common_app(
             except RuntimeError:
                 worker_task = None
 
-        data = await request.json()
+        req_any: Any = request
+        data = await req_any.json()
         validated_req = GenerateRequest.from_dict(cast(dict[str, Any], data))
         prompt = validated_req.prompt
         if validated_req.image_base64 or validated_req.audio_base64 or validated_req.image_path or validated_req.audio_path:
@@ -304,6 +294,55 @@ def create_common_app(
     return app
 
 
+def create_backend_serve_app(
+    backend_name: str,
+    model_name: str,
+    generate_sql_fn: Callable[..., JSONDict],
+    startup_callback: Callable[[], None] | None = None,
+    batch_generate_logic: Callable[[list[str]], list[str]] | None = None,
+    max_batch_size: int = 32,
+) -> object:
+    """Create a FastAPI continuous batching application wrapping a backend's `generate_sql` function.
+
+    Args:
+        backend_name: Backend identifier ('jax', 'keras', 'maxtext', 'mlx', 'pytorch').
+        model_name: Target model name.
+        generate_sql_fn: Backend `generate_sql(model_name=..., prompt=...)` callable.
+        startup_callback: Optional callback invoked during app initialization.
+        batch_generate_logic: Optional batch generation override callable.
+        max_batch_size: Maximum batch size per dispatch window.
+
+    Returns:
+        Configured FastAPI application instance.
+
+    """
+    from gemma_4_sql.exceptions import InferenceError
+
+    def _generate(prompt: str) -> str:
+        """Execute backend SQL generation and validate non-empty output."""
+        try:
+            out = generate_sql_fn(model_name=model_name, prompt=prompt)
+            sql = out.get("sql", "")
+            if sql:
+                return str(sql)
+            msg = f"{backend_name.title()} inference returned empty SQL for prompt '{prompt}'"
+            raise InferenceError(msg, backend=backend_name)
+        except Exception as e:
+            if isinstance(e, InferenceError):
+                raise
+            msg = f"{backend_name.title()} generation failed: {e}"
+            raise InferenceError(msg, backend=backend_name, cause=e) from e
+
+    return create_common_app(
+        backend_name=backend_name,
+        model_name=model_name,
+        startup_callback=startup_callback,
+        generate_logic=_generate,
+        batch_generate_logic=batch_generate_logic,
+        max_batch_size=max_batch_size,
+    )
+
+
 def serve_model_wrapper(
     backend_name: str,
     model_name: str,
@@ -313,7 +352,7 @@ def serve_model_wrapper(
     app_factory: Callable[[], object],
     run_server: bool = False,
     host: str = "0.0.0.0",
-) -> JSONDict:
+) -> ServeResultDict:
     """Wrap serving logic to unify exception handling and result formatting.
 
     Args:
@@ -354,15 +393,12 @@ def serve_model_wrapper(
         status = f"failed: {e!s}"
         app = None
 
-    return cast(
-        JSONDict,
-        {
-            "backend": backend_name,
-            "model": model_name,
-            "port": port,
-            "max_batch_size": max_batch_size,
-            "status": status,
-            "mode": "continuous_batching",
-            "app": app,
-        },
-    )
+    return {
+        "backend": backend_name,
+        "model": model_name,
+        "port": port,
+        "max_batch_size": max_batch_size,
+        "status": status,
+        "mode": "continuous_batching",
+        "app": app,
+    }

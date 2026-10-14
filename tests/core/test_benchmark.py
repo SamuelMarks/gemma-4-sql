@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,7 +21,7 @@ BACKENDS = ["jax", "keras", "maxtext", "mlx", "pytorch"]
 class UniversalMock(MagicMock):
     """Mock helper for backend benchmarking tests."""
 
-    def __call__(self, *_args: object, **kwargs: object) -> object:
+    def __call__(self, *_args: Any, **kwargs: Any) -> Any:
         """Execute mock callable."""
         if "num_records" in kwargs:
             return self
@@ -34,17 +35,17 @@ class UniversalMock(MagicMock):
         """Return element count."""
         return 1000
 
-    def to(self, *_a: object, **_k: object) -> object:
+    def to(self, *_a: Any, **_k: Any) -> Any:
         """Return self."""
         return self
 
-    def eval(self) -> object:
+    def eval(self) -> Any:
         """Return self."""
         return self
 
 
 @pytest.fixture
-def mock_benchmark_backend(request: object, monkeypatch: object) -> object:
+def mock_benchmark_backend(request: Any, monkeypatch: Any) -> Any:
     """Parametrized fixture configuring mock backends for benchmarking."""
     backend = request.param
     module = importlib.import_module(f"gemma_4_sql.backends.{backend}.benchmark")
@@ -74,7 +75,7 @@ def mock_benchmark_backend(request: object, monkeypatch: object) -> object:
 
 
 @pytest.mark.parametrize("mock_benchmark_backend", BACKENDS, indirect=True)
-def test_benchmark_model_real(mock_benchmark_backend: object) -> None:
+def test_benchmark_model_real(mock_benchmark_backend: Any) -> None:
     """Test mock backend benchmark fixture dispatch."""
     (_backend, _module) = mock_benchmark_backend
 
@@ -123,7 +124,7 @@ def test_run_benchmark_wrapper_paths() -> None:
 
     # 2. Execution failure branch
     def _fail() -> tuple[float, float, float]:
-        """Docstring for _fail."""
+        """Verify behavior of _fail."""
         raise RuntimeError("Benchmark execution crashed")
 
     res_fail = run_benchmark_wrapper(
@@ -162,21 +163,21 @@ def test_run_benchmark_wrapper_paths() -> None:
         )
 
 
-def test_sdk_benchmark(monkeypatch: object) -> None:
-    """Docstring for test_sdk_benchmark."""
+def test_sdk_benchmark(monkeypatch: Any) -> None:
+    """Verify behavior of test_sdk_benchmark."""
     import sys
 
     from gemma_4_sql.sdk.benchmark import benchmark
 
     class FakeBackend:
-        """Docstring for FakeBackend."""
+        """Verify behavior of FakeBackend."""
 
         def benchmark_model(self, *args, **kwargs):
-            """Docstring for benchmark_model."""
+            """Verify behavior of benchmark_model."""
             return {"status": "success"}
 
     def mock_get_backend(x):
-        """Docstring for mock_get_backend."""
+        """Verify behavior of mock_get_backend."""
         return FakeBackend()
 
     bench_mod = sys.modules["gemma_4_sql.sdk.benchmark"]
@@ -202,21 +203,23 @@ def test_universal_mock():
 
 
 @pytest.fixture(autouse=True)
-def _mock_import_for_fake(monkeypatch):
+def _mock_import_for_fake(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Intercept importlib.import_module for fake_backend during benchmark fixture tests."""
     import importlib
 
     orig_import = importlib.import_module
 
-    def mock_import(name, *args, **kwargs):
+    def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        """Return dummy object when importing fake_backend."""
         if name and "fake_backend" in name:
             return object()
-        return orig_import(name, *args, **kwargs)
+        return orig_import(name, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(importlib, "import_module", mock_import)
 
 
 @pytest.mark.parametrize("mock_benchmark_backend", ["fake_backend"], indirect=True)
-def test_mock_benchmark_backend_unsupported(mock_benchmark_backend: object) -> None:
+def test_mock_benchmark_backend_unsupported(mock_benchmark_backend: Any) -> None:
     """Cover the else branch in mock_benchmark_backend."""
     res = mock_benchmark_backend
     assert res[0] == "fake_backend"

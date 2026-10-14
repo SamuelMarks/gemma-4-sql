@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for gemma4 utils params."""
 
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +10,7 @@ import pytest
 
 
 def test_map_to_jax_key_exceptions():
-    """Docstring for test_map_to_jax_key_exceptions."""
+    """Verify behavior of test_map_to_jax_key_exceptions."""
     from gemma_4_sql.backends.jax.gemma4.utils_params import map_to_jax_key
 
     mapping = {r"model.*": ("b", None), r"model\.layers.*": ("d", None)}
@@ -19,7 +19,7 @@ def test_map_to_jax_key_exceptions():
 
 
 def test_stoi():
-    """Docstring for test_stoi."""
+    """Verify behavior of test_stoi."""
     from gemma_4_sql.backends.jax.gemma4.utils_params import stoi
 
     assert stoi("123") == 123
@@ -27,7 +27,7 @@ def test_stoi():
 
 
 def test_apply_transform():
-    """Docstring for test_apply_transform."""
+    """Verify behavior of test_apply_transform."""
     import numpy as np
 
     from gemma_4_sql.backends.jax.gemma4.utils_params import _apply_transform
@@ -51,14 +51,14 @@ def test_apply_transform():
 
 
 def test_assign_weights():
-    """Docstring for test_assign_weights."""
+    """Verify behavior of test_assign_weights."""
     from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights
 
     mock_val = MagicMock()
     mock_val.shape = (1,)
 
     class MockVar:
-        """Docstring for MockVar."""
+        """Verify behavior of MockVar."""
 
     var_obj = MockVar()
     var_obj.value = mock_val
@@ -78,7 +78,7 @@ def test_assign_weights():
 
 
 def test_assign_weights_from_eval_shape():
-    """Docstring for test_assign_weights_from_eval_shape."""
+    """Verify behavior of test_assign_weights_from_eval_shape."""
     from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights_from_eval_shape
 
     mock_val = MagicMock()
@@ -86,7 +86,7 @@ def test_assign_weights_from_eval_shape():
     mock_val.dtype = float
 
     class MockVar:
-        """Docstring for MockVar."""
+        """Verify behavior of MockVar."""
 
     var_obj = MockVar()
     var_obj.value = mock_val
@@ -110,28 +110,28 @@ def test_assign_weights_from_eval_shape():
 
 
 def test_load_safetensors_weights_import(monkeypatch):
-    """Docstring for test_load_safetensors_weights_import."""
+    """Verify behavior of test_load_safetensors_weights_import."""
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
 
     class MockSafeOpen:
-        """Docstring for MockSafeOpen."""
+        """Verify behavior of MockSafeOpen."""
 
         def __init__(self, *args, **kwargs):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
 
         def __enter__(self):
-            """Docstring for __enter__."""
+            """Verify behavior of __enter__."""
             raise TypeError("Simulated TypeError")
 
         def __exit__(self, *args):
-            """Docstring for __exit__."""
+            """Verify behavior of __exit__."""
 
     monkeypatch.setattr(up, "safe_open", MockSafeOpen)
     up._load_weights_from_safetensors_file("path", {}, {})
 
 
 def test_load_safetensors_weights(monkeypatch):
-    """Docstring for test_load_safetensors_weights."""
+    """Verify behavior of test_load_safetensors_weights."""
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
 
     mock_f = MagicMock()
@@ -140,17 +140,17 @@ def test_load_safetensors_weights(monkeypatch):
     mock_f.get_tensor.return_value = "tensor"
 
     class MockSafeOpen:
-        """Docstring for MockSafeOpen."""
+        """Verify behavior of MockSafeOpen."""
 
         def __init__(self, *args, **kwargs):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
 
         def __enter__(self):
-            """Docstring for __enter__."""
+            """Verify behavior of __enter__."""
             return mock_f
 
         def __exit__(self, *args):
-            """Docstring for __exit__."""
+            """Verify behavior of __exit__."""
 
     monkeypatch.setattr(up, "safe_open", MockSafeOpen)
     monkeypatch.setattr(up, "map_to_jax_key", lambda m, k: ("transformer.layer.0" if "layers" in k else None, None))
@@ -161,7 +161,7 @@ def test_load_safetensors_weights(monkeypatch):
 
 
 def test_populate_state_from_files(monkeypatch):
-    """Docstring for test_populate_state_from_files."""
+    """Verify behavior of test_populate_state_from_files."""
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
     from gemma_4_sql.backends.jax.gemma4.utils_params import _populate_state_from_files
 
@@ -183,7 +183,7 @@ def test_populate_state_from_files(monkeypatch):
 
 
 def test_create_model():
-    """Docstring for test_create_model."""
+    """Verify behavior of test_create_model."""
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
     from gemma_4_sql.backends.jax.gemma4.utils_params import create_model_from_safe_tensors
 
@@ -196,7 +196,7 @@ def test_create_model():
 
 
 def test_get_model_and_state():
-    """Docstring for test_get_model_and_state."""
+    """Verify behavior of test_get_model_and_state."""
     from gemma_4_sql.backends.jax.gemma4.utils_params import _get_model_and_state
 
     mock_model_cls = MagicMock()
@@ -205,11 +205,11 @@ def test_get_model_and_state():
 
 
 def test_update_state_exceptions(monkeypatch):
-    """Docstring for test_update_state_exceptions."""
+    """Verify behavior of test_update_state_exceptions."""
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
 
     def mock_populate(*args):
-        """Docstring for mock_populate."""
+        """Verify behavior of mock_populate."""
 
     monkeypatch.setattr(up, "_populate_state_from_files", mock_populate)
     monkeypatch.setattr(up, "_get_model_and_state", lambda c, cfg: (MagicMock(), {}))
@@ -217,6 +217,7 @@ def test_update_state_exceptions(monkeypatch):
     monkeypatch.setattr("gemma_4_sql.backends.jax.gemma4.utils_params.safe_open", MagicMock())
 
     def mock_update(*args, **kwargs):
+        """Raise ValueError to simulate error updating state."""
         raise ValueError("simulated error updating state")
 
     monkeypatch.setattr("flax.nnx.update", mock_update)
@@ -224,7 +225,7 @@ def test_update_state_exceptions(monkeypatch):
 
 
 def test_apply_transform_no_permute():
-    """Docstring for test_apply_transform_no_permute."""
+    """Verify behavior of test_apply_transform_no_permute."""
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
 
     mock_tensor = MagicMock()
@@ -235,7 +236,7 @@ def test_apply_transform_no_permute():
 
 
 def test_assign_weights_shape_mismatch():
-    """Docstring for test_assign_weights_shape_mismatch."""
+    """Verify behavior of test_assign_weights_shape_mismatch."""
     import pytest
 
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
@@ -251,7 +252,7 @@ def test_assign_weights_shape_mismatch():
 
 
 def test_assign_weights_int_key():
-    """Docstring for test_assign_weights_int_key."""
+    """Verify behavior of test_assign_weights_int_key."""
     import numpy as np
 
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
@@ -301,13 +302,13 @@ def test_assign_weights_int_key():
 
 
 def test_populate_state_from_files_non_safetensors(monkeypatch):
-    """Docstring for test_populate_state_from_files_non_safetensors."""
+    """Verify behavior of test_populate_state_from_files_non_safetensors."""
     import os
 
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
 
     def mock_walk(*args, **kwargs):
-        """Docstring for mock_walk."""
+        """Verify behavior of mock_walk."""
         return [("root", [], ["model.safetensors", "README.md"])]
 
     monkeypatch.setattr(os, "walk", mock_walk)
@@ -317,7 +318,7 @@ def test_populate_state_from_files_non_safetensors(monkeypatch):
 
 
 def test_assign_weights_keyerror(monkeypatch):
-    """Docstring for test_assign_weights_keyerror."""
+    """Verify behavior of test_assign_weights_keyerror."""
     import gemma_4_sql.backends.jax.gemma4.utils_params as up
 
     up.jax = MagicMock()
@@ -329,23 +330,23 @@ def test_assign_weights_keyerror(monkeypatch):
     mock_f.get_tensor.return_value = "tensor"
 
     class MockSafeOpen:
-        """Docstring for MockSafeOpen."""
+        """Verify behavior of MockSafeOpen."""
 
         def __init__(self, *args, **kwargs):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
 
         def __enter__(self):
-            """Docstring for __enter__."""
+            """Verify behavior of __enter__."""
             return mock_f
 
         def __exit__(self, *args):
-            """Docstring for __exit__."""
+            """Verify behavior of __exit__."""
 
     monkeypatch.setattr(up, "safe_open", MockSafeOpen)
     monkeypatch.setattr(up, "map_to_jax_key", lambda m, k: ("mapped", None))
 
     def mock_assign(*args, **kwargs):
-        """Docstring for mock_assign."""
+        """Verify behavior of mock_assign."""
         raise KeyError("Mocked key error")
 
     monkeypatch.setattr(up, "assign_weights", mock_assign)

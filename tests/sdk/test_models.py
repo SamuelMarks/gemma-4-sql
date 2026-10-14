@@ -1,25 +1,43 @@
-"""Tests for Models SDK module."""
+"""Behavioral unit tests for the Models SDK module."""
+
+from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.sdk.models import pretrain_model
+from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
+from gemma_4_sql.sdk import models
+from gemma_4_sql.sdk.models import posttrain_model, pretrain_model, sft_model, train_from_scratch
+from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.type_hints import TrainingConfig
 
 
 def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test pretraining a model."""
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    """Verify `pretrain_model` routes configurations across JAX, PyTorch, Keras, MaxText, and MLX."""
     jax_agent = get_backend("jax")
-    monkeypatch.setattr(jax_agent, "train_model", lambda cfg, **k: {"backend": cfg.backend, "action": cfg.action, "model": cfg.model_name, "dataset": cfg.dataset, "epochs": cfg.epochs})
+    monkeypatch.setattr(
+        jax_agent,
+        "train_model",
+        lambda cfg, **_k: {
+            "backend": cfg.backend,
+            "action": cfg.action,
+            "model": cfg.model_name,
+            "dataset": cfg.dataset,
+            "epochs": cfg.epochs,
+            "status": "completed",
+            "final_loss": 0.1,
+        },
+    )
     res = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="jax"))
     assert res["backend"] == "jax"
     assert res["action"] == "pretrain"
     assert res["model"] == "my-model"
 
-    # Instead of just pt_train.torch = None, mock train_model to raise the error
-    # since other tests might have patched the module
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.train.train_model", lambda *args, **kwargs: (_ for _ in ()).throw(DependencyMissingError("PyTorch dependencies are missing.")))
+    monkeypatch.setattr(
+        "gemma_4_sql.backends.pytorch.train.train_model",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(DependencyMissingError("PyTorch dependencies are missing.")),
+    )
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="pytorch"))
 
@@ -30,9 +48,17 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
 
-    def mock_train(*args, **kwargs):
-        """Docstring for mock_train."""
-        return {"backend": "keras", "action": "pretrain", "model": "my-model"}
+    def mock_train(cfg: TrainingConfig, **_kwargs: Any) -> dict[str, Any]:
+        """Return simulated Keras training result."""
+        return {
+            "backend": "keras",
+            "action": cfg.action,
+            "model": cfg.model_name,
+            "dataset": cfg.dataset,
+            "epochs": cfg.epochs,
+            "status": "completed",
+            "final_loss": 0.2,
+        }
 
     monkeypatch.setattr(ktrain, "keras", object())
     monkeypatch.setattr(ktrain, "tf", object())
@@ -49,39 +75,67 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="maxtext"))
 
-    # cover mlx pretraining by mocking registry and mlx modules
-    import sys
-    from unittest.mock import Mock
-
-    monkeypatch.setitem(sys.modules, "mlx.core", Mock())
-    monkeypatch.setitem(sys.modules, "mlx.nn", Mock())
-    monkeypatch.setitem(sys.modules, "mlx.optimizers", Mock())
-    monkeypatch.setitem(sys.modules, "mlx_lm", Mock())
-
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     mlx_agent = get_backend("mlx")
-    monkeypatch.setattr(mlx_agent, "train_model", lambda cfg, **k: {"backend": cfg.backend, "action": cfg.action, "model": cfg.model_name, "dataset": cfg.dataset, "epochs": cfg.epochs})
+    monkeypatch.setattr(
+        mlx_agent,
+        "train_model",
+        lambda cfg, **_k: {
+            "backend": cfg.backend,
+            "action": cfg.action,
+            "model": cfg.model_name,
+            "dataset": cfg.dataset,
+            "epochs": cfg.epochs,
+            "status": "completed",
+            "final_loss": 0.05,
+        },
+    )
 
     res_mlx = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="mlx"))
     assert res_mlx["backend"] == "mlx"
 
 
 def test_pretrain_model_error() -> None:
-    """Test pretraining a model with an unknown backend."""
-    with pytest.raises(ValueError, match=r".*"):
+    """Verify `pretrain_model` raises `ConfigurationError` with an unknown backend."""
+    with pytest.raises(ConfigurationError, match="Unknown backend: unknown"):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="unknown"))
 
 
-def test_models_defaults(monkeypatch):
-    from gemma_4_sql.sdk import models
+def test_models_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `pretrain_model`, `train_from_scratch`, `sft_model`, and `posttrain_model` populate default configs without mutating caller configs."""
+    captured: list[TrainingConfig] = []
 
-    monkeypatch.setattr(models, "_route_training", lambda c: c)
+    class DummyBackend:
+        """Backend stub that records passed TrainingConfig."""
 
-    res1 = models.train_from_scratch()
-    assert res1.action == "train_from_scratch"
+        def train_model(self, cfg: TrainingConfig, **_kw: Any) -> dict[str, Any]:
+            """Record TrainingConfig and return valid TrainResultDict."""
+            captured.append(cfg)
+            return {
+                "backend": cfg.backend,
+                "action": cfg.action,
+                "model": cfg.model_name,
+                "dataset": cfg.dataset,
+                "epochs": cfg.epochs,
+                "status": "completed",
+                "final_loss": 0.0,
+            }
 
-    res2 = models.sft_model()
-    assert res2.action == "sft"
+    monkeypatch.setattr(models, "get_backend", lambda _b: DummyBackend())
 
-    res3 = models.posttrain_model()
-    assert res3.action == "posttrain"
+    res0 = pretrain_model()
+    assert res0["action"] == "pretrain"
+    assert captured[-1].action == "pretrain"
+    assert captured[-1].backend == "maxtext"
+
+    res1 = train_from_scratch()
+    assert res1["action"] == "train_from_scratch"
+    assert captured[-1].action == "train_from_scratch"
+
+    res2 = sft_model()
+    assert res2["action"] == "sft"
+    assert captured[-1].action == "sft"
+
+    res3 = posttrain_model()
+    assert res3["action"] == "posttrain"
+    assert captured[-1].action == "posttrain"
+    assert captured[-1].backend == "keras"

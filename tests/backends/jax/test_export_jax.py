@@ -1,6 +1,5 @@
-"""Module docstring."""
+"""Unit and behavioral tests for export jax."""
 
-import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -12,11 +11,15 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def mock_dependencies():
-    """Docstring for mock_dependencies."""
+def mock_dependencies(monkeypatch: pytest.MonkeyPatch):
+    """Provide mocked JAX, Orbax, and Flax NNX dependencies for export unit tests."""
+    import gemma_4_sql.backends.jax.export as jax_export
+    import gemma_4_sql.backends.jax.gemma4 as real_gemma4_pkg
+
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_ocp = MagicMock()
+    mock_orbax = MagicMock(checkpoint=mock_ocp)
     mock_nnx = MagicMock()
     mock_flax = MagicMock()
     mock_flax.nnx = mock_nnx
@@ -34,31 +37,38 @@ def mock_dependencies():
     mock_gemma4_mod.Gemma4Config = mock_gemma4_config
     mock_gemma4_mod.Gemma4ForCausalLM = mock_gemma4_model
 
-    with patch.dict(
-        sys.modules,
-        {
-            "jax": mock_jax,
-            "jax.numpy": mock_jnp,
-            "orbax.checkpoint": mock_ocp,
-            "orbax": MagicMock(checkpoint=mock_ocp),
-            "flax": mock_flax,
-            "flax.nnx": mock_nnx,
-            "gemma_4_sql.backends.jax.gemma4": mock_gemma4_mod,
-        },
+    monkeypatch.setattr(jax_export, "jax", mock_jax)
+    monkeypatch.setattr(jax_export, "jnp", mock_jnp)
+    monkeypatch.setattr(jax_export, "ocp", mock_ocp)
+
+    with (
+        patch.dict(
+            sys.modules,
+            {
+                "jax": mock_jax,
+                "jax.numpy": mock_jnp,
+                "orbax": mock_orbax,
+                "orbax.checkpoint": mock_ocp,
+                "flax": mock_flax,
+                "flax.nnx": mock_nnx,
+                "gemma_4_sql.backends.jax.gemma4": mock_gemma4_mod,
+            },
+        ),
+        patch.object(real_gemma4_pkg, "Gemma4Config", mock_gemma4_config),
+        patch.object(real_gemma4_pkg, "Gemma4ForCausalLM", mock_gemma4_model),
     ):
         yield mock_jax, mock_jnp, mock_ocp, mock_nnx, mock_gemma4_config, mock_gemma4_model, mock_checkpointer
 
 
 def reload_module():
-    """Docstring for reload_module."""
+    """Return the `gemma_4_sql.backends.jax.export` module."""
     import gemma_4_sql.backends.jax.export as jax_export
 
-    importlib.reload(jax_export)
     return jax_export
 
 
 def test_export_model_with_weights(tmp_path):
-    """Docstring for test_export_model_with_weights."""
+    """Verify behavior of test_export_model_with_weights."""
     jax_export = reload_module()
 
     export_path = str(tmp_path / "export")
@@ -71,7 +81,7 @@ def test_export_model_with_weights(tmp_path):
 
 
 def test_export_model_extract_weights(tmp_path):
-    """Docstring for test_export_model_extract_weights."""
+    """Verify behavior of test_export_model_extract_weights."""
     jax_export = reload_module()
 
     export_path = str(tmp_path / "export")
@@ -90,7 +100,7 @@ def test_export_model_extract_weights(tmp_path):
 
 
 def test_export_model_extract_weights_missing_flax(tmp_path):
-    """Docstring for test_export_model_extract_weights_missing_flax."""
+    """Verify behavior of test_export_model_extract_weights_missing_flax."""
     jax_export = reload_module()
 
     with patch.dict(sys.modules, {"flax": None}), pytest.raises(Exception, match="Flax NNX dependency missing:"):
@@ -99,7 +109,7 @@ def test_export_model_extract_weights_missing_flax(tmp_path):
 
 
 def test_export_model_extract_weights_error(tmp_path, mock_dependencies):
-    """Docstring for test_export_model_extract_weights_error."""
+    """Verify behavior of test_export_model_extract_weights_error."""
     jax_export = reload_module()
 
     # Make extraction fail
@@ -111,7 +121,7 @@ def test_export_model_extract_weights_error(tmp_path, mock_dependencies):
 
 
 def test_export_model_save_error(tmp_path, mock_dependencies):
-    """Docstring for test_export_model_save_error."""
+    """Verify behavior of test_export_model_save_error."""
     jax_export = reload_module()
 
     _, _, _, _, _, _, mock_checkpointer = mock_dependencies
@@ -121,22 +131,11 @@ def test_export_model_save_error(tmp_path, mock_dependencies):
         jax_export.export_model("test_model", str(tmp_path / "export"), weights="w")
 
 
-def test_jax_export_import_error():
-    """Docstring for test_jax_export_import_error."""
-    import importlib
-    import sys
-    from unittest.mock import patch
+def test_jax_export_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `export_model` raises `DependencyMissingError` when `jax` is None."""
+    import gemma_4_sql.backends.jax.export as mod
 
-    import pytest
-
-    with patch.dict(sys.modules, {"jax": None}):
-        import gemma_4_sql.backends.jax.export as mod
-
-        importlib.reload(mod)
-        assert mod.jax is None
-
-        with pytest.raises(Exception, match="JAX export dependencies are missing."):
-            mod.export_model("model", "path")
-
-    # reload cleanly
-    importlib.reload(mod)
+    monkeypatch.setattr(mod, "jax", None)
+    assert mod.jax is None
+    with pytest.raises(Exception, match="JAX export dependencies are missing."):
+        mod.export_model("model", "path")

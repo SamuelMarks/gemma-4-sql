@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any
+import argparse
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.cli_benchmark import benchmark_cmd
 from gemma_4_sql.cli_misc import log_metrics_cmd, rag_cmd, tokenize_cmd
 from gemma_4_sql.cli_parsers.db_parser import add_db_parsers
 
+if TYPE_CHECKING:
+    SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
+else:
+    SubParsersType = argparse._SubParsersAction
 
-def add_tokenize_parser(subparsers: Any) -> None:
+
+def add_tokenize_parser(subparsers: SubParsersType) -> None:
     """Register tokenization inspection subparser.
 
     Args:
@@ -24,7 +30,7 @@ def add_tokenize_parser(subparsers: Any) -> None:
     parser_tokenize.set_defaults(func=tokenize_cmd)
 
 
-def add_rag_log_parsers(subparsers: Any) -> None:
+def add_rag_log_parsers(subparsers: SubParsersType) -> None:
     """Register RAG prompt builder and metric logging subparsers.
 
     Args:
@@ -48,7 +54,7 @@ def add_rag_log_parsers(subparsers: Any) -> None:
     parser_log.set_defaults(func=log_metrics_cmd)
 
 
-def add_benchmark_parser(subparsers: Any) -> None:
+def add_benchmark_parser(subparsers: SubParsersType) -> None:
     """Register hardware throughput and latency benchmark subparser.
 
     Args:
@@ -70,7 +76,7 @@ def add_benchmark_parser(subparsers: Any) -> None:
     parser_benchmark.set_defaults(func=benchmark_cmd)
 
 
-def add_misc_parsers(subparsers: Any) -> None:
+def add_misc_parsers(subparsers: SubParsersType) -> None:
     """Register tokenization, database, benchmark, RAG, and logging subparsers.
 
     Args:

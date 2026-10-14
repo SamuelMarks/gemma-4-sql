@@ -1,4 +1,4 @@
-"""Provide module docstring."""
+"""Common training epoch iteration utilities across backends."""
 
 from __future__ import annotations
 
@@ -15,15 +15,15 @@ def generic_run_training_epochs(
     dataloader: Iterable[T_Batch],
     process_batch_fn: Callable[[T_Batch], float],
 ) -> float:
-    """Run a generic training loop across epochs and batches.
+    """Run a generic supervised training loop across epochs and batches.
 
     Args:
-        epochs: The integer value for epochs.
-        dataloader: The dataloader.
-        process_batch_fn: The process batch fn.
+        epochs: Number of full passes over the dataset.
+        dataloader: Iterable yielding training batches.
+        process_batch_fn: Callback executing one optimization step and returning scalar loss.
 
     Returns:
-        The computed float value.
+        Mean batch loss from the final training epoch.
 
     """
     final_loss = 0.0

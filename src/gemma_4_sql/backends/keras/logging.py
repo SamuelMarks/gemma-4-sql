@@ -2,27 +2,24 @@
 
 from __future__ import annotations
 
-import types
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import optional_import
+
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
-try:
-    import tensorflow as _tf
-
-    tf: types.ModuleType | None = _tf
-except (ImportError, AttributeError):
-    tf = None
+tf = optional_import("tensorflow")
 
 
-def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> JSONDict:
+def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", **_kwargs: JSONValue) -> LogMetricsResultDict:
     """Log metrics using Keras/TensorFlow TensorBoard tools.
 
     Args:
         metrics: The evaluation or training metrics.
         step: The current training or logging step.
         log_dir: The directory to save logs.
+        **_kwargs: Additional logging keyword arguments.
 
     Returns:
         A dictionary containing the results.
@@ -37,10 +34,12 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
         raise DependencyMissingError("TensorFlow dependencies are missing.")
     if hasattr(tf, "summary"):
         writer = tf.summary.create_file_writer(log_dir)
-        with writer.as_default():
-            for k, v in metrics.items():
-                tf.summary.scalar(k, v, step=step)
-        writer.close()
+        try:
+            with writer.as_default():
+                for k, v in metrics.items():
+                    tf.summary.scalar(k, v, step=step)
+        finally:
+            writer.close()
         status = "success"
     else:
         status = "missing_summary_attr"

@@ -3,39 +3,25 @@
 from __future__ import annotations
 
 import logging
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ETLConfig, ModelType, TensorType, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-    import maxtext.models.gemma4 as _gemma4
-    import maxtext.train as _maxtext_train
-    import optax as _optax
-    import orbax.checkpoint as _ocp
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-    optax: types.ModuleType | None = _optax
-    maxtext_train: types.ModuleType | None = _maxtext_train
-    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
-    ocp: types.ModuleType | None = _ocp
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-    optax = None
-    maxtext_train = None
-    Gemma4Model = None
-    ocp = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+optax = optional_import("optax")
+maxtext_train = optional_import("maxtext.train")
+Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+ocp = optional_import("orbax.checkpoint")
 
 
 def _loss_fn(model: ModelType, params: dict[str, TensorType], batch: JSONDict) -> Any:
@@ -82,7 +68,7 @@ def _get_train_step_fn(model: ModelType, optimizer: object) -> Any:
 
         # type ignore for lambda mapping to dynamic PyTree
         def _wrapper(p: Any, b: Any) -> Any:
-            """Docstring for _wrapper."""
+            """Evaluate _loss_fn for JAX value_and_grad differentiation."""
             return _loss_fn(model, p, b)
 
         (loss, grads) = jax.value_and_grad(_wrapper)(params, batch)
@@ -119,11 +105,11 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
 
         """
         nonlocal params, opt_state
-        (params, opt_state, loss) = state.train_step(params, opt_state, batch)  # type: ignore # Justified: Dynamic backend protocol typing
+        (params, opt_state, loss) = state.train_step(params, opt_state, batch)
         return float(loss.item() if hasattr(loss, "item") else loss)
 
-    final_loss = generic_run_training_epochs(state.epochs, state.dataloader, process_batch)  # type: ignore # Justified: Dynamic backend protocol typing
-    return (params, opt_state, final_loss)  # type: ignore # Justified: Dynamic backend protocol typing
+    final_loss = generic_run_training_epochs(state.epochs, state.dataloader, process_batch)
+    return (params, opt_state, final_loss)
 
 
 def _initialize_jax_distributed(
@@ -368,8 +354,6 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     final_loss = 0.0
     status = "completed"
     if jax is None or jnp is None or optax is None or (Gemma4Model is None and maxtext_train is None):
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MaxText dependencies are missing.")
 
     try:

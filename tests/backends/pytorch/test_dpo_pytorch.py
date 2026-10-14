@@ -1,6 +1,5 @@
 """Tests for PyTorch dpo."""
 
-import sys
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_torch
@@ -13,19 +12,41 @@ from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import DPOConfig
 
 
-def test_pytorch_dpo_imports():
-    """Test pytorch dpo imports fallback."""
-    import importlib
+@pytest.fixture(autouse=True)
+def _restore_dpo_mod(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore dpo_module globals after each test."""
+    import gemma_4_sql.backends.pytorch.dpo as dpo_module
 
-    with patch.dict(sys.modules, {"torch": None}):
-        import gemma_4_sql.backends.pytorch.dpo as dpo_module
+    monkeypatch.setattr(dpo_module, "torch", dpo_module.torch)
+    monkeypatch.setattr(dpo_module, "nn", dpo_module.nn)
+    monkeypatch.setattr(dpo_module, "optim", dpo_module.optim)
+    monkeypatch.setattr(dpo_module, "functional", dpo_module.functional)
 
-        importlib.reload(dpo_module)
-        assert dpo_module.torch is None
-        assert dpo_module.nn is None
-        assert dpo_module.optim is None
-        assert dpo_module.functional is None
-    importlib.reload(dpo_module)
+
+def test_real_pytorch_dpo_loss_and_step() -> None:
+    """Verify DPO loss and optimization step with real PyTorch tensors and nn.Linear models."""
+    import torch
+
+    import gemma_4_sql.backends.pytorch.dpo as dpo_module
+
+    p_chosen = torch.tensor([-1.0, -1.2], requires_grad=True)
+    p_rejected = torch.tensor([-2.0, -2.5], requires_grad=True)
+    r_chosen = torch.tensor([-1.1, -1.3])
+    r_rejected = torch.tensor([-1.9, -2.4])
+
+    loss, chosen_rew, rejected_rew = dpo_module.dpo_loss(p_chosen, p_rejected, r_chosen, r_rejected, beta=0.1)
+    assert float(loss.item()) > 0.0
+    assert float(chosen_rew.mean().item()) > float(rejected_rew.mean().item())
+
+    policy_model = torch.nn.Linear(4, 2)
+    ref_model = torch.nn.Linear(4, 2)
+    optimizer = torch.optim.SGD(policy_model.parameters(), lr=0.05)
+    batch = {
+        "chosen_inputs": torch.ones((2, 4)),
+        "rejected_inputs": torch.zeros((2, 4)),
+    }
+    step_loss = dpo_module._run_dpo_step(policy_model, ref_model, optimizer, batch, 0.1)  # type: ignore[arg-type]
+    assert float(step_loss.item()) > 0.0
 
 
 def test_dpo_loss():

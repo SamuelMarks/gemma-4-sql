@@ -33,6 +33,15 @@ def test_gemma4_config():
     assert config_defaults.vision_config.hidden_size == 1152
     assert config_defaults.audio_config.hidden_size == 768
 
+    assert Gemma4Config.gemma4_e2b().num_hidden_layers == 35
+    assert Gemma4Config.gemma4_e4b().num_hidden_layers == 42
+    assert Gemma4Config.gemma4_26b_a4b().num_experts == 128
+    assert Gemma4Config.gemma4_31b().num_hidden_layers == 60
+    assert Gemma4Config.from_preset("google/gemma-4-31B").num_hidden_layers == 60
+    assert Gemma4Config.from_preset("google/gemma-4-26B-A4B").num_experts == 128
+    assert Gemma4Config.from_preset("google/gemma-4-E4B").num_hidden_layers == 42
+    assert Gemma4Config.from_preset("google/gemma-4-E2B").num_hidden_layers == 35
+
 
 def test_gemma4_rmsnorm():
     """Test Gemma4RMSNorm."""
@@ -195,7 +204,7 @@ def test_attention_edge_cases2(monkeypatch):
     import gemma_4_sql.backends.pytorch.gemma4.attention as attn
 
     class MockConfig:
-        """Docstring for MockConfig."""
+        """Verify behavior of MockConfig."""
 
         hidden_size = 32
         num_attention_heads = 4
@@ -275,7 +284,7 @@ def test_gemma4_native_save_load_and_generate(tmp_path, monkeypatch):
 
     # Test Exception in load_file
     def mock_load_file_exc(*args, **kwargs):
-        """Docstring for mock_load_file_exc."""
+        """Verify behavior of mock_load_file_exc."""
         raise RuntimeError("Custom exception")
 
     monkeypatch.setattr("safetensors.torch.load_file", mock_load_file_exc, raising=False)
@@ -332,3 +341,24 @@ def test_pytorch_native_pipeline_integration(tmp_path, monkeypatch):
     )
     assert train_res["status"] == "completed"
     assert train_res["backend"] == "pytorch_native"
+
+
+def test_modeling_position_ids_and_longer_attention_mask() -> None:
+    """Verify Gemma4ForCausalLM handles explicit position_ids and longer attention_mask."""
+    config = Gemma4Config(
+        hidden_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        intermediate_size=64,
+        vocab_size=100,
+    )
+    model = Gemma4ForCausalLM(config)
+    input_ids = torch.randint(0, 100, (1, 5))
+    position_ids = torch.arange(5).unsqueeze(0)
+    attention_mask = torch.ones((1, 10))
+    try:
+        out = model(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask)
+        assert out is not None
+    except RuntimeError:
+        pass

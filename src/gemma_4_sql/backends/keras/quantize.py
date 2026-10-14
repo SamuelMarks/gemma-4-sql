@@ -9,10 +9,10 @@ Supports:
 from __future__ import annotations
 
 import logging
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.type_hints import ModelType
 
@@ -21,15 +21,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-try:
-    import keras as _keras
-    import numpy as _np
-
-    keras: types.ModuleType | None = _keras
-    np: types.ModuleType | None = _np
-except (ImportError, AttributeError):
-    keras = None
-    np = None
+keras = optional_import("keras")
+np = optional_import("numpy")
 
 
 def quantize_layer_weights(layer: object, method: str = "int8") -> int:

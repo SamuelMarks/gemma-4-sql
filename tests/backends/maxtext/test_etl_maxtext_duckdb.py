@@ -1,4 +1,6 @@
-"""Provide module docstring."""
+"""Unit and behavioral tests for etl maxtext duckdb."""
+
+from typing import Any
 
 import pytest
 
@@ -6,7 +8,7 @@ import gemma_4_sql.backends.maxtext.etl as etl_maxtext
 from gemma_4_sql.type_hints import ETLConfig
 
 
-def test_maxtext_etl_duckdb_missing() -> object:
+def test_maxtext_etl_duckdb_missing() -> Any:
     """Initialize function test_maxtext_etl_duckdb_missing."""
     original_duckdb = getattr(etl_maxtext, "duckdb", None)
     original_datasets = getattr(etl_maxtext, "datasets", None)

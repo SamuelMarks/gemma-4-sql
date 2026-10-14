@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import operator
-import types
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import TensorType
 
@@ -14,22 +15,9 @@ if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-
-try:
-    import maxtext.models.gemma4 as _gemma4
-
-    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
-except (ImportError, AttributeError):
-    Gemma4Model = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
 
 
 def _beam_search_step(seq: TensorType, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
@@ -67,10 +55,17 @@ def _beam_search_step(seq: TensorType, score: float, model_apply_fn: Any, beam_w
 
 
 def maxtext_beam_search(model_apply_fn: Any, input_ids: Any, beam_width: int, max_length: int, eos_token_id: int) -> tuple[Any, float]:
-    """Maxtext native beam search implementation (XLA compiled via JIT).
+    """Execute MaxText beam search decoding over token sequences.
+
+    Args:
+        model_apply_fn: Callable mapping token sequences to output logits.
+        input_ids: Initial prompt token ID array.
+        beam_width: Number of active beams to retain per step.
+        max_length: Maximum number of new tokens to decode.
+        eos_token_id: End-of-sequence token ID.
 
     Returns:
-        object: The resulting output from the operation.
+        Tuple of `(best_token_sequence, cumulative_log_probability)`.
 
     """
     beams: list[tuple[Any, float]] = [(input_ids, 0.0)]
@@ -140,8 +135,6 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
     eos_token_id = tokenizer.vocab_size - 1
     confidence_score = 0.0
     if jax is None or jnp is None or Gemma4Model is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MaxText dependencies are missing.")
     try:
         status, sql, confidence_score = _execute_generate(model_name, input_tokens, beam_width, max_length, eos_token_id, tokenizer)

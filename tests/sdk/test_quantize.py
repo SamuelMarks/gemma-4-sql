@@ -1,31 +1,27 @@
-"""Tests for Quantization SDK module."""
+"""Behavioral unit tests for the Quantization SDK module."""
+
+from __future__ import annotations
+
+from typing import Any
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.sdk.quantize import quantize_model
+from gemma_4_sql.sdk.registry import get_backend
 
 
 def test_quantize_jax() -> None:
-    """Initialize function test_quantize_jax.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify `quantize_model` executes INT8 weight quantization on the JAX backend."""
     res = quantize_model("model1", "int8", backend="jax")
     assert res["backend"] == "jax"
     assert res["model"] == "model1"
     assert res["method"] == "int8"
+    assert res["memory_reduction_factor"] > 0.0
 
 
 def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Initialize function test_quantize_pytorch.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify `quantize_model` raises `DependencyMissingError` when PyTorch is unavailable."""
     import gemma_4_sql.backends.pytorch.quantize as pt_q
 
     monkeypatch.setattr(pt_q, "torch", None)
@@ -34,20 +30,31 @@ def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_keras(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test Keras quantization through SDK."""
-    from gemma_4_sql.exceptions import UnsupportedQuantizationMethodError
-
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
+    """Verify `quantize_model` forwards method and extra `**kwargs` to the Keras backend."""
     keras_agent = get_backend("keras")
-    monkeypatch.setattr(keras_agent, "quantize_model", lambda m, method, **k: {"backend": "keras", "model": m, "method": method, "status": f"quantized_{method}"})
+    captured_kw: dict[str, Any] = {}
 
-    res = quantize_model("model3", "int8", backend="keras")
+    def _spy_quantize(m: str, method: str, **kw: Any) -> dict[str, Any]:
+        """Record forwarded quantization kwargs."""
+        captured_kw.update(kw)
+        return {
+            "backend": "keras",
+            "model": m,
+            "method": method,
+            "status": f"quantized_{method}",
+            "memory_reduction_factor": 2.0,
+        }
+
+    monkeypatch.setattr(keras_agent, "quantize_model", _spy_quantize)
+
+    res = quantize_model("model3", "int8", backend="keras", export_path="/tmp/q.keras")
     assert res["backend"] == "keras"
     assert res["model"] == "model3"
     assert res["status"] == "quantized_int8"
+    assert captured_kw["export_path"] == "/tmp/q.keras"
 
-    # For the unsupported method error, we need to mock it raising it
-    def raise_unsupported(*args, **kwargs):
+    def raise_unsupported(*_args: Any, **_kwargs: Any) -> None:
+        """Raise UnsupportedQuantizationMethodError."""
         raise UnsupportedQuantizationMethodError("awq is not supported")
 
     monkeypatch.setattr(keras_agent, "quantize_model", raise_unsupported)
@@ -57,7 +64,7 @@ def test_quantize_keras(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Initialize function test_quantize_maxtext."""
+    """Verify `quantize_model` raises `DependencyMissingError` when MaxText dependencies are missing."""
     import gemma_4_sql.backends.maxtext.quantize as mx_q
 
     monkeypatch.setattr(mx_q, "jax", None)
@@ -66,6 +73,6 @@ def test_quantize_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_quantize_invalid() -> None:
-    """Initialize function test_quantize_invalid."""
-    with pytest.raises(ValueError, match=r".*"):
+    """Verify `quantize_model` raises `ConfigurationError` (a `ValueError` subclass) on an unknown backend."""
+    with pytest.raises(ConfigurationError, match="Unknown backend: unknown"):
         quantize_model("model", "int8", backend="unknown")

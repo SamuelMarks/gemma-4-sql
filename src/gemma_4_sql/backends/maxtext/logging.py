@@ -4,24 +4,22 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_logging import get_tensorboard_summary_writer
+
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
-try:
-    from tensorboardX import SummaryWriter as _SummaryWriter
-
-    SummaryWriter: Any | None = _SummaryWriter
-except (ImportError, AttributeError):
-    SummaryWriter = None
+SummaryWriter: Any | None = get_tensorboard_summary_writer()
 
 
-def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> JSONDict:
+def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", **_kwargs: JSONValue) -> LogMetricsResultDict:
     """Log metrics for a MaxText training run using TensorBoard.
 
     Args:
         metrics: The evaluation or training metrics.
         step: The current training or logging step.
         log_dir: The directory to save logs.
+        **_kwargs: Additional logging keyword arguments.
 
     Returns:
         A dictionary containing the results.
@@ -35,8 +33,10 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs") -> 
 
         raise DependencyMissingError("TensorBoardX dependencies are missing.")
     writer = SummaryWriter(log_dir=log_dir)
-    for k, v in metrics.items():
-        writer.add_scalar(k, v, step)
-    writer.close()
+    try:
+        for k, v in metrics.items():
+            writer.add_scalar(k, v, step)
+    finally:
+        writer.close()
     status = "success"
     return {"backend": "maxtext", "action": "log_metrics", "step": step, "metrics": metrics, "status": status, "log_dir": log_dir}

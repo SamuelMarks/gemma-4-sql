@@ -3,35 +3,22 @@
 from __future__ import annotations
 
 import logging
-import types
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType, TensorType
 
 MIN_NDIM_FOR_QUANTIZATION = 2
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import QuantizeResultDict
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-    from flax import nnx as _nnx
-
-    from .gemma4 import Gemma4Config as _Gemma4Config
-    from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-    nnx: types.ModuleType | None = _nnx
-    Gemma4Config: Any | None = _Gemma4Config
-    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-    nnx = None
-    Gemma4Config = None
-    Gemma4ForCausalLM = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+nnx = optional_import("flax.nnx")
+Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
+Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
 
 def quantize_int8(tensor: TensorType) -> tuple[Any, Any]:
@@ -208,7 +195,7 @@ def dequantize_awq(q_tensor: TensorType, scale: TensorType, salient_weights: Ten
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("JAX is required for dequantize_awq.")
-    return (q_tensor.astype(salient_weights.dtype) * scale) + salient_weights  # type: ignore # Justified: Dynamic backend protocol typing
+    return (q_tensor.astype(salient_weights.dtype) * scale) + salient_weights
 
 
 def _set_param_metadata(param: Any, key: str, value: Any) -> None:
@@ -255,7 +242,7 @@ def _apply_quantization_to_model(
                 _set_param_metadata(param, "quant_scale", scale_float)
                 scales[str(path)] = scale_float
                 quantized_params += 1
-        model._quant_scales = scales  # type: ignore # Justified: Dynamic backend protocol typing
+        model._quant_scales = scales
         status = "quantized_int8"
         memory_reduction = 0.5
         logger.info("Quantized %d parameters using uniform int8", quantized_params)
@@ -276,7 +263,7 @@ def _apply_quantization_to_model(
                 _set_param_metadata(param, "salient_mask", salient_mask)
                 scales[str(path)] = scale_float
                 quantized_params += 1
-        model._quant_scales = scales  # type: ignore # Justified: Dynamic backend protocol typing
+        model._quant_scales = scales
         status = "quantized_awq"
         memory_reduction = 0.7
         logger.info("Quantized %d parameters using AWQ (salient_ratio=%.3f)", quantized_params, salient_ratio)
@@ -292,7 +279,7 @@ def quantize_model(
     calibration_samples: list[Any] | None = None,
     salient_ratio: float = 0.01,
     **kwargs: object,
-) -> JSONDict:
+) -> QuantizeResultDict:
     """Quantize a JAX model using int8 or AWQ.
 
     Args:
@@ -310,12 +297,12 @@ def quantize_model(
 
     """
     if jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError("JAX quantization dependencies are missing.")
+        raise DependencyMissingError("JAX dependencies are missing.")
 
     try:
-        model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
+        from_preset_fn = getattr(Gemma4Config, "from_preset", None)
+        cfg = from_preset_fn(model_name) if callable(from_preset_fn) else Gemma4Config.gemma4_e2b()
+        model = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0))
         (status, memory_reduction, _) = _apply_quantization_to_model(
             model,
             method,

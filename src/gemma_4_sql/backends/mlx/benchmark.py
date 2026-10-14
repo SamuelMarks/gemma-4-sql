@@ -4,31 +4,20 @@ from __future__ import annotations
 
 import logging
 import time
-import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
-try:
-    import mlx.core as _mx
-
-    mx: types.ModuleType | None = _mx
-except (ImportError, AttributeError):
-    mx = None
-
-try:
-    import mlx_lm
-
-    load = getattr(mlx_lm, "load", None)
-except (ImportError, AttributeError):
-    load = None
+mx = optional_import("mlx.core")
+load = optional_attr("mlx_lm", "load")
 
 
 def _load_mlx_model_and_device(model_name: str, hardware: str) -> tuple[Any, str]:
@@ -108,7 +97,7 @@ def _get_peak_memory_mb() -> float:
 
 
 def _run_benchmark_pass(
-    model: ModelType,
+    model: ModelType | None,
     batch_size: int,
     num_runs: int,
     prompt_len: int = 32,
@@ -193,7 +182,7 @@ def _run_benchmark_pass(
     return (tokens_per_sec, latency_ms, memory_mb)
 
 
-def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: JSONValue) -> JSONDict:
+def benchmark_model(model_name: str, hardware: str = "apple-silicon", batch_size: int = 32, **kwargs: JSONValue) -> BenchmarkResultDict:
     """Benchmark an MLX model on CPU or Apple Silicon Metal GPU.
 
     Args:

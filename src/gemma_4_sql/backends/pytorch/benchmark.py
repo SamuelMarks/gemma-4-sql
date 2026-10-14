@@ -4,25 +4,18 @@ from __future__ import annotations
 
 import logging
 import time
-import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
 logger = logging.getLogger(__name__)
 
-try:
-    import torch as _torch
-    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
-
-    torch: types.ModuleType | None = _torch
-    AutoModelForCausalLM: Any | None = _AutoModelForCausalLM
-except (ImportError, AttributeError):
-    torch = None
-    AutoModelForCausalLM = None
+torch = optional_import("torch")
+AutoModelForCausalLM = optional_attr("transformers", "AutoModelForCausalLM")
 
 
 def _get_device(hardware: str) -> str:
@@ -120,16 +113,16 @@ def _run_benchmark_pass(model: ModelType, device: str, batch_size: int, num_runs
     """Execute the forward pass benchmark loop.
 
     Args:
-        model: The model.
-        device: The device.
-        batch_size: Batch size.
-        num_runs: Num runs.
-        warmup_steps: Number of warmup steps.
-        mode: The mode.
-        max_new_tokens: Max tokens.
+        model: Loaded PyTorch causal LM instance.
+        device: Target execution device string.
+        batch_size: Batch size for synthetic benchmark inputs.
+        num_runs: Number of timed benchmark iterations.
+        warmup_steps: Number of untimed warmup iterations.
+        mode: Benchmark mode (`'prefill'` or `'decode'`).
+        max_new_tokens: Number of tokens to generate in decode mode.
 
     Returns:
-        The resulting output from the operation.
+        Tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
 
     """
     if hasattr(torch, "manual_seed"):
@@ -174,7 +167,7 @@ def _run_benchmark_pass(model: ModelType, device: str, batch_size: int, num_runs
     return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 
 
-def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: JSONValue) -> JSONDict:
+def benchmark_model(model_name: str, hardware: str = "gpu", batch_size: int = 32, **kwargs: JSONValue) -> BenchmarkResultDict:
     """Benchmark a model using the PyTorch backend.
 
     Args:
@@ -193,10 +186,10 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     backend_alias = str(kwargs.get("backend_alias", "pytorch"))
 
     def _run() -> tuple[float, float, float]:
-        """Execute function.
+        """Load PyTorch model and execute benchmark pass.
 
         Returns:
-            The execution result.
+            Tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
 
         """
         dtype = str(kwargs.get("dtype", "bfloat16"))

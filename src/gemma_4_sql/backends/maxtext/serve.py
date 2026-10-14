@@ -3,25 +3,18 @@
 from __future__ import annotations
 
 import logging
-import types
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import JSONValue, ServeResultDict
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import maxtext.models.gemma4 as _gemma4
-
-    jax: types.ModuleType | None = _jax
-    gemma4: types.ModuleType | None = _gemma4
-except (ImportError, AttributeError):
-    jax = None
-    gemma4 = None
+jax = optional_import("jax")
+gemma4 = optional_import("maxtext.models.gemma4")
 FastAPI = None
 Request = None
 JSONResponse = None
@@ -37,12 +30,12 @@ def _create_app(model_name: str) -> object:
         model_name: The name of the target model.
 
     Returns:
-        The execution result.
+        The FastAPI application instance.
 
     """
 
     def _startup() -> None:
-        """Execute function."""
+        """Initialize JAX distributed runtime on FastAPI startup."""
         try:
             jax.distributed.initialize()
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
@@ -58,22 +51,21 @@ def _create_app(model_name: str) -> object:
             Generated SQL query string.
 
         Raises:
-            InferenceError: If model inference fails during non-test execution.
+            InferenceError: If model inference fails during execution.
 
         """
         from gemma_4_sql.backends.maxtext.inference import generate_sql
-        from gemma_4_sql.exceptions import InferenceError
 
         try:
             out = generate_sql(model_name=model_name, prompt=prompt)
             sql = out.get("sql", "")
             if sql:
                 return str(sql)
-            raise InferenceError(f"MaxText inference returned empty SQL for prompt '{prompt}'")
+            raise InferenceError(f"MaxText inference returned empty SQL for prompt '{prompt}'", backend="maxtext")
         except Exception as e:
             if isinstance(e, InferenceError):
                 raise
-            raise InferenceError(f"MaxText generation failed: {e}") from e
+            raise InferenceError(f"MaxText generation failed: {e}", backend="maxtext", cause=e) from e
 
     return create_common_app(
         backend_name="maxtext",
@@ -83,26 +75,24 @@ def _create_app(model_name: str) -> object:
     )
 
 
-def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
+def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **_kwargs: JSONValue) -> ServeResultDict:
     """Serve a model using MaxText continuous batching.
 
     Args:
         model_name: The name of the target model.
         port: The network port to listen on.
         max_batch_size: The maximum allowed batch size.
-        **kwargs: Underlying server and backend-specific configuration options.
+        **_kwargs: Underlying server and backend-specific configuration options.
 
     Returns:
-        A dictionary containing the results.
+        A structured `ServeResultDict` containing the server metadata.
 
     Raises:
         DependencyMissingError: If MaxText dependencies are missing.
 
     """
     if gemma4 is None or jax is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError("MaxText dependencies are missing.")
+        raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
     return serve_model_wrapper(
         backend_name="maxtext",
         model_name=model_name,

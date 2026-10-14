@@ -3,45 +3,35 @@
 from __future__ import annotations
 
 import logging
-import types
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, JSONDict, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Iterable, Mapping
 
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-    import maxtext.models.gemma4 as _gemma4
-    import optax as _optax
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-    optax: types.ModuleType | None = _optax
-    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
-except (ImportError, AttributeError):
-    jax, jnp, optax, Gemma4Model = None, None, None, None
-    jax = None
-    jnp = None
-    optax = None
-    Gemma4Model = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+optax = optional_import("optax")
+Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
 
 
 def dpo_loss(
-    policy_chosen_logps: object,
-    policy_rejected_logps: object,
-    ref_chosen_logps: object,
-    ref_rejected_logps: object,
+    policy_chosen_logps: TensorType,
+    policy_rejected_logps: TensorType,
+    ref_chosen_logps: TensorType,
+    ref_rejected_logps: TensorType,
     beta: float = 0.1,
 ) -> tuple[object, object, object]:
-    """Compute the DPO loss for MaxText (using JAX under the hood).
+    """Compute the DPO loss for MaxText using JAX under the hood.
 
     Args:
         policy_chosen_logps: Log probabilities of the chosen completions from the policy model.
@@ -51,27 +41,32 @@ def dpo_loss(
         beta: The beta parameter controlling the KL penalty.
 
     Returns:
-        A tuple containing the results.
+        A 3-tuple of `(mean_loss, chosen_rewards, rejected_rewards)`.
 
     """
-    return jax_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta)  # type: ignore # Justified: Dynamic backend protocol typing
+    return jax_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta)
 
 
-def _compute_logps(model: ModelType, params: dict[str, TensorType], inputs: TensorType, labels: TensorType) -> Any:
+def _compute_logps(
+    model: ModelType,
+    params: dict[str, TensorType],
+    inputs: TensorType,
+    labels: TensorType,
+) -> TensorType:
     """Compute sequence log probabilities from logits and labels.
 
     Args:
         model: Neural network model instance.
-        params: Model parameters.
-        inputs: Input token ids.
-        labels: Target label ids.
+        params: Model parameters dictionary.
+        inputs: Input token IDs tensor.
+        labels: Target label IDs tensor.
 
     Returns:
         Log probability sum per sequence.
 
     """
-    logits = model.apply(params, inputs)
-    return jnp.sum(logits * labels, axis=-1)
+    logits = cast(TensorType, model.apply(params, inputs))
+    return cast(TensorType, jnp.sum(logits * labels, axis=-1))
 
 
 def _dpo_step_loss(
@@ -79,9 +74,9 @@ def _dpo_step_loss(
     policy_params: dict[str, TensorType],
     ref_model: ModelType,
     ref_params: dict[str, TensorType],
-    batch: JSONDict,
+    batch: Mapping[str, TensorType],
     beta: float,
-) -> Any:
+) -> object:
     """Calculate single-step DPO loss.
 
     Args:
@@ -89,22 +84,27 @@ def _dpo_step_loss(
         policy_params: Policy parameters.
         ref_model: Reference model instance.
         ref_params: Reference parameters.
-        batch: Dictionary containing chosen and rejected inputs/labels.
+        batch: Mapping containing chosen and rejected inputs/labels tensors.
         beta: KL temperature penalty factor.
 
     Returns:
         Calculated step loss tensor.
 
     """
-    pi_ch_logps = _compute_logps(policy_model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore # Justified: Dynamic backend protocol typing
-    pi_re_logps = _compute_logps(policy_model, policy_params, batch["rejected_inputs"], batch["rejected_labels"])  # type: ignore # Justified: Dynamic backend protocol typing
-    ref_ch_logps = _compute_logps(ref_model, ref_params, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore # Justified: Dynamic backend protocol typing
-    ref_re_logps = _compute_logps(ref_model, ref_params, batch["rejected_inputs"], batch["rejected_labels"])  # type: ignore # Justified: Dynamic backend protocol typing
+    pi_ch_logps = _compute_logps(policy_model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])
+    pi_re_logps = _compute_logps(policy_model, policy_params, batch["rejected_inputs"], batch["rejected_labels"])
+    ref_ch_logps = _compute_logps(ref_model, ref_params, batch["chosen_inputs"], batch["chosen_labels"])
+    ref_re_logps = _compute_logps(ref_model, ref_params, batch["rejected_inputs"], batch["rejected_labels"])
     (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
     return loss
 
 
-def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer: object, beta: float) -> Callable[..., Any]:
+def _get_train_step_fn(
+    policy_model: ModelType,
+    ref_model: ModelType,
+    optimizer: object,
+    beta: float,
+) -> Callable[..., tuple[Any, Any, Any]]:
     """Create a JIT-compiled train step function.
 
     Args:
@@ -118,62 +118,74 @@ def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer:
 
     """
 
-    def train_step(policy_params: dict[str, TensorType], ref_params: dict[str, TensorType], opt_state: dict[str, TensorType], batch: JSONDict) -> tuple[Any, Any, Any]:
+    def train_step(
+        policy_params: dict[str, TensorType],
+        ref_params: dict[str, TensorType],
+        opt_state: dict[str, TensorType],
+        batch: Mapping[str, TensorType],
+    ) -> tuple[Any, Any, Any]:
         """Execute one optimization step.
 
         Args:
             policy_params: Policy parameters.
             ref_params: Reference parameters.
             opt_state: Optimizer state.
-            batch: Data batch.
+            batch: Data batch mapping.
 
         Returns:
             Tuple of updated policy parameters, optimizer state, and loss.
 
         """
 
-        def _wrapper(p: Any, r: Any, b: Any) -> Any:
-            """Docstring for _wrapper."""
+        def _wrapper(
+            p: dict[str, TensorType],
+            r: dict[str, TensorType],
+            b: Mapping[str, TensorType],
+        ) -> object:
+            """Compute DPO step loss for gradient differentiation."""
             return _dpo_step_loss(policy_model, p, ref_model, r, b, beta)
 
+        opt_obj = cast(Any, optimizer)
         (loss, grads) = jax.value_and_grad(_wrapper)(policy_params, ref_params, batch)
-        (updates, opt_state) = optimizer.update(grads, opt_state, policy_params)  # type: ignore # Justified: Dynamic backend protocol typing
-        policy_params = optax.apply_updates(policy_params, updates)
-        return (policy_params, opt_state, loss)
+        (updates, new_opt_state) = opt_obj.update(grads, opt_state, policy_params)
+        updated_params = optax.apply_updates(policy_params, updates)
+        return (updated_params, new_opt_state, loss)
 
     if jax is not None and hasattr(jax, "jit"):
-        return jax.jit(train_step)
+        return cast(Callable[..., tuple[Any, Any, Any]], jax.jit(train_step))
     return train_step
 
 
 def _run_training_epochs(state: TrainerState) -> tuple[Any, Any, float]:
-    """Run training epochs.
+    """Run DPO training epochs for MaxText.
 
     Args:
         state: Trainer state containing dataloader and parameters.
 
     Returns:
-        tuple: (policy_params, opt_state, final_loss)
+        A 3-tuple of `(policy_params, opt_state, final_loss)`.
 
     """
     policy_params = state.policy_params
     opt_state = state.opt_state
+    step_fn = cast(Callable[..., tuple[Any, Any, Any]], state.train_step)
+    dataloader = cast("Iterable[dict[str, TensorType]]", state.dataloader or ())
 
     def process_batch(batch: dict[str, TensorType]) -> float:
         """Process a single training batch.
 
         Args:
-            batch: Dictionary containing training batch.
+            batch: Dictionary containing training batch tensors.
 
         Returns:
-            Computed batch loss.
+            Computed batch loss scalar.
 
         """
         nonlocal policy_params, opt_state
-        (policy_params, opt_state, loss) = state.train_step(policy_params, state.ref_params, opt_state, batch)  # type: ignore # Justified: Dynamic backend protocol typing
+        (policy_params, opt_state, loss) = step_fn(policy_params, state.ref_params, opt_state, batch)
         return float(loss.item() if hasattr(loss, "item") else loss)
 
-    final_loss = generic_run_training_epochs(state.epochs, state.dataloader, process_batch)  # type: ignore # Justified: Dynamic backend protocol typing
+    final_loss = generic_run_training_epochs(state.epochs, dataloader, process_batch)
     return (policy_params, opt_state, final_loss)
 
 
@@ -223,7 +235,7 @@ def _execute_dpo(
 
     (policy_params, opt_state, final_loss) = _run_training_epochs(
         TrainerState(
-            dataloader=dataloader,
+            dataloader=cast("Iterable[object]", dataloader),
             epochs=epochs,
             train_step=train_step,
             policy_params=policy_params,
@@ -257,8 +269,6 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     final_loss = 0.0
     status = "completed"
     if jax is None or jnp is None or optax is None or Gemma4Model is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MaxText dependencies are missing.")
     try:
         batch_size = getattr(config, "batch_size", 2)

@@ -1,6 +1,9 @@
-"""Module docstring."""
+"""Unit tests for FastAPI continuous batching server, request validation, and fallbacks."""
+
+from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +12,7 @@ from gemma_4_sql.backends.common_serve import GenerateRequest, create_common_app
 
 
 def test_generate_request_validation():
-    """Docstring for test_generate_request_validation."""
+    """Verify behavior of test_generate_request_validation."""
     with pytest.raises(ValueError, match="Field 'prompt' must be a valid string"):
         GenerateRequest.from_dict({"not_prompt": "test"})
     with pytest.raises(ValueError, match="Field 'prompt' must be a valid string"):
@@ -17,13 +20,13 @@ def test_generate_request_validation():
 
 
 def test_require_handlers():
-    """Docstring for test_require_handlers."""
+    """Verify behavior of test_require_handlers."""
     with pytest.raises(ValueError, match="At least one generation logic callback must be provided"):
         create_common_app("pytorch", "test", require_handlers=True)
 
 
 def test_common_serve_endpoints():
-    """Docstring for test_common_serve_endpoints."""
+    """Verify behavior of test_common_serve_endpoints."""
     app = create_common_app("pytorch", "test", generate_logic=lambda p: "SELECT 1;")
     client = TestClient(app)
 
@@ -33,7 +36,7 @@ def test_common_serve_endpoints():
         original_get = asyncio.get_running_loop
 
         def fake_get():
-            """Docstring for fake_get."""
+            """Verify behavior of fake_get."""
             import inspect
 
             f = inspect.currentframe()
@@ -53,11 +56,11 @@ def test_common_serve_endpoints():
 
 @pytest.mark.asyncio
 async def test_worker_async():
-    """Docstring for test_worker_async."""
+    """Verify behavior of test_worker_async."""
     import httpx
 
     def b_gen(prompts):
-        """Docstring for b_gen."""
+        """Verify behavior of b_gen."""
         if prompts[0] == "mismatch":
             return []
         return ["R" * len(p) for p in prompts]
@@ -76,7 +79,7 @@ async def test_worker_async():
 
 @pytest.mark.asyncio
 async def test_worker_async_generate_fallback():
-    """Docstring for test_worker_async_generate_fallback."""
+    """Verify behavior of test_worker_async_generate_fallback."""
     import httpx
 
     app = create_common_app("pytorch", "test", generate_logic=lambda p: "F", max_batch_size=2)
@@ -87,7 +90,7 @@ async def test_worker_async_generate_fallback():
 
 @pytest.mark.asyncio
 async def test_worker_async_both_none():
-    """Docstring for test_worker_async_both_none."""
+    """Verify behavior of test_worker_async_both_none."""
     import httpx
 
     app = create_common_app("pytorch", "test", max_batch_size=2)
@@ -98,7 +101,7 @@ async def test_worker_async_both_none():
 
 @pytest.mark.asyncio
 async def test_multimodal_request():
-    """Docstring for test_multimodal_request."""
+    """Verify behavior of test_multimodal_request."""
     import httpx
 
     app = create_common_app("pytorch", "test", generate_logic=lambda p: p)
@@ -108,12 +111,12 @@ async def test_multimodal_request():
 
 
 def test_serve_model_wrapper():
-    """Docstring for test_serve_model_wrapper."""
+    """Verify behavior of test_serve_model_wrapper."""
     res = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=None, app_factory=lambda: create_common_app("pytorch", "test"), run_server=False, port=8000)
     assert res["status"] == "running_pytorch_serve"
 
     def fail_factory():
-        """Docstring for fail_factory."""
+        """Verify behavior of fail_factory."""
         raise RuntimeError("failed factory")
 
     res2 = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=None, app_factory=fail_factory, run_server=False, port=8000)
@@ -126,7 +129,7 @@ def test_serve_model_wrapper():
 
 
 def test_json_response_fallback():
-    """Docstring for test_json_response_fallback."""
+    """Verify behavior of test_json_response_fallback."""
     import gemma_4_sql.backends.common_serve as mod
 
     with pytest.MonkeyPatch.context() as mp:
@@ -138,7 +141,7 @@ def test_json_response_fallback():
         original_get = asyncio.get_running_loop
 
         def fake_get():
-            """Docstring for fake_get."""
+            """Verify behavior of fake_get."""
             import inspect
 
             f = inspect.currentframe()
@@ -158,14 +161,14 @@ def test_json_response_fallback():
 
 
 def test_sync_fallback_branches():
-    """Docstring for test_sync_fallback_branches."""
+    """Verify behavior of test_sync_fallback_branches."""
     import asyncio
 
     with pytest.MonkeyPatch.context() as mp:
         original_get = asyncio.get_running_loop
 
         def fake_get():
-            """Docstring for fake_get."""
+            """Verify behavior of fake_get."""
             import inspect
 
             f = inspect.currentframe()
@@ -189,13 +192,13 @@ def test_sync_fallback_branches():
 
 @pytest.mark.asyncio
 async def test_common_serve_cancel_request():
-    """Docstring for test_common_serve_cancel_request."""
+    """Verify behavior of test_common_serve_cancel_request."""
     import asyncio
 
     import httpx
 
     def slow_batch(p):
-        """Docstring for slow_batch."""
+        """Verify behavior of slow_batch."""
         import time
 
         time.sleep(0.1)
@@ -220,7 +223,7 @@ async def test_common_serve_cancel_request():
 
 @pytest.mark.asyncio
 async def test_common_serve_cancel_request_exception():
-    """Docstring for test_common_serve_cancel_request_exception."""
+    """Verify behavior of test_common_serve_cancel_request_exception."""
     import asyncio
 
     import httpx
@@ -228,7 +231,7 @@ async def test_common_serve_cancel_request_exception():
     from gemma_4_sql.backends.common_serve import create_common_app
 
     def error_batch(p):
-        """Docstring for error_batch."""
+        """Verify behavior of error_batch."""
         import time
 
         time.sleep(0.1)
@@ -244,3 +247,55 @@ async def test_common_serve_cancel_request_exception():
         except asyncio.CancelledError:
             pass
         await asyncio.sleep(0.2)
+
+
+def test_fastapi_missing_and_run_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify serve_model_wrapper raises when FastAPI/uvicorn is None and calls uvicorn.run when run_server=True."""
+    import gemma_4_sql.backends.common_serve as mod
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    monkeypatch.setattr(mod, "FastAPI", None)
+    with pytest.raises(DependencyMissingError):
+        mod.serve_model_wrapper(backend_name="pytorch", model_name="test", max_batch_size=32, missing_deps=None, app_factory=lambda: None, port=8000)
+
+    monkeypatch.undo()
+    called: list[bool] = []
+
+    class MockUvicorn:
+        """Stub uvicorn module."""
+
+        def run(self, *_args: Any, **_kwargs: Any) -> None:
+            """Record server execution."""
+            called.append(True)
+
+    monkeypatch.setattr(mod, "uvicorn", MockUvicorn())
+    mod.serve_model_wrapper(
+        backend_name="pytorch",
+        model_name="test",
+        max_batch_size=32,
+        missing_deps=None,
+        app_factory=lambda: "fake_app",
+        run_server=True,
+        port=8000,
+    )
+    assert len(called) == 1
+
+    # Also test create_backend_serve_app
+    from gemma_4_sql.exceptions import InferenceError
+
+    app_ok = mod.create_backend_serve_app("jax", "test", generate_sql_fn=lambda **_k: {"sql": "SELECT 1"})
+    client_ok = TestClient(app_ok)
+    assert client_ok.post("/generate", json={"prompt": "hi"}).json()["sql"] == "SELECT 1"
+
+    app_empty = mod.create_backend_serve_app("jax", "test", generate_sql_fn=lambda **_k: {"sql": ""})
+    client_empty = TestClient(app_empty, raise_server_exceptions=False)
+    assert client_empty.post("/generate", json={"prompt": "hi"}).status_code == 500
+
+    def _raise_val(**_k: object) -> dict[str, str]:
+        """Raise ValueError to simulate backend failure."""
+        raise ValueError("boom")
+
+    app_err = mod.create_backend_serve_app("jax", "test", generate_sql_fn=_raise_val)
+    client_err = TestClient(app_err, raise_server_exceptions=False)
+    assert client_err.post("/generate", json={"prompt": "hi"}).status_code == 500
+    assert InferenceError("test").backend is None

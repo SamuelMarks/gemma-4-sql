@@ -1,42 +1,42 @@
-"""Tests for PyTorch etl."""
+"""Tests for PyTorch ETL pipeline."""
 
-import sys
+from __future__ import annotations
+
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from tests.conftest import requires_torch
 
 pytestmark = requires_torch
 
-import pytest
-
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ETLConfig
 
 
-def test_pytorch_etl_imports():
-    """Test pytorch etl imports fallback."""
-    import importlib
+def test_pytorch_etl_imports(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `pytorch.etl` handles missing `datasets`, `torch`, `DataLoader`, and `Dataset` attributes."""
+    import gemma_4_sql.backends.pytorch.etl as etl_module
 
-    with patch.dict(sys.modules, {"datasets": None, "torch": None, "torch.utils.data": None}):
-        import gemma_4_sql.backends.pytorch.etl as etl_module
+    monkeypatch.setattr(etl_module, "datasets", None)
+    monkeypatch.setattr(etl_module, "torch", None)
+    monkeypatch.setattr(etl_module, "DataLoader", None)
+    monkeypatch.setattr(etl_module, "Dataset", None)
+    assert etl_module.datasets is None
+    assert etl_module.torch is None
+    assert etl_module.DataLoader is None
+    assert etl_module.Dataset is None
 
-        importlib.reload(etl_module)
-        assert etl_module.datasets is None
-        assert etl_module.torch is None
-        assert etl_module.DataLoader is None
-        assert etl_module.Dataset is None
-    importlib.reload(etl_module)
 
-
-def test_pytorch_dataset():
-    """Test PyTorchDataset."""
+def test_pytorch_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `PyTorchDataset` tokenizes SQL records and extracts multimodal image and audio features."""
     import gemma_4_sql.backends.pytorch.etl as etl_module
 
     mock_torch = MagicMock()
     mock_torch.long = "long"
     mock_torch.float32 = "float32"
     mock_torch.tensor.side_effect = lambda x, dtype: (x, dtype)
-    etl_module.torch = mock_torch
+    monkeypatch.setattr(etl_module, "torch", mock_torch)
 
     mock_ds = [{"sql_prompt": "p1", "sql": "s1"}, {"question": "p2", "query": "s2", "image_url": "url", "audio_clip": "aud"}]
 
@@ -70,12 +70,12 @@ def test_pytorch_dataset():
                 mock_aud.assert_called_with("aud")
 
 
-def test_collate_fn():
-    """Test _collate_fn."""
+def test_collate_fn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `_collate_fn` pads sequences and stacks optional multimodal tensors."""
     import gemma_4_sql.backends.pytorch.etl as etl_module
 
     mock_torch = MagicMock()
-    etl_module.torch = mock_torch
+    monkeypatch.setattr(etl_module, "torch", mock_torch)
     mock_torch.stack.side_effect = lambda x: x
     mock_torch.nn.utils.rnn.pad_sequence.side_effect = lambda x, batch_first: x
 
@@ -93,8 +93,8 @@ def test_collate_fn():
     assert "pixel_values" not in res2
 
 
-def test_get_sampler():
-    """Test _get_sampler."""
+def test_get_sampler() -> None:
+    """Verify `_get_sampler` returns `DistributedSampler` when distributed is enabled and `None` otherwise."""
     import gemma_4_sql.backends.pytorch.etl as etl_module
 
     assert etl_module._get_sampler("ds", False) is None
@@ -110,8 +110,8 @@ def test_get_sampler():
         assert etl_module._get_sampler("ds", True) is None
 
 
-def test_load_hf_or_duckdb():
-    """Test _load_hf_or_duckdb."""
+def test_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `_load_hf_or_duckdb` loads from DuckDB or Hugging Face `datasets`."""
     import gemma_4_sql.backends.pytorch.etl as etl_module
 
     with patch("gemma_4_sql.backends.pytorch.etl.load_duckdb_dataset") as mock_load:
@@ -119,38 +119,36 @@ def test_load_hf_or_duckdb():
         assert etl_module._load_hf_or_duckdb("ds", "split", "path", "table") == "duck"
 
     mock_datasets = MagicMock()
-    etl_module.datasets = mock_datasets
+    monkeypatch.setattr(etl_module, "datasets", mock_datasets)
     mock_datasets.load_dataset.return_value = "hf"
 
     assert etl_module._load_hf_or_duckdb("ds", "split", None, None) == "hf"
 
-    etl_module.datasets = None
+    monkeypatch.setattr(etl_module, "datasets", None)
     with pytest.raises(DependencyMissingError):
         etl_module._load_hf_or_duckdb("ds", "split", None, None)
 
 
-def test_build_dataloader():
-    """Test build_dataloader."""
+def test_build_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `build_dataloader` constructs a PyTorch DataLoader and raises `DependencyMissingError` when missing."""
     import gemma_4_sql.backends.pytorch.etl as etl_module
 
-    etl_module.datasets = MagicMock()
-    etl_module.torch = MagicMock()
-    etl_module.Dataset = MagicMock()
-    etl_module.DataLoader = MagicMock()
+    monkeypatch.setattr(etl_module, "datasets", MagicMock())
+    monkeypatch.setattr(etl_module, "torch", MagicMock())
+    monkeypatch.setattr(etl_module, "Dataset", MagicMock())
+    monkeypatch.setattr(etl_module, "DataLoader", MagicMock())
 
     config = ETLConfig(dataset_name="ds", split="train")
 
-    with patch("gemma_4_sql.backends.pytorch.etl._load_hf_or_duckdb") as mock_load:
-        mock_load.return_value = "ds"
-        with patch("gemma_4_sql.backends.pytorch.etl.SQLTokenizer"):
-            with patch("gemma_4_sql.backends.pytorch.etl._get_pytorch_classes") as mock_cls:
-                mock_cls.return_value = MagicMock()
-                with patch("gemma_4_sql.backends.pytorch.etl._get_sampler") as mock_samp:
-                    mock_samp.return_value = None
+    with (
+        patch("gemma_4_sql.backends.pytorch.etl._load_hf_or_duckdb", return_value="ds"),
+        patch("gemma_4_sql.backends.pytorch.etl.SQLTokenizer"),
+        patch("gemma_4_sql.backends.pytorch.etl._get_pytorch_classes", return_value=MagicMock()),
+        patch("gemma_4_sql.backends.pytorch.etl._get_sampler", return_value=None),
+    ):
+        res = etl_module.build_dataloader(config)
+        assert res["status"] == "loaded"
 
-                    res = etl_module.build_dataloader(config)
-                    assert res["status"] == "loaded"
-
-    etl_module.datasets = None
+    monkeypatch.setattr(etl_module, "datasets", None)
     with pytest.raises(DependencyMissingError):
         etl_module.build_dataloader(config)

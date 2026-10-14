@@ -1,6 +1,5 @@
 """Tests for maxtext serve."""
 
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,21 +7,14 @@ import pytest
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
-def test_maxtext_serve_missing_deps():
+def test_maxtext_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test maxtext serve missing deps."""
-    import importlib
+    import gemma_4_sql.backends.maxtext.serve as serve_module
 
-    with patch.dict(sys.modules, {"jax": None, "maxtext": None, "maxtext.models": None, "maxtext.models.gemma4": None}):
-        import gemma_4_sql.backends.maxtext.serve as serve_module
-
-        importlib.reload(serve_module)
-
-        serve_module.jax = None
-        serve_module.gemma4 = None
-
-        with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
-            serve_module.serve_model("model")
-    importlib.reload(serve_module)
+    monkeypatch.setattr(serve_module, "jax", None)
+    monkeypatch.setattr(serve_module, "gemma4", None)
+    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
+        serve_module.serve_model("model")
 
 
 def test_maxtext_serve_success():
@@ -86,32 +78,3 @@ def test_maxtext_create_app():
             mock_generate_sql.side_effect = InferenceError("test error")
             with pytest.raises(InferenceError, match="test error"):
                 generate("prompt")
-
-
-def test_maxtext_serve_successful_imports():
-    """Test maxtext serve successful imports."""
-    import importlib
-    import sys
-    from unittest.mock import MagicMock
-
-    mock_jax = MagicMock()
-    mock_gemma4 = MagicMock()
-    mock_maxtext = MagicMock()
-    mock_maxtext.models = MagicMock()
-    mock_maxtext.models.gemma4 = mock_gemma4
-
-    with patch.dict(
-        sys.modules,
-        {
-            "jax": mock_jax,
-            "maxtext": mock_maxtext,
-            "maxtext.models": mock_maxtext.models,
-            "maxtext.models.gemma4": mock_gemma4,
-        },
-    ):
-        import gemma_4_sql.backends.maxtext.serve as serve_module
-
-        importlib.reload(serve_module)
-        assert serve_module.jax is mock_jax
-        assert serve_module.gemma4 is mock_gemma4
-    importlib.reload(serve_module)

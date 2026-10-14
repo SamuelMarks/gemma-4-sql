@@ -1,8 +1,5 @@
 """Tests for JAX training pipeline."""
 
-import sys
-from unittest import mock
-
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
@@ -15,145 +12,145 @@ from gemma_4_sql.type_hints import TrainerState, TrainingConfig
 
 
 class MockJnpTensor:
-    """Docstring for MockJnpTensor."""
+    """Verify behavior of MockJnpTensor."""
 
     def __init__(self, val=0.35) -> None:
-        """Docstring for __init__."""
+        """Verify behavior of __init__."""
         self.val = val
         self.shape = (1,)
 
     def item(self) -> float:
-        """Docstring for item."""
+        """Verify behavior of item."""
         return self.val
 
     def __float__(self):
-        """Docstring for __float__."""
+        """Verify behavior of __float__."""
         return float(self.val)
 
 
 @pytest.fixture
 def _mock_jax_train_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for _mock_jax_train_env."""
+    """Verify behavior of _mock_jax_train_env."""
 
     class MockJax:
-        """Docstring for MockJax."""
+        """Verify behavior of MockJax."""
 
         class sharding:
-            """Docstring for sharding."""
+            """Verify behavior of sharding."""
 
             class Mesh:
-                """Docstring for Mesh."""
+                """Verify behavior of Mesh."""
 
                 def __init__(self, *args):
-                    """Docstring for __init__."""
+                    """Verify behavior of __init__."""
 
             class NamedSharding:
-                """Docstring for NamedSharding."""
+                """Verify behavior of NamedSharding."""
 
                 def __init__(self, *args):
-                    """Docstring for __init__."""
+                    """Verify behavior of __init__."""
 
             class PartitionSpec:
-                """Docstring for PartitionSpec."""
+                """Verify behavior of PartitionSpec."""
 
                 def __init__(self, *args):
-                    """Docstring for __init__."""
+                    """Verify behavior of __init__."""
 
         @staticmethod
         def devices():
-            """Docstring for devices."""
+            """Verify behavior of devices."""
             return ["cpu"]
 
         @staticmethod
         def device_put(x, params=None):
-            """Docstring for device_put."""
+            """Verify behavior of device_put."""
             return x
 
     class MockJnp:
-        """Docstring for MockJnp."""
+        """Verify behavior of MockJnp."""
 
         @staticmethod
         def mean(x):
-            """Docstring for mean."""
+            """Verify behavior of mean."""
             return MockJnpTensor(0.5)
 
     class MockOptax:
-        """Docstring for MockOptax."""
+        """Verify behavior of MockOptax."""
 
         @staticmethod
         def warmup_cosine_decay_schedule(**kwargs):
-            """Docstring for warmup_cosine_decay_schedule."""
+            """Verify behavior of warmup_cosine_decay_schedule."""
             return "schedule"
 
         @staticmethod
         def adamw(schedule):
-            """Docstring for adamw."""
+            """Verify behavior of adamw."""
             return "adamw"
 
         @staticmethod
         def clip_by_global_norm(clip):
-            """Docstring for clip_by_global_norm."""
+            """Verify behavior of clip_by_global_norm."""
             return "clip"
 
         @staticmethod
         def chain(*args):
-            """Docstring for chain."""
+            """Verify behavior of chain."""
             return "chain"
 
         @staticmethod
         def softmax_cross_entropy_with_integer_labels(logits, targets):
-            """Docstring for softmax_cross_entropy_with_integer_labels."""
+            """Verify behavior of softmax_cross_entropy_with_integer_labels."""
             return MockJnpTensor(0.5)
 
     class MockNNX:
-        """Docstring for MockNNX."""
+        """Verify behavior of MockNNX."""
 
         class Rngs:
-            """Docstring for Rngs."""
+            """Verify behavior of Rngs."""
 
             def __init__(self, seed):
-                """Docstring for __init__."""
+                """Verify behavior of __init__."""
 
         class Optimizer:
-            """Docstring for Optimizer."""
+            """Verify behavior of Optimizer."""
 
             def __init__(self, model, tx):
-                """Docstring for __init__."""
+                """Verify behavior of __init__."""
 
             def update(self, grads):
-                """Docstring for update."""
+                """Verify behavior of update."""
 
         @staticmethod
         def jit(fn):
-            """Docstring for jit."""
+            """Verify behavior of jit."""
             return fn
 
         @staticmethod
         def value_and_grad(fn):
-            """Docstring for value_and_grad."""
+            """Verify behavior of value_and_grad."""
 
             def wrapper(*args, **kwargs):
-                """Docstring for wrapper."""
+                """Verify behavior of wrapper."""
                 return MockJnpTensor(0.123), "mock_grads"
 
             return wrapper
 
     class MockGemma4Config:
-        """Docstring for MockGemma4Config."""
+        """Verify behavior of MockGemma4Config."""
 
         @staticmethod
         def gemma4_e2b():
-            """Docstring for gemma4_e2b."""
+            """Verify behavior of gemma4_e2b."""
             return "mock_config"
 
     class MockGemma4ForCausalLM:
-        """Docstring for MockGemma4ForCausalLM."""
+        """Verify behavior of MockGemma4ForCausalLM."""
 
         def __init__(self, config, rngs):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
 
         def __call__(self, inputs):
-            """Docstring for __call__."""
+            """Verify behavior of __call__."""
             return MockJnpTensor(0.99)
 
     monkeypatch.setattr(tr, "jax", MockJax())
@@ -164,7 +161,7 @@ def _mock_jax_train_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tr, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
 
     def mock_build_dataloader(*args, **kwargs):
-        """Docstring for mock_build_dataloader."""
+        """Verify behavior of mock_build_dataloader."""
         return {"loader": [{"inputs": [1], "targets": [1]}]}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
@@ -172,7 +169,7 @@ def _mock_jax_train_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.usefixtures("_mock_jax_train_env")
 def test_train_model_jax_real() -> None:
-    """Docstring for test_train_model_jax_real."""
+    """Verify behavior of test_train_model_jax_real."""
     res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=1, learning_rate=0.1))
     assert res["backend"] == "jax"
     assert res["status"] == "completed"
@@ -181,10 +178,10 @@ def test_train_model_jax_real() -> None:
 
 @pytest.mark.usefixtures("_mock_jax_train_env")
 def test_train_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_train_model_jax_error."""
+    """Verify behavior of test_train_model_jax_error."""
 
     def mock_raise_error(*args, **kwargs):
-        """Docstring for mock_raise_error."""
+        """Verify behavior of mock_raise_error."""
         raise ValueError("mock build dataloader error")
 
     monkeypatch.setattr(tr, "build_dataloader", mock_raise_error)
@@ -193,7 +190,7 @@ def test_train_model_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_train_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_train_model_jax_missing."""
+    """Verify behavior of test_train_model_jax_missing."""
     monkeypatch.setattr(tr, "jax", None)
     with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing for training\."):
         tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=1, learning_rate=0.1))
@@ -201,10 +198,10 @@ def test_train_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.usefixtures("_mock_jax_train_env")
 def test_execute_train_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_execute_train_no_loader_fallback."""
+    """Verify behavior of test_execute_train_no_loader_fallback."""
 
     def mock_build_dataloader(*args, **kwargs):
-        """Docstring for mock_build_dataloader."""
+        """Verify behavior of mock_build_dataloader."""
         return {"loader": None}
 
     monkeypatch.setattr(tr, "build_dataloader", mock_build_dataloader)
@@ -214,10 +211,10 @@ def test_execute_train_no_loader_fallback(monkeypatch: pytest.MonkeyPatch) -> No
 
 @pytest.mark.usefixtures("_mock_jax_train_env")
 def test_loss_fn() -> None:
-    """Docstring for test_loss_fn."""
+    """Verify behavior of test_loss_fn."""
 
     def model(x):
-        """Docstring for model."""
+        """Verify behavior of model."""
         return MockJnpTensor(0.99)
 
     batch = {"inputs": [1], "targets": [1]}
@@ -227,14 +224,14 @@ def test_loss_fn() -> None:
 
 @pytest.mark.usefixtures("_mock_jax_train_env")
 def test_get_train_step_fn(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_get_train_step_fn."""
+    """Verify behavior of test_get_train_step_fn."""
     step_fn = tr._get_train_step_fn()
 
     class MockOpt:
-        """Docstring for MockOpt."""
+        """Verify behavior of MockOpt."""
 
         def update(self, grads):
-            """Docstring for update."""
+            """Verify behavior of update."""
             self.grads = grads
 
     opt = MockOpt()
@@ -244,11 +241,11 @@ def test_get_train_step_fn(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test fallback branches when nnx missing methods
     class MockNNXNoGrad:
-        """Docstring for MockNNXNoGrad."""
+        """Verify behavior of MockNNXNoGrad."""
 
         @staticmethod
         def jit(fn):
-            """Docstring for jit."""
+            """Verify behavior of jit."""
             return fn
 
     monkeypatch.setattr(tr, "nnx", MockNNXNoGrad())
@@ -264,10 +261,10 @@ def test_get_train_step_fn(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.usefixtures("_mock_jax_train_env")
 def test_run_training_epochs() -> None:
-    """Docstring for test_run_training_epochs."""
+    """Verify behavior of test_run_training_epochs."""
 
     def mock_train_step(model, opt, batch):
-        """Docstring for mock_train_step."""
+        """Verify behavior of mock_train_step."""
         return MockJnpTensor(0.42)
 
     state = TrainerState(
@@ -282,20 +279,43 @@ def test_run_training_epochs() -> None:
     assert final_loss == pytest.approx(0.42)
 
 
-def test_train_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_train_imports_fail."""
-    import importlib
+def test_real_tiny_jax_model_loss_fn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _loss_fn computes finite cross-entropy loss on a real tiny JAX Gemma4ForCausalLM."""
+    import jax
+    import jax.numpy as jnp
+    import optax
+    from flax import nnx
 
-    with mock.patch.dict(sys.modules, {"jax": None, "flax": None}):
-        importlib.reload(tr)
-        assert tr.jax is None
-        assert tr.nnx is None
+    from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
 
-    importlib.reload(tr)
+    monkeypatch.setattr(tr, "jax", jax)
+    monkeypatch.setattr(tr, "jnp", jnp)
+    monkeypatch.setattr(tr, "optax", optax)
+
+    cfg = Gemma4Config(
+        vocab_size=64,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=8,
+        num_experts=2,
+        num_experts_per_tok=1,
+    )
+    model = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0))
+    positions = jnp.array([[0, 1, 2]], dtype=jnp.int32)
+    batch = {
+        "inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
+        "targets": jnp.array([[2, 3, 4]], dtype=jnp.int32),
+    }
+    loss = tr._loss_fn(lambda x: model(x, positions), batch)
+    assert float(loss) > 0.0
 
 
 def test_execute_train_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for test_execute_train_missing."""
+    """Verify behavior of test_execute_train_missing."""
     monkeypatch.setattr(tr, "jax", None)
     with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing for training\."):
         tr._execute_train("dat", 1, 0.1)
+    assert tr._resolve_gemma4_config("google/gemma-4-E4B").num_hidden_layers == 42

@@ -3,53 +3,24 @@
 from __future__ import annotations
 
 import logging
-import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import JSONValue, ServeResultDict
 
 logger = logging.getLogger(__name__)
 
-try:
-    import torch as _torch
-
-    torch: types.ModuleType | None = _torch
-except (ImportError, AttributeError, RuntimeError):
-    torch = None
-
-try:
-    from fastapi import FastAPI as _FastAPI
-    from fastapi import Request as _Request
-    from fastapi.responses import JSONResponse as _JSONResponse
-
-    FastAPI: Any | None = _FastAPI
-    Request: Any | None = _Request
-    JSONResponse: Any | None = _JSONResponse
-    try:
-        import vllm
-
-        vllm_utils = getattr(vllm, "utils", None)
-        AsyncEngineArgs_Any = getattr(vllm, "AsyncEngineArgs", None)
-        AsyncLLMEngine_Any = getattr(vllm, "AsyncLLMEngine", None)
-        random_uuid_Any = getattr(vllm_utils, "random_uuid", None) if vllm_utils else None
-
-        AsyncEngineArgs = AsyncEngineArgs_Any
-        AsyncLLMEngine = AsyncLLMEngine_Any
-        random_uuid = random_uuid_Any
-    except (ImportError, AttributeError):
-        AsyncEngineArgs = None
-        AsyncLLMEngine = None
-        random_uuid = None
-except (ImportError, AttributeError):
-    FastAPI = None
-    Request = None
-    JSONResponse = None
-    AsyncEngineArgs = None
-    AsyncLLMEngine = None
-    random_uuid = None
+torch = optional_import("torch")
+FastAPI = optional_attr("fastapi", "FastAPI")
+Request = optional_attr("fastapi", "Request")
+JSONResponse = optional_attr("fastapi.responses", "JSONResponse")
+AsyncEngineArgs = optional_attr("vllm", "AsyncEngineArgs")
+AsyncLLMEngine = optional_attr("vllm", "AsyncLLMEngine")
+random_uuid = optional_attr("vllm.utils", "random_uuid")
 uvicorn = None
 
 
@@ -74,7 +45,7 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
         if AsyncEngineArgs is not None
         else None
     )
-    engine = AsyncLLMEngine.from_engine_args(engine_args) if AsyncLLMEngine is not None else None
+    engine: Any = AsyncLLMEngine.from_engine_args(engine_args) if AsyncLLMEngine is not None else None
 
     app = FastAPI.__call__(title=f"vLLM Serve: {model_name}") if FastAPI is not None else None
 
@@ -136,18 +107,23 @@ def _create_native_app(model_name: str, max_batch_size: int) -> object:
         Returns:
             Generated SQL string.
 
+        Raises:
+            InferenceError: If PyTorch inference returns empty SQL or fails.
+
         """
         from gemma_4_sql.backends.pytorch.inference import generate_sql
 
         try:
             res = generate_sql(model_name=model_name, prompt=prompt)
-            sql = res.get("sql")
+            sql = res.get("sql", "")
             if sql:
                 return str(sql)
-            return f"SELECT * FROM pytorch_native WHERE prompt='{prompt}'"
-        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
+            raise InferenceError(f"PyTorch inference returned empty SQL for prompt '{prompt}'", backend="pytorch")
+        except Exception as exc:
+            if isinstance(exc, InferenceError):
+                raise
             logger.warning("Native PyTorch inference encountered error: %s", exc)
-            return f"SELECT * FROM pytorch_native WHERE prompt='{prompt}'"
+            raise InferenceError(f"PyTorch generation failed: {exc}", backend="pytorch", cause=exc) from exc
 
     def _batch_generate(prompts: list[str]) -> list[str]:
         """Batch generation handler.
@@ -170,7 +146,7 @@ def _create_native_app(model_name: str, max_batch_size: int) -> object:
     )
 
 
-def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
+def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> ServeResultDict:
     """Serve a model using vLLM or native PyTorch continuous batching.
 
     Args:
@@ -181,7 +157,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
                   Pass `native_fallback=True` or `engine='native'` for in-process continuous batching.
 
     Returns:
-        A dictionary containing the results.
+        A structured `ServeResultDict` containing the server metadata.
 
     Raises:
         DependencyMissingError: If vLLM dependencies are missing and native fallback is not active.
@@ -191,20 +167,18 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
     use_native = engine_type == "native" or bool(kwargs.get("native_fallback"))
 
     if not use_native and AsyncEngineArgs is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError("vLLM dependencies are missing for PyTorch serving.")
+        raise DependencyMissingError("vLLM dependencies are missing for PyTorch serving.", backend="pytorch")
 
     if use_native:
 
         def app_factory() -> Any:
-            """Docstring for app_factory."""
+            """Create FastAPI app backed by native PyTorch model inference."""
             return _create_native_app(model_name, max_batch_size)
 
     else:
 
         def app_factory() -> Any:
-            """Docstring for app_factory."""
+            """Create FastAPI app backed by vLLM async engine."""
             return _create_vllm_app(model_name, max_batch_size)
 
     result = serve_model_wrapper(
@@ -217,7 +191,6 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
     )
 
     if not use_native:
-        # Standardize specific status string for vLLM
         if result["status"] == "running_pytorch_serve":
             result["status"] = "running_vllm"
 

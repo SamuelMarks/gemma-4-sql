@@ -4,27 +4,18 @@ from __future__ import annotations
 
 import logging
 import math
-import types
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
 logger = logging.getLogger(__name__)
 
-try:
-    import torch as _torch
-    from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
-    from transformers import AutoTokenizer as _AutoTokenizer
-
-    torch: types.ModuleType | None = _torch
-    AutoModelForCausalLM: Any | None = _AutoModelForCausalLM
-    AutoTokenizer: Any | None = _AutoTokenizer
-except (ImportError, AttributeError):
-    torch = None
-    AutoModelForCausalLM = None
-    AutoTokenizer = None
+torch = optional_import("torch")
+AutoModelForCausalLM = optional_attr("transformers", "AutoModelForCausalLM")
+AutoTokenizer = optional_attr("transformers", "AutoTokenizer")
 
 
 def _run_generation(
@@ -166,10 +157,12 @@ def _run_generation(
     if hasattr(inputs, "to"):
         inputs = inputs.to(getattr(model, "device", "cpu"))
     extra_gen: dict[str, Any] = {}
-    if pixel_values is not None:
-        extra_gen["pixel_values"] = pixel_values.to(getattr(model, "device", "cpu")) if hasattr(pixel_values, "to") else pixel_values
-    if audio_values is not None:
-        extra_gen["audio_values"] = audio_values.to(getattr(model, "device", "cpu")) if hasattr(audio_values, "to") else audio_values
+    pv_any: Any = pixel_values
+    av_any: Any = audio_values
+    if pv_any is not None:
+        extra_gen["pixel_values"] = pv_any.to(getattr(model, "device", "cpu")) if hasattr(pv_any, "to") else pv_any
+    if av_any is not None:
+        extra_gen["audio_values"] = av_any.to(getattr(model, "device", "cpu")) if hasattr(av_any, "to") else av_any
 
     outputs = model.generate(
         **inputs,

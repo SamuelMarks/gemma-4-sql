@@ -1,8 +1,7 @@
-"""Tests for SDK benchmark entry point."""
+"""Behavioral tests for the SDK Benchmark module across backends."""
 
 from __future__ import annotations
 
-import importlib.util
 from typing import Any
 
 import pytest
@@ -10,19 +9,33 @@ import pytest
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.benchmark import benchmark
 
-has_keras = importlib.util.find_spec("keras") is not None
-has_maxtext = importlib.util.find_spec("maxtext") is not None
 
+def test_benchmark_jax(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify benchmark executes or propagates expected status for JAX backend."""
+    import gemma_4_sql.backends.jax.benchmark as jbm
+    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
 
-def test_benchmark_jax() -> None:
-    """Test benchmark invocation for JAX backend."""
-    res = benchmark("gemma-4", "gpu", 1, "jax")
+    tiny_cfg = ModelConfig(
+        vocab_size=64,
+        hidden_size=8,
+        intermediate_size=16,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=4,
+    )
+    if jbm.Gemma4Config is not None:
+        monkeypatch.setattr(jbm.Gemma4Config, "gemma4_e2b", staticmethod(lambda: tiny_cfg))
+    if jbm.jax is not None:
+        monkeypatch.setattr(jbm.jax, "jit", lambda fn, *_a, **_k: fn)
+
+    res = benchmark("gemma-4", "cpu", 1, "jax", warmup_steps=1)
     assert res["backend"] == "jax"
-    assert "tokens_per_second" in res or "latency_ms" in res or "status" in res
+    assert "tokens_per_sec" in res or "latency_ms" in res or "status" in res
 
 
-def test_benchmark_keras(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test benchmark invocation for Keras backend with fallback when missing."""
+def test_benchmark_keras_routing_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify benchmark forwards exact arguments to Keras backend and raises when TensorFlow is missing."""
     import gemma_4_sql.backends.keras as kb
     import gemma_4_sql.backends.keras.benchmark as kbm
 
@@ -30,64 +43,79 @@ def test_benchmark_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         benchmark("gemma-4", "gpu", 1, "keras")
 
-    def mock_bench(*args, **kwargs):
-        """Docstring for mock_bench."""
-        return {"backend": "keras", "status": "completed"}
+    captured: dict[str, Any] = {}
+
+    def spy_bench(model_name: str, hardware: str, batch_size: int = 1, **kwargs: Any) -> dict[str, Any]:
+        """Record forwarded benchmark arguments."""
+        captured["model_name"] = model_name
+        captured["hardware"] = hardware
+        captured["batch_size"] = batch_size
+        captured["kwargs"] = kwargs
+        return {"backend": "keras", "model": model_name, "hardware": hardware, "batch_size": batch_size, "status": "completed"}
 
     monkeypatch.setattr(kbm, "keras", object())
     monkeypatch.setattr(kbm, "tf", object())
-    monkeypatch.setattr(kbm, "benchmark_model", mock_bench)
-    monkeypatch.setattr(kb, "benchmark_model", mock_bench)
+    monkeypatch.setattr(kbm, "benchmark_model", spy_bench)
+    monkeypatch.setattr(kb, "benchmark_model", spy_bench)
 
-    res = benchmark("gemma-4", "gpu", 1, "keras")
+    res = benchmark("gemma-4", "gpu", 4, "keras", dtype="float16", mode="decode")
     assert res["backend"] == "keras"
+    assert captured["model_name"] == "gemma-4"
+    assert captured["hardware"] == "gpu"
+    assert captured["batch_size"] == 4
+    assert captured["kwargs"]["dtype"] == "float16"
+    assert captured["kwargs"]["mode"] == "decode"
 
 
-def test_benchmark_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test benchmark invocation for MaxText backend with fallback when missing."""
+def test_benchmark_maxtext_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify benchmark forwards arguments to the MaxText backend."""
     import gemma_4_sql.backends.maxtext.benchmark as mbm
 
-    monkeypatch.setattr(mbm, "benchmark_model", lambda *args, **kwargs: {"backend": "maxtext", "status": "completed"})
-    res = benchmark("gemma-4", "gpu", 1, "maxtext")
+    captured: dict[str, Any] = {}
+
+    def spy_bench(model_name: str, hardware: str, batch_size: int = 1, **kwargs: Any) -> dict[str, Any]:
+        """Record forwarded MaxText benchmark arguments."""
+        captured["model_name"] = model_name
+        captured["hardware"] = hardware
+        captured["batch_size"] = batch_size
+        captured["kwargs"] = kwargs
+        return {"backend": "maxtext", "status": "completed"}
+
+    monkeypatch.setattr(mbm, "benchmark_model", spy_bench)
+    res = benchmark("gemma-4", "tpu", 2, "maxtext")
     assert res["backend"] == "maxtext"
+    assert captured["model_name"] == "gemma-4"
+    assert captured["hardware"] == "tpu"
+    assert captured["batch_size"] == 2
 
 
-def test_benchmark_pytorch_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test benchmark invocation for PyTorch backend successfully."""
+def test_benchmark_pytorch_routing_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify benchmark forwards arguments to PyTorch backend and raises when torch is missing."""
     import gemma_4_sql.backends.pytorch.benchmark as bm
 
-    monkeypatch.setattr(bm, "benchmark_model", lambda *args, **kwargs: {"backend": "pytorch", "status": "completed"})
+    captured: dict[str, Any] = {}
+
+    def spy_bench(model_name: str, hardware: str, batch_size: int = 1, **kwargs: Any) -> dict[str, Any]:
+        """Record forwarded PyTorch benchmark arguments."""
+        captured["model_name"] = model_name
+        captured["hardware"] = hardware
+        captured["batch_size"] = batch_size
+        return {"backend": "pytorch", "status": "completed"}
+
+    monkeypatch.setattr(bm, "benchmark_model", spy_bench)
     res = benchmark("gemma-4", "cpu", 1, "pytorch")
     assert res["backend"] == "pytorch"
+    assert captured["model_name"] == "gemma-4"
+    assert captured["hardware"] == "cpu"
 
-
-def test_benchmark_pytorch_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test benchmark for pytorch missing dependencies."""
-    import gemma_4_sql.backends.pytorch.benchmark as bm
-
+    monkeypatch.setattr(bm, "torch", None)
+    monkeypatch.undo()
     monkeypatch.setattr(bm, "torch", None)
     with pytest.raises(DependencyMissingError):
         benchmark("gemma-4", "gpu", 1, "pytorch")
 
 
 def test_benchmark_unknown() -> None:
-    """Test benchmark with an unknown backend identifier raises ValueError."""
-    with pytest.raises(ValueError, match=r".*"):
+    """Verify benchmark raises ValueError on an unknown backend identifier."""
+    with pytest.raises(ValueError, match="Unknown backend: unknown"):
         benchmark("gemma-4", "gpu", 1, "unknown")
-
-
-def test_benchmark_parameter_variants(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test benchmark invocation with varied batch sizes and model names."""
-    import gemma_4_sql.backends.jax as jax_backend
-
-    recorded_kwargs: dict[str, Any] = {}
-
-    def mock_bench(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        """Docstring for mock_bench."""
-        recorded_kwargs.update(kwargs)
-        return {"backend": "jax", "batch_size": args[2] if len(args) > 2 else kwargs.get("batch_size", 1)}
-
-    monkeypatch.setattr(jax_backend, "benchmark_model", mock_bench)
-    res = benchmark("custom_gemma", "tpu", 8, "jax")
-    assert res["backend"] == "jax"
-    assert res["batch_size"] == 8

@@ -24,10 +24,15 @@ def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array)
     """
 
     def merge_modalities(i_emb: Any, t_emb: Any, mask: Any) -> Any:
-        """Merge image and text embeddings using the provided token mask.
+        """Merge single-example modality and text embeddings using a boolean token mask.
+
+        Args:
+            i_emb: Modality feature embeddings for one batch element.
+            t_emb: Text token embeddings for one batch element.
+            mask: Boolean mask indicating modality token positions.
 
         Returns:
-            object: The resulting output from the operation.
+            Combined embedding sequence for one batch element.
 
         """
         img_indices = jnp.cumsum(mask) - 1

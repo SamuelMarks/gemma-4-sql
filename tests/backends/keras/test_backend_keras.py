@@ -7,5 +7,5 @@ pytestmark = requires_keras
 
 
 def test_get_trainer():
-    """Docstring for test_get_trainer."""
+    """Verify behavior of test_get_trainer."""
     assert get_trainer() == "keras_trainer"

@@ -1,4 +1,4 @@
-"""Core functionality for the utils_params module."""
+"""Safetensors weight loading, key mapping, and shape transformation utilities for JAX Gemma 4."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ import contextlib
 import logging
 import os
 import re
-import types
 from pathlib import Path
 from typing import Any, Optional
 
 import jax
 
+from gemma_4_sql.backends.lazy_loader import optional_attr
 from gemma_4_sql.type_hints import TensorType
 
 TransformValueType = Optional[tuple[tuple[int, ...], Optional[tuple[int, ...]], bool]]
@@ -19,26 +19,21 @@ TransformType = Any
 KeyMapType = tuple[str, TransformType]
 logger = logging.getLogger(__name__)
 
-try:
-    from safetensors import safe_open as _safe_open
-
-    safe_open: types.ModuleType | None = _safe_open
-except ImportError:
-    safe_open = None
+safe_open = optional_attr("safetensors", "safe_open")
 
 
 def map_to_jax_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapType | tuple[None, None]:
-    """Map a safetensors key to exactly one JAX key & transform, else warn/error.
+    """Map a safetensors key to a single JAX parameter path and tensor transform.
 
     Args:
-        mapping: A mapping representing mapping.
-        source_key: The string representing the source key.
+        mapping: Dictionary mapping regex patterns to `(replacement_key, transform)` tuples.
+        source_key: Original safetensors parameter name.
 
     Returns:
-        A tuple containing the results.
+        Tuple of `(mapped_key, transform)` or `(None, None)` if unmapped.
 
     Raises:
-        ValueError: If multiple mappings are found for source_key.
+        ValueError: If multiple regex patterns match `source_key`.
 
     """
     subs = [(re.sub(pat, repl, source_key), transform) for (pat, (repl, transform)) in mapping.items() if re.match(pat, source_key)]
@@ -53,13 +48,13 @@ def map_to_jax_key(mapping: dict[str, KeyMapType], source_key: str) -> KeyMapTyp
 
 
 def stoi(s: str) -> int | str:
-    """Convert a string to an int if possible, otherwise return the string.
+    """Convert a string to an integer if numeric, otherwise return the original string.
 
     Args:
-        s: The string representing the s.
+        s: Input string token.
 
     Returns:
-        The execution result.
+        Parsed integer or original string.
 
     """
     try:
@@ -69,14 +64,14 @@ def stoi(s: str) -> int | str:
 
 
 def _apply_transform(tensor: TensorType, transform: Any) -> Any:
-    """Apply transformation to tensor.
+    """Apply permutation and reshape transformations to a weight tensor.
 
     Args:
-        tensor: The input tensor.
-        transform: The transform.
+        tensor: Input weight tensor.
+        transform: Optional 3-tuple of `(permute_axes, target_shape, reshape_first)`.
 
     Returns:
-        The resulting tensor array.
+        Transformed tensor array.
 
     """
     if transform is None:
@@ -91,24 +86,31 @@ def _apply_transform(tensor: TensorType, transform: Any) -> Any:
     return tensor
 
 
-def assign_weights(keys: list[str], tensor: TensorType, state_dict: Any, st_key: str, transform: Any, **kwargs: Any) -> None:
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
+def assign_weights(
+    keys: list[str],
+    tensor: TensorType,
+    state_dict: Any,
+    st_key: str,
+    transform: Any,
+    **kwargs: Any,
+) -> None:
+    """Recursively descend into `state_dict` and assign the transformed weight tensor.
 
     Args:
-        keys: List of string keys.
-        tensor: Tensor to assign.
-        state_dict: State dict to assign into.
-        st_key: Original safetensors key name.
-        transform: Transform specification.
-        **kwargs: Optional keyword arguments for advanced configuration.
+        keys: Hierarchical path segments within `state_dict`.
+        tensor: Source tensor to assign.
+        state_dict: Nested Flax NNX state dictionary.
+        st_key: Original safetensors key name for diagnostics.
+        transform: Optional shape/permutation transform specification.
+        **kwargs: Optional `sharding_dict` for device placement.
 
     Raises:
-        ValueError: If the operation encounters an unexpected ValueError.
+        ValueError: If the transformed tensor shape does not match the target parameter shape.
 
     """
     sharding_dict = kwargs.get("sharding_dict")
     (key, *rest) = keys
-    resolved_key = key
+    resolved_key: Any = key
     if hasattr(state_dict, "__contains__") and resolved_key not in state_dict:
         if isinstance(resolved_key, str) and resolved_key.isdigit() and int(resolved_key) in state_dict:
             resolved_key = int(resolved_key)
@@ -116,8 +118,9 @@ def assign_weights(keys: list[str], tensor: TensorType, state_dict: Any, st_key:
             resolved_key = str(resolved_key)
     if not rest:
         tensor = _apply_transform(tensor, transform)
-        if tensor.shape != (state_dict[resolved_key].value.shape if hasattr(state_dict[resolved_key], "value") else getattr(state_dict[resolved_key], "shape", ())):
-            msg = f"Shape mismatch for {st_key}: {tensor.shape} vs {(state_dict[resolved_key].value.shape if hasattr(state_dict[resolved_key], 'value') else getattr(state_dict[resolved_key], 'shape', ()))}"
+        target_shape = state_dict[resolved_key].value.shape if hasattr(state_dict[resolved_key], "value") else getattr(state_dict[resolved_key], "shape", ())
+        if tensor.shape != target_shape:
+            msg = f"Shape mismatch for {st_key}: {tensor.shape} vs {target_shape}"
             raise ValueError(msg)
         val = jax.device_put(tensor, sharding_dict[resolved_key]) if sharding_dict is not None else jax.device_put(tensor)
         if hasattr(state_dict[resolved_key], "value"):
@@ -129,22 +132,28 @@ def assign_weights(keys: list[str], tensor: TensorType, state_dict: Any, st_key:
         assign_weights(rest, tensor, state_dict[resolved_key], st_key, transform, sharding_dict=next_sharding)
 
 
-def assign_weights_from_eval_shape(keys: list[str], tensor: TensorType, state_dict: Any, st_key: str, transform: Any) -> None:
-    """Recursively descend into state_dict and assign the (possibly permuted/reshaped) tensor.
+def assign_weights_from_eval_shape(
+    keys: list[str],
+    tensor: TensorType,
+    state_dict: Any,
+    st_key: str,
+    transform: Any,
+) -> None:
+    """Recursively descend into an abstract `eval_shape` state dict and assign the tensor.
 
     Args:
-        keys: List of string keys.
-        tensor: Tensor to assign.
-        state_dict: State dict to assign into.
-        st_key: Original safetensors key name.
-        transform: Transform specification.
+        keys: Hierarchical path segments within `state_dict`.
+        tensor: Source tensor to assign.
+        state_dict: Abstract state dictionary produced via `nnx.eval_shape`.
+        st_key: Original safetensors key name for diagnostics.
+        transform: Optional shape/permutation transform specification.
 
     Raises:
-        ValueError: If the operation encounters an unexpected ValueError.
+        ValueError: If the transformed tensor shape does not match the target parameter shape.
 
     """
     (key, *rest) = keys
-    resolved_key = key
+    resolved_key: Any = key
     if hasattr(state_dict, "__contains__") and resolved_key not in state_dict:
         if isinstance(resolved_key, str) and resolved_key.isdigit() and int(resolved_key) in state_dict:
             resolved_key = int(resolved_key)
@@ -171,8 +180,19 @@ def assign_weights_from_eval_shape(keys: list[str], tensor: TensorType, state_di
         assign_weights_from_eval_shape(rest, tensor, state_dict[resolved_key], st_key, transform)
 
 
-def _load_weights_from_safetensors_file(filepath: str, state: dict[str, object], key_mapping: dict[str, KeyMapType]) -> None:
-    """Load weights from a single safetensors file."""
+def _load_weights_from_safetensors_file(
+    filepath: str,
+    state: dict[str, object],
+    key_mapping: dict[str, KeyMapType],
+) -> None:
+    """Load and assign weights from a single `.safetensors` file into `state`.
+
+    Args:
+        filepath: Path to the `.safetensors` file.
+        state: Mutable model state dictionary.
+        key_mapping: Mapping from Hugging Face parameter patterns to JAX paths.
+
+    """
     try:
         with safe_open(filepath, framework="jax") as f:
             for st_key in f:
@@ -190,14 +210,14 @@ def _load_weights_from_safetensors_file(filepath: str, state: dict[str, object],
 
 
 def _get_model_and_state(model_cls: Any, cfg: object) -> tuple[object, dict[str, Any]]:
-    """Instantiate the model and extract its state.
+    """Instantiate the model and extract its mutable state dictionary.
 
     Args:
         model_cls: Model class constructor.
         cfg: Model configuration object.
 
     Returns:
-        A tuple of (model_instance, state_dict).
+        Tuple of `(model_instance, state_dict)`.
 
     """
     nnx = __import__("flax", fromlist=["nnx"]).nnx
@@ -209,12 +229,12 @@ def _get_model_and_state(model_cls: Any, cfg: object) -> tuple[object, dict[str,
 
 
 def _populate_state_from_files(file_dir: str, state: dict[str, Any], key_mapping: dict[str, Any]) -> None:
-    """Iterate directory files and populate state dictionary from safetensors.
+    """Walk `file_dir` and populate `state` from all discovered `.safetensors` files.
 
     Args:
-        file_dir: Directory containing safetensors weight files.
-        state: State dictionary to populate.
-        key_mapping: Name mapping from HF to JAX keys.
+        file_dir: Directory containing `.safetensors` weight shards.
+        state: State dictionary to populate in-place.
+        key_mapping: Regex mapping from Hugging Face keys to JAX state keys.
 
     """
     for root, _, files in os.walk(file_dir):
@@ -224,14 +244,22 @@ def _populate_state_from_files(file_dir: str, state: dict[str, Any], key_mapping
                 _load_weights_from_safetensors_file(filepath, state, key_mapping)
 
 
-def create_model_from_safe_tensors(file_dir: str, model_cls: Any, cfg: object, key_mapping: dict[str, Any]) -> object:
-    """Load tensors from the safetensors file and create a model (memory-optimized).
+def create_model_from_safe_tensors(
+    file_dir: str,
+    model_cls: Any,
+    cfg: object,
+    key_mapping: dict[str, Any],
+) -> object:
+    """Stream tensors from `.safetensors` shards in `file_dir` into a newly initialized model.
 
-    This loads arrays one by one to avoid memory spikes, avoiding reading
-    all parameters into host memory at once.
+    Args:
+        file_dir: Directory path containing `.safetensors` files.
+        model_cls: Model class to instantiate.
+        cfg: Model configuration instance.
+        key_mapping: Regex mapping from source keys to target JAX state keys.
 
     Returns:
-        object: The resulting output from the operation.
+        Instantiated model updated with loaded weights.
 
     """
     if safe_open is None or not Path(file_dir).is_dir():

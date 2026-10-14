@@ -3,24 +3,17 @@
 from __future__ import annotations
 
 import logging
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError
+
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import ExportResultDict
 
-try:
-    import torch as _torch
-
-    torch: types.ModuleType | None = _torch
-    from safetensors.torch import save_file
-
-    save_file_fn = save_file
-    save_file = save_file_fn
-except (ImportError, AttributeError):
-    torch = None
-    save_file = None
+torch = optional_import("torch")
+save_file = optional_attr("safetensors.torch", "save_file")
 
 
 def _is_rank_zero() -> bool:
@@ -57,7 +50,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
         A tuple of (file_path, status).
 
     Raises:
-        ValueError: If loading the model fails.
+        ExportError: If loading the model fails.
 
     """
     try:
@@ -89,7 +82,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
             tensors = model.state_dict()
     except (ImportError, ValueError, OSError) as e:
         msg = f"Failed to load model {model_name}"
-        raise ValueError(msg) from e
+        raise ExportError(msg, backend=backend_alias, cause=e) from e
     file_path = Path(export_path) / "model.safetensors"
     if kwargs.get("export_type") == "adapter" and hasattr(model, "save_pretrained"):
         model.save_pretrained(export_path)
@@ -100,7 +93,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
     return (file_path, status)
 
 
-def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDict:
+def export_model(model_name: str, export_path: str, **kwargs: object) -> ExportResultDict:
     """Export a Text-to-SQL model using the PyTorch backend.
 
     Args:
@@ -112,11 +105,11 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
         Dictionary indicating status and file path.
 
     Raises:
-        RuntimeError: If PyTorch or safetensors are missing.
+        DependencyMissingError: If PyTorch or safetensors are missing.
 
     """
     if torch is None or save_file is None:
-        raise RuntimeError("PyTorch or safetensors missing, cannot export model.")
+        raise DependencyMissingError("PyTorch or safetensors missing, cannot export model.", backend="pytorch")
     Path(export_path).mkdir(parents=True, exist_ok=True)
     is_rank_0 = _is_rank_zero()
     backend_alias = str(kwargs.get("backend_alias", kwargs.get("backend", "pytorch")))

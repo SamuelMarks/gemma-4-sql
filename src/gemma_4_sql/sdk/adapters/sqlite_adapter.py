@@ -1,4 +1,4 @@
-"""SQLite adapter."""
+"""SQLite database adapter with synchronous and asynchronous execution."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import sqlite3
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
+from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
 
 from .base import DatabaseAdapter
 
@@ -19,7 +20,7 @@ aiosqlite = LazyLoader("aiosqlite").get_module()
 
 
 class SQLiteAdapter(DatabaseAdapter):
-    """Adapter for SQLite."""
+    """Adapter for SQLite databases supporting shared in-memory and file-backed URIs."""
 
     def __init__(
         self,
@@ -31,7 +32,7 @@ class SQLiteAdapter(DatabaseAdapter):
         """Initialize SQLite adapter with shared-memory support for in-memory databases.
 
         Args:
-            db_path: Database path or ':memory:'.
+            db_path: Database file path or ':memory:'.
             db_kwargs: Optional database connection keyword arguments.
             read_only: Read-only enforcement flag.
 
@@ -53,7 +54,7 @@ class SQLiteAdapter(DatabaseAdapter):
         """Connect synchronously to SQLite.
 
         Returns:
-            A sqlite3.Connection instance.
+            An active `sqlite3.Connection` instance.
 
         """
         kwargs = dict(self.db_kwargs)
@@ -64,18 +65,18 @@ class SQLiteAdapter(DatabaseAdapter):
         return sqlite3.connect(self.db_path, **cast(dict[str, Any], self.db_kwargs))
 
     async def connect_async(self) -> object:
-        """Connect asynchronously to SQLite.
+        """Connect asynchronously to SQLite via `aiosqlite`.
 
         Returns:
-            The aiosqlite connection instance.
+            The active `aiosqlite` connection instance.
 
         Raises:
-            ImportError: If aiosqlite is missing for async database connections.
+            DependencyMissingError: If `aiosqlite` is not installed.
 
         """
         if aiosqlite is None:
             msg = "aiosqlite is required."
-            raise ImportError(msg)
+            raise DependencyMissingError(msg, dependency_name="aiosqlite", backend="sqlite")
         kwargs = dict(self.db_kwargs)
         if self.db_path == ":memory:":
             kwargs["uri"] = True
@@ -83,7 +84,7 @@ class SQLiteAdapter(DatabaseAdapter):
         return await aiosqlite.connect(self.db_path, **self.db_kwargs)
 
     def setup_schema(self, ddl: str) -> None:
-        """Execute DDL to set up schema.
+        """Execute DDL statements to set up the SQLite schema.
 
         Args:
             ddl: DDL string containing SQL statements to execute.
@@ -98,61 +99,40 @@ class SQLiteAdapter(DatabaseAdapter):
         query: str,
         params: tuple[object, ...] | None = None,
     ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Execute asynchronously with feedback.
+        """Execute a SQLite query asynchronously and return status, rows, and error feedback.
 
         Args:
             query: SQL query string.
             params: Optional tuple of query parameters.
 
         Returns:
-            A tuple of (success, fetched rows, optional error message).
+            A tuple of `(success, fetched_rows, optional_error_message)`.
 
         """
         try:
-            async_conn = cast(Any, await self.connect_async())
-            try:
-                cursor = await async_conn.execute(query, params or ())
-                try:
-                    if getattr(cursor, "description", None) is not None:
-                        results = await cursor.fetchall()
-                        return (True, results, None)
-                    if hasattr(async_conn, "commit"):
-                        res_c = async_conn.commit()
-                        if asyncio.iscoroutine(res_c):
-                            await res_c
-                    return (True, [], None)
-                finally:
-                    if hasattr(cursor, "close"):
-                        res = cursor.close()
-                        if asyncio.iscoroutine(res):
-                            await res
-            except Exception:
-                if hasattr(async_conn, "rollback"):
-                    res_r = async_conn.rollback()
-                    if asyncio.iscoroutine(res_r):
-                        await res_r
-                raise
-            finally:
-                if hasattr(async_conn, "close"):
-                    res = async_conn.close()
-                    if asyncio.iscoroutine(res):
-                        await res
-        except self.error_classes as e:
-            return (False, [], str(e))
+            rows = await self.execute_query_async(query, params)
+        except self.error_classes + (DatabaseExecutionError,) as e:
+            cause = e.cause if isinstance(e, DatabaseExecutionError) and e.cause is not None else e
+            return (False, [], str(cause))
+        else:
+            return (True, rows, None)
 
     async def execute_query_async(
         self,
         query: str,
         params: tuple[object, ...] | None = None,
     ) -> list[tuple[JSONPrimitive, ...]]:
-        """Execute asynchronously.
+        """Execute a SQLite query asynchronously and return fetched rows.
 
         Args:
             query: SQL query string.
             params: Optional tuple of query parameters.
 
         Returns:
-            List of result rows.
+            List of result row tuples.
+
+        Raises:
+            DatabaseExecutionError: If SQLite execution fails.
 
         """
         try:
@@ -172,6 +152,12 @@ class SQLiteAdapter(DatabaseAdapter):
                         res = cursor.close()
                         if asyncio.iscoroutine(res):
                             await res
+            except Exception:
+                if hasattr(async_conn, "rollback"):
+                    res_r = async_conn.rollback()
+                    if asyncio.iscoroutine(res_r):
+                        await res_r
+                raise
             finally:
                 if hasattr(async_conn, "close"):
                     res = async_conn.close()
@@ -179,4 +165,4 @@ class SQLiteAdapter(DatabaseAdapter):
                         await res
         except self.error_classes as e:
             logger.debug("Async Query execution failed: %s", e)
-            return []
+            raise DatabaseExecutionError(str(e), cause=e) from e

@@ -100,12 +100,12 @@ def test_mlx_beam_search_success():
 
     # test ndim 2
     class MockOut2D:
-        """Docstring for MockOut2D."""
+        """Verify behavior of MockOut2D."""
 
         ndim = 2
 
         def __getitem__(self, item):
-            """Docstring for __getitem__."""
+            """Verify behavior of __getitem__."""
             return mock_next_logits
 
     mock_model.return_value = MockOut2D()
@@ -250,7 +250,7 @@ def test_mlx_inference_successful_imports():
 
 
 def test_mlx_beam_search_eos_and_empty():
-    """Docstring for test_mlx_beam_search_eos_and_empty."""
+    """Verify behavior of test_mlx_beam_search_eos_and_empty."""
     from unittest.mock import MagicMock
 
     import gemma_4_sql.backends.mlx.inference as inf_module

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Sequence
+from typing import Any, SupportsInt
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 
-if TYPE_CHECKING:
-    from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
-
-_transformers_mod = LazyLoader("transformers").get_module()
+_transformers_mod: Any = LazyLoader("transformers").get_module()
 AutoTokenizer: Any = getattr(_transformers_mod, "AutoTokenizer", None) if _transformers_mod is not None else None
 
 
@@ -17,31 +15,38 @@ class SQLTokenizer:
     """A tokenizer for SQL datasets.
 
     Wraps a Hugging Face tokenizer (like SentencePiece for Gemma) if available
-    and a model_name is provided. Otherwise, falls back to a byte/character-level
-    encoding scheme.
+    and a `model_name` is provided. Otherwise, falls back to a deterministic,
+    reversible UTF-8 byte-level encoding scheme.
     """
 
     def __init__(self, vocab_size: int = 256, model_name: str | None = None) -> None:
         """Initialize the tokenizer.
 
         Args:
-            vocab_size: The integer value for vocabulary size.
-            model_name: Optional model identifier or path to Hugging Face tokenizer.
+            vocab_size: Vocabulary size for the byte-level fallback tokenizer.
+            model_name: Optional model identifier or path to a Hugging Face tokenizer.
 
         """
-        self.vocab_size = vocab_size
+        self.vocab_size = max(1, int(vocab_size))
         self.model_name = model_name
-        self.hf_tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast | None = None
+        self.hf_tokenizer: Any = self._try_load_hf_tokenizer()
 
+    def _try_load_hf_tokenizer(self) -> Any:
+        """Attempt to load a Hugging Face `AutoTokenizer` if `model_name` is set.
+
+        Returns:
+            Loaded Hugging Face tokenizer instance or `None` if unavailable.
+
+        """
         tok_cls = AutoTokenizer
         if tok_cls is None and _transformers_mod is not None:
             tok_cls = getattr(_transformers_mod, "AutoTokenizer", None)
-
-        if self.model_name and tok_cls is not None and hasattr(tok_cls, "from_pretrained"):
-            try:
-                self.hf_tokenizer = tok_cls.from_pretrained(self.model_name)
-            except (ImportError, OSError, ValueError, TypeError, RuntimeError, AttributeError):
-                self.hf_tokenizer = None
+        if not self.model_name or tok_cls is None or not hasattr(tok_cls, "from_pretrained"):
+            return None
+        try:
+            return tok_cls.from_pretrained(self.model_name)
+        except (ImportError, OSError, ValueError, TypeError, RuntimeError, AttributeError):
+            return None
 
     def get_vocab(self) -> dict[str, int]:
         """Return the vocabulary mapping tokens or bytes to token IDs.
@@ -53,7 +58,7 @@ class SQLTokenizer:
         if self.hf_tokenizer is not None and hasattr(self.hf_tokenizer, "get_vocab"):
             return dict(self.hf_tokenizer.get_vocab())
 
-        vocab = {}
+        vocab: dict[str, int] = {}
         for b in range(self.vocab_size):
             vocab[chr(b) if 32 <= b <= 126 else f"<byte_{b}>"] = b
         return vocab
@@ -69,13 +74,13 @@ class SQLTokenizer:
 
         """
         if self.hf_tokenizer is not None:
-            res: Any = self.hf_tokenizer.encode(text, add_special_tokens=False)
-            return cast(list[int], res)
+            encoded: Sequence[int] = self.hf_tokenizer.encode(text, add_special_tokens=False)
+            return [int(x) for x in encoded]
 
         return [b % self.vocab_size for b in str(text).encode("utf-8", errors="replace")]
 
-    def decode(self, tokens: list[int]) -> str:
-        """Decode a list of token IDs back into a string.
+    def decode(self, tokens: Sequence[int | object]) -> str:
+        """Decode a sequence of token IDs back into a UTF-8 string.
 
         Args:
             tokens: A sequence of integer token IDs.
@@ -85,17 +90,16 @@ class SQLTokenizer:
 
         """
         if self.hf_tokenizer is not None:
-            return str(self.hf_tokenizer.decode(tokens))
+            int_tokens = [int(t) for t in tokens if isinstance(t, (int, float, str))]
+            return str(self.hf_tokenizer.decode(int_tokens))
 
-        valid_bytes = []
+        modulus = min(256, self.vocab_size)
+        valid_bytes: list[int] = []
         for t in tokens:
             try:
-                t_int = int(t)
+                t_int = int(str(t)) if not isinstance(t, (int, bytes, SupportsInt)) else int(t)
             except (ValueError, TypeError):
                 continue
-
-            # Map negative and out-of-bounds to valid byte range
-            # using modulo operation
-            valid_bytes.append(t_int % min(256, self.vocab_size))
+            valid_bytes.append(t_int % modulus)
 
         return bytes(valid_bytes).decode("utf-8", errors="replace")

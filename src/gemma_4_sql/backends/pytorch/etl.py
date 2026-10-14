@@ -6,27 +6,17 @@ import typing
 from typing import Any
 
 from gemma_4_sql.backends.common_data import load_duckdb_dataset
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig, JSONDict
 
 if typing.TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONValue
 
-try:
-    import datasets as _datasets
-    import torch as _torch
-    from torch.utils.data import DataLoader as _DataLoader
-    from torch.utils.data import Dataset as _Dataset
-
-    datasets: typing.Any = _datasets
-    torch: typing.Any = _torch
-    DataLoader: typing.Any = _DataLoader
-    Dataset: typing.Any = _Dataset
-except (ImportError, AttributeError):
-    datasets = None
-    torch = None
-    DataLoader = None
-    Dataset = None
+datasets: typing.Any = optional_import("datasets")
+torch: typing.Any = optional_import("torch")
+DataLoader: typing.Any = optional_attr("torch.utils.data", "DataLoader")
+Dataset: typing.Any = optional_attr("torch.utils.data", "Dataset")
 duckdb = None
 
 

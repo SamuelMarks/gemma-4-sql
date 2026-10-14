@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.sdk.registry import get_backend
+from gemma_4_sql.type_hints import DPOConfig
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import DPOResultDict, JSONValue
 
 
 def run_dpo(
@@ -19,7 +20,7 @@ def run_dpo(
     learning_rate: float = 1e-05,
     batch_size: int = 2,
     **kwargs: JSONValue,
-) -> JSONDict:
+) -> DPOResultDict:
     """Run Direct Preference Optimization (DPO).
 
     Args:
@@ -36,8 +37,6 @@ def run_dpo(
         A dictionary containing the results.
 
     """
-
-    DPOConfig = __import__("gemma_4_sql.type_hints", fromlist=["DPOConfig"]).DPOConfig
     return get_backend(backend).run_dpo(
         DPOConfig(
             model_name=model_name,
@@ -46,7 +45,9 @@ def run_dpo(
             epochs=epochs,
             learning_rate=learning_rate,
             batch_size=batch_size,
-        )
+            extra_kwargs=dict(kwargs),
+        ),
+        **kwargs,
     )
 
 

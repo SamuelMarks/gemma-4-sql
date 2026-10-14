@@ -86,7 +86,13 @@ class Gemma4Attention(nnx.Module):
     """Multi-Head / Grouped-Query Attention for Gemma 4."""
 
     def _setup_heads(self, config: ModelConfig, attention_type: AttentionType) -> None:
-        """Execute function."""
+        """Configure attention head counts, head dimensions, and KV sharing flags.
+
+        Args:
+            config: Model configuration parameters.
+            attention_type: Whether this layer uses global or local sliding attention.
+
+        """
         self.num_heads = config.num_attention_heads
         if getattr(attention_type, "name", str(attention_type).upper()) == "GLOBAL":
             self.num_kv_heads = config.num_global_key_value_heads if config.num_global_key_value_heads is not None else config.num_key_value_heads
@@ -98,7 +104,13 @@ class Gemma4Attention(nnx.Module):
             self.share_kv = False
 
     def _setup_rope(self, config: ModelConfig, attention_type: AttentionType) -> None:
-        """Execute function."""
+        """Configure Rotary Position Embedding (RoPE) frequencies for the layer.
+
+        Args:
+            config: Model configuration parameters.
+            attention_type: Whether this layer uses global or local sliding attention.
+
+        """
         if getattr(attention_type, "name", str(attention_type).upper()) == "GLOBAL":
             rope_factor = config.global_rope_proportion
             rope_theta = getattr(config, "global_rope_max_timescale", None) if getattr(config, "global_rope_max_timescale", None) is not None else config.rope_max_timescale
@@ -108,7 +120,14 @@ class Gemma4Attention(nnx.Module):
         self.rope = RoPE(rope_type="default", head_dim=self.head_dim, rope_theta=rope_theta, factor=rope_factor)
 
     def __init__(self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
-        """Initialize Attention."""
+        """Initialize Multi-Head / Grouped-Query Attention module.
+
+        Args:
+            config: Model configuration parameters.
+            attention_type: Attention mechanism variant (`GLOBAL` or `LOCAL_SLIDING`).
+            rngs: Flax NNX random number generators.
+
+        """
         self.config = config
         self.attention_type = attention_type
         self._setup_heads(config, attention_type)
@@ -131,8 +150,14 @@ class Gemma4Attention(nnx.Module):
     def __call__(self, x: Array, positions: Array, cache: LayerCache | None = None, attention_mask: Array | None = None) -> Array:
         """Apply attention over the input sequences.
 
+        Args:
+            x: Input hidden state tensor of shape `(batch, seq_len, hidden_size)`.
+            positions: Token position indices tensor of shape `(batch, seq_len)`.
+            cache: Optional `LayerCache` for autoregressive KV caching.
+            attention_mask: Optional additive attention mask tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Output hidden state tensor of shape `(batch, seq_len, hidden_size)`.
 
         """
         (batch_size, seq_len, _) = x.shape

@@ -1,4 +1,4 @@
-"""Core functionality for the vision module."""
+"""SigLIP vision transformer and multimodal projector layers for Gemma 4 in JAX/Flax NNX."""
 
 from __future__ import annotations
 
@@ -20,11 +20,11 @@ class SiglipVisionEmbeddings(nnx.Module):
     """Embeddings for the SigLIP vision model."""
 
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__.
+        """Initialize patch convolution and learned positional embeddings.
 
         Args:
-            config: The configuration parameters.
-            rngs: The rngs.
+            config: Vision encoder configuration parameters.
+            rngs: Flax NNX random number generators.
 
         """
         self.config = config
@@ -39,8 +39,11 @@ class SiglipVisionEmbeddings(nnx.Module):
     def __call__(self, pixel_values: Array) -> Array:
         """Apply patch and position embeddings to pixel values.
 
+        Args:
+            pixel_values: Input image tensor of shape `(batch, height, width, channels)`.
+
         Returns:
-            object: The resulting output from the operation.
+            Patch sequence embeddings of shape `(batch, num_patches, hidden_size)`.
 
         """
         patch_embeds = self.patch_embedding(pixel_values)
@@ -54,7 +57,13 @@ class SiglipAttention(nnx.Module):
     """Attention block for SigLIP."""
 
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize SigLIP multi-head self-attention projections.
+
+        Args:
+            config: Vision encoder configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         self.config = config
         self.num_heads = config.num_attention_heads
         self.head_dim = config.hidden_size // config.num_attention_heads
@@ -69,8 +78,11 @@ class SiglipAttention(nnx.Module):
     def __call__(self, x: Array) -> Array:
         """Apply multi-head attention.
 
+        Args:
+            x: Input patch hidden state tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Attended patch representation tensor.
 
         """
         (b, t, _) = x.shape
@@ -95,7 +107,13 @@ class SiglipMLP(nnx.Module):
     """
 
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize SigLIP two-layer MLP.
+
+        Args:
+            config: Vision encoder configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         self.config = config
         self.fc1 = make_linear(config.hidden_size, config.intermediate_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.fc2 = make_linear(config.intermediate_size, config.hidden_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
@@ -103,8 +121,11 @@ class SiglipMLP(nnx.Module):
     def __call__(self, x: Array) -> Array:
         """Apply the MLP with tanh-approximate GELU activation.
 
+        Args:
+            x: Input hidden state tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Transformed hidden state tensor.
 
         """
         x = self.fc1(x)
@@ -119,7 +140,13 @@ class SiglipEncoderLayer(nnx.Module):
     """
 
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize SigLIP encoder layer with pre-norm attention and MLP.
+
+        Args:
+            config: Vision encoder configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         self.config = config
         shd = config.shd_cfg.layer_norm
         self.layer_norm1 = Gemma4RMSNorm(config.hidden_size, eps=config.layer_norm_eps, _shd=shd, rngs=rngs)
@@ -130,8 +157,11 @@ class SiglipEncoderLayer(nnx.Module):
     def __call__(self, x: Array) -> Array:
         """Process the encoder layer.
 
+        Args:
+            x: Input patch hidden state tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Output patch hidden state tensor.
 
         """
         hidden = self.layer_norm1(x)
@@ -146,7 +176,13 @@ class Gemma4MultimodalEmbedder(nnx.Module):
     """Embeds multimodal soft tokens (e.g., from audio) into language model space."""
 
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize multimodal soft token norm and linear projection.
+
+        Args:
+            config: Model configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         if config.audio_config:
             multimodal_hidden_size = getattr(config.audio_config, "output_proj_dims", config.audio_config.hidden_size)
             eps = config.audio_config.rms_norm_eps
@@ -157,10 +193,13 @@ class Gemma4MultimodalEmbedder(nnx.Module):
         self.embedding_pre_projection_norm = Gemma4RMSNorm(multimodal_hidden_size, eps=eps, with_scale=False, rngs=rngs)
 
     def __call__(self, inputs_embeds: jax.Array) -> jax.Array:
-        """Embeds multimodal inputs.
+        """Embed multimodal inputs into the text model hidden dimension.
+
+        Args:
+            inputs_embeds: Raw multimodal feature tensor.
 
         Returns:
-            object: The resulting output from the operation.
+            Normalized and projected multimodal embeddings.
 
         """
         embs_normed = self.embedding_pre_projection_norm(inputs_embeds)
@@ -175,7 +214,13 @@ class SiglipVisionTransformer(nnx.Module):
     """
 
     def __init__(self, config: VisionConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize SigLIP vision transformer stack.
+
+        Args:
+            config: Vision encoder configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         self.config = config
         self.embeddings = SiglipVisionEmbeddings(config, rngs=rngs)
         self.layers = nnx.List([SiglipEncoderLayer(config, rngs=rngs) for _ in range(config.num_hidden_layers)])
@@ -185,8 +230,11 @@ class SiglipVisionTransformer(nnx.Module):
     def __call__(self, pixel_values: Array) -> Array:
         """Apply the vision transformer to pixel values.
 
+        Args:
+            pixel_values: Input image tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Encoded vision patch representations.
 
         """
         x = self.embeddings(pixel_values)

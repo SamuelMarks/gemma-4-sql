@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from tests.conftest import requires_torch
 
 pytestmark = requires_torch
@@ -115,10 +117,10 @@ def test_extract_pytorch_state_dict_from_model() -> None:
     from torch import nn
 
     class DummyModel(nn.Module):
-        """Docstring for DummyModel."""
+        """Verify behavior of DummyModel."""
 
         def __init__(self) -> None:
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
             super().__init__()
             self.model = nn.ModuleDict({"embed_tokens": nn.Embedding(2, 4)})
 
@@ -299,6 +301,9 @@ def test_extract_state_dict_local_file_failure(tmp_path: Path, monkeypatch: pyte
     local_dir = tmp_path / "dummy_weights"
     local_dir.mkdir()
 
+    with pytest.raises(ExportError, match="allow_dummy_fallback is False"):
+        extract_pytorch_state_dict(str(local_dir), allow_dummy_fallback=False)
+
     monkeypatch.setitem(sys.modules, "gemma_4_sql.backends.pytorch.gemma4.modeling", None)
     with pytest.raises(ExportError, match="Failed to extract state dict"):
         extract_pytorch_state_dict(str(local_dir))
@@ -352,7 +357,7 @@ def test_gguf_write_metadata_types_and_payloads(tmp_path: Path) -> None:
         None.
     """
     target_file = tmp_path / "metadata_test.gguf"
-    metadata: dict[str, object] = {
+    metadata: dict[str, Any] = {
         "float_val": math.pi,
         "list_val": ["a", "b", "c"],
         "tuple_val": (1, 2),
@@ -361,7 +366,7 @@ def test_gguf_write_metadata_types_and_payloads(tmp_path: Path) -> None:
         "str_val": "hello",
         "custom_obj": object(),
     }
-    tensors: dict[str, object] = {
+    tensors: dict[str, Any] = {
         "raw_tensor": b"\x00" * 32,
         "2d_tensor": [[1.0] * 32] * 8,
         "1d_tensor": [0.5] * 256,
@@ -381,10 +386,10 @@ def test_extract_pytorch_state_dict_callable_object() -> None:
     from torch import nn
 
     class CallableModel(nn.Module):
-        """Docstring for CallableModel."""
+        """Verify behavior of CallableModel."""
 
         def __init__(self) -> None:
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
             super().__init__()
             self.model = nn.ModuleDict({"embed_tokens": nn.Embedding(2, 4)})
 
@@ -400,10 +405,10 @@ def test_extract_state_dict_local_hf_model(tmp_path: Path, monkeypatch: pytest.M
     local_dir.mkdir()
 
     class HFModel(nn.Module):
-        """Docstring for HFModel."""
+        """Verify behavior of HFModel."""
 
         def __init__(self) -> None:
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
             super().__init__()
             self.embed_tokens = nn.Embedding(2, 4)
             self.layers = nn.ModuleDict({"notanint": nn.Linear(4, 4)})

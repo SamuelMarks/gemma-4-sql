@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for gemma4 audio."""
 
 from unittest.mock import MagicMock
 
@@ -13,7 +13,7 @@ from gemma_4_sql.backends.jax.gemma4.audio import Gemma4AudioLayer, Gemma4AudioM
 
 
 def get_mock_audio_config():
-    """Docstring for get_mock_audio_config."""
+    """Verify behavior of get_mock_audio_config."""
     config = MagicMock()
     config.hidden_size = 16
     config.num_hidden_layers = 1
@@ -35,7 +35,7 @@ def get_mock_audio_config():
 
 
 def test_gemma4_audio_layer():
-    """Docstring for test_gemma4_audio_layer."""
+    """Verify behavior of test_gemma4_audio_layer."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     layer = Gemma4AudioLayer(config, rngs=rngs)
@@ -48,7 +48,7 @@ def test_gemma4_audio_layer():
 
 
 def test_gemma4_audio_model():
-    """Docstring for test_gemma4_audio_model."""
+    """Verify behavior of test_gemma4_audio_model."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     model = Gemma4AudioModel(config, rngs=rngs)
@@ -68,7 +68,7 @@ def test_gemma4_audio_model():
 
 
 def test_gemma4_audio_layer_clipped():
-    """Docstring for test_gemma4_audio_layer_clipped."""
+    """Verify behavior of test_gemma4_audio_layer_clipped."""
     config = get_mock_audio_config()
     config.use_clipped_linears = True
     from flax import nnx
@@ -86,7 +86,7 @@ def test_gemma4_audio_layer_clipped():
 
 
 def test_gemma4_audio_model_with_mask():
-    """Docstring for test_gemma4_audio_model_with_mask."""
+    """Verify behavior of test_gemma4_audio_model_with_mask."""
     config = get_mock_audio_config()
     from flax import nnx
 

@@ -4,35 +4,21 @@ from __future__ import annotations
 
 import logging
 import time
-import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-    from flax import nnx as _nnx
-
-    from .gemma4 import Gemma4Config as _Gemma4Config
-    from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-    nnx: types.ModuleType | None = _nnx
-    Gemma4Config: Any | None = _Gemma4Config
-    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-    nnx = None
-    Gemma4Config = None
-    Gemma4ForCausalLM = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+nnx = optional_import("flax.nnx")
+Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
+Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
 
 def _get_device(hardware: str) -> Any:
@@ -149,7 +135,7 @@ def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup
     return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 
 
-def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: JSONValue) -> JSONDict:
+def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int = 32, **kwargs: JSONValue) -> BenchmarkResultDict:
     """Benchmark a model using the JAX backend.
 
     Args:
@@ -167,10 +153,10 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """
 
     def _run() -> tuple[float, float, float]:
-        """Execute function.
+        """Instantiate model and execute JAX benchmark pass.
 
         Returns:
-            The execution result.
+            Tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
 
         """
         dtype_str = str(kwargs.get("dtype", "bfloat16"))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from typing import NoReturn as Never
 
 import pytest
@@ -44,8 +45,8 @@ def test_chat_turn_routing_error(monkeypatch: pytest.MonkeyPatch) -> None:
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend("jax")
 
-    def mock_generate(*_args: object, **_kwargs: object) -> Never:
-        """Execute function.
+    def mock_generate(*_args: Any, **_kwargs: Any) -> Never:
+        """Execute test helper or verification step.
 
         Raises:
             ValueError: Description.
@@ -66,7 +67,7 @@ def test_multiturn_history_accumulation_and_prompt_formatting(monkeypatch: pytes
     """
     captured_prompts: list[str] = []
 
-    def mock_generate(_model: str, prompt: str, **_kwargs: object) -> dict[str, str]:
+    def mock_generate(_model: str, prompt: str, **_kwargs: Any) -> dict[str, str]:
         """Capture generated prompt and return mock SQL.
 
         Args:

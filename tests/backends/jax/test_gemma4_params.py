@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for gemma4 params."""
 
 from unittest.mock import patch
 
@@ -9,32 +9,8 @@ pytestmark = requires_jax
 import pytest
 
 
-def test_safetensors_missing():
-    """Docstring for test_safetensors_missing."""
-    import builtins
-    import importlib
-
-    import gemma_4_sql.backends.jax.gemma4.params as mod
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name == "safetensors":
-            raise ImportError("mock")
-        return orig_import(name, *args, **kwargs)
-
-    builtins.__import__ = mock_import
-    try:
-        importlib.reload(mod)
-        assert mod.safetensors is None
-    finally:
-        builtins.__import__ = orig_import
-        importlib.reload(mod)
-
-
 def test_stack_expert_tensors_none_key():
-    """Docstring for test_stack_expert_tensors_none_key."""
+    """Verify behavior of test_stack_expert_tensors_none_key."""
     import jax.numpy as jnp
 
     from gemma_4_sql.backends.jax.gemma4.params import _stack_and_assign_expert_tensors
@@ -50,7 +26,7 @@ def test_stack_expert_tensors_none_key():
 
 
 def test_create_gemma4_from_pretrained(tmp_path):
-    """Docstring for test_create_gemma4_from_pretrained."""
+    """Verify behavior of test_create_gemma4_from_pretrained."""
     import numpy as np
     from safetensors.numpy import save_file
 
@@ -99,7 +75,7 @@ def test_create_gemma4_from_pretrained(tmp_path):
 
 
 def test_process_standard_tensor_errors():
-    """Docstring for test_process_standard_tensor_errors."""
+    """Verify behavior of test_process_standard_tensor_errors."""
     import numpy as np
 
     from gemma_4_sql.backends.jax.gemma4.params import _get_key_and_transform_mapping, process_standard_tensor
@@ -107,10 +83,10 @@ def test_process_standard_tensor_errors():
     mapping = _get_key_and_transform_mapping()
 
     class FakeSF:
-        """Docstring for FakeSF."""
+        """Verify behavior of FakeSF."""
 
         def get_tensor(self, key):
-            """Docstring for get_tensor."""
+            """Verify behavior of get_tensor."""
             return np.zeros((1,))
 
     # Test skipping standard KeyError exception by assign_weights_from_eval_shape
@@ -122,10 +98,10 @@ def test_process_standard_tensor_errors():
 
     # Test raising AttributeError inside try block
     class FakeSF2:
-        """Docstring for FakeSF2."""
+        """Verify behavior of FakeSF2."""
 
         def get_tensor(self, key):
-            """Docstring for get_tensor."""
+            """Verify behavior of get_tensor."""
             return np.zeros((1,))
 
     with patch("gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape", side_effect=AttributeError("bad")):
@@ -134,7 +110,7 @@ def test_process_standard_tensor_errors():
 
 
 def test_create_gemma4_from_pretrained_etils_success(tmp_path, monkeypatch):
-    """Docstring for test_create_gemma4_from_pretrained_etils_success."""
+    """Verify behavior of test_create_gemma4_from_pretrained_etils_success."""
     import sys
 
     import numpy as np
@@ -157,7 +133,7 @@ def test_create_gemma4_from_pretrained_etils_success(tmp_path, monkeypatch):
 
 
 def test_create_gemma4_from_pretrained_etils_missing(tmp_path, monkeypatch):
-    """Docstring for test_create_gemma4_from_pretrained_etils_missing."""
+    """Verify behavior of test_create_gemma4_from_pretrained_etils_missing."""
     import sys
 
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
@@ -175,7 +151,7 @@ def test_create_gemma4_from_pretrained_etils_missing(tmp_path, monkeypatch):
     with patch("builtins.__import__") as mock_import:
 
         def side_effect(name, *args, **kwargs):
-            """Docstring for side_effect."""
+            """Verify behavior of side_effect."""
             if name == "etils":
                 raise ImportError("no etils")
             return orig_import(name, *args, **kwargs)
@@ -187,7 +163,7 @@ def test_create_gemma4_from_pretrained_etils_missing(tmp_path, monkeypatch):
 
 
 def test_fix_jax_state_embeddings_coverage():
-    """Docstring for test_fix_jax_state_embeddings_coverage."""
+    """Verify behavior of test_fix_jax_state_embeddings_coverage."""
     import jax
     import jax.numpy as jnp
 
@@ -210,7 +186,7 @@ def test_fix_jax_state_embeddings_coverage():
 
 
 def test_create_gemma4_state_dict_fallbacks(tmp_path):
-    """Docstring for test_create_gemma4_state_dict_fallbacks."""
+    """Verify behavior of test_create_gemma4_state_dict_fallbacks."""
     import numpy as np
     from safetensors.numpy import save_file
 
@@ -223,10 +199,10 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path):
     with patch("flax.nnx.split") as mock_split:
         # Test to_pure_dict
         class MockState0:
-            """Docstring for MockState0."""
+            """Verify behavior of MockState0."""
 
             def to_pure_dict(self):
-                """Docstring for to_pure_dict."""
+                """Verify behavior of to_pure_dict."""
                 return {"a": 0}
 
         mock_split.return_value = (None, MockState0())
@@ -238,10 +214,10 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path):
 
         # Test to_flat_dict fallback
         class MockState1:
-            """Docstring for MockState1."""
+            """Verify behavior of MockState1."""
 
             def to_flat_dict(self):
-                """Docstring for to_flat_dict."""
+                """Verify behavior of to_flat_dict."""
                 return {"a": 1}
 
         mock_split.return_value = (None, MockState1())
@@ -253,10 +229,10 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path):
 
         # Test dict() fallback
         class MockState2:
-            """Docstring for MockState2."""
+            """Verify behavior of MockState2."""
 
             def __iter__(self):
-                """Docstring for __iter__."""
+                """Verify behavior of __iter__."""
                 yield from {"b": 2}.items()
 
         mock_split.return_value = (None, MockState2())

@@ -19,10 +19,10 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
     """Sinusoidal relative positional encoding for the audio encoder."""
 
     def __init__(self, config: AudioConfig) -> None:
-        """Docstring for __init__.
+        """Initialize sinusoidal relative positional encoding.
 
         Args:
-            config: The configuration parameters.
+            config: Audio configuration parameters.
 
         """
         self.hidden_size = config.hidden_size
@@ -52,10 +52,14 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
 
 
 def convert_to_block(x: jax.Array, chunk_size: int) -> jax.Array:
-    """Reshapes the input into chunks/blocks for block-wise attention.
+    """Reshape input tensor into fixed-size blocks for block-wise attention.
+
+    Args:
+        x: Input tensor of shape `(batch, seq_len, num_heads, head_dim)`.
+        chunk_size: Block length along the sequence dimension.
 
     Returns:
-        object: The resulting output from the operation.
+        Blocked tensor of shape `(batch, num_blocks, chunk_size, num_heads, head_dim)`.
 
     """
     (batch_size, seq_len, num_heads, head_dim) = x.shape
@@ -66,10 +70,14 @@ def convert_to_block(x: jax.Array, chunk_size: int) -> jax.Array:
 
 
 def extract_block_context(x: jax.Array, attn: Any) -> jax.Array:
-    """Extract the left context block for block-wise attention.
+    """Extract the local context windows for block-wise attention.
+
+    Args:
+        x: Key or value tensor of shape `(batch, seq_len, num_heads, head_dim)`.
+        attn: Parent `Gemma4AudioAttention` module holding horizon parameters.
 
     Returns:
-        object: The resulting output from the operation.
+        Stacked context blocks tensor.
 
     """
     (batch_size, seq_len, num_heads, head_dim) = x.shape
@@ -83,10 +91,14 @@ def extract_block_context(x: jax.Array, attn: Any) -> jax.Array:
 
 
 def rel_shift(x: jax.Array, context_size: int) -> jax.Array:
-    """Perform relative shift on attention scores.
+    """Perform relative shift on relative position attention scores.
+
+    Args:
+        x: Unshifted relative attention score tensor.
+        context_size: Target context window size.
 
     Returns:
-        object: The resulting output from the operation.
+        Shifted relative attention score tensor.
 
     """
     (batch_size, num_heads, num_blocks, block_size, position_length) = x.shape
@@ -99,8 +111,14 @@ def rel_shift(x: jax.Array, context_size: int) -> jax.Array:
 def compute_audio_attention_outputs(attn: Any, qkv: tuple[jax.Array, jax.Array, jax.Array], pos_emb: jax.Array, mask: jax.Array | None) -> jax.Array:
     """Compute the multi-head attention outputs for audio.
 
+    Args:
+        attn: `Gemma4AudioAttention` module instance.
+        qkv: Tuple of `(q, k, v)` tensors.
+        pos_emb: Sinusoidal relative positional embeddings.
+        mask: Optional blocked attention mask.
+
     Returns:
-        object: The resulting output from the operation.
+        Post-projected audio attention output tensor.
 
     """
     (q, k, v) = qkv
@@ -138,7 +156,13 @@ class Gemma4AudioAttention(nnx.Module):
     """Chunked local attention with relative position bias for audio."""
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize chunked audio attention layer.
+
+        Args:
+            config: Audio configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         self.config = config
         self.num_heads = config.num_attention_heads
         self.head_dim = config.hidden_size // config.num_attention_heads
@@ -161,8 +185,13 @@ class Gemma4AudioAttention(nnx.Module):
     def __call__(self, x: jax.Array, pos_emb: jax.Array, mask: jax.Array | None = None) -> jax.Array:
         """Compute the multi-head attention for audio inputs.
 
+        Args:
+            x: Input audio sequence tensor.
+            pos_emb: Sinusoidal relative positional embeddings.
+            mask: Optional blocked attention mask.
+
         Returns:
-            object: The resulting output from the operation.
+            Attended audio hidden states tensor.
 
         """
         (batch_size, seq_len, _) = x.shape

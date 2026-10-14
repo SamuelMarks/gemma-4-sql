@@ -1,8 +1,10 @@
-# Copyright 2024
-"""Core functionality for the update_badges module."""
+"""Script to calculate test and documentation coverage and update README.md badges."""
+
+from __future__ import annotations
 
 import io
 import re
+import subprocess
 import sys
 from contextlib import redirect_stdout, suppress
 from pathlib import Path
@@ -14,10 +16,13 @@ except ImportError:
 
 
 def get_color(pct: int) -> str:
-    """Docstring for get_color.
+    """Determine the Shields.io badge color corresponding to a coverage percentage.
+
+    Args:
+        pct: Integer coverage percentage (0-100).
 
     Returns:
-        str: The computed string result.
+        Shields.io color identifier string.
 
     """
     threshold_90 = 90
@@ -36,19 +41,26 @@ def get_color(pct: int) -> str:
 
 
 def main() -> None:
-    """Docstring for main."""
-    io.StringIO()
-    import subprocess
-
+    """Compute test and docstring coverage percentages and update README.md badges."""
     cov_path = Path(".coverage")
     tox_cov_path = Path(".tox/.coverage")
     if tox_cov_path.exists() and "--force-run" not in sys.argv:
         print("[update_badges] Reading existing .tox/.coverage...", flush=True)
-        res = subprocess.run(["uvx", "coverage", "report", "--data-file=.tox/.coverage"], capture_output=True, text=True, check=False)
+        res = subprocess.run(
+            [sys.executable, "-m", "coverage", "report", "--keep-combined", "--data-file=.tox/.coverage"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         cov_out_str = res.stdout
     elif cov_path.exists() and "--force-run" not in sys.argv:
         print("[update_badges] Reading existing .coverage...", flush=True)
-        res = subprocess.run([sys.executable, "-m", "coverage", "report"], capture_output=True, text=True, check=False)
+        res = subprocess.run(
+            [sys.executable, "-m", "coverage", "report"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         cov_out_str = res.stdout
     else:
         if cov_path.exists():
@@ -58,16 +70,61 @@ def main() -> None:
 
         out = ""
         print("[update_badges] Running batch 1/4 (core, sdk, cli)...", flush=True)
-        res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-report=term", "tests/core/", "tests/sdk/", "tests/cli/", "src/"], capture_output=True, text=True, check=False)
+        res = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--cov=src/gemma_4_sql",
+                "--cov-branch",
+                "--cov-report=term",
+                "tests/core/",
+                "tests/sdk/",
+                "tests/cli/",
+                "src/",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         out += res.stdout
         print("[update_badges] Running batch 2/4 (pytorch, keras)...", flush=True)
-        res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/pytorch/", "tests/backends/keras/"], capture_output=True, text=True, check=False)
+        res = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--cov=src/gemma_4_sql",
+                "--cov-branch",
+                "--cov-append",
+                "--cov-report=term",
+                "tests/backends/pytorch/",
+                "tests/backends/keras/",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         out += res.stdout
         print("[update_badges] Running batch 3/4 (jax, maxtext)...", flush=True)
-        res = subprocess.run([sys.executable, "-m", "pytest", "--cov=src/gemma_4_sql", "--cov-branch", "--cov-append", "--cov-report=term", "tests/backends/jax/", "tests/backends/maxtext/"], capture_output=True, text=True, check=False)
+        res = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--cov=src/gemma_4_sql",
+                "--cov-branch",
+                "--cov-append",
+                "--cov-report=term",
+                "tests/backends/jax/",
+                "tests/backends/maxtext/",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         out += res.stdout
         print("[update_badges] Running batch 4/4 (mlx, backend modules)...", flush=True)
-        # Collect all tests/backends/test_*.py files dynamically to avoid missing any
         backend_root_tests = [str(p) for p in Path("tests/backends").glob("test_*.py")]
         res = subprocess.run(
             [

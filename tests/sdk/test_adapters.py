@@ -1,84 +1,87 @@
-"""Module docstring."""
+"""Unit tests for the base DatabaseAdapter class."""
+
+from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 import pytest
 
+from gemma_4_sql.exceptions import DatabaseExecutionError
 from gemma_4_sql.sdk.adapters.base import DatabaseAdapter
 
 
 class DummyAdapter(DatabaseAdapter):
-    """Docstring for DummyAdapter."""
+    """Concrete DatabaseAdapter subclass for unit testing base behavior."""
 
-    def connect(self):
-        """Docstring for connect."""
+    def connect(self) -> MagicMock:
+        """Create a mock connection object.
+
+        Returns:
+            A `MagicMock` connection.
+
+        """
         return MagicMock()
 
     @property
-    def error_classes(self):
-        """Docstring for error_classes."""
+    def error_classes(self) -> tuple[type[Exception], ...]:
+        """Return handled exception classes for DummyAdapter.
+
+        Returns:
+            Tuple containing `ValueError`.
+
+        """
         return (ValueError,)
 
 
 @pytest.mark.asyncio
-async def test_base_adapter():
-    """Docstring for test_base_adapter."""
+async def test_base_adapter() -> None:
+    """Verify synchronous and asynchronous execution, feedback, and error propagation on DatabaseAdapter."""
     adapter = DummyAdapter("path", {})
 
-    # Test connect_async
     await adapter.connect_async()
 
-    # Test execute_with_feedback without cursor
     adapter.conn.cursor = None
     del adapter.conn.cursor
 
-    # conn.execute exists
     adapter.conn.execute.return_value.fetchall.return_value = [("row",)]
     res = adapter.execute_with_feedback("SELECT")
     assert res == (True, [("row",)], None)
 
-    # Test execute_with_feedback_async
     res_async = await adapter.execute_with_feedback_async("SELECT")
     assert res_async == (True, [("row",)], None)
 
-    # Test execute_query without cursor
     res_q = adapter.execute_query("SELECT")
     assert res_q == [("row",)]
 
-    # Test execute_query_async
     res_q_async = await adapter.execute_query_async("SELECT")
     assert res_q_async == [("row",)]
 
-    # Test close without conn.close
     del adapter.conn.close
     adapter.close()
 
-    # Test execute_with_feedback with cursor but no cursor.close
     class CursorMock:
-        """Docstring for CursorMock."""
+        """Cursor mock without a close method."""
 
-        def __init__(self):
-            """Docstring for __init__."""
+        def __init__(self) -> None:
+            """Initialize cursor with a non-null description."""
             self.description = True
 
-        def execute(self, q, p):
-            """Docstring for execute."""
+        def execute(self, q: str, p: tuple[object, ...]) -> None:
+            """Execute query no-op."""
 
-        def fetchall(self):
-            """Docstring for fetchall."""
+        def fetchall(self) -> list[tuple[str, ...]]:
+            """Return a single mocked row."""
             return [("c_row",)]
 
-        # no close
-
     class ConnMock:
-        """Docstring for ConnMock."""
+        """Connection mock returning CursorMock."""
 
-        def cursor(self):
-            """Docstring for cursor."""
+        def cursor(self) -> CursorMock:
+            """Return a new CursorMock."""
             return CursorMock()
 
-        def close(self):
-            """Docstring for close."""
+        def close(self) -> None:
+            """Close connection no-op."""
 
     adapter.conn = ConnMock()
     res2 = adapter.execute_with_feedback("SELECT")
@@ -88,53 +91,48 @@ async def test_base_adapter():
     assert res3 == [("c_row",)]
 
     adapter.close()
-
-    # Test setup_schema
     adapter.setup_schema("DDL")
 
-    # Test execute_with_feedback exception
     adapter.conn = MagicMock()
     adapter.conn.cursor.return_value.execute.side_effect = ValueError("err")
-    res = adapter.execute_with_feedback("SELECT")
-    assert res == (False, [], "err")
+    res_err = adapter.execute_with_feedback("SELECT")
+    assert res_err == (False, [], "err")
+
+    with pytest.raises(DatabaseExecutionError, match="err"):
+        adapter.execute_query("SELECT")
 
     adapter.conn.cursor.return_value.execute.side_effect = None
     adapter.conn.cursor.return_value.close.side_effect = ValueError("err_close")
-    res_q2 = adapter.execute_query("SELECT")
-    assert res_q2 == []
-
-    # Test execute_query exception
-    res_q = adapter.execute_query("SELECT")
-    assert res_q == []
-    adapter.conn.execute.side_effect = None
+    with pytest.raises(DatabaseExecutionError, match="err_close"):
+        adapter.execute_query("SELECT")
 
     class CursorMockClose:
-        """Docstring for CursorMockClose."""
+        """Cursor mock with a close method."""
 
-        def __init__(self):
-            """Docstring for __init__."""
+        def __init__(self) -> None:
+            """Initialize cursor with a non-null description."""
             self.description = True
 
-        def execute(self, q, p):
-            """Docstring for execute."""
+        def execute(self, q: str, p: tuple[object, ...]) -> None:
+            """Execute query no-op."""
 
-        def fetchall(self):
-            """Docstring for fetchall."""
+        def fetchall(self) -> list[tuple[str, ...]]:
+            """Return a single mocked row."""
             return [("c_row",)]
 
-        def close(self):
-            """Docstring for close."""
+        def close(self) -> None:
+            """Close cursor no-op."""
 
     class ConnMockClose:
-        """Docstring for ConnMockClose."""
+        """Connection mock returning CursorMockClose."""
 
-        def cursor(self):
-            """Docstring for cursor."""
+        def cursor(self) -> CursorMockClose:
+            """Return a new CursorMockClose."""
             return CursorMockClose()
 
-        def close(self):
-            """Docstring for close."""
+        def close(self) -> None:
+            """Close connection no-op."""
 
     adapter.conn = ConnMockClose()
-    adapter.execute_with_feedback("SELECT")
-    adapter.execute_query("SELECT")
+    assert adapter.execute_with_feedback("SELECT") == (True, [("c_row",)], None)
+    assert adapter.execute_query("SELECT") == [("c_row",)]

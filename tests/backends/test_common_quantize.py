@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for common quantize."""
 
 from unittest.mock import MagicMock
 
@@ -9,13 +9,13 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_apply_bits_and_bytes_quantization_missing_deps():
-    """Docstring for test_apply_bits_and_bytes_quantization_missing_deps."""
+    """Verify behavior of test_apply_bits_and_bytes_quantization_missing_deps."""
     with pytest.raises(DependencyMissingError):
         apply_bits_and_bytes_quantization("int8", None)
 
 
 def test_apply_bits_and_bytes_quantization_int8():
-    """Docstring for test_apply_bits_and_bytes_quantization_int8."""
+    """Verify behavior of test_apply_bits_and_bytes_quantization_int8."""
     mock_cls = MagicMock()
     mock_cls.return_value = "config_obj"
     reduction, status = apply_bits_and_bytes_quantization("int8", mock_cls, llm_int8_skip_modules=["skipme"])
@@ -29,7 +29,7 @@ def test_apply_bits_and_bytes_quantization_int8():
 
 
 def test_apply_bits_and_bytes_quantization_int4():
-    """Docstring for test_apply_bits_and_bytes_quantization_int4."""
+    """Verify behavior of test_apply_bits_and_bytes_quantization_int4."""
     mock_cls = MagicMock()
     mock_cls.return_value = "config_obj"
     reduction, status = apply_bits_and_bytes_quantization("int4", mock_cls, "float16")
@@ -39,14 +39,14 @@ def test_apply_bits_and_bytes_quantization_int4():
 
 
 def test_apply_bits_and_bytes_quantization_unsupported():
-    """Docstring for test_apply_bits_and_bytes_quantization_unsupported."""
+    """Verify behavior of test_apply_bits_and_bytes_quantization_unsupported."""
     mock_cls = MagicMock()
     reduction, status = apply_bits_and_bytes_quantization("unknown", mock_cls)
     assert status == "unsupported_method_unknown"
 
 
 def test_apply_bits_and_bytes_quantization_with_model():
-    """Docstring for test_apply_bits_and_bytes_quantization_with_model."""
+    """Verify behavior of test_apply_bits_and_bytes_quantization_with_model."""
     mock_cls = MagicMock()
     mock_model = MagicMock()
     mock_model.config = MagicMock()
@@ -57,7 +57,7 @@ def test_apply_bits_and_bytes_quantization_with_model():
 
 
 def test_quantize_model_wrapper():
-    """Docstring for test_quantize_model_wrapper."""
+    """Verify behavior of test_quantize_model_wrapper."""
     with pytest.raises(DependencyMissingError):
         quantize_model_wrapper("b", "m", "int8", True, lambda: (0, ""))
 
@@ -68,7 +68,7 @@ def test_quantize_model_wrapper():
     assert res["status"] == "unsupported_xyz"
 
     def fail_fn():
-        """Docstring for fail_fn."""
+        """Verify behavior of fail_fn."""
         raise ValueError("oops")
 
     res = quantize_model_wrapper("b", "m", "int8", False, fail_fn)

@@ -3,35 +3,31 @@
 from __future__ import annotations
 
 import logging
-import types
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
+from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import JSONValue, ServeResultDict
 
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-
-    jax: types.ModuleType | None = _jax
-except (ImportError, AttributeError):
-    jax = None
+jax = optional_import("jax")
 
 
-def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> JSONDict:
+def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **_kwargs: JSONValue) -> ServeResultDict:
     """Serve a model using JAX continuous batching.
 
     Args:
         model_name: The name of the target model.
         port: The network port to listen on.
         max_batch_size: The maximum allowed batch size.
-        **kwargs: Underlying server and backend-specific configuration options.
+        **_kwargs: Underlying server and backend-specific configuration options.
 
     Returns:
-        A dictionary containing the results.
+        A structured `ServeResultDict` containing the server metadata.
 
     Raises:
         DependencyMissingError: If JAX dependencies are missing.
@@ -64,18 +60,23 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
             Returns:
                 Generated SQL query string.
 
+            Raises:
+                InferenceError: If JAX inference returns empty SQL or fails.
+
             """
             from gemma_4_sql.backends.jax.inference import generate_sql
 
             try:
                 out = generate_sql(model_name=model_name, prompt=prompt)
-                res_sql = out.get("sql")
+                res_sql = out.get("sql", "")
                 if res_sql:
                     return str(res_sql)
-                return f"SELECT * FROM generated WHERE prompt='{prompt}'"
-            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+                raise InferenceError(f"JAX inference returned empty SQL for prompt '{prompt}'", backend="jax")
+            except Exception as e:
+                if isinstance(e, InferenceError):
+                    raise
                 logger.warning("JAX generation error in server: %s", e)
-                return f"SELECT * FROM generated WHERE prompt='{prompt}'"
+                raise InferenceError(f"JAX generation failed: {e}", backend="jax", cause=e) from e
 
         def _batch_generate(prompts: list[str]) -> list[str]:
             """Execute batched generation across multiple bundled prompt requests.
@@ -99,9 +100,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         )
 
     if jax is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError("JAX dependencies are missing for serve.")
+        raise DependencyMissingError("JAX dependencies are missing for serve.", backend="jax")
 
     result = serve_model_wrapper(
         backend_name="jax",
@@ -112,7 +111,6 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         app_factory=_app_factory,
     )
 
-    # Maintain JAX specific log message behavior from original logic for backwards compatibility tests
     if result["status"] == "running_jax_serve":
         logger.info("Starting JAX server on port %d with max_batch_size %d", port, max_batch_size)
 

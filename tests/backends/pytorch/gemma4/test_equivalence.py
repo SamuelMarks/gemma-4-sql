@@ -62,6 +62,7 @@ def test_logit_equivalence() -> None:
     _, jax_state = nnx.split(jax_model)
 
     def _flatten_state(state, prefix=""):
+        """Recursively flatten nested Flax NNX state dictionary."""
         flat = {}
         for k, v in state.items():
             new_key = f"{prefix}.{k}" if prefix else k

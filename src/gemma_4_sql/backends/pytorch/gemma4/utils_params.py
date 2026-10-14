@@ -1,31 +1,30 @@
-"""Parameter translation utilities for JAX to PyTorch."""
+"""Parameter translation utilities for converting JAX Gemma 4 weights to PyTorch."""
+
+from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import torch
 
 
 def translate_jax_to_pytorch(jax_params: dict[str, Any]) -> dict[str, torch.Tensor]:
-    """Translate JAX parameters to PyTorch state dict.
+    """Translate JAX parameters to a PyTorch `state_dict`.
 
-    This function handles the necessary transposition for Dense/Linear layers.
+    Handles zero-copy NumPy buffer conversion, kernel transposition for linear layers,
+    RMSNorm scale offset adjustment (`+ 1.0`), and routed MoE expert weight splitting.
 
     Args:
-        jax_params: Dictionary of JAX parameters.
+        jax_params: Dictionary of JAX parameter arrays keyed by dotted path.
 
     Returns:
-        PyTorch state dictionary with mapped keys and weights.
+        PyTorch state dictionary with mapped keys and `torch.Tensor` weights.
 
     """
     pytorch_state_dict: dict[str, torch.Tensor] = {}
 
     for key, value in jax_params.items():
-        if hasattr(value, "__array__"):
-            import numpy as np
-
-            tensor = torch.tensor(np.array(value).tolist())
-        else:
-            tensor = torch.tensor(value)
+        tensor = value.clone() if isinstance(value, torch.Tensor) else torch.from_numpy(np.asarray(value).copy())
 
         key = key.replace("model.embed_tokens.embedding", "embed_tokens.weight")
         key = key.replace("model.layers.", "layers.")
@@ -35,8 +34,8 @@ def translate_jax_to_pytorch(jax_params: dict[str, Any]) -> dict[str, torch.Tens
 
         if "kernel" in key:
             if tensor.dim() > 2 and "routed_experts" not in key:
-                tensor = tensor.view(tensor.size(0), -1)
-            tensor = tensor.transpose(-2, -1)
+                tensor = tensor.reshape(tensor.size(0), -1)
+            tensor = tensor.transpose(-2, -1).contiguous()
             key = key.replace("kernel", "weight")
 
         if "scale" in key:
@@ -49,9 +48,6 @@ def translate_jax_to_pytorch(jax_params: dict[str, Any]) -> dict[str, torch.Tens
         key = key.replace(".self_attention.", ".self_attn.")
 
         if "routed_experts" in key:
-            # JAX shape: (num_experts, in_dim, out_dim)
-            # PyTorch expects layers.0.mlp.experts.N.weight with shape (out_dim, in_dim)
-            # The tensor is already transposed by the "kernel" check above -> (num_experts, out_dim, in_dim)
             base_key = key.replace("routed_experts.", "experts.")
             for i in range(tensor.size(0)):
                 expert_key = base_key.replace("experts.", f"experts.{i}.")

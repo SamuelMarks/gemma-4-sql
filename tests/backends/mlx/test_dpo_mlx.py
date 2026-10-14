@@ -56,10 +56,10 @@ def test_dpo_loss():
         del dpo_module.mx.negative
 
         class MockVal:
-            """Docstring for MockVal."""
+            """Verify behavior of MockVal."""
 
             def __neg__(self):
-                """Docstring for __neg__."""
+                """Verify behavior of __neg__."""
                 return "neg2"
 
         assert log_sig_fn(MockVal()) == "neg2"

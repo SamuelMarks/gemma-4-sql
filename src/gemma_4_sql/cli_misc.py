@@ -98,8 +98,14 @@ def log_metrics_cmd(args: argparse.Namespace) -> None:
     """
     metrics_dict: dict[str, float] = {}
     if args.metrics:
-        for m in args.metrics.split(","):
-            (k, v) = m.split("=")
+        for item in args.metrics.split(","):
+            stripped = item.strip()
+            if not stripped:
+                continue
+            if "=" not in stripped:
+                logger.warning("Skipping malformed metric entry (expected key=value): %s", stripped)
+                continue
+            (k, v) = stripped.split("=", 1)
             metrics_dict[k.strip()] = float(v.strip())
     res = log_metrics(metrics=metrics_dict, step=args.step, log_dir=args.log_dir, backend=args.backend)
     print(json.dumps(res, indent=2))

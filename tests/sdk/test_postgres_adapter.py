@@ -1,20 +1,29 @@
-"""Tests for PostgreSQL adapter."""
+"""Unit tests for the PostgreSQL database adapter."""
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+import gemma_4_sql.sdk.adapters.postgres_adapter as pa
+from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
 from tests.utils.test_utils import FakeDBConnection
 
 
 @pytest.fixture
-def fake_postgres_module():
+def fake_postgres_module() -> tuple[MagicMock, MagicMock, FakeDBConnection, type[Exception]]:
+    """Create mocked psycopg2 and asyncpg modules backed by FakeDBConnection.
+
+    Returns:
+        Tuple of `(mock_psycopg2, mock_asyncpg, fake_conn, PostgresError)`.
+
+    """
     mock_psycopg2 = MagicMock()
 
     class PostgresError(Exception):
-        pass
+        """Simulated PostgreSQL driver error."""
 
     mock_psycopg2.Error = PostgresError
 
@@ -24,28 +33,36 @@ def fake_postgres_module():
     mock_asyncpg = MagicMock()
     mock_asyncpg.PostgresError = PostgresError
 
-    # Return fake connection
-    async def mock_ac(*a, **k):
-        # Create an async interface on top of FakeDBConnection
+    async def mock_ac(*_a: Any, **_k: Any) -> Any:
+        """Create an async connection wrapper around FakeDBConnection."""
+
         class AsyncFakeConn:
-            def __init__(self):
+            """Async wrapper over FakeDBConnection."""
+
+            def __init__(self) -> None:
+                """Initialize with shared FakeDBConnection."""
                 self._conn = conn
 
-            async def fetch(self, query, *args):
+            async def fetch(self, query: str, *args: Any) -> list[Any]:
+                """Execute query on FakeDBConnection and return MockRecord instances."""
                 cur = self._conn.cursor()
                 cur.execute(query, args)
 
                 class MockRecord:
-                    def __init__(self, row):
+                    """Simulated asyncpg.Record."""
+
+                    def __init__(self, row: tuple[object, ...]) -> None:
+                        """Store row tuple."""
                         self._row = row
 
-                    def values(self):
+                    def values(self) -> list[Any]:
+                        """Return row values as list."""
                         return list(self._row)
 
                 return [MockRecord(row) for row in cur.fetchall()]
 
-            async def close(self):
-                pass
+            async def close(self) -> None:
+                """Close async connection no-op."""
 
         return AsyncFakeConn()
 
@@ -55,17 +72,18 @@ def fake_postgres_module():
 
 
 @pytest.mark.asyncio
-async def test_postgres_adapter_execution(fake_postgres_module, monkeypatch) -> None:
-    """Test PostgresAdapter execution paths."""
-    mock_psycopg2, mock_asyncpg, conn, PostgresError = fake_postgres_module
-    import gemma_4_sql.sdk.adapters.postgres_adapter as pa
+async def test_postgres_adapter_execution(
+    fake_postgres_module: tuple[MagicMock, MagicMock, FakeDBConnection, type[Exception]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify PostgresAdapter synchronous and asynchronous execution and error propagation."""
+    mock_psycopg2, mock_asyncpg, conn, postgres_error_cls = fake_postgres_module
 
     monkeypatch.setattr(pa, "psycopg2", mock_psycopg2)
     monkeypatch.setattr(pa, "asyncpg", mock_asyncpg)
 
     adapter = pa.PostgresAdapter("host=localhost dbname=test", {})
 
-    # Test empty db_path
     empty_adapter = pa.PostgresAdapter("", {})
     empty_adapter.connect()
     await empty_adapter.connect_async()
@@ -75,54 +93,54 @@ async def test_postgres_adapter_execution(fake_postgres_module, monkeypatch) -> 
     assert res == [(1, "apple")]
 
     conn.set_results([[(1, "apple")]])
-    print("CONN CLOSED?", conn._closed)
     suc, res, err = await adapter.execute_with_feedback_async("SELECT")
     assert suc is True
     assert res == [(1, "apple")]
+    assert err is None
 
-    conn.set_fail_query("FAIL")
+    def mock_fail(*_args: Any, **_kwargs: Any) -> None:
+        """Raise simulated PostgresError."""
+        msg = "Simulated"
+        raise postgres_error_cls(msg)
 
-    # Make FakeDBConnection raise PostgresError on failure
-    def mock_fail(*args, **kwargs):
-        raise PostgresError("Simulated")
-
-    conn.cursor = MagicMock()
+    conn.cursor = MagicMock()  # type: ignore[method-assign]
     conn.cursor.return_value.execute = mock_fail
 
     suc, res, err = await adapter.execute_with_feedback_async("FAIL")
     assert suc is False
+    assert res == []
     assert "Simulated" in str(err)
 
-    res_err = await adapter.execute_query_async("FAIL")
-    assert res_err == []
+    with pytest.raises(DatabaseExecutionError, match="Simulated"):
+        await adapter.execute_query_async("FAIL")
+
+    await adapter.close_async()
+    await adapter.close_async()
+    await empty_adapter.close_async()
+    adapter.close()
+    empty_adapter.close()
 
 
 @pytest.mark.asyncio
 async def test_postgres_adapter_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test missing dependencies."""
-    import gemma_4_sql.sdk.adapters.postgres_adapter as pa
-
+    """Verify PostgresAdapter raises DependencyMissingError when psycopg2 or asyncpg is missing."""
     monkeypatch.setattr(pa, "psycopg2", None)
-    with pytest.raises(ImportError):
+    with pytest.raises(DependencyMissingError, match="psycopg2 is required"):
         pa.PostgresAdapter("path", {})
 
-    # Mock psycopg2 to pass init, but asyncpg is None
     monkeypatch.setattr(pa, "psycopg2", MagicMock())
     monkeypatch.setattr(pa, "asyncpg", None)
 
     adapter = pa.PostgresAdapter("path", {})
-    with pytest.raises(ImportError):
+    with pytest.raises(DependencyMissingError, match="asyncpg is required"):
         await adapter.connect_async()
 
-    # Test error_classes branch where both are None
     monkeypatch.setattr(pa, "psycopg2", None)
     monkeypatch.setattr(pa, "asyncpg", None)
-    # create adapter without init logic triggering error
     with patch.object(pa.PostgresAdapter, "__init__", return_value=None):
         dummy_adapter = pa.PostgresAdapter("path", {})
         assert Exception in dummy_adapter.error_classes
 
-        # Test error_classes branch where Error objects are not types
         mock_p = MagicMock()
         mock_p.Error = 123
         monkeypatch.setattr(pa, "psycopg2", mock_p)
@@ -134,10 +152,12 @@ async def test_postgres_adapter_missing_deps(monkeypatch: pytest.MonkeyPatch) ->
         assert Exception in dummy_adapter.error_classes
 
 
-def test_postgres_adapter_schema(fake_postgres_module, monkeypatch) -> None:
-    """Test setup_schema."""
-    mock_psycopg2, mock_asyncpg, conn, PostgresError = fake_postgres_module
-    import gemma_4_sql.sdk.adapters.postgres_adapter as pa
+def test_postgres_adapter_schema(
+    fake_postgres_module: tuple[MagicMock, MagicMock, FakeDBConnection, type[Exception]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify PostgresAdapter.setup_schema commits DDL and propagates execution failures."""
+    mock_psycopg2, mock_asyncpg, conn, _ = fake_postgres_module
 
     monkeypatch.setattr(pa, "psycopg2", mock_psycopg2)
     monkeypatch.setattr(pa, "asyncpg", mock_asyncpg)
@@ -147,5 +167,5 @@ def test_postgres_adapter_schema(fake_postgres_module, monkeypatch) -> None:
     assert conn._transactions_committed == 1
 
     conn.set_fail_query("FAIL")
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match="Simulated execution failure"):
         adapter.setup_schema("FAIL")

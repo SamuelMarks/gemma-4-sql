@@ -7,10 +7,16 @@ from typing import TYPE_CHECKING
 from gemma_4_sql.sdk.registry import get_backend
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
 
-def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", backend: str = "jax") -> JSONDict:
+def log_metrics(
+    metrics: dict[str, float],
+    step: int,
+    log_dir: str = "logs",
+    backend: str = "jax",
+    **kwargs: JSONValue,
+) -> LogMetricsResultDict:
     """Log training or evaluation metrics to TensorBoard.
 
     Args:
@@ -18,13 +24,13 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", bac
         step: The current training or logging step.
         log_dir: The directory to save logs.
         backend: The backend framework to use.
+        **kwargs: Additional backend logging options (e.g., `step_duration_s`).
 
     Returns:
         A dictionary containing the results.
 
     """
-
-    return get_backend(backend).log_metrics(metrics, step, log_dir)
+    return get_backend(backend).log_metrics(metrics, step, log_dir, **kwargs)
 
 
 __all__ = ["log_metrics"]

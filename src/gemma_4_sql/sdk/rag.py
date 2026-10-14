@@ -7,24 +7,45 @@ import logging
 import math
 import operator
 import re
+import threading
 from typing import Any
 
+from gemma_4_sql.backends.lazy_loader import optional_attr
 from gemma_4_sql.type_hints import ModelType
 
 MIN_SIMILARITY = 0.1
 logger = logging.getLogger(__name__)
 
-try:
-    import sentence_transformers as _st
-    import sklearn.metrics.pairwise as _smp
+SentenceTransformer: Any = optional_attr("sentence_transformers", "SentenceTransformer")
+cosine_similarity: Any = optional_attr("sklearn.metrics.pairwise", "cosine_similarity")
 
-    SentenceTransformer: Any = _st.SentenceTransformer
-    cosine_similarity: Any = _smp.cosine_similarity
-except (ImportError, ValueError, AttributeError, OSError):
-    SentenceTransformer = None
-    cosine_similarity = None
-
+_RAG_LOCK = threading.Lock()
 _SCHEMA_EMBEDDING_CACHE: dict[str, Any] = {}
+_SENTENCE_TRANSFORMER_CACHE: dict[tuple[Any, str], ModelType] = {}
+
+
+def clear_rag_model_cache() -> None:
+    """Clear the cached SentenceTransformer models and schema embeddings in a thread-safe manner."""
+    with _RAG_LOCK:
+        _SCHEMA_EMBEDDING_CACHE.clear()
+        _SENTENCE_TRANSFORMER_CACHE.clear()
+
+
+def _get_sentence_transformer(model_id: str = "all-MiniLM-L6-v2") -> ModelType:
+    """Return a cached `SentenceTransformer` instance keyed by class and model identifier.
+
+    Args:
+        model_id: Sentence-Transformer model identifier.
+
+    Returns:
+        Instantiated or cached `SentenceTransformer` model.
+
+    """
+    with _RAG_LOCK:
+        cache_key = (SentenceTransformer, model_id)
+        if cache_key not in _SENTENCE_TRANSFORMER_CACHE:
+            _SENTENCE_TRANSFORMER_CACHE[cache_key] = SentenceTransformer(model_id)
+        return _SENTENCE_TRANSFORMER_CACHE[cache_key]
 
 
 def _clean_identifier(identifier: str) -> str:
@@ -37,14 +58,15 @@ def _clean_identifier(identifier: str) -> str:
         The unquoted identifier string.
 
     """
-    return identifier.strip("\"'`[]")
+    return identifier.strip("\"`'[]")
 
 
 def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
     """Extract table names and their corresponding column names from a DDL string.
 
-    Supports standard unquoted identifiers as well as double-quoted,
-    backtick-quoted, and bracket-quoted identifiers with schema prefixes.
+    Uses a balanced-parenthesis scanner and supports standard unquoted identifiers
+    as well as double-quoted, backtick-quoted, and bracket-quoted identifiers with
+    schema prefixes.
 
     Args:
         ddl: The Data Definition Language (DDL) string.
@@ -55,7 +77,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
     """
     schema: dict[str, list[str]] = {}
     pattern = re.compile(
-        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(?:\"[^\"]+\"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\.)?(\"[^\"]+\"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\s*\(",
+        r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\.)?("[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\s*\(',
         re.IGNORECASE,
     )
     pos = 0
@@ -97,7 +119,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
             raw_cols.append("".join(cur).strip())
 
         ignored_keywords = ("PRIMARY KEY", "FOREIGN KEY", "CONSTRAINT", "UNIQUE", "CHECK", "INDEX")
-        col_pattern = re.compile(r"^(?:\"([^\"]+)\"|`([^`]+)`|\[([^\]]+)\]|([a-zA-Z0-9_]+))")
+        col_pattern = re.compile(r'^(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([a-zA-Z0-9_]+))')
 
         for col_def in raw_cols:
             c = col_def.strip()
@@ -226,7 +248,7 @@ def _semantic_search(
     top_k_tables: int,
     min_similarity: float = MIN_SIMILARITY,
 ) -> list[str]:
-    """Execute semantic vector embedding retrieval using cosine similarity with caching.
+    """Execute semantic vector embedding retrieval using cosine similarity with model and embedding caching.
 
     Args:
         prompt: Natural language query.
@@ -244,15 +266,18 @@ def _semantic_search(
     if SentenceTransformer is None or cosine_similarity is None:
         return _keyword_search(prompt, schema, top_k_tables)
     try:
-        model: ModelType = SentenceTransformer("all-MiniLM-L6-v2")
+        model: ModelType = _get_sentence_transformer("all-MiniLM-L6-v2")
         table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]
 
         schema_key = hashlib.md5(";;".join(table_docs).encode()).hexdigest()
-        if schema_key in _SCHEMA_EMBEDDING_CACHE:
-            table_embeddings = _SCHEMA_EMBEDDING_CACHE[schema_key]
+        with _RAG_LOCK:
+            cached_embeddings = _SCHEMA_EMBEDDING_CACHE.get(schema_key)
+        if cached_embeddings is not None:
+            table_embeddings = cached_embeddings
         else:
             table_embeddings = model.encode(table_docs)
-            _SCHEMA_EMBEDDING_CACHE[schema_key] = table_embeddings
+            with _RAG_LOCK:
+                _SCHEMA_EMBEDDING_CACHE[schema_key] = table_embeddings
 
         prompt_embedding: Any = model.encode([prompt])
         similarities: Any = cosine_similarity(prompt_embedding, table_embeddings)[0]
@@ -290,15 +315,16 @@ def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_ta
     for table in relevant_tables:
         cols = ", ".join(schema[table])
         context_lines.append(f"-- Table: {table} | Columns: {cols}")
-    return "\n".join(context_lines)
+    return chr(10).join(context_lines)
 
 
-def build_rag_prompt(prompt: str, ddl: str | None = None) -> str:
+def build_rag_prompt(prompt: str, ddl: str | None = None, *, sql_prefix: str = "SELECT") -> str:
     """Build a prompt augmented with relevant schema information retrieved via RAG.
 
     Args:
         prompt: The original natural language prompt.
         ddl: Optional DDL string to extract schema context from.
+        sql_prefix: Optional trailing SQL continuation prefix (defaults to `'SELECT'`; pass `''` to omit).
 
     Returns:
         The augmented prompt string.
@@ -308,7 +334,23 @@ def build_rag_prompt(prompt: str, ddl: str | None = None) -> str:
         return prompt
     schema = extract_schema_entities(ddl)
     context = retrieve_relevant_schema(prompt, schema)
-    return f"{context}\n\n-- Request:\n-- {prompt}\n\nSELECT"
+    if sql_prefix:
+        return f"""{context}
+
+-- Request:
+-- {prompt}
+
+{sql_prefix}"""
+    return f"""{context}
+
+-- Request:
+-- {prompt}"""
 
 
-__all__ = ["MIN_SIMILARITY", "build_rag_prompt", "extract_schema_entities", "retrieve_relevant_schema"]
+__all__ = [
+    "MIN_SIMILARITY",
+    "build_rag_prompt",
+    "clear_rag_model_cache",
+    "extract_schema_entities",
+    "retrieve_relevant_schema",
+]

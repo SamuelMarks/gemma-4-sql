@@ -15,24 +15,15 @@ import struct
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import AudioInput, ImageInput, MultimodalInput
 
 logger = logging.getLogger(__name__)
 
-try:
-    import numpy as _np
-
-    np: Any = _np
-except (ImportError, AttributeError):
-    np = None
-
-try:
-    from PIL import Image as _Image
-
-    Image: Any = _Image
-except (ImportError, AttributeError):
-    Image = None
+np = optional_import("numpy")
+Image = optional_attr("PIL", "Image")
 
 
 def load_image_bytes(image_input: ImageInput) -> bytes:
@@ -80,19 +71,20 @@ def load_image_bytes(image_input: ImageInput) -> bytes:
             return base64.b64decode(parts[1])
         return base64.b64decode(image_input[5:])
 
-    global Image
-    if Image is None:
-        try:
-            from PIL import Image as _Image
+    if getattr(image_input, "save", None) is not None:
+        pil_image = Image
+        if pil_image is None:
+            try:
+                from PIL import Image as _Image
 
-            Image = _Image
-        except ImportError as err:
-            logger.debug("Failed to import PIL: %s", err)
-    if Image is not None and getattr(image_input, "save", None) is not None:
-        buf = io.BytesIO()
-        save_fn = cast(Any, image_input).save
-        save_fn(buf, format="PNG")
-        return buf.getvalue()
+                pil_image = _Image
+            except ImportError as err:
+                logger.debug("Failed to import PIL: %s", err)
+        if pil_image is not None:
+            buf = io.BytesIO()
+            save_fn = cast(Any, image_input).save
+            save_fn(buf, format="PNG")
+            return buf.getvalue()
 
     msg = f"Unsupported image input type: {type(image_input)}"
     raise ValueError(msg)
@@ -131,65 +123,44 @@ def process_image(
 
     img_bytes = load_image_bytes(image_input)
 
-    rgb_array: Any = None
-    if Image is not None:
-        try:
-            with Image.open(io.BytesIO(img_bytes)) as pil_img:
-                pil_resized = pil_img.convert("RGB").resize((target_w, target_h), Image.Resampling.BILINEAR)
-                if np is not None:
-                    rgb_array = np.array(pil_resized, dtype=np.float32) / 255.0
-                else:
-                    rgb_array = [[[p / 255.0 for p in pil_resized.getpixel((x, y))] for x in range(target_w)] for y in range(target_h)]
-        except Exception as e:
-            raise ValueError(f"Corrupted or unreadable image: {e}") from e
-
-    if rgb_array is None:
+    np_mod: Any = np
+    if Image is None or np_mod is None:
         raise ValueError("Corrupted or unreadable image: Pillow library is required but missing.")
+    try:
+        with Image.open(io.BytesIO(img_bytes)) as pil_img:
+            pil_resized = pil_img.convert("RGB").resize((target_w, target_h), Image.Resampling.BILINEAR)
+            rgb_array = np_mod.array(pil_resized, dtype=np_mod.float32) / 255.0
+    except Exception as e:
+        raise ValueError(f"Corrupted or unreadable image: {e}") from e
 
     # Standard ImageNet normalization: (x - mean) / std
     mean = [0.485, 0.456, 0.406]
     std = [0.229, 0.224, 0.225]
 
-    if np is not None and isinstance(rgb_array, np.ndarray):
-        norm_img = (rgb_array - mean) / std
-        pixel_values = np.transpose(norm_img, (2, 0, 1)).astype(np.float32)
+    norm_img = (rgb_array - mean) / std
+    pixel_values = np_mod.transpose(norm_img, (2, 0, 1)).astype(np_mod.float32)
 
-        num_patches_h = target_h // patch_size
-        num_patches_w = target_w // patch_size
-        num_patches = num_patches_h * num_patches_w
-        patch_dim = 3 * patch_size * patch_size
+    num_patches_h = target_h // patch_size
+    num_patches_w = target_w // patch_size
+    num_patches = num_patches_h * num_patches_w
+    patch_dim = 3 * patch_size * patch_size
 
-        patches = np.zeros((num_patches, patch_dim), dtype=np.float32)
-        idx = 0
-        for i in range(num_patches_h):
-            for j in range(num_patches_w):
-                h_start = i * patch_size
-                h_end = h_start + patch_size
-                w_start = j * patch_size
-                w_end = w_start + patch_size
-                patch = pixel_values[:, h_start:h_end, w_start:w_end]
-                patches[idx] = patch.reshape(-1)
-                idx += 1
+    patches = np_mod.zeros((num_patches, patch_dim), dtype=np_mod.float32)
+    idx = 0
+    for i in range(num_patches_h):
+        for j in range(num_patches_w):
+            h_start = i * patch_size
+            h_end = h_start + patch_size
+            w_start = j * patch_size
+            w_end = w_start + patch_size
+            patch = pixel_values[:, h_start:h_end, w_start:w_end]
+            patches[idx] = patch.reshape(-1)
+            idx += 1
 
-        return {
-            "pixel_values": pixel_values,
-            "patches": patches,
-            "num_patches": int(num_patches),
-            "shape": (3, target_h, target_w),
-        }
-
-    pixel_values_list: list[list[list[float]]] = [[[] for _ in range(target_h)] for _ in range(3)]
-    for c in range(3):
-        c_mean = mean[c]
-        c_std = std[c]
-        for h in range(target_h):
-            pixel_values_list[c][h] = [(rgb_array[h][w][c] - c_mean) / c_std for w in range(target_w)]
-
-    num_patches = (target_h // patch_size) * (target_w // patch_size)
     return {
-        "pixel_values": pixel_values_list,
-        "patches": [[0.0] * (3 * patch_size * patch_size) for _ in range(num_patches)],
-        "num_patches": num_patches,
+        "pixel_values": pixel_values,
+        "patches": patches,
+        "num_patches": int(num_patches),
         "shape": (3, target_h, target_w),
     }
 
@@ -310,8 +281,9 @@ def process_audio(
 
     samples: list[float]
     global np
-    if np is not None and hasattr(audio_input, "flatten"):
-        samples = audio_input.flatten().astype(np.float32).tolist()
+    audio_any: Any = audio_input
+    if np is not None and hasattr(audio_any, "flatten"):
+        samples = [float(x) for x in audio_any.flatten().astype(np.float32).tolist()]
         orig_rate = sample_rate
     elif isinstance(audio_input, (list, tuple)):
         samples = [float(x) for x in cast(Any, audio_input)]
@@ -319,18 +291,13 @@ def process_audio(
     else:
         if np is None:
             try:
-                import sys as _sys
+                import numpy
 
-                if "numpy" in _sys.modules:
-                    np = _sys.modules["numpy"]
-                else:
-                    import numpy
-
-                    np = numpy
+                np = numpy
             except ImportError as err:
                 logger.debug("Failed to import numpy: %s", err)
-        if np is not None and isinstance(audio_input, np.ndarray):
-            samples = [float(x) for x in audio_input.flatten().tolist()]
+        if np is not None and isinstance(audio_any, np.ndarray):
+            samples = [float(x) for x in audio_any.flatten().tolist()]
             orig_rate = sample_rate
         else:
             raw_bytes = load_audio_bytes(audio_input)

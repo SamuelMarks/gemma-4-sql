@@ -3,26 +3,21 @@
 from __future__ import annotations
 
 import logging
-import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.keras.etl import build_dataloader
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import DPOResultDict
 logger = logging.getLogger(__name__)
 
-try:
-    import keras as _keras
-    import tensorflow as _tf
-
-    keras: types.ModuleType | None = _keras
-    tf: types.ModuleType | None = _tf
-except (ImportError, AttributeError):
-    keras = None
-    tf = None
+tf = optional_import("tensorflow")
+keras = optional_import("keras")
+GemmaCausalLM = optional_attr("keras_nlp.models", "GemmaCausalLM")
 
 
 def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[Any, Any, Any]:
@@ -45,10 +40,15 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
 
 
 def _compute_logps(model: ModelType, inputs: TensorType, labels: TensorType) -> Any:
-    """Compute exact log probabilities for DPO math using categorical cross-entropy approach.
+    """Compute sequence log probabilities for DPO using TensorFlow log-softmax.
+
+    Args:
+        model: Keras causal LM callable.
+        inputs: Input token ID tensor.
+        labels: Target token ID tensor.
 
     Returns:
-        The resulting output from the operation.
+        Summed non-padding token log probabilities per sequence.
 
     """
     if tf is None:
@@ -72,25 +72,34 @@ def _compute_logps(model: ModelType, inputs: TensorType, labels: TensorType) -> 
 
 
 def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer: object, beta: float) -> object:
-    """Return a tf.function compiled train step function.
+    """Return a `tf.function` compiled DPO train step function.
+
+    Args:
+        policy_model: Trainable policy model.
+        ref_model: Frozen reference model.
+        optimizer: Keras optimizer instance.
+        beta: KL penalty temperature coefficient.
 
     Returns:
-        object: The resulting output from the operation.
+        Compiled TensorFlow step function or no-op fallback if TensorFlow is unavailable.
 
     """
     if tf is None:
 
         def _dummy_step(_b: Any) -> float:
-            """Docstring for _dummy_step."""
+            """Return 0.0 when TensorFlow is not installed."""
             return 0.0
 
         return _dummy_step
 
     def train_step(batch: dict[str, object]) -> object:
-        """Execute the train step operation.
+        """Compute DPO loss and apply gradients under a TensorFlow GradientTape.
+
+        Args:
+            batch: Preference batch dictionary.
 
         Returns:
-            object: The resulting output from the operation.
+            Scalar step loss tensor.
 
         """
         with tf.GradientTape() as tape:
@@ -107,34 +116,28 @@ def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer:
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    """Execute function.
+    """Run Keras DPO training epochs over the preference dataloader.
+
+    Args:
+        state: `TrainerState` holding dataloader, epoch count, and compiled step function.
 
     Returns:
-        The execution result.
+        Mean batch loss from the final epoch.
 
     """
     dataloader = state.dataloader
     epochs = state.epochs
     train_step = state.train_step
-    """Run training epochs.
-
-    Returns:
-        object: The resulting output from the operation.
-
-    """
     final_loss = 0.0
     for _epoch in range(epochs):
         epoch_loss = 0.0
-        for batch in dataloader:  # type: ignore # Justified: Dynamic backend protocol typing
-            loss = train_step(batch)  # type: ignore # Justified: Dynamic backend protocol typing
-            if hasattr(loss, "numpy") and callable(loss.numpy):
+        for batch in dataloader:
+            loss: Any = train_step(batch)
+            if hasattr(loss, "numpy"):
                 epoch_loss += float(loss.numpy())
-            else:
-                try:
-                    epoch_loss += float(loss)
-                except (ValueError, TypeError):
-                    pass
-        final_loss = epoch_loss / max(1, len(dataloader) if hasattr(dataloader, "__len__") else 1)  # type: ignore # Justified: Dynamic backend protocol typing
+            elif isinstance(loss, (int, float)):
+                epoch_loss += float(loss)
+        final_loss = epoch_loss / max(1, len(dataloader) if hasattr(dataloader, "__len__") else 1)
     return float(final_loss)
 
 
@@ -158,14 +161,14 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
 
     """
     if keras is None or tf is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("Keras dependencies are missing.")
 
     try:
-        gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
-        policy_model = gemma_causal_lm_cls.from_preset(model_name)
-        ref_model = gemma_causal_lm_cls.from_preset(model_name)
+        gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM")
+        if gemma_causal_lm_cls is None:
+            raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
+        policy_model: ModelType = gemma_causal_lm_cls.from_preset(model_name)
+        ref_model: ModelType = gemma_causal_lm_cls.from_preset(model_name)
     except (ImportError, ValueError) as e:
         raise ValueError(f"Failed to load Keras model {model_name}") from e
 
@@ -177,11 +180,11 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
-    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step))  # type: ignore # Justified: Dynamic backend protocol typing
+    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step))
     return "completed", final_loss
 
 
-def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
+def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
     """Run a DPO training loop for Keras.
 
     Args:
@@ -203,8 +206,6 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     final_loss = 0.0
     status = "completed"
     if keras is None or tf is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("Keras DPO dependencies are missing.")
 
     batch_size = getattr(config, "batch_size", 2)

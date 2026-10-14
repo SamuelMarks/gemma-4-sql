@@ -2,41 +2,24 @@
 
 from __future__ import annotations
 
-import types
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.jax.etl import build_dataloader
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import DPOResultDict, JSONDict
 
-try:
-    import jax as _jax
-    import jax.nn as _jnn
-    import jax.numpy as _jnp
-    import optax as _optax
-    from flax import nnx as _nnx
-
-    from .gemma4 import Gemma4Config as _Gemma4Config
-    from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
-
-    jax: types.ModuleType | None = _jax
-    jnn: types.ModuleType | None = _jnn
-    jnp: types.ModuleType | None = _jnp
-    optax: types.ModuleType | None = _optax
-    nnx: types.ModuleType | None = _nnx
-    Gemma4Config: Any | None = _Gemma4Config
-    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
-except (ImportError, AttributeError):
-    jax = None
-    jnn = None
-    jnp = None
-    optax = None
-    nnx = None
-    Gemma4Config = None
-    Gemma4ForCausalLM = None
+jax = optional_import("jax")
+jnn = optional_import("jax.nn")
+jnp = optional_import("jax.numpy")
+optax = optional_import("optax")
+nnx = optional_import("flax.nnx")
+Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
+Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
 
 def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[Any, Any, Any]:
@@ -59,10 +42,15 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
 
 
 def _compute_logps(model: ModelType, inputs: TensorType, labels: TensorType) -> Any:
-    """Compute exact log probabilities for DPO math using categorical cross-entropy approach.
+    """Compute sequence log probabilities for DPO using token-level log-softmax.
+
+    Args:
+        model: Policy or reference model callable.
+        inputs: Input token ID tensor.
+        labels: Target token ID tensor.
 
     Returns:
-        The resulting output from the operation.
+        Summed non-padding token log probabilities per sequence.
 
     """
     logits = model(inputs)
@@ -85,10 +73,16 @@ def _compute_logps(model: ModelType, inputs: TensorType, labels: TensorType) -> 
 
 
 def _dpo_step_loss(policy_model: ModelType, ref_model: ModelType, batch: JSONDict, beta: float) -> Any:
-    """Compute DPO loss for a step.
+    """Compute scalar DPO loss for a preference batch.
+
+    Args:
+        policy_model: Trainable policy model.
+        ref_model: Frozen reference model.
+        batch: Preference batch dictionary with chosen/rejected inputs and labels.
+        beta: KL penalty temperature coefficient.
 
     Returns:
-        object: The resulting output from the operation.
+        Scalar DPO loss value.
 
     """
     ch_inputs = batch.get("chosen_inputs", batch.get("chosen_input_ids"))
@@ -102,24 +96,33 @@ def _dpo_step_loss(policy_model: ModelType, ref_model: ModelType, batch: JSONDic
 
 
 def _get_train_step_fn(beta: float) -> object:
-    """Return a JIT-compiled train step function for the given beta.
+    """Return a JIT-compiled DPO training step function for the given beta.
+
+    Args:
+        beta: KL penalty temperature coefficient.
 
     Returns:
-        object: The resulting output from the operation.
+        Compiled or eager training step callable.
 
     """
 
-    def train_step(policy_model: ModelType, ref_model: ModelType, optimizer: object, batch: JSONDict) -> Any:
+    def train_step(policy_model: ModelType, ref_model: ModelType, optimizer: Any, batch: JSONDict) -> Any:
         """Execute a single JAX-compiled DPO training step.
 
+        Args:
+            policy_model: Trainable policy model.
+            ref_model: Frozen reference model.
+            optimizer: Flax NNX optimizer instance.
+            batch: Preference batch dictionary.
+
         Returns:
-            object: The resulting output from the operation.
+            Scalar step loss.
 
         """
         if nnx is not None and hasattr(nnx, "value_and_grad"):
             # Using cast to Any to avoid strict typing complaints on the lambda arguments since they map to dynamic models
             def _loss_wrapper(p: Any, r: Any, b: Any) -> Any:
-                """Docstring for _loss_wrapper."""
+                """Evaluate _dpo_step_loss for gradient transformation."""
                 return _dpo_step_loss(p, r, b, beta)
 
             (loss, grads) = nnx.value_and_grad(_loss_wrapper)(policy_model, ref_model, batch)
@@ -135,10 +138,13 @@ def _get_train_step_fn(beta: float) -> object:
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    """Execute function.
+    """Run DPO training epochs over the preference dataloader.
+
+    Args:
+        state: `TrainerState` holding models, optimizer, dataloader, and step function.
 
     Returns:
-        The execution result.
+        Mean batch loss from the final epoch.
 
     """
     dataloader = state.dataloader
@@ -147,21 +153,28 @@ def _run_training_epochs(state: TrainerState) -> float:
     ref_model = state.ref_model
     optimizer = state.optimizer
     train_step = state.train_step
-    """Run training epochs.
-
-    Returns:
-        object: The resulting output from the operation.
-
-    """
     final_loss = 0.0
     for _epoch in range(epochs):
         epoch_loss = 0.0
-        for batch in dataloader:  # type: ignore # Justified: Dynamic backend protocol typing
-            loss = train_step(policy_model, ref_model, optimizer, batch)  # type: ignore # Justified: Dynamic backend protocol typing
+        for batch in dataloader:
+            loss = train_step(policy_model, ref_model, optimizer, batch)
             loss_val = float(loss.item() if hasattr(loss, "item") else loss)
             epoch_loss += loss_val
-        final_loss = epoch_loss / max(1, len(dataloader))  # type: ignore # Justified: Dynamic backend protocol typing
+        final_loss = epoch_loss / max(1, len(dataloader))
     return float(final_loss)
+
+
+def _resolve_gemma4_config(model_name: str) -> Any:
+    """Resolve a `Gemma4Config` preset for the given `model_name`.
+
+    Args:
+        model_name: Model name or preset identifier.
+
+    Returns:
+        Resolved `Gemma4Config` object.
+
+    """
+    return Gemma4Config.from_preset(model_name) if hasattr(Gemma4Config, "from_preset") else Gemma4Config.gemma4_e2b()
 
 
 def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
@@ -184,12 +197,11 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
 
     """
     if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("JAX dependencies are missing for DPO.")
 
-    policy_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(0))
-    ref_model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=nnx.Rngs(1))
+    resolved_cfg = _resolve_gemma4_config(model_name)
+    policy_model = Gemma4ForCausalLM(resolved_cfg, rngs=nnx.Rngs(0))
+    ref_model = Gemma4ForCausalLM(resolved_cfg, rngs=nnx.Rngs(1))
     optimizer = nnx.Optimizer(policy_model, optax.adamw(learning_rate))
     train_step = _get_train_step_fn(beta)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
@@ -198,11 +210,11 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
-    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=policy_model, ref_model=ref_model, optimizer=optimizer, train_step=train_step))  # type: ignore # Justified: Dynamic backend protocol typing
+    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=policy_model, ref_model=ref_model, optimizer=optimizer, train_step=train_step))
     return "completed", final_loss
 
 
-def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
+def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
     """Run a DPO training loop for JAX.
 
     Args:
@@ -225,8 +237,6 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     final_loss = 0.0
     status = "completed"
     if jax is None or jnp is None or jnn is None or optax is None or Gemma4ForCausalLM is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("JAX DPO dependencies are missing.")
 
     try:

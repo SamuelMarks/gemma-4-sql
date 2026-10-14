@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from collections.abc import Callable
+
+    from gemma_4_sql.type_hints import QuantizeResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -33,25 +36,22 @@ def apply_bits_and_bytes_quantization(
         method: The string representing the quantization method ('int8', 'int4').
         bits_and_bytes_config_cls: The bits and bytes config class.
         float16_dtype: Optional float16 dtype for 4-bit compute.
-        model: Optional model instance or model name string to quantize.
-        raise_if_missing: If True, raises DependencyMissingError when config class is absent.
+        model: Optional model instance to attach quantization metadata to.
         llm_int8_threshold: Threshold for 8-bit outlier feature detection.
         llm_int8_skip_modules: Optional list of module name substrings to skip in 8-bit.
         bnb_4bit_quant_type: 4-bit quantization datatype ('nf4' or 'fp4').
         bnb_4bit_use_double_quant: Whether to compress quantization constants (double quantization).
 
     Returns:
-        A tuple of (memory_reduction_factor, status_string).
+        A tuple of `(memory_reduction_factor, status_string)`.
 
     Raises:
-        DependencyMissingError: If raise_if_missing is True and bits_and_bytes_config_cls is None.
+        DependencyMissingError: If `bits_and_bytes_config_cls` is None.
 
     """
     if bits_and_bytes_config_cls is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         msg = "bitsandbytes and transformers are required for BitsAndBytes quantization. Install with `pip install bitsandbytes transformers`."
-        raise DependencyMissingError(msg)
+        raise DependencyMissingError(msg, dependency_name="bitsandbytes", backend="pytorch")
 
     bnb_config: Any
     if method == "int8":
@@ -75,12 +75,11 @@ def apply_bits_and_bytes_quantization(
         logger.warning("Unsupported quantization method for BitsAndBytes: %s", method)
         return (0.0, f"unsupported_method_{method}")
 
-    # Attach quantization config or transform in-memory model if provided
     if model is not None:
-        if hasattr(model, "config"):
+        if hasattr(model, "config") and model.config is not None:
             model.config.quantization_config = bnb_config
-        model._is_quantized = True  # type: ignore # Runtime injection
-        model._quant_method = method  # type: ignore # Runtime injection
+        model._is_quantized = True
+        model._quant_method = method
 
     return (memory_reduction, f"quantized_{method}")
 
@@ -91,7 +90,7 @@ def quantize_model_wrapper(
     method: str,
     missing_deps: bool,
     apply_fn: Callable[..., tuple[float, str]],
-) -> JSONDict:
+) -> QuantizeResultDict:
     """Wrap and standardize execution and error handling for quantization.
 
     Args:
@@ -99,17 +98,20 @@ def quantize_model_wrapper(
         model_name: Name of the model.
         method: The quantization method.
         missing_deps: Whether dependencies are missing.
-        missing_status: Status to return if dependencies are missing.
-        apply_fn: Function that applies quantization and returns (memory_reduction, status).
+        apply_fn: Function that applies quantization and returns `(memory_reduction, status)`.
 
     Returns:
         A dictionary containing the quantization results.
 
+    Raises:
+        DependencyMissingError: If `missing_deps` is True.
+
     """
     if missing_deps:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError(f"Dependencies missing for backend: {backend_name}")
+        raise DependencyMissingError(
+            f"Dependencies missing for backend: {backend_name}",
+            backend=backend_name,
+        )
 
     try:
         (memory_reduction, status) = apply_fn()

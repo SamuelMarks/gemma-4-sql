@@ -16,43 +16,51 @@ from gemma_4_sql.backends.jax.inference import generate_sql
 from gemma_4_sql.tokenization import SQLTokenizer
 
 
-def test_jax_grain_multimodal_map(tmp_path: Path) -> None:
+def test_jax_grain_multimodal_map(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test BaseFormatTransform.map extracting image and audio features into dict."""
 
-    import pytest
-
-    monkeypatch_fix = pytest.MonkeyPatch()
-
     class _MockOpenedImage:
+        """Mock opened PIL image."""
+
         def __enter__(self):
+            """Enter context manager."""
             return self
 
         def __exit__(self, *args):
-            pass
+            """Exit context manager."""
 
         def convert(self, mode):
+            """Convert image mode."""
             return self
 
         def resize(self, size, resample):
+            """Resize image."""
             return self
 
         def getpixel(self, coords):
+            """Get pixel RGB tuple."""
             return (255, 0, 0)
 
         def __array__(self, *args, **kwargs):
+            """Return numpy array representation."""
             import numpy as np
 
             return np.zeros((224, 224, 3), dtype=np.float32)
 
     class _MockPILImage:
+        """Mock PIL Image module."""
+
         class Resampling:
+            """Mock PIL Resampling constants."""
+
             BILINEAR = 2
 
         @staticmethod
         def open(buf):
+            """Open mock image from buffer."""
             return _MockOpenedImage()
 
-    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
 
     dummy_img = tmp_path / "table.png"
     dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
@@ -84,40 +92,48 @@ def test_jax_grain_multimodal_map(tmp_path: Path) -> None:
 def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test JAX generate_sql processing image and audio paths and formatting prompt."""
 
-    import pytest
-
-    monkeypatch_fix = pytest.MonkeyPatch()
-
     class _MockOpenedImage:
+        """Mock opened PIL image."""
+
         def __enter__(self):
+            """Enter context manager."""
             return self
 
         def __exit__(self, *args):
-            pass
+            """Exit context manager."""
 
         def convert(self, mode):
+            """Convert image mode."""
             return self
 
         def resize(self, size, resample):
+            """Resize image."""
             return self
 
         def getpixel(self, coords):
+            """Get pixel RGB tuple."""
             return (255, 0, 0)
 
         def __array__(self, *args, **kwargs):
+            """Return numpy array representation."""
             import numpy as np
 
             return np.zeros((224, 224, 3), dtype=np.float32)
 
     class _MockPILImage:
+        """Mock PIL Image module."""
+
         class Resampling:
+            """Mock PIL Resampling constants."""
+
             BILINEAR = 2
 
         @staticmethod
         def open(buf):
+            """Open mock image from buffer."""
             return _MockOpenedImage()
 
-    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
 
     dummy_img = tmp_path / "erd.png"
     dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
@@ -126,7 +142,7 @@ def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         """Mock JAX causal model for beam search."""
 
         def __call__(self, input_ids: Any, positions: Any = None, **kwargs: Any) -> Any:
-            """Docstring for __call__."""
+            """Verify behavior of __call__."""
             import jax.numpy as jnp
 
             batch, seq = input_ids.shape
@@ -148,40 +164,48 @@ def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 def test_jax_inference_multimodal_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test JAX generate_sql live model execution with multimodal preprocessing."""
 
-    import pytest
-
-    monkeypatch_fix = pytest.MonkeyPatch()
-
     class _MockOpenedImage:
+        """Mock opened PIL image."""
+
         def __enter__(self):
+            """Enter context manager."""
             return self
 
         def __exit__(self, *args):
-            pass
+            """Exit context manager."""
 
         def convert(self, mode):
+            """Convert image mode."""
             return self
 
         def resize(self, size, resample):
+            """Resize image."""
             return self
 
         def getpixel(self, coords):
+            """Get pixel RGB tuple."""
             return (255, 0, 0)
 
         def __array__(self, *args, **kwargs):
+            """Return numpy array representation."""
             import numpy as np
 
             return np.zeros((224, 224, 3), dtype=np.float32)
 
     class _MockPILImage:
+        """Mock PIL Image module."""
+
         class Resampling:
+            """Mock PIL Resampling constants."""
+
             BILINEAR = 2
 
         @staticmethod
         def open(buf):
+            """Open mock image from buffer."""
             return _MockOpenedImage()
 
-    monkeypatch_fix.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
 
     dummy_img = tmp_path / "erd.png"
     dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")

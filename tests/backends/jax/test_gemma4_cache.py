@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for gemma4 cache."""
 
 from unittest.mock import MagicMock
 
@@ -12,7 +12,7 @@ from gemma_4_sql.backends.jax.gemma4.cache import LayerCache, init_cache
 
 
 def test_layer_cache():
-    """Docstring for test_layer_cache."""
+    """Verify behavior of test_layer_cache."""
     cache = LayerCache((2, 8, 4, 16), jnp.float32, None)
     assert cache.size == 8
     assert cache.cur_ind.value == 0
@@ -21,7 +21,7 @@ def test_layer_cache():
 
 
 def test_init_cache():
-    """Docstring for test_init_cache."""
+    """Verify behavior of test_init_cache."""
     config = MagicMock()
     config.num_hidden_layers = 2
     # attention patterns have GLOBAL at index 5. so index 0 and 1 are LOCAL_SLIDING
@@ -37,7 +37,7 @@ def test_init_cache():
 
 
 def test_init_cache_global():
-    """Docstring for test_init_cache_global."""
+    """Verify behavior of test_init_cache_global."""
     config = MagicMock()
     config.num_hidden_layers = 6  # 6th is global
     config.num_key_value_heads = 2
@@ -53,7 +53,7 @@ def test_init_cache_global():
 
 
 def test_init_cache_global_fallback():
-    """Docstring for test_init_cache_global_fallback."""
+    """Verify behavior of test_init_cache_global_fallback."""
     config = MagicMock()
     config.num_hidden_layers = 6  # 6th is global
     config.num_key_value_heads = 2

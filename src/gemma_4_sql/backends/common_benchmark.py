@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import BenchmarkResultDict, LatencyStatsDict
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ def get_current_rss_mb() -> float:
         return float(ru_maxrss / 1024)
 
 
-def compute_latency_statistics(latencies_ms: list[float]) -> dict[str, float]:
+def compute_latency_statistics(latencies_ms: list[float]) -> LatencyStatsDict:
     """Compute statistical percentiles and summaries for latency samples.
 
     Args:
@@ -83,7 +83,7 @@ def run_benchmark_wrapper(
     *,
     raise_if_missing: bool = False,
     latency_samples: list[float] | None = None,
-) -> JSONDict:
+) -> BenchmarkResultDict:
     """Wrap benchmarking logic to unify exception handling and result formatting.
 
     Args:
@@ -137,7 +137,7 @@ def run_benchmark_wrapper(
     rss_end = get_current_rss_mb()
     rss_mb = max(rss_end, rss_start)
 
-    result: JSONDict = {
+    result: BenchmarkResultDict = {
         "backend": backend_name,
         "model": model_name,
         "hardware": hardware,

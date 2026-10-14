@@ -1,19 +1,33 @@
-# Copyright 2024
-"""Protocols for the SDK."""
+"""Runtime-checkable protocols for gemma-4-sql training and inference backends."""
 
 from __future__ import annotations
 
-import typing
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-if typing.TYPE_CHECKING:
-    from gemma_4_sql.type_hints import DPOConfig, ETLConfig, JSONDict, JSONValue, TrainingConfig
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import (
+        BenchmarkResultDict,
+        DataloaderResultDict,
+        DPOConfig,
+        DPOResultDict,
+        ETLConfig,
+        ExportResultDict,
+        InferenceResultDict,
+        JSONValue,
+        LogMetricsResultDict,
+        PEFTResultDict,
+        QuantizeResultDict,
+        ServeResultDict,
+        TrainingConfig,
+        TrainResultDict,
+    )
 
 
+@runtime_checkable
 class TrainingProtocol(Protocol):
     """Training backend interface."""
 
-    def train_model(self, config: TrainingConfig, **kwargs: JSONValue) -> JSONDict:
+    def train_model(self, config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
         """Train a model according to training configuration.
 
         Args:
@@ -26,7 +40,7 @@ class TrainingProtocol(Protocol):
         """
         ...
 
-    def run_dpo(self, config: DPOConfig, **kwargs: JSONValue) -> JSONDict:
+    def run_dpo(self, config: DPOConfig, **kwargs: JSONValue) -> DPOResultDict:
         """Run Direct Preference Optimization (DPO).
 
         Args:
@@ -39,7 +53,7 @@ class TrainingProtocol(Protocol):
         """
         ...
 
-    def build_dataloader(self, config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
+    def build_dataloader(self, config: ETLConfig, **kwargs: JSONValue) -> DataloaderResultDict:
         """Construct ETL dataloader pipeline.
 
         Args:
@@ -52,7 +66,7 @@ class TrainingProtocol(Protocol):
         """
         ...
 
-    def export_model(self, model_name: str, export_path: str, **kwargs: JSONValue) -> JSONDict:
+    def export_model(self, model_name: str, export_path: str, **kwargs: JSONValue) -> ExportResultDict:
         """Export model weights and architecture definition.
 
         Args:
@@ -66,7 +80,7 @@ class TrainingProtocol(Protocol):
         """
         ...
 
-    def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> JSONDict:
+    def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> LogMetricsResultDict:
         """Log training and evaluation metrics.
 
         Args:
@@ -89,7 +103,7 @@ class TrainingProtocol(Protocol):
         lora_alpha: int = 16,
         lora_dropout: float = 0.05,
         **kwargs: JSONValue,
-    ) -> JSONDict:
+    ) -> PEFTResultDict:
         """Apply Parameter-Efficient Fine-Tuning (LoRA) adapters.
 
         Args:
@@ -106,7 +120,7 @@ class TrainingProtocol(Protocol):
         """
         ...
 
-    def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> JSONDict:
+    def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> QuantizeResultDict:
         """Quantize model weights for reduced memory footprint.
 
         Args:
@@ -121,6 +135,7 @@ class TrainingProtocol(Protocol):
         ...
 
 
+@runtime_checkable
 class InferenceProtocol(Protocol):
     """Inference backend interface."""
 
@@ -131,7 +146,7 @@ class InferenceProtocol(Protocol):
         beam_width: int = 3,
         max_length: int = 50,
         **kwargs: JSONValue,
-    ) -> JSONDict:
+    ) -> InferenceResultDict:
         """Generate a SQL query from natural language input.
 
         Args:
@@ -153,7 +168,7 @@ class InferenceProtocol(Protocol):
         port: int = 8000,
         max_batch_size: int = 32,
         **kwargs: JSONValue,
-    ) -> JSONDict:
+    ) -> ServeResultDict:
         """Serve model via continuous batching API endpoint.
 
         Args:
@@ -173,8 +188,8 @@ class InferenceProtocol(Protocol):
         model_name: str,
         hardware: str = "tpu-v5p",
         batch_size: int = 32,
-        **kwargs: typing.Any,
-    ) -> JSONDict:
+        **kwargs: object,
+    ) -> BenchmarkResultDict:
         """Run latency, throughput, and memory benchmarking.
 
         Args:
@@ -190,8 +205,9 @@ class InferenceProtocol(Protocol):
         ...
 
 
+@runtime_checkable
 class BackendProtocol(TrainingProtocol, InferenceProtocol, Protocol):
-    """Unified Backend protocol interface combining training and inference capabilities."""
+    """Unified runtime-checkable Backend protocol combining training and inference capabilities."""
 
 
 __all__ = ["BackendProtocol", "InferenceProtocol", "TrainingProtocol"]

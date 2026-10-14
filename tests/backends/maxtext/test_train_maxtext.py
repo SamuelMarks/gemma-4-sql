@@ -1,6 +1,5 @@
 """Tests for maxtext train."""
 
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -8,18 +7,6 @@ import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 from gemma_4_sql.type_hints import TrainingConfig
-
-
-def test_maxtext_train_imports():
-    """Test maxtext train imports fallback."""
-    import importlib
-
-    with patch.dict(sys.modules, {"jax": None, "maxtext": None}):
-        import gemma_4_sql.backends.maxtext.train as train_module
-
-        importlib.reload(train_module)
-        assert train_module.jax is None
-    importlib.reload(train_module)
 
 
 def test_maxtext_train_loss_fn():
@@ -60,10 +47,10 @@ def test_get_train_step_fn():
     train_module.optax.apply_updates = MagicMock(return_value="new_params")
 
     def mock_value_and_grad(fn):
-        """Docstring for mock_value_and_grad."""
+        """Verify behavior of mock_value_and_grad."""
 
         def wrapper(p, b):
-            """Docstring for wrapper."""
+            """Verify behavior of wrapper."""
             fn(p, b)  # Trigger wrapper
             return ("loss", "grads")
 
@@ -101,7 +88,7 @@ def test_run_training_epochs():
     state.dataloader = [1, 2]
 
     def train_step(params, opt_state, batch):
-        """Docstring for train_step."""
+        """Verify behavior of train_step."""
         return "new_params", "new_opt_state", MagicMock(item=lambda: 0.5)
 
     state.train_step = train_step
@@ -111,7 +98,7 @@ def test_run_training_epochs():
 
         # Test process_batch internally
         def capture_fn(epochs, dataloader, process_batch):
-            """Docstring for capture_fn."""
+            """Verify behavior of capture_fn."""
             return process_batch({"batch": 1})
 
         mock_run.side_effect = capture_fn
@@ -265,47 +252,6 @@ def test_train_model():
     train_module.jax = None
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
         train_module.train_model(config)
-
-
-def test_maxtext_train_successful_imports():
-    """Test maxtext train successful imports."""
-    import importlib
-    import sys
-    from unittest.mock import MagicMock
-
-    mock_jax = MagicMock()
-    mock_jnp = MagicMock()
-    mock_maxtext = MagicMock()
-    mock_gemma4 = MagicMock()
-    mock_train = MagicMock()
-    mock_maxtext.models = MagicMock()
-    mock_maxtext.models.gemma4 = mock_gemma4
-    mock_maxtext.train = mock_train
-    mock_optax = MagicMock()
-    mock_ocp = MagicMock()
-
-    with patch.dict(
-        sys.modules,
-        {
-            "jax": mock_jax,
-            "jax.numpy": mock_jnp,
-            "maxtext": mock_maxtext,
-            "maxtext.models": mock_maxtext.models,
-            "maxtext.models.gemma4": mock_gemma4,
-            "maxtext.train": mock_train,
-            "optax": mock_optax,
-            "orbax": MagicMock(),
-            "orbax.checkpoint": mock_ocp,
-        },
-    ):
-        import gemma_4_sql.backends.maxtext.train as train_module
-
-        importlib.reload(train_module)
-        assert train_module.jax is mock_jax
-        assert train_module.jnp is not None
-        assert train_module.optax is mock_optax
-        assert train_module.ocp is not None
-    importlib.reload(train_module)
 
 
 def test_execute_train_no_checkpoint_dir():

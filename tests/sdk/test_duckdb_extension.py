@@ -37,14 +37,16 @@ def test_embed_in_duckdb_success() -> None:
         kwargs = mock_agent.call_args.kwargs
         assert "CREATE TABLE users" in kwargs["context"].ddl
 
+        # Second invocation reuses cached DDL without re-extracting
+        res_str2 = conn.execute("SELECT ask_gemma('Get users again')").fetchone()[0]
+        assert json.loads(res_str2)["success"] is True
 
-def test_embed_in_duckdb_missing(missing_dependency_context: Any) -> None:  # noqa: F821
-    """Test when duckdb is missing."""
-    with missing_dependency_context(["duckdb"]):
-        import importlib
 
-        import gemma_4_sql.sdk.duckdb_extension as de
+def test_embed_in_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `embed_in_duckdb` raises `DependencyMissingError` (an `ImportError` subclass) when `duckdb` is None."""
+    import gemma_4_sql.sdk.duckdb_extension as de
+    from gemma_4_sql.exceptions import DependencyMissingError
 
-        importlib.reload(de)
-        with pytest.raises(ImportError, match="duckdb is required"):
-            de.embed_in_duckdb(MagicMock(), "model", "jax")
+    monkeypatch.setattr(de, "duckdb", None)
+    with pytest.raises(DependencyMissingError, match="duckdb is required"):
+        de.embed_in_duckdb(MagicMock(), "model", "jax")

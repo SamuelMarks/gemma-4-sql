@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 import math
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
@@ -15,24 +16,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-try:
-    import mlx.core as _mx
-    import mlx.nn as _nn
+mx = optional_import("mlx.core")
+nn = optional_import("mlx.nn")
+load = optional_attr("mlx_lm", "load")
 
-    mx: types.ModuleType | None = _mx
-    nn: types.ModuleType | None = _nn
-except (ImportError, AttributeError):
-    mx = None
-    nn = None
-
-try:
-    from mlx_lm import load as _load
-
-    load: types.ModuleType | None = _load
-except (ImportError, AttributeError):
-    load = None
-
-_ModuleBase = nn.Module if nn is not None else object
+_ModuleBase: Any = nn.Module if nn is not None else object
 
 
 class MLXLoRALinear(_ModuleBase):
@@ -284,8 +272,6 @@ def inject_lora(
 
     """
     if nn is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MLX dependencies are missing.")
 
     if hasattr(model, "freeze"):
@@ -345,12 +331,10 @@ def save_adapter_weights(model: ModelType, save_path: str | Path) -> None:
 
     """
     if mx is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MLX dependencies are missing.")
     import mlx.utils as _mlx_utils
 
-    tree_flatten = getattr(_mlx_utils, "tree_flatten", None)
+    tree_flatten: Any = getattr(_mlx_utils, "tree_flatten", lambda x: x)
 
     path = Path(save_path)
     if path.is_dir() or path.suffix != ".safetensors":
@@ -374,8 +358,6 @@ def load_adapter_weights(model: ModelType, load_path: str | Path) -> None:
 
     """
     if mx is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MLX dependencies are missing.")
     path = Path(load_path)
     if not path.exists():
@@ -410,8 +392,6 @@ def apply_lora(
 
     """
     if nn is None or load is None or mx is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MLX dependencies are missing.")
     status = "completed"
     try:
@@ -429,7 +409,7 @@ def apply_lora(
         )
 
         if "output_dir" in kwargs and kwargs["output_dir"] is not None:
-            save_adapter_weights(cast(Any, model), str(kwargs["output_dir"]))
+            save_adapter_weights(model, str(kwargs["output_dir"]))
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to apply LoRA: ")
         status = f"failed: {e!s}"

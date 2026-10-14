@@ -9,28 +9,21 @@ Supports:
 from __future__ import annotations
 
 import logging
-import types
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import QuantizeResultDict
 
 logger = logging.getLogger(__name__)
 
-try:
-    import mlx.core as _mlx
-    import numpy as _np
-
-    mlx: types.ModuleType | None = _mlx
-    np: types.ModuleType | None = _np
-except (ImportError, AttributeError):
-    mlx = None
-    np = None
+mlx = optional_import("mlx.core")
+np = optional_import("numpy")
 
 
 def calibrate_awq_scales(
@@ -146,7 +139,7 @@ def calibrate_gptq_weights(
     return w
 
 
-def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> JSONDict:
+def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> QuantizeResultDict:
     """Quantize an MLX model.
 
     Supports native MLX 8-bit and 4-bit weight-only quantization, as well as
@@ -188,16 +181,18 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
         bits = 4 if method in {"int4", "awq", "gptq"} else 8
 
         try:
+            import mlx.nn as _mlx_nn
             import mlx_lm
-            from mlx import nn
+
+            nn: Any = _mlx_nn
         except ImportError as exc:
             raise DependencyMissingError(f"mlx and mlx_lm are required for MLX quantization: {exc!s}") from exc
 
-        model: ModelType = kwargs.get("model")  # type: ignore # Justified: Dynamic backend protocol typing
+        model: ModelType | None = kwargs.get("model")  # type: ignore # Justified: Dynamic backend protocol typing
         if model is None:
             try:
-                loaded = mlx_lm.load(model_name)
-                model = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
+                loaded: Any = mlx_lm.load(model_name)
+                model = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
             except Exception as exc:
                 logger.warning("mlx_lm.load failed for model '%s': %s", model_name, exc)
                 raise RuntimeError(f"MLX quantization failed: {exc!s}") from exc

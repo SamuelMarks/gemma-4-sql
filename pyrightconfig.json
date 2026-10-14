@@ -1,4 +1,39 @@
 {
   "typeCheckingMode": "strict",
-  "include": ["src/gemma_4_sql"]
+  "venvPath": ".tox",
+  "venv": "jax",
+  "include": ["src/gemma_4_sql", "tests"],
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+  "reportMissingTypeStubs": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownLambdaType": "none",
+  "reportMissingParameterType": "none",
+  "reportPrivateUsage": "none",
+  "reportUntypedBaseClass": "none",
+  "reportUntypedFunctionDecorator": "none",
+  "executionEnvironments": [
+    {
+      "root": "src/gemma_4_sql"
+    },
+    {
+      "root": "tests",
+      "reportArgumentType": "none",
+      "reportAttributeAccessIssue": "none",
+      "reportCallIssue": "none",
+      "reportUnusedVariable": "none",
+      "reportTypedDictNotRequiredAccess": "none",
+      "reportMissingTypeArgument": "none",
+      "reportIndexIssue": "none",
+      "reportRedeclaration": "none",
+      "reportOptionalMemberAccess": "none",
+      "reportOperatorIssue": "none",
+      "reportIncompatibleMethodOverride": "none",
+      "reportOptionalSubscript": "none",
+      "reportFunctionMemberAccess": "none"
+    }
+  ]
 }

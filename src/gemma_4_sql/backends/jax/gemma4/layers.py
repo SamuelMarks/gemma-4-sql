@@ -1,4 +1,4 @@
-"""Core functionality for the layers module."""
+"""Foundational Flax NNX layers (RMSNorm, SwiGLU MLP, ClippableLinear) for Gemma 4."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ from .config import ShardConfig
 
 
 def make_linear(*args: Any, **kwargs: Any) -> Any:
-    """Docstring for make_linear.
+    """Construct an `nnx.Linear` layer while stripping sharding metadata kwargs.
 
     Args:
-        *args: Positional arguments passed directly to the underlying flax.nnx layer.
-        **kwargs: Keyword arguments passed to the underlying flax.nnx layer (e.g. rngs, dtype).
+        *args: Positional arguments forwarded to `nnx.Linear`.
+        **kwargs: Keyword arguments forwarded to `nnx.Linear`.
 
     Returns:
-        The execution result.
+        Configured `nnx.Linear` instance.
 
     """
     kwargs.pop("kernel_metadata", None)
@@ -29,14 +29,14 @@ def make_linear(*args: Any, **kwargs: Any) -> Any:
 
 
 def make_embed(*args: Any, **kwargs: Any) -> Any:
-    """Docstring for make_embed.
+    """Construct an `nnx.Embed` layer while stripping sharding metadata kwargs.
 
     Args:
-        *args: Positional arguments passed directly to the underlying flax.nnx layer.
-        **kwargs: Keyword arguments passed to the underlying flax.nnx layer (e.g. rngs, dtype).
+        *args: Positional arguments forwarded to `nnx.Embed`.
+        **kwargs: Keyword arguments forwarded to `nnx.Embed`.
 
     Returns:
-        The execution result.
+        Configured `nnx.Embed` instance.
 
     """
     kwargs.pop("embedding_metadata", None)
@@ -73,7 +73,7 @@ class Gemma4RMSNorm(nnx.Module):
         """
         self.eps = eps
         self.with_scale = with_scale
-        self.dtype = kwargs.get("dtype", jnp.float32)
+        self.dtype: Any = kwargs.get("dtype", jnp.float32)
         if self.with_scale:
             self.scale = nnx.Param(jax.nn.initializers.zeros(rngs.params(), (dim,), dtype=self.dtype))
         else:
@@ -83,8 +83,12 @@ class Gemma4RMSNorm(nnx.Module):
     def __call__(self, x: Array, original_x: Array | None = None) -> Array:
         """Apply RMS normalization.
 
+        Args:
+            x: Input array to normalize.
+            original_x: Optional unnormalized reference array.
+
         Returns:
-            object: The resulting output from the operation.
+            RMS-normalized array cast to `self.dtype`.
 
         """
         xf32 = x.astype(jnp.float32)
@@ -118,7 +122,15 @@ class Gemma4ClippableLinear(nnx.Module):
     """Linear layer with optional input/output clipping."""
 
     def __init__(self, in_features: int, features: int, *, use_clipped_linears: bool = True, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize linear projection with optional activation range clipping.
+
+        Args:
+            in_features: Input feature dimension.
+            features: Output feature dimension.
+            use_clipped_linears: Whether to track and apply min/max clipping bounds.
+            rngs: Flax NNX random number generators.
+
+        """
         self.use_clipped_linears = use_clipped_linears
         self.linear = nnx.Linear(in_features, features, use_bias=False, rngs=rngs)
         if self.use_clipped_linears:
@@ -130,8 +142,11 @@ class Gemma4ClippableLinear(nnx.Module):
     def __call__(self, x: jax.Array) -> jax.Array:
         """Apply a linear transformation, conditionally clipping the output.
 
+        Args:
+            x: Input feature tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Linearly projected (and optionally clipped) tensor.
 
         """
         if self.use_clipped_linears:
@@ -161,14 +176,18 @@ class Gemma4MLP(nnx.Module):
         self.gate_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.up_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
         self.down_proj = make_linear(intermediate_size, hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.dtype = kwargs.get("dtype", jnp.float32)
+        self.dtype: Any = kwargs.get("dtype", jnp.float32)
 
     @jax.named_scope("gemma4_mlp")
     def __call__(self, x: Array, original_x: Array | None = None) -> Array:
         """Apply SwiGLU MLP transformation.
 
+        Args:
+            x: Input hidden state tensor.
+            original_x: Optional unnormalized input tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Projected hidden state tensor.
 
         """
         gate = self.gate_proj(x)

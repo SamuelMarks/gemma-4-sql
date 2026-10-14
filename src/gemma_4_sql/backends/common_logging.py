@@ -7,8 +7,21 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.lazy_loader import LazyLoader
+
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import LogMetricsResultDict
+
+
+def get_tensorboard_summary_writer() -> type | None:
+    """Resolve `tensorboardX.SummaryWriter` lazily if installed.
+
+    Returns:
+        The `SummaryWriter` class or `None` if `tensorboardX` is unavailable.
+
+    """
+    tbx = LazyLoader("tensorboardX").get_module()
+    return getattr(tbx, "SummaryWriter", None) if tbx is not None else None
 
 
 def log_metrics_wrapper(
@@ -19,7 +32,7 @@ def log_metrics_wrapper(
     summary_writer_cls: type | None,
     extra_fields: dict[str, str] | None = None,
     step_duration_s: float | None = None,
-) -> JSONDict:
+) -> LogMetricsResultDict:
     """Log metrics for a training run using TensorBoard or a structured file-based fallback.
 
     When TensorBoard is unavailable, logs are automatically appended as JSON-lines
@@ -69,7 +82,7 @@ def log_metrics_wrapper(
             f.write(f"{json.dumps(record)}\n")
         fallback_file = str(metrics_file)
 
-    result: JSONDict = {
+    result: LogMetricsResultDict = {
         "backend": backend_name,
         "step": step,
         "metrics": metrics,
@@ -83,6 +96,7 @@ def log_metrics_wrapper(
     if fallback_file is not None:
         result["fallback_file"] = fallback_file
     if extra_fields:
-        result.update(extra_fields)
+        cast_res: dict[str, Any] = result  # type: ignore[assignment]
+        cast_res.update(extra_fields)
 
     return result

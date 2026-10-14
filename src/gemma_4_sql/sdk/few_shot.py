@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.constants import DEFAULT_BACKEND
+
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import FewShotPromptResultDict, FewShotResultDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +64,11 @@ def build_few_shot_prompt(
     model_name: str,
     prompt: str,
     examples: list[dict[str, str]],
-    backend: str = "jax",
+    backend: str = DEFAULT_BACKEND,
     top_k: int | None = None,
     max_tokens: int = 2048,
     **_kwargs: JSONValue,
-) -> JSONDict:
+) -> FewShotPromptResultDict:
     """Build a dynamic few-shot prompt with optional example selection.
 
     Args:
@@ -79,7 +81,7 @@ def build_few_shot_prompt(
         **_kwargs: Optional parameters for prompt formatting.
 
     Returns:
-        A dictionary containing the results.
+        A structured `FewShotPromptResultDict` containing the formatted prompt.
 
     """
     if top_k is not None and top_k > 0:
@@ -88,11 +90,12 @@ def build_few_shot_prompt(
         active_examples = examples
 
     status = f"success_{backend}_few_shot"
-    formatted_examples = "\n".join([f"Input: {ex.get('input', '')}\nOutput: {ex.get('output', '')}" for ex in active_examples])
+    nl = chr(10)
+    formatted_examples = nl.join([f"Input: {ex.get('input', '')}{nl}Output: {ex.get('output', '')}" for ex in active_examples])
     if formatted_examples:
-        full_prompt = f"{formatted_examples}\nInput: {prompt}\nOutput: "
+        full_prompt = f"{formatted_examples}{nl}Input: {prompt}{nl}Output: "
     else:
-        full_prompt = f"Input: {prompt}\nOutput: "
+        full_prompt = f"Input: {prompt}{nl}Output: "
 
     return {
         "backend": backend,
@@ -107,11 +110,11 @@ def generate_few_shot_sql(
     model_name: str,
     prompt: str,
     examples: list[dict[str, str]],
-    backend: str = "jax",
+    backend: str = DEFAULT_BACKEND,
     top_k: int = 3,
     max_tokens: int = 2048,
     **kwargs: JSONValue,
-) -> JSONDict:
+) -> FewShotResultDict:
     """Generate SQL query using dynamic few-shot prompting and backend inference.
 
     Args:
@@ -156,10 +159,10 @@ def generate_few_shot_sql(
         "model": model_name,
         "prompt": prompt,
         "few_shot_prompt": few_shot_prompt,
-        "sql": gen_res.get("sql", ""),
-        "confidence_score": gen_res.get("confidence_score", 0.0),
-        "status": gen_res.get("status", "success"),
-        "num_examples": prompt_res.get("num_examples", 0),
+        "sql": str(gen_res.get("sql", "")),
+        "confidence_score": float(gen_res.get("confidence_score", 0.0)),
+        "status": str(gen_res.get("status", "success")),
+        "num_examples": int(prompt_res.get("num_examples", 0)),
     }
 
 

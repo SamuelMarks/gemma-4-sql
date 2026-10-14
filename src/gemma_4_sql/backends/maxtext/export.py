@@ -2,32 +2,18 @@
 
 from __future__ import annotations
 
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-    import orbax.checkpoint as _ocp
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-    ocp: types.ModuleType | None = _ocp
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-    ocp = None
-
-try:
-    import maxtext.models.gemma4 as _gemma4
-
-    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
-except (ImportError, AttributeError):
-    Gemma4Model = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+ocp = optional_import("orbax.checkpoint")
+Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
 
 
 def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDict:

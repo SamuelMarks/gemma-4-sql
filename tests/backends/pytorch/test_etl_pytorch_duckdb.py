@@ -1,4 +1,6 @@
-"""Provide module docstring."""
+"""Unit and behavioral tests for etl pytorch duckdb."""
+
+from typing import Any
 
 import pytest
 
@@ -14,7 +16,7 @@ class MockDatasets:
     """Initialize class MockDatasets."""
 
     @staticmethod
-    def load_dataset(*_args: object, **_kwargs: object) -> list[dict]:
+    def load_dataset(*_args: Any, **_kwargs: Any) -> list[dict]:
         """Initialize function load_dataset.
 
         Args:
@@ -23,8 +25,7 @@ class MockDatasets:
         split: Description of split.
 
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return [{"question": "Q1", "query": "A1"}]
@@ -42,7 +43,7 @@ class MockTorch:
     """Initialize class MockTorch."""
 
 
-def test_pytorch_etl_duckdb_missing() -> object:
+def test_pytorch_etl_duckdb_missing() -> Any:
     """Initialize function test_pytorch_etl_duckdb_missing."""
     original_duckdb = getattr(etl_pytorch, "duckdb", None)
     original_datasets = getattr(etl_pytorch, "datasets", None)

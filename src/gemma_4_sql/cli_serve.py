@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.sdk import build_few_shot_prompt, chat_turn, evaluate, generate, run_agentic_loop, serve_model
+from gemma_4_sql.sdk.agent import AgentContext
 
 if TYPE_CHECKING:
     import argparse
+
+logger = logging.getLogger(__name__)
 
 
 def evaluate_cmd(args: argparse.Namespace) -> None:
@@ -27,6 +31,7 @@ def evaluate_cmd(args: argparse.Namespace) -> None:
         backend=args.backend,
         db_path=args.db_path,
         ddl=args.ddl,
+        max_batches=getattr(args, "max_batches", 10),
         db_type=args.db_type,
         db_kwargs=db_kwargs,
         image_path=getattr(args, "image_path", None),
@@ -74,8 +79,7 @@ def agent_cmd(args: argparse.Namespace) -> None:
     db_kwargs: dict[str, Any] = {}
     if args.db_kwargs:
         db_kwargs = json.loads(args.db_kwargs)
-    agent_context_cls = __import__("gemma_4_sql.sdk.agent", fromlist=["AgentContext"]).AgentContext
-    context = agent_context_cls(
+    context = AgentContext(
         db_path=args.db_path,
         ddl=args.ddl,
         db_type=args.db_type,
@@ -124,7 +128,8 @@ def chat_cmd(args: argparse.Namespace) -> None:
     if getattr(args, "history", ""):
         try:
             history = json.loads(args.history)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            logger.warning("Invalid JSON history provided to chat_cmd: %s", exc)
             return
     res = chat_turn(
         model_name=args.model,
@@ -148,7 +153,8 @@ def few_shot_cmd(args: argparse.Namespace) -> None:
     if getattr(args, "examples", ""):
         try:
             examples = json.loads(args.examples)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            logger.warning("Invalid JSON examples provided to few_shot_cmd: %s", exc)
             return
     res = build_few_shot_prompt(
         model_name=args.model,

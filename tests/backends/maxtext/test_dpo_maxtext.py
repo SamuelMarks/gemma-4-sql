@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for dpo maxtext."""
 
 from unittest.mock import MagicMock, patch
 
@@ -11,7 +11,7 @@ from gemma_4_sql.type_hints import DPOConfig, TrainerState
 
 @pytest.fixture
 def mock_dpo_deps():
-    """Docstring for mock_dpo_deps."""
+    """Verify behavior of mock_dpo_deps."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_optax = MagicMock()
@@ -22,7 +22,7 @@ def mock_dpo_deps():
 
 
 def test_dpo_loss():
-    """Docstring for test_dpo_loss."""
+    """Verify behavior of test_dpo_loss."""
     with patch("gemma_4_sql.backends.maxtext.dpo.jax_dpo_loss", return_value=(1, 2, 3)) as mock_jax_dpo:
         res = dpo_loss(1, 2, 3, 4, 0.5)
         assert res == (1, 2, 3)
@@ -30,7 +30,7 @@ def test_dpo_loss():
 
 
 def test_compute_logps(mock_dpo_deps):
-    """Docstring for test_compute_logps."""
+    """Verify behavior of test_compute_logps."""
     _, mock_jnp, _, _ = mock_dpo_deps
     model = MagicMock()
     model.apply.return_value = 5
@@ -44,7 +44,7 @@ def test_compute_logps(mock_dpo_deps):
 
 
 def test_dpo_step_loss():
-    """Docstring for test_dpo_step_loss."""
+    """Verify behavior of test_dpo_step_loss."""
     with patch("gemma_4_sql.backends.maxtext.dpo._compute_logps", side_effect=[1, 2, 3, 4]) as mock_comp, patch("gemma_4_sql.backends.maxtext.dpo.dpo_loss", return_value=(10, 0, 0)) as mock_loss:
         batch = {"chosen_inputs": "ci", "chosen_labels": "cl", "rejected_inputs": "ri", "rejected_labels": "rl"}
         res = _dpo_step_loss("pm", "pp", "rm", "rp", batch, 0.1)
@@ -57,7 +57,7 @@ def test_dpo_step_loss():
 
 
 def test_get_train_step_fn(mock_dpo_deps):
-    """Docstring for test_get_train_step_fn."""
+    """Verify behavior of test_get_train_step_fn."""
     mock_jax, _, mock_optax, _ = mock_dpo_deps
 
     mock_jax.value_and_grad.return_value = lambda *args: (0.5, "grads")
@@ -79,7 +79,7 @@ def test_get_train_step_fn(mock_dpo_deps):
 
 
 def test_get_train_step_fn_no_jit():
-    """Docstring for test_get_train_step_fn_no_jit."""
+    """Verify behavior of test_get_train_step_fn_no_jit."""
     mock_jax = MagicMock()
     mock_jax.value_and_grad.return_value = lambda *args: (0.5, "grads")
     del mock_jax.jit
@@ -96,17 +96,17 @@ def test_get_train_step_fn_no_jit():
 
 
 def test_run_training_epochs():
-    """Docstring for test_run_training_epochs."""
+    """Verify behavior of test_run_training_epochs."""
 
     class MockLoss:
-        """Docstring for MockLoss."""
+        """Verify behavior of MockLoss."""
 
         def item(self):
-            """Docstring for item."""
+            """Verify behavior of item."""
             return 0.5
 
     def mock_train_step(pp, rp, os, b):
-        """Docstring for mock_train_step."""
+        """Verify behavior of mock_train_step."""
         return pp, os, MockLoss()
 
     state = TrainerState(dataloader=[1, 2], epochs=1, train_step=mock_train_step, policy_params="pp", ref_params="rp", opt_state="os")
@@ -124,10 +124,10 @@ def test_run_training_epochs():
 
 
 def test_run_training_epochs_no_item():
-    """Docstring for test_run_training_epochs_no_item."""
+    """Verify behavior of test_run_training_epochs_no_item."""
 
     def mock_train_step(pp, rp, os, b):
-        """Docstring for mock_train_step."""
+        """Verify behavior of mock_train_step."""
         return pp, os, 0.5
 
     state = TrainerState(dataloader=[1, 2], epochs=1, train_step=mock_train_step, policy_params="pp", ref_params="rp", opt_state="os")
@@ -140,7 +140,7 @@ def test_run_training_epochs_no_item():
 
 
 def test_execute_dpo(mock_dpo_deps):
-    """Docstring for test_execute_dpo."""
+    """Verify behavior of test_execute_dpo."""
     mock_jax, _, _, mock_Gemma4Model = mock_dpo_deps
 
     mock_jax.distributed.initialize.return_value = None
@@ -156,7 +156,7 @@ def test_execute_dpo(mock_dpo_deps):
 
 
 def test_execute_dpo_init_error(mock_dpo_deps):
-    """Docstring for test_execute_dpo_init_error."""
+    """Verify behavior of test_execute_dpo_init_error."""
     mock_jax, _, _, mock_Gemma4Model = mock_dpo_deps
     mock_jax.distributed.initialize.side_effect = RuntimeError("init fail")
 
@@ -170,7 +170,7 @@ def test_execute_dpo_init_error(mock_dpo_deps):
 
 
 def test_execute_dpo_invalid_loader(mock_dpo_deps):
-    """Docstring for test_execute_dpo_invalid_loader."""
+    """Verify behavior of test_execute_dpo_invalid_loader."""
     _mock_jax, _, _, mock_Gemma4Model = mock_dpo_deps
     mock_Gemma4Model.side_effect = [MagicMock(), MagicMock()]
 
@@ -179,7 +179,7 @@ def test_execute_dpo_invalid_loader(mock_dpo_deps):
 
 
 def test_run_dpo_success():
-    """Docstring for test_run_dpo_success."""
+    """Verify behavior of test_run_dpo_success."""
     config = DPOConfig(model_name="model", dataset="dataset")
 
     with (
@@ -195,14 +195,14 @@ def test_run_dpo_success():
 
 
 def test_run_dpo_missing_deps():
-    """Docstring for test_run_dpo_missing_deps."""
+    """Verify behavior of test_run_dpo_missing_deps."""
     config = DPOConfig(model_name="model", dataset="dataset")
     with patch("gemma_4_sql.backends.maxtext.dpo.jax", None), pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
         run_dpo(config)
 
 
 def test_run_dpo_execution_error():
-    """Docstring for test_run_dpo_execution_error."""
+    """Verify behavior of test_run_dpo_execution_error."""
     config = DPOConfig(model_name="model", dataset="dataset")
 
     with (
@@ -217,7 +217,7 @@ def test_run_dpo_execution_error():
 
 
 def test_get_train_step_fn_wrapper_coverage():
-    """Docstring for test_get_train_step_fn_wrapper_coverage."""
+    """Verify behavior of test_get_train_step_fn_wrapper_coverage."""
     from unittest.mock import MagicMock, patch
 
     from gemma_4_sql.backends.maxtext.dpo import _get_train_step_fn
@@ -230,11 +230,11 @@ def test_get_train_step_fn_wrapper_coverage():
 
     # We want value_and_grad to return a function that will also invoke the wrapper
     def mock_vag(fn):
-        """Docstring for mock_vag."""
+        """Verify behavior of mock_vag."""
 
         def inner(*args, **kwargs):
             # Call the wrapper to hit coverage
-            """Docstring for inner."""
+            """Verify behavior of inner."""
             fn(args[0], args[1], args[2])
             return (0.5, "grads")
 

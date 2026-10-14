@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for etl jax."""
 
 import importlib
 import sys
@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_dependencies():
-    """Docstring for mock_dependencies."""
+    """Verify behavior of mock_dependencies."""
     mock_datasets = MagicMock()
     mock_grain = MagicMock()
 
@@ -40,38 +40,42 @@ def mock_dependencies():
 
 
 def reload_module():
-    """Docstring for reload_module."""
+    """Verify behavior of reload_module."""
     import gemma_4_sql.backends.jax.etl as jax_etl
 
     importlib.reload(jax_etl)
+    jax_etl.datasets = sys.modules.get("datasets")
+    jax_etl.grain = sys.modules.get("grain.python")
     return jax_etl
 
 
-def test_missing_dependencies():
-    """Docstring for test_missing_dependencies."""
-    with patch.dict(sys.modules, {"datasets": None, "grain.python": None, "grain": None}):
-        jax_etl = reload_module()
+def test_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify behavior of test_missing_dependencies."""
+    import gemma_4_sql.backends.jax.etl as jax_etl
 
-        with pytest.raises(Exception, match="Datasets dependency is missing."):
-            jax_etl._load_hf_or_duckdb("ds", "split", None, None)
+    monkeypatch.setattr(jax_etl, "datasets", None)
+    monkeypatch.setattr(jax_etl, "grain", None)
 
-        with pytest.raises(Exception, match="Grain dependency is missing."):
-            jax_etl._get_sampler(10, False)
+    with pytest.raises(Exception, match="Datasets dependency is missing."):
+        jax_etl._load_hf_or_duckdb("ds", "split", None, None)
 
-        config = MagicMock()
-        config.dataset_name = "test"
-        config.split = "train"
-        config.batch_size = 1
-        config.distributed = False
-        config.tokenizer_name = "t"
-        config.duckdb_path = None
-        config.duckdb_table = None
-        with pytest.raises(Exception, match="Missing grain or datasets. Cannot load"):
-            jax_etl.build_dataloader(config)
+    with pytest.raises(Exception, match="Grain dependency is missing."):
+        jax_etl._get_sampler(10, False)
+
+    config = MagicMock()
+    config.dataset_name = "test"
+    config.split = "train"
+    config.batch_size = 1
+    config.distributed = False
+    config.tokenizer_name = "t"
+    config.duckdb_path = None
+    config.duckdb_table = None
+    with pytest.raises(Exception, match="Missing grain or datasets. Cannot load"):
+        jax_etl.build_dataloader(config)
 
 
 def test_load_hf_or_duckdb():
-    """Docstring for test_load_hf_or_duckdb."""
+    """Verify behavior of test_load_hf_or_duckdb."""
     jax_etl = reload_module()
 
     with patch("gemma_4_sql.backends.jax.etl.load_duckdb_dataset") as mock_duckdb:
@@ -85,7 +89,7 @@ def test_load_hf_or_duckdb():
 
 
 def test_get_sampler():
-    """Docstring for test_get_sampler."""
+    """Verify behavior of test_get_sampler."""
     jax_etl = reload_module()
 
     sampler = jax_etl._get_sampler(10, True)
@@ -99,7 +103,7 @@ def test_get_sampler():
 
 
 def test_get_sampler_missing_sharding():
-    """Docstring for test_get_sampler_missing_sharding."""
+    """Verify behavior of test_get_sampler_missing_sharding."""
     jax_etl = reload_module()
 
     del jax_etl.grain.JAXDistributedSharding
@@ -110,7 +114,7 @@ def test_get_sampler_missing_sharding():
 
 
 def test_build_dataloader():
-    """Docstring for test_build_dataloader."""
+    """Verify behavior of test_build_dataloader."""
     jax_etl = reload_module()
 
     config = MagicMock()

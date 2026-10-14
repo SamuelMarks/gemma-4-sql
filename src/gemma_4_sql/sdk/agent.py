@@ -3,22 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.registry import get_backend
 
 MAX_ERR_LEN = 500
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from gemma_4_sql.sdk.protocols import BackendProtocol
-    from gemma_4_sql.type_hints import JSONDict, JSONPrimitive, JSONValue
+    from gemma_4_sql.type_hints import AgentAttemptDict, AgentLoopResultDict, JSONPrimitive, JSONValue
 
 
 @dataclass
 class AgentContext:
-    """Context for the agentic loop.
+    """Context for the agentic self-correction loop.
 
     Attributes:
         db_path: Path to live or in-memory SQLite/DuckDB database.
@@ -38,10 +42,46 @@ class AgentContext:
     db_type: str = "sqlite"
     max_retries: int = 3
     min_confidence: float = 0.0
-    image_path: str | Any | None = None
-    audio_path: str | Any | None = None
+    image_path: str | Path | None = None
+    audio_path: str | Path | None = None
     modality: str = "text"
     multimodal_context: dict[str, Any] | None = None
+
+
+def _extract_sql_from_response(raw_sql: str) -> str:
+    """Extract clean SQL query string from a raw model response or Markdown code fence.
+
+    Args:
+        raw_sql: Raw string output from the model.
+
+    Returns:
+        Cleaned SQL query string.
+
+    """
+    text = raw_sql.strip()
+    fence_match = re.search(r"```(?:sql)?\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    if fence_match:
+        return fence_match.group(1).strip()
+    return text
+
+
+def _classify_error_hint(error_msg: str | None) -> str:
+    """Classify a database execution error message into an actionable diagnostic hint.
+
+    Args:
+        error_msg: Database execution error string or None.
+
+    Returns:
+        Diagnostic hint suffix string (or empty string if no specific hint applies).
+
+    """
+    if not error_msg:
+        return ""
+    if re.search(r"(?:no such column|column .* does not exist)", error_msg, re.IGNORECASE):
+        return " [Hint: check valid column names]"
+    if re.search(r"(?:no such table|relation .* does not exist)", error_msg, re.IGNORECASE):
+        return " [Hint: check available table names]"
+    return ""
 
 
 async def _process_single_prompt(
@@ -52,7 +92,7 @@ async def _process_single_prompt(
     engine: LiveDatabaseEngine,
     context: AgentContext,
     **gen_kwargs: JSONValue,
-) -> JSONDict:
+) -> AgentLoopResultDict:
     """Execute self-correction loop preserving multimodal contextual embeddings across turns.
 
     Args:
@@ -65,7 +105,7 @@ async def _process_single_prompt(
         **gen_kwargs: Generation options.
 
     Returns:
-        Result dictionary containing final_sql, history, and status.
+        Result dictionary containing `final_sql`, `history`, and `status`.
 
     """
     if context.image_path or context.audio_path:
@@ -85,7 +125,7 @@ async def _process_single_prompt(
     success = False
     final_sql = ""
     final_results: list[tuple[JSONPrimitive, ...]] = []
-    history: list[JSONDict] = []
+    history: list[AgentAttemptDict] = []
     while attempts < context.max_retries:
         attempts += 1
         b_width = int(str(gen_kwargs.get("beam_width", 3)))
@@ -104,11 +144,18 @@ async def _process_single_prompt(
             other_kwargs["multimodal_context"] = context.multimodal_context
 
         gen_res = backend_impl.generate_sql(model_name, current_prompt, beam_width=b_width, max_length=m_len, **other_kwargs)
-        sql = str(gen_res.get("sql", ""))
+        sql = _extract_sql_from_response(str(gen_res.get("sql", "")))
         confidence_score = float(str(gen_res.get("confidence_score", 1.0)))
         if context.min_confidence and confidence_score < context.min_confidence:
-            history.append({"attempt": attempts, "prompt": current_prompt, "sql": sql, "success": False, "error": f"Confidence score {confidence_score:.2f} below threshold {context.min_confidence}"})
-            current_prompt = f"{base_prompt}\nPrevious attempt was rejected due to low confidence ({confidence_score:.2f}). Please provide a more certain SQL query."
+            history.append({
+                "attempt": attempts,
+                "prompt": current_prompt,
+                "sql": sql,
+                "success": False,
+                "error": f"Confidence score {confidence_score:.2f} below threshold {context.min_confidence}",
+            })
+            current_prompt = f"""{base_prompt}
+Previous attempt was rejected due to low confidence ({confidence_score:.2f}). Please provide a more certain SQL query."""
             final_sql = sql
             continue
         (is_success, query_results, error_msg) = await engine.execute_with_feedback_async(sql)
@@ -120,14 +167,10 @@ async def _process_single_prompt(
             final_results = query_results
             break
 
-        hint = ""
-        if error_msg:
-            if re.search(r"(?:no such column|column .* does not exist)", error_msg, re.IGNORECASE):
-                hint = " [Hint: check valid column names]"
-            if not hint and re.search(r"(?:no such table|relation .* does not exist)", error_msg, re.IGNORECASE):
-                hint = " [Hint: check available table names]"
-
-        current_prompt = f"{base_prompt}\nPrevious attempt failed with error: {error_msg}{hint}\nPlease fix the SQL query."
+        hint = _classify_error_hint(error_msg)
+        current_prompt = f"""{base_prompt}
+Previous attempt failed with error: {error_msg}{hint}
+Please fix the SQL query."""
         final_sql = sql
     return {
         "backend": backend_name,
@@ -142,18 +185,24 @@ async def _process_single_prompt(
     }
 
 
-def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "jax", context: AgentContext | None = None, **kwargs: JSONValue) -> JSONDict | list[JSONDict]:
-    """Run an agentic self-correction loop.
+async def run_agentic_loop_async(
+    model_name: str,
+    prompt: str | list[str],
+    backend: str = DEFAULT_BACKEND,
+    context: AgentContext | None = None,
+    **kwargs: JSONValue,
+) -> AgentLoopResultDict | list[AgentLoopResultDict]:
+    """Asynchronously run an agentic self-correction loop.
 
     Args:
         model_name: The name of the target model.
-        prompt: The input text prompt.
+        prompt: Single natural language prompt or list of prompts.
         backend: The backend framework to use.
-        context: The agent context for state tracking across execution iterations.
-        **kwargs: Advanced generation parameters (e.g., temperature, top_p, show_confidence).
+        context: AgentContext for state tracking across execution iterations.
+        **kwargs: Advanced generation parameters (e.g., `temperature`, `top_p`, `db_kwargs`).
 
     Returns:
-            A list of results.
+        A single result dictionary or list of result dictionaries matching `prompt`.
 
     """
     if context is None:
@@ -161,36 +210,55 @@ def run_agentic_loop(model_name: str, prompt: str | list[str], backend: str = "j
     db_kwargs = kwargs.get("db_kwargs")
     gen_kwargs = {k: v for k, v in kwargs.items() if k != "db_kwargs"}
     engine = LiveDatabaseEngine(db_path=context.db_path, ddl=context.ddl, db_type=context.db_type, db_kwargs=db_kwargs)
-
     backend_impl = get_backend(backend)
     prompts = prompt if isinstance(prompt, list) else [prompt]
-
-    async def _run_all() -> list[JSONDict]:
-        """Execute logic.
-
-        Returns:
-            object: The resulting output from the operation.
-
-        """
-        tasks = [_process_single_prompt(backend, backend_impl, model_name, p, engine, context, **gen_kwargs) for p in prompts]
-        return await asyncio.gather(*tasks)
-
     try:
-        try:
-            running_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            running_loop = None
-
-        if running_loop is not None and running_loop.is_running():
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                results = executor.submit(asyncio.run, _run_all()).result()
-        else:
-            results = asyncio.run(_run_all())
+        tasks = [_process_single_prompt(backend, backend_impl, model_name, p, engine, context, **gen_kwargs) for p in prompts]
+        results = list(await asyncio.gather(*tasks))
     finally:
         engine.close()
     return results if isinstance(prompt, list) else results[0]
 
 
-__all__ = ["MAX_ERR_LEN", "AgentContext", "run_agentic_loop"]
+def run_agentic_loop(
+    model_name: str,
+    prompt: str | list[str],
+    backend: str = DEFAULT_BACKEND,
+    context: AgentContext | None = None,
+    **kwargs: JSONValue,
+) -> AgentLoopResultDict | list[AgentLoopResultDict]:
+    """Run an agentic self-correction loop synchronously.
+
+    Args:
+        model_name: The name of the target model.
+        prompt: The input text prompt or list of prompts.
+        backend: The backend framework to use.
+        context: The agent context for state tracking across execution iterations.
+        **kwargs: Advanced generation parameters (e.g., `temperature`, `top_p`, `show_confidence`).
+
+    Returns:
+        A single result dictionary or list of result dictionaries.
+
+    """
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is not None and running_loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(
+                asyncio.run,
+                run_agentic_loop_async(model_name, prompt, backend=backend, context=context, **kwargs),
+            ).result()
+    return asyncio.run(run_agentic_loop_async(model_name, prompt, backend=backend, context=context, **kwargs))
+
+
+__all__ = [
+    "MAX_ERR_LEN",
+    "AgentContext",
+    "_classify_error_hint",
+    "_extract_sql_from_response",
+    "run_agentic_loop",
+    "run_agentic_loop_async",
+]

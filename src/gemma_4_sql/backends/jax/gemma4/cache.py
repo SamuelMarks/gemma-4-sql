@@ -29,12 +29,12 @@ class LayerCache(nnx.Module):
     """
 
     def __init__(self, cache_shape: tuple[int, int, int, int], dtype: jnp.dtype[Any], _shd: PartitionSpec | None = None) -> None:
-        """Docstring for __init__.
+        """Initialize zero-filled key/value cache buffers for a single decoder layer.
 
         Args:
-            cache_shape: A sequence of cache shape.
-            dtype: The dtype.
-            _shd: The  shd.
+            cache_shape: 4-tuple `(batch_size, cache_size, num_kv_heads, head_dim)`.
+            dtype: Floating-point data type for cached keys and values.
+            _shd: Optional sharding partition specification.
 
         """
         self.k_cache = nnx.Cache(jnp.zeros(cache_shape, dtype=dtype))

@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+import argparse
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.cli_db import db_execute_cmd, embed_duckdb_cmd
 
+if TYPE_CHECKING:
+    SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
+else:
+    SubParsersType = argparse._SubParsersAction
 
-def add_db_parsers(subparsers: Any) -> None:
+
+def add_db_parsers(subparsers: SubParsersType) -> None:
     """Register database query execution and DuckDB embedding subparsers.
 
     Args:

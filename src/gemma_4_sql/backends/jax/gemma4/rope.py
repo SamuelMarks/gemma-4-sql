@@ -1,4 +1,4 @@
-"""Core functionality for the rope module."""
+"""Rotary Position Embedding (RoPE) implementation for Gemma 4 in JAX."""
 
 from __future__ import annotations
 
@@ -14,30 +14,29 @@ if TYPE_CHECKING:
 
 
 def segment_ids_to_positions(segment_ids: Array) -> Array:
-    """Execute the segment ids to positions operation.
+    """Convert segment mask IDs into cumulative token position indices.
 
     Args:
-        segment_ids: The segment ids.
+        segment_ids: Segment indicator array.
 
     Returns:
-        The resulting tensor array.
+        Cumulative position index array along the last axis.
 
     """
     return jnp.cumsum(segment_ids, axis=-1)
 
 
 def default_rope_params(_positions: Array, head_dim: int, rope_theta: int = 1000000, factor: float = 1.0) -> tuple[Array, float]:
-    """Execute the default rope params operation.
+    """Compute default inverse rotational frequencies and scaling factor for RoPE.
 
     Args:
-    ----
-    head_dim: The head_dim parameter required for this operation.
-    rope_theta: The rope_theta parameter required for this operation.
-    factor: The factor parameter required for this operation.
-
+        _positions: Token position tensor (unused for static frequency computation).
+        head_dim: Attention head dimension.
+        rope_theta: Base period for rotary frequencies.
+        factor: Proportional scaling factor for frequencies.
 
     Returns:
-        object: The resulting output from the operation.
+        Tuple of `(rotational_frequency, attention_factor)`.
 
     """
     fraction = jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim
@@ -52,20 +51,18 @@ rope_functions: dict[str, Any] = {"default": default_rope_params}
 
 
 def apply_rope(x: Any, sin: Any, cos: Any) -> Any:
-    """Execute the apply rope operation.
+    """Apply rotary position embeddings to query or key projections.
 
     Args:
-    ----
-    x: The x parameter required for this operation.
-    sin: The sin parameter required for this operation.
-    cos: The cos parameter required for this operation.
-
+        x: 4D query or key projection tensor `(batch, seq_len, heads, head_dim)`.
+        sin: 3D sine frequency tensor `(batch, seq_len, head_dim // 2)`.
+        cos: 3D cosine frequency tensor `(batch, seq_len, head_dim // 2)`.
 
     Returns:
-        object: The resulting output from the operation.
+        Rotated query or key tensor preserving `x.dtype`.
 
     Raises:
-        AssertionError: If the test validation fails.
+        AssertionError: If input tensor ranks do not match `(4, 3, 3)`.
 
     """
     if not (x.ndim == int("4") and sin.ndim == int("3") and (cos.ndim == int("3"))):
@@ -90,15 +87,13 @@ class RoPE(nnx.Module):
         self.rope_fn = partial(rope_functions[rope_type], **rope_kwargs)
 
     def __call__(self, positions: Array) -> tuple[Array, Array]:
-        """Execute the callable logic.
+        """Compute sine and cosine rotary tables for given token positions.
 
         Args:
-        ----
-        positions: The positions parameter required for this operation.
-
+            positions: 2D token position indices `(batch, seq_len)`.
 
         Returns:
-            object: The resulting output from the operation.
+            Tuple of `(sin, cos)` arrays.
 
         """
         (rotational_frequency, attention_factor) = self.rope_fn(positions)

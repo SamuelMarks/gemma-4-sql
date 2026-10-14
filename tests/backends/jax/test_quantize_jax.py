@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
 
-import sys
-from unittest import mock
 
 import jax.numpy as jnp
 import pytest
@@ -122,7 +122,7 @@ def test_quantize_awq_fallback_activations() -> None:
 def test_quantize_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test JAX quantize when dependencies are missing."""
     monkeypatch.setattr(qt, "jax", None)
-    with pytest.raises(DependencyMissingError, match=r"JAX quantization dependencies are missing\."):
+    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing\."):
         qt.quantize_model("model", "int8")
 
     monkeypatch.setattr(qt, "jnp", None)
@@ -144,39 +144,39 @@ def test_quantize_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Docstring for _mock_jax_quantize_env."""
+    """Verify behavior of _mock_jax_quantize_env."""
 
     # Mock Gemma4Config and Gemma4ForCausalLM to avoid allocating giant models
     class MockGemma4Config:
-        """Docstring for MockGemma4Config."""
+        """Verify behavior of MockGemma4Config."""
 
         @staticmethod
         def gemma4_e2b():
-            """Docstring for gemma4_e2b."""
+            """Verify behavior of gemma4_e2b."""
             return "mock_config"
 
     class MockGemma4ForCausalLM:
-        """Docstring for MockGemma4ForCausalLM."""
+        """Verify behavior of MockGemma4ForCausalLM."""
 
         def __init__(self, config, rngs):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
 
     monkeypatch.setattr(qt, "Gemma4Config", MockGemma4Config)
     monkeypatch.setattr(qt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
 
     class MockParam:
-        """Docstring for MockParam."""
+        """Verify behavior of MockParam."""
 
         def __init__(self, val):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
             self.value = val
 
     class MockGraph:
-        """Docstring for MockGraph."""
+        """Verify behavior of MockGraph."""
 
         @staticmethod
         def iter_graph(model):
-            """Docstring for iter_graph."""
+            """Verify behavior of iter_graph."""
             # Return 3 mock parameters for quantize
             yield ("path1", MockParam(jnp.array([[1.0, 2.0], [3.0, 4.0]])))
             yield ("path2", MockParam(jnp.array([[0.1, 0.2], [0.3, 0.4]])))
@@ -186,16 +186,16 @@ def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
             yield ("path4", "not_a_param")
 
     class MockNNX:
-        """Docstring for MockNNX."""
+        """Verify behavior of MockNNX."""
 
         graph = MockGraph()
         Param = MockParam
 
         class Rngs:
-            """Docstring for Rngs."""
+            """Verify behavior of Rngs."""
 
             def __init__(self, seed):
-                """Docstring for __init__."""
+                """Verify behavior of __init__."""
 
     monkeypatch.setattr(qt, "nnx", MockNNX())
 
@@ -231,8 +231,8 @@ def test_quantize_jax_model_int8_and_awq() -> None:
 def test_quantize_jax_model_error_handling(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test quantize_model when an error occurs in model graph iteration."""
 
-    def raise_runtime_err(*_args: object, **_kwargs: object) -> object:
-        """Docstring for raise_runtime_err."""
+    def raise_runtime_err(*_args: Any, **_kwargs: Any) -> Any:
+        """Verify behavior of raise_runtime_err."""
         raise RuntimeError("Mock graph iteration failure")
 
     monkeypatch.setattr(qt, "_apply_quantization_to_model", raise_runtime_err)
@@ -256,10 +256,10 @@ def test_set_param_metadata_native() -> None:
     """Test _set_param_metadata when set_metadata is present."""
 
     class DummyParamNative:
-        """Docstring for DummyParamNative."""
+        """Verify behavior of DummyParamNative."""
 
         def set_metadata(self, k: str, v: str) -> None:
-            """Docstring for set_metadata."""
+            """Verify behavior of set_metadata."""
             setattr(self, k, v)
 
     dummy = DummyParamNative()
@@ -267,26 +267,28 @@ def test_set_param_metadata_native() -> None:
     assert dummy.custom_key == "custom_val"
 
 
-def test_quantize_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test module reload when jax or flax is missing."""
-    import importlib
+def test_quantize_real_tiny_jax_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify quantize_model runs AWQ quantization on a real tiny Gemma4ForCausalLM."""
+    from flax import nnx
 
-    # Store original state
-    orig_jax = qt.jax
-    orig_jnp = qt.jnp
-    orig_nnx = qt.nnx
-    orig_gemma4 = qt.Gemma4ForCausalLM
-    orig_config = qt.Gemma4Config
+    from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
 
-    # Reload with AttributeError mock (or just run import directly)
-    with mock.patch.dict(sys.modules, {"jax": None, "jax.numpy": None}):
-        importlib.reload(qt)
-        assert qt.jax is None
-        assert qt.jnp is None
+    cfg = Gemma4Config(
+        vocab_size=64,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=8,
+        num_experts=2,
+        num_experts_per_tok=1,
+    )
+    monkeypatch.setattr(qt.Gemma4Config, "gemma4_e2b", staticmethod(lambda: cfg))
+    monkeypatch.setattr(qt, "Gemma4ForCausalLM", Gemma4ForCausalLM)
+    monkeypatch.setattr(qt, "nnx", nnx)
 
-    # Restore
-    qt.jax = orig_jax
-    qt.jnp = orig_jnp
-    qt.nnx = orig_nnx
-    qt.Gemma4ForCausalLM = orig_gemma4
-    qt.Gemma4Config = orig_config
+    res = qt.quantize_model("tiny-jax", "awq", salient_ratio=0.25)
+    assert res["backend"] == "jax"
+    assert res["status"] == "quantized_awq"
+    assert res["memory_reduction_factor"] == pytest.approx(0.7)

@@ -1,4 +1,4 @@
-"""Provide module docstring."""
+"""Unit and behavioral tests for gemma4 utils."""
 
 import contextlib
 from typing import Any
@@ -22,8 +22,8 @@ from gemma_4_sql.backends.jax.gemma4.utils_params import assign_weights, assign_
 EXPECTED_VAL = 123
 
 
-def test_utils() -> object:
-    """Docstring for test_utils.
+def test_utils() -> Any:
+    """Verify behavior of test_utils.
 
     Raises:
         AssertionError: Description.
@@ -54,7 +54,7 @@ def test_utils() -> object:
     assert stoi("123") == EXPECTED_VAL
 
 
-def test_utils_part1() -> object:
+def test_utils_part1() -> Any:
     """Docstring.
 
     Raises:
@@ -71,8 +71,8 @@ def test_utils_part1() -> object:
 class MockModelCls:
     """Provide class docstring."""
 
-    def __init__(self, cfg: object, rngs: object) -> None:
-        """Execute function."""
+    def __init__(self, cfg: Any, rngs: Any) -> None:
+        """Execute test helper or verification step."""
         self.cfg = cfg
         self.rngs = rngs
 
@@ -80,47 +80,45 @@ class MockModelCls:
 class MockSafeOpen:
     """Provide class docstring."""
 
-    def __init__(self, filepath: object, framework: object) -> None:
-        """Execute function."""
+    def __init__(self, filepath: Any, framework: Any) -> None:
+        """Execute test helper or verification step."""
         self.filepath = filepath
         self.framework = framework
 
-    def __enter__(self) -> object:
-        """Execute function.
+    def __enter__(self) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return self
 
-    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> object:
-        """Execute function."""
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        """Execute test helper or verification step."""
 
-    def __iter__(self) -> object:
+    def __iter__(self) -> Any:
+        """Iterate over mock safetensors keys."""
         return iter(self.keys())
 
-    def keys(self) -> object:
-        """Execute function.
+    def keys(self) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return ["layer1.weight", "layer2.weight"]
 
-    def get_tensor(self, _key: object) -> object:
-        """Execute function.
+    def get_tensor(self, _key: Any) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return jnp.ones((2, 2))
 
 
-def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function.
+def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -137,7 +135,7 @@ def test_create_model_from_safe_tensors(monkeypatch: pytest.MonkeyPatch, tmp_pat
 
 
 def test_create_model_from_safe_tensors_missing_dir(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -176,8 +174,8 @@ def test_assign_weights_int_to_str_keys() -> None:
     assert "0" in d_str2
 
 
-def test_create_model_from_safe_tensors_no_safetensors(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function.
+def test_create_model_from_safe_tensors_no_safetensors(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -188,20 +186,9 @@ def test_create_model_from_safe_tensors_no_safetensors(monkeypatch: pytest.Monke
     assert model.cfg == "config"
 
 
-def test_utils_imports_fail(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function."""
-    importlib = __import__("importlib", fromlist=[""])
-    sys = __import__("sys", fromlist=[""])
-    m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params", fromlist=[""])
-    monkeypatch.setitem(sys.modules, "safetensors", None)
-    importlib.reload(m_utils)
-    monkeypatch.undo()
-    importlib.reload(m_utils)
-
-
 @pytest.mark.usefixtures("monkeypatch")
 def test_assign_weights_transforms() -> None:
-    """Execute function."""
+    """Execute test helper or verification step."""
     tensor = jnp.zeros((2, 4))
     transform = ((1, 0), (4, 2), True)
     state = {"a": type("S", (), {"shape": (2, 4)})()}
@@ -213,7 +200,7 @@ def test_assign_weights_transforms() -> None:
 
 @pytest.mark.usefixtures("monkeypatch")
 def test_assign_weights_value_attribute() -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -229,32 +216,29 @@ def test_assign_weights_value_attribute() -> None:
 class MockF:
     """Provide class docstring."""
 
-    def __enter__(self) -> object:
-        """Execute function.
+    def __enter__(self) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return self
 
-    def __exit__(self, *args: object) -> object:
-        """Execute function."""
+    def __exit__(self, *args: object) -> Any:
+        """Execute test helper or verification step."""
 
-    def __iter__(self) -> object:
-        """Execute function.
+    def __iter__(self) -> Any:
+        """Execute test helper or verification step.
 
-        Yields:
-            object: Description of yield.
+        Yields: Any: Description of yield.
 
         """
         yield "b"
 
-    def get_tensor(self, _k: object) -> object:
-        """Execute function.
+    def get_tensor(self, _k: Any) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return jnp.zeros((1,))
@@ -264,21 +248,20 @@ class MockNNX:
     """Class docstring."""
 
     def update(self, *args, **kwargs):
-        """Test function."""
+        """Verify expected test case behavior."""
 
     """Provide class docstring."""
 
     class Rngs:
         """Provide class docstring."""
 
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            """Execute function."""
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            """Execute test helper or verification step."""
 
-    def split(self, *_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    def split(self, *_args: Any, **_kwargs: Any) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return (None, {"a": type("S", (), {"shape": (1,)})()}, None)
@@ -287,20 +270,19 @@ class MockNNX:
 class MockModelCls2:
     """Provide class docstring."""
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        """Execute function."""
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Execute test helper or verification step."""
 
 
-def test_create_model_from_safe_tensors2(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function."""
+def test_create_model_from_safe_tensors2(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Execute test helper or verification step."""
     m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params", fromlist=[""])
     monkeypatch.setattr(m_utils, "safe_open", lambda *_args, **_kwargs: MockF())
 
-    def mock_map(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    def mock_map(*_args: Any, **_kwargs: Any) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return ("a", None)
@@ -313,16 +295,15 @@ def test_create_model_from_safe_tensors2(monkeypatch: pytest.MonkeyPatch, tmp_pa
     create_model_from_safe_tensors(str(tmp_path), MockModelCls2, {}, {"b": ("a", None)})
 
 
-def test_create_model_from_safe_tensors_key_error(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function."""
+def test_create_model_from_safe_tensors_key_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Execute test helper or verification step."""
     m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params", fromlist=[""])
     monkeypatch.setattr(m_utils, "safe_open", lambda *_args, **_kwargs: MockF())
 
-    def mock_map(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    def mock_map(*_args: Any, **_kwargs: Any) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return ("a", None)
@@ -335,8 +316,8 @@ def test_create_model_from_safe_tensors_key_error(monkeypatch: pytest.MonkeyPatc
     create_model_from_safe_tensors(str(tmp_path), MockModelCls2, {}, {"b": ("a", None)})
 
 
-def test_create_model_from_safe_tensors_exception(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function."""
+def test_create_model_from_safe_tensors_exception(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Execute test helper or verification step."""
     m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params", fromlist=[""])
     monkeypatch.setattr(m_utils, "safe_open", lambda *_args, **_kwargs: MockF())
     file_path = tmp_path / "model.safetensors"
@@ -348,7 +329,7 @@ def test_create_model_from_safe_tensors_exception(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.usefixtures("monkeypatch")
 def test_assign_weights_from_eval_shape_exceptions() -> None:
-    """Execute function."""
+    """Execute test helper or verification step."""
     m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params", fromlist=[""])
     with contextlib.suppress(Exception):
         m_utils.assign_weights_from_eval_shape(["missing"], jnp.zeros((1,)), {}, "st_key", None)
@@ -360,13 +341,13 @@ def test_assign_weights_from_eval_shape_exceptions() -> None:
 
 @pytest.mark.usefixtures("monkeypatch")
 def test_create_model_from_safe_tensors_missing_dir2() -> None:
-    """Execute function."""
+    """Execute test helper or verification step."""
     m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params", fromlist=[""])
     m_utils.create_model_from_safe_tensors("non_existent_dir", lambda *_a, **_k: "model", {}, {})
 
 
-def test_create_model_from_safe_tensors_nnx_split_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function."""
+def test_create_model_from_safe_tensors_nnx_split_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Execute test helper or verification step."""
     m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params", fromlist=[""])
     sys = __import__("sys", fromlist=[""])
     monkeypatch.setitem(sys.modules, "flax", type("M", (), {"nnx": MockNNX()})())
@@ -378,7 +359,7 @@ def test_create_model_from_safe_tensors_nnx_split_fails(monkeypatch: pytest.Monk
 
 @pytest.mark.usefixtures("monkeypatch")
 def test_assign_weights_from_eval_shape_transforms() -> None:
-    """Execute function."""
+    """Execute test helper or verification step."""
     m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params", fromlist=[""])
     tensor = jnp.zeros((2, 4))
     transform = ((1, 0), (4, 2), True)
@@ -389,16 +370,15 @@ def test_assign_weights_from_eval_shape_transforms() -> None:
     m_utils.assign_weights_from_eval_shape(["a"], tensor, state, "st_key", transform)
 
 
-def test_create_model_from_safe_tensors_mapped_key_none(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
-    """Execute function."""
+def test_create_model_from_safe_tensors_mapped_key_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+    """Execute test helper or verification step."""
     m_utils = __import__("gemma_4_sql.backends.jax.gemma4.utils_params", fromlist=[""])
     monkeypatch.setattr(m_utils, "safe_open", lambda *_args, **_kwargs: MockF())
 
-    def mock_map(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    def mock_map(*_args: Any, **_kwargs: Any) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return (None, None)

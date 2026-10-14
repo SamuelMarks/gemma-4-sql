@@ -14,7 +14,7 @@ from gemma_4_sql.sdk.duckdb_extension import embed_in_duckdb
 class MockBackendForDuckDB:
     """Mock backend that returns a query matching the prompt."""
 
-    def generate_sql(self, _model_name: str, _prompt: str, **_kwargs: object) -> dict[str, Any]:
+    def generate_sql(self, _model_name: str, _prompt: str, **_kwargs: Any) -> dict[str, Any]:
         """Generate SQL query.
 
         Args:
@@ -83,7 +83,7 @@ def test_duckdb_udf_error_handling(monkeypatch: pytest.MonkeyPatch) -> None:
     class BadBackend:
         """Backend that raises an error."""
 
-        def generate_sql(self, _model_name: str, _prompt: str, **_kwargs: object) -> dict[str, Any]:
+        def generate_sql(self, _model_name: str, _prompt: str, **_kwargs: Any) -> dict[str, Any]:
             """Raise RuntimeError.
 
             Args:

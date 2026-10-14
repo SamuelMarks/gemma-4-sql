@@ -4,54 +4,45 @@ from __future__ import annotations
 
 import logging
 import math
-import types
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from jax import Array
 
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import PEFTResultDict
 
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-    import optax as _optax
-    from flax import nnx as _nnx
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+optax = optional_import("optax")
+nnx = optional_import("flax.nnx")
+Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
+Gemma4DecoderLayer = optional_attr("gemma_4_sql.backends.jax.gemma4.decoder_layer", "Gemma4DecoderLayer")
+Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
-    from .gemma4 import Gemma4Config as _Gemma4Config
-    from .gemma4 import Gemma4ForCausalLM as _Gemma4ForCausalLM
-    from .gemma4.decoder_layer import Gemma4DecoderLayer as _Gemma4DecoderLayer
+_ModuleBase: Any = nnx.Module if nnx is not None else object
+_ParamBase: Any = nnx.Param if nnx is not None else object
 
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-    optax: types.ModuleType | None = _optax
-    nnx: types.ModuleType | None = _nnx
-    Gemma4Config: Any | None = _Gemma4Config
-    Gemma4DecoderLayer: Any | None = _Gemma4DecoderLayer
-    Gemma4ForCausalLM: Any | None = _Gemma4ForCausalLM
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-    optax = None
-    nnx = None
-    Gemma4Config = None
-    Gemma4DecoderLayer = None
-    Gemma4ForCausalLM = None
 
-_ModuleBase = nnx.Module if nnx is not None else object
-_ParamBase = nnx.Param if nnx is not None else object
+def _ensure_param_compat(param_cls: Any) -> None:
+    """Attach `.shape`, `.dtype`, `__getitem__`, and `__setitem__` to a Flax NNX Param class if absent.
 
-if nnx is not None and hasattr(nnx, "Param"):
-    _ParamCls = nnx.Param
-    if not hasattr(_ParamCls, "shape"):
-        _ParamCls.shape = property(lambda self: self.value.shape if hasattr(self, "value") else ())
-    if not hasattr(_ParamCls, "dtype"):
-        _ParamCls.dtype = property(lambda self: self.value.dtype if hasattr(self, "value") else None)
-    if not hasattr(_ParamCls, "__setitem__"):
+    Args:
+        param_cls: The Flax NNX `Param` class to patch.
+
+    """
+    if param_cls is None:
+        return
+    if not hasattr(param_cls, "shape"):
+        param_cls.shape = property(lambda self: self.value.shape if hasattr(self, "value") else ())
+    if not hasattr(param_cls, "dtype"):
+        param_cls.dtype = property(lambda self: self.value.dtype if hasattr(self, "value") else None)
+    if not hasattr(param_cls, "__setitem__"):
 
         def _param_setitem(self: Any, idx: Any, val: Any) -> None:
             """Assign values into the underlying array of Flax NNX Param."""
@@ -65,14 +56,17 @@ if nnx is not None and hasattr(nnx, "Param"):
             else:
                 self.value = val
 
-        _ParamCls.__setitem__ = _param_setitem
-    if not hasattr(_ParamCls, "__getitem__"):
+        param_cls.__setitem__ = _param_setitem
+    if not hasattr(param_cls, "__getitem__"):
 
         def _param_getitem(self: Any, idx: Any) -> Any:
             """Index into the underlying array of Flax NNX Param."""
             return self.value[idx] if hasattr(self, "value") else None
 
-        _ParamCls.__getitem__ = _param_getitem
+        param_cls.__getitem__ = _param_getitem
+
+
+_ensure_param_compat(getattr(nnx, "Param", None))
 
 
 class LoRAParam(_ParamBase):
@@ -110,9 +104,9 @@ class NNXLoRALinear(_ModuleBase):
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
         use_bias: bool = False,
-        dtype=None,
+        dtype: Any = None,
         *,
-        rngs=None,
+        rngs: Any = None,
     ) -> None:
         """Initialize the NNX LoRA linear layer.
 
@@ -229,7 +223,7 @@ class NNXLoRALinear(_ModuleBase):
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
         *,
-        rngs=None,
+        rngs: Any = None,
     ) -> NNXLoRALinear:
         """Construct an NNXLoRALinear module wrapping an existing nnx.Linear.
 
@@ -297,13 +291,13 @@ class NNXLoRALinear(_ModuleBase):
 
 
 def inject_lora_to_layer(
-    layer: object,
+    layer: Any,
     target_modules: list[str],
     lora_r: int = 8,
     lora_alpha: float = 16.0,
     lora_dropout: float = 0.05,
     *,
-    rngs=None,
+    rngs: Any = None,
 ) -> int:
     """Inject LoRA adapters into designated projection layers of a Gemma4DecoderLayer.
 
@@ -372,7 +366,7 @@ def inject_lora(
     lora_alpha: float = 16.0,
     lora_dropout: float = 0.05,
     *,
-    rngs=None,
+    rngs: Any = None,
 ) -> tuple[Any, int]:
     """Inject LoRA adapters into designated projection modules of a JAX/Flax NNX model.
 
@@ -395,8 +389,6 @@ def inject_lora(
 
     """
     if nnx is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("JAX PEFT dependencies are missing.")
 
     if rngs is None:
@@ -467,7 +459,7 @@ def inject_lora(
 
 def create_lora_optimizer(
     model: ModelType,
-    tx=None,
+    tx: Any = None,
 ) -> Any:
     """Create a Flax NNX Optimizer configured to update only LoRA adapter parameters.
 
@@ -485,8 +477,6 @@ def create_lora_optimizer(
 
     """
     if nnx is None or optax is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("JAX PEFT dependencies are missing.")
 
     if tx is None:
@@ -509,8 +499,6 @@ def count_parameters(model: ModelType) -> tuple[int, int]:
 
     """
     if nnx is None or jax is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("JAX PEFT dependencies are missing.")
 
     _, lora_state, base_state = nnx.split(model, LoRAParam, ...)
@@ -526,7 +514,7 @@ def apply_lora(
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     **kwargs: object,
-) -> JSONDict:
+) -> PEFTResultDict:
     """Apply LoRA to a model using the JAX backend.
 
     Args:
@@ -546,8 +534,6 @@ def apply_lora(
     """
     status = "completed"
     if optax is None or jax is None or nnx is None or Gemma4ForCausalLM is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("JAX PEFT dependencies are missing.")
 
     injected_count = 0
@@ -561,7 +547,8 @@ def apply_lora(
         else:
             config = kwargs.get("config")
             if config is None and Gemma4Config is not None:
-                config = Gemma4Config.gemma4_e2b()
+                from_preset_fn = getattr(Gemma4Config, "from_preset", None)
+                config = from_preset_fn(model_name) if callable(from_preset_fn) else Gemma4Config.gemma4_e2b()
             model = Gemma4ForCausalLM(config, rngs=rngs)
 
         model, injected_count = inject_lora(

@@ -1,6 +1,5 @@
 """Tests for PyTorch inference."""
 
-import sys
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_torch
@@ -12,20 +11,43 @@ import pytest
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
-def test_pytorch_inference_imports():
-    """Test pytorch inference imports fallback."""
-    import importlib
-
-    with patch.dict(sys.modules, {"torch": None, "transformers": None}):
-        import gemma_4_sql.backends.pytorch.inference as inf_module
-
-        importlib.reload(inf_module)
-        assert inf_module.torch is None
-        assert inf_module.AutoModelForCausalLM is None
-        assert inf_module.AutoTokenizer is None
+@pytest.fixture(autouse=True)
+def _restore_inf_mod(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore inf_module globals after each test."""
     import gemma_4_sql.backends.pytorch.inference as inf_module
 
-    importlib.reload(inf_module)
+    monkeypatch.setattr(inf_module, "torch", inf_module.torch)
+    monkeypatch.setattr(inf_module, "AutoModelForCausalLM", inf_module.AutoModelForCausalLM)
+    monkeypatch.setattr(inf_module, "AutoTokenizer", inf_module.AutoTokenizer)
+
+
+def test_real_tiny_pytorch_native_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify generate_sql runs real token generation using a tiny native Gemma4ForCausalLM."""
+    import gemma_4_sql.backends.pytorch.inference as inf_module
+    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config, Gemma4ForCausalLM
+
+    cfg = Gemma4Config(
+        vocab_size=320,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=8,
+        num_experts=2,
+        num_experts_per_tok=1,
+        layer_types=["sliding_attention"],
+        hidden_size_per_layer_input=0,
+        num_kv_shared_layers=0,
+    )
+    tiny_model = Gemma4ForCausalLM(cfg)
+    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda cls, *_a, **_k: tiny_model))
+    monkeypatch.setattr(inf_module, "AutoTokenizer", None)
+
+    res = inf_module.generate_sql("tiny-native", "SELECT 1", beam_width=1, max_length=2, backend_alias="pytorch_native")
+    assert res["status"] == "success"
+    assert isinstance(res["sql"], str)
+    assert len(str(res["sql"])) > 0
 
 
 def test_run_generation_native():
@@ -72,14 +94,14 @@ def test_run_generation_native():
 
             # Need an object that returns a list from .tolist() and has __len__
             class MockGenTokens:
-                """Docstring for MockGenTokens."""
+                """Verify behavior of MockGenTokens."""
 
                 def tolist(self):
-                    """Docstring for tolist."""
+                    """Verify behavior of tolist."""
                     return [1, 2]
 
                 def __len__(self):
-                    """Docstring for __len__."""
+                    """Verify behavior of __len__."""
                     return 2
 
             mock_out = MagicMock()
@@ -136,16 +158,16 @@ def test_run_generation_hf():
 
     # Needs to support len(sequences[0])
     class MockSeq(list):
-        """Docstring for MockSeq."""
+        """Verify behavior of MockSeq."""
 
         def __getitem__(self, i):
-            """Docstring for __getitem__."""
+            """Verify behavior of __getitem__."""
             if isinstance(i, slice):
                 return list.__getitem__(self, i)
             return list.__getitem__(self, i)
 
         def __len__(self):
-            """Docstring for __len__."""
+            """Verify behavior of __len__."""
             return 4
 
     seq = MockSeq([1, 2, 3, 4])
@@ -157,21 +179,21 @@ def test_run_generation_hf():
     mock_model.generate.return_value = mock_out
 
     class MockInputIds:
-        """Docstring for MockInputIds."""
+        """Verify behavior of MockInputIds."""
 
         shape = [1, 2]
 
     class MockInputs(dict):
-        """Docstring for MockInputs."""
+        """Verify behavior of MockInputs."""
 
         def __init__(self):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
             super().__init__()
             self["input_ids"] = MockInputIds()
             self.input_ids = self["input_ids"]
 
         def to(self, device):
-            """Docstring for to."""
+            """Verify behavior of to."""
             return self
 
     inputs_mock = MockInputs()
@@ -226,30 +248,30 @@ def test_run_generation_hf_multimodal():
                 mock_pa.return_value = {"audio_values": "a"}
 
                 class MockSeq(list):
-                    """Docstring for MockSeq."""
+                    """Verify behavior of MockSeq."""
 
                     def __len__(self):
-                        """Docstring for __len__."""
+                        """Verify behavior of __len__."""
                         return 3
 
                 inf_module.AutoModelForCausalLM.from_pretrained.return_value.generate.return_value.sequences = [MockSeq([1, 2, 3])]
 
                 class MockInputIds:
-                    """Docstring for MockInputIds."""
+                    """Verify behavior of MockInputIds."""
 
                     shape = [1, 2]
 
                 class MockInputs(dict):
-                    """Docstring for MockInputs."""
+                    """Verify behavior of MockInputs."""
 
                     def __init__(self):
-                        """Docstring for __init__."""
+                        """Verify behavior of __init__."""
                         super().__init__()
                         self["input_ids"] = MockInputIds()
                         self.input_ids = self["input_ids"]
 
                     def to(self, device):
-                        """Docstring for to."""
+                        """Verify behavior of to."""
                         return self
 
                 inputs_mock = MockInputs()
@@ -286,7 +308,7 @@ def test_generate_sql():
 
 
 def test_inference_coverage_gaps():
-    """Docstring for test_inference_coverage_gaps."""
+    """Verify behavior of test_inference_coverage_gaps."""
     from unittest.mock import MagicMock, patch
 
     import gemma_4_sql.backends.pytorch.inference as inf_module
@@ -299,7 +321,7 @@ def test_inference_coverage_gaps():
     mock_auto_tok = MagicMock()
 
     def side_effect(model_name):
-        """Docstring for side_effect."""
+        """Verify behavior of side_effect."""
         if model_name == "fail":
             raise OSError("error")
         return MagicMock()
@@ -319,31 +341,31 @@ def test_inference_coverage_gaps():
         mock_auto_model.from_pretrained.return_value = mock_model
 
         class MockOutputs:
-            """Docstring for MockOutputs."""
+            """Verify behavior of MockOutputs."""
 
             def __init__(self):
                 # HF sequences
-                """Docstring for __init__."""
+                """Verify behavior of __init__."""
 
                 class HfSeq(list):
-                    """Docstring for HfSeq."""
+                    """Verify behavior of HfSeq."""
 
                     def __init__(self):
-                        """Docstring for __init__."""
+                        """Verify behavior of __init__."""
                         super().__init__([1, 2, 3, 4])
 
                     def tolist(self):
-                        """Docstring for tolist."""
+                        """Verify behavior of tolist."""
                         return self
 
                     def __getitem__(self, idx):
-                        """Docstring for __getitem__."""
+                        """Verify behavior of __getitem__."""
                         if isinstance(idx, slice):
                             return [1]
                         return 1
 
                     def __len__(self):
-                        """Docstring for __len__."""
+                        """Verify behavior of __len__."""
                         return 4
 
                 hf_seq = HfSeq()
@@ -357,25 +379,25 @@ def test_inference_coverage_gaps():
 
             def __getitem__(self, idx):
                 # Native output_ids
-                """Docstring for __getitem__."""
+                """Verify behavior of __getitem__."""
 
                 class NativeSeq(list):
-                    """Docstring for NativeSeq."""
+                    """Verify behavior of NativeSeq."""
 
                     def __init__(self):
-                        """Docstring for __init__."""
+                        """Verify behavior of __init__."""
                         super().__init__([1, 2, 3, 4])
 
                     def tolist(self):
-                        """Docstring for tolist."""
+                        """Verify behavior of tolist."""
                         return self
 
                     def __getitem__(self, idx):
-                        """Docstring for __getitem__."""
+                        """Verify behavior of __getitem__."""
                         return self
 
                     def __len__(self):
-                        """Docstring for __len__."""
+                        """Verify behavior of __len__."""
                         return 4
 
                 return NativeSeq()
@@ -401,24 +423,24 @@ def test_inference_coverage_gaps():
             # Hit 146->150 and 150->154 in hf path
             # We need to ensure that the mocked tokenizer returns something where inputs.input_ids.shape[-1] is an int
             class MockTokRes(dict):
-                """Docstring for MockTokRes."""
+                """Verify behavior of MockTokRes."""
 
                 def __init__(self):
-                    """Docstring for __init__."""
+                    """Verify behavior of __init__."""
                     super().__init__()
 
                     class MockInputIds:
-                        """Docstring for MockInputIds."""
+                        """Verify behavior of MockInputIds."""
 
                         def __init__(self):
-                            """Docstring for __init__."""
+                            """Verify behavior of __init__."""
                             self.shape = (1, 0)
 
                     self.input_ids = MockInputIds()
                     self["input_ids"] = self.input_ids
 
                 def to(self, *args, **kwargs):
-                    """Docstring for to."""
+                    """Verify behavior of to."""
                     return self
 
             mock_tok_res = MockTokRes()
@@ -437,7 +459,7 @@ def test_inference_coverage_gaps():
 
 
 def test_inference_negative_conf():
-    """Docstring for test_inference_negative_conf."""
+    """Verify behavior of test_inference_negative_conf."""
     from unittest.mock import MagicMock
 
     import gemma_4_sql.backends.pytorch.inference as inf_module
@@ -453,10 +475,10 @@ def test_inference_negative_conf():
     mock_out = MagicMock()
 
     class MockSeq(list):
-        """Docstring for MockSeq."""
+        """Verify behavior of MockSeq."""
 
         def __len__(self):
-            """Docstring for __len__."""
+            """Verify behavior of __len__."""
             return 4
 
     mock_out.sequences = [MockSeq([1, 2, 3, 4])]
@@ -469,21 +491,21 @@ def test_inference_negative_conf():
     mock_model.generate.return_value = mock_out
 
     class MockInputIds:
-        """Docstring for MockInputIds."""
+        """Verify behavior of MockInputIds."""
 
         shape = [1, 2]
 
     class MockInputs(dict):
-        """Docstring for MockInputs."""
+        """Verify behavior of MockInputs."""
 
         def __init__(self):
-            """Docstring for __init__."""
+            """Verify behavior of __init__."""
             super().__init__()
             self["input_ids"] = MockInputIds()
             self.input_ids = self["input_ids"]
 
         def to(self, device):
-            """Docstring for to."""
+            """Verify behavior of to."""
             return self
 
     inputs_mock = MockInputs()

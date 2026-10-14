@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+import argparse
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.cli_misc import export_cmd
 from gemma_4_sql.cli_serve import agent_cmd, chat_cmd, evaluate_cmd, few_shot_cmd, generate_cmd, serve_cmd
 
+if TYPE_CHECKING:
+    SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
+else:
+    SubParsersType = argparse._SubParsersAction
 
-def add_evaluate_parsers(subparsers: Any) -> None:
+
+def add_evaluate_parsers(subparsers: SubParsersType) -> None:
     """Register evaluation, few-shot prompting, and conversational chat subparsers.
 
     Args:
@@ -26,6 +32,7 @@ def add_evaluate_parsers(subparsers: Any) -> None:
     parser_evaluate.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or screenshot.")
     parser_evaluate.add_argument("--audio-path", default=None, help="Path to recorded query audio file.")
     parser_evaluate.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_evaluate.add_argument("--max-batches", type=int, default=10, help="Maximum number of batches to evaluate.")
     parser_evaluate.set_defaults(func=evaluate_cmd)
 
     parser_few_shot = subparsers.add_parser("few-shot", help="Build a dynamic few-shot prompt.")
@@ -49,7 +56,7 @@ def add_evaluate_parsers(subparsers: Any) -> None:
     parser_chat.set_defaults(func=chat_cmd)
 
 
-def add_serve_export_parsers(subparsers: Any) -> None:
+def add_serve_export_parsers(subparsers: SubParsersType) -> None:
     """Register HTTP continuous batching serving and model export parsers.
 
     Args:
@@ -72,7 +79,7 @@ def add_serve_export_parsers(subparsers: Any) -> None:
     parser_export.set_defaults(func=export_cmd)
 
 
-def add_generate_agent_parsers(subparsers: Any) -> None:
+def add_generate_agent_parsers(subparsers: SubParsersType) -> None:
     """Register SQL generation and self-correction agent parsers.
 
     Args:
@@ -112,7 +119,7 @@ def add_generate_agent_parsers(subparsers: Any) -> None:
     parser_agent.set_defaults(func=agent_cmd)
 
 
-def add_inference_parsers(subparsers: Any) -> None:
+def add_inference_parsers(subparsers: SubParsersType) -> None:
     """Register serving, export, generation, and agentic loop subparsers.
 
     Args:

@@ -3,59 +3,60 @@
 from __future__ import annotations
 
 import abc
+import asyncio
 import logging
-import typing
+from typing import TYPE_CHECKING, Any
 
-if typing.TYPE_CHECKING:
+from gemma_4_sql.exceptions import DatabaseExecutionError
+
+if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONPrimitive
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseAdapter(abc.ABC):
-    """Protocol for database dialect adapters."""
+    """Abstract base class for database dialect adapters."""
 
     def __init__(self, db_path: str, db_kwargs: dict[str, object], *, read_only: bool = False) -> None:
-        """Initialize adapter.
+        """Initialize the database adapter and establish initial connection.
 
         Args:
-            db_path: The file path to the database.
-            db_kwargs: A mapping representing db kwargs.
-            read_only: Boolean flag indicating read only.
+            db_path: The file path or connection URI for the database.
+            db_kwargs: Additional connection keyword arguments.
+            read_only: Flag indicating whether mutating queries are disallowed.
 
         """
         self.db_path = db_path
         self.db_kwargs = db_kwargs
         self.read_only = read_only
-        self.conn: typing.Any = self.connect()
+        self.conn: Any = self.connect()
 
     @property
     @abc.abstractmethod
     def error_classes(self) -> tuple[type[Exception], ...]:
-        """Provide the tuple of exceptions that this adapter can catch."""
+        """Provide the tuple of database-specific exception types caught by this adapter."""
 
     @abc.abstractmethod
     def connect(self) -> object:
-        """Connect synchronously.
+        """Connect synchronously to the underlying database.
 
         Returns:
-            The connection object.
+            The active database connection object.
 
         """
 
     async def connect_async(self) -> object:
-        """Connect asynchronously.
+        """Connect asynchronously to the underlying database.
 
         Returns:
-            The async connection object.
+            The active asynchronous database connection object.
 
         """
-        import asyncio
-
         return await asyncio.to_thread(self.connect)
 
     def setup_schema(self, ddl: str) -> None:
-        """Execute DDL to set up schema.
+        """Execute DDL statements to initialize the database schema.
 
         Args:
             ddl: The SQL DDL query string.
@@ -63,55 +64,62 @@ class DatabaseAdapter(abc.ABC):
         """
         self.execute_with_feedback(ddl)
 
-    def execute_with_feedback(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Execute synchronously with feedback.
+    def execute_with_feedback(
+        self,
+        query: str,
+        params: tuple[object, ...] | None = None,
+    ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
+        """Execute a query synchronously and return execution status, rows, and error feedback.
 
         Args:
-            query: The SQL query.
-            params: Parameters for the query.
+            query: The SQL query string to execute.
+            params: Optional positional parameters for the query.
 
         Returns:
-            A tuple containing success boolean, results list, and error string if any.
+            A tuple containing `(success, rows, error_message)`.
 
         """
         try:
-            if hasattr(self.conn, "cursor"):
-                cursor = self.conn.cursor()
-                cursor.execute(query, params or ())
-                results: list[tuple[JSONPrimitive, ...]] = cursor.fetchall() if getattr(cursor, "description", None) is not None else []
-                if hasattr(cursor, "close"):
-                    cursor.close()
-                return (True, results, None)
-            else:
-                results_alt: list[tuple[JSONPrimitive, ...]] = self.conn.execute(query, params or ()).fetchall()
-                return (True, results_alt, None)
-        except self.error_classes as e:
-            return (False, [], str(e))
+            rows = self.execute_query(query, params)
+        except self.error_classes + (DatabaseExecutionError,) as e:
+            cause = e.cause if isinstance(e, DatabaseExecutionError) and e.cause is not None else e
+            return (False, [], str(cause))
+        else:
+            return (True, rows, None)
 
-    async def execute_with_feedback_async(self, query: str, params: tuple[object, ...] | None = None) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Execute asynchronously with feedback.
+    async def execute_with_feedback_async(
+        self,
+        query: str,
+        params: tuple[object, ...] | None = None,
+    ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
+        """Execute a query asynchronously and return execution status, rows, and error feedback.
 
         Args:
-            query: The SQL query.
-            params: Parameters for the query.
+            query: The SQL query string to execute.
+            params: Optional positional parameters for the query.
 
         Returns:
-            A tuple containing success boolean, results list, and error string if any.
+            A tuple containing `(success, rows, error_message)`.
 
         """
-        import asyncio
-
         return await asyncio.to_thread(self.execute_with_feedback, query, params)
 
-    def execute_query(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
-        """Execute synchronously.
+    def execute_query(
+        self,
+        query: str,
+        params: tuple[object, ...] | None = None,
+    ) -> list[tuple[JSONPrimitive, ...]]:
+        """Execute a query synchronously and return fetched result tuples.
 
         Args:
-            query: The SQL query.
-            params: Parameters for the query.
+            query: The SQL query string to execute.
+            params: Optional positional parameters for the query.
 
         Returns:
-            The results list.
+            List of result row tuples.
+
+        Raises:
+            DatabaseExecutionError: If query execution fails on the underlying connection.
 
         """
         try:
@@ -122,28 +130,32 @@ class DatabaseAdapter(abc.ABC):
                 if hasattr(cursor, "close"):
                     cursor.close()
                 return results
-            else:
-                return self.conn.execute(query, params or ()).fetchall()
+            return self.conn.execute(query, params or ()).fetchall()
         except self.error_classes as e:
             logger.debug("Query execution failed: %s", e)
-            return []
+            raise DatabaseExecutionError(str(e), cause=e) from e
 
-    async def execute_query_async(self, query: str, params: tuple[object, ...] | None = None) -> list[tuple[JSONPrimitive, ...]]:
-        """Execute asynchronously.
+    async def execute_query_async(
+        self,
+        query: str,
+        params: tuple[object, ...] | None = None,
+    ) -> list[tuple[JSONPrimitive, ...]]:
+        """Execute a query asynchronously and return fetched result tuples.
 
         Args:
-            query: The SQL query.
-            params: Parameters for the query.
+            query: The SQL query string to execute.
+            params: Optional positional parameters for the query.
 
         Returns:
-            The results list.
+            List of result row tuples.
+
+        Raises:
+            DatabaseExecutionError: If query execution fails on the underlying connection.
 
         """
-        import asyncio
-
         return await asyncio.to_thread(self.execute_query, query, params)
 
     def close(self) -> None:
-        """Close connection."""
+        """Close the active database connection if open."""
         if hasattr(self.conn, "close"):
             self.conn.close()

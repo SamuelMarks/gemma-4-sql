@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 import math
-import types
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from gemma_4_sql.type_hints import ModelType, TensorType
 
@@ -15,21 +15,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-try:
-    import mlx.core as _mx
-
-    mx: types.ModuleType | None = _mx
-except (ImportError, AttributeError):
-    mx = None
-
-try:
-    import mlx_lm
-
-    load = getattr(mlx_lm, "load", None)
-    generate = getattr(mlx_lm, "generate", None)
-except (ImportError, AttributeError):
-    load = None
-    generate = None
+mx = optional_import("mlx.core")
+load = optional_attr("mlx_lm", "load")
+generate = optional_attr("mlx_lm", "generate")
 
 
 def compute_confidence_score(log_probs: list[float] | float, num_tokens: int) -> float:
@@ -56,7 +44,7 @@ def compute_confidence_score(log_probs: list[float] | float, num_tokens: int) ->
 
 
 def mlx_beam_search(
-    model: ModelType,
+    model: ModelType | None,
     tokenizer: Any,
     prompt: str,
     beam_width: int = 3,

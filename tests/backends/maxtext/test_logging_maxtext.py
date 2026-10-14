@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for logging maxtext."""
 
 from unittest.mock import MagicMock, patch
 
@@ -9,7 +9,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_log_metrics_success():
-    """Docstring for test_log_metrics_success."""
+    """Verify behavior of test_log_metrics_success."""
     metrics = {"loss": 0.5, "accuracy": 0.9}
     step = 10
     log_dir = "test_logs"
@@ -37,49 +37,6 @@ def test_log_metrics_success():
 
 
 def test_log_metrics_missing_dependency():
-    """Docstring for test_log_metrics_missing_dependency."""
+    """Verify behavior of test_log_metrics_missing_dependency."""
     with patch("gemma_4_sql.backends.maxtext.logging.SummaryWriter", new=None), pytest.raises(DependencyMissingError, match="TensorBoardX dependencies are missing."):
         log_metrics({"loss": 0.5}, 10)
-
-
-def test_module_load_import_error(monkeypatch):
-    """Test the try/except ImportError block."""
-    import builtins
-    import sys
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name == "tensorboardX":
-            raise ImportError("simulated missing import")
-        return orig_import(name, *args, **kwargs)
-
-    with patch("builtins.__import__", side_effect=mock_import):
-        sys.modules.pop("gemma_4_sql.backends.maxtext.logging", None)
-        import gemma_4_sql.backends.maxtext.logging as mlog
-
-        assert mlog.SummaryWriter is None
-
-    # Restore
-    sys.modules.pop("gemma_4_sql.backends.maxtext.logging", None)
-
-
-def test_tensorboardx_import_success(monkeypatch):
-    """Docstring for test_tensorboardx_import_success."""
-    import importlib
-    import sys
-    from unittest.mock import MagicMock
-
-    mock_tb = MagicMock()
-    mock_tb.SummaryWriter = "MockWriter"
-    monkeypatch.setitem(sys.modules, "tensorboardX", mock_tb)
-
-    import gemma_4_sql.backends.maxtext.logging as log_max
-
-    importlib.reload(log_max)
-
-    assert log_max.SummaryWriter == "MockWriter"
-
-    monkeypatch.undo()
-    importlib.reload(log_max)

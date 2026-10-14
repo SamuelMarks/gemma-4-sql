@@ -18,13 +18,13 @@ class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):
     """A single convolutional projection layer for audio subsampling."""
 
     def __init__(self, in_channels: int, channels: int, norm_eps: float, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__.
+        """Initialize the subsampling 2D convolution and layer norm block.
 
         Args:
-            in_channels: The integer value for in channels.
-            channels: The integer value for channels.
-            norm_eps: The float value for norm eps.
-            rngs: The rngs.
+            in_channels: Number of input feature channels.
+            channels: Number of output convolution channels.
+            norm_eps: Epsilon for LayerNorm stability.
+            rngs: Flax NNX random number generators.
 
         """
         self.conv = nnx.Conv(in_channels, channels, kernel_size=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)), use_bias=False, rngs=rngs)
@@ -33,8 +33,12 @@ class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):
     def __call__(self, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
         """Apply the subsample convolution projection layer.
 
+        Args:
+            x: 4D input feature tensor.
+            mask: Optional sequence mask tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Tuple of `(downsampled_features, downsampled_mask)`.
 
         """
         if mask is not None:
@@ -53,7 +57,13 @@ class Gemma4AudioSubSampleConvProjection(nnx.Module):
     """Full convolutional projection module for audio subsampling."""
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize the two-stage audio subsampling convolutional projection.
+
+        Args:
+            config: Audio configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         (c0, c1) = config.subsampling_conv_channels
         self.layer0 = Gemma4AudioSubSampleConvProjectionLayer(1, c0, config.rms_norm_eps, rngs=rngs)
         self.layer1 = Gemma4AudioSubSampleConvProjectionLayer(c0, c1, config.rms_norm_eps, rngs=rngs)
@@ -63,8 +73,12 @@ class Gemma4AudioSubSampleConvProjection(nnx.Module):
     def __call__(self, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
         """Apply the full subsample convolution projection.
 
+        Args:
+            x: Input spectrogram tensor of shape `(batch, seq_len, mel_bins)`.
+            mask: Optional frame-level mask tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Tuple of `(projected_features, subsampled_mask)`.
 
         """
         x = jnp.expand_dims(x, 1)
@@ -79,7 +93,13 @@ class Gemma4AudioFeedForward(nnx.Module):
     """Feed forward network used in the audio tower."""
 
     def __init__(self, config: AudioConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize the Conformer half-step feed-forward module.
+
+        Args:
+            config: Audio configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         self.ffw_layer_1 = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 4, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
         self.ffw_layer_2 = Gemma4ClippableLinear(config.hidden_size * 4, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
         self.pre_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
@@ -90,8 +110,11 @@ class Gemma4AudioFeedForward(nnx.Module):
     def __call__(self, x: jax.Array) -> jax.Array:
         """Apply the feed forward network.
 
+        Args:
+            x: Input hidden state tensor.
+
         Returns:
-            object: The resulting output from the operation.
+            Residual-added feed-forward output tensor.
 
         """
         residual = x

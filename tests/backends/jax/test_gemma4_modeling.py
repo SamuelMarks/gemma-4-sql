@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for gemma4 modeling."""
 
 from unittest.mock import MagicMock, patch
 
@@ -17,7 +17,7 @@ from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM, Gemma4Mo
 
 @pytest.fixture
 def tiny_config():
-    """Docstring for tiny_config."""
+    """Verify behavior of tiny_config."""
     return ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -31,7 +31,7 @@ def tiny_config():
 
 @pytest.fixture
 def tiny_ple_config():
-    """Docstring for tiny_ple_config."""
+    """Verify behavior of tiny_ple_config."""
     return ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -47,7 +47,7 @@ def tiny_ple_config():
 
 @pytest.fixture
 def tiny_multimodal_config():
-    """Docstring for tiny_multimodal_config."""
+    """Verify behavior of tiny_multimodal_config."""
     return ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -63,7 +63,7 @@ def tiny_multimodal_config():
 
 
 def test_gemma4_model_forward(tiny_config):
-    """Docstring for test_gemma4_model_forward."""
+    """Verify behavior of test_gemma4_model_forward."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_config, rngs=rngs)
 
@@ -80,7 +80,7 @@ def test_gemma4_model_forward(tiny_config):
 
 
 def test_gemma4_model_ple(tiny_ple_config):
-    """Docstring for test_gemma4_model_ple."""
+    """Verify behavior of test_gemma4_model_ple."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_ple_config, rngs=rngs)
 
@@ -104,7 +104,7 @@ def test_gemma4_model_ple(tiny_ple_config):
 
 
 def test_gemma4_causal_lm(tiny_config):
-    """Docstring for test_gemma4_causal_lm."""
+    """Verify behavior of test_gemma4_causal_lm."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_config, rngs=rngs)
 
@@ -114,9 +114,21 @@ def test_gemma4_causal_lm(tiny_config):
     logits = model(input_ids, positions)
     assert logits.shape == (1, 3, 10)
 
+    # Test when a layer attribute is None on model.model.layers
+    class SparseLayers:
+        """Stub layers container where attribute '0' is None."""
+
+        def __len__(self) -> int:
+            """Return length 1."""
+            return 1
+
+    model.model.layers = SparseLayers()  # type: ignore[assignment]
+    logits_sparse = model(input_ids, positions)
+    assert logits_sparse.shape == (1, 3, 10)
+
 
 def test_gemma4_multimodal(tiny_multimodal_config):
-    """Docstring for test_gemma4_multimodal."""
+    """Verify behavior of test_gemma4_multimodal."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_multimodal_config, rngs=rngs)
 
@@ -144,7 +156,7 @@ def test_gemma4_multimodal(tiny_multimodal_config):
 
 def test_gemma4_multimodal_with_ple(tiny_multimodal_config, tiny_ple_config):
     # Combine configs for multimodal + ple
-    """Docstring for test_gemma4_multimodal_with_ple."""
+    """Verify behavior of test_gemma4_multimodal_with_ple."""
     config = tiny_ple_config
     config.vision_config = VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4, image_size=16)
     config.audio_config = AudioConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2)
@@ -163,7 +175,7 @@ def test_gemma4_multimodal_with_ple(tiny_multimodal_config, tiny_ple_config):
 
 
 def test_gemma4_multimodal_missing_masks(tiny_multimodal_config):
-    """Docstring for test_gemma4_multimodal_missing_masks."""
+    """Verify behavior of test_gemma4_multimodal_missing_masks."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_multimodal_config, rngs=rngs)
 
@@ -180,7 +192,7 @@ def test_gemma4_multimodal_missing_masks(tiny_multimodal_config):
 
 
 def test_gemma4_model_ple_none(tiny_ple_config):
-    """Docstring for test_gemma4_model_ple_none."""
+    """Verify behavior of test_gemma4_model_ple_none."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_ple_config, rngs=rngs)
 
@@ -192,7 +204,7 @@ def test_gemma4_model_ple_none(tiny_ple_config):
 
 
 def test_gemma4_model_ple_none_config(tiny_config):
-    """Docstring for test_gemma4_model_ple_none_config."""
+    """Verify behavior of test_gemma4_model_ple_none_config."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_config, rngs=rngs)
 
@@ -209,7 +221,7 @@ def test_gemma4_model_ple_none_config(tiny_config):
 
 
 def test_project_ple_none(tiny_ple_config):
-    """Docstring for test_project_ple_none."""
+    """Verify behavior of test_project_ple_none."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_ple_config, rngs=rngs)
     input_ids = jnp.array([[1, 2, 3]])
@@ -219,7 +231,7 @@ def test_project_ple_none(tiny_ple_config):
 
 
 def test_from_pretrained():
-    """Docstring for test_from_pretrained."""
+    """Verify behavior of test_from_pretrained."""
     import sys
 
     mock_huggingface = MagicMock()
@@ -243,12 +255,12 @@ def test_from_pretrained():
 
 
 def test_default_jit():
-    """Docstring for test_default_jit."""
+    """Verify behavior of test_default_jit."""
     assert _default_jit("x") == "x"
 
 
 def test_forward(tiny_config):
-    """Docstring for test_forward."""
+    """Verify behavior of test_forward."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_config, rngs=rngs)
 
@@ -262,7 +274,7 @@ def test_forward(tiny_config):
 
 
 def test_gemma4_multimodal_audio_only(tiny_multimodal_config):
-    """Docstring for test_gemma4_multimodal_audio_only."""
+    """Verify behavior of test_gemma4_multimodal_audio_only."""
     import jax.numpy as jnp
     from flax import nnx
 
@@ -288,8 +300,3 @@ def test_gemma4_multimodal_audio_only(tiny_multimodal_config):
         audio_token_mask=audio_token_mask,
     )
     assert logits.shape == (1, 3, 10)
-
-
-def test_gemma4_modeling_false_branch():
-    pass
-    # Assuming there's a specific branch...

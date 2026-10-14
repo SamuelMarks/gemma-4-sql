@@ -1,4 +1,4 @@
-"""DuckDB adapter."""
+"""DuckDB database adapter supporting in-process analytical SQL execution."""
 
 from __future__ import annotations
 
@@ -6,35 +6,41 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, cast
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONPrimitive
-
 from gemma_4_sql.backends.lazy_loader import LazyLoader
+from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
 
 from .base import DatabaseAdapter
+
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import JSONPrimitive
 
 logger = logging.getLogger(__name__)
 duckdb = LazyLoader("duckdb").get_module()
 
 
 class DuckDBAdapter(DatabaseAdapter):
-    """Adapter for DuckDB."""
+    """Adapter for DuckDB analytical databases."""
 
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
-        """Provide the exception classes."""
-        import duckdb
-
-        return (duckdb.Error,)
-
-    def connect(self) -> object:
-        """Connect synchronously.
+        """Provide the exception classes for DuckDB errors.
 
         Returns:
-            The execution result.
+            Tuple containing `duckdb.Error`.
+
+        """
+        import duckdb as _duckdb
+
+        return (_duckdb.Error,)
+
+    def connect(self) -> object:
+        """Connect synchronously to DuckDB or reuse an injected connection.
+
+        Returns:
+            Active DuckDB connection object.
 
         Raises:
-            ImportError: If duckdb is not installed.
+            DependencyMissingError: If `duckdb` is not installed.
 
         """
         if "existing_conn" in self.db_kwargs and self.db_kwargs["existing_conn"] is not None:
@@ -43,23 +49,23 @@ class DuckDBAdapter(DatabaseAdapter):
             return self.db_kwargs["conn"]
         if duckdb is None:
             msg = "duckdb is required. Install with `pip install duckdb`."
-            raise ImportError(msg)
+            raise DependencyMissingError(msg, dependency_name="duckdb", backend="duckdb")
         kwargs = self.db_kwargs.copy()
         if self.read_only and self.db_path != ":memory:":
             kwargs["read_only"] = True
         return duckdb.connect(self.db_path, **kwargs)
 
     async def connect_async(self) -> object:
-        """Connect asynchronously.
+        """Return the active DuckDB connection for async operations.
 
         Returns:
-            object: The resulting output from the operation.
+            Active DuckDB connection object.
 
         """
         return self.conn
 
     def setup_schema(self, ddl: str) -> None:
-        """Execute DDL to set up schema.
+        """Execute DDL statements to initialize the DuckDB schema.
 
         Args:
             ddl: Schema DDL string to execute.
@@ -70,7 +76,7 @@ class DuckDBAdapter(DatabaseAdapter):
         self.conn.execute(ddl)
 
     def close(self) -> None:
-        """Close connection if not an externally provided connection."""
+        """Close the DuckDB connection if it was not externally provided."""
         if "existing_conn" in self.db_kwargs or "conn" in self.db_kwargs:
             return
         super().close()
@@ -80,29 +86,21 @@ class DuckDBAdapter(DatabaseAdapter):
         query: str,
         params: tuple[object, ...] | None = None,
     ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Execute asynchronously with feedback.
+        """Execute a DuckDB query asynchronously and return status, rows, and error feedback.
+
+        Args:
+            query: SQL query string to execute.
+            params: Optional query parameters.
 
         Returns:
-            object: The resulting output from the operation.
+            A tuple of `(success, rows, error_message)`.
 
         """
         try:
-            loop = asyncio.get_running_loop()
-
-            def _exec() -> list[tuple[JSONPrimitive, ...]]:
-                """Execute query on thread-safe cursor.
-
-                Returns:
-                    Query result rows.
-
-                """
-                conn_obj = self.conn
-                cur = conn_obj.cursor() if callable(getattr(conn_obj, "cursor", None)) else conn_obj
-                return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
-
-            results = await loop.run_in_executor(None, _exec)
-        except self.error_classes as e:
-            return (False, [], str(e))
+            results = await self.execute_query_async(query, params)
+        except self.error_classes + (DatabaseExecutionError,) as e:
+            cause = e.cause if isinstance(e, DatabaseExecutionError) and e.cause is not None else e
+            return (False, [], str(cause))
         else:
             return (True, results, None)
 
@@ -111,17 +109,24 @@ class DuckDBAdapter(DatabaseAdapter):
         query: str,
         params: tuple[object, ...] | None = None,
     ) -> list[tuple[JSONPrimitive, ...]]:
-        """Execute asynchronously.
+        """Execute a DuckDB query asynchronously on a thread-safe cursor.
+
+        Args:
+            query: SQL query string to execute.
+            params: Optional query parameters.
 
         Returns:
-            object: The resulting output from the operation.
+            List of result row tuples.
+
+        Raises:
+            DatabaseExecutionError: If DuckDB query execution fails.
 
         """
         try:
             loop = asyncio.get_running_loop()
 
             def _exec() -> list[tuple[JSONPrimitive, ...]]:
-                """Execute query on thread-safe cursor.
+                """Execute query on a thread-safe cursor.
 
                 Returns:
                     Query result rows.
@@ -134,4 +139,4 @@ class DuckDBAdapter(DatabaseAdapter):
             return await loop.run_in_executor(None, _exec)
         except self.error_classes as e:
             logger.debug("Async Query execution failed: %s", e)
-            return []
+            raise DatabaseExecutionError(str(e), cause=e) from e

@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for gemma4 rope."""
 
 import jax.numpy as jnp
 import pytest
@@ -11,14 +11,14 @@ from gemma_4_sql.backends.jax.gemma4.rope import RoPE, apply_rope, default_rope_
 
 
 def test_segment_ids_to_positions():
-    """Docstring for test_segment_ids_to_positions."""
+    """Verify behavior of test_segment_ids_to_positions."""
     segment_ids = jnp.array([[1, 1, 1], [1, 0, 1]])
     positions = segment_ids_to_positions(segment_ids)
     assert jnp.allclose(positions, jnp.array([[1, 2, 3], [1, 1, 2]]))
 
 
 def test_default_rope_params():
-    """Docstring for test_default_rope_params."""
+    """Verify behavior of test_default_rope_params."""
     positions = jnp.array([1, 2, 3])
     freq, factor = default_rope_params(positions, head_dim=4, rope_theta=10000, factor=2.0)
     assert jnp.allclose(freq, jnp.array([0.5, 0.005]))
@@ -26,7 +26,7 @@ def test_default_rope_params():
 
 
 def test_apply_rope():
-    """Docstring for test_apply_rope."""
+    """Verify behavior of test_apply_rope."""
     x = jnp.ones((2, 3, 2, 4))
     sin = jnp.zeros((2, 3, 2))
     cos = jnp.ones((2, 3, 2))
@@ -44,7 +44,7 @@ def test_apply_rope():
 
 
 def test_rope_module():
-    """Docstring for test_rope_module."""
+    """Verify behavior of test_rope_module."""
     rope = RoPE(rope_type="default", head_dim=4, rope_theta=10000, factor=2.0)
     positions = jnp.array([[1, 2]])
     sin, cos = rope(positions)

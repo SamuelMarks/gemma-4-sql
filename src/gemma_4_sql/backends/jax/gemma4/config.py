@@ -1,10 +1,10 @@
-"""Core functionality for the config module."""
+"""Configuration dataclasses and presets for the JAX/Flax NNX Gemma 4 implementation."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, cast
+from typing import Any
 
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec
@@ -14,7 +14,7 @@ DEFAULT_GRADIENT_CLIPPING = 10000000000.0
 
 @dataclass(frozen=True)
 class VisionShardConfig:
-    """Sharding configuration for Vision Transformer."""
+    """Sharding configuration for the SigLIP Vision Transformer."""
 
     attn_kernel: PartitionSpec | None = None
     attn_bias: PartitionSpec | None = None
@@ -36,7 +36,7 @@ class VisionShardConfig:
         """Return an unpartitioned default VisionShardConfig.
 
         Returns:
-            The execution result.
+            Unpartitioned `VisionShardConfig` instance.
 
         """
         return VisionShardConfig()
@@ -71,23 +71,23 @@ class ShardMode(Enum):
     TP = "tp"
 
 
-def _make_spec(*partitions: Any) -> PartitionSpec:
-    """Instantiate PartitionSpec in typed context.
+def _make_spec(*partitions: str | None) -> PartitionSpec:
+    """Instantiate PartitionSpec in a typed context.
 
     Args:
-        *partitions: Partition axis names.
+        *partitions: Partition axis names or None.
 
     Returns:
-        PartitionSpec: Created PartitionSpec instance.
+        Created `PartitionSpec` instance.
 
     """
     spec_cls = PartitionSpec
-    return cast(PartitionSpec, spec_cls(*partitions))
+    return spec_cls(*partitions)
 
 
 @dataclass(frozen=True)
 class ShardConfig:
-    """Sharding configuration mappings."""
+    """Sharding configuration mappings for Gemma 4 layers."""
 
     attn_kernel: PartitionSpec | None = None
     attn_bias: PartitionSpec | None = None
@@ -105,20 +105,24 @@ class ShardConfig:
 
     @staticmethod
     def no_sharding() -> ShardConfig:
-        """Return empty sharding config.
+        """Return an empty unpartitioned sharding config.
 
         Returns:
-            object: The resulting output from the operation.
+            Unpartitioned `ShardConfig` instance.
 
         """
         return ShardConfig()
 
     @staticmethod
     def default(*, use_fsdp: bool = False, use_tp: bool = False) -> ShardConfig:
-        """Return standard sharding patterns.
+        """Return standard FSDP and tensor-parallel sharding patterns.
+
+        Args:
+            use_fsdp: Whether to shard across the FSDP axis.
+            use_tp: Whether to shard across the tensor-parallel axis.
 
         Returns:
-            object: The resulting output from the operation.
+            Configured `ShardConfig` instance.
 
         """
         fsdp = ShardMode.FSDP.value if use_fsdp else None
@@ -142,7 +146,7 @@ class ShardConfig:
 
 @dataclass(frozen=True)
 class AudioConfig:
-    """Configuration for the Audio Encoder in Gemma 4."""
+    """Configuration for the Conformer Audio Encoder in Gemma 4."""
 
     hidden_size: int = 1024
     num_hidden_layers: int = 12
@@ -163,14 +167,18 @@ class AudioConfig:
 
 
 class ModelConfigPresets:
-    """Preset configurations for Gemma 4."""
+    """Preset configurations for Gemma 4 variants."""
 
     @classmethod
-    def gemma4_base(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for a base Gemma 4 model.
+    def gemma4_base(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
+        """Return preset configuration for a base Gemma 4 model.
+
+        Args:
+            use_fsdp: Whether to enable FSDP sharding.
+            use_tp: Whether to enable tensor-parallel sharding.
 
         Returns:
-            object: The resulting output from the operation.
+            Base `ModelConfig` instance.
 
         """
         kwargs: dict[str, Any] = {}
@@ -179,61 +187,145 @@ class ModelConfigPresets:
         return ModelConfig(**kwargs)
 
     @classmethod
-    def gemma4_e2b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for Gemma 4 E2B.
+    def gemma4_e2b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
+        """Return preset configuration for Gemma 4 E2B.
+
+        Args:
+            use_fsdp: Whether to enable FSDP sharding.
+            use_tp: Whether to enable tensor-parallel sharding.
 
         Returns:
-            object: The resulting output from the operation.
+            Gemma 4 E2B `ModelConfig` instance.
 
         """
         kwargs: dict[str, Any] = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(num_hidden_layers=35, hidden_size=1024, intermediate_size=4096, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
+        return ModelConfig(
+            num_hidden_layers=35,
+            hidden_size=1024,
+            intermediate_size=4096,
+            num_attention_heads=8,
+            num_key_value_heads=4,
+            head_dim=256,
+            global_head_dim=512,
+            num_experts=1,
+            vocab_size=262144,
+            **kwargs,
+        )
 
     @classmethod
-    def gemma4_e4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for Gemma 4 E4B.
+    def gemma4_e4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
+        """Return preset configuration for Gemma 4 E4B.
+
+        Args:
+            use_fsdp: Whether to enable FSDP sharding.
+            use_tp: Whether to enable tensor-parallel sharding.
 
         Returns:
-            object: The resulting output from the operation.
+            Gemma 4 E4B `ModelConfig` instance.
 
         """
         kwargs: dict[str, Any] = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(num_hidden_layers=42, hidden_size=2560, intermediate_size=10240, num_attention_heads=10, num_key_value_heads=1, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
+        return ModelConfig(
+            num_hidden_layers=42,
+            hidden_size=2560,
+            intermediate_size=10240,
+            num_attention_heads=10,
+            num_key_value_heads=1,
+            head_dim=256,
+            global_head_dim=512,
+            num_experts=1,
+            vocab_size=262144,
+            **kwargs,
+        )
 
     @classmethod
-    def gemma4_26b_a4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for Gemma 4 26B A4B (MoE).
+    def gemma4_26b_a4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
+        """Return preset configuration for Gemma 4 26B A4B (Mixture-of-Experts).
+
+        Args:
+            use_fsdp: Whether to enable FSDP sharding.
+            use_tp: Whether to enable tensor-parallel sharding.
 
         Returns:
-            object: The resulting output from the operation.
+            Gemma 4 26B-A4B `ModelConfig` instance.
 
         """
         kwargs: dict[str, Any] = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(num_hidden_layers=30, hidden_size=2816, intermediate_size=2112, moe_intermediate_size=704, num_attention_heads=8, num_key_value_heads=4, head_dim=256, global_head_dim=512, num_experts=128, num_experts_per_tok=2, vocab_size=262144, **kwargs)
+        return ModelConfig(
+            num_hidden_layers=30,
+            hidden_size=2816,
+            intermediate_size=2112,
+            moe_intermediate_size=704,
+            num_attention_heads=8,
+            num_key_value_heads=4,
+            head_dim=256,
+            global_head_dim=512,
+            num_experts=128,
+            num_experts_per_tok=2,
+            vocab_size=262144,
+            **kwargs,
+        )
 
     @classmethod
-    def gemma4_31b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> object:
-        """Preset configuration for Gemma 4 31B.
+    def gemma4_31b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
+        """Return preset configuration for Gemma 4 31B.
+
+        Args:
+            use_fsdp: Whether to enable FSDP sharding.
+            use_tp: Whether to enable tensor-parallel sharding.
 
         Returns:
-            object: The resulting output from the operation.
+            Gemma 4 31B `ModelConfig` instance.
 
         """
         kwargs: dict[str, Any] = {}
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(num_hidden_layers=60, hidden_size=5376, intermediate_size=21504, num_attention_heads=32, num_key_value_heads=16, head_dim=256, global_head_dim=512, num_experts=1, vocab_size=262144, **kwargs)
+        return ModelConfig(
+            num_hidden_layers=60,
+            hidden_size=5376,
+            intermediate_size=21504,
+            num_attention_heads=32,
+            num_key_value_heads=16,
+            head_dim=256,
+            global_head_dim=512,
+            num_experts=1,
+            vocab_size=262144,
+            **kwargs,
+        )
+
+    @classmethod
+    def from_preset(cls, model_name: str, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
+        """Resolve a `ModelConfig` preset from a model identifier string.
+
+        Args:
+            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`, `'gemma-4-26B-A4B'`, `'gemma-4-31B'`).
+            use_fsdp: Whether to enable FSDP sharding.
+            use_tp: Whether to enable tensor-parallel sharding.
+
+        Returns:
+            Matching `ModelConfig` preset instance.
+
+        """
+        lowered = model_name.lower()
+        if "31b" in lowered:
+            return cls.gemma4_31b(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else cls.gemma4_31b()
+        if "26b" in lowered or "a4b" in lowered:
+            return cls.gemma4_26b_a4b(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else cls.gemma4_26b_a4b()
+        if "e4b" in lowered:
+            return cls.gemma4_e4b(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else cls.gemma4_e4b()
+        return cls.gemma4_e2b(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else cls.gemma4_e2b()
 
 
 @dataclass
 class ModelConfig(ModelConfigPresets):
-    """Configuration for Gemma 4."""
+    """Architectural configuration for Gemma 4 in JAX/Flax NNX."""
 
     vocab_size: int = 256000
     vocab_size_per_layer_input: int | None = None

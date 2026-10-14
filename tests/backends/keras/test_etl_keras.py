@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for etl keras."""
 
 from unittest.mock import MagicMock
 
@@ -10,7 +10,7 @@ import pytest
 
 
 def test_load_hf_or_duckdb(monkeypatch):
-    """Docstring for test_load_hf_or_duckdb."""
+    """Verify behavior of test_load_hf_or_duckdb."""
     from gemma_4_sql.backends.keras import etl
     from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -27,33 +27,8 @@ def test_load_hf_or_duckdb(monkeypatch):
     assert etl._load_hf_or_duckdb("ds", "train", None, None) == "hf"
 
 
-def test_import_error():
-    """Docstring for test_import_error."""
-    import builtins
-    import importlib
-
-    import gemma_4_sql.backends.keras.etl as mod
-
-    orig_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        """Docstring for mock_import."""
-        if name == "datasets" or name == "grain.python":
-            raise ImportError("mock")
-        return orig_import(name, *args, **kwargs)
-
-    builtins.__import__ = mock_import
-    try:
-        importlib.reload(mod)
-        assert mod.datasets is None
-        assert mod.grain is None
-    finally:
-        builtins.__import__ = orig_import
-        importlib.reload(mod)
-
-
 def test_get_sampler(monkeypatch):
-    """Docstring for test_get_sampler."""
+    """Verify behavior of test_get_sampler."""
     from gemma_4_sql.backends.keras import etl
     from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -72,7 +47,7 @@ def test_get_sampler(monkeypatch):
 
 
 def test_build_dataloader(monkeypatch):
-    """Docstring for test_build_dataloader."""
+    """Verify behavior of test_build_dataloader."""
     from gemma_4_sql.backends.keras import etl
     from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -86,10 +61,10 @@ def test_build_dataloader(monkeypatch):
     monkeypatch.setattr(etl, "_load_hf_or_duckdb", MagicMock())
 
     class MockSource:
-        """Docstring for MockSource."""
+        """Verify behavior of MockSource."""
 
         def __len__(self):
-            """Docstring for __len__."""
+            """Verify behavior of __len__."""
             return 10
 
     monkeypatch.setattr(etl, "get_grain_classes", MagicMock(return_value=(MagicMock(return_value=MockSource()), MagicMock())))
@@ -101,7 +76,7 @@ def test_build_dataloader(monkeypatch):
 
 
 def test_build_dataloader_missing_grain(monkeypatch):
-    """Docstring for test_build_dataloader_missing_grain."""
+    """Verify behavior of test_build_dataloader_missing_grain."""
     from gemma_4_sql.backends.keras import etl
     from gemma_4_sql.exceptions import DependencyMissingError
 

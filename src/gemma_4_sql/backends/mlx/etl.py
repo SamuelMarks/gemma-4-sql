@@ -5,18 +5,14 @@ from __future__ import annotations
 import typing
 
 from gemma_4_sql.backends.common_data import load_duckdb_dataset
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig, JSONDict
 
 if typing.TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONValue
 
-try:
-    import datasets as _datasets
-
-    datasets: typing.Any = _datasets
-except (ImportError, AttributeError):
-    datasets = None
+datasets: typing.Any = optional_import("datasets")
 duckdb = None
 mx = None
 

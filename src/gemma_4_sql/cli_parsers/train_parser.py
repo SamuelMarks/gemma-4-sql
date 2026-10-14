@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.cli_misc import quantize_cmd
 from gemma_4_sql.cli_train import dpo_cmd, peft_cmd, posttrain_cmd, pretrain_cmd, sft_cmd, train_cmd
 
+if TYPE_CHECKING:
+    SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
+else:
+    SubParsersType = argparse._SubParsersAction
+
 
 def add_training_subparser(
-    subparsers: Any,
+    subparsers: SubParsersType,
     name: str,
     help_text: str,
     backend: str,
@@ -44,7 +50,7 @@ def add_training_subparser(
     return parser
 
 
-def add_peft_quantize_parsers(subparsers: Any) -> None:
+def add_peft_quantize_parsers(subparsers: SubParsersType) -> None:
     """Register DPO, PEFT/LoRA, and Quantize subcommand parsers.
 
     Args:
@@ -80,7 +86,7 @@ def add_peft_quantize_parsers(subparsers: Any) -> None:
     parser_quantize.set_defaults(func=quantize_cmd)
 
 
-def add_training_parsers(subparsers: Any) -> None:
+def add_training_parsers(subparsers: SubParsersType) -> None:
     """Register all model training, adaptation, and optimization subparsers.
 
     Args:

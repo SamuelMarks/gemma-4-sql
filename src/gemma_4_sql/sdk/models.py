@@ -9,7 +9,7 @@ from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.type_hints import TrainingConfig
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import TrainResultDict
 
 __all__ = [
     "TrainingConfig",
@@ -20,7 +20,7 @@ __all__ = [
 ]
 
 
-def _route_training(config: TrainingConfig) -> JSONDict:
+def _route_training(config: TrainingConfig) -> TrainResultDict:
     """Route training request to the appropriate backend.
 
     Args:
@@ -35,7 +35,7 @@ def _route_training(config: TrainingConfig) -> JSONDict:
     return get_backend(backend).train_model(config)
 
 
-def train_from_scratch(config: TrainingConfig | None = None) -> JSONDict:
+def train_from_scratch(config: TrainingConfig | None = None) -> TrainResultDict:
     """Train a model from scratch.
 
     Args:
@@ -50,7 +50,7 @@ def train_from_scratch(config: TrainingConfig | None = None) -> JSONDict:
     return _route_training(cfg)
 
 
-def pretrain_model(config: TrainingConfig | None = None) -> JSONDict:
+def pretrain_model(config: TrainingConfig | None = None) -> TrainResultDict:
     """Pretrains an existing model.
 
     Args:
@@ -65,7 +65,7 @@ def pretrain_model(config: TrainingConfig | None = None) -> JSONDict:
     return _route_training(cfg)
 
 
-def sft_model(config: TrainingConfig | None = None) -> JSONDict:
+def sft_model(config: TrainingConfig | None = None) -> TrainResultDict:
     """Supervised fine-tunes (SFT) an existing model.
 
     Args:
@@ -80,7 +80,7 @@ def sft_model(config: TrainingConfig | None = None) -> JSONDict:
     return _route_training(cfg)
 
 
-def posttrain_model(config: TrainingConfig | None = None) -> JSONDict:
+def posttrain_model(config: TrainingConfig | None = None) -> TrainResultDict:
     """Post-trains an existing model (e.g., RLHF, DPO).
 
     Args:

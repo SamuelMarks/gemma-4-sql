@@ -3,22 +3,20 @@
 from __future__ import annotations
 
 import json
-import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError
+
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import ExportResultDict
 
-try:
-    import mlx.core as _mx
-
-    mx: types.ModuleType | None = _mx
-except (ImportError, AttributeError):
-    mx = None
+mx = optional_import("mlx.core")
+mlx_load: Any = optional_attr("mlx_lm", "load")
 
 
-def export_model(model_name: str, export_path: str) -> JSONDict:
+def export_model(model_name: str, export_path: str, **_kwargs: object) -> ExportResultDict:
     """Export a Text-to-SQL model using the MLX backend.
 
     Saves model weights in safetensors format alongside configuration metadata (config.json)
@@ -27,26 +25,29 @@ def export_model(model_name: str, export_path: str) -> JSONDict:
     Args:
         model_name: The name of the target model.
         export_path: The path where the model will be exported.
+        **_kwargs: Additional export keyword arguments.
 
     Returns:
-        A dictionary containing the results.
+        A structured `ExportResultDict` containing the export metadata.
 
     Raises:
-        RuntimeError: If MLX is not installed.
-        ValueError: If loading the model fails.
+        DependencyMissingError: If MLX is not installed.
+        ExportError: If loading or exporting the model fails.
 
     """
     export_dir = Path(export_path)
     export_dir.mkdir(parents=True, exist_ok=True)
     if mx is None:
-        raise RuntimeError("MLX is not installed, cannot export model.")
+        raise DependencyMissingError("MLX is not installed, cannot export model.", backend="mlx")
 
     try:
-        load = __import__("mlx_lm", fromlist=["load"]).load
-        (model, _tokenizer) = load(model_name)
+        load_fn = mlx_load if mlx_load is not None else optional_attr("mlx_lm", "load")
+        if load_fn is None:
+            raise ImportError("mlx_lm.load is not available.")
+        (model, _tokenizer) = load_fn(model_name)
         tensors = dict(model.parameters())
     except (ImportError, ValueError, RuntimeError, TypeError, AttributeError, OSError) as e:
-        raise ValueError(f"Failed to load MLX model {model_name}") from e
+        raise ExportError(f"Failed to load MLX model {model_name}", backend="mlx", cause=e) from e
 
     file_path = export_dir / "model.safetensors"
     mx.save_safetensors(str(file_path), tensors)

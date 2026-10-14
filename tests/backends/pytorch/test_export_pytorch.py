@@ -10,16 +10,13 @@ pytestmark = requires_torch
 import pytest
 
 
-def test_pytorch_export_imports():
-    """Test pytorch export imports fallback."""
-    import importlib
+@pytest.fixture(autouse=True)
+def _restore_export_mod(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Restore export_module globals after each test."""
+    import gemma_4_sql.backends.pytorch.export as export_module
 
-    with patch.dict(sys.modules, {"torch": None, "safetensors.torch": None}):
-        import gemma_4_sql.backends.pytorch.export as export_module
-
-        importlib.reload(export_module)
-        assert getattr(export_module, "torch", None) is None
-        assert getattr(export_module, "save_file", None) is None
+    monkeypatch.setattr(export_module, "torch", export_module.torch)
+    monkeypatch.setattr(export_module, "save_file", export_module.save_file)
 
 
 def test_is_rank_zero():
@@ -118,46 +115,31 @@ def test_export_model():
         export_module.export_model("m", "export")
 
 
-def test_is_rank_zero_import_error(monkeypatch):
+def test_is_rank_zero_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _is_rank_zero returns True when torch.distributed.is_initialized raises RuntimeError."""
     import gemma_4_sql.backends.pytorch.export as pexp
 
-    monkeypatch.setattr(pexp, "torch", type("MockTorch", (), {}))  # not none
-
-    def mock_import_error(*args, **kwargs):
-        raise RuntimeError("mocked error")
-
-    monkeypatch.setitem(sys.modules, "torch.distributed", None)  # Not enough
-    # Wait, the try imports it inside the function.
-    # Let's just mock builtins.__import__ ?
+    monkeypatch.setattr(pexp, "torch", MagicMock())
+    with patch("torch.distributed.is_initialized", side_effect=RuntimeError("mocked error")):
+        assert pexp._is_rank_zero() is True
 
 
-def test_is_rank_zero_runtime_error(monkeypatch):
+def test_is_rank_zero_get_rank_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _is_rank_zero returns True when torch.distributed.get_rank raises RuntimeError."""
     import gemma_4_sql.backends.pytorch.export as pexp
 
     class MockDist:
+        """Stub torch.distributed raising RuntimeError on get_rank."""
+
         @staticmethod
-        def is_initialized():
-            raise RuntimeError("mocked error")
-
-    import sys
-
-    monkeypatch.setitem(sys.modules, "torch.distributed", MockDist)
-    assert pexp._is_rank_zero() == True
-
-
-def test_is_rank_zero_runtime_error2(monkeypatch):
-    import gemma_4_sql.backends.pytorch.export as pexp
-
-    class MockDist:
-        @staticmethod
-        def is_initialized():
+        def is_initialized() -> bool:
+            """Return True."""
             return True
 
         @staticmethod
-        def get_rank():
+        def get_rank() -> int:
+            """Raise RuntimeError."""
             raise RuntimeError("mocked error")
 
-    import sys
-
-    monkeypatch.setitem(sys.modules, "torch.distributed", MockDist)
-    assert pexp._is_rank_zero() == True
+    monkeypatch.setitem(sys.modules, "torch.distributed", MockDist)  # type: ignore[arg-type]
+    assert pexp._is_rank_zero() is True

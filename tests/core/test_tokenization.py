@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 import pytest
 
@@ -12,7 +13,7 @@ from gemma_4_sql.tokenization import SQLTokenizer
 class MockHFTokenizer:
     """Mock Hugging Face tokenizer implementation for testing."""
 
-    def encode(self, _text: str, **_kwargs: object) -> list[int]:
+    def encode(self, _text: str, **_kwargs: Any) -> list[int]:
         """Encode text using mock token IDs.
 
         Args:
@@ -132,10 +133,10 @@ def test_sql_tokenizer_get_vocab() -> None:
     assert vocab["a"] == ord("a")
 
     class MockVocabHFTokenizer(MockHFTokenizer):
-        """Docstring for MockVocabHFTokenizer."""
+        """Verify behavior of MockVocabHFTokenizer."""
 
         def get_vocab(self) -> dict[str, int]:
-            """Docstring for get_vocab."""
+            """Verify behavior of get_vocab."""
             return {"<pad>": 0, "select": 1}
 
     tok_hf = SQLTokenizer()
@@ -202,9 +203,8 @@ def test_sql_tokenizer_custom_vocab_bounds() -> None:
     assert isinstance(decoded, str)
 
 
-def test_tokenizer_decode_invalid_type():
-    from gemma_4_sql.tokenization import SQLTokenizer
-
+def test_tokenizer_decode_invalid_type() -> None:
+    """Verify SQLTokenizer.decode ignores non-integer elements in token sequence."""
     tokenizer = SQLTokenizer(vocab_size=256)
-    res = tokenizer.decode([65, "bad", 66])
+    res = tokenizer.decode([65, "bad", 66])  # type: ignore[list-item]
     assert res == "AB"

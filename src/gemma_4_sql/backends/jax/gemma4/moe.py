@@ -1,4 +1,4 @@
-"""Core functionality for the moe module."""
+"""Mixture-of-Experts (MoE) routed and shared expert layers for Gemma 4 in JAX/Flax NNX."""
 
 from __future__ import annotations
 
@@ -19,11 +19,11 @@ class Gemma4RoutedExperts(nnx.Module):
     """Monolithic MoE expert module vectorizing all routed experts."""
 
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__.
+        """Initialize 3D expert weight tensors for all routed experts.
 
         Args:
-            config: The configuration parameters.
-            rngs: The rngs.
+            config: Model configuration parameters.
+            rngs: Flax NNX random number generators.
 
         """
         self.config = config
@@ -79,7 +79,13 @@ class Gemma4MoE(nnx.Module):
     """
 
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
-        """Docstring for __init__."""
+        """Initialize the Gemma 4 MoE block with shared and routed experts.
+
+        Args:
+            config: Model configuration parameters.
+            rngs: Flax NNX random number generators.
+
+        """
         self.config = config
         self.dtype = config.dtype
         shd = config.shd_cfg
@@ -99,8 +105,12 @@ class Gemma4MoE(nnx.Module):
     def __call__(self, x: Array, original_x: Array) -> Array:
         """Apply Mixture of Experts with shared and routed execution paths.
 
+        Args:
+            x: Pre-normalized hidden state tensor for shared experts.
+            original_x: Unnormalized residual hidden state tensor for routing and routed experts.
+
         Returns:
-            object: The resulting output from the operation.
+            Combined output tensor from shared and top-k routed experts.
 
         """
         shared_out = self.shared_experts(x)

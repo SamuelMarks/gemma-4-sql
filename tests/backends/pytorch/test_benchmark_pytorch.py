@@ -197,7 +197,7 @@ def test_benchmark_model():
 
 
 def test_load_pytorch_model_and_device_torch_dtype_none():
-    """Docstring for test_load_pytorch_model_and_device_torch_dtype_none."""
+    """Verify behavior of test_load_pytorch_model_and_device_torch_dtype_none."""
     from unittest.mock import MagicMock, patch
 
     import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
@@ -216,7 +216,7 @@ def test_load_pytorch_model_and_device_torch_dtype_none():
 
 
 def test_run_benchmark_pass_no_generate():
-    """Docstring for test_run_benchmark_pass_no_generate."""
+    """Verify behavior of test_run_benchmark_pass_no_generate."""
     from unittest.mock import MagicMock, patch
 
     import gemma_4_sql.backends.pytorch.benchmark as benchmark_module

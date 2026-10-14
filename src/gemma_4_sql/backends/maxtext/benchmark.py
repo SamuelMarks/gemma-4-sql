@@ -4,28 +4,19 @@ from __future__ import annotations
 
 import logging
 import time
-import types
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
 logger = logging.getLogger(__name__)
 
-try:
-    import jax as _jax
-    import jax.numpy as _jnp
-    import maxtext.models.gemma4 as _gemma4
-
-    jax: types.ModuleType | None = _jax
-    jnp: types.ModuleType | None = _jnp
-    Gemma4Model = getattr(_gemma4, "Gemma4Model", None)
-except (ImportError, AttributeError):
-    jax = None
-    jnp = None
-    Gemma4Model = None
+jax = optional_import("jax")
+jnp = optional_import("jax.numpy")
+Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
 
 
 def _get_device(hardware: str) -> Any:
@@ -97,7 +88,7 @@ def _run_benchmark_pass(model: ModelType, params: dict[str, TensorType], batch_s
             seq = jnp.concatenate([seq, token], axis=-1)
         return seq
 
-    if jax is not None and hasattr(jax, "jit"):
+    if hasattr(jax, "jit"):
         forward_pass = jax.jit(forward_pass)
         generate_pass = jax.jit(generate_pass)
 
@@ -139,7 +130,7 @@ def _run_benchmark_pass(model: ModelType, params: dict[str, TensorType], batch_s
     return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 
 
-def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: JSONValue) -> JSONDict:
+def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int = 32, **kwargs: JSONValue) -> BenchmarkResultDict:
     """Benchmark a model using the MaxText backend.
 
     Args:
@@ -154,10 +145,10 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """
 
     def _run() -> tuple[float, float, float]:
-        """Execute function.
+        """Initialize MaxText model and execute hardware benchmark pass.
 
         Returns:
-            The execution result.
+            Tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
 
         """
         dtype_str = str(kwargs.get("dtype", "bfloat16"))

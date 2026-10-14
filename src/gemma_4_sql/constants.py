@@ -1,5 +1,6 @@
 """Constants for gemma-4-sql."""
 
+DEFAULT_BACKEND = "jax"
 DEFAULT_PRETRAIN_DATASET = "my-custom-dataset"
 DEFAULT_SFT_DATASET = "my-custom-sft-dataset"
 DEFAULT_POSTTRAIN_DATASET = "my-custom-dpo-dataset"

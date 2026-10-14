@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest import mock
 
 import pytest
 
 import gemma_4_sql.sdk.registry as mod
+from gemma_4_sql.sdk.protocols import BackendProtocol
 from gemma_4_sql.sdk.registry import get_backend
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry_caches() -> object:
+    """Clear registry caches before and after each test in test_registry.py."""
+    mod.ENTRY_POINTS.clear()
+    mod._BACKEND_CACHE.clear()
+    yield
+    mod.ENTRY_POINTS.clear()
+    mod._BACKEND_CACHE.clear()
 
 
 def test_registry_fallback() -> None:
@@ -36,6 +48,7 @@ def test_registry_missing_adapter_module(monkeypatch) -> None:
     orig_import_module = importlib.import_module
 
     def mock_import_module(name, *args, **kwargs):
+        """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             raise ImportError("Mock missing adapter")
         return orig_import_module(name, *args, **kwargs)
@@ -66,6 +79,7 @@ def test_registry_missing_adapter_class(monkeypatch) -> None:
     orig_import_module = importlib.import_module
 
     def mock_import_module(name, *args, **kwargs):
+        """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
         return orig_import_module(name, *args, **kwargs)
@@ -90,7 +104,7 @@ def test_registry_dict_entry_points(monkeypatch) -> None:
     fake_ep.load.return_value = fake_module
 
     fake_adapter = mock.MagicMock()
-    fake_adapter_class = mock.MagicMock()
+    fake_adapter_class = mock.MagicMock(return_value=mock.MagicMock(spec=BackendProtocol))
     fake_adapter.Mock_backendBackend = fake_adapter_class
 
     # fake importlib.import_module
@@ -99,6 +113,7 @@ def test_registry_dict_entry_points(monkeypatch) -> None:
     orig_import_module = importlib.import_module
 
     def mock_import_module(name, *args, **kwargs):
+        """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
         return orig_import_module(name, *args, **kwargs)
@@ -122,7 +137,7 @@ def test_registry_select_entry_points(monkeypatch) -> None:
     fake_ep.load.return_value = fake_module
 
     fake_adapter = mock.MagicMock()
-    fake_adapter_class = mock.MagicMock()
+    fake_adapter_class = mock.MagicMock(return_value=mock.MagicMock(spec=BackendProtocol))
     fake_adapter.Select_backendBackend = fake_adapter_class
 
     import importlib
@@ -130,6 +145,7 @@ def test_registry_select_entry_points(monkeypatch) -> None:
     orig_import_module = importlib.import_module
 
     def mock_import_module(name, *args, **kwargs):
+        """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
         return orig_import_module(name, *args, **kwargs)
@@ -156,7 +172,7 @@ def test_registry_caching(monkeypatch) -> None:
     fake_ep.load.return_value = fake_module
 
     fake_adapter = mock.MagicMock()
-    fake_adapter_class = mock.MagicMock()
+    fake_adapter_class = mock.MagicMock(return_value=mock.MagicMock(spec=BackendProtocol))
     fake_adapter.Cached_backendBackend = fake_adapter_class
 
     import importlib
@@ -164,6 +180,7 @@ def test_registry_caching(monkeypatch) -> None:
     orig_import_module = importlib.import_module
 
     def mock_import_module(name, *args, **kwargs):
+        """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
         return orig_import_module(name, *args, **kwargs)
@@ -183,3 +200,38 @@ def test_registry_unknown_backend() -> None:
     mod.ENTRY_POINTS.clear()
     with pytest.raises(ValueError, match="Unknown backend: definitely_not_real"):
         get_backend("definitely_not_real")
+
+
+def test_registry_invalid_protocol_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify get_backend raises TypeError when adapter instance does not satisfy BackendProtocol."""
+    mod.ENTRY_POINTS.clear()
+    mod._BACKEND_CACHE.clear()
+    fake_ep = mock.MagicMock()
+    fake_ep.name = "invalid_proto"
+    fake_module = mock.MagicMock()
+    fake_module.__name__ = "mock_module"
+    fake_ep.load.return_value = fake_module
+
+    class IncompleteAdapter:
+        """Adapter stub missing BackendProtocol methods."""
+
+    fake_adapter = mock.MagicMock()
+    fake_adapter.Invalid_protoBackend = IncompleteAdapter
+
+    import importlib
+
+    orig_import_module = importlib.import_module
+
+    def mock_import_module(name: str, *args: Any, **kwargs: Any) -> Any:
+        """Return fake_adapter for mock_module.adapter."""
+        if name == "mock_module.adapter":
+            return fake_adapter
+        return orig_import_module(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(importlib, "import_module", mock_import_module)
+
+    with (
+        mock.patch("importlib.metadata.entry_points", return_value={"gemma_4_sql.backends": [fake_ep]}),
+        pytest.raises(TypeError, match="does not satisfy BackendProtocol"),
+    ):
+        get_backend("invalid_proto")

@@ -1,24 +1,63 @@
-"""Provide module docstring."""
+"""Unit and behavioral tests for CLI benchmark subcommand."""
+
+from __future__ import annotations
 
 import argparse
+import json
+from typing import Any
 
 import pytest
 
 from gemma_4_sql.cli_benchmark import benchmark_cmd
 
 
-def test_benchmark_cmd(monkeypatch: pytest.MonkeyPatch) -> object:
-    """Docstring for test_benchmark_cmd."""
-    monkeypatch.setattr("gemma_4_sql.cli_benchmark.benchmark", lambda **kwargs: {"status": "ok"})
-    """Initialize function test_benchmark_cmd."""
+def test_benchmark_cmd(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify `benchmark_cmd` forwards all CLI arguments to `sdk.benchmark` and prints JSON output."""
+    captured_kwargs: dict[str, Any] = {}
+
+    def _fake_benchmark(**kwargs: Any) -> dict[str, Any]:
+        """Capture forwarded benchmark arguments and return a structured result."""
+        captured_kwargs.update(kwargs)
+        return {
+            "backend": kwargs["backend"],
+            "model": kwargs["model_name"],
+            "hardware": kwargs["hardware"],
+            "batch_size": kwargs["batch_size"],
+            "tokens_per_sec": 512.0,
+            "latency_ms": 12.5,
+            "memory_mb": 1024.0,
+            "status": "success",
+        }
+
+    monkeypatch.setattr("gemma_4_sql.cli_benchmark.benchmark", _fake_benchmark)
     args = argparse.Namespace(
         model="gemma-4",
         hardware="gpu",
-        batch_size=1,
+        batch_size=4,
         backend="jax",
         dtype="bfloat16",
         mode="prefill",
         max_new_tokens=128,
         warmup_steps=5,
+        image_path="diagram.png",
+        audio_path=None,
+        modality="vision",
     )
     benchmark_cmd(args)
+
+    assert captured_kwargs["model_name"] == "gemma-4"
+    assert captured_kwargs["hardware"] == "gpu"
+    assert captured_kwargs["batch_size"] == 4
+    assert captured_kwargs["backend"] == "jax"
+    assert captured_kwargs["dtype"] == "bfloat16"
+    assert captured_kwargs["mode"] == "prefill"
+    assert captured_kwargs["max_new_tokens"] == 128
+    assert captured_kwargs["warmup_steps"] == 5
+    assert captured_kwargs["image_path"] == "diagram.png"
+    assert captured_kwargs["modality"] == "vision"
+
+    out = capsys.readouterr().out
+    parsed = json.loads(out)
+    assert parsed["status"] == "success"
+    assert parsed["tokens_per_sec"] == 512.0
+    assert parsed["backend"] == "jax"

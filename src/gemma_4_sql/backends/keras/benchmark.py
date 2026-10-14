@@ -4,25 +4,18 @@ from __future__ import annotations
 
 import logging
 import time
-import types
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
 logger = logging.getLogger(__name__)
 
-try:
-    import keras as _keras
-    import tensorflow as _tf
-
-    keras: types.ModuleType | None = _keras
-    tf: types.ModuleType | None = _tf
-except (ImportError, AttributeError):
-    keras = None
-    tf = None
+keras = optional_import("keras")
+tf = optional_import("tensorflow")
 
 
 def _load_keras_model(model_name: str, dtype: str) -> object:
@@ -169,7 +162,7 @@ def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup
         return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 
 
-def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: JSONValue) -> JSONDict:
+def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int = 32, **kwargs: JSONValue) -> BenchmarkResultDict:
     """Benchmark a model using the Keras backend.
 
     Args:
@@ -187,10 +180,10 @@ def benchmark_model(model_name: str, hardware: str, batch_size: int, **kwargs: J
     """
 
     def _run() -> tuple[float, float, float]:
-        """Execute function.
+        """Load Keras model and execute benchmark pass.
 
         Returns:
-            The execution result.
+            Tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
 
         """
         dtype = str(kwargs.get("dtype", "bfloat16"))

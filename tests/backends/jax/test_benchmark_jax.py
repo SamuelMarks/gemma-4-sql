@@ -1,4 +1,4 @@
-"""Module docstring."""
+"""Unit and behavioral tests for benchmark jax."""
 
 import importlib
 import sys
@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_dependencies():
-    """Docstring for mock_dependencies."""
+    """Verify behavior of mock_dependencies."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_nnx = MagicMock()
@@ -37,29 +37,41 @@ def mock_dependencies():
     mock_gemma4_mod.Gemma4Config = mock_gemma4_config
     mock_gemma4_mod.Gemma4ForCausalLM = mock_gemma4_model
 
-    with patch.dict(
-        sys.modules,
-        {
-            "jax": mock_jax,
-            "jax.numpy": mock_jnp,
-            "flax": mock_flax,
-            "flax.nnx": mock_nnx,
-            "gemma_4_sql.backends.jax.gemma4": mock_gemma4_mod,
-        },
+    import gemma_4_sql.backends.jax.gemma4 as real_gemma4_pkg
+
+    with (
+        patch.dict(
+            sys.modules,
+            {
+                "jax": mock_jax,
+                "jax.numpy": mock_jnp,
+                "flax": mock_flax,
+                "flax.nnx": mock_nnx,
+                "gemma_4_sql.backends.jax.gemma4": mock_gemma4_mod,
+            },
+        ),
+        patch.object(real_gemma4_pkg, "Gemma4Config", mock_gemma4_config),
+        patch.object(real_gemma4_pkg, "Gemma4ForCausalLM", mock_gemma4_model),
     ):
         yield mock_jax, mock_jnp, mock_nnx, mock_gemma4_config, mock_gemma4_model
 
 
 def reload_module():
-    """Docstring for reload_module."""
+    """Verify behavior of reload_module."""
     import gemma_4_sql.backends.jax.benchmark as jax_benchmark
 
     importlib.reload(jax_benchmark)
+    jax_benchmark.jax = sys.modules.get("jax")
+    jax_benchmark.jnp = sys.modules.get("jax.numpy")
+    jax_benchmark.nnx = sys.modules.get("flax.nnx")
+    g4_mod = sys.modules.get("gemma_4_sql.backends.jax.gemma4")
+    jax_benchmark.Gemma4Config = getattr(g4_mod, "Gemma4Config", None)
+    jax_benchmark.Gemma4ForCausalLM = getattr(g4_mod, "Gemma4ForCausalLM", None)
     return jax_benchmark
 
 
 def test_missing_dependencies():
-    """Docstring for test_missing_dependencies."""
+    """Verify behavior of test_missing_dependencies."""
     with patch.dict(sys.modules, {"jax": None, "jax.numpy": None, "flax": None, "flax.nnx": None}):
         jax_benchmark = reload_module()
         with pytest.raises(Exception, match="JAX dependencies are missing."):
@@ -67,7 +79,7 @@ def test_missing_dependencies():
 
 
 def test_get_device():
-    """Docstring for test_get_device."""
+    """Verify behavior of test_get_device."""
     jax_benchmark = reload_module()
 
     assert jax_benchmark._get_device("gpu") == "mock_gpu_device"
@@ -75,7 +87,7 @@ def test_get_device():
     assert jax_benchmark._get_device("unknown") == "mock_cpu_device"
 
     def side_effect(hw):
-        """Docstring for side_effect."""
+        """Verify behavior of side_effect."""
         if hw in ("tpu", "gpu"):
             raise RuntimeError("Mock error")
         return [f"mock_{hw}_device"]
@@ -85,7 +97,7 @@ def test_get_device():
 
 
 def test_run_benchmark_pass_prefill():
-    """Docstring for test_run_benchmark_pass_prefill."""
+    """Verify behavior of test_run_benchmark_pass_prefill."""
     jax_benchmark = reload_module()
 
     mock_model = MagicMock()
@@ -104,7 +116,7 @@ def test_run_benchmark_pass_prefill():
 
 
 def test_run_benchmark_pass_generate():
-    """Docstring for test_run_benchmark_pass_generate."""
+    """Verify behavior of test_run_benchmark_pass_generate."""
     jax_benchmark = reload_module()
     del jax_benchmark.nnx.jit
     jax_benchmark = reload_module()
@@ -131,14 +143,14 @@ def test_run_benchmark_pass_generate():
 
 
 def test_benchmark_model_execution():
-    """Docstring for test_benchmark_model_execution."""
+    """Verify behavior of test_benchmark_model_execution."""
     jax_benchmark = reload_module()
 
     # We don't mock _run_benchmark_pass, we let it run with mocked jax
     with patch("gemma_4_sql.backends.jax.benchmark.run_benchmark_wrapper") as mock_wrapper:
 
         def side_effect(backend_name, model_name, hardware, batch_size, missing_deps, benchmark_fn, **kwargs):
-            """Docstring for side_effect."""
+            """Verify behavior of side_effect."""
             return benchmark_fn()
 
         mock_wrapper.side_effect = side_effect

@@ -8,28 +8,17 @@ from __future__ import annotations
 
 import logging
 import struct
-import types
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import ExportError
 
 logger = logging.getLogger(__name__)
 
-try:
-    import numpy as _np
-
-    np: types.ModuleType | None = _np
-except (ImportError, AttributeError):
-    np = None
-
-try:
-    import torch as _torch
-
-    torch: types.ModuleType | None = _torch
-except (ImportError, AttributeError):
-    torch = None
+np = optional_import("numpy")
+torch = optional_import("torch")
 
 
 # GGML Numerical Quantization Types
@@ -192,7 +181,7 @@ def quantize_tensor_q4_0(arr: Any, block_size: int = 32) -> bytes:
         n_blocks = len(a) // block_size
         blocks = a.reshape(n_blocks, block_size)
         max_vals = np.max(np.abs(blocks), axis=1)
-        scales = np.where(max_vals > 0, max_vals / -8.0, 1.0).astype(np.float16)
+        scales = np.where(max_vals > 0, max_vals / 8.0, 1.0).astype(np.float16)
         denom = np.where(scales[:, None] != 0, scales[:, None], 1.0)
         v0 = np.clip(np.round(blocks[:, :half_block] / denom) + 8, 0, 15).astype(np.uint8)
         v1 = np.clip(np.round(blocks[:, half_block:] / denom) + 8, 0, 15).astype(np.uint8)
@@ -212,7 +201,7 @@ def quantize_tensor_q4_0(arr: Any, block_size: int = 32) -> bytes:
     for i in range(0, len(flat), block_size):
         chunk = flat[i : i + block_size]
         max_val = max(abs(x) for x in chunk)
-        scale = max_val / -8.0 if max_val > 0.0 else 1.0
+        scale = max_val / 8.0 if max_val > 0.0 else 1.0
         out.extend(struct.pack("<e", scale))
         for j in range(half_block):
             v0 = round(chunk[j] / scale) + 8
@@ -250,11 +239,11 @@ def quantize_tensor_q4_k_m(arr: Any) -> bytes:
             a = np.pad(a, (0, block_size - rem))
         n_blocks = len(a) // block_size
         blocks = a.reshape(n_blocks, block_size)
-        max_vals = np.max(np.abs(blocks), axis=1)
-        d = np.where(max_vals > 0, max_vals / -8.0, 1.0).astype(np.float16)
         dmin = np.min(blocks, axis=1).astype(np.float16)
-        denom = np.where(d[:, None] != 0, d[:, None], 1.0)
         diff = blocks - dmin[:, None]
+        max_diff = np.max(diff, axis=1)
+        d = np.where(max_diff > 0, max_diff / 15.0, 1.0).astype(np.float16)
+        denom = np.where(d[:, None] != 0, d[:, None], 1.0)
         quant = np.clip(np.round(diff / denom), 0, 15).astype(np.uint8)
         v0 = quant[:, 0::2]
         v1 = quant[:, 1::2]
@@ -276,9 +265,9 @@ def quantize_tensor_q4_k_m(arr: Any) -> bytes:
     out = bytearray()
     for i in range(0, len(flat), block_size):
         chunk = flat[i : i + block_size]
-        max_val = max(abs(x) for x in chunk)
-        d = max_val / -8.0 if max_val > 0.0 else 1.0
         dmin = min(chunk)
+        max_diff = max(x - dmin for x in chunk)
+        d = max_diff / 15.0 if max_diff > 0.0 else 1.0
         out.extend(struct.pack("<e", d))
         out.extend(struct.pack("<e", dmin))
         # 12 bytes scale metadata
@@ -291,13 +280,15 @@ def quantize_tensor_q4_k_m(arr: Any) -> bytes:
     return bytes(out)
 
 
-def extract_pytorch_state_dict(model_or_name: Any) -> dict[str, Any]:
+def extract_pytorch_state_dict(model_or_name: Any, *, allow_dummy_fallback: bool = True) -> dict[str, Any]:
     """Extract named weight tensors from a PyTorch model, state dictionary, or preset.
 
     Maps architecture layer names to canonical GGUF llama.cpp layer identifiers.
 
     Args:
         model_or_name: Model instance, state dictionary, or preset model string identifier.
+        allow_dummy_fallback: Whether to fall back to a compact native Gemma4Config when
+            `model_or_name` is a preset name that is not found on disk.
 
     Returns:
         Dictionary mapping canonical GGUF tensor names to tensor or array objects.
@@ -311,7 +302,7 @@ def extract_pytorch_state_dict(model_or_name: Any) -> dict[str, Any]:
     if isinstance(model_or_name, dict):
         raw_dict = cast(dict[str, Any], model_or_name)
     elif hasattr(model_or_name, "state_dict") and callable(model_or_name.state_dict):
-        state_dict_res = model_or_name.state_dict()
+        state_dict_res: Any = model_or_name.state_dict()
         raw_dict = {str(k): v for k, v in state_dict_res.items()}
     elif isinstance(model_or_name, str):
         loaded = False
@@ -328,6 +319,8 @@ def extract_pytorch_state_dict(model_or_name: Any) -> dict[str, Any]:
                 logger.debug("Local AutoModelForCausalLM load failed for '%s': %s", model_or_name, e)
 
         if not loaded:
+            if not allow_dummy_fallback:
+                raise ExportError(f"Failed to load model state dict from '{model_or_name}' and allow_dummy_fallback is False.")
             try:
                 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
                 from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM

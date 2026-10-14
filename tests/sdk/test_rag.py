@@ -1,5 +1,6 @@
 """Tests for RAG-based schema contextualization module."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -10,7 +11,7 @@ from gemma_4_sql.sdk.rag import build_rag_prompt, extract_schema_entities, retri
 
 
 def test_extract_schema_entities() -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -25,7 +26,7 @@ def test_extract_schema_entities() -> None:
 
 
 def test_extract_schema_entities_ignore_comments() -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -38,7 +39,7 @@ def test_extract_schema_entities_ignore_comments() -> None:
 
 
 def test_retrieve_relevant_schema() -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -54,7 +55,7 @@ def test_retrieve_relevant_schema() -> None:
 
 
 def test_retrieve_relevant_schema_fallback() -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -66,7 +67,7 @@ def test_retrieve_relevant_schema_fallback() -> None:
 
 
 def test_retrieve_relevant_schema_empty() -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -80,13 +81,12 @@ class MockSentenceTransformer:
     """Provide class docstring."""
 
     def __init__(self, name: str) -> None:
-        """Execute function."""
+        """Execute test helper or verification step."""
 
     def encode(self, docs: list[str]) -> list[list[float]]:
-        """Execute function.
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return [[1.0] for _ in docs]
@@ -95,37 +95,34 @@ class MockSentenceTransformer:
 class MockSimilarities:
     """Provide class docstring."""
 
-    def argsort(self) -> object:
-        """Execute function.
+    def argsort(self) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return [0]
 
-    def __getitem__(self, idx: object) -> object:
-        """Execute function.
+    def __getitem__(self, idx: Any) -> Any:
+        """Execute test helper or verification step.
 
-        Returns:
-            object: Description of return.
+        Returns: Any: Description of return.
 
         """
         return 1.0
 
 
-def mock_cosine_similarity(_a: object, _b: object) -> list:
-    """Execute function.
+def mock_cosine_similarity(_a: Any, _b: Any) -> list:
+    """Execute test helper or verification step.
 
-    Returns:
-        object: Description of return.
+    Returns: Any: Description of return.
 
     """
     return [MockSimilarities()]
 
 
 def test_retrieve_relevant_schema_semantic(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -139,7 +136,7 @@ def test_retrieve_relevant_schema_semantic(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -148,8 +145,8 @@ def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(rag, "SentenceTransformer", MockSentenceTransformer)
     __import__("typing", fromlist=[""])
 
-    def raise_err(*_args: object, **_kwargs: object) -> object:
-        """Execute function.
+    def raise_err(*_args: Any, **_kwargs: Any) -> Any:
+        """Execute test helper or verification step.
 
         Raises:
             ValueError: Description.
@@ -165,7 +162,7 @@ def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch
 
 
 def test_build_rag_prompt_no_ddl() -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -175,7 +172,7 @@ def test_build_rag_prompt_no_ddl() -> None:
 
 
 def test_build_rag_prompt_with_ddl() -> None:
-    """Execute function.
+    """Execute test helper or verification step.
 
     Raises:
         AssertionError: Description.
@@ -192,15 +189,12 @@ def test_build_rag_prompt_with_ddl() -> None:
 
 
 def test_rag_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test import fallback."""
-    import sys
-
-    with monkeypatch.context() as m:
-        m.setitem(sys.modules, "sentence_transformers", None)
-        sys.modules.pop("gemma_4_sql.sdk.rag", None)
-        rag = __import__("gemma_4_sql.sdk.rag", fromlist=[""])
-        assert rag.SentenceTransformer is None
-        assert rag.cosine_similarity is None
+    """Verify `rag` falls back to keyword search when `SentenceTransformer` and `cosine_similarity` are None."""
+    monkeypatch.setattr(rag, "SentenceTransformer", None)
+    monkeypatch.setattr(rag, "cosine_similarity", None)
+    assert rag.SentenceTransformer is None
+    assert rag.cosine_similarity is None
+    assert rag.build_rag_prompt("Find users", "CREATE TABLE users (id INT);", sql_prefix="") == "-- Relevant Schema Context:\n-- Table: users | Columns: id\n\n-- Request:\n-- Find users"
 
 
 def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,7 +211,7 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockModel:
         """Mock SentenceTransformer model."""
 
-        def encode(self, _x: object) -> list[list[float]]:
+        def encode(self, _x: Any) -> list[list[float]]:
             """Return mock embedding.
 
             Args:
@@ -395,50 +389,26 @@ def test_rag_bm25_search() -> None:
     assert len(empty) == 2
 
 
-def test_rag_successful_imports():
-    """Test rag successful imports and semantic search."""
-    import sys
-    from unittest.mock import MagicMock, patch
-
-    mock_st = MagicMock()
+def test_rag_successful_imports(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify semantic search caches embeddings and models across calls using `clear_rag_model_cache`."""
+    rag.clear_rag_model_cache()
     mock_st_class = MagicMock()
-    mock_st.SentenceTransformer = mock_st_class
-
-    # Mock encode to return 2D array of vectors
     mock_model = MagicMock()
-    import numpy as np
-
     mock_model.encode.side_effect = lambda texts: np.array([[1.0, 0.0]] * len(texts))
     mock_st_class.return_value = mock_model
 
-    mock_smp = MagicMock()
-    # Mock cosine_similarity to return a 2D array of scores
-    mock_smp.cosine_similarity.return_value = np.array([[0.9, 0.1]])
+    mock_cos = MagicMock(return_value=np.array([[0.9, 0.1]]))
+    monkeypatch.setattr(rag, "SentenceTransformer", mock_st_class)
+    monkeypatch.setattr(rag, "cosine_similarity", mock_cos)
 
-    mock_sklearn = MagicMock()
-    mock_sklearn.metrics = MagicMock()
-    mock_sklearn.metrics.pairwise = mock_smp
-    mock_sklearn.metrics.pairwise.cosine_similarity = mock_smp.cosine_similarity
+    schema = {"table1": ["col1"], "table2": ["col2"]}
+    res = rag._semantic_search("query", schema, ["table1", "table2"], top_k_tables=1)
+    assert res == ["table1"]
+    assert mock_model.encode.call_count == 2
+    mock_cos.assert_called_once()
 
-    with patch.dict(
-        sys.modules,
-        {
-            "sentence_transformers": mock_st,
-            "sklearn": mock_sklearn,
-            "sklearn.metrics": mock_sklearn.metrics,
-            "sklearn.metrics.pairwise": mock_smp,
-        },
-    ):
-        sys.modules.pop("gemma_4_sql.sdk.rag", None)
-        import gemma_4_sql.sdk.rag as rag_module
-
-        schema = {"table1": ["col1"], "table2": ["col2"]}
-        res = rag_module._semantic_search("query", schema, ["table1", "table2"], top_k_tables=1)
-
-        # Since table1 has score 0.9 and table2 has 0.1, table1 should be first
-        assert res == ["table1"]
-
-        # Verify encode was called with correct inputs
-        assert mock_model.encode.call_count == 2
-
-        mock_smp.cosine_similarity.assert_called_once()
+    # Second call with same schema reuses cached table embeddings (only encodes prompt)
+    res2 = rag._semantic_search("second query", schema, ["table1", "table2"], top_k_tables=1)
+    assert res2 == ["table1"]
+    assert mock_model.encode.call_count == 3
+    rag.clear_rag_model_cache()
