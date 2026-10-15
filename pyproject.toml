@@ -193,6 +193,13 @@ disallow_untyped_decorators = false
 warn_return_any = false
 
 [tool.coverage.run]
+relative_files = true
+
+[tool.coverage.paths]
+source = [
+    "src/gemma_4_sql",
+    "*/src/gemma_4_sql",
+]
 
 [tool.coverage.report]
 
