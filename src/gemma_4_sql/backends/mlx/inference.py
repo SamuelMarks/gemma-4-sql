@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
-from gemma_4_sql.type_hints import ModelType, TensorType
+from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict, JSONValue
@@ -111,7 +111,7 @@ def mlx_beam_search(
             else:
                 out = model(full_seq)
 
-            next_logits: TensorType = None  # type: ignore # Justified: Dynamic backend protocol typing
+            next_logits: Any = None
             # Extract logits for the next token position
             if hasattr(out, "ndim") and out.ndim == 3:
                 next_logits = out[0, -1, slice(None)]

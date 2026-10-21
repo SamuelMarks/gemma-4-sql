@@ -278,7 +278,7 @@ def inject_lora(
                         adapted_ids.add(id(val))
                         injected_count += 1
                     else:
-                        __import__("typing").cast(__import__("typing").Any, val).trainable = False
+                        cast(Any, val).trainable = False
                 elif isinstance(val, list):
                     list_modified = False
                     for idx, item in enumerate(val):
@@ -295,7 +295,7 @@ def inject_lora(
                                 injected_count += 1
                                 list_modified = True
                             else:
-                                __import__("typing").cast(__import__("typing").Any, item).trainable = False
+                                cast(Any, item).trainable = False
                         else:
                             _traverse(item)
                     if list_modified:
@@ -438,7 +438,7 @@ def apply_lora(
             injected_count = len(target_modules)
         else:
             model, injected_count = inject_lora(
-                model=model,  # type: ignore # Runtime typing
+                model=cast(ModelType, model),
                 target_modules=target_modules,
                 lora_r=lora_r,
                 lora_alpha=lora_alpha,
@@ -446,7 +446,7 @@ def apply_lora(
             )
 
         if kwargs.get("merge"):
-            model = merge_lora_weights(model)  # type: ignore # Runtime typing
+            model = merge_lora_weights(cast(ModelType, model))
 
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, ImportError) as e:
         logger.exception("Keras LoRA error: ")

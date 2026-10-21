@@ -21,21 +21,21 @@ def benchmark(
     warmup_steps: int = 5,
     **kwargs: object,
 ) -> BenchmarkResultDict:
-    """Benchmarks a model on specific hardware.
+    """Benchmark a Text-to-SQL model on a target hardware accelerator.
 
     Args:
-        model_name: The name of the target model.
-        hardware: The target hardware accelerator.
-        batch_size: The number of items to process in a single batch.
-        backend: The backend framework to use.
-        dtype: The precision.
-        mode: The mode.
-        max_new_tokens: Max new tokens.
-        warmup_steps: Number of warmup steps.
-        **kwargs: Additional parameters including multimodal options.
+        model_name: Hugging Face model identifier or preset name.
+        hardware: Target hardware accelerator (e.g., `'tpu-v5p'`, `'gpu'`, `'cpu'`, `'apple_silicon'`).
+        batch_size: Number of sequences processed per benchmark batch.
+        backend: Backend framework (`'jax'`, `'pytorch'`, `'keras'`, `'maxtext'`, or `'mlx'`).
+        dtype: Numerical precision policy (e.g., `'bfloat16'`, `'float16'`, `'float32'`).
+        mode: Benchmark execution mode (`'prefill'` or `'generate'`).
+        max_new_tokens: Maximum number of tokens generated in `'generate'` mode.
+        warmup_steps: Number of untimed warmup iterations before latency measurement.
+        **kwargs: Additional parameters including multimodal options and `num_runs`.
 
     Returns:
-        A dictionary containing the results.
+        Structured `BenchmarkResultDict` containing throughput (`tokens_per_sec`), latency, memory, and status.
 
     """
 

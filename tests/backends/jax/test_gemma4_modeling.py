@@ -17,7 +17,7 @@ from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM, Gemma4Mo
 
 @pytest.fixture
 def tiny_config():
-    """Verify behavior of tiny_config."""
+    """Execute and verify `tiny_config` behavior and invariants."""
     return ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -31,7 +31,7 @@ def tiny_config():
 
 @pytest.fixture
 def tiny_ple_config():
-    """Verify behavior of tiny_ple_config."""
+    """Execute and verify `tiny_ple_config` behavior and invariants."""
     return ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -47,7 +47,7 @@ def tiny_ple_config():
 
 @pytest.fixture
 def tiny_multimodal_config():
-    """Verify behavior of tiny_multimodal_config."""
+    """Execute and verify `tiny_multimodal_config` behavior and invariants."""
     return ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -63,7 +63,7 @@ def tiny_multimodal_config():
 
 
 def test_gemma4_model_forward(tiny_config):
-    """Verify behavior of test_gemma4_model_forward."""
+    """Execute and verify `test_gemma4_model_forward` behavior and invariants."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_config, rngs=rngs)
 
@@ -80,7 +80,7 @@ def test_gemma4_model_forward(tiny_config):
 
 
 def test_gemma4_model_ple(tiny_ple_config):
-    """Verify behavior of test_gemma4_model_ple."""
+    """Execute and verify `test_gemma4_model_ple` behavior and invariants."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_ple_config, rngs=rngs)
 
@@ -104,7 +104,7 @@ def test_gemma4_model_ple(tiny_ple_config):
 
 
 def test_gemma4_causal_lm(tiny_config):
-    """Verify behavior of test_gemma4_causal_lm."""
+    """Execute and verify `test_gemma4_causal_lm` behavior and invariants."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_config, rngs=rngs)
 
@@ -128,7 +128,7 @@ def test_gemma4_causal_lm(tiny_config):
 
 
 def test_gemma4_multimodal(tiny_multimodal_config):
-    """Verify behavior of test_gemma4_multimodal."""
+    """Execute and verify `test_gemma4_multimodal` behavior and invariants."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_multimodal_config, rngs=rngs)
 
@@ -156,7 +156,7 @@ def test_gemma4_multimodal(tiny_multimodal_config):
 
 def test_gemma4_multimodal_with_ple(tiny_multimodal_config, tiny_ple_config):
     # Combine configs for multimodal + ple
-    """Verify behavior of test_gemma4_multimodal_with_ple."""
+    """Execute and verify `test_gemma4_multimodal_with_ple` behavior and invariants."""
     config = tiny_ple_config
     config.vision_config = VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4, image_size=16)
     config.audio_config = AudioConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2)
@@ -175,7 +175,7 @@ def test_gemma4_multimodal_with_ple(tiny_multimodal_config, tiny_ple_config):
 
 
 def test_gemma4_multimodal_missing_masks(tiny_multimodal_config):
-    """Verify behavior of test_gemma4_multimodal_missing_masks."""
+    """Execute and verify `test_gemma4_multimodal_missing_masks` behavior and invariants."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_multimodal_config, rngs=rngs)
 
@@ -192,7 +192,7 @@ def test_gemma4_multimodal_missing_masks(tiny_multimodal_config):
 
 
 def test_gemma4_model_ple_none(tiny_ple_config):
-    """Verify behavior of test_gemma4_model_ple_none."""
+    """Execute and verify `test_gemma4_model_ple_none` behavior and invariants."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_ple_config, rngs=rngs)
 
@@ -204,7 +204,7 @@ def test_gemma4_model_ple_none(tiny_ple_config):
 
 
 def test_gemma4_model_ple_none_config(tiny_config):
-    """Verify behavior of test_gemma4_model_ple_none_config."""
+    """Execute and verify `test_gemma4_model_ple_none_config` behavior and invariants."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_config, rngs=rngs)
 
@@ -221,7 +221,7 @@ def test_gemma4_model_ple_none_config(tiny_config):
 
 
 def test_project_ple_none(tiny_ple_config):
-    """Verify behavior of test_project_ple_none."""
+    """Execute and verify `test_project_ple_none` behavior and invariants."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_ple_config, rngs=rngs)
     input_ids = jnp.array([[1, 2, 3]])
@@ -231,7 +231,7 @@ def test_project_ple_none(tiny_ple_config):
 
 
 def test_from_pretrained():
-    """Verify behavior of test_from_pretrained."""
+    """Execute and verify `test_from_pretrained` behavior and invariants."""
     import sys
 
     mock_huggingface = MagicMock()
@@ -255,12 +255,12 @@ def test_from_pretrained():
 
 
 def test_default_jit():
-    """Verify behavior of test_default_jit."""
+    """Execute and verify `test_default_jit` behavior and invariants."""
     assert _default_jit("x") == "x"
 
 
 def test_forward(tiny_config):
-    """Verify behavior of test_forward."""
+    """Execute and verify `test_forward` behavior and invariants."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_config, rngs=rngs)
 
@@ -274,7 +274,7 @@ def test_forward(tiny_config):
 
 
 def test_gemma4_multimodal_audio_only(tiny_multimodal_config):
-    """Verify behavior of test_gemma4_multimodal_audio_only."""
+    """Execute and verify `test_gemma4_multimodal_audio_only` behavior and invariants."""
     import jax.numpy as jnp
     from flax import nnx
 

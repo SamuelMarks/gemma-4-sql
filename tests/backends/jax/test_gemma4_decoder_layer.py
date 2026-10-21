@@ -12,7 +12,7 @@ from gemma_4_sql.backends.jax.gemma4.decoder_layer import Gemma4DecoderLayer
 
 
 def test_decoder_layer_mlp():
-    """Verify behavior of test_decoder_layer_mlp."""
+    """Execute and verify `test_decoder_layer_mlp` behavior and invariants."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -29,10 +29,10 @@ def test_decoder_layer_mlp():
 
     # Test with cache and mask
     class DummyCache:
-        """Verify behavior of DummyCache."""
+        """Execute and verify `DummyCache` behavior and invariants."""
 
         def __init__(self):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             import jax.numpy as jnp
             from flax import nnx
 
@@ -51,7 +51,7 @@ def test_decoder_layer_mlp():
 
 
 def test_decoder_layer_moe():
-    """Verify behavior of test_decoder_layer_moe."""
+    """Execute and verify `test_decoder_layer_moe` behavior and invariants."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -70,7 +70,7 @@ def test_decoder_layer_moe():
 
 
 def test_decoder_layer_per_layer_input():
-    """Verify behavior of test_decoder_layer_per_layer_input."""
+    """Execute and verify `test_decoder_layer_per_layer_input` behavior and invariants."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,

@@ -122,7 +122,7 @@ def test_run_training_epochs():
 
     # Check outputs obj
     class Obj:
-        """Verify behavior of Obj."""
+        """Execute and verify `Obj` behavior and invariants."""
 
         logits = MagicMock()
 

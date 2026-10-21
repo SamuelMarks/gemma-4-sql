@@ -29,7 +29,7 @@ def apply_peft(
         **kwargs: Backend-specific LoRA parameters (including optional `backend`).
 
     Returns:
-        A dictionary containing the results.
+        Structured `PEFTResultDict` containing `backend`, `action`, `model`, `target_modules`, LoRA hyperparameters, and `status`.
 
     """
     call_kwargs = dict(kwargs)

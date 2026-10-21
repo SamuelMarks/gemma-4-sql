@@ -148,8 +148,10 @@ def _run_generation(
     if "adapter_path" in kwargs or "lora_path" in kwargs:
         adapter_path = str(kwargs.get("adapter_path") or kwargs.get("lora_path"))
         try:
-            peft_pkg = __import__("peft", fromlist=["PeftModel"])
-            model = peft_pkg.PeftModel.from_pretrained(model, adapter_path)
+            peft_model_cls = optional_attr("peft", "PeftModel")
+            if peft_model_cls is None:
+                raise ImportError("peft.PeftModel is not available.")
+            model = peft_model_cls.from_pretrained(model, adapter_path)
         except (ImportError, ValueError, RuntimeError, OSError) as e:
             logger.warning("Could not load adapter from %s: %s", adapter_path, e)
 

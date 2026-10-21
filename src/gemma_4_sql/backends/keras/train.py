@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.keras.etl import build_dataloader
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ETLConfig, ModelType, TrainingConfig
+from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import TrainResultDict
@@ -39,7 +39,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, batch_size: int =
     if keras is None or tf is None:
         raise DependencyMissingError("Keras dependencies are missing.")
 
-    model: ModelType = None  # type: ignore # Justified: Dynamic backend protocol typing
+    model: Any = None
     strategy = tf.distribute.MirroredStrategy()
     with strategy.scope():
         try:

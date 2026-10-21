@@ -12,7 +12,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 @pytest.fixture(autouse=True)
 def mock_dependencies(monkeypatch):
-    """Verify behavior of mock_dependencies."""
+    """Execute and verify `mock_dependencies` behavior and invariants."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_gemma4 = MagicMock()
@@ -31,11 +31,11 @@ def mock_dependencies(monkeypatch):
 
 
 def test_beam_search_step():
-    """Verify behavior of test_beam_search_step."""
+    """Execute and verify `test_beam_search_step` behavior and invariants."""
     seq = np.array([[1, 2, 3]])
 
     def model_apply_fn(s):
-        """Verify behavior of model_apply_fn."""
+        """Execute and verify `model_apply_fn` behavior and invariants."""
         # Return logits where shape is 3D
         logits = np.zeros((1, 3, 5))
         # Top indices will be 4, 3, 2, 1, 0 based on values
@@ -52,11 +52,11 @@ def test_beam_search_step():
 
 
 def test_beam_search_step_shapes():
-    """Verify behavior of test_beam_search_step_shapes."""
+    """Execute and verify `test_beam_search_step_shapes` behavior and invariants."""
     seq = np.array([[1, 2, 3]])
 
     def model_apply_fn_2d(s):
-        """Verify behavior of model_apply_fn_2d."""
+        """Execute and verify `model_apply_fn_2d` behavior and invariants."""
         logits = np.zeros((3, 5))
         logits[-1, :] = [0.1, 0.2, 0.3, 0.4, 0.5]
         return logits
@@ -65,7 +65,7 @@ def test_beam_search_step_shapes():
     np.testing.assert_array_equal(beams_2d[0][0], [[1, 2, 3, 4]])
 
     def model_apply_fn_1d(s):
-        """Verify behavior of model_apply_fn_1d."""
+        """Execute and verify `model_apply_fn_1d` behavior and invariants."""
         logits = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
         return logits
 
@@ -74,30 +74,30 @@ def test_beam_search_step_shapes():
 
 
 def test_beam_search_step_no_item(mock_dependencies):
-    """Verify behavior of test_beam_search_step_no_item."""
+    """Execute and verify `test_beam_search_step_no_item` behavior and invariants."""
     mock_jax, mock_jnp, _mock_gemma4 = mock_dependencies
 
     seq = np.array([[1, 2]])
 
     def model_apply_fn(s):
-        """Verify behavior of model_apply_fn."""
+        """Execute and verify `model_apply_fn` behavior and invariants."""
         return np.array([0.1, 0.2, 0.3])
 
     class NoItemScore:
-        """Verify behavior of NoItemScore."""
+        """Execute and verify `NoItemScore` behavior and invariants."""
 
         def __init__(self, v):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             self.v = v
 
         def __float__(self):
-            """Verify behavior of __float__."""
+            """Execute and verify `__float__` behavior and invariants."""
             return float(self.v)
 
         # no .item() method!
 
     def dummy_argsort(x):
-        """Verify behavior of dummy_argsort."""
+        """Execute and verify `dummy_argsort` behavior and invariants."""
         return np.array([0, 1, 2])
 
     mock_jnp.argsort.side_effect = dummy_argsort
@@ -110,10 +110,10 @@ def test_beam_search_step_no_item(mock_dependencies):
 
 
 def test_maxtext_beam_search():
-    """Verify behavior of test_maxtext_beam_search."""
+    """Execute and verify `test_maxtext_beam_search` behavior and invariants."""
 
     def apply_fn(seq):
-        """Verify behavior of apply_fn."""
+        """Execute and verify `apply_fn` behavior and invariants."""
         return np.array([0.1, 0.9])  # always predicts 1
 
     input_ids = np.array([[0]])
@@ -130,11 +130,11 @@ def test_maxtext_beam_search():
 
 
 def test_maxtext_beam_search_eos():
-    """Verify behavior of test_maxtext_beam_search_eos."""
+    """Execute and verify `test_maxtext_beam_search_eos` behavior and invariants."""
     call_count = 0
 
     def apply_fn(seq):
-        """Verify behavior of apply_fn."""
+        """Execute and verify `apply_fn` behavior and invariants."""
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -156,11 +156,11 @@ def test_maxtext_beam_search_eos():
 
 
 def test_maxtext_beam_search_eos_continue():
-    """Verify behavior of test_maxtext_beam_search_eos_continue."""
+    """Execute and verify `test_maxtext_beam_search_eos_continue` behavior and invariants."""
     call_count = 0
 
     def apply_fn(seq):
-        """Verify behavior of apply_fn."""
+        """Execute and verify `apply_fn` behavior and invariants."""
         nonlocal call_count
         call_count += 1
         # First call (input [2]): return top 2 tokens: 1 and 0 (eos)
@@ -176,7 +176,7 @@ def test_maxtext_beam_search_eos_continue():
 
 
 def test_execute_generate(mock_dependencies):
-    """Verify behavior of test_execute_generate."""
+    """Execute and verify `test_execute_generate` behavior and invariants."""
     mock_jax, _mock_jnp, _mock_gemma4 = mock_dependencies
 
     tokenizer = MagicMock()
@@ -196,7 +196,7 @@ def test_execute_generate(mock_dependencies):
 
 
 def test_execute_generate_model_apply(mock_dependencies):
-    """Verify behavior of test_execute_generate_model_apply."""
+    """Execute and verify `test_execute_generate_model_apply` behavior and invariants."""
     mock_jax, _mock_jnp, mock_gemma4 = mock_dependencies
 
     mock_model = MagicMock()
@@ -223,7 +223,7 @@ def test_execute_generate_model_apply(mock_dependencies):
 
 
 def test_generate_sql(mock_dependencies):
-    """Verify behavior of test_generate_sql."""
+    """Execute and verify `test_generate_sql` behavior and invariants."""
     with patch("gemma_4_sql.backends.maxtext.inference._execute_generate") as mock_exec:
         mock_exec.return_value = ("success", "SELECT 1", 0.9)
 
@@ -234,7 +234,7 @@ def test_generate_sql(mock_dependencies):
 
 
 def test_generate_sql_missing_deps(monkeypatch):
-    """Verify behavior of test_generate_sql_missing_deps."""
+    """Execute and verify `test_generate_sql_missing_deps` behavior and invariants."""
     monkeypatch.setattr(inference, "jax", None)
 
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
@@ -242,7 +242,7 @@ def test_generate_sql_missing_deps(monkeypatch):
 
 
 def test_generate_sql_error(mock_dependencies):
-    """Verify behavior of test_generate_sql_error."""
+    """Execute and verify `test_generate_sql_error` behavior and invariants."""
     with patch("gemma_4_sql.backends.maxtext.inference._execute_generate") as mock_exec:
         mock_exec.side_effect = RuntimeError("Generation failed")
 

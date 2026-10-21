@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_dependencies():
-    """Verify behavior of mock_dependencies."""
+    """Execute and verify `mock_dependencies` behavior and invariants."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_nnx = MagicMock()
@@ -57,7 +57,7 @@ def mock_dependencies():
 
 
 def reload_module():
-    """Verify behavior of reload_module."""
+    """Execute and verify `reload_module` behavior and invariants."""
     import gemma_4_sql.backends.jax.benchmark as jax_benchmark
 
     importlib.reload(jax_benchmark)
@@ -71,7 +71,7 @@ def reload_module():
 
 
 def test_missing_dependencies():
-    """Verify behavior of test_missing_dependencies."""
+    """Execute and verify `test_missing_dependencies` behavior and invariants."""
     with patch.dict(sys.modules, {"jax": None, "jax.numpy": None, "flax": None, "flax.nnx": None}):
         jax_benchmark = reload_module()
         with pytest.raises(Exception, match="JAX dependencies are missing."):
@@ -79,7 +79,7 @@ def test_missing_dependencies():
 
 
 def test_get_device():
-    """Verify behavior of test_get_device."""
+    """Execute and verify `test_get_device` behavior and invariants."""
     jax_benchmark = reload_module()
 
     assert jax_benchmark._get_device("gpu") == "mock_gpu_device"
@@ -87,7 +87,7 @@ def test_get_device():
     assert jax_benchmark._get_device("unknown") == "mock_cpu_device"
 
     def side_effect(hw):
-        """Verify behavior of side_effect."""
+        """Execute and verify `side_effect` behavior and invariants."""
         if hw in ("tpu", "gpu"):
             raise RuntimeError("Mock error")
         return [f"mock_{hw}_device"]
@@ -97,7 +97,7 @@ def test_get_device():
 
 
 def test_run_benchmark_pass_prefill():
-    """Verify behavior of test_run_benchmark_pass_prefill."""
+    """Execute and verify `test_run_benchmark_pass_prefill` behavior and invariants."""
     jax_benchmark = reload_module()
 
     mock_model = MagicMock()
@@ -116,7 +116,7 @@ def test_run_benchmark_pass_prefill():
 
 
 def test_run_benchmark_pass_generate():
-    """Verify behavior of test_run_benchmark_pass_generate."""
+    """Execute and verify `test_run_benchmark_pass_generate` behavior and invariants."""
     jax_benchmark = reload_module()
     del jax_benchmark.nnx.jit
     jax_benchmark = reload_module()
@@ -143,14 +143,14 @@ def test_run_benchmark_pass_generate():
 
 
 def test_benchmark_model_execution():
-    """Verify behavior of test_benchmark_model_execution."""
+    """Execute and verify `test_benchmark_model_execution` behavior and invariants."""
     jax_benchmark = reload_module()
 
     # We don't mock _run_benchmark_pass, we let it run with mocked jax
     with patch("gemma_4_sql.backends.jax.benchmark.run_benchmark_wrapper") as mock_wrapper:
 
         def side_effect(backend_name, model_name, hardware, batch_size, missing_deps, benchmark_fn, **kwargs):
-            """Verify behavior of side_effect."""
+            """Execute and verify `side_effect` behavior and invariants."""
             return benchmark_fn()
 
         mock_wrapper.side_effect = side_effect

@@ -10,7 +10,7 @@ import pytest
 
 
 def test_load_hf_or_duckdb(monkeypatch):
-    """Verify behavior of test_load_hf_or_duckdb."""
+    """Execute and verify `test_load_hf_or_duckdb` behavior and invariants."""
     from gemma_4_sql.backends.keras import etl
     from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -28,7 +28,7 @@ def test_load_hf_or_duckdb(monkeypatch):
 
 
 def test_get_sampler(monkeypatch):
-    """Verify behavior of test_get_sampler."""
+    """Execute and verify `test_get_sampler` behavior and invariants."""
     from gemma_4_sql.backends.keras import etl
     from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -47,7 +47,7 @@ def test_get_sampler(monkeypatch):
 
 
 def test_build_dataloader(monkeypatch):
-    """Verify behavior of test_build_dataloader."""
+    """Execute and verify `test_build_dataloader` behavior and invariants."""
     from gemma_4_sql.backends.keras import etl
     from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -61,10 +61,10 @@ def test_build_dataloader(monkeypatch):
     monkeypatch.setattr(etl, "_load_hf_or_duckdb", MagicMock())
 
     class MockSource:
-        """Verify behavior of MockSource."""
+        """Execute and verify `MockSource` behavior and invariants."""
 
         def __len__(self):
-            """Verify behavior of __len__."""
+            """Execute and verify `__len__` behavior and invariants."""
             return 10
 
     monkeypatch.setattr(etl, "get_grain_classes", MagicMock(return_value=(MagicMock(return_value=MockSource()), MagicMock())))
@@ -76,7 +76,7 @@ def test_build_dataloader(monkeypatch):
 
 
 def test_build_dataloader_missing_grain(monkeypatch):
-    """Verify behavior of test_build_dataloader_missing_grain."""
+    """Execute and verify `test_build_dataloader_missing_grain` behavior and invariants."""
     from gemma_4_sql.backends.keras import etl
     from gemma_4_sql.exceptions import DependencyMissingError
 

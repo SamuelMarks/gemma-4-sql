@@ -8,7 +8,7 @@ from gemma_4_sql.backends.maxtext import benchmark
 
 
 def test_get_device():
-    """Verify behavior of test_get_device."""
+    """Execute and verify `test_get_device` behavior and invariants."""
     mock_jax = MagicMock()
     mock_jax.devices.side_effect = lambda x: ["tpu0"] if x == "tpu" else ["gpu0"] if x == "gpu" else ["cpu0"]
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", mock_jax):
@@ -18,11 +18,11 @@ def test_get_device():
 
 
 def test_get_device_runtime_error():
-    """Verify behavior of test_get_device_runtime_error."""
+    """Execute and verify `test_get_device_runtime_error` behavior and invariants."""
     mock_jax = MagicMock()
 
     def mock_devices(t):
-        """Verify behavior of mock_devices."""
+        """Execute and verify `mock_devices` behavior and invariants."""
         if t == "cpu":
             return ["cpu0"]
         raise RuntimeError()
@@ -33,13 +33,13 @@ def test_get_device_runtime_error():
 
 
 def test_get_device_no_jax():
-    """Verify behavior of test_get_device_no_jax."""
+    """Execute and verify `test_get_device_no_jax` behavior and invariants."""
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", None):
         assert benchmark._get_device("tpu") is None
 
 
 def test_run_benchmark_pass():
-    """Verify behavior of test_run_benchmark_pass."""
+    """Execute and verify `test_run_benchmark_pass` behavior and invariants."""
     mock_model = MagicMock()
     mock_model.apply.return_value = jnp.zeros((2, 32, 256))
 
@@ -75,7 +75,7 @@ def test_run_benchmark_pass():
 
 
 def test_benchmark_model():
-    """Verify behavior of test_benchmark_model."""
+    """Execute and verify `test_benchmark_model` behavior and invariants."""
     with (
         patch("gemma_4_sql.backends.maxtext.benchmark.Gemma4Model", MagicMock()),
         patch("gemma_4_sql.backends.maxtext.benchmark.jax", MagicMock()),
@@ -100,7 +100,7 @@ def test_benchmark_model():
 
 
 def test_benchmark_model_error():
-    """Verify behavior of test_benchmark_model_error."""
+    """Execute and verify `test_benchmark_model_error` behavior and invariants."""
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", None):
         res = benchmark.benchmark_model("gemma4", "cpu", 2)
         assert res["status"] == "backend_unavailable"

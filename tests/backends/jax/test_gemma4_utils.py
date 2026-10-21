@@ -23,10 +23,10 @@ EXPECTED_VAL = 123
 
 
 def test_utils() -> Any:
-    """Verify behavior of test_utils.
+    """Verify assign_weights, assign_weights_from_eval_shape, and stoi transformations.
 
     Raises:
-        AssertionError: Description.
+        AssertionError: If weight assignment or string-to-int conversion fails.
 
     """
     state = {"a": jax.ShapeDtypeStruct((2, 2), jnp.float32)}

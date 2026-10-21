@@ -1,122 +1,103 @@
-"""Tests for mlx train."""
+"""Unit and behavioral tests for the MLX training pipeline."""
 
-import sys
+from __future__ import annotations
+
+from typing import Any
 from unittest.mock import MagicMock, patch
-
-from tests.conftest import requires_mlx
-
-pytestmark = requires_mlx
 
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import TrainingConfig
+from gemma_4_sql.type_hints import TrainerState, TrainingConfig
+from tests.conftest import requires_mlx
+
+pytestmark = requires_mlx
 
 
-def test_mlx_train_imports():
-    """Test mlx train imports fallback."""
-    import importlib
+def test_real_mlx_training_epochs_and_execute_train(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _run_training_epochs and _execute_train run real MLX forward/backward updates on a tiny nn.Module."""
+    import mlx.core as mx
+    from mlx import nn
 
-    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None, "mlx.nn": None, "mlx.optimizers": None, "mlx_lm": None}):
-        import gemma_4_sql.backends.mlx.train as train_module
-
-        importlib.reload(train_module)
-        assert train_module.mx is None
-        assert train_module.nn is None
-        assert train_module.optim is None
-        assert train_module.load is None
-
-    with patch.dict(sys.modules, {"mlx": MagicMock(), "mlx.core": MagicMock(), "mlx.nn": MagicMock(), "mlx.optimizers": MagicMock(), "mlx_lm": MagicMock(load="load")}):
-        importlib.reload(train_module)
-        assert train_module.load == "load"
-    importlib.reload(train_module)
-
-
-def test_run_training_epochs():
-    """Test _run_training_epochs."""
     import gemma_4_sql.backends.mlx.train as train_module
 
-    state = MagicMock()
-    state.dataloader = [{"inputs": [1, 2], "targets": [3, 4]}]
-    state.epochs = 2
-    state.policy_model = MagicMock()
-    state.optimizer = MagicMock()
+    class TinyMLXModel(nn.Module):
+        """Minimal MLX language model for supervised fine-tuning tests."""
 
-    loss_mock = MagicMock()
-    loss_mock.item.return_value = 0.5
-    state.train_step.return_value = (loss_mock, "grads")
+        def __init__(self) -> None:
+            """Initialize TinyMLXModel with embedding and output projection."""
+            super().__init__()
+            self.embed = nn.Embedding(32, 8)
+            self.head = nn.Linear(8, 32)
 
-    train_module.mx = MagicMock()
+        def __call__(self, x: Any) -> Any:
+            """Compute logits from input token IDs."""
+            return self.head(self.embed(x))
 
+    tiny_model = TinyMLXModel()
+    mx.eval(tiny_model.parameters())
+    old_weight = mx.array(tiny_model.head.weight)
+    mx.eval(old_weight)
+
+    monkeypatch.setattr(train_module, "load", lambda _m: (tiny_model, "tok"))
+    batch = {"inputs": [[1, 2, 3]], "targets": [[2, 3, 4]]}
+    monkeypatch.setattr(train_module, "build_dataloader", lambda *_a, **_k: {"loader": [batch]})
+
+    status, final_loss = train_module._execute_train("tiny", "ds", epochs=1, learning_rate=1e-2, batch_size=1)
+    assert status == "completed"
+    assert final_loss > 0.0
+    assert not mx.allclose(old_weight, tiny_model.head.weight).item()
+
+
+def test_run_training_epochs_scalar_loss() -> None:
+    """Verify _run_training_epochs handles plain float loss returns without .item()."""
+    import gemma_4_sql.backends.mlx.train as train_module
+
+    state = TrainerState(
+        dataloader=[{"inputs": [[1, 2]], "targets": [[2, 3]]}],
+        epochs=1,
+        policy_model=MagicMock(),
+        optimizer=MagicMock(),
+        train_step=lambda *_a: (0.25, "grads"),
+    )
     loss = train_module._run_training_epochs(state)
-    assert loss == 0.5
+    assert loss == 0.25
 
 
-def test_execute_train():
-    """Test _execute_train."""
+def test_execute_train_invalid_dataloader_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _execute_train validates the dataloader and raises DependencyMissingError when MLX is missing."""
     import gemma_4_sql.backends.mlx.train as train_module
 
-    train_module.mx = MagicMock()
-    train_module.nn = MagicMock()
-    train_module.optim = MagicMock()
-    train_module.load = MagicMock(return_value=MagicMock())
+    monkeypatch.setattr(train_module, "load", lambda _m: MagicMock())
+    monkeypatch.setattr(train_module, "build_dataloader", lambda *_a, **_k: {})
+    with pytest.raises(ValueError, match="Invalid dataloader"):
+        train_module._execute_train("m", "d", 1, 0.1)
 
-    with patch("gemma_4_sql.backends.mlx.train.build_dataloader") as mock_build:
-        mock_build.return_value = {"loader": [1]}
-        with patch("gemma_4_sql.backends.mlx.train._run_training_epochs") as mock_run:
-            mock_run.return_value = 0.5
-
-            stat, loss = train_module._execute_train("m", "d", 1, 0.1)
-            assert stat == "completed"
-            assert loss == 0.5
-
-            # test value_and_grad callable
-            loss_fn = train_module.nn.value_and_grad.call_args[0][1]
-            mock_model = MagicMock()
-            mock_model.return_value = "logits"
-            train_module.nn.losses.cross_entropy.return_value = "loss"
-            assert loss_fn(mock_model, "in", "tar") == "loss"
-
-        mock_build.return_value = {}
-        with pytest.raises(ValueError):
-            train_module._execute_train("m", "d", 1, 0.1)
-
-    train_module.mx = None
+    monkeypatch.setattr(train_module, "mx", None)
     with pytest.raises(DependencyMissingError):
         train_module._execute_train("m", "d", 1, 0.1)
 
 
-def test_train_model():
-    """Test train_model."""
+def test_train_model_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify train_model returns structured results and captures runtime errors."""
     import gemma_4_sql.backends.mlx.train as train_module
 
-    train_module.mx = MagicMock()
-    train_module.nn = MagicMock()
-    train_module.optim = MagicMock()
-    train_module.load = MagicMock()
+    config = TrainingConfig(model_name="model", dataset="dataset")
 
-    config = TrainingConfig(model_name="model")
-
-    with patch("gemma_4_sql.backends.mlx.train._execute_train") as mock_exec:
+    with patch.object(train_module, "_execute_train") as mock_exec:
         mock_exec.return_value = ("completed", 0.5)
-
         res = train_module.train_model(config)
         assert res["status"] == "completed"
         assert res["final_loss"] == 0.5
 
         mock_exec.side_effect = TypeError("err")
         res2 = train_module.train_model(config)
-        assert "failed: err" in res2["status"]  # Wait! TypeError inside the try falls back to _execute_train without batch_size!
-
-        # We need to make the fallback return something
-        mock_exec.side_effect = [TypeError("err"), ("completed", 0.5)]
-        res3 = train_module.train_model(config)
-        assert res3["status"] == "completed"
+        assert "failed: err" in res2["status"]
 
         mock_exec.side_effect = RuntimeError("err")
         res4 = train_module.train_model(config)
         assert "failed: err" in res4["status"]
 
-    train_module.mx = None
+    monkeypatch.setattr(train_module, "mx", None)
     with pytest.raises(DependencyMissingError):
         train_module.train_model(config)

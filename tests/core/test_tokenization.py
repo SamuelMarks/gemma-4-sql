@@ -133,10 +133,10 @@ def test_sql_tokenizer_get_vocab() -> None:
     assert vocab["a"] == ord("a")
 
     class MockVocabHFTokenizer(MockHFTokenizer):
-        """Verify behavior of MockVocabHFTokenizer."""
+        """Execute and verify `MockVocabHFTokenizer` behavior and invariants."""
 
         def get_vocab(self) -> dict[str, int]:
-            """Verify behavior of get_vocab."""
+            """Execute and verify `get_vocab` behavior and invariants."""
             return {"<pad>": 0, "select": 1}
 
     tok_hf = SQLTokenizer()

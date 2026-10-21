@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import jax
+from flax import nnx
 
 from gemma_4_sql.backends.lazy_loader import optional_attr
 from gemma_4_sql.type_hints import TensorType
@@ -220,11 +221,12 @@ def _get_model_and_state(model_cls: Any, cfg: object) -> tuple[object, dict[str,
         Tuple of `(model_instance, state_dict)`.
 
     """
-    nnx = __import__("flax", fromlist=["nnx"]).nnx
     model = model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
     state: dict[str, Any] = {}
     with contextlib.suppress(RuntimeError, ValueError, TypeError, AttributeError):
-        (_, state, _) = nnx.split(model, ...)
+        split_fn: Any = nnx.split
+        split_res = split_fn(model, ...)
+        state = split_res[1]
     return model, state
 
 
@@ -264,14 +266,12 @@ def create_model_from_safe_tensors(
     """
     if safe_open is None or not Path(file_dir).is_dir():
         logger.warning("safetensors not available or file_dir invalid. Returning uninitialized model.")
-        nnx = __import__("flax", fromlist=["nnx"]).nnx
         return model_cls(cfg, rngs=nnx.Rngs(0)) if model_cls else None
 
     model, state = _get_model_and_state(model_cls, cfg)
     _populate_state_from_files(file_dir, state, key_mapping)
 
     try:
-        nnx = __import__("flax", fromlist=["nnx"]).nnx
         nnx.update(model, state)
     except (ValueError, TypeError, KeyError, AttributeError, RuntimeError):
         logger.exception("Failed to update model with loaded state")

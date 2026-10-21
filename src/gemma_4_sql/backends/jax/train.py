@@ -21,28 +21,67 @@ Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
 Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
 
-def _loss_fn(model: ModelType, batch: JSONDict) -> Any:
-    """Compute the cross-entropy loss for the model on a given batch.
+def _create_nnx_optimizer(model: Any, tx: Any) -> Any:
+    """Create a Flax NNX Optimizer compatible with both Flax <0.11 and >=0.11 (`wrt=nnx.Param`).
 
     Args:
-        model: The model.
-        batch: The batch.
+        model: Flax NNX module to optimize.
+        tx: Optax gradient transformation.
 
     Returns:
-        The execution result.
+        Configured `nnx.Optimizer` instance.
 
     """
-    logits = model(batch["inputs"])
+    try:
+        return nnx.Optimizer(model, tx, wrt=nnx.Param)
+    except TypeError:
+        return nnx.Optimizer(model, tx)
+
+
+def _apply_nnx_optimizer_update(optimizer: Any, model: Any, grads: Any) -> None:
+    """Apply gradient updates on an `nnx.Optimizer` across Flax NNX versions.
+
+    Args:
+        optimizer: Flax NNX optimizer instance.
+        model: Flax NNX module being optimized.
+        grads: Computed gradient PyTree.
+
+    """
+    if optimizer is not None and hasattr(optimizer, "update"):
+        try:
+            optimizer.update(model, grads)
+        except TypeError:
+            optimizer.update(grads)
+
+
+def _loss_fn(model: ModelType, batch: JSONDict) -> Any:
+    """Compute the mean cross-entropy loss for the model on a given token batch.
+
+    Args:
+        model: Trainable JAX/Flax NNX causal language model.
+        batch: Batch dictionary containing `'inputs'` and `'targets'` token ID arrays.
+
+    Returns:
+        Scalar mean cross-entropy loss array.
+
+    """
+    inputs: Any = batch["inputs"]
+    try:
+        seq_len = inputs.shape[1] if hasattr(inputs, "shape") and len(inputs.shape) > 1 else 1
+        positions = jnp.arange(seq_len)[None, :] if jnp is not None and hasattr(jnp, "arange") else None
+        logits = model(inputs, positions) if positions is not None else model(inputs)
+    except TypeError:
+        logits = model(inputs)
     targets = batch["targets"]
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
     return jnp.mean(loss)
 
 
 def _get_train_step_fn() -> object:
-    """Return a JIT-compiled train step function.
+    """Return a JIT-compiled Flax NNX training step function.
 
     Returns:
-        The execution result.
+        Compiled or eager training step callable `(model, optimizer, batch) -> loss`.
 
     """
 
@@ -50,20 +89,19 @@ def _get_train_step_fn() -> object:
         """Execute a single JAX-compiled training step.
 
         Args:
-            model: The model.
-            optimizer: The optimizer.
-            batch: The batch.
+            model: Trainable Flax NNX causal language model.
+            optimizer: Flax NNX optimizer instance.
+            batch: Token batch dictionary with `'inputs'` and `'targets'`.
 
         Returns:
-            The execution result.
+            Scalar batch loss tensor.
 
         """
         if nnx is not None and hasattr(nnx, "value_and_grad"):
             (loss, grads) = nnx.value_and_grad(_loss_fn)(model, batch)
         else:
             loss, grads = 0.0, None
-        if optimizer is not None and hasattr(optimizer, "update"):
-            optimizer.update(grads)
+        _apply_nnx_optimizer_update(optimizer, model, grads)
         return loss
 
     if nnx is not None and hasattr(nnx, "jit"):
@@ -72,10 +110,13 @@ def _get_train_step_fn() -> object:
 
 
 def _run_training_epochs(state: TrainerState) -> float:
-    """Run training loops.
+    """Run supervised training epochs over the JAX dataloader.
+
+    Args:
+        state: `TrainerState` holding dataloader, model, optimizer, sharding, and step function.
 
     Returns:
-        float: The final loss.
+        Mean batch loss from the final epoch.
 
     """
 
@@ -145,7 +186,7 @@ def _execute_train(
         optax.clip_by_global_norm(1.0),
         optax.adamw(schedule),
     )
-    optimizer = nnx.Optimizer(model, tx)
+    optimizer = _create_nnx_optimizer(model, tx)
     train_step = _get_train_step_fn()
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
@@ -153,19 +194,28 @@ def _execute_train(
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
-    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=train_step, params=sharding))
-    return "completed", float(final_loss)
+    final_loss = _run_training_epochs(
+        TrainerState(
+            dataloader=dataloader,
+            epochs=epochs,
+            policy_model=model,
+            optimizer=optimizer,
+            train_step=train_step,
+            params=sharding,
+        )
+    )
+    return "completed", final_loss
 
 
 def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
-    """Train a Text-to-SQL model using the JAX backend.
+    """Train a Text-to-SQL model using JAX and Flax NNX.
 
     Args:
-        config: The TrainingConfig.
-        **kwargs: Extra runtime options such as 'distributed_strategy'.
+        config: Training configuration parameters.
+        **kwargs: Extra runtime options.
 
     Returns:
-        A dictionary containing JAX training status and metrics.
+        Structured `TrainResultDict` containing JAX training status and final loss.
 
     Raises:
         DependencyMissingError: If JAX dependencies are missing.
@@ -173,9 +223,10 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
     """
     action = getattr(config, "action", "sft")
     model_name = getattr(config, "model_name", "gemma-4")
-    dataset = getattr(config, "dataset", "dummy")
+    dataset = getattr(config, "dataset", "dataset")
     epochs = getattr(config, "epochs", 1)
-    learning_rate = getattr(config, "learning_rate", 1e-05)
+    learning_rate = getattr(config, "learning_rate", 1e-4)
+    batch_size = getattr(config, "batch_size", 2)
 
     final_loss = 0.0
     status = "completed"
@@ -183,7 +234,6 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
         raise DependencyMissingError("JAX dependencies are missing for training.")
 
     try:
-        batch_size = getattr(config, "batch_size", 2)
         status, final_loss = _execute_train(dataset, epochs, learning_rate, batch_size=batch_size, model_name=model_name)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         status = f"failed: {e!s}"

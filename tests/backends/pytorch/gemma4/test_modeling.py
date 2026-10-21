@@ -33,6 +33,13 @@ def test_gemma4_config():
     assert config_defaults.vision_config.hidden_size == 1152
     assert config_defaults.audio_config.hidden_size == 768
 
+    config_with_instances = Gemma4Config(
+        vision_config=config_defaults.vision_config,
+        audio_config=config_defaults.audio_config,
+    )
+    assert config_with_instances.vision_config is config_defaults.vision_config
+    assert config_with_instances.audio_config is config_defaults.audio_config
+
     assert Gemma4Config.gemma4_e2b().num_hidden_layers == 35
     assert Gemma4Config.gemma4_e4b().num_hidden_layers == 42
     assert Gemma4Config.gemma4_26b_a4b().num_experts == 128
@@ -153,6 +160,17 @@ def test_gemma4_for_causal_lm():
     gen = model.generate(input_ids, max_new_tokens=5)
     assert gen.shape == (2, 4 + 5)
 
+    # Test min_new_tokens and eos_token_id early stopping
+    model.lm_head = torch.nn.Linear(config.hidden_size, config.vocab_size, bias=True)
+    with torch.no_grad():
+        model.lm_head.weight.fill_(0.0)
+        model.lm_head.bias.fill_(0.0)
+        model.lm_head.bias[7] = 100.0
+    gen_eos = model.generate(torch.tensor([[1, 2]], dtype=torch.long), max_new_tokens=5, min_new_tokens=1, eos_token_id=7)
+    # Token 0 cannot be 7 due to min_new_tokens=1; token 1 becomes 7 and stops immediately -> length 2 + 2 = 4
+    assert gen_eos.shape == (1, 4)
+    assert int(gen_eos[0, -1].item()) == 7
+
     # Test multimodal and cache
     pixel_values = torch.randn(2, 3, 224, 224)
     audio_values = torch.randn(2, 1000)
@@ -204,7 +222,7 @@ def test_attention_edge_cases2(monkeypatch):
     import gemma_4_sql.backends.pytorch.gemma4.attention as attn
 
     class MockConfig:
-        """Verify behavior of MockConfig."""
+        """Execute and verify `MockConfig` behavior and invariants."""
 
         hidden_size = 32
         num_attention_heads = 4
@@ -284,7 +302,7 @@ def test_gemma4_native_save_load_and_generate(tmp_path, monkeypatch):
 
     # Test Exception in load_file
     def mock_load_file_exc(*args, **kwargs):
-        """Verify behavior of mock_load_file_exc."""
+        """Execute and verify `mock_load_file_exc` behavior and invariants."""
         raise RuntimeError("Custom exception")
 
     monkeypatch.setattr("safetensors.torch.load_file", mock_load_file_exc, raising=False)

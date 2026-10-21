@@ -21,7 +21,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, ba
         **kwargs: Underlying server and backend-specific configuration options.
 
     Returns:
-            A dictionary containing the results.
+        Structured `ServeResultDict` containing `backend`, `model`, `port`, `max_batch_size`, `mode`, `status`, and FastAPI `app`.
 
     """
 

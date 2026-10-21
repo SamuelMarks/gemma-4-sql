@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 
@@ -91,12 +91,12 @@ def log_metrics_wrapper(
         "timestamp": timestamp,
     }
 
-    if step_duration_s is not None:
+    if step_duration_s is not None and step_duration_s > 0:
         result["step_duration_s"] = step_duration_s
     if fallback_file is not None:
         result["fallback_file"] = fallback_file
     if extra_fields:
-        cast_res: dict[str, Any] = result  # type: ignore[assignment]
-        cast_res.update(extra_fields)
+        raw_res = cast("dict[str, Any]", result)
+        raw_res.update(extra_fields)
 
     return result

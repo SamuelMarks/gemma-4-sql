@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import math
 from typing import TYPE_CHECKING, Any, cast
 
@@ -84,11 +83,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from gemma_4_sql.type_hints import JSONValue
-
-_linear_sig = inspect.signature(nnx.Linear.__init__)
-_LINEAR_SUPPORTS_METADATA = "kernel_metadata" in _linear_sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in _linear_sig.parameters.values())
-_embed_sig = inspect.signature(nnx.Embed.__init__)
-_EMBED_SUPPORTS_METADATA = "embedding_metadata" in _embed_sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in _embed_sig.parameters.values())
 
 
 class Gemma4Model(nnx.Module):

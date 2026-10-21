@@ -105,7 +105,7 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_pytorch_collate_multimodal() -> None:
-    """Verify behavior of test_pytorch_collate_multimodal."""
+    """Execute and verify `test_pytorch_collate_multimodal` behavior and invariants."""
     import importlib
 
     from gemma_4_sql.backends.pytorch import etl
@@ -296,10 +296,10 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
             passed_extra.update(kwargs)
 
             class MockOutput:
-                """Verify behavior of MockOutput."""
+                """Execute and verify `MockOutput` behavior and invariants."""
 
                 def __init__(self) -> None:
-                    """Verify behavior of __init__."""
+                    """Execute and verify `__init__` behavior and invariants."""
                     self.sequences = torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long)
                     self.sequences_scores = [torch.tensor(0.9)]
 
@@ -317,15 +317,15 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
             """Simulate tokenization."""
 
             class MockInputs(UserDict):
-                """Verify behavior of MockInputs."""
+                """Execute and verify `MockInputs` behavior and invariants."""
 
                 def __init__(self) -> None:
-                    """Verify behavior of __init__."""
+                    """Execute and verify `__init__` behavior and invariants."""
                     super().__init__({"input_ids": torch.tensor([[1, 2]], dtype=torch.long)})
                     self.input_ids = self["input_ids"]
 
                 def to(self, device: Any) -> MockInputs:
-                    """Verify behavior of to."""
+                    """Execute and verify `to` behavior and invariants."""
                     return self
 
             return MockInputs()

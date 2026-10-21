@@ -173,6 +173,14 @@ class PostgresAdapter(DatabaseAdapter):
         self._async_conn = None
 
     def close(self) -> None:
-        """Close the synchronous database connection and reset cached async state."""
+        """Close the synchronous database connection and close or schedule closure of cached async state."""
+        cached = getattr(self, "_async_conn", None)
         self._async_conn = None
+        if cached is not None and hasattr(cached, "close"):
+            import asyncio
+            from contextlib import suppress
+
+            with suppress(RuntimeError):
+                loop = asyncio.get_running_loop()
+                loop.create_task(cached.close())
         super().close()

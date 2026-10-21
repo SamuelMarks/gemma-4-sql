@@ -19,7 +19,7 @@ from gemma_4_sql.backends.jax.gemma4.rope import RoPE
 
 
 def test_compute_attention_scores_and_output():
-    """Verify behavior of test_compute_attention_scores_and_output."""
+    """Execute and verify `test_compute_attention_scores_and_output` behavior and invariants."""
     # test soft_cap
     q = jnp.ones((2, 1, 4, 16))
     k = jnp.ones((2, 4, 4, 16))
@@ -38,7 +38,7 @@ def test_compute_attention_scores_and_output():
 
 
 def test_prepare_qkv_for_attention():
-    """Verify behavior of test_prepare_qkv_for_attention."""
+    """Execute and verify `test_prepare_qkv_for_attention` behavior and invariants."""
     q = jnp.ones((2, 1, 4, 16))
     k = jnp.ones((2, 1, 4, 16))
     v = jnp.ones((2, 1, 4, 16))
@@ -57,7 +57,7 @@ def test_prepare_qkv_for_attention():
 
 
 def test_gemma4_attention_local():
-    """Verify behavior of test_gemma4_attention_local."""
+    """Execute and verify `test_gemma4_attention_local` behavior and invariants."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
     config.num_attention_heads = 4
@@ -73,7 +73,7 @@ def test_gemma4_attention_local():
     config.sliding_window_size = 512
 
     class LocalType:
-        """Verify behavior of LocalType."""
+        """Execute and verify `LocalType` behavior and invariants."""
 
         name = "LOCAL_SLIDING"
 
@@ -91,7 +91,7 @@ def test_gemma4_attention_local():
 
 
 def test_gemma4_attention_global():
-    """Verify behavior of test_gemma4_attention_global."""
+    """Execute and verify `test_gemma4_attention_global` behavior and invariants."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
     config.num_attention_heads = 4
@@ -107,7 +107,7 @@ def test_gemma4_attention_global():
     config.attn_logits_soft_cap = 50.0
 
     class GlobalType:
-        """Verify behavior of GlobalType."""
+        """Execute and verify `GlobalType` behavior and invariants."""
 
         name = "GLOBAL"
 
@@ -121,7 +121,7 @@ def test_gemma4_attention_global():
 
 
 def test_gemma4_attention_global_fallback_options():
-    """Verify behavior of test_gemma4_attention_global_fallback_options."""
+    """Execute and verify `test_gemma4_attention_global_fallback_options` behavior and invariants."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
     config.num_attention_heads = 4
@@ -140,7 +140,7 @@ def test_gemma4_attention_global_fallback_options():
     config.rope_max_timescale = 10000
 
     class GlobalType:
-        """Verify behavior of GlobalType."""
+        """Execute and verify `GlobalType` behavior and invariants."""
 
         name = "GLOBAL"
 

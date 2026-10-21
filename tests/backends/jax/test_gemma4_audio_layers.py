@@ -19,7 +19,7 @@ from gemma_4_sql.backends.jax.gemma4.audio_layers import (
 
 
 def get_mock_audio_config():
-    """Verify behavior of get_mock_audio_config."""
+    """Execute and verify `get_mock_audio_config` behavior and invariants."""
     config = MagicMock()
     config.hidden_size = 16
     config.subsampling_conv_channels = (4, 4)
@@ -32,7 +32,7 @@ def get_mock_audio_config():
 
 
 def test_subsample_conv_projection_layer():
-    """Verify behavior of test_subsample_conv_projection_layer."""
+    """Execute and verify `test_subsample_conv_projection_layer` behavior and invariants."""
     rngs = nnx.Rngs(0)
     layer = Gemma4AudioSubSampleConvProjectionLayer(1, 4, 1e-6, rngs=rngs)
 
@@ -46,7 +46,7 @@ def test_subsample_conv_projection_layer():
 
 
 def test_subsample_conv_projection():
-    """Verify behavior of test_subsample_conv_projection."""
+    """Execute and verify `test_subsample_conv_projection` behavior and invariants."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     proj = Gemma4AudioSubSampleConvProjection(config, rngs=rngs)
@@ -61,7 +61,7 @@ def test_subsample_conv_projection():
 
 
 def test_feed_forward():
-    """Verify behavior of test_feed_forward."""
+    """Execute and verify `test_feed_forward` behavior and invariants."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     ffw = Gemma4AudioFeedForward(config, rngs=rngs)
@@ -72,7 +72,7 @@ def test_feed_forward():
 
 
 def test_causal_conv1d():
-    """Verify behavior of test_causal_conv1d."""
+    """Execute and verify `test_causal_conv1d` behavior and invariants."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     conv = Gemma4AudioCausalConv1d(config, rngs=rngs)
@@ -83,7 +83,7 @@ def test_causal_conv1d():
 
 
 def test_light_conv1d():
-    """Verify behavior of test_light_conv1d."""
+    """Execute and verify `test_light_conv1d` behavior and invariants."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     lconv = Gemma4AudioLightConv1d(config, rngs=rngs)

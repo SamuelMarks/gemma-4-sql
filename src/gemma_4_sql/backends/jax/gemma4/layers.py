@@ -80,12 +80,11 @@ class Gemma4RMSNorm(nnx.Module):
             self.scale = None
 
     @jax.named_scope("gemma4_rms_norm")
-    def __call__(self, x: Array, original_x: Array | None = None) -> Array:
+    def __call__(self, x: Array) -> Array:
         """Apply RMS normalization.
 
         Args:
             x: Input array to normalize.
-            original_x: Optional unnormalized reference array.
 
         Returns:
             RMS-normalized array cast to `self.dtype`.
@@ -167,15 +166,18 @@ class Gemma4MLP(nnx.Module):
             hidden_size: Hidden dimension of the model.
             intermediate_size: Intermediate projection dimension.
             rngs: Random number generators for weight initialization.
-            **kwargs: Additional Flax/NNX module configuration parameters like 'dtype'.
+            **kwargs: Additional Flax/NNX module configuration parameters like 'dtype' and 'shd'.
 
         """
-        shd = kwargs.get("shd")
-        if shd is None:
-            shd = ShardConfig.no_sharding()
-        self.gate_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.up_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.down_proj = make_linear(intermediate_size, hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        raw_shd = kwargs.get("shd")
+        shd = raw_shd if isinstance(raw_shd, ShardConfig) else ShardConfig.no_sharding()
+        fc1_meta = {"out_sharding": shd.fc1_kernel} if shd.fc1_kernel is not None else {}
+        fc1_bias_meta = {"out_sharding": shd.fc1_bias} if shd.fc1_bias is not None else {}
+        fc2_meta = {"out_sharding": shd.fc2_kernel} if shd.fc2_kernel is not None else {}
+        fc2_bias_meta = {"out_sharding": shd.fc2_bias} if shd.fc2_bias is not None else {}
+        self.gate_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata=fc1_meta, bias_metadata=fc1_bias_meta, rngs=rngs)
+        self.up_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata=fc1_meta, bias_metadata=fc1_bias_meta, rngs=rngs)
+        self.down_proj = make_linear(intermediate_size, hidden_size, use_bias=False, kernel_metadata=fc2_meta, bias_metadata=fc2_bias_meta, rngs=rngs)
         self.dtype: Any = kwargs.get("dtype", jnp.float32)
 
     @jax.named_scope("gemma4_mlp")
@@ -184,12 +186,13 @@ class Gemma4MLP(nnx.Module):
 
         Args:
             x: Input hidden state tensor.
-            original_x: Optional unnormalized input tensor.
+            original_x: Optional unnormalized input tensor accepted for call-signature parity with `Gemma4MoE`.
 
         Returns:
             Projected hidden state tensor.
 
         """
+        _ = original_x
         gate = self.gate_proj(x)
         up = self.up_proj(x)
         activated = jax.nn.silu(gate) * up

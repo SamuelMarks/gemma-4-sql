@@ -1,247 +1,181 @@
-"""Unit and behavioral tests for dpo maxtext."""
+"""Unit and behavioral tests for MaxText Direct Preference Optimization (DPO)."""
 
+from __future__ import annotations
+
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gemma_4_sql.backends.maxtext.dpo import _compute_logps, _dpo_step_loss, _execute_dpo, _get_train_step_fn, _run_training_epochs, dpo_loss, run_dpo
+from gemma_4_sql.backends.maxtext.dpo import (
+    _compute_logps,
+    _dpo_step_loss,
+    _execute_dpo,
+    _get_train_step_fn,
+    _run_training_epochs,
+    dpo_loss,
+    run_dpo,
+)
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import DPOConfig, TrainerState
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
 
 
-@pytest.fixture
-def mock_dpo_deps():
-    """Verify behavior of mock_dpo_deps."""
-    mock_jax = MagicMock()
+def test_real_maxtext_dpo_logps_loss_and_train_step() -> None:
+    """Verify MaxText _compute_logps, _dpo_step_loss, and _get_train_step_fn with real JAX arrays and Optax."""
+    import jax.numpy as jnp
+    import optax
+
+    class TinyStatelessModel:
+        """Minimal stateless Flax/MaxText-style model."""
+
+        def apply(self, params: dict[str, Any], inputs: Any) -> Any:
+            """Project token embeddings to vocabulary logits."""
+            emb = jnp.take(params["embed"], inputs, axis=0)
+            return jnp.dot(emb, params["head"])
+
+    model = TinyStatelessModel()
+    policy_params: dict[str, Any] = {
+        "embed": jnp.ones((16, 4), dtype=jnp.float32) * 0.1,
+        "head": jnp.ones((4, 16), dtype=jnp.float32) * 0.1,
+    }
+    ref_params: dict[str, Any] = {
+        "embed": jnp.ones((16, 4), dtype=jnp.float32) * 0.1,
+        "head": jnp.ones((4, 16), dtype=jnp.float32) * 0.1,
+    }
+    batch: dict[str, Any] = {
+        "chosen_inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
+        "chosen_labels": jnp.array([[2, 3, 0]], dtype=jnp.int32),
+        "rejected_inputs": jnp.array([[1, 4, 5]], dtype=jnp.int32),
+        "rejected_labels": jnp.array([[4, 5, 0]], dtype=jnp.int32),
+    }
+
+    logps = _compute_logps(model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore[arg-type]
+    assert logps.shape == (1,)
+    assert float(logps[0]) < 0.0
+
+    step_loss = _dpo_step_loss(model, policy_params, model, ref_params, batch, 0.1)  # type: ignore[arg-type]
+    assert float(step_loss) > 0.0  # type: ignore[arg-type]
+
+    optimizer = optax.adamw(1e-2)
+    opt_state = optimizer.init(policy_params)
+    train_step = _get_train_step_fn(model, model, optimizer, 0.1)  # type: ignore[arg-type]
+
+    state = TrainerState(
+        dataloader=[batch],
+        epochs=1,
+        train_step=train_step,
+        policy_params=policy_params,
+        ref_params=ref_params,
+        opt_state=opt_state,
+    )
+    new_params, _new_opt_state, final_loss = _run_training_epochs(state)
+    assert final_loss > 0.0
+    assert not jnp.allclose(new_params["head"], policy_params["head"])
+
+
+def test_compute_logps_scalar_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _compute_logps falls back to sum(logits * labels) when logits are 1D/scalar mocks."""
+    import gemma_4_sql.backends.maxtext.dpo as mt_dpo
+
     mock_jnp = MagicMock()
-    mock_optax = MagicMock()
-    mock_Gemma4Model = MagicMock()
+    mock_jnp.sum.return_value = 10.0
+    monkeypatch.setattr(mt_dpo, "jnp", mock_jnp)
+    monkeypatch.setattr(mt_dpo, "jnn", None)
 
-    with patch("gemma_4_sql.backends.maxtext.dpo.jax", mock_jax), patch("gemma_4_sql.backends.maxtext.dpo.jnp", mock_jnp), patch("gemma_4_sql.backends.maxtext.dpo.optax", mock_optax), patch("gemma_4_sql.backends.maxtext.dpo.Gemma4Model", mock_Gemma4Model):
-        yield mock_jax, mock_jnp, mock_optax, mock_Gemma4Model
+    model = MagicMock()
+    model.apply.return_value = 5
+    res = _compute_logps(model, {"p": 1}, 2, 3)  # type: ignore[arg-type]
+    assert res == 10.0
 
 
-def test_dpo_loss():
-    """Verify behavior of test_dpo_loss."""
-    with patch("gemma_4_sql.backends.maxtext.dpo.jax_dpo_loss", return_value=(1, 2, 3)) as mock_jax_dpo:
-        res = dpo_loss(1, 2, 3, 4, 0.5)
-        assert res == (1, 2, 3)
+def test_dpo_loss_delegation() -> None:
+    """Verify MaxText dpo_loss delegates to JAX dpo_loss."""
+    with patch("gemma_4_sql.backends.maxtext.dpo.jax_dpo_loss", return_value=(1.0, 2.0, 3.0)) as mock_jax_dpo:
+        res = dpo_loss(1, 2, 3, 4, 0.5)  # type: ignore[arg-type]
+        assert res == (1.0, 2.0, 3.0)
         mock_jax_dpo.assert_called_once_with(1, 2, 3, 4, 0.5)
 
 
-def test_compute_logps(mock_dpo_deps):
-    """Verify behavior of test_compute_logps."""
-    _, mock_jnp, _, _ = mock_dpo_deps
-    model = MagicMock()
-    model.apply.return_value = 5
-    mock_jnp.sum.return_value = 10
+def test_get_train_step_fn_without_jit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _get_train_step_fn returns an un-jitted step callable when jax.jit is absent."""
+    import gemma_4_sql.backends.maxtext.dpo as mt_dpo
 
-    res = _compute_logps(model, {"p": 1}, 2, 3)
-    assert res == 10
-    model.apply.assert_called_once_with({"p": 1}, 2)
-    # mock_jnp.sum was called with 5 * 3 = 15. The exact call is complex to assert due to magicmock mult, just ensure it was called.
-    mock_jnp.sum.assert_called_once()
-
-
-def test_dpo_step_loss():
-    """Verify behavior of test_dpo_step_loss."""
-    with patch("gemma_4_sql.backends.maxtext.dpo._compute_logps", side_effect=[1, 2, 3, 4]) as mock_comp, patch("gemma_4_sql.backends.maxtext.dpo.dpo_loss", return_value=(10, 0, 0)) as mock_loss:
-        batch = {"chosen_inputs": "ci", "chosen_labels": "cl", "rejected_inputs": "ri", "rejected_labels": "rl"}
-        res = _dpo_step_loss("pm", "pp", "rm", "rp", batch, 0.1)
-        assert res == 10
-        mock_comp.assert_any_call("pm", "pp", "ci", "cl")
-        mock_comp.assert_any_call("pm", "pp", "ri", "rl")
-        mock_comp.assert_any_call("rm", "rp", "ci", "cl")
-        mock_comp.assert_any_call("rm", "rp", "ri", "rl")
-        mock_loss.assert_called_once_with(1, 2, 3, 4, 0.1)
-
-
-def test_get_train_step_fn(mock_dpo_deps):
-    """Verify behavior of test_get_train_step_fn."""
-    mock_jax, _, mock_optax, _ = mock_dpo_deps
-
-    mock_jax.value_and_grad.return_value = lambda *args: (0.5, "grads")
-    mock_jax.jit = lambda x: x
+    mock_jax = MagicMock(spec=["value_and_grad"])
+    mock_jax.value_and_grad.return_value = lambda *_args: (0.5, "grads")
+    monkeypatch.setattr(mt_dpo, "jax", mock_jax)
 
     optimizer = MagicMock()
     optimizer.update.return_value = ("updates", "new_opt_state")
+    mock_optax = MagicMock()
     mock_optax.apply_updates.return_value = "new_policy_params"
+    monkeypatch.setattr(mt_dpo, "optax", mock_optax)
 
-    train_step = _get_train_step_fn("pm", "rm", optimizer, 0.1)
-
+    train_step = _get_train_step_fn("pm", "rm", optimizer, 0.1)  # type: ignore[arg-type]
     with patch("gemma_4_sql.backends.maxtext.dpo._dpo_step_loss", return_value=0.5):
         policy_params, opt_state, loss = train_step("pp", "rp", "os", "batch")
-
     assert policy_params == "new_policy_params"
     assert opt_state == "new_opt_state"
     assert loss == 0.5
-    optimizer.update.assert_called_once_with("grads", "os", "pp")
 
 
-def test_get_train_step_fn_no_jit():
-    """Verify behavior of test_get_train_step_fn_no_jit."""
-    mock_jax = MagicMock()
-    mock_jax.value_and_grad.return_value = lambda *args: (0.5, "grads")
-    del mock_jax.jit
-    optimizer = MagicMock()
-    optimizer.update.return_value = ("updates", "new_opt_state")
+def test_run_training_epochs_float_loss() -> None:
+    """Verify _run_training_epochs handles plain float losses without .item()."""
 
-    with patch("gemma_4_sql.backends.maxtext.dpo.jax", mock_jax), patch("gemma_4_sql.backends.maxtext.dpo.optax") as mock_optax:
-        mock_optax.apply_updates.return_value = "new_policy_params"
-        train_step = _get_train_step_fn("pm", "rm", optimizer, 0.1)
-
-        with patch("gemma_4_sql.backends.maxtext.dpo._dpo_step_loss", return_value=0.5):
-            _policy_params, _opt_state, loss = train_step("pp", "rp", "os", "batch")
-        assert loss == 0.5
-
-
-def test_run_training_epochs():
-    """Verify behavior of test_run_training_epochs."""
-
-    class MockLoss:
-        """Verify behavior of MockLoss."""
-
-        def item(self):
-            """Verify behavior of item."""
-            return 0.5
-
-    def mock_train_step(pp, rp, os, b):
-        """Verify behavior of mock_train_step."""
-        return pp, os, MockLoss()
-
-    state = TrainerState(dataloader=[1, 2], epochs=1, train_step=mock_train_step, policy_params="pp", ref_params="rp", opt_state="os")
-
-    with patch("gemma_4_sql.backends.maxtext.dpo.generic_run_training_epochs", return_value=0.5) as mock_run:
-        pp, os, loss = _run_training_epochs(state)
-        assert pp == "pp"
-        assert os == "os"
-        assert loss == 0.5
-
-        # Test the callback
-        cb = mock_run.call_args[0][2]
-        cb_loss = cb({"b": 1})
-        assert cb_loss == 0.5
-
-
-def test_run_training_epochs_no_item():
-    """Verify behavior of test_run_training_epochs_no_item."""
-
-    def mock_train_step(pp, rp, os, b):
-        """Verify behavior of mock_train_step."""
+    def mock_train_step(pp: Any, _rp: Any, os: Any, _b: Any) -> tuple[Any, Any, float]:
+        """Return updated state tuple with float scalar loss."""
         return pp, os, 0.5
 
-    state = TrainerState(dataloader=[1, 2], epochs=1, train_step=mock_train_step, policy_params="pp", ref_params="rp", opt_state="os")
-
-    with patch("gemma_4_sql.backends.maxtext.dpo.generic_run_training_epochs", return_value=0.5) as mock_run:
-        _run_training_epochs(state)
-        cb = mock_run.call_args[0][2]
-        cb_loss = cb({"b": 1})
-        assert cb_loss == 0.5
+    state = TrainerState(dataloader=[{"b": 1}], epochs=1, train_step=mock_train_step, policy_params="pp", ref_params="rp", opt_state="os")
+    _pp, _os, loss = _run_training_epochs(state)
+    assert loss == 0.5
 
 
-def test_execute_dpo(mock_dpo_deps):
-    """Verify behavior of test_execute_dpo."""
-    mock_jax, _, _, mock_Gemma4Model = mock_dpo_deps
+def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _execute_dpo and run_dpo handle distributed initialization, dataloader validation, and errors."""
+    import gemma_4_sql.backends.maxtext.dpo as mt_dpo
 
-    mock_jax.distributed.initialize.return_value = None
+    mock_jax = MagicMock()
+    mock_jnp = MagicMock()
+    mock_optax = MagicMock()
+    mock_gemma = MagicMock()
 
-    mock_pm = MagicMock()
-    mock_rm = MagicMock()
-    mock_Gemma4Model.side_effect = [mock_pm, mock_rm]
+    monkeypatch.setattr(mt_dpo, "jax", mock_jax)
+    monkeypatch.setattr(mt_dpo, "jnp", mock_jnp)
+    monkeypatch.setattr(mt_dpo, "optax", mock_optax)
+    monkeypatch.setattr(mt_dpo, "Gemma4Model", mock_gemma)
 
-    with patch("gemma_4_sql.backends.maxtext.dpo.build_dataloader", return_value={"loader": [1, 2]}), patch("gemma_4_sql.backends.maxtext.dpo._get_train_step_fn"), patch("gemma_4_sql.backends.maxtext.dpo._run_training_epochs", return_value=("pp", "os", 0.5)):
+    with (
+        patch("gemma_4_sql.backends.maxtext.dpo.build_dataloader", return_value={"loader": [1, 2]}),
+        patch("gemma_4_sql.backends.maxtext.dpo._get_train_step_fn"),
+        patch("gemma_4_sql.backends.maxtext.dpo._run_training_epochs", return_value=("pp", "os", 0.5)),
+    ):
         status, loss = _execute_dpo("model", "dataset", 0.1, 1, 1e-5, 2)
         assert status == "completed"
         assert loss == 0.5
 
-
-def test_execute_dpo_init_error(mock_dpo_deps):
-    """Verify behavior of test_execute_dpo_init_error."""
-    mock_jax, _, _, mock_Gemma4Model = mock_dpo_deps
-    mock_jax.distributed.initialize.side_effect = RuntimeError("init fail")
-
-    mock_pm = MagicMock()
-    mock_rm = MagicMock()
-    mock_Gemma4Model.side_effect = [mock_pm, mock_rm]
-
-    with patch("gemma_4_sql.backends.maxtext.dpo.build_dataloader", return_value={"loader": [1, 2]}), patch("gemma_4_sql.backends.maxtext.dpo._get_train_step_fn"), patch("gemma_4_sql.backends.maxtext.dpo._run_training_epochs", return_value=("pp", "os", 0.5)):
-        status, _loss = _execute_dpo("model", "dataset", 0.1, 1, 1e-5, 2)
-        assert status == "completed"
-
-
-def test_execute_dpo_invalid_loader(mock_dpo_deps):
-    """Verify behavior of test_execute_dpo_invalid_loader."""
-    _mock_jax, _, _, mock_Gemma4Model = mock_dpo_deps
-    mock_Gemma4Model.side_effect = [MagicMock(), MagicMock()]
-
-    with patch("gemma_4_sql.backends.maxtext.dpo.build_dataloader", return_value={"loader": None}), pytest.raises(ValueError, match="Invalid dataloader for dataset"):
-        _execute_dpo("model", "dataset", 0.1, 1, 1e-5, 2)
-
-
-def test_run_dpo_success():
-    """Verify behavior of test_run_dpo_success."""
-    config = DPOConfig(model_name="model", dataset="dataset")
+        mock_jax.distributed.initialize.side_effect = RuntimeError("init fail")
+        status2, _ = _execute_dpo("model", "dataset", 0.1, 1, 1e-5, 2)
+        assert status2 == "completed"
 
     with (
-        patch("gemma_4_sql.backends.maxtext.dpo.jax", MagicMock()),
-        patch("gemma_4_sql.backends.maxtext.dpo.jnp", MagicMock()),
-        patch("gemma_4_sql.backends.maxtext.dpo.optax", MagicMock()),
-        patch("gemma_4_sql.backends.maxtext.dpo.Gemma4Model", MagicMock()),
-        patch("gemma_4_sql.backends.maxtext.dpo._execute_dpo", return_value=("completed", 0.5)),
+        patch("gemma_4_sql.backends.maxtext.dpo.build_dataloader", return_value={"loader": None}),
+        pytest.raises(ValueError, match="Invalid dataloader for dataset"),
     ):
+        _execute_dpo("model", "dataset", 0.1, 1, 1e-5, 2)
+
+    config = DPOConfig(model_name="model", dataset="dataset")
+    with patch("gemma_4_sql.backends.maxtext.dpo._execute_dpo", return_value=("completed", 0.5)):
         res = run_dpo(config)
         assert res["status"] == "completed"
         assert res["final_loss"] == 0.5
 
+    with patch("gemma_4_sql.backends.maxtext.dpo._execute_dpo", side_effect=RuntimeError("exec fail")):
+        res_err = run_dpo(config)
+        assert res_err["status"] == "failed: exec fail"
 
-def test_run_dpo_missing_deps():
-    """Verify behavior of test_run_dpo_missing_deps."""
-    config = DPOConfig(model_name="model", dataset="dataset")
-    with patch("gemma_4_sql.backends.maxtext.dpo.jax", None), pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
+    monkeypatch.setattr(mt_dpo, "jax", None)
+    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
         run_dpo(config)
-
-
-def test_run_dpo_execution_error():
-    """Verify behavior of test_run_dpo_execution_error."""
-    config = DPOConfig(model_name="model", dataset="dataset")
-
-    with (
-        patch("gemma_4_sql.backends.maxtext.dpo.jax", MagicMock()),
-        patch("gemma_4_sql.backends.maxtext.dpo.jnp", MagicMock()),
-        patch("gemma_4_sql.backends.maxtext.dpo.optax", MagicMock()),
-        patch("gemma_4_sql.backends.maxtext.dpo.Gemma4Model", MagicMock()),
-        patch("gemma_4_sql.backends.maxtext.dpo._execute_dpo", side_effect=RuntimeError("exec fail")),
-    ):
-        res = run_dpo(config)
-        assert res["status"] == "failed: exec fail"
-
-
-def test_get_train_step_fn_wrapper_coverage():
-    """Verify behavior of test_get_train_step_fn_wrapper_coverage."""
-    from unittest.mock import MagicMock, patch
-
-    from gemma_4_sql.backends.maxtext.dpo import _get_train_step_fn
-
-    optimizer = MagicMock()
-    optimizer.update.return_value = ("updates", "new_opt_state")
-
-    mock_jax = MagicMock()
-    mock_jax.jit = lambda f: f
-
-    # We want value_and_grad to return a function that will also invoke the wrapper
-    def mock_vag(fn):
-        """Verify behavior of mock_vag."""
-
-        def inner(*args, **kwargs):
-            # Call the wrapper to hit coverage
-            """Verify behavior of inner."""
-            fn(args[0], args[1], args[2])
-            return (0.5, "grads")
-
-        return inner
-
-    mock_jax.value_and_grad.side_effect = mock_vag
-
-    with patch("gemma_4_sql.backends.maxtext.dpo.jax", mock_jax), patch("gemma_4_sql.backends.maxtext.dpo.optax"), patch("gemma_4_sql.backends.maxtext.dpo._dpo_step_loss", return_value=0.5):
-        train_step = _get_train_step_fn("pm", "rm", optimizer, 0.1)
-        train_step("pp", "rp", "os", "batch")

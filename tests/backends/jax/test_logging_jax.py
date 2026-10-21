@@ -10,7 +10,7 @@ from gemma_4_sql.backends.jax.logging import log_metrics
 
 
 def test_log_metrics():
-    """Verify behavior of test_log_metrics."""
+    """Execute and verify `test_log_metrics` behavior and invariants."""
     with patch("gemma_4_sql.backends.jax.logging.log_metrics_wrapper") as mock_wrapper:
         mock_wrapper.return_value = {"status": "success"}
 
@@ -27,7 +27,7 @@ def test_log_metrics():
 
 
 def test_log_metrics_success_import(monkeypatch):
-    """Verify behavior of test_log_metrics_success_import."""
+    """Execute and verify `test_log_metrics_success_import` behavior and invariants."""
     mock_tbx = MagicMock()
     mock_tbx.SummaryWriter = "MockWriter"
     import sys

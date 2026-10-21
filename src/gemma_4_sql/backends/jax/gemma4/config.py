@@ -313,14 +313,15 @@ class ModelConfigPresets:
             Matching `ModelConfig` preset instance.
 
         """
+        preset_kw = {"use_fsdp": use_fsdp, "use_tp": use_tp} if (use_fsdp or use_tp) else {}
         lowered = model_name.lower()
         if "31b" in lowered:
-            return cls.gemma4_31b(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else cls.gemma4_31b()
+            return cls.gemma4_31b(**preset_kw)
         if "26b" in lowered or "a4b" in lowered:
-            return cls.gemma4_26b_a4b(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else cls.gemma4_26b_a4b()
+            return cls.gemma4_26b_a4b(**preset_kw)
         if "e4b" in lowered:
-            return cls.gemma4_e4b(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else cls.gemma4_e4b()
-        return cls.gemma4_e2b(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else cls.gemma4_e2b()
+            return cls.gemma4_e4b(**preset_kw)
+        return cls.gemma4_e2b(**preset_kw)
 
 
 @dataclass

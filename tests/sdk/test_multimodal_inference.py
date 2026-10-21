@@ -141,23 +141,23 @@ def test_process_image(tmp_path: Path) -> None:
 
     monkeypatch_fix = pytest.MonkeyPatch()
     monkeypatch_fix.setattr(cm, "Image", _MockPILImage)
+    try:
+        valid_png = b"fakebytes"
 
-    valid_png = b"fakebytes"
+        res = cm.process_image(valid_png, target_size=(224, 224), patch_size=14)
+        assert "pixel_values" in res
+        assert "patches" in res
+        assert res["num_patches"] == 256
+        assert res["shape"] == (3, 224, 224)
 
-    res = cm.process_image(valid_png, target_size=(224, 224), patch_size=14)
-    assert "pixel_values" in res
-    assert "patches" in res
-    assert res["num_patches"] == 256
-    assert res["shape"] == (3, 224, 224)
+        # Validation errors
+        with pytest.raises(ValueError, match="target_size dimensions must be positive"):
+            cm.process_image(b"fake", target_size=(0, 224))
 
-    # Validation errors
-    with pytest.raises(ValueError, match="target_size dimensions must be positive"):
-        cm.process_image(b"fake", target_size=(0, 224))
-
-    with pytest.raises(ValueError, match="target dimensions"):
-        cm.process_image(b"fake", target_size=(224, 224), patch_size=15)
-
-    monkeypatch_fix.undo()
+        with pytest.raises(ValueError, match="target dimensions"):
+            cm.process_image(b"fake", target_size=(224, 224), patch_size=15)
+    finally:
+        monkeypatch_fix.undo()
 
 
 def test_load_audio_bytes(tmp_path: Path) -> None:
@@ -465,11 +465,15 @@ def test_multimodal_edge_cases() -> None:
         buf = io.BytesIO()
         PILImage.new("RGB", (14, 14)).save(buf, format="PNG")
         png_bytes = buf.getvalue()
+        res_img_with_pil = cm.process_image(png_bytes, target_size=(14, 14), patch_size=14)
+        assert res_img_with_pil["num_patches"] == 1
         monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(cm, "np", None)
-        res_img_no_np = cm.process_image(png_bytes, target_size=(14, 14), patch_size=14)
-        assert res_img_no_np["num_patches"] == 1
-        monkeypatch.undo()
+        try:
+            with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
+                cm.process_image(png_bytes, target_size=(14, 14), patch_size=14)
+        finally:
+            monkeypatch.undo()
     except ImportError:  # pragma: no cover
 
         class _MockPILResampling:
@@ -597,15 +601,16 @@ def test_multimodal_edge_cases() -> None:
 
     # Corrupt image bytes triggering PIL exception and synthetic fallback
     with pytest.raises(ValueError):
-        cm.process_image(b"NOT_A_VALID_IMAGE_BYTES_PAYLOAD")
+        cm.process_image(b"NOT_A_VALID_IMAGE_BYTES_PAYLOAD", target_size=(14, 14), patch_size=14)
 
     # Synthetic image fallback when numpy is None
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(cm, "np", None)
-    with pytest.raises(ValueError):
-        cm.process_image(b"NOT_A_VALID_IMAGE")
-
-    monkeypatch.undo()
+    try:
+        with pytest.raises(ValueError):
+            cm.process_image(b"NOT_A_VALID_IMAGE", target_size=(14, 14), patch_size=14)
+    finally:
+        monkeypatch.undo()
 
     # Truncated WAV header triggering struct.error in WAV parser
     truncated_wav = b"RIFF\x20\x00\x00\x00WAVEfmt "

@@ -109,7 +109,7 @@ def configure_beam_sampler(model: ModelType, beam_width: int) -> Any:
         if hasattr(model, "compile"):
             model.compile(sampler=sampler)
         elif hasattr(model, "sampler"):
-            model.sampler = sampler  # type: ignore # Runtime injection
+            cast(Any, model).sampler = sampler
 
     return sampler
 

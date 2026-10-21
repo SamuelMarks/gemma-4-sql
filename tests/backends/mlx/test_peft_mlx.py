@@ -134,7 +134,7 @@ def test_inject_lora():
     peft_module.mx = MagicMock()
 
     class MockLinear:
-        """Verify behavior of MockLinear."""
+        """Execute and verify `MockLinear` behavior and invariants."""
 
     peft_module.nn.Linear = MockLinear
 
@@ -162,10 +162,10 @@ def test_inject_lora():
         # Wait, to hit 324 `curr[int(last)] = lora_module`, `last` must be digit and `curr` must be list.
         # So name = '1', curr = [0, MockLinear()].
         class ListModel(list):
-            """Verify behavior of ListModel."""
+            """Execute and verify `ListModel` behavior and invariants."""
 
             def named_modules(self):
-                """Verify behavior of named_modules."""
+                """Execute and verify `named_modules` behavior and invariants."""
                 return [("0.q_proj", MockLinear()), ("1", MockLinear())]
 
         model_list = ListModel([MagicMock(), MockLinear()])
@@ -265,7 +265,7 @@ def test_inject_lora_coverage():
 
 
 def test_mlx_lm_import_success_real(monkeypatch):
-    """Verify behavior of test_mlx_lm_import_success_real."""
+    """Execute and verify `test_mlx_lm_import_success_real` behavior and invariants."""
     import sys
     from unittest.mock import MagicMock
 

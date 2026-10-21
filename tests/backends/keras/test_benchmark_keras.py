@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import builtins
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -26,23 +25,13 @@ def test_load_keras_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
     mock_gemma_causal_lm = MagicMock()
     mock_gemma_causal_lm.from_preset.return_value = "fake_model"
-    mock_keras_nlp = MagicMock(GemmaCausalLM=mock_gemma_causal_lm)
 
-    with patch("builtins.__import__", return_value=mock_keras_nlp):
-        res = bm._load_keras_model("test_model", "float32")
-        assert res == "fake_model"
-        mock_keras.config.set_floatx.assert_called_with("float32")
+    monkeypatch.setattr(bm, "optional_attr", lambda *_a, **_k: mock_gemma_causal_lm)
+    res = bm._load_keras_model("test_model", "float32")
+    assert res == "fake_model"
+    mock_keras.config.set_floatx.assert_called_with("float32")
 
-    original_import = builtins.__import__
-
-    def mock_import_err(name: str, *args: Any, **kwargs: Any) -> Any:
-        """Raise ValueError when importing keras_nlp.models."""
-        if name == "keras_nlp.models":
-            raise ValueError("simulated error")
-        return original_import(name, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(builtins, "__import__", mock_import_err)
-    assert __import__("math") is not None
+    monkeypatch.setattr(bm, "optional_attr", lambda *_a, **_k: None)
     with pytest.raises(ValueError, match="Failed to load actual model"):
         bm._load_keras_model("name", "bfloat16")
 
@@ -101,13 +90,13 @@ def test_run_benchmark_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_model_gen = MagicMock()
     mock_model_gen.generate.return_value = mock_out
     _, _, mem_cpu = bm._run_benchmark_pass(mock_model_gen, 1, 1, 1, "generate", 1, "cpu")
-    assert mem_cpu == 6000.0
+    assert mem_cpu == 0.0
 
-    # Memory stats exceptions fallback to 6000.0
+    # Memory stats exceptions fallback to 0.0
     mock_tf.config.experimental.reset_memory_stats.side_effect = ValueError("reset err")
     mock_tf.config.experimental.get_memory_info.side_effect = ValueError("info err")
     _, _, mem_fallback = bm._run_benchmark_pass(mock_model, 1, 1, 1, "prefill", 1, "gpu")
-    assert mem_fallback == 6000.0
+    assert mem_fallback == 0.0
 
 
 def test_run_benchmark_pass_missing_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,15 +122,15 @@ def test_run_benchmark_pass_missing_attrs(monkeypatch: pytest.MonkeyPatch) -> No
 
     mock_model = MagicMock(return_value=object())
     res1 = bm._run_benchmark_pass(mock_model, 1, 1, 1, "prefill", 1, "cpu")
-    assert res1[2] == 6000.0
+    assert res1[2] == 0.0
 
     res2 = bm._run_benchmark_pass(object(), 1, 1, 1, "generate", 1, "cpu")
-    assert res2[2] == 6000.0
+    assert res2[2] == 0.0
 
     mock_model_gen = MagicMock()
     mock_model_gen.generate.return_value = object()
     res3 = bm._run_benchmark_pass(mock_model_gen, 1, 1, 1, "generate", 1, "cpu")
-    assert res3[2] == 6000.0
+    assert res3[2] == 0.0
 
 
 def test_benchmark_model(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports, optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from gemma_4_sql.type_hints import ModelType
 
@@ -17,12 +17,6 @@ logger = logging.getLogger(__name__)
 keras = optional_import("keras")
 tf = optional_import("tensorflow")
 GemmaCausalLM: Any = optional_attr("keras_nlp.models", "GemmaCausalLM")
-FastAPI = None
-Request = None
-JSONResponse = None
-uvicorn = None
-with catch_optional_imports():
-    pass
 
 
 def create_app(model_name: str) -> object:

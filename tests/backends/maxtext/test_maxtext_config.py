@@ -16,10 +16,10 @@ from gemma_4_sql.backends.maxtext.config_generator import (
 
 
 class MockTrainingConfig:
-    """Verify behavior of MockTrainingConfig."""
+    """Execute and verify `MockTrainingConfig` behavior and invariants."""
 
     def __init__(self, **kwargs):
-        """Verify behavior of __init__."""
+        """Execute and verify `__init__` behavior and invariants."""
         for k, v in kwargs.items():
             setattr(self, k, v)
 
@@ -34,7 +34,7 @@ def test_to_float():
 
 
 def test_to_int():
-    """Verify behavior of test_to_int."""
+    """Execute and verify `test_to_int` behavior and invariants."""
     assert _to_int(None, 2) == 2
     assert _to_int("3", 2) == 3
     assert _to_int(10.5, 2) == 10
@@ -42,7 +42,7 @@ def test_to_int():
 
 
 def test_normalize_model_architecture():
-    """Verify behavior of test_normalize_model_architecture."""
+    """Execute and verify `test_normalize_model_architecture` behavior and invariants."""
     assert normalize_model_architecture("gemma-4") == "gemma4_2b"
     assert normalize_model_architecture("gemma4_2b") == "gemma4_2b"
     assert normalize_model_architecture("gemma-4-7b") == "gemma4_7b"
@@ -52,7 +52,7 @@ def test_normalize_model_architecture():
 
 
 def test_build_maxtext_hyperparameters_defaults():
-    """Verify behavior of test_build_maxtext_hyperparameters_defaults."""
+    """Execute and verify `test_build_maxtext_hyperparameters_defaults` behavior and invariants."""
     config = MockTrainingConfig()
     params = build_maxtext_hyperparameters(config)
     assert params.model_architecture == "gemma4_2b"
@@ -62,7 +62,7 @@ def test_build_maxtext_hyperparameters_defaults():
 
 
 def test_build_maxtext_hyperparameters_overrides():
-    """Verify behavior of test_build_maxtext_hyperparameters_overrides."""
+    """Execute and verify `test_build_maxtext_hyperparameters_overrides` behavior and invariants."""
     config = MockTrainingConfig(model_name="gemma-4-7b", batch_size=4.0, learning_rate=2e-4, epochs=2, dataset="test_data", extra_kwargs={"opt_type": "adam"})
     params = build_maxtext_hyperparameters(config, steps=2000)
     assert params.model_architecture == "gemma4_7b"
@@ -75,7 +75,7 @@ def test_build_maxtext_hyperparameters_overrides():
 
 
 def test_build_maxtext_hyperparameters_validation_errors():
-    """Verify behavior of test_build_maxtext_hyperparameters_validation_errors."""
+    """Execute and verify `test_build_maxtext_hyperparameters_validation_errors` behavior and invariants."""
     config = MockTrainingConfig()
     with pytest.raises(ValueError, match="per_device_batch_size must be positive"):
         build_maxtext_hyperparameters(config, per_device_batch_size=-1)
@@ -106,7 +106,7 @@ def test_build_maxtext_hyperparameters_validation_errors():
 
 
 def test_generate_maxtext_gin_config():
-    """Verify behavior of test_generate_maxtext_gin_config."""
+    """Execute and verify `test_generate_maxtext_gin_config` behavior and invariants."""
     config = MockTrainingConfig()
     gin_str = generate_maxtext_gin_config(config)
     assert "gemma4_2b" in gin_str
@@ -114,7 +114,7 @@ def test_generate_maxtext_gin_config():
 
 
 def test_save_maxtext_gin_config(tmp_path):
-    """Verify behavior of test_save_maxtext_gin_config."""
+    """Execute and verify `test_save_maxtext_gin_config` behavior and invariants."""
     gin_content = "test_content"
 
     # Test with output path
@@ -134,7 +134,7 @@ def test_save_maxtext_gin_config(tmp_path):
 
 
 def test_build_maxtext_cli_args(tmp_path):
-    """Verify behavior of test_build_maxtext_cli_args."""
+    """Execute and verify `test_build_maxtext_cli_args` behavior and invariants."""
     config = MockTrainingConfig()
 
     # Test without gin_config_path

@@ -124,7 +124,7 @@ def test_run_benchmark_wrapper_paths() -> None:
 
     # 2. Execution failure branch
     def _fail() -> tuple[float, float, float]:
-        """Verify behavior of _fail."""
+        """Execute and verify `_fail` behavior and invariants."""
         raise RuntimeError("Benchmark execution crashed")
 
     res_fail = run_benchmark_wrapper(
@@ -164,20 +164,20 @@ def test_run_benchmark_wrapper_paths() -> None:
 
 
 def test_sdk_benchmark(monkeypatch: Any) -> None:
-    """Verify behavior of test_sdk_benchmark."""
+    """Execute and verify `test_sdk_benchmark` behavior and invariants."""
     import sys
 
     from gemma_4_sql.sdk.benchmark import benchmark
 
     class FakeBackend:
-        """Verify behavior of FakeBackend."""
+        """Execute and verify `FakeBackend` behavior and invariants."""
 
         def benchmark_model(self, *args, **kwargs):
-            """Verify behavior of benchmark_model."""
+            """Execute and verify `benchmark_model` behavior and invariants."""
             return {"status": "success"}
 
     def mock_get_backend(x):
-        """Verify behavior of mock_get_backend."""
+        """Execute and verify `mock_get_backend` behavior and invariants."""
         return FakeBackend()
 
     bench_mod = sys.modules["gemma_4_sql.sdk.benchmark"]

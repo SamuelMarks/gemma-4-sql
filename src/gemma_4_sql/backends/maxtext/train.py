@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -72,7 +72,7 @@ def _get_train_step_fn(model: ModelType, optimizer: object) -> Any:
             return _loss_fn(model, p, b)
 
         (loss, grads) = jax.value_and_grad(_wrapper)(params, batch)
-        (updates, opt_state) = optimizer.update(grads, opt_state, params)  # type: ignore # Justified: Dynamic backend protocol typing
+        (updates, opt_state) = cast(Any, optimizer).update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
         return (params, opt_state, loss)
 
@@ -290,7 +290,7 @@ def _execute_train(
             save_maxtext_checkpoint(
                 checkpoint_dir=str(ckpt_dir),
                 step=epochs,
-                params={"status": "trained_distributed"},  # type: ignore # Justified: Dynamic backend protocol typing
+                params=cast("dict[str, TensorType]", {"status": "trained_distributed"}),
                 opt_state=None,
             )
         return "completed", 0.0

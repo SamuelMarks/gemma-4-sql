@@ -16,7 +16,7 @@ def test_create_hf_data_source():
     """Test _create_hf_data_source."""
 
     class DummyBase:
-        """Verify behavior of DummyBase."""
+        """Execute and verify `DummyBase` behavior and invariants."""
 
     HFDataSource = _create_hf_data_source(DummyBase)
 
@@ -33,7 +33,7 @@ def test_create_base_format_transform():
     """Test _create_base_format_transform."""
 
     class DummyBaseMap:
-        """Verify behavior of DummyBaseMap."""
+        """Execute and verify `DummyBaseMap` behavior and invariants."""
 
     BaseFormatTransform = _create_base_format_transform(DummyBaseMap)
 

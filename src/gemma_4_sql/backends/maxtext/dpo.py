@@ -11,14 +11,17 @@ from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, JSONDict, ModelType, TensorType, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
+    from gemma_4_sql.type_hints import DPOResultDict
+
 logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")
+jnn = optional_import("jax.nn")
 jnp = optional_import("jax.numpy")
 optax = optional_import("optax")
 Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
@@ -53,19 +56,30 @@ def _compute_logps(
     inputs: TensorType,
     labels: TensorType,
 ) -> TensorType:
-    """Compute sequence log probabilities from logits and labels.
+    """Compute sequence log probabilities from logits and target labels.
+
+    Applies `jax.nn.log_softmax` over the vocabulary dimension, gathers log-probabilities
+    at the target token indices via `jnp.take_along_axis`, masks out padding tokens
+    (`labels != 0`), and sums along the sequence axis.
 
     Args:
-        model: Neural network model instance.
+        model: Stateless Flax/MaxText neural network model instance.
         params: Model parameters dictionary.
-        inputs: Input token IDs tensor.
-        labels: Target label IDs tensor.
+        inputs: Input token IDs tensor of shape `(batch_size, seq_len)`.
+        labels: Target label IDs tensor of shape `(batch_size, seq_len)`.
 
     Returns:
-        Log probability sum per sequence.
+        Summed non-padding log probability per sequence.
 
     """
-    logits = cast(TensorType, model.apply(params, inputs))
+    logits = cast(Any, model.apply(params, inputs))
+    ndim = getattr(logits, "ndim", 0)
+    if jnn is not None and jnp is not None and isinstance(ndim, int) and ndim >= 2 and hasattr(jnn, "log_softmax") and hasattr(jnp, "take_along_axis"):
+        log_probs = jnn.log_softmax(logits, axis=-1)
+        labels_expanded = jnp.expand_dims(labels, axis=-1)
+        selected_log_probs = jnp.squeeze(jnp.take_along_axis(log_probs, labels_expanded, axis=-1), axis=-1)
+        mask = cast(Any, labels) != 0
+        return cast(TensorType, jnp.sum(selected_log_probs * mask, axis=-1))
     return cast(TensorType, jnp.sum(logits * labels, axis=-1))
 
 
@@ -246,7 +260,7 @@ def _execute_dpo(
     return "completed", final_loss
 
 
-def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
+def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
     """Run DPO training loop for MaxText.
 
     Args:
@@ -254,7 +268,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
         **kwargs: Extra parameters.
 
     Returns:
-        A dict with the execution status and metrics.
+        Structured `DPOResultDict` with the execution status and metrics.
 
     Raises:
         DependencyMissingError: If MaxText or JAX dependencies are missing.

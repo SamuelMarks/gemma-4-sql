@@ -21,15 +21,15 @@ if TYPE_CHECKING:
 
 
 def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Array], attention_mask: jax.Array | None, config_params: tuple[int, float | None, int, int]) -> jax.Array:
-    """Compute attention scores and output.
+    """Compute scaled dot-product attention scores, optional soft-capping, and context projection.
 
     Args:
-        qkv: A sequence of qkv.
-        attention_mask: The attention mask.
-        config_params: A sequence of config params.
+        qkv: A 3-tuple of `(query, key, value)` tensors of shapes `(B, T, H_q, D)` and `(B, S, H_kv, D)`.
+        attention_mask: Optional additive attention mask tensor of shape `(B, 1, T, S)`.
+        config_params: A 4-tuple of `(head_dim, attn_logits_soft_cap, num_kv_heads, num_heads)`.
 
     Returns:
-        The execution result.
+        Flattened attention output tensor of shape `(B, T, num_heads * head_dim)`.
 
     """
     (q, k, v) = qkv
@@ -51,16 +51,16 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
 
 
 def _prepare_qkv_for_attention(qkv: tuple[jax.Array, jax.Array, jax.Array], positions: Array, rope: Any, cache: LayerCache | None) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
-    """Prepare QKV and return masks.
+    """Apply Rotary Position Embeddings (RoPE), update the KV cache, and construct causal/window masks.
 
     Args:
-        qkv: A sequence of qkv.
-        positions: The positions.
-        rope: The rope.
-        cache: The cache.
+        qkv: A 3-tuple of `(query, key, value)` tensors of shape `(B, T, H, D)`.
+        positions: Token position index tensor of shape `(B, T)`.
+        rope: `RoPE` module callable returning `(sin, cos)` frequency tables.
+        cache: Optional mutable `LayerCache` for autoregressive decoding.
 
     Returns:
-        A tuple containing the results.
+        A 5-tuple of `(q_rotated, k_cached, v_cached, causal_mask, relative_window_distance)`.
 
     """
     (q, k, v) = qkv

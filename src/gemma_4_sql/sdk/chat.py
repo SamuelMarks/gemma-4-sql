@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
-from gemma_4_sql.exceptions import InferenceError
+from gemma_4_sql.exceptions import InferenceError, is_failed_status
 from gemma_4_sql.sdk.registry import get_backend
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ def chat_turn(
         bw = int(bw_raw) if isinstance(bw_raw, (int, float, str)) else 3
         ml = int(ml_raw) if isinstance(ml_raw, (int, float, str)) else 50
         result = backend_impl.generate_sql(model_name, full_prompt, beam_width=bw, max_length=ml, **call_kwargs)
-        if "sql" not in result:
+        if "sql" not in result or is_failed_status(result):
             raise ValueError(f"Backend {backend} did not return SQL.")
         response = str(result["sql"])
         status = f"success_{backend}_chat"

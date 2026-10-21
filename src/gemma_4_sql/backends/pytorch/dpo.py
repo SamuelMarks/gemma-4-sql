@@ -3,26 +3,36 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
-from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.backends.common_train import generic_run_training_epochs
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from collections.abc import Iterable, Mapping
+
+    from gemma_4_sql.type_hints import DPOResultDict, JSONDict
 logger = logging.getLogger(__name__)
 
 torch = optional_import("torch")
 nn = optional_import("torch.nn")
 optim = optional_import("torch.optim")
 functional = optional_import("torch.nn.functional")
+AutoModelForCausalLM = optional_attr("transformers", "AutoModelForCausalLM")
 
 
-def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[Any, Any, Any]:
-    """Compute the DPO loss.
+def dpo_loss(
+    policy_chosen_logps: TensorType,
+    policy_rejected_logps: TensorType,
+    ref_chosen_logps: TensorType,
+    ref_rejected_logps: TensorType,
+    beta: float = 0.1,
+) -> tuple[Any, Any, Any]:
+    """Compute the Direct Preference Optimization (DPO) loss for PyTorch tensors.
 
     Args:
         policy_chosen_logps: Log probabilities of the chosen completions from the policy model.
@@ -32,22 +42,56 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
         beta: The beta parameter controlling the KL penalty.
 
     Returns:
-        A tuple containing the results.
+        A 3-tuple of `(mean_loss, chosen_rewards, rejected_rewards)`.
 
     """
     if torch is None or functional is None:
         return (0.0, 0.0, 0.0)
-    return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, functional.logsigmoid)
+    return generic_dpo_loss(
+        policy_chosen_logps,
+        policy_rejected_logps,
+        ref_chosen_logps,
+        ref_rejected_logps,
+        beta,
+        functional.logsigmoid,
+    )
 
 
-def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: Any, batch: JSONDict, beta: float) -> Any:
+def _compute_pytorch_logps(model: Any, inputs: Any, labels: Any = None) -> Any:
+    """Compute per-sequence summed token log-probabilities for PyTorch models.
+
+    Applies `log_softmax` over the vocabulary axis, gathers log-probabilities at target
+    token indices, masks out padding tokens (`labels != 0`), and sums along the sequence dimension.
+
+    Args:
+        model: Policy or reference PyTorch model callable.
+        inputs: Input token ID tensor.
+        labels: Optional target token ID tensor of shape `(batch_size, seq_len)`.
+
+    Returns:
+        Per-sequence log-probability tensor of shape `(batch_size,)`.
+
+    """
+    raw_out = model(inputs)
+    logits = raw_out[0] if isinstance(raw_out, tuple) else getattr(raw_out, "logits", raw_out)
+    target = labels if labels is not None else inputs
+    ndim = getattr(logits, "ndim", 0)
+    if torch is not None and functional is not None and isinstance(ndim, int) and ndim >= 2 and hasattr(target, "unsqueeze") and getattr(target, "dtype", None) in (getattr(torch, "long", None), getattr(torch, "int64", None), getattr(torch, "int32", None)):
+        log_probs = functional.log_softmax(logits, dim=-1)
+        gathered = torch.gather(log_probs, dim=-1, index=target.unsqueeze(-1)).squeeze(-1)
+        mask = target != 0
+        return (gathered * mask).sum(dim=-1)
+    return logits.mean(dim=-1) if hasattr(logits, "mean") else logits
+
+
+def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: Any, batch: Mapping[str, Any], beta: float) -> Any:
     """Run a single PyTorch DPO optimization step.
 
     Args:
         policy_model: Trainable PyTorch policy model.
         ref_model: Frozen PyTorch reference model.
         optimizer: PyTorch optimizer instance.
-        batch: Preference batch dictionary.
+        batch: Preference batch dictionary containing chosen and rejected inputs/labels.
         beta: KL penalty temperature coefficient.
 
     Returns:
@@ -56,15 +100,17 @@ def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: Any,
     """
     if hasattr(optimizer, "zero_grad"):
         optimizer.zero_grad()
-    pi_ch = policy_model(batch["chosen_inputs"])
-    pi_re = policy_model(batch["rejected_inputs"])
+    ch_inputs = batch.get("chosen_inputs", batch.get("inputs"))
+    re_inputs = batch.get("rejected_inputs", batch.get("inputs"))
+    ch_labels = batch.get("chosen_labels")
+    re_labels = batch.get("rejected_labels")
+
+    pi_ch_logps = _compute_pytorch_logps(policy_model, ch_inputs, ch_labels)
+    pi_re_logps = _compute_pytorch_logps(policy_model, re_inputs, re_labels)
     with torch.no_grad():
-        ref_ch = ref_model(batch["chosen_inputs"])
-        ref_re = ref_model(batch["rejected_inputs"])
-    pi_ch_logps = pi_ch.mean(dim=-1) if hasattr(pi_ch, "mean") else pi_ch
-    pi_re_logps = pi_re.mean(dim=-1) if hasattr(pi_re, "mean") else pi_re
-    ref_ch_logps = ref_ch.mean(dim=-1) if hasattr(ref_ch, "mean") else ref_ch
-    ref_re_logps = ref_re.mean(dim=-1) if hasattr(ref_re, "mean") else ref_re
+        ref_ch_logps = _compute_pytorch_logps(ref_model, ch_inputs, ch_labels)
+        ref_re_logps = _compute_pytorch_logps(ref_model, re_inputs, re_labels)
+
     (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
     if hasattr(loss, "backward"):
         loss.backward()
@@ -83,36 +129,65 @@ def _run_training_epochs(state: TrainerState) -> float:
         Mean batch loss from the final epoch.
 
     """
-    dataloader = state.dataloader
-    epochs = state.epochs
+    dataloader = cast("Iterable[JSONDict]", state.dataloader or ())
     policy_model = state.policy_model
     ref_model = state.ref_model
     optimizer = state.optimizer
     beta = state.beta
-    final_loss = 0.0
-    for _epoch in range(epochs):
-        epoch_loss = 0.0
-        for batch in dataloader:
-            loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)
-            loss_val = float(loss.item() if hasattr(loss, "item") else loss)
-            epoch_loss += loss_val
-        final_loss = epoch_loss / max(1, len(dataloader))
-    return float(final_loss)
+
+    def _step(batch: JSONDict) -> float:
+        """Execute a single PyTorch DPO step and extract scalar float loss."""
+        loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)
+        return float(loss.item() if hasattr(loss, "item") else loss)
+
+    return generic_run_training_epochs(state.epochs, dataloader, _step)
 
 
-def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
+def _load_dpo_models(model_name: str, backend_alias: str = "pytorch", model_config: Any = None) -> tuple[Any, Any]:
+    """Load policy and reference models for PyTorch DPO.
+
+    Args:
+        model_name: Hugging Face model ID or local path.
+        backend_alias: Backend variant (`'pytorch'` or `'pytorch_native'`).
+        model_config: Optional explicit `Gemma4Config` for native initialization.
+
+    Returns:
+        A 2-tuple of `(policy_model, ref_model)`.
+
+    Raises:
+        ValueError: If model loading fails.
+
+    """
+    try:
+        if backend_alias == "pytorch_native":
+            from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4ForCausalLM
+
+            policy_model = NativeGemma4ForCausalLM.from_pretrained(model_name, config=model_config)
+            ref_model = NativeGemma4ForCausalLM.from_pretrained(model_name, config=model_config)
+            return (policy_model, ref_model)
+
+        gemma4_cls = optional_attr("transformers.models.gemma4", "Gemma4ForCausalLM")
+        loader_cls = gemma4_cls if gemma4_cls is not None else AutoModelForCausalLM
+        if loader_cls is None:
+            raise ImportError("Neither transformers.models.gemma4.Gemma4ForCausalLM nor AutoModelForCausalLM is available.")
+        return (loader_cls.from_pretrained(model_name), loader_cls.from_pretrained(model_name))
+    except (ImportError, ValueError, OSError, RuntimeError) as e:
+        msg = f"Failed to load model {model_name}"
+        raise ValueError(msg) from e
+
+
+def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
     """Run a DPO training loop for PyTorch.
 
     Args:
         config: The DPO configuration.
-        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
+        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate, backend_alias).
 
     Returns:
-        A dict with the execution status and metrics.
+        Structured `DPOResultDict` with execution status and final loss.
 
     Raises:
         DependencyMissingError: If PyTorch dependencies are missing.
-        ValueError: If model loading fails.
 
     """
     model_name = getattr(config, "model_name", "model")
@@ -120,30 +195,42 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> JSONDict:
     beta = getattr(config, "beta", 0.1)
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
+    backend_alias = str(kwargs.get("backend_alias", "pytorch"))
+    model_config = kwargs.get("model_config") or getattr(config, "extra_kwargs", {}).get("model_config")
 
     if torch is None or nn is None or optim is None:
         raise DependencyMissingError("PyTorch dependencies are missing.")
 
     try:
-        try:
-            gemma4_for_causal_lm_cls = __import__("transformers.models.gemma4", fromlist=["Gemma4ForCausalLM"]).Gemma4ForCausalLM
-            policy_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
-            ref_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
-        except (ImportError, ValueError) as e:
-            msg = f"Failed to load model {model_name}"
-            raise ValueError(msg) from e
-
+        (policy_model, ref_model) = _load_dpo_models(model_name, backend_alias=backend_alias, model_config=model_config)
         optimizer = optim.AdamW(policy_model.parameters(), lr=learning_rate)
         batch_size = getattr(config, "batch_size", 2)
         data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
         dataloader = data_dict.get("loader", None)
         if dataloader is None or not hasattr(dataloader, "__iter__"):
             raise ValueError(f"Invalid dataloader for dataset: {dataset}")
-        final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=policy_model, ref_model=ref_model, optimizer=optimizer, beta=beta))
+        final_loss = _run_training_epochs(
+            TrainerState(
+                dataloader=dataloader,
+                epochs=epochs,
+                policy_model=policy_model,
+                ref_model=ref_model,
+                optimizer=optimizer,
+                beta=beta,
+            )
+        )
         status = "completed"
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("DPO failed: ")
         status = f"failed: {e!s}"
         final_loss = 0.0
 
-    return {"backend": "pytorch", "action": "dpo", "model": model_name, "dataset": dataset, "beta": beta, "status": status, "final_loss": float(final_loss)}
+    return {
+        "backend": backend_alias,
+        "action": "dpo",
+        "model": model_name,
+        "dataset": dataset,
+        "beta": beta,
+        "status": status,
+        "final_loss": float(final_loss),
+    }

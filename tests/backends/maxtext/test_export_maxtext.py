@@ -9,7 +9,7 @@ from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 
 
 def test_export_model_success_with_kwargs(tmp_path):
-    """Verify behavior of test_export_model_success_with_kwargs."""
+    """Execute and verify `test_export_model_success_with_kwargs` behavior and invariants."""
     export_path = tmp_path / "export_dir"
     weights = {"w": 1}
 
@@ -41,7 +41,7 @@ def test_export_model_success_with_kwargs(tmp_path):
 
 
 def test_export_model_success_without_kwargs(tmp_path):
-    """Verify behavior of test_export_model_success_without_kwargs."""
+    """Execute and verify `test_export_model_success_without_kwargs` behavior and invariants."""
     export_path = tmp_path / "export_dir"
 
     mock_mngr_instance = MagicMock()
@@ -73,13 +73,13 @@ def test_export_model_success_without_kwargs(tmp_path):
 
 
 def test_export_model_missing_jax(tmp_path):
-    """Verify behavior of test_export_model_missing_jax."""
+    """Execute and verify `test_export_model_missing_jax` behavior and invariants."""
     with patch("gemma_4_sql.backends.maxtext.export.jax", None), pytest.raises(DependencyMissingError, match="MaxText export dependencies \\(jax, orbax.checkpoint\\) are missing."):
         export_model("test_model", str(tmp_path))
 
 
 def test_export_model_missing_gemma4model(tmp_path):
-    """Verify behavior of test_export_model_missing_gemma4model."""
+    """Execute and verify `test_export_model_missing_gemma4model` behavior and invariants."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_ocp = MagicMock()
@@ -94,7 +94,7 @@ def test_export_model_missing_gemma4model(tmp_path):
 
 
 def test_export_model_init_error(tmp_path):
-    """Verify behavior of test_export_model_init_error."""
+    """Execute and verify `test_export_model_init_error` behavior and invariants."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_ocp = MagicMock()
@@ -110,7 +110,7 @@ def test_export_model_init_error(tmp_path):
 
 
 def test_export_model_save_error(tmp_path):
-    """Verify behavior of test_export_model_save_error."""
+    """Execute and verify `test_export_model_save_error` behavior and invariants."""
     export_path = tmp_path / "export_dir"
 
     mock_mngr_class = MagicMock(side_effect=Exception("Save failed"))

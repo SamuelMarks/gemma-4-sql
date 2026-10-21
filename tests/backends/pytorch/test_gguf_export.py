@@ -117,10 +117,10 @@ def test_extract_pytorch_state_dict_from_model() -> None:
     from torch import nn
 
     class DummyModel(nn.Module):
-        """Verify behavior of DummyModel."""
+        """Execute and verify `DummyModel` behavior and invariants."""
 
         def __init__(self) -> None:
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             super().__init__()
             self.model = nn.ModuleDict({"embed_tokens": nn.Embedding(2, 4)})
 
@@ -386,10 +386,10 @@ def test_extract_pytorch_state_dict_callable_object() -> None:
     from torch import nn
 
     class CallableModel(nn.Module):
-        """Verify behavior of CallableModel."""
+        """Execute and verify `CallableModel` behavior and invariants."""
 
         def __init__(self) -> None:
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             super().__init__()
             self.model = nn.ModuleDict({"embed_tokens": nn.Embedding(2, 4)})
 
@@ -405,10 +405,10 @@ def test_extract_state_dict_local_hf_model(tmp_path: Path, monkeypatch: pytest.M
     local_dir.mkdir()
 
     class HFModel(nn.Module):
-        """Verify behavior of HFModel."""
+        """Execute and verify `HFModel` behavior and invariants."""
 
         def __init__(self) -> None:
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             super().__init__()
             self.embed_tokens = nn.Embedding(2, 4)
             self.layers = nn.ModuleDict({"notanint": nn.Linear(4, 4)})

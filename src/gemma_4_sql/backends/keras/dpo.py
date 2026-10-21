@@ -6,12 +6,15 @@ import logging
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
+from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.keras.etl import build_dataloader
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
     from gemma_4_sql.type_hints import DPOResultDict
 logger = logging.getLogger(__name__)
 
@@ -20,8 +23,14 @@ keras = optional_import("keras")
 GemmaCausalLM = optional_attr("keras_nlp.models", "GemmaCausalLM")
 
 
-def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType, ref_chosen_logps: TensorType, ref_rejected_logps: TensorType, beta: float = 0.1) -> tuple[Any, Any, Any]:
-    """Compute the DPO loss.
+def dpo_loss(
+    policy_chosen_logps: TensorType,
+    policy_rejected_logps: TensorType,
+    ref_chosen_logps: TensorType,
+    ref_rejected_logps: TensorType,
+    beta: float = 0.1,
+) -> tuple[Any, Any, Any]:
+    """Compute the Direct Preference Optimization (DPO) loss for TensorFlow/Keras tensors.
 
     Args:
         policy_chosen_logps: Log probabilities of the chosen completions from the policy model.
@@ -31,21 +40,30 @@ def dpo_loss(policy_chosen_logps: TensorType, policy_rejected_logps: TensorType,
         beta: The beta parameter controlling the KL penalty.
 
     Returns:
-        A tuple containing the results.
+        A 3-tuple of `(mean_loss, chosen_rewards, rejected_rewards)`.
 
     """
     if tf is None:
         return (0.0, 0.0, 0.0)
-    return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, tf.math.log_sigmoid)
+    (losses, chosen_rewards, rejected_rewards) = generic_dpo_loss(
+        policy_chosen_logps,
+        policy_rejected_logps,
+        ref_chosen_logps,
+        ref_rejected_logps,
+        beta,
+        tf.math.log_sigmoid,
+    )
+    mean_loss = tf.reduce_mean(losses) if hasattr(tf, "reduce_mean") and not isinstance(losses, (int, float)) else losses
+    return (mean_loss, chosen_rewards, rejected_rewards)
 
 
-def _compute_logps(model: ModelType, inputs: TensorType, labels: TensorType) -> Any:
+def _compute_logps(model: ModelType, inputs: Any, labels: Any) -> Any:
     """Compute sequence log probabilities for DPO using TensorFlow log-softmax.
 
     Args:
         model: Keras causal LM callable.
-        inputs: Input token ID tensor.
-        labels: Target token ID tensor.
+        inputs: Input token ID tensor of shape `(batch_size, seq_len)`.
+        labels: Target token ID tensor of shape `(batch_size, seq_len)`.
 
     Returns:
         Summed non-padding token log probabilities per sequence.
@@ -53,25 +71,20 @@ def _compute_logps(model: ModelType, inputs: TensorType, labels: TensorType) -> 
     """
     if tf is None:
         return 0.0
-    logits = model(inputs)
-
-    # Compute log_softmax over the vocabulary dimension (usually axis -1)
+    raw_logits = model(inputs)
+    if hasattr(raw_logits, "detach") and hasattr(raw_logits, "cpu"):
+        logits = tf.convert_to_tensor(raw_logits.detach().cpu().numpy())
+    else:
+        logits = raw_logits
     log_probs = tf.nn.log_softmax(logits, axis=-1)
-
-    # Gather the log probability of the true next token (label).
-    # labels shape is (batch_size, sequence_length)
-    # log_probs shape is (batch_size, sequence_length, vocab_size)
     labels_expanded = tf.expand_dims(tf.cast(labels, tf.int32), axis=-1)
     selected_log_probs = tf.gather(log_probs, labels_expanded, batch_dims=2)
-
-    # Remove the extra dimension and sum over the sequence length
     selected_log_probs = tf.squeeze(selected_log_probs, axis=-1)
-    # We might want to mask out padding tokens in the future, assuming non-zero labels are valid tokens for now
-    mask = tf.cast(cast(Any, labels) != 0, tf.float32)  # Justified: Dynamic backend protocol typing
+    mask = tf.cast(cast(Any, labels) != 0, tf.float32)
     return tf.reduce_sum(selected_log_probs * mask, axis=-1)
 
 
-def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer: object, beta: float) -> object:
+def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer: Any, beta: float) -> object:
     """Return a `tf.function` compiled DPO train step function.
 
     Args:
@@ -92,7 +105,7 @@ def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer:
 
         return _dummy_step
 
-    def train_step(batch: dict[str, object]) -> object:
+    def train_step(batch: Mapping[str, Any]) -> object:
         """Compute DPO loss and apply gradients under a TensorFlow GradientTape.
 
         Args:
@@ -103,13 +116,14 @@ def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer:
 
         """
         with tf.GradientTape() as tape:
-            pi_ch_logps = _compute_logps(policy_model, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore # Justified: Dynamic backend protocol typing
-            pi_re_logps = _compute_logps(policy_model, batch["rejected_inputs"], batch["rejected_labels"])  # type: ignore # Justified: Dynamic backend protocol typing
-            ref_ch_logps = _compute_logps(ref_model, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore # Justified: Dynamic backend protocol typing
-            ref_re_logps = _compute_logps(ref_model, batch["rejected_inputs"], batch["rejected_labels"])  # type: ignore # Justified: Dynamic backend protocol typing
+            pi_ch_logps = _compute_logps(policy_model, batch["chosen_inputs"], batch["chosen_labels"])
+            pi_re_logps = _compute_logps(policy_model, batch["rejected_inputs"], batch["rejected_labels"])
+            ref_ch_logps = _compute_logps(ref_model, batch["chosen_inputs"], batch["chosen_labels"])
+            ref_re_logps = _compute_logps(ref_model, batch["rejected_inputs"], batch["rejected_labels"])
             (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
-        grads = tape.gradient(loss, getattr(policy_model, "trainable_variables", []))
-        optimizer.apply_gradients(zip(grads, getattr(policy_model, "trainable_variables", [])))  # type: ignore # Justified: Dynamic backend protocol typing
+        trainable_vars = getattr(policy_model, "trainable_variables", [])
+        grads = tape.gradient(loss, trainable_vars)
+        optimizer.apply_gradients(zip(grads, trainable_vars))
         return loss
 
     return tf.function(train_step)
@@ -125,20 +139,19 @@ def _run_training_epochs(state: TrainerState) -> float:
         Mean batch loss from the final epoch.
 
     """
-    dataloader = state.dataloader
-    epochs = state.epochs
+    dataloader = cast("Iterable[dict[str, Any]]", state.dataloader or ())
     train_step = state.train_step
-    final_loss = 0.0
-    for _epoch in range(epochs):
-        epoch_loss = 0.0
-        for batch in dataloader:
-            loss: Any = train_step(batch)
-            if hasattr(loss, "numpy"):
-                epoch_loss += float(loss.numpy())
-            elif isinstance(loss, (int, float)):
-                epoch_loss += float(loss)
-        final_loss = epoch_loss / max(1, len(dataloader) if hasattr(dataloader, "__len__") else 1)
-    return float(final_loss)
+
+    def _step(batch: dict[str, Any]) -> float:
+        """Execute a single Keras DPO step and extract scalar float loss."""
+        loss: Any = train_step(batch)
+        if hasattr(loss, "numpy"):
+            return float(loss.numpy())
+        if isinstance(loss, (int, float)):
+            return float(loss)
+        return 0.0
+
+    return generic_run_training_epochs(state.epochs, dataloader, _step)
 
 
 def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
@@ -192,7 +205,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
         **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
 
     Returns:
-        A dictionary containing execution status and loss.
+        Structured `DPOResultDict` containing execution status and loss.
 
     Raises:
         DependencyMissingError: If Keras DPO dependencies are missing.

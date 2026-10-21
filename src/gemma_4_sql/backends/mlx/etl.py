@@ -4,69 +4,55 @@ from __future__ import annotations
 
 import typing
 
-from gemma_4_sql.backends.common_data import load_duckdb_dataset
+from gemma_4_sql.backends.common_data import (
+    load_duckdb_dataset,
+    load_hf_or_duckdb_dataset,
+    pad_token_batch,
+)
 from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import ETLConfig, JSONDict
 
 if typing.TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue
+    from collections.abc import Iterator
 
-datasets: typing.Any = optional_import("datasets")
-duckdb = None
-mx = None
+    from gemma_4_sql.type_hints import DataloaderResultDict, ETLConfig, JSONDict
 
+datasets = optional_import("datasets")
 
-def _pad_batch(batch_inputs: list[list[int]], batch_targets: list[list[int]]) -> JSONDict:
-    """Pad batch sequences to max length.
-
-    Args:
-        batch_inputs: A sequence of batch inputs.
-        batch_targets: A sequence of batch targets.
-
-    Returns:
-        A dictionary containing the results.
-
-    """
-    max_len_in = max(len(x) for x in batch_inputs)
-    max_len_tgt = max(len(x) for x in batch_targets)
-    padded_in = [x + [0] * (max_len_in - len(x)) for x in batch_inputs]
-    padded_tgt = [x + [0] * (max_len_tgt - len(x)) for x in batch_targets]
-    return {"inputs": padded_in, "targets": padded_tgt}
+_pad_batch = pad_token_batch
 
 
 class MLXDataLoader:
-    """Simple DataLoader for MLX that yields padded batches."""
-
-    ds: typing.Any
+    """Iterable batch dataloader for MLX token sequence training."""
 
     def __init__(self, ds: object, tok: SQLTokenizer, bs: int) -> None:
-        """Execute logic.
+        """Initialize the MLXDataLoader.
 
         Args:
-            ds: The ds.
-            tok: The tok.
-            bs: The integer value for bs.
+            ds: Underlying Hugging Face Dataset or sequence of SQL prompt/query dictionaries.
+            tok: `SQLTokenizer` instance used to encode prompts and SQL targets.
+            bs: Number of records per padded batch.
 
         """
         self.ds = ds
         self.tok = tok
         self.bs = bs
 
-    def __iter__(self) -> typing.Iterator[JSONDict]:
-        """Execute logic.
+    def __iter__(self) -> Iterator[dict[str, list[list[int]]]]:
+        """Iterate over the dataset and yield zero-padded token batches.
 
         Yields:
-            object: The yielded item during generation.
+            Dictionary containing `'inputs'` and `'targets'` 2D padded integer token lists.
 
         """
         batch_inputs: list[list[int]] = []
         batch_targets: list[list[int]] = []
-        for item in self.ds:
-            prompt = item.get("sql_prompt", item.get("question", ""))
-            target = item.get("sql", item.get("query", ""))
-            batch_inputs.append(self.tok.encode(str(prompt)))
-            batch_targets.append(self.tok.encode(str(target)))
+        for item in typing.cast("typing.Iterable[JSONDict]", self.ds):
+            prompt = str(item.get("sql_prompt", item.get("question", "")))
+            target = str(item.get("sql", item.get("query", "")))
+            batch_inputs.append(self.tok.encode(prompt))
+            batch_targets.append(self.tok.encode(target))
             if len(batch_inputs) == self.bs:
                 yield _pad_batch(batch_inputs, batch_targets)
                 batch_inputs = []
@@ -75,43 +61,49 @@ class MLXDataLoader:
             yield _pad_batch(batch_inputs, batch_targets)
 
 
-def _load_hf_or_duckdb(dataset_name: str, split: str, duckdb_path: str | None, duckdb_table: str | None) -> object:
-    """Load a dataset from Hugging Face or DuckDB.
+def _load_hf_or_duckdb(
+    dataset_name: str,
+    split: str,
+    duckdb_path: str | None,
+    duckdb_table: str | None,
+) -> object:
+    """Load dataset records from DuckDB when configured or Hugging Face `datasets`.
 
     Args:
-        dataset_name: The name of the Hugging Face dataset.
-        split: The dataset split to load.
-        duckdb_path: Optional path to a DuckDB database.
-        duckdb_table: Optional name of the DuckDB table.
+        dataset_name: Hugging Face dataset identifier.
+        split: Dataset split name (e.g., `'train'`).
+        duckdb_path: Optional path to a DuckDB database file.
+        duckdb_table: Optional DuckDB table name.
 
     Returns:
-        The loaded dataset.
+        Loaded dataset sequence or Hugging Face Dataset object.
 
     Raises:
-        DependencyMissingError: If Datasets dependency is missing.
+        DependencyMissingError: If `datasets` is required and not installed.
 
     """
-    if duckdb_path and duckdb_table:
-        return load_duckdb_dataset(duckdb_path, duckdb_table)
-    if datasets is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
+    return load_hf_or_duckdb_dataset(
+        dataset_name=dataset_name,
+        split=split,
+        duckdb_path=duckdb_path,
+        duckdb_table=duckdb_table,
+        datasets_module=datasets,
+        load_duckdb_fn=load_duckdb_dataset,
+    )
 
-        raise DependencyMissingError("Datasets dependency is missing.")
-    return datasets.load_dataset(dataset_name, split=split)
 
-
-def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
-    """Build an MLX-specific dataloader.
+def build_dataloader(config: ETLConfig, **kwargs: object) -> DataloaderResultDict:
+    """Build an `MLXDataLoader` for the MLX backend.
 
     Args:
         config: ETL configuration parameters.
-        **kwargs: Overrides for ETL configuration (e.g., duckdb_path, duckdb_table).
+        **kwargs: Overrides such as `duckdb_path` and `duckdb_table`.
 
     Returns:
-        A dictionary containing the loaded dataloader and metadata.
+        Structured `DataloaderResultDict` containing the constructed `MLXDataLoader`.
 
     Raises:
-        DependencyMissingError: If datasets dependency is missing.
+        DependencyMissingError: If `datasets` is not available.
 
     """
     dataset_name = config.dataset_name
@@ -122,11 +114,19 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> JSONDict:
     duckdb_path = str(config.duckdb_path or kwargs.get("duckdb_path") or "")
     duckdb_table = str(config.duckdb_table or kwargs.get("duckdb_table") or "")
     if datasets is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError(f"Missing datasets. Cannot load {dataset_name}.")
-
     hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)
     tokenizer = SQLTokenizer(model_name=tokenizer_name)
     dataloader = MLXDataLoader(hf_dataset, tokenizer, batch_size)
-    return typing.cast(JSONDict, {"dataset": dataset_name, "split": split, "status": "loaded", "batch_size": batch_size, "backend": "mlx", "distributed": distributed, "loader": dataloader})
+    return typing.cast(
+        "DataloaderResultDict",
+        {
+            "dataset": dataset_name,
+            "split": split,
+            "status": "loaded",
+            "batch_size": batch_size,
+            "backend": "mlx",
+            "distributed": distributed,
+            "loader": dataloader,
+        },
+    )

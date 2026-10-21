@@ -27,25 +27,25 @@ from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
 
 
 def mock_build_dataloader(config: ETLConfig, *args: Any, **kwargs: Any) -> dict[str, typing.Any]:
-    """Verify behavior of mock_build_dataloader."""
+    """Execute and verify `mock_build_dataloader` behavior and invariants."""
     inputs = torch.randint(0, 128, (4, 10))
     targets = torch.randint(0, 128, (4, 10))
 
     # We return dictionaries so it matches the expected batch structure
     class DictDataset(torch.utils.data.Dataset):
-        """Verify behavior of DictDataset."""
+        """Execute and verify `DictDataset` behavior and invariants."""
 
         def __init__(self, inputs, targets):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             self.inputs = inputs
             self.targets = targets
 
         def __len__(self):
-            """Verify behavior of __len__."""
+            """Execute and verify `__len__` behavior and invariants."""
             return len(self.inputs)
 
         def __getitem__(self, idx):
-            """Verify behavior of __getitem__."""
+            """Execute and verify `__getitem__` behavior and invariants."""
             return {"inputs": self.inputs[idx], "targets": self.targets[idx]}
 
     dataset = DictDataset(inputs, targets)
@@ -67,7 +67,7 @@ def mock_build_dataloader(config: ETLConfig, *args: Any, **kwargs: Any) -> dict[
 
 @pytest.fixture
 def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> typing.Iterator[None]:
-    """Verify behavior of _mock_torch_env."""
+    """Execute and verify `_mock_torch_env` behavior and invariants."""
     # We want to run real DDP on gloo
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
@@ -80,19 +80,19 @@ def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> typing.Iterator[None]:
 
     # We can mock the model instantiation to return a tiny Gemma4 so it fits in memory and runs fast
     class DummyModel(nn.Module):
-        """Verify behavior of DummyModel."""
+        """Execute and verify `DummyModel` behavior and invariants."""
 
         def __init__(self):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             super().__init__()
             self.emb = nn.Embedding(128, 128)
 
         def forward(self, x, *args, **kwargs):
-            """Verify behavior of forward."""
+            """Execute and verify `forward` behavior and invariants."""
             return self.emb(x.long())
 
     def mock_gemma_from_pretrained(*args, **kwargs):
-        """Verify behavior of mock_gemma_from_pretrained."""
+        """Execute and verify `mock_gemma_from_pretrained` behavior and invariants."""
         return DummyModel()
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM.from_pretrained", mock_gemma_from_pretrained)
@@ -108,7 +108,7 @@ def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> typing.Iterator[None]:
 
 @pytest.mark.usefixtures("_mock_torch_env")
 def test_train_model_ddp() -> None:
-    """Verify behavior of test_train_model_ddp."""
+    """Execute and verify `test_train_model_ddp` behavior and invariants."""
     res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=1, learning_rate=0.1, distributed_strategy="ddp", backend="pytorch_native"))
     assert res["status"] == "completed"
     assert res["distributed_strategy"] == "ddp"
@@ -116,7 +116,7 @@ def test_train_model_ddp() -> None:
 
 @pytest.mark.usefixtures("_mock_torch_env")
 def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify behavior of test_train_model_fsdp."""
+    """Execute and verify `test_train_model_fsdp` behavior and invariants."""
     # FSDP in PyTorch on CPU might raise errors in _get_compute_device.
     # To test that train_model uses the FSDP path correctly without crashing the test runner,
     # we patch _wrap_model_distributed just for this test, or we catch the FSDP initialization error.
@@ -132,22 +132,22 @@ def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
     # wait, instead of mocking FSDP, let's just make sure we are not calling it and raising an exception that makes the test fail.
     # I'll just use a DummyModule that extends nn.Module to simulate FSDP if it raises on this platform.
     class DummyFSDP(nn.Module):
-        """Verify behavior of DummyFSDP."""
+        """Execute and verify `DummyFSDP` behavior and invariants."""
 
         def __init__(self, module):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             super().__init__()
             self.module = module
 
         def forward(self, *args, **kwargs):
-            """Verify behavior of forward."""
+            """Execute and verify `forward` behavior and invariants."""
             return self.module(*args, **kwargs)
 
     # We patch fsdp_module.FullyShardedDataParallel to DummyFSDP
     import sys
 
     class MockFSDPModule:
-        """Verify behavior of MockFSDPModule."""
+        """Execute and verify `MockFSDPModule` behavior and invariants."""
 
         FullyShardedDataParallel = DummyFSDP
 
@@ -159,7 +159,7 @@ def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Verify behavior of test_export_distributed_rank_zero."""
+    """Execute and verify `test_export_distributed_rank_zero` behavior and invariants."""
     # We don't need real model export for this error check, but we need real torch.
     monkeypatch.setattr(ex, "save_file", lambda *args, **kwargs: None)
 
@@ -175,7 +175,7 @@ def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 
 def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Verify behavior of test_export_distributed_rank_one."""
+    """Execute and verify `test_export_distributed_rank_one` behavior and invariants."""
     monkeypatch.setattr(ex, "save_file", lambda *args, **kwargs: None)
 
     os.environ["MASTER_ADDR"] = "localhost"
@@ -192,7 +192,7 @@ def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 
 def test_etl_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify behavior of test_etl_distributed."""
+    """Execute and verify `test_etl_distributed` behavior and invariants."""
     # etl_distributed tests build_dataloader with distributed=True
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12358"
@@ -215,13 +215,13 @@ def test_etl_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
 
         # Real tokenizer
         class DummyTokenizer:
-            """Verify behavior of DummyTokenizer."""
+            """Execute and verify `DummyTokenizer` behavior and invariants."""
 
             def __init__(self, **kwargs):
                 """Initialize DummyTokenizer."""
 
             def encode(self, text):
-                """Verify behavior of encode."""
+                """Execute and verify `encode` behavior and invariants."""
                 return [1, 2, 3]  # pragma: no cover
 
         monkeypatch.setattr(etl, "SQLTokenizer", DummyTokenizer)

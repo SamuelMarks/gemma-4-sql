@@ -289,6 +289,24 @@ def build_grain_dataloader(
     }
 
 
+def pad_token_batch(inputs: list[list[int]], targets: list[list[int]]) -> dict[str, list[list[int]]]:
+    """Pad variable-length input and target token sequences to uniform batch lengths with zeros.
+
+    Args:
+        inputs: Batch of input token ID sequences.
+        targets: Batch of target token ID sequences.
+
+    Returns:
+        Dictionary with `'inputs'` and `'targets'` keys mapped to zero-padded 2D token lists.
+
+    """
+    max_in = max((len(x) for x in inputs), default=1)
+    max_tgt = max((len(x) for x in targets), default=1)
+    padded_in = [x + [0] * (max_in - len(x)) for x in inputs]
+    padded_tgt = [x + [0] * (max_tgt - len(x)) for x in targets]
+    return {"inputs": padded_in, "targets": padded_tgt}
+
+
 def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
     """Load a dataset from a DuckDB database.
 

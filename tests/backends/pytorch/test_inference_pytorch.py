@@ -94,14 +94,14 @@ def test_run_generation_native():
 
             # Need an object that returns a list from .tolist() and has __len__
             class MockGenTokens:
-                """Verify behavior of MockGenTokens."""
+                """Execute and verify `MockGenTokens` behavior and invariants."""
 
                 def tolist(self):
-                    """Verify behavior of tolist."""
+                    """Execute and verify `tolist` behavior and invariants."""
                     return [1, 2]
 
                 def __len__(self):
-                    """Verify behavior of __len__."""
+                    """Execute and verify `__len__` behavior and invariants."""
                     return 2
 
             mock_out = MagicMock()
@@ -158,16 +158,16 @@ def test_run_generation_hf():
 
     # Needs to support len(sequences[0])
     class MockSeq(list):
-        """Verify behavior of MockSeq."""
+        """Execute and verify `MockSeq` behavior and invariants."""
 
         def __getitem__(self, i):
-            """Verify behavior of __getitem__."""
+            """Execute and verify `__getitem__` behavior and invariants."""
             if isinstance(i, slice):
                 return list.__getitem__(self, i)
             return list.__getitem__(self, i)
 
         def __len__(self):
-            """Verify behavior of __len__."""
+            """Execute and verify `__len__` behavior and invariants."""
             return 4
 
     seq = MockSeq([1, 2, 3, 4])
@@ -179,21 +179,21 @@ def test_run_generation_hf():
     mock_model.generate.return_value = mock_out
 
     class MockInputIds:
-        """Verify behavior of MockInputIds."""
+        """Execute and verify `MockInputIds` behavior and invariants."""
 
         shape = [1, 2]
 
     class MockInputs(dict):
-        """Verify behavior of MockInputs."""
+        """Execute and verify `MockInputs` behavior and invariants."""
 
         def __init__(self):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             super().__init__()
             self["input_ids"] = MockInputIds()
             self.input_ids = self["input_ids"]
 
         def to(self, device):
-            """Verify behavior of to."""
+            """Execute and verify `to` behavior and invariants."""
             return self
 
     inputs_mock = MockInputs()
@@ -204,15 +204,12 @@ def test_run_generation_hf():
     assert sql == "SQL"
 
     # Test adapter load
-    with patch("builtins.__import__") as mock_import:
-        mock_peft = MagicMock()
-        mock_peft.PeftModel.from_pretrained.return_value = mock_model
-        mock_import.return_value = mock_peft
-
+    mock_peft_cls = MagicMock()
+    mock_peft_cls.from_pretrained.return_value = mock_model
+    with patch.object(inf_module, "optional_attr", return_value=mock_peft_cls):
         inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", adapter_path="p")
 
-        # Test PEFT import failure
-        mock_import.side_effect = ImportError("error")
+    with patch.object(inf_module, "optional_attr", return_value=None):
         inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", adapter_path="p")
 
     # Test low conf score logic
@@ -248,30 +245,30 @@ def test_run_generation_hf_multimodal():
                 mock_pa.return_value = {"audio_values": "a"}
 
                 class MockSeq(list):
-                    """Verify behavior of MockSeq."""
+                    """Execute and verify `MockSeq` behavior and invariants."""
 
                     def __len__(self):
-                        """Verify behavior of __len__."""
+                        """Execute and verify `__len__` behavior and invariants."""
                         return 3
 
                 inf_module.AutoModelForCausalLM.from_pretrained.return_value.generate.return_value.sequences = [MockSeq([1, 2, 3])]
 
                 class MockInputIds:
-                    """Verify behavior of MockInputIds."""
+                    """Execute and verify `MockInputIds` behavior and invariants."""
 
                     shape = [1, 2]
 
                 class MockInputs(dict):
-                    """Verify behavior of MockInputs."""
+                    """Execute and verify `MockInputs` behavior and invariants."""
 
                     def __init__(self):
-                        """Verify behavior of __init__."""
+                        """Execute and verify `__init__` behavior and invariants."""
                         super().__init__()
                         self["input_ids"] = MockInputIds()
                         self.input_ids = self["input_ids"]
 
                     def to(self, device):
-                        """Verify behavior of to."""
+                        """Execute and verify `to` behavior and invariants."""
                         return self
 
                 inputs_mock = MockInputs()
@@ -308,7 +305,7 @@ def test_generate_sql():
 
 
 def test_inference_coverage_gaps():
-    """Verify behavior of test_inference_coverage_gaps."""
+    """Execute and verify `test_inference_coverage_gaps` behavior and invariants."""
     from unittest.mock import MagicMock, patch
 
     import gemma_4_sql.backends.pytorch.inference as inf_module
@@ -321,7 +318,7 @@ def test_inference_coverage_gaps():
     mock_auto_tok = MagicMock()
 
     def side_effect(model_name):
-        """Verify behavior of side_effect."""
+        """Execute and verify `side_effect` behavior and invariants."""
         if model_name == "fail":
             raise OSError("error")
         return MagicMock()
@@ -341,31 +338,31 @@ def test_inference_coverage_gaps():
         mock_auto_model.from_pretrained.return_value = mock_model
 
         class MockOutputs:
-            """Verify behavior of MockOutputs."""
+            """Execute and verify `MockOutputs` behavior and invariants."""
 
             def __init__(self):
                 # HF sequences
-                """Verify behavior of __init__."""
+                """Execute and verify `__init__` behavior and invariants."""
 
                 class HfSeq(list):
-                    """Verify behavior of HfSeq."""
+                    """Execute and verify `HfSeq` behavior and invariants."""
 
                     def __init__(self):
-                        """Verify behavior of __init__."""
+                        """Execute and verify `__init__` behavior and invariants."""
                         super().__init__([1, 2, 3, 4])
 
                     def tolist(self):
-                        """Verify behavior of tolist."""
+                        """Execute and verify `tolist` behavior and invariants."""
                         return self
 
                     def __getitem__(self, idx):
-                        """Verify behavior of __getitem__."""
+                        """Execute and verify `__getitem__` behavior and invariants."""
                         if isinstance(idx, slice):
                             return [1]
                         return 1
 
                     def __len__(self):
-                        """Verify behavior of __len__."""
+                        """Execute and verify `__len__` behavior and invariants."""
                         return 4
 
                 hf_seq = HfSeq()
@@ -379,25 +376,25 @@ def test_inference_coverage_gaps():
 
             def __getitem__(self, idx):
                 # Native output_ids
-                """Verify behavior of __getitem__."""
+                """Execute and verify `__getitem__` behavior and invariants."""
 
                 class NativeSeq(list):
-                    """Verify behavior of NativeSeq."""
+                    """Execute and verify `NativeSeq` behavior and invariants."""
 
                     def __init__(self):
-                        """Verify behavior of __init__."""
+                        """Execute and verify `__init__` behavior and invariants."""
                         super().__init__([1, 2, 3, 4])
 
                     def tolist(self):
-                        """Verify behavior of tolist."""
+                        """Execute and verify `tolist` behavior and invariants."""
                         return self
 
                     def __getitem__(self, idx):
-                        """Verify behavior of __getitem__."""
+                        """Execute and verify `__getitem__` behavior and invariants."""
                         return self
 
                     def __len__(self):
-                        """Verify behavior of __len__."""
+                        """Execute and verify `__len__` behavior and invariants."""
                         return 4
 
                 return NativeSeq()
@@ -423,24 +420,24 @@ def test_inference_coverage_gaps():
             # Hit 146->150 and 150->154 in hf path
             # We need to ensure that the mocked tokenizer returns something where inputs.input_ids.shape[-1] is an int
             class MockTokRes(dict):
-                """Verify behavior of MockTokRes."""
+                """Execute and verify `MockTokRes` behavior and invariants."""
 
                 def __init__(self):
-                    """Verify behavior of __init__."""
+                    """Execute and verify `__init__` behavior and invariants."""
                     super().__init__()
 
                     class MockInputIds:
-                        """Verify behavior of MockInputIds."""
+                        """Execute and verify `MockInputIds` behavior and invariants."""
 
                         def __init__(self):
-                            """Verify behavior of __init__."""
+                            """Execute and verify `__init__` behavior and invariants."""
                             self.shape = (1, 0)
 
                     self.input_ids = MockInputIds()
                     self["input_ids"] = self.input_ids
 
                 def to(self, *args, **kwargs):
-                    """Verify behavior of to."""
+                    """Execute and verify `to` behavior and invariants."""
                     return self
 
             mock_tok_res = MockTokRes()
@@ -459,7 +456,7 @@ def test_inference_coverage_gaps():
 
 
 def test_inference_negative_conf():
-    """Verify behavior of test_inference_negative_conf."""
+    """Execute and verify `test_inference_negative_conf` behavior and invariants."""
     from unittest.mock import MagicMock
 
     import gemma_4_sql.backends.pytorch.inference as inf_module
@@ -475,10 +472,10 @@ def test_inference_negative_conf():
     mock_out = MagicMock()
 
     class MockSeq(list):
-        """Verify behavior of MockSeq."""
+        """Execute and verify `MockSeq` behavior and invariants."""
 
         def __len__(self):
-            """Verify behavior of __len__."""
+            """Execute and verify `__len__` behavior and invariants."""
             return 4
 
     mock_out.sequences = [MockSeq([1, 2, 3, 4])]
@@ -491,21 +488,21 @@ def test_inference_negative_conf():
     mock_model.generate.return_value = mock_out
 
     class MockInputIds:
-        """Verify behavior of MockInputIds."""
+        """Execute and verify `MockInputIds` behavior and invariants."""
 
         shape = [1, 2]
 
     class MockInputs(dict):
-        """Verify behavior of MockInputs."""
+        """Execute and verify `MockInputs` behavior and invariants."""
 
         def __init__(self):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             super().__init__()
             self["input_ids"] = MockInputIds()
             self.input_ids = self["input_ids"]
 
         def to(self, device):
-            """Verify behavior of to."""
+            """Execute and verify `to` behavior and invariants."""
             return self
 
     inputs_mock = MockInputs()

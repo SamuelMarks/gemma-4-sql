@@ -13,7 +13,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def mock_dependencies():
-    """Verify behavior of mock_dependencies."""
+    """Execute and verify `mock_dependencies` behavior and invariants."""
     mock_datasets = MagicMock()
     mock_grain = MagicMock()
 
@@ -40,7 +40,7 @@ def mock_dependencies():
 
 
 def reload_module():
-    """Verify behavior of reload_module."""
+    """Execute and verify `reload_module` behavior and invariants."""
     import gemma_4_sql.backends.jax.etl as jax_etl
 
     importlib.reload(jax_etl)
@@ -50,7 +50,7 @@ def reload_module():
 
 
 def test_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify behavior of test_missing_dependencies."""
+    """Execute and verify `test_missing_dependencies` behavior and invariants."""
     import gemma_4_sql.backends.jax.etl as jax_etl
 
     monkeypatch.setattr(jax_etl, "datasets", None)
@@ -75,7 +75,7 @@ def test_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_load_hf_or_duckdb():
-    """Verify behavior of test_load_hf_or_duckdb."""
+    """Execute and verify `test_load_hf_or_duckdb` behavior and invariants."""
     jax_etl = reload_module()
 
     with patch("gemma_4_sql.backends.jax.etl.load_duckdb_dataset") as mock_duckdb:
@@ -89,7 +89,7 @@ def test_load_hf_or_duckdb():
 
 
 def test_get_sampler():
-    """Verify behavior of test_get_sampler."""
+    """Execute and verify `test_get_sampler` behavior and invariants."""
     jax_etl = reload_module()
 
     sampler = jax_etl._get_sampler(10, True)
@@ -103,7 +103,7 @@ def test_get_sampler():
 
 
 def test_get_sampler_missing_sharding():
-    """Verify behavior of test_get_sampler_missing_sharding."""
+    """Execute and verify `test_get_sampler_missing_sharding` behavior and invariants."""
     jax_etl = reload_module()
 
     del jax_etl.grain.JAXDistributedSharding
@@ -114,7 +114,7 @@ def test_get_sampler_missing_sharding():
 
 
 def test_build_dataloader():
-    """Verify behavior of test_build_dataloader."""
+    """Execute and verify `test_build_dataloader` behavior and invariants."""
     jax_etl = reload_module()
 
     config = MagicMock()

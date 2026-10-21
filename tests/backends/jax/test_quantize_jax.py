@@ -144,39 +144,39 @@ def test_quantize_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify behavior of _mock_jax_quantize_env."""
+    """Execute and verify `_mock_jax_quantize_env` behavior and invariants."""
 
     # Mock Gemma4Config and Gemma4ForCausalLM to avoid allocating giant models
     class MockGemma4Config:
-        """Verify behavior of MockGemma4Config."""
+        """Execute and verify `MockGemma4Config` behavior and invariants."""
 
         @staticmethod
         def gemma4_e2b():
-            """Verify behavior of gemma4_e2b."""
+            """Execute and verify `gemma4_e2b` behavior and invariants."""
             return "mock_config"
 
     class MockGemma4ForCausalLM:
-        """Verify behavior of MockGemma4ForCausalLM."""
+        """Execute and verify `MockGemma4ForCausalLM` behavior and invariants."""
 
         def __init__(self, config, rngs):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
 
     monkeypatch.setattr(qt, "Gemma4Config", MockGemma4Config)
     monkeypatch.setattr(qt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
 
     class MockParam:
-        """Verify behavior of MockParam."""
+        """Execute and verify `MockParam` behavior and invariants."""
 
         def __init__(self, val):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             self.value = val
 
     class MockGraph:
-        """Verify behavior of MockGraph."""
+        """Execute and verify `MockGraph` behavior and invariants."""
 
         @staticmethod
         def iter_graph(model):
-            """Verify behavior of iter_graph."""
+            """Execute and verify `iter_graph` behavior and invariants."""
             # Return 3 mock parameters for quantize
             yield ("path1", MockParam(jnp.array([[1.0, 2.0], [3.0, 4.0]])))
             yield ("path2", MockParam(jnp.array([[0.1, 0.2], [0.3, 0.4]])))
@@ -186,16 +186,16 @@ def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
             yield ("path4", "not_a_param")
 
     class MockNNX:
-        """Verify behavior of MockNNX."""
+        """Execute and verify `MockNNX` behavior and invariants."""
 
         graph = MockGraph()
         Param = MockParam
 
         class Rngs:
-            """Verify behavior of Rngs."""
+            """Execute and verify `Rngs` behavior and invariants."""
 
             def __init__(self, seed):
-                """Verify behavior of __init__."""
+                """Execute and verify `__init__` behavior and invariants."""
 
     monkeypatch.setattr(qt, "nnx", MockNNX())
 
@@ -232,7 +232,7 @@ def test_quantize_jax_model_error_handling(monkeypatch: pytest.MonkeyPatch) -> N
     """Test quantize_model when an error occurs in model graph iteration."""
 
     def raise_runtime_err(*_args: Any, **_kwargs: Any) -> Any:
-        """Verify behavior of raise_runtime_err."""
+        """Execute and verify `raise_runtime_err` behavior and invariants."""
         raise RuntimeError("Mock graph iteration failure")
 
     monkeypatch.setattr(qt, "_apply_quantization_to_model", raise_runtime_err)
@@ -256,10 +256,10 @@ def test_set_param_metadata_native() -> None:
     """Test _set_param_metadata when set_metadata is present."""
 
     class DummyParamNative:
-        """Verify behavior of DummyParamNative."""
+        """Execute and verify `DummyParamNative` behavior and invariants."""
 
         def set_metadata(self, k: str, v: str) -> None:
-            """Verify behavior of set_metadata."""
+            """Execute and verify `set_metadata` behavior and invariants."""
             setattr(self, k, v)
 
     dummy = DummyParamNative()

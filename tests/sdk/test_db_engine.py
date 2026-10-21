@@ -132,3 +132,28 @@ def test_db_engine_has_top_level_order_by_and_normalization() -> None:
     assert engine._compare_results(res1, res2, strict_order=False) is True
     assert engine._compare_results(res1, res2, strict_order=True) is False
     engine.close()
+
+
+@pytest.mark.asyncio
+async def test_db_engine_context_managers() -> None:
+    """Verify LiveDatabaseEngine supports both `with` and `async with` context management."""
+    with LiveDatabaseEngine(":memory:") as sync_engine:
+        rows = sync_engine.execute_query("SELECT 1")
+        assert rows == [(1,)]
+
+    async with LiveDatabaseEngine(":memory:") as async_engine:
+        rows_async = await async_engine.execute_query_async("SELECT 2")
+        assert rows_async == [(2,)]
+
+    # Also test close_async when adapter has a coroutine close_async method
+    engine_coro = LiveDatabaseEngine(":memory:")
+    closed_flag = False
+
+    async def _fake_close_async() -> None:
+        """Set closed_flag to True."""
+        nonlocal closed_flag
+        closed_flag = True
+
+    engine_coro.adapter.close_async = _fake_close_async  # type: ignore[attr-defined]
+    await engine_coro.close_async()
+    assert closed_flag is True

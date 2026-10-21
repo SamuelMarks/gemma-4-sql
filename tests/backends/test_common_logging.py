@@ -9,38 +9,38 @@ from gemma_4_sql.backends.common_logging import log_metrics_wrapper
 
 
 class MockWriterWithClose:
-    """Verify behavior of MockWriterWithClose."""
+    """Execute and verify `MockWriterWithClose` behavior and invariants."""
 
     def __init__(self, log_dir):
-        """Verify behavior of __init__."""
+        """Execute and verify `__init__` behavior and invariants."""
         self.log_dir = log_dir
         self.scalars = []
         self.closed = False
 
     def add_scalar(self, tag, scalar_value, global_step):
-        """Verify behavior of add_scalar."""
+        """Execute and verify `add_scalar` behavior and invariants."""
         self.scalars.append((tag, scalar_value, global_step))
 
     def close(self):
-        """Verify behavior of close."""
+        """Execute and verify `close` behavior and invariants."""
         self.closed = True
 
 
 class MockWriterWithoutClose:
-    """Verify behavior of MockWriterWithoutClose."""
+    """Execute and verify `MockWriterWithoutClose` behavior and invariants."""
 
     def __init__(self, log_dir):
-        """Verify behavior of __init__."""
+        """Execute and verify `__init__` behavior and invariants."""
         self.log_dir = log_dir
         self.scalars = []
 
     def add_scalar(self, tag, scalar_value, global_step):
-        """Verify behavior of add_scalar."""
+        """Execute and verify `add_scalar` behavior and invariants."""
         self.scalars.append((tag, scalar_value, global_step))
 
 
 def test_log_metrics_wrapper_with_writer_with_close(tmp_path):
-    """Verify behavior of test_log_metrics_wrapper_with_writer_with_close."""
+    """Execute and verify `test_log_metrics_wrapper_with_writer_with_close` behavior and invariants."""
     log_dir = str(tmp_path / "logs")
     metrics = {"loss": 0.5, "accuracy": 0.9}
 
@@ -48,10 +48,10 @@ def test_log_metrics_wrapper_with_writer_with_close(tmp_path):
     writer_instances = []
 
     class FactoryWithClose:
-        """Verify behavior of FactoryWithClose."""
+        """Execute and verify `FactoryWithClose` behavior and invariants."""
 
         def __new__(cls, log_dir):
-            """Verify behavior of __new__."""
+            """Execute and verify `__new__` behavior and invariants."""
             inst = MockWriterWithClose(log_dir)
             writer_instances.append(inst)
             return inst
@@ -74,17 +74,17 @@ def test_log_metrics_wrapper_with_writer_with_close(tmp_path):
 
 
 def test_log_metrics_wrapper_with_writer_without_close(tmp_path):
-    """Verify behavior of test_log_metrics_wrapper_with_writer_without_close."""
+    """Execute and verify `test_log_metrics_wrapper_with_writer_without_close` behavior and invariants."""
     log_dir = str(tmp_path / "logs")
     metrics = {"loss": 0.3}
 
     writer_instances = []
 
     class FactoryWithoutClose:
-        """Verify behavior of FactoryWithoutClose."""
+        """Execute and verify `FactoryWithoutClose` behavior and invariants."""
 
         def __new__(cls, log_dir):
-            """Verify behavior of __new__."""
+            """Execute and verify `__new__` behavior and invariants."""
             inst = MockWriterWithoutClose(log_dir)
             writer_instances.append(inst)
             return inst
@@ -108,7 +108,7 @@ def test_log_metrics_wrapper_with_writer_without_close(tmp_path):
 
 
 def test_log_metrics_wrapper_without_writer_fallback(tmp_path):
-    """Verify behavior of test_log_metrics_wrapper_without_writer_fallback."""
+    """Execute and verify `test_log_metrics_wrapper_without_writer_fallback` behavior and invariants."""
     log_dir = str(tmp_path / "logs")
     metrics = {"val_loss": 0.8}
 
@@ -138,7 +138,7 @@ def test_log_metrics_wrapper_without_writer_fallback(tmp_path):
 
 
 def test_log_metrics_wrapper_without_writer_fallback_minimal(tmp_path):
-    """Verify behavior of test_log_metrics_wrapper_without_writer_fallback_minimal."""
+    """Execute and verify `test_log_metrics_wrapper_without_writer_fallback_minimal` behavior and invariants."""
     log_dir = str(tmp_path / "logs_minimal")
     metrics = {"val_loss": 1.2}
 
@@ -164,22 +164,22 @@ def test_log_metrics_wrapper_without_writer_fallback_minimal(tmp_path):
 
 
 def test_log_metrics_wrapper_writer_closes_on_error(tmp_path):
-    """Verify behavior of test_log_metrics_wrapper_writer_closes_on_error."""
+    """Execute and verify `test_log_metrics_wrapper_writer_closes_on_error` behavior and invariants."""
     log_dir = str(tmp_path / "logs_err")
     metrics = {"loss": 0.1}
 
     writer_instances = []
 
     class FailingWriterWithClose(MockWriterWithClose):
-        """Verify behavior of FailingWriterWithClose."""
+        """Execute and verify `FailingWriterWithClose` behavior and invariants."""
 
         def __init__(self, log_dir):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             super().__init__(log_dir)
             writer_instances.append(self)
 
         def add_scalar(self, tag, scalar_value, global_step):
-            """Verify behavior of add_scalar."""
+            """Execute and verify `add_scalar` behavior and invariants."""
             raise ValueError("Intentional error")
 
     with pytest.raises(ValueError, match="Intentional error"):

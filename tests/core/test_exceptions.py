@@ -16,6 +16,7 @@ from gemma_4_sql.exceptions import (
     SQLSafetyViolationError,
     TrainingError,
     UnsupportedQuantizationMethodError,
+    is_failed_status,
 )
 
 
@@ -85,3 +86,13 @@ def test_domain_exception_inheritance(
     assert isinstance(err, std_parent)
     if exc_cls is SQLSafetyViolationError:
         assert isinstance(err, DatabaseExecutionError)
+
+
+def test_is_failed_status() -> None:
+    """Verify is_failed_status detects failed status strings and error dictionaries."""
+    assert is_failed_status("failed: boom") is True
+    assert is_failed_status("completed") is False
+    assert is_failed_status({"status": "failed: err"}) is True
+    assert is_failed_status({"status": "completed", "error": "boom"}) is True
+    assert is_failed_status({"status": "completed"}) is False
+    assert is_failed_status(123) is False

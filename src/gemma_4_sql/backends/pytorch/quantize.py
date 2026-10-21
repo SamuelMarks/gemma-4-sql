@@ -367,14 +367,14 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
 
         def apply_fn() -> tuple[float, str]:
             """Execute BitsAndBytes INT8/INT4 quantization."""
-            model_target = kwargs.get("model")
+            model_target = cast("ModelType | None", kwargs.get("model"))
             raw_threshold = kwargs.get("llm_int8_threshold", 6.0)
             threshold = float(raw_threshold) if isinstance(raw_threshold, (int, float, str)) else 6.0
             return apply_bits_and_bytes_quantization(
                 method,
                 BitsAndBytesConfig,
                 getattr(torch, "float16", None),
-                model=model_target,  # type: ignore # Justified: Dynamic backend protocol typing
+                model=model_target,
                 llm_int8_threshold=threshold,
                 bnb_4bit_quant_type=str(kwargs.get("bnb_4bit_quant_type", "nf4")),
                 bnb_4bit_use_double_quant=bool(kwargs.get("bnb_4bit_use_double_quant", True)),

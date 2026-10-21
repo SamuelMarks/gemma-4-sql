@@ -11,15 +11,15 @@ from jax import Array
 
 
 def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array) -> Array:
-    """Merge image and text embeddings based on a token mask.
+    """Merge continuous vision/audio feature embeddings into text token embeddings at masked placeholder positions.
 
     Args:
-        img_emb: The img emb.
-        text_emb: The text emb.
-        token_mask: The token mask.
+        img_emb: Continuous modality feature tensor of shape `(batch_size, num_modality_tokens, hidden_size)`.
+        text_emb: Text token embedding tensor of shape `(batch_size, seq_len, hidden_size)`.
+        token_mask: Boolean mask tensor of shape `(batch_size, seq_len)` indicating placeholder token positions.
 
     Returns:
-        The resulting tensor array.
+        Merged multimodal sequence embedding tensor of shape `(batch_size, seq_len, hidden_size)`.
 
     """
 

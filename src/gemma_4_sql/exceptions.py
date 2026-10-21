@@ -129,6 +129,27 @@ class ConfigurationError(GemmaSQLError, ValueError):
     """Raised when hyperparameters, backend names, or configuration parameters are invalid."""
 
 
+def is_failed_status(result: object) -> bool:
+    """Return True if a backend result dictionary or status string indicates execution failure.
+
+    Args:
+        result: A backend result mapping (containing `'status'` or `'error'`) or a status string.
+
+    Returns:
+        True if the status starts with `'failed'` or a non-empty `'error'` field is present.
+
+    """
+    if isinstance(result, str):
+        return result.lower().startswith("failed")
+    if isinstance(result, dict):
+        err = result.get("error")
+        if isinstance(err, str) and err:
+            return True
+        status = result.get("status", "")
+        return isinstance(status, str) and status.lower().startswith("failed")
+    return False
+
+
 __all__ = [
     "ConfigurationError",
     "DatabaseExecutionError",
@@ -141,4 +162,5 @@ __all__ = [
     "SchemaExtractionError",
     "TrainingError",
     "UnsupportedQuantizationMethodError",
+    "is_failed_status",
 ]

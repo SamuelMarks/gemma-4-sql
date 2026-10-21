@@ -472,6 +472,7 @@ class TrainResultDict(TypedDict):
     final_loss: float
     distributed_strategy: NotRequired[str]
     checkpoint_dir: NotRequired[str]
+    error: NotRequired[str]
 
 
 class DPOResultDict(TypedDict):
@@ -485,6 +486,7 @@ class DPOResultDict(TypedDict):
     epochs: NotRequired[int]
     status: str
     final_loss: float
+    error: NotRequired[str]
 
 
 class InferenceResultDict(TypedDict):
@@ -497,6 +499,7 @@ class InferenceResultDict(TypedDict):
     status: str
     beam_width: int
     confidence_score: float
+    error: NotRequired[str]
 
 
 class EvaluationMetricsDict(TypedDict):
@@ -581,6 +584,7 @@ class QuantizeResultDict(TypedDict):
     export_path: NotRequired[str]
     quantized_layers_count: NotRequired[int]
     metadata: NotRequired[dict[str, Any]]
+    error: NotRequired[str]
 
 
 class PEFTResultDict(TypedDict):
@@ -595,6 +599,7 @@ class PEFTResultDict(TypedDict):
     lora_dropout: float
     status: str
     injected_modules: NotRequired[int]
+    error: NotRequired[str]
 
 
 class ExportResultDict(TypedDict):
@@ -835,8 +840,40 @@ class KerasTrainerState(Generic[TModel, TOpt, TBatch]):
 
 
 @dataclass
+class SFTTrainerState(Generic[TModel, TOpt, TBatch]):
+    """Strongly-typed generic state container for supervised fine-tuning (SFT) loops."""
+
+    dataloader: Iterable[TBatch]
+    epochs: int = 1
+    model: TModel | None = None
+    policy_model: TModel | None = None
+    optimizer: TOpt | None = None
+    train_step: Callable[..., Any] | None = None
+    params: Any = None
+    opt_state: Any = None
+    criterion: Callable[..., Any] | None = None
+    device: Any = "cpu"
+
+
+@dataclass
+class DPOTrainerState(Generic[TModel, TOpt, TBatch]):
+    """Strongly-typed generic state container for Direct Preference Optimization (DPO) loops."""
+
+    dataloader: Iterable[TBatch]
+    epochs: int = 1
+    beta: float = 0.1
+    policy_model: TModel | None = None
+    ref_model: TModel | None = None
+    optimizer: TOpt | None = None
+    train_step: Callable[..., Any] | None = None
+    policy_params: Any = None
+    ref_params: Any = None
+    opt_state: Any = None
+
+
+@dataclass
 class TrainerState:
-    """State configuration for training and DPO epoch runners across backends."""
+    """Unified state container for training and DPO epoch runners across backends."""
 
     dataloader: Any = None
     epochs: int = 1

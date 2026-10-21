@@ -4,24 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from gemma_4_sql.type_hints import JSONDict
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from fastapi import Request
 
     from gemma_4_sql.type_hints import ServeResultDict
+else:
+    Request = optional_attr("fastapi", "Request")
 
 logger = logging.getLogger(__name__)
 
 uvicorn = optional_import("uvicorn")
 FastAPI = optional_attr("fastapi", "FastAPI")
 HTTPException = optional_attr("fastapi", "HTTPException")
-Request = optional_attr("fastapi", "Request")
 JSONResponse = optional_attr("fastapi.responses", "JSONResponse")
 
 
@@ -167,7 +169,7 @@ def create_common_app(
                     item["future"].set_result(sql)
 
     @app.post("/generate", response_model=None)
-    async def generate(request: Request) -> Any:  # type: ignore[valid-type]
+    async def generate(request: Request) -> Any:
         """Handle continuous batching Text-to-SQL generation.
 
         Args:
@@ -316,7 +318,6 @@ def create_backend_serve_app(
         Configured FastAPI application instance.
 
     """
-    from gemma_4_sql.exceptions import InferenceError
 
     def _generate(prompt: str) -> str:
         """Execute backend SQL generation and validate non-empty output."""

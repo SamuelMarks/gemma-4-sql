@@ -401,7 +401,7 @@ def apply_lora(
             (model, _) = load(model_name)
 
         model, _ = inject_lora(
-            model=model,  # type: ignore # Justified: Dynamic backend protocol typing
+            model=cast(ModelType, model),
             target_modules=target_modules,
             lora_r=lora_r,
             lora_alpha=lora_alpha,

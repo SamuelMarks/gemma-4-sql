@@ -21,7 +21,6 @@ if typing.TYPE_CHECKING:
 
 datasets: typing.Any = optional_import("datasets")
 grain: typing.Any = optional_import("grain.python")
-duckdb = None
 
 
 def _load_hf_or_duckdb(

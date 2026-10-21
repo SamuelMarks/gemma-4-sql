@@ -1,4 +1,4 @@
-"""Unit tests for Keras DPO loss calculation, log-probability extraction, and training loop."""
+"""Unit and behavioral tests for Keras Direct Preference Optimization (DPO)."""
 
 from __future__ import annotations
 
@@ -15,100 +15,112 @@ from tests.conftest import requires_keras
 pytestmark = requires_keras
 
 
-def test_run_dpo_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify run_dpo and _execute_dpo raise DependencyMissingError when Keras or TensorFlow are missing."""
-    cfg = DPOConfig(model_name="m", dataset="d")
+def test_real_keras_dpo_loss_logps_and_train_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify Keras dpo_loss, _compute_logps, and _get_train_step_fn with a real TensorFlow model and tensors."""
+    import tensorflow as tf
 
-    monkeypatch.setattr(dpo, "keras", None)
-    with pytest.raises(DependencyMissingError, match="Keras DPO dependencies are missing"):
-        dpo.run_dpo(cfg)
-    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
-        dpo._execute_dpo("m", "d", 0.1, 1, 1e-4)
+    monkeypatch.setattr(dpo.tf, "function", lambda fn, **_kw: fn)
 
-    monkeypatch.setattr(dpo, "keras", MagicMock())
+    class TinyTFModel(tf.Module):
+        """Minimal TensorFlow causal LM for DPO gradient testing."""
+
+        def __init__(self, seed: int = 0) -> None:
+            """Initialize TinyTFModel with trainable embedding and projection weights."""
+            super().__init__()
+            tf.random.set_seed(seed)
+            self.embed = tf.Variable(tf.random.normal((32, 8), stddev=0.1), trainable=True)
+            self.head = tf.Variable(tf.random.normal((8, 32), stddev=0.1), trainable=True)
+
+        def __call__(self, x: Any) -> Any:
+            """Compute vocabulary logits from token IDs."""
+            h = tf.gather(self.embed, x)
+            return tf.matmul(h, self.head)
+
+    policy_model = TinyTFModel(seed=1)
+    ref_model = TinyTFModel(seed=2)
+
+    batch = {
+        "chosen_inputs": tf.constant([[1, 2, 3]], dtype=tf.int32),
+        "chosen_labels": tf.constant([[2, 3, 0]], dtype=tf.int32),
+        "rejected_inputs": tf.constant([[1, 4, 5]], dtype=tf.int32),
+        "rejected_labels": tf.constant([[4, 5, 0]], dtype=tf.int32),
+    }
+
+    logps = dpo._compute_logps(policy_model, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore[arg-type]
+    assert tuple(logps.shape) == (1,)
+    assert float(logps.numpy()[0]) < 0.0
+
+    # Also test _compute_logps when model returns an object with .detach().cpu().numpy()
+    import numpy as np
+
+    class TorchLikeTensor:
+        """Tensor stub mimicking a PyTorch MPS tensor."""
+
+        def detach(self) -> TorchLikeTensor:
+            """Return detached tensor stub."""
+            return self
+
+        def cpu(self) -> TorchLikeTensor:
+            """Return CPU tensor stub."""
+            return self
+
+        def numpy(self) -> Any:
+            """Return numpy float32 array."""
+            return np.zeros((1, 3, 32), dtype=np.float32)
+
+    logps_torch_like = dpo._compute_logps(lambda _x: TorchLikeTensor(), batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore[arg-type]
+    assert tuple(logps_torch_like.shape) == (1,)
+
+    applied_grads: list[Any] = []
+
+    class SimpleTFOptimizer:
+        """Minimal optimizer applying TensorFlow gradients."""
+
+        def apply_gradients(self, grads_and_vars: Any) -> None:
+            """Apply gradient updates to variables."""
+            for g, v in grads_and_vars:
+                if g is not None:
+                    dense_g = tf.convert_to_tensor(g)
+                    v.assign_sub(0.05 * dense_g)
+                    applied_grads.append(dense_g)
+
+    optimizer = SimpleTFOptimizer()
+    step_fn = dpo._get_train_step_fn(policy_model, ref_model, optimizer, 0.1)  # type: ignore[arg-type]
+    loss = step_fn(batch)  # type: ignore[operator]
+    assert float(loss.numpy().mean()) > 0.0
+    assert len(applied_grads) == 2
+
+    state = TrainerState(dataloader=[batch], epochs=1, train_step=step_fn)
+    final_loss = dpo._run_training_epochs(state)
+    assert final_loss > 0.0
+
+
+def test_dpo_loss_and_logps_missing_tf(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify dpo_loss, _compute_logps, and _get_train_step_fn fallbacks when TensorFlow is None."""
     monkeypatch.setattr(dpo, "tf", None)
-    with pytest.raises(DependencyMissingError, match="Keras DPO dependencies are missing"):
-        dpo.run_dpo(cfg)
+    assert dpo.dpo_loss(1, 2, 3, 4) == (0.0, 0.0, 0.0)  # type: ignore[arg-type]
+    assert dpo._compute_logps(MagicMock(), 1, 2) == 0.0
+    dummy_step = dpo._get_train_step_fn(MagicMock(), MagicMock(), MagicMock(), 0.1)
+    assert dummy_step({}) == 0.0  # type: ignore[operator]
 
 
-def test_dpo_loss_and_compute_logps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify dpo_loss and _compute_logps compute expected log-probability reductions."""
-    monkeypatch.setattr(dpo, "tf", None)
-    assert dpo.dpo_loss(None, None, None, None) == (0.0, 0.0, 0.0)  # type: ignore[arg-type]
-    assert dpo._compute_logps(None, None, None) == 0.0  # type: ignore[arg-type]
-
-    mock_tf = MagicMock()
-
-    class FakeTensor:
-        """Tensor stub supporting equality comparison."""
-
-        def __init__(self, val: float) -> None:
-            """Initialize FakeTensor with float value."""
-            self.val = val
-
-        def __eq__(self, other: object) -> bool:
-            """Compare underlying float value."""
-            return self.val == other
-
-    mock_tf.reduce_sum = lambda x, axis: FakeTensor(-1.0) if x == "case1" else FakeTensor(-1.5)
-    mock_tf.cast = lambda x, _y: x
-    mock_tf.expand_dims = lambda x, axis: x
-    mock_tf.gather = lambda x, _y, batch_dims: x
-    mock_tf.squeeze = lambda x, axis: x
-    mock_tf.nn.log_softmax = lambda _x, axis: "case1"
-    monkeypatch.setattr(dpo, "tf", mock_tf)
-
-    model = MagicMock(return_value=1.0)
-    assert dpo._compute_logps(model, MagicMock(), MagicMock()) == -1.0
-
-    mock_tf.nn.log_softmax = lambda _x, axis: "case2"
-    assert dpo._compute_logps(model, MagicMock(), MagicMock()) == -1.5
-
-    monkeypatch.setattr("gemma_4_sql.backends.keras.dpo.generic_dpo_loss", MagicMock(return_value=(0.5, 0.1, -0.1)))
-    assert dpo.dpo_loss(MagicMock(), MagicMock(), MagicMock(), MagicMock()) == (0.5, 0.1, -0.1)
-
-
-def test_get_train_step_fn_and_epochs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify _get_train_step_fn builds a step function and _run_training_epochs averages losses."""
-    monkeypatch.setattr(dpo, "tf", None)
-    step_none = dpo._get_train_step_fn(MagicMock(), MagicMock(), MagicMock(), 0.1)
-    assert step_none({}) == 0.0
-
-    mock_tf = MagicMock()
-
-    class MockTape:
-        """No-op GradientTape context manager."""
-
-        def __enter__(self) -> MagicMock:
-            """Enter GradientTape."""
-            return MagicMock()
-
-        def __exit__(self, *_args: object) -> None:
-            """Exit GradientTape."""
-
-    mock_tf.GradientTape = MockTape
-    mock_tf.function = lambda fn: fn
-    monkeypatch.setattr(dpo, "tf", mock_tf)
-    monkeypatch.setattr(dpo, "_compute_logps", MagicMock(return_value=1.0))
-    monkeypatch.setattr(dpo, "dpo_loss", MagicMock(return_value=(1.25, 0.0, 0.0)))
-
-    step_fn = dpo._get_train_step_fn(MagicMock(), MagicMock(), MagicMock(), 0.1)
-    batch: dict[str, Any] = {"chosen_inputs": 1, "chosen_labels": 1, "rejected_inputs": 1, "rejected_labels": 1}
-    assert step_fn(batch) == 1.25
-
-    state_np = TrainerState(dataloader=[batch, batch], epochs=1, train_step=lambda _b: MagicMock(numpy=lambda: 1.5))
-    assert dpo._run_training_epochs(state_np) == 1.5
-
-    state_float = TrainerState(dataloader=[batch, batch], epochs=1, train_step=lambda _b: 2.0)
+def test_run_training_epochs_loss_variants() -> None:
+    """Verify _run_training_epochs handles float and non-numeric step return values."""
+    state_float = TrainerState(dataloader=[{"b": 1}], epochs=1, train_step=lambda _b: 2.0)
     assert dpo._run_training_epochs(state_float) == 2.0
 
-    state_invalid = TrainerState(dataloader=[batch], epochs=1, train_step=lambda _b: "not_a_float")
-    assert dpo._run_training_epochs(state_invalid) == 0.0
+    state_str = TrainerState(dataloader=[{"b": 1}], epochs=1, train_step=lambda _b: "non_numeric")
+    assert dpo._run_training_epochs(state_str) == 0.0
 
 
 def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify _execute_dpo and run_dpo handle preset loading, dataloader validation, and execution."""
-    monkeypatch.setattr(dpo, "keras", MagicMock())
+    """Verify _execute_dpo and run_dpo handle missing dependencies, preset loading, and dataloader validation."""
+    monkeypatch.setattr(dpo, "keras", None)
+    with pytest.raises(DependencyMissingError):
+        dpo._execute_dpo("m", "d", 0.1, 1, 1e-4)
+
+    mock_keras = MagicMock()
+    monkeypatch.setattr(dpo, "keras", mock_keras)
     monkeypatch.setattr(dpo, "tf", MagicMock())
 
     monkeypatch.setattr(dpo, "GemmaCausalLM", None)
@@ -116,21 +128,28 @@ def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ValueError, match="Failed to load Keras model"):
         dpo._execute_dpo("m", "d", 0.1, 1, 1e-4)
 
-    mock_gemma_cls = MagicMock()
-    monkeypatch.setattr(dpo, "GemmaCausalLM", mock_gemma_cls)
-    monkeypatch.setattr(dpo, "_get_train_step_fn", MagicMock())
+    mock_cls = MagicMock()
+    mock_cls.from_preset.return_value = MagicMock()
+    monkeypatch.setattr(dpo, "GemmaCausalLM", mock_cls)
 
-    monkeypatch.setattr(dpo, "build_dataloader", MagicMock(return_value={}))
+    monkeypatch.setattr(dpo, "build_dataloader", MagicMock(return_value={"loader": None}))
     with pytest.raises(ValueError, match="Invalid dataloader"):
         dpo._execute_dpo("m", "d", 0.1, 1, 1e-4)
 
-    monkeypatch.setattr(dpo, "build_dataloader", MagicMock(return_value={"loader": [1, 2]}))
-    monkeypatch.setattr(dpo, "_run_training_epochs", MagicMock(return_value=0.75))
+    monkeypatch.setattr(dpo, "build_dataloader", MagicMock(return_value={"loader": [{"b": 1}]}))
+    monkeypatch.setattr(dpo, "_run_training_epochs", MagicMock(return_value=1.5))
     status, loss = dpo._execute_dpo("m", "d", 0.1, 1, 1e-4)
     assert status == "completed"
-    assert loss == 0.75
+    assert loss == 1.5
 
-    cfg = DPOConfig(model_name="m", dataset="d", beta=0.1, epochs=1, learning_rate=1e-4)
+    cfg = DPOConfig(model_name="m", dataset="d")
+    monkeypatch.setattr(dpo, "keras", None)
+    with pytest.raises(DependencyMissingError):
+        dpo.run_dpo(cfg)
+
+    monkeypatch.setattr(dpo, "keras", MagicMock())
+    monkeypatch.setattr(dpo, "tf", MagicMock())
+    monkeypatch.setattr(dpo, "_execute_dpo", MagicMock(return_value=("completed", 0.75)))
     res_ok = dpo.run_dpo(cfg)
     assert res_ok["status"] == "completed"
     assert res_ok["final_loss"] == 0.75

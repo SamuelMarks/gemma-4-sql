@@ -47,10 +47,10 @@ async def test_create_vllm_app(monkeypatch):
 
     # We can inspect the decorator by capturing it
     def mock_decorator(path):
-        """Verify behavior of mock_decorator."""
+        """Execute and verify `mock_decorator` behavior and invariants."""
 
         def wrapper(func):
-            """Verify behavior of wrapper."""
+            """Execute and verify `wrapper` behavior and invariants."""
             mock_app.generate_func = func
             return func
 
@@ -64,13 +64,13 @@ async def test_create_vllm_app(monkeypatch):
     mock_req = MagicMock()
 
     async def mock_json():
-        """Verify behavior of mock_json."""
+        """Execute and verify `mock_json` behavior and invariants."""
         return {"prompt": "p"}
 
     mock_req.json = mock_json
 
     async def mock_disconnected():
-        """Verify behavior of mock_disconnected."""
+        """Execute and verify `mock_disconnected` behavior and invariants."""
         return False
 
     await mock_disconnected()
@@ -81,23 +81,23 @@ async def test_create_vllm_app(monkeypatch):
     serve_module.AsyncLLMEngine.from_engine_args.return_value = mock_engine
 
     class MockOutput:
-        """Verify behavior of MockOutput."""
+        """Execute and verify `MockOutput` behavior and invariants."""
 
         class Out:
-            """Verify behavior of Out."""
+            """Execute and verify `Out` behavior and invariants."""
 
             text = "sql"
 
         outputs = [Out()]
 
     async def mock_generate_stream(*args, **kwargs):
-        """Verify behavior of mock_generate_stream."""
+        """Execute and verify `mock_generate_stream` behavior and invariants."""
         yield MockOutput()
 
     mock_engine.generate.return_value = mock_generate_stream()
 
     def mock_json_response(content):
-        """Verify behavior of mock_json_response."""
+        """Execute and verify `mock_json_response` behavior and invariants."""
         return {"response": content}
 
     serve_module.JSONResponse.__call__ = mock_json_response
@@ -110,13 +110,13 @@ async def test_create_vllm_app(monkeypatch):
 
     # Test disconnect
     async def mock_disconnected_true():
-        """Verify behavior of mock_disconnected_true."""
+        """Execute and verify `mock_disconnected_true` behavior and invariants."""
         return True
 
     mock_req.is_disconnected = mock_disconnected_true
 
     async def mock_abort(*args):
-        """Verify behavior of mock_abort."""
+        """Execute and verify `mock_abort` behavior and invariants."""
 
     mock_engine.abort = mock_abort
 
@@ -210,7 +210,7 @@ def test_serve_model(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_create_vllm_app_empty_generator(monkeypatch):
-    """Verify behavior of test_create_vllm_app_empty_generator."""
+    """Execute and verify `test_create_vllm_app_empty_generator` behavior and invariants."""
     from unittest.mock import MagicMock
 
     import gemma_4_sql.backends.pytorch.serve as serve_module
@@ -225,10 +225,10 @@ async def test_create_vllm_app_empty_generator(monkeypatch):
     monkeypatch.setattr(serve_module, "JSONResponse", MagicMock())
 
     def mock_decorator(path):
-        """Verify behavior of mock_decorator."""
+        """Execute and verify `mock_decorator` behavior and invariants."""
 
         def wrapper(func):
-            """Verify behavior of wrapper."""
+            """Execute and verify `wrapper` behavior and invariants."""
             mock_app.generate_func = func
             return func
 
@@ -242,13 +242,13 @@ async def test_create_vllm_app_empty_generator(monkeypatch):
     mock_req = MagicMock()
 
     async def mock_json():
-        """Verify behavior of mock_json."""
+        """Execute and verify `mock_json` behavior and invariants."""
         return {"prompt": "p"}
 
     mock_req.json = mock_json
 
     async def mock_disconnected():
-        """Verify behavior of mock_disconnected."""
+        """Execute and verify `mock_disconnected` behavior and invariants."""
         return False
 
     await mock_disconnected()
@@ -280,7 +280,7 @@ async def test_create_vllm_app_empty_generator(monkeypatch):
     mock_engine.generate.return_value = EmptyAsyncGen()
 
     def mock_json_response(content):
-        """Verify behavior of mock_json_response."""
+        """Execute and verify `mock_json_response` behavior and invariants."""
         return {"response": content}
 
     serve_module.JSONResponse.__call__ = mock_json_response

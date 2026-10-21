@@ -239,6 +239,7 @@ class Gemma4ForCausalLM(nn.Module):
 
         """
         gen_cache: Cache | tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = DynamicCache()
+        eos_token_id = kwargs.get("eos_token_id", getattr(self.config, "eos_token_id", None))
         for i in range(max_new_tokens):
             curr_input = input_ids if i == 0 else input_ids[:, -1:]
             call_res = self(
@@ -248,8 +249,13 @@ class Gemma4ForCausalLM(nn.Module):
             logits = call_res[0]
             gen_cache = call_res[1]
             next_token_logits = logits[:, -1, :]
+            if eos_token_id is not None and i < min_new_tokens:
+                next_token_logits = next_token_logits.clone()
+                next_token_logits[:, int(eos_token_id)] = float("-inf")
             next_tokens = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
             input_ids = torch.cat([input_ids, next_tokens], dim=-1)
+            if eos_token_id is not None and i >= min_new_tokens and bool((next_tokens == int(eos_token_id)).all()):
+                break
         return input_ids
 
     @classmethod
@@ -272,6 +278,7 @@ class Gemma4ForCausalLM(nn.Module):
         """
         from pathlib import Path
 
+        from safetensors import SafetensorError
         from safetensors.torch import load_file
 
         path = Path(str(model_name_or_path))
@@ -299,11 +306,7 @@ class Gemma4ForCausalLM(nn.Module):
             try:
                 state_dict = load_file(str(weights_file))
                 model.load_state_dict(state_dict, strict=False)
-            except (ValueError, RuntimeError, OSError, KeyError, AttributeError) as exc:
-                import logging
-
-                logging.getLogger(__name__).debug("Failed to load safetensors: %s", exc)
-            except Exception as exc:  # noqa: BLE001
+            except (SafetensorError, ValueError, RuntimeError, OSError, KeyError, AttributeError, TypeError) as exc:
                 import logging
 
                 logging.getLogger(__name__).debug("Failed to load safetensors: %s", exc)

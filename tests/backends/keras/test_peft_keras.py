@@ -20,76 +20,76 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 class DummyOps:
-    """Verify behavior of DummyOps."""
+    """Execute and verify `DummyOps` behavior and invariants."""
 
     def matmul(self, a, b):
-        """Verify behavior of matmul."""
+        """Execute and verify `matmul` behavior and invariants."""
 
         class MockTensor:
-            """Verify behavior of MockTensor."""
+            """Execute and verify `MockTensor` behavior and invariants."""
 
             def __add__(self, other):
-                """Verify behavior of __add__."""
+                """Execute and verify `__add__` behavior and invariants."""
                 return self
 
             def __radd__(self, other):
-                """Verify behavior of __radd__."""
+                """Execute and verify `__radd__` behavior and invariants."""
                 return self
 
             def __mul__(self, other):
-                """Verify behavior of __mul__."""
+                """Execute and verify `__mul__` behavior and invariants."""
                 return self
 
             def __rmul__(self, other):
-                """Verify behavior of __rmul__."""
+                """Execute and verify `__rmul__` behavior and invariants."""
                 return self
 
         return MockTensor()
 
     def size(self, w):
-        """Verify behavior of size."""
+        """Execute and verify `size` behavior and invariants."""
         return len(w)
 
 
 def get_mock_keras_ops():
-    """Verify behavior of get_mock_keras_ops."""
+    """Execute and verify `get_mock_keras_ops` behavior and invariants."""
     mock_keras = MagicMock()
     mock_keras.ops = DummyOps()
 
     class DummyDropout:
-        """Verify behavior of DummyDropout."""
+        """Execute and verify `DummyDropout` behavior and invariants."""
 
         def __init__(self, rate):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             self.rate = rate
 
         def __call__(self, x, training=None):
-            """Verify behavior of __call__."""
+            """Execute and verify `__call__` behavior and invariants."""
             return x
 
     mock_keras.layers.Dropout = DummyDropout
 
     class Layer:
-        """Verify behavior of Layer."""
+        """Execute and verify `Layer` behavior and invariants."""
 
         def __init__(self, **kwargs):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
 
         def build(self, input_shape):
-            """Verify behavior of build."""
+            """Execute and verify `build` behavior and invariants."""
 
     class Dense(Layer):
-        """Verify behavior of Dense."""
+        """Execute and verify `Dense` behavior and invariants."""
 
         def __init__(self, kernel, bias=None, name=""):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
             self.kernel = kernel
             self.bias = bias
             self.name = name
             self.trainable = True
 
         def __call__(self, inputs):
-            """Verify behavior of __call__."""
+            """Execute and verify `__call__` behavior and invariants."""
             return inputs
 
     mock_keras.layers.Layer = Layer
@@ -99,20 +99,20 @@ def get_mock_keras_ops():
 
 
 def test_keras_lora_dense_missing_keras():
-    """Verify behavior of test_keras_lora_dense_missing_keras."""
+    """Execute and verify `test_keras_lora_dense_missing_keras` behavior and invariants."""
     with patch("gemma_4_sql.backends.keras.peft.keras", None), pytest.raises(DependencyMissingError):
         KerasLoRADense(dense=MagicMock())
 
 
 def test_keras_lora_dense_invalid_rank():
-    """Verify behavior of test_keras_lora_dense_invalid_rank."""
+    """Execute and verify `test_keras_lora_dense_invalid_rank` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops), pytest.raises(ValueError):
         KerasLoRADense(dense=MagicMock(), r=0)
 
 
 def test_keras_lora_dense_build_and_call():
-    """Verify behavior of test_keras_lora_dense_build_and_call."""
+    """Execute and verify `test_keras_lora_dense_build_and_call` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops):
         mock_kernel = MagicMock()
@@ -122,7 +122,7 @@ def test_keras_lora_dense_build_and_call():
         lora = KerasLoRADense(dense=dense, r=2, lora_alpha=4.0, lora_dropout=0.1)
 
         def add_weight_mock(shape, initializer, trainable, name):
-            """Verify behavior of add_weight_mock."""
+            """Execute and verify `add_weight_mock` behavior and invariants."""
             return shape
 
         lora.add_weight = add_weight_mock
@@ -146,7 +146,7 @@ def test_keras_lora_dense_build_and_call():
 
 
 def test_keras_lora_dense_no_dropout():
-    """Verify behavior of test_keras_lora_dense_no_dropout."""
+    """Execute and verify `test_keras_lora_dense_no_dropout` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops):
         mock_kernel = MagicMock()
@@ -157,7 +157,7 @@ def test_keras_lora_dense_no_dropout():
         assert lora.dropout is None
 
         def add_weight_mock(shape, initializer, trainable, name):
-            """Verify behavior of add_weight_mock."""
+            """Execute and verify `add_weight_mock` behavior and invariants."""
             return 2.0
 
         lora.add_weight = add_weight_mock
@@ -168,7 +168,7 @@ def test_keras_lora_dense_no_dropout():
 
 
 def test_keras_lora_dense_merge_weights():
-    """Verify behavior of test_keras_lora_dense_merge_weights."""
+    """Execute and verify `test_keras_lora_dense_merge_weights` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops):
         mock_kernel = MagicMock()
@@ -182,7 +182,7 @@ def test_keras_lora_dense_merge_weights():
         assert lora.merge_weights() == dense
 
         def add_weight_mock(shape, initializer, trainable, name):
-            """Verify behavior of add_weight_mock."""
+            """Execute and verify `add_weight_mock` behavior and invariants."""
             return 1.0
 
         lora.add_weight = add_weight_mock
@@ -193,13 +193,13 @@ def test_keras_lora_dense_merge_weights():
 
 
 def test_inject_lora_missing_deps():
-    """Verify behavior of test_inject_lora_missing_deps."""
+    """Execute and verify `test_inject_lora_missing_deps` behavior and invariants."""
     with patch("gemma_4_sql.backends.keras.peft.keras", None), pytest.raises(DependencyMissingError):
         inject_lora(MagicMock(), ["target"])
 
 
 def test_inject_lora_empty():
-    """Verify behavior of test_inject_lora_empty."""
+    """Execute and verify `test_inject_lora_empty` behavior and invariants."""
     mock_keras, _mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras):
         _model, count = inject_lora(MagicMock(), [])
@@ -207,21 +207,21 @@ def test_inject_lora_empty():
 
 
 def test_inject_lora_basic():
-    """Verify behavior of test_inject_lora_basic."""
+    """Execute and verify `test_inject_lora_basic` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops):
 
         class SubModel:
-            """Verify behavior of SubModel."""
+            """Execute and verify `SubModel` behavior and invariants."""
 
         sub_model = SubModel()
         sub_model.l3 = mock_keras.layers.Dense(MagicMock(), name="target_mod")
 
         class Model:
-            """Verify behavior of Model."""
+            """Execute and verify `Model` behavior and invariants."""
 
             def __init__(self):
-                """Verify behavior of __init__."""
+                """Execute and verify `__init__` behavior and invariants."""
                 self._tracker = MagicMock()
                 self._modules = {"mod_l4": mock_keras.layers.Dense(MagicMock(), name="target_mod")}
                 self.l1 = mock_keras.layers.Dense(MagicMock(), name="target_mod")
@@ -239,7 +239,7 @@ def test_inject_lora_basic():
                 self.prim_attr = 42
 
             def __getattr__(self, name):
-                """Verify behavior of __getattr__."""
+                """Execute and verify `__getattr__` behavior and invariants."""
                 if name in self._modules:
                     return self._modules[name]
                 raise AttributeError()
@@ -257,12 +257,12 @@ def test_inject_lora_basic():
 
         # Test without __dict__
         class NoDictModel:
-            """Verify behavior of NoDictModel."""
+            """Execute and verify `NoDictModel` behavior and invariants."""
 
             __slots__ = ["l1"]
 
             def __init__(self):
-                """Verify behavior of __init__."""
+                """Execute and verify `__init__` behavior and invariants."""
                 self.l1 = mock_keras.layers.Dense(MagicMock(), name="target")
 
         _no_dict, count = inject_lora(NoDictModel(), ["target"])
@@ -270,7 +270,7 @@ def test_inject_lora_basic():
 
 
 def test_merge_lora_weights_basic():
-    """Verify behavior of test_merge_lora_weights_basic."""
+    """Execute and verify `test_merge_lora_weights_basic` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops):
         dense_kernel = MagicMock()
@@ -278,16 +278,16 @@ def test_merge_lora_weights_basic():
         dense_kernel.__add__ = lambda self, other: self
 
         class SubModel:
-            """Verify behavior of SubModel."""
+            """Execute and verify `SubModel` behavior and invariants."""
 
         sub_model = SubModel()
         sub_model.l3 = KerasLoRADense(mock_keras.layers.Dense(dense_kernel))
 
         class Model:
-            """Verify behavior of Model."""
+            """Execute and verify `Model` behavior and invariants."""
 
             def __init__(self):
-                """Verify behavior of __init__."""
+                """Execute and verify `__init__` behavior and invariants."""
                 self._tracker = MagicMock()
                 self._modules = {"mod_l4": KerasLoRADense(mock_keras.layers.Dense(dense_kernel))}
                 self.l1 = KerasLoRADense(mock_keras.layers.Dense(dense_kernel))
@@ -299,7 +299,7 @@ def test_merge_lora_weights_basic():
                 self.none_attr = None
 
             def __getattr__(self, name):
-                """Verify behavior of __getattr__."""
+                """Execute and verify `__getattr__` behavior and invariants."""
                 if name in self._modules:
                     return self._modules[name]
                 raise AttributeError()
@@ -315,12 +315,12 @@ def test_merge_lora_weights_basic():
 
         # Test without __dict__
         class NoDictModel:
-            """Verify behavior of NoDictModel."""
+            """Execute and verify `NoDictModel` behavior and invariants."""
 
             __slots__ = ["l1"]
 
             def __init__(self):
-                """Verify behavior of __init__."""
+                """Execute and verify `__init__` behavior and invariants."""
                 self.l1 = KerasLoRADense(mock_keras.layers.Dense(dense_kernel))
 
         no_dict = merge_lora_weights(NoDictModel())
@@ -328,12 +328,12 @@ def test_merge_lora_weights_basic():
 
 
 def test_count_parameters():
-    """Verify behavior of test_count_parameters."""
+    """Execute and verify `test_count_parameters` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops):
 
         class Model:
-            """Verify behavior of Model."""
+            """Execute and verify `Model` behavior and invariants."""
 
             weights = [[1, 2], [3]]
             trainable_weights = [[3]]
@@ -393,13 +393,13 @@ def test_count_parameters():
 
 
 def test_apply_lora_missing_deps():
-    """Verify behavior of test_apply_lora_missing_deps."""
+    """Execute and verify `test_apply_lora_missing_deps` behavior and invariants."""
     with patch("gemma_4_sql.backends.keras.peft.keras", None), pytest.raises(DependencyMissingError):
         apply_lora("model", ["target"])
 
 
 def test_apply_lora_with_backbone():
-    """Verify behavior of test_apply_lora_with_backbone."""
+    """Execute and verify `test_apply_lora_with_backbone` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops):
         mock_model = MagicMock()
@@ -416,7 +416,7 @@ def test_apply_lora_with_backbone():
 
 
 def test_apply_lora_inject_and_merge():
-    """Verify behavior of test_apply_lora_inject_and_merge."""
+    """Execute and verify `test_apply_lora_inject_and_merge` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops):
         mock_model = MagicMock()
@@ -428,7 +428,7 @@ def test_apply_lora_inject_and_merge():
 
 
 def test_apply_lora_from_preset():
-    """Verify behavior of test_apply_lora_from_preset."""
+    """Execute and verify `test_apply_lora_from_preset` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     mock_model = MagicMock()
     mock_cls = MagicMock()
@@ -446,7 +446,7 @@ def test_apply_lora_from_preset():
 
 
 def test_apply_lora_exception():
-    """Verify behavior of test_apply_lora_exception."""
+    """Execute and verify `test_apply_lora_exception` behavior and invariants."""
     mock_keras, mock_ops = get_mock_keras_ops()
     with patch("gemma_4_sql.backends.keras.peft.keras", mock_keras), patch("gemma_4_sql.backends.keras.peft.ops", mock_ops):
         mock_model = MagicMock()

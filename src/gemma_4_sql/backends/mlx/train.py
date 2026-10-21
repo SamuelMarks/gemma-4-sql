@@ -126,10 +126,7 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
         raise DependencyMissingError("MLX dependencies are missing.")
     try:
         batch_size = getattr(config, "batch_size", 2)
-        try:
-            status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, batch_size=batch_size)
-        except TypeError:
-            status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate)
+        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, batch_size=batch_size)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         status = f"failed: {e!s}"
     return {"backend": "mlx", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}

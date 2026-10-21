@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
+from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.registry import get_backend
 
@@ -144,7 +145,7 @@ async def _process_single_prompt(
             other_kwargs["multimodal_context"] = context.multimodal_context
 
         gen_res = backend_impl.generate_sql(model_name, current_prompt, beam_width=b_width, max_length=m_len, **other_kwargs)
-        sql = _extract_sql_from_response(str(gen_res.get("sql", "")))
+        sql = _extract_sql_from_response(str(gen_res.get("sql", ""))) if not is_failed_status(gen_res) else ""
         confidence_score = float(str(gen_res.get("confidence_score", 1.0)))
         if context.min_confidence and confidence_score < context.min_confidence:
             history.append({

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from gemma_4_sql.sdk.protocols import BackendProtocol
 
@@ -62,9 +62,9 @@ class ModuleDelegatedBackend(BackendProtocol):
 
         """
         if self.backend_alias is not None and "backend_alias" not in kwargs:
-            merged = dict(kwargs)
-            merged["backend_alias"] = self.backend_alias  # type: ignore[assignment]
-            return merged
+            merged: dict[str, Any] = dict(kwargs)
+            merged["backend_alias"] = self.backend_alias
+            return cast("dict[str, TVal]", merged)
         return kwargs
 
     def _get_submodule(self, attr_name: str, _protocol_cls: type[TSubmod] | object = object) -> TSubmod:

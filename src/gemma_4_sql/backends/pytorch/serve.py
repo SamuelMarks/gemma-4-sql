@@ -16,12 +16,10 @@ logger = logging.getLogger(__name__)
 
 torch = optional_import("torch")
 FastAPI = optional_attr("fastapi", "FastAPI")
-Request = optional_attr("fastapi", "Request")
 JSONResponse = optional_attr("fastapi.responses", "JSONResponse")
 AsyncEngineArgs = optional_attr("vllm", "AsyncEngineArgs")
 AsyncLLMEngine = optional_attr("vllm", "AsyncLLMEngine")
 random_uuid = optional_attr("vllm.utils", "random_uuid")
-uvicorn = None
 
 
 def _create_vllm_app(model_name: str, max_batch_size: int) -> object:

@@ -20,7 +20,7 @@ def export_model(model_name: str, export_path: str, backend: str = "jax", **kwar
         **kwargs: Optional additional keyword arguments passed to the backend export.
 
     Returns:
-        A dictionary containing the results.
+        Structured `ExportResultDict` containing `backend`, `model`, `export_path`, `file_path`, `format`, and `status`.
 
     """
 

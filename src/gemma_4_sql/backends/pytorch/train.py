@@ -160,7 +160,7 @@ def _execute_train(
             raw_model = NativeGemma4.from_pretrained(model_name, config=cast(Any, kwargs.get("model_config") or kwargs.get("config"))).to(cast(Any, device))
         else:
             raw_model = Gemma4ForCausalLM.from_pretrained(model_name).to(cast(Any, device))
-        model: ModelType = _wrap_model_distributed(raw_model, distributed_strategy, device_id)  # type: ignore # Justified: Dynamic backend protocol typing
+        model: ModelType = cast(ModelType, _wrap_model_distributed(cast(ModelType, raw_model), distributed_strategy, device_id))
         optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
         data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size, distributed=is_distributed))

@@ -93,21 +93,21 @@ def test_collate_fn(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "pixel_values" not in res2
 
 
-def test_get_sampler() -> None:
+def test_get_sampler(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `_get_sampler` returns `DistributedSampler` when distributed is enabled and `None` otherwise."""
     import gemma_4_sql.backends.pytorch.etl as etl_module
 
     assert etl_module._get_sampler("ds", False) is None
 
-    with patch("builtins.__import__") as mock_import:
-        mock_dist = MagicMock()
-        mock_dist.DistributedSampler.return_value = "sampler"
-        mock_import.return_value = mock_dist
+    mock_sampler_cls = MagicMock(return_value="sampler")
+    monkeypatch.setattr(etl_module, "optional_attr", lambda *_a, **_k: mock_sampler_cls)
+    assert etl_module._get_sampler("ds", True) == "sampler"
 
-        assert etl_module._get_sampler("ds", True) == "sampler"
+    mock_sampler_cls.side_effect = RuntimeError("error")
+    assert etl_module._get_sampler("ds", True) is None
 
-        mock_dist.DistributedSampler.side_effect = RuntimeError("error")
-        assert etl_module._get_sampler("ds", True) is None
+    monkeypatch.setattr(etl_module, "optional_attr", lambda *_a, **_k: None)
+    assert etl_module._get_sampler("ds", True) is None
 
 
 def test_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:

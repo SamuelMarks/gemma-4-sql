@@ -21,16 +21,16 @@ Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
 
 
 def _beam_search_step(seq: TensorType, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
-    """Process a single sequence and expand it into multiple beams.
+    """Expand a single partial token sequence into `beam_width` candidate beams using log-softmax top-k selection.
 
     Args:
-        seq: The seq.
-        score: The float value for score.
-        model_apply_fn: The model apply fn.
-        beam_width: The number of beams for beam search.
+        seq: Current token ID sequence tensor of shape `(1, current_seq_len)`.
+        score: Cumulative log-probability score of `seq`.
+        model_apply_fn: Callable mapping `seq` to vocabulary logits.
+        beam_width: Number of top candidate token extensions to retain.
 
     Returns:
-        A tuple containing the results.
+        List of `(expanded_sequence, updated_cumulative_score)` tuples of length `beam_width`.
 
     """
     logits = model_apply_fn(seq)

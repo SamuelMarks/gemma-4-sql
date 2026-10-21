@@ -188,7 +188,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
         except ImportError as exc:
             raise DependencyMissingError(f"mlx and mlx_lm are required for MLX quantization: {exc!s}") from exc
 
-        model: ModelType | None = kwargs.get("model")  # type: ignore # Justified: Dynamic backend protocol typing
+        model: ModelType | None = cast("ModelType | None", kwargs.get("model"))
         if model is None:
             try:
                 loaded: Any = mlx_lm.load(model_name)
@@ -216,7 +216,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
             # Apply optimal channel scaling to linear projections
             dummy_acts = np.random.randn(8, 64).astype(np.float32) if np is not None else [1.0] * 64
             dummy_w = np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64
-            calibrate_awq_scales(dummy_w, dummy_acts)  # type: ignore # Justified: Dynamic backend protocol typing
+            calibrate_awq_scales(cast(TensorType, dummy_w), cast(TensorType, dummy_acts))
             nn.quantize(cast(Any, model), group_size=group_size, bits=4)
             return (0.75, "quantized_awq")
 
@@ -224,7 +224,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
             logger.info("Applying second-order Hessian error compensation (GPTQ) to MLX model %s", model_name)
             dummy_acts = np.random.randn(16, 64).astype(np.float32) if np is not None else [1.0] * 64
             dummy_w = np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64
-            calibrate_gptq_weights(dummy_w, dummy_acts)  # type: ignore # Justified: Dynamic backend protocol typing
+            calibrate_gptq_weights(cast(TensorType, dummy_w), cast(TensorType, dummy_acts))
             nn.quantize(cast(Any, model), group_size=group_size, bits=4)
             return (0.75, "quantized_gptq")
 

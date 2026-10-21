@@ -11,7 +11,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_serve_model(monkeypatch) -> None:
-    """Verify behavior of test_serve_model."""
+    """Execute and verify `test_serve_model` behavior and invariants."""
     from unittest.mock import MagicMock
 
     import gemma_4_sql.backends.keras.serve as serve_module
@@ -28,7 +28,7 @@ def test_serve_model(monkeypatch) -> None:
 
 
 def test_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify behavior of test_serve_missing_deps."""
+    """Execute and verify `test_serve_missing_deps` behavior and invariants."""
     import gemma_4_sql.backends.common_serve as cs
 
     monkeypatch.setattr(cs, "FastAPI", None)
@@ -37,7 +37,7 @@ def test_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_serve_keras_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify behavior of test_serve_keras_missing_deps."""
+    """Execute and verify `test_serve_keras_missing_deps` behavior and invariants."""
     import gemma_4_sql.backends.keras.serve as srv
 
     monkeypatch.setattr(srv, "keras", None)
@@ -46,15 +46,15 @@ def test_serve_keras_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify behavior of test_create_app_generation_logic."""
+    """Execute and verify `test_create_app_generation_logic` behavior and invariants."""
     import gemma_4_sql.backends.keras.serve as srv
     from gemma_4_sql.exceptions import InferenceError
 
     class MockApp:
-        """Verify behavior of MockApp."""
+        """Execute and verify `MockApp` behavior and invariants."""
 
     def mock_create_common_app(**kwargs):
-        """Verify behavior of mock_create_common_app."""
+        """Execute and verify `mock_create_common_app` behavior and invariants."""
         app = MockApp()
         app.startup = kwargs["startup_callback"]
         app.generate = kwargs["generate_logic"]
@@ -72,20 +72,20 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test generation with mock loaded_model via startup
     class MockModel:
-        """Verify behavior of MockModel."""
+        """Execute and verify `MockModel` behavior and invariants."""
 
         def generate(self, prompt, **kwargs):
-            """Verify behavior of generate."""
+            """Execute and verify `generate` behavior and invariants."""
             if isinstance(prompt, list):
                 return [f"BATCH_{p}" for p in prompt]
             return "MOCK_SQL"
 
     class DummyPreset:
-        """Verify behavior of DummyPreset."""
+        """Execute and verify `DummyPreset` behavior and invariants."""
 
         @classmethod
         def from_preset(cls, model_name):
-            """Verify behavior of from_preset."""
+            """Execute and verify `from_preset` behavior and invariants."""
             return MockModel()
 
     monkeypatch.setattr(srv, "GemmaCausalLM", DummyPreset)
@@ -99,18 +99,18 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test individual generation fallback
     class MockModelFail:
-        """Verify behavior of MockModelFail."""
+        """Execute and verify `MockModelFail` behavior and invariants."""
 
         def generate(self, prompt, **kwargs):
-            """Verify behavior of generate."""
+            """Execute and verify `generate` behavior and invariants."""
             raise ValueError("fail")
 
     class DummyPresetFail:
-        """Verify behavior of DummyPresetFail."""
+        """Execute and verify `DummyPresetFail` behavior and invariants."""
 
         @classmethod
         def from_preset(cls, model_name):
-            """Verify behavior of from_preset."""
+            """Execute and verify `from_preset` behavior and invariants."""
             return MockModelFail()
 
     import gemma_4_sql.backends.keras.inference as real_inf
@@ -125,20 +125,20 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test batch generation fallback exception
     class MockBatchModelFail:
-        """Verify behavior of MockBatchModelFail."""
+        """Execute and verify `MockBatchModelFail` behavior and invariants."""
 
         def generate(self, prompt, **kwargs):
-            """Verify behavior of generate."""
+            """Execute and verify `generate` behavior and invariants."""
             if isinstance(prompt, list):
                 raise TypeError("batch fail")
             return "MOCK_SQL"
 
     class DummyPresetBatchFail:
-        """Verify behavior of DummyPresetBatchFail."""
+        """Execute and verify `DummyPresetBatchFail` behavior and invariants."""
 
         @classmethod
         def from_preset(cls, model_name):
-            """Verify behavior of from_preset."""
+            """Execute and verify `from_preset` behavior and invariants."""
             return MockBatchModelFail()
 
     monkeypatch.setattr(srv, "GemmaCausalLM", DummyPresetBatchFail)
@@ -157,7 +157,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test generic fallback output error
     def gen_err(**kwargs):
-        """Verify behavior of gen_err."""
+        """Execute and verify `gen_err` behavior and invariants."""
         raise OSError("other err")
 
     monkeypatch.setattr(real_inf, "generate_sql", gen_err)

@@ -13,7 +13,7 @@ import gemma_4_sql.backends.keras.quantize as q
 
 
 def test_quantize_layer_weights(monkeypatch):
-    """Verify behavior of test_quantize_layer_weights."""
+    """Execute and verify `test_quantize_layer_weights` behavior and invariants."""
     mock_layer = MagicMock()
     mock_layer.name = "dense"
 
@@ -61,7 +61,7 @@ def test_quantize_layer_weights(monkeypatch):
 
 
 def test_quantize_model(monkeypatch, tmp_path):
-    """Verify behavior of test_quantize_model."""
+    """Execute and verify `test_quantize_model` behavior and invariants."""
     from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 
     # 1. Missing keras
@@ -99,32 +99,20 @@ def test_quantize_model(monkeypatch, tmp_path):
     q.quantize_model("m", "int4", model=mock_model)
 
     # 5. Load model from preset
-    import builtins
-
-    original_import = builtins.__import__
-
-    def mock_import(name, *args, **kwargs):
-        """Verify behavior of mock_import."""
-        if name == "keras_nlp.models":
-            mock_models = MagicMock()
-            mock_models.GemmaCausalLM.from_preset.return_value = mock_model
-            return mock_models
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", mock_import)
+    mock_gemma_cls = MagicMock()
+    mock_gemma_cls.from_preset.return_value = mock_model
+    monkeypatch.setattr(q, "optional_attr", lambda *_a, **_k: mock_gemma_cls)
 
     res = q.quantize_model("m", "int8")
     assert res["status"] == "quantized_int8"
 
-    # 6. Load model from preset error
-    def mock_import_err(name, *args, **kwargs):
-        """Raise ValueError when importing keras_nlp.models."""
-        if name == "keras_nlp.models":
-            raise ValueError("sim")
-        return original_import(name, *args, **kwargs)
+    # 6. Load model from preset error / None
+    monkeypatch.setattr(q, "optional_attr", lambda *_a, **_k: None)
+    res_none = q.quantize_model("m", "int8")
+    assert res_none["status"] == "quantized_int8"
 
-    monkeypatch.setattr(builtins, "__import__", mock_import_err)
-
+    mock_gemma_cls.from_preset.side_effect = ValueError("sim")
+    monkeypatch.setattr(q, "optional_attr", lambda *_a, **_k: mock_gemma_cls)
     res = q.quantize_model("m", "int8")
     assert res["status"] == "quantized_int8"  # Doesn't fail, model is just None
 

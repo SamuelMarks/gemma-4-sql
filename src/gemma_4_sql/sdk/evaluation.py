@@ -8,6 +8,7 @@ import typing
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
+from gemma_4_sql.exceptions import GemmaSQLError
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.tokenization import SQLTokenizer
@@ -86,7 +87,7 @@ async def compute_metrics_async(
                 ex = 1 if engine._compare_results(p_results, t_results, strict_order) else 0
             else:
                 ex = 0
-        except Exception as exc:  # noqa: BLE001
+        except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, KeyError, AttributeError) as exc:
             import logging
 
             logging.getLogger(__name__).warning("Query execution failed: %s", exc)

@@ -68,7 +68,7 @@ def reload_module():
 
 
 def test_export_model_with_weights(tmp_path):
-    """Verify behavior of test_export_model_with_weights."""
+    """Execute and verify `test_export_model_with_weights` behavior and invariants."""
     jax_export = reload_module()
 
     export_path = str(tmp_path / "export")
@@ -81,7 +81,7 @@ def test_export_model_with_weights(tmp_path):
 
 
 def test_export_model_extract_weights(tmp_path):
-    """Verify behavior of test_export_model_extract_weights."""
+    """Execute and verify `test_export_model_extract_weights` behavior and invariants."""
     jax_export = reload_module()
 
     export_path = str(tmp_path / "export")
@@ -100,7 +100,7 @@ def test_export_model_extract_weights(tmp_path):
 
 
 def test_export_model_extract_weights_missing_flax(tmp_path):
-    """Verify behavior of test_export_model_extract_weights_missing_flax."""
+    """Execute and verify `test_export_model_extract_weights_missing_flax` behavior and invariants."""
     jax_export = reload_module()
 
     with patch.dict(sys.modules, {"flax": None}), pytest.raises(Exception, match="Flax NNX dependency missing:"):
@@ -109,7 +109,7 @@ def test_export_model_extract_weights_missing_flax(tmp_path):
 
 
 def test_export_model_extract_weights_error(tmp_path, mock_dependencies):
-    """Verify behavior of test_export_model_extract_weights_error."""
+    """Execute and verify `test_export_model_extract_weights_error` behavior and invariants."""
     jax_export = reload_module()
 
     # Make extraction fail
@@ -121,7 +121,7 @@ def test_export_model_extract_weights_error(tmp_path, mock_dependencies):
 
 
 def test_export_model_save_error(tmp_path, mock_dependencies):
-    """Verify behavior of test_export_model_save_error."""
+    """Execute and verify `test_export_model_save_error` behavior and invariants."""
     jax_export = reload_module()
 
     _, _, _, _, _, _, mock_checkpointer = mock_dependencies

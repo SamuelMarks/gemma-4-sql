@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -122,7 +122,7 @@ def _run_benchmark_pass(model: ModelType, params: dict[str, TensorType], batch_s
             tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
 
         try:
-            stats = device.memory_stats()  # type: ignore # Dynamic typing
+            stats = cast(Any, device).memory_stats()
             memory_mb = stats.get("peak_bytes_in_use", 16384.0 * 1024 * 1024) / (1024 * 1024)
         except (AttributeError, KeyError, RuntimeError, TypeError):
             memory_mb = 16384.0

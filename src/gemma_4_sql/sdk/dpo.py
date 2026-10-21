@@ -34,7 +34,7 @@ def run_dpo(
         **kwargs: Additional backend-specific parameters.
 
     Returns:
-        A dictionary containing the results.
+        Structured `DPOResultDict` containing `backend`, `action`, `model`, `dataset`, `beta`, `status`, and `final_loss`.
 
     """
     return get_backend(backend).run_dpo(

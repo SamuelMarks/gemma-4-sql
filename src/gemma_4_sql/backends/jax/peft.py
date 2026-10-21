@@ -552,7 +552,7 @@ def apply_lora(
             model = Gemma4ForCausalLM(config, rngs=rngs)
 
         model, injected_count = inject_lora(
-            model=model,  # type: ignore # Justified: Dynamic backend protocol typing
+            model=cast(ModelType, model),
             target_modules=target_modules,
             lora_r=lora_r,
             lora_alpha=lora_alpha,

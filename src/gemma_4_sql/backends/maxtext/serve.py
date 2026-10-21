@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports, optional_import
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 if TYPE_CHECKING:
@@ -15,12 +15,6 @@ logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")
 gemma4 = optional_import("maxtext.models.gemma4")
-FastAPI = None
-Request = None
-JSONResponse = None
-uvicorn = None
-with catch_optional_imports():
-    pass
 
 
 def _create_app(model_name: str) -> object:

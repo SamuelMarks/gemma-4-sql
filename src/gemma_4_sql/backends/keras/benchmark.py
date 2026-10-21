@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
-from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
@@ -18,19 +18,19 @@ keras = optional_import("keras")
 tf = optional_import("tensorflow")
 
 
-def _load_keras_model(model_name: str, dtype: str) -> object:
-    """Load an actual compiled Keras model.
+def _load_keras_model(model_name: str, dtype: str) -> ModelType:
+    """Load and configure a compiled KerasNLP `GemmaCausalLM` model for benchmarking.
 
     Args:
-        model_name: The name of the target model.
-        dtype: The string representing dtype.
+        model_name: Target KerasNLP preset or model identifier.
+        dtype: Floating-point precision policy string (e.g., `'bfloat16'`, `'float32'`).
 
     Returns:
-        The execution result.
+        Loaded `GemmaCausalLM` model instance.
 
     Raises:
         DependencyMissingError: If Keras dependencies are missing.
-        ValueError: If model cannot be loaded.
+        ValueError: If the model preset cannot be loaded.
 
     """
     if keras is None:
@@ -39,21 +39,23 @@ def _load_keras_model(model_name: str, dtype: str) -> object:
         raise DependencyMissingError("Keras dependencies are missing.")
     try:
         keras.config.set_floatx(dtype)
-        gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
-        return gemma_causal_lm_cls.from_preset(model_name)
+        gemma_causal_lm_cls = optional_attr("keras_nlp.models", "GemmaCausalLM")
+        if gemma_causal_lm_cls is None:
+            raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
+        return cast(ModelType, gemma_causal_lm_cls.from_preset(model_name))
     except (ImportError, ValueError) as err:
         msg = f"Failed to load actual model {model_name}"
         raise ValueError(msg) from err
 
 
 def _get_device_str(hardware: str) -> str:
-    """Map hardware string to device string.
+    """Map hardware target identifier to a TensorFlow device placement string.
 
     Args:
-        hardware: Target hardware string.
+        hardware: Target hardware identifier (`'cpu'`, `'gpu'`, `'tpu'`).
 
     Returns:
-        TensorFlow device string specification.
+        TensorFlow device specification string (`'/CPU:0'`, `'/GPU:0'`, or `'/TPU:0'`).
 
     """
     if tf is None:
@@ -67,20 +69,28 @@ def _get_device_str(hardware: str) -> str:
     return "/CPU:0"
 
 
-def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, hardware: str) -> tuple[float, float, float]:
-    """Execute the forward pass benchmark loop.
+def _run_benchmark_pass(
+    model: Any,
+    batch_size: int,
+    num_runs: int,
+    warmup_steps: int,
+    mode: str,
+    max_new_tokens: int,
+    hardware: str,
+) -> tuple[float, float, float]:
+    """Execute the warmup and timed benchmark pass for a Keras model.
 
     Args:
-        model: The model.
-        batch_size: The number of items to process in a single batch.
-        num_runs: The integer value for num runs.
-        warmup_steps: Number of warmup steps.
-        mode: Benchmark mode.
-        max_new_tokens: Number of max tokens.
-        hardware: Target hardware.
+        model: Instantiated Keras model.
+        batch_size: Number of sequences processed per batch.
+        num_runs: Number of timed benchmark iterations.
+        warmup_steps: Number of untimed warmup iterations before timing begins.
+        mode: Execution mode (`'prefill'` or `'generate'`).
+        max_new_tokens: Number of tokens generated in `'generate'` mode.
+        hardware: Target hardware identifier (`'cpu'`, `'gpu'`, `'tpu'`).
 
     Returns:
-        A tuple containing the results.
+        A 3-tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
 
     Raises:
         DependencyMissingError: If TensorFlow dependencies are missing.
@@ -99,25 +109,23 @@ def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup
 
         @tf.function(jit_compile=True)
         def forward_pass(inputs: TensorType) -> object:
-            """Run forward pass.
+            """Run JIT-compiled forward pass.
 
             Args:
-                inputs: Model inputs.
+                inputs: Input token tensor.
 
             Returns:
-                Output tensor.
+                Output logits tensor.
 
             """
             return model(inputs)
 
-        # Reset memory stats if on GPU
         if "GPU" in device_str:
             try:
                 tf.config.experimental.reset_memory_stats(device_str.replace("/", ""))
             except ValueError:
                 pass
 
-        # Warmup
         for _ in range(warmup_steps):
             if mode == "prefill":
                 out = forward_pass(dummy_inputs)
@@ -129,7 +137,7 @@ def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup
                     if hasattr(out, "numpy"):
                         _ = out.numpy()
 
-        start_time = time.time()
+        start_time = time.perf_counter()
         for _ in range(num_runs):
             if mode == "prefill":
                 out = forward_pass(dummy_inputs)
@@ -140,24 +148,25 @@ def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup
                     out = model.generate(dummy_inputs, max_length=32 + max_new_tokens)
                     if hasattr(out, "numpy"):
                         _ = out.numpy()
-        end_time = time.time()
+        end_time = time.perf_counter()
 
-        total_time_ms = (end_time - start_time) * 1000.0
+        elapsed_s = max(end_time - start_time, 1e-09)
+        total_time_ms = elapsed_s * 1000.0
         latency_ms = total_time_ms / max(1, num_runs)
 
         if mode == "prefill":
-            tokens_per_sec = 32 * batch_size * num_runs / max(end_time - start_time, 1e-09)
+            tokens_per_sec = 32 * batch_size * num_runs / elapsed_s
         else:
-            tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
+            tokens_per_sec = max_new_tokens * batch_size * num_runs / elapsed_s
 
         try:
             if "GPU" in device_str:
                 memory_info = tf.config.experimental.get_memory_info(device_str.replace("/", ""))
                 memory_mb = memory_info.get("peak", memory_info.get("current", 0.0)) / (1024 * 1024)
             else:
-                memory_mb = 6000.0
+                memory_mb = 0.0
         except ValueError:
-            memory_mb = 6000.0
+            memory_mb = 0.0
 
         return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 
@@ -167,15 +176,15 @@ def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int 
 
     Args:
         model_name: The name of the model to benchmark.
-        hardware: Target hardware for the benchmark (e.g., 'gpu', 'tpu', 'cpu').
+        hardware: Target hardware for the benchmark (e.g., `'gpu'`, `'tpu'`, `'cpu'`).
         batch_size: Batch size to use during benchmarking.
-        **kwargs: Additional args like `num_runs`.
+        **kwargs: Additional options such as `num_runs`, `dtype`, `mode`, `max_new_tokens`, `warmup_steps`.
 
     Returns:
-        A dictionary containing benchmark metrics and status.
+        Structured `BenchmarkResultDict` containing throughput, latency, memory, and status.
 
     Raises:
-        DependencyMissingError: If Keras dependencies are missing.
+        DependencyMissingError: If Keras or TensorFlow dependencies are missing.
 
     """
 
@@ -193,7 +202,7 @@ def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int 
 
         model = _load_keras_model(model_name, dtype=dtype)
         num_runs = int(str(kwargs.get("num_runs", 5)))
-        return _run_benchmark_pass(model, batch_size, num_runs, warmup_steps, mode, max_new_tokens, hardware)  # type: ignore # Runtime typing
+        return _run_benchmark_pass(model, batch_size, num_runs, warmup_steps, mode, max_new_tokens, hardware)
 
     if keras is None or tf is None:
         from gemma_4_sql.exceptions import DependencyMissingError

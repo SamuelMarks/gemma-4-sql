@@ -10,7 +10,7 @@ import pytest
 
 
 def test_log_metrics(monkeypatch):
-    """Verify behavior of test_log_metrics."""
+    """Execute and verify `test_log_metrics` behavior and invariants."""
     import gemma_4_sql.backends.keras.logging as log_keras
     from gemma_4_sql.exceptions import DependencyMissingError
 
@@ -22,17 +22,17 @@ def test_log_metrics(monkeypatch):
     monkeypatch.setattr(log_keras, "tf", mock_tf)
 
     class MockWriter:
-        """Verify behavior of MockWriter."""
+        """Execute and verify `MockWriter` behavior and invariants."""
 
         def __init__(self, *args, **kwargs):
-            """Verify behavior of __init__."""
+            """Execute and verify `__init__` behavior and invariants."""
 
         def as_default(self):
-            """Verify behavior of as_default."""
+            """Execute and verify `as_default` behavior and invariants."""
             return MagicMock()
 
         def close(self):
-            """Verify behavior of close."""
+            """Execute and verify `close` behavior and invariants."""
 
     mock_tf.summary.create_file_writer.return_value = MockWriter()
     res = log_keras.log_metrics({"a": 1.0}, 1)
@@ -44,7 +44,7 @@ def test_log_metrics(monkeypatch):
 
 
 def test_module_load_import_error():
-    """Verify behavior of test_module_load_import_error."""
+    """Execute and verify `test_module_load_import_error` behavior and invariants."""
     import importlib
     import sys
     from unittest.mock import patch
@@ -59,7 +59,7 @@ def test_module_load_import_error():
 
 
 def test_module_load_import_error_coverage(monkeypatch):
-    """Verify behavior of test_module_load_import_error_coverage."""
+    """Execute and verify `test_module_load_import_error_coverage` behavior and invariants."""
     import importlib
     import sys
 

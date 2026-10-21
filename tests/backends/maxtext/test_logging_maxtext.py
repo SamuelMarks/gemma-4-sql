@@ -9,7 +9,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 def test_log_metrics_success():
-    """Verify behavior of test_log_metrics_success."""
+    """Execute and verify `test_log_metrics_success` behavior and invariants."""
     metrics = {"loss": 0.5, "accuracy": 0.9}
     step = 10
     log_dir = "test_logs"
@@ -37,6 +37,6 @@ def test_log_metrics_success():
 
 
 def test_log_metrics_missing_dependency():
-    """Verify behavior of test_log_metrics_missing_dependency."""
+    """Execute and verify `test_log_metrics_missing_dependency` behavior and invariants."""
     with patch("gemma_4_sql.backends.maxtext.logging.SummaryWriter", new=None), pytest.raises(DependencyMissingError, match="TensorBoardX dependencies are missing."):
         log_metrics({"loss": 0.5}, 10)

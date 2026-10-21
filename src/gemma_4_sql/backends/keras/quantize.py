@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.type_hints import ModelType
 
@@ -95,11 +95,12 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
             keras.config.set_dtype_policy(policy_name)
 
         # Retrieve or load model instance if provided
-        model: ModelType | None = kwargs.get("model")  # type: ignore # Justified: Dynamic backend protocol typing
+        model: ModelType | None = cast("ModelType | None", kwargs.get("model"))
         if model is None:
             try:
-                gemma_causal_lm_cls = __import__("keras_nlp.models", fromlist=["GemmaCausalLM"]).GemmaCausalLM
-                model = gemma_causal_lm_cls.from_preset(model_name)
+                gemma_causal_lm_cls = optional_attr("keras_nlp.models", "GemmaCausalLM")
+                if gemma_causal_lm_cls is not None:
+                    model = gemma_causal_lm_cls.from_preset(model_name)
             except (ImportError, ValueError, RuntimeError, AttributeError, OSError):
                 model = None
 

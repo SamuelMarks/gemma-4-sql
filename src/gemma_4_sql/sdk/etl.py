@@ -22,7 +22,7 @@ def _route_backend(config: ETLConfig, backend: str, **kwargs: JSONValue) -> ETLR
         **kwargs: Additional keyword arguments passed to the specific backend implementation.
 
     Returns:
-        A dictionary containing the results.
+        Structured `ETLResultDict` containing `dataset`, `split`, `batch_size`, `backend`, `distributed`, `status`, and `loader`.
 
     """
     return get_backend(backend).build_dataloader(config, **kwargs)

@@ -7,7 +7,7 @@ import collections
 import logging
 import math
 import re
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.exceptions import ConfigurationError, SQLSafetyViolationError
 from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
@@ -16,6 +16,8 @@ from gemma_4_sql.sdk.adapters.snowflake_adapter import SnowflakeAdapter
 from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
 
 if TYPE_CHECKING:
+    from typing_extensions import Self
+
     from gemma_4_sql.type_hints import JSONPrimitive
 
 logger = logging.getLogger(__name__)
@@ -381,9 +383,33 @@ class LiveDatabaseEngine:
         strict_order = self._has_top_level_order_by(ground_truth_sql)
         return self._compare_results(pred_results, truth_results, strict_order)
 
+    async def close_async(self) -> None:
+        """Asynchronously close the underlying database connection."""
+        close_async_fn = getattr(self.adapter, "close_async", None)
+        if callable(close_async_fn):
+            res = close_async_fn()
+            await cast(Any, res)
+        self.adapter.close()
+
     def close(self) -> None:
         """Close the underlying database connection."""
         self.adapter.close()
+
+    def __enter__(self) -> Self:
+        """Enter synchronous context manager."""
+        return self
+
+    def __exit__(self, _exc_type: object, _exc_val: object, _exc_tb: object) -> None:
+        """Exit synchronous context manager and close database connection."""
+        self.close()
+
+    async def __aenter__(self) -> Self:
+        """Enter asynchronous context manager."""
+        return self
+
+    async def __aexit__(self, _exc_type: object, _exc_val: object, _exc_tb: object) -> None:
+        """Exit asynchronous context manager and close database connection."""
+        await self.close_async()
 
 
 __all__ = ["LiveDatabaseEngine"]
