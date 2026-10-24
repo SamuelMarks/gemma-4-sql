@@ -1,102 +1,63 @@
-"""Tests for PyTorch ETL pipeline."""
+"""Unit and behavioral tests for PyTorch ETL pipeline with real tensors and SQLTokenizer."""
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 
 from tests.conftest import requires_torch
 
 pytestmark = requires_torch
 
+import gemma_4_sql.backends.pytorch.etl as etl_module
 from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig
 
 
-def test_pytorch_etl_imports(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `pytorch.etl` handles missing `datasets`, `torch`, `DataLoader`, and `Dataset` attributes."""
-    import gemma_4_sql.backends.pytorch.etl as etl_module
-
-    monkeypatch.setattr(etl_module, "datasets", None)
-    monkeypatch.setattr(etl_module, "torch", None)
-    monkeypatch.setattr(etl_module, "DataLoader", None)
-    monkeypatch.setattr(etl_module, "Dataset", None)
-    assert etl_module.datasets is None
-    assert etl_module.torch is None
-    assert etl_module.DataLoader is None
-    assert etl_module.Dataset is None
-
-
-def test_pytorch_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `PyTorchDataset` tokenizes SQL records and extracts multimodal image and audio features."""
-    import gemma_4_sql.backends.pytorch.etl as etl_module
-
-    mock_torch = MagicMock()
-    mock_torch.long = "long"
-    mock_torch.float32 = "float32"
-    mock_torch.tensor.side_effect = lambda x, dtype: (x, dtype)
-    monkeypatch.setattr(etl_module, "torch", mock_torch)
-
-    mock_ds = [{"sql_prompt": "p1", "sql": "s1"}, {"question": "p2", "query": "s2", "image_url": "url", "audio_clip": "aud"}]
-
-    mock_tok = MagicMock()
-    mock_tok.encode.side_effect = lambda x: [x]
-
+def test_pytorch_dataset_and_collate_real_tensors() -> None:
+    """Verify PyTorchDataset and _collate_fn produce real padded torch.Tensor batches."""
+    records = [
+        {"sql_prompt": "SELECT 1", "sql": "SELECT 1;"},
+        {"question": "Find all users", "query": "SELECT * FROM users;", "image_url": "img.png", "audio_clip": "aud.wav"},
+    ]
+    tok = SQLTokenizer()
     cls = etl_module._get_pytorch_classes()
-    dataset = cls(mock_ds, mock_tok)
-
+    dataset = cls(records, tok)
     assert len(dataset) == 2
 
-    with patch("gemma_4_sql.backends.common_multimodal.format_multimodal_prompt") as mock_format:
-        mock_format.return_value = {"prompt": "formatted_p1"}
-        item1 = dataset[0]
-        assert item1["inputs"] == (["formatted_p1"], "long")
-        assert item1["targets"] == (["s1"], "long")
+    with (
+        patch("gemma_4_sql.backends.common_multimodal.process_image", return_value={"pixel_values": [[1.0, 2.0]]}),
+        patch("gemma_4_sql.backends.common_multimodal.process_audio", return_value={"audio_values": [0.5, -0.5]}),
+    ):
+        item0 = dataset[0]
+        item1 = dataset[1]
+        assert isinstance(item0["inputs"], torch.Tensor)
+        assert item0["inputs"].dtype == torch.long
+        assert isinstance(item1["pixel_values"], torch.Tensor)
+        assert item1["pixel_values"].dtype == torch.float32
+        assert isinstance(item1["audio_values"], torch.Tensor)
 
-        with patch("gemma_4_sql.backends.common_multimodal.process_image") as mock_img:
-            mock_img.return_value = {"pixel_values": "pixels"}
-            with patch("gemma_4_sql.backends.common_multimodal.process_audio") as mock_aud:
-                mock_aud.return_value = {"audio_values": "audio"}
+        # Also cover fallback when format_multimodal_prompt returns empty dict
+        with patch("gemma_4_sql.backends.common_multimodal.format_multimodal_prompt", return_value={}):
+            item1_fallback = dataset[1]
+            assert isinstance(item1_fallback["inputs"], torch.Tensor)
 
-                mock_format.return_value = {}
-                item2 = dataset[1]
-                assert item2["inputs"] == (["p2"], "long")
-                assert item2["targets"] == (["s2"], "long")
-                assert item2["pixel_values"] == ("pixels", "float32")
-                assert item2["audio_values"] == ("audio", "float32")
+        batch_no_mm = etl_module._collate_fn([item0, {"inputs": item1["inputs"], "targets": item1["targets"]}])
+        assert batch_no_mm["inputs"].shape[0] == 2
+        assert "pixel_values" not in batch_no_mm
 
-                mock_img.assert_called_with("url")
-                mock_aud.assert_called_with("aud")
-
-
-def test_collate_fn(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `_collate_fn` pads sequences and stacks optional multimodal tensors."""
-    import gemma_4_sql.backends.pytorch.etl as etl_module
-
-    mock_torch = MagicMock()
-    monkeypatch.setattr(etl_module, "torch", mock_torch)
-    mock_torch.stack.side_effect = lambda x: x
-    mock_torch.nn.utils.rnn.pad_sequence.side_effect = lambda x, batch_first: x
-
-    batch = [{"inputs": 1, "targets": 2, "pixel_values": 3, "audio_values": 4}, {"inputs": 5, "targets": 6, "pixel_values": 7, "audio_values": 8}]
-
-    res = etl_module._collate_fn(batch)
-    assert res["inputs"] == [1, 5]
-    assert res["targets"] == [2, 6]
-    assert res["pixel_values"] == [3, 7]
-    assert res["audio_values"] == [4, 8]
-
-    batch2 = [{"inputs": 1, "targets": 2}, {"inputs": 5, "targets": 6}]
-    res2 = etl_module._collate_fn(batch2)
-    assert res2["inputs"] == [1, 5]
-    assert "pixel_values" not in res2
+        item0_with_mm = dict(item0, pixel_values=item1["pixel_values"], audio_values=item1["audio_values"])
+        batch_mm = etl_module._collate_fn([item0_with_mm, item1])
+        assert batch_mm["pixel_values"].shape == (2, 1, 2)
+        assert batch_mm["audio_values"].shape == (2, 2)
 
 
-def test_get_sampler(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `_get_sampler` returns `DistributedSampler` when distributed is enabled and `None` otherwise."""
-    import gemma_4_sql.backends.pytorch.etl as etl_module
-
+def test_get_sampler_and_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _get_sampler and _load_hf_or_duckdb handle distributed, DuckDB, and HuggingFace sources."""
     assert etl_module._get_sampler("ds", False) is None
 
     mock_sampler_cls = MagicMock(return_value="sampler")
@@ -109,19 +70,12 @@ def test_get_sampler(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(etl_module, "optional_attr", lambda *_a, **_k: None)
     assert etl_module._get_sampler("ds", True) is None
 
-
-def test_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `_load_hf_or_duckdb` loads from DuckDB or Hugging Face `datasets`."""
-    import gemma_4_sql.backends.pytorch.etl as etl_module
-
-    with patch("gemma_4_sql.backends.pytorch.etl.load_duckdb_dataset") as mock_load:
-        mock_load.return_value = "duck"
+    with patch("gemma_4_sql.backends.pytorch.etl.load_duckdb_dataset", return_value="duck"):
         assert etl_module._load_hf_or_duckdb("ds", "split", "path", "table") == "duck"
 
     mock_datasets = MagicMock()
-    monkeypatch.setattr(etl_module, "datasets", mock_datasets)
     mock_datasets.load_dataset.return_value = "hf"
-
+    monkeypatch.setattr(etl_module, "datasets", mock_datasets)
     assert etl_module._load_hf_or_duckdb("ds", "split", None, None) == "hf"
 
     monkeypatch.setattr(etl_module, "datasets", None)
@@ -129,25 +83,22 @@ def test_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
         etl_module._load_hf_or_duckdb("ds", "split", None, None)
 
 
-def test_build_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `build_dataloader` constructs a PyTorch DataLoader and raises `DependencyMissingError` when missing."""
-    import gemma_4_sql.backends.pytorch.etl as etl_module
+def test_build_dataloader_real_torch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify build_dataloader constructs a real torch.utils.data.DataLoader yielding padded batches."""
+    mock_datasets = MagicMock()
+    mock_datasets.load_dataset.return_value = [
+        {"sql_prompt": "SELECT 1", "sql": "SELECT 1;"},
+        {"sql_prompt": "SELECT 22", "sql": "SELECT 22;"},
+    ]
+    monkeypatch.setattr(etl_module, "datasets", mock_datasets)
 
-    monkeypatch.setattr(etl_module, "datasets", MagicMock())
-    monkeypatch.setattr(etl_module, "torch", MagicMock())
-    monkeypatch.setattr(etl_module, "Dataset", MagicMock())
-    monkeypatch.setattr(etl_module, "DataLoader", MagicMock())
-
-    config = ETLConfig(dataset_name="ds", split="train")
-
-    with (
-        patch("gemma_4_sql.backends.pytorch.etl._load_hf_or_duckdb", return_value="ds"),
-        patch("gemma_4_sql.backends.pytorch.etl.SQLTokenizer"),
-        patch("gemma_4_sql.backends.pytorch.etl._get_pytorch_classes", return_value=MagicMock()),
-        patch("gemma_4_sql.backends.pytorch.etl._get_sampler", return_value=None),
-    ):
-        res = etl_module.build_dataloader(config)
-        assert res["status"] == "loaded"
+    config = ETLConfig(dataset_name="ds", split="train", batch_size=2)
+    res = etl_module.build_dataloader(config)
+    assert res["status"] == "loaded"
+    loader: Any = res["loader"]
+    first_batch = next(iter(loader))
+    assert first_batch["inputs"].shape[0] == 2
+    assert first_batch["targets"].shape[0] == 2
 
     monkeypatch.setattr(etl_module, "datasets", None)
     with pytest.raises(DependencyMissingError):

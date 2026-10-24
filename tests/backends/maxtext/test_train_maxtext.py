@@ -51,14 +51,16 @@ def test_real_maxtext_loss_and_train_step() -> None:
         "targets": jnp.array([[2, 3, 4]], dtype=jnp.int32),
     }
 
-    loss = train_module._loss_fn(model, params, batch)  # type: ignore[arg-type]
+    model_any: Any = model
+    params_any: Any = params
+    loss = train_module._loss_fn(model_any, params_any, batch)
     assert float(loss) > 0.0
 
     optimizer = optax.adamw(1e-2)
     opt_state = optimizer.init(params)
-    step_fn = train_module._get_train_step_fn(model, optimizer)  # type: ignore[arg-type]
+    step_fn = train_module._get_train_step_fn(model_any, optimizer)
 
-    state = TrainerState(
+    state: Any = TrainerState(
         dataloader=[batch],
         epochs=1,
         train_step=step_fn,
@@ -100,17 +102,19 @@ def test_save_maxtext_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(train_module, "ocp", mock_ocp)
 
     ckpt_dir = tmp_path / "ckpt"
-    res = train_module.save_maxtext_checkpoint(ckpt_dir, 1, {"p": 1}, {"s": 1})  # type: ignore[arg-type]
+    p_stub: Any = {"p": 1}
+    s_stub: Any = {"s": 1}
+    res = train_module.save_maxtext_checkpoint(ckpt_dir, 1, p_stub, s_stub)
     assert res == ckpt_dir.resolve()
     mock_ocp.CheckpointManager.assert_called_once()
 
     mock_ocp.CheckpointManager.side_effect = RuntimeError("error")
     with pytest.raises(ExportError, match="Failed to persist Orbax checkpoint"):
-        train_module.save_maxtext_checkpoint(ckpt_dir, 1, {"p": 1})  # type: ignore[arg-type]
+        train_module.save_maxtext_checkpoint(ckpt_dir, 1, p_stub)
 
     monkeypatch.setattr(train_module, "ocp", None)
     with pytest.raises(DependencyMissingError, match="Orbax checkpoint dependency"):
-        train_module.save_maxtext_checkpoint(ckpt_dir, 1, {"p": 1})  # type: ignore[arg-type]
+        train_module.save_maxtext_checkpoint(ckpt_dir, 1, p_stub)
 
 
 def test_execute_train_local_and_distributed(monkeypatch: pytest.MonkeyPatch) -> None:

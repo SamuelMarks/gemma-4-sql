@@ -33,7 +33,8 @@ class Gemma4AudioFeatureExtractor(nn.Module):
         hidden_states = self.conv2(hidden_states)
         hidden_states = self.activation(hidden_states)
 
-        return hidden_states.transpose(1, 2)
+        res: torch.Tensor = hidden_states.transpose(1, 2)
+        return res
 
 
 class Gemma4AudioEncoderBlock(nn.Module):
@@ -78,6 +79,6 @@ class Gemma4AudioEncoderBlock(nn.Module):
         residual = hidden_states
         hidden_states = self.layer_norm2(hidden_states)
         mlp_output = self.mlp(hidden_states)
-        hidden_states = residual + mlp_output
+        out: torch.Tensor = residual + mlp_output
 
-        return hidden_states
+        return out

@@ -1,5 +1,6 @@
 """Tests for common benchmark utilities."""
 
+from typing import Never
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +13,7 @@ from gemma_4_sql.backends.common_benchmark import (
 from gemma_4_sql.exceptions import DependencyMissingError
 
 
-def test_get_current_rss_mb_psutil():
+def test_get_current_rss_mb_psutil() -> None:
     """Test get_current_rss_mb with psutil."""
     mock_psutil = MagicMock()
     mock_process = MagicMock()
@@ -25,7 +26,7 @@ def test_get_current_rss_mb_psutil():
         assert get_current_rss_mb() == 1.0
 
 
-def test_get_current_rss_mb_fallback_darwin(monkeypatch: pytest.MonkeyPatch):
+def test_get_current_rss_mb_fallback_darwin(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test get_current_rss_mb fallback on darwin."""
     with patch.dict("sys.modules", {"psutil": None}), patch("sys.platform", "darwin"):
         mock_resource = MagicMock()
@@ -36,7 +37,7 @@ def test_get_current_rss_mb_fallback_darwin(monkeypatch: pytest.MonkeyPatch):
             assert get_current_rss_mb() == 2.0
 
 
-def test_get_current_rss_mb_fallback_linux(monkeypatch: pytest.MonkeyPatch):
+def test_get_current_rss_mb_fallback_linux(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test get_current_rss_mb fallback on linux."""
     with patch.dict("sys.modules", {"psutil": None}), patch("sys.platform", "linux"):
         mock_resource = MagicMock()
@@ -47,7 +48,7 @@ def test_get_current_rss_mb_fallback_linux(monkeypatch: pytest.MonkeyPatch):
             assert get_current_rss_mb() == 3.0
 
 
-def test_compute_latency_statistics_empty():
+def test_compute_latency_statistics_empty() -> None:
     """Test compute_latency_statistics with empty list."""
     stats = compute_latency_statistics([])
     assert stats["mean_ms"] == 0.0
@@ -58,7 +59,7 @@ def test_compute_latency_statistics_empty():
     assert stats["max_ms"] == 0.0
 
 
-def test_compute_latency_statistics():
+def test_compute_latency_statistics() -> None:
     """Test compute_latency_statistics."""
     latencies = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
     stats = compute_latency_statistics(latencies)
@@ -70,23 +71,23 @@ def test_compute_latency_statistics():
     assert stats["p99_ms"] == 100.0
 
 
-def test_run_benchmark_wrapper_missing_deps():
+def test_run_benchmark_wrapper_missing_deps() -> None:
     """Test run_benchmark_wrapper with missing dependencies."""
     res = run_benchmark_wrapper("test_backend", "model", "cpu", 1, True, lambda: (0, 0, 0))
     assert res["status"] == "backend_unavailable"
     assert res["tokens_per_sec"] == 0.0
 
 
-def test_run_benchmark_wrapper_missing_deps_raise():
+def test_run_benchmark_wrapper_missing_deps_raise() -> None:
     """Test run_benchmark_wrapper with missing dependencies and raise_if_missing."""
-    with pytest.raises(DependencyMissingError, match="Dependencies for test_backend benchmarking on cpu are missing."):
+    with pytest.raises(DependencyMissingError, match=r"Dependencies for test_backend benchmarking on cpu are missing\."):
         run_benchmark_wrapper("test_backend", "model", "cpu", 1, True, lambda: (0, 0, 0), raise_if_missing=True)
 
 
-def test_run_benchmark_wrapper_success():
+def test_run_benchmark_wrapper_success() -> None:
     """Test run_benchmark_wrapper success."""
 
-    def mock_benchmark():
+    def mock_benchmark() -> tuple[float, float, float]:
         """Provide mock benchmark test helper."""
         return (10.0, 50.0, 100.0)
 
@@ -102,10 +103,10 @@ def test_run_benchmark_wrapper_success():
     assert res["latency_stats"]["mean_ms"] == 15.0
 
 
-def test_run_benchmark_wrapper_failure():
+def test_run_benchmark_wrapper_failure() -> None:
     """Test run_benchmark_wrapper failure."""
 
-    def mock_benchmark():
+    def mock_benchmark() -> Never:
         """Provide mock benchmark test helper."""
         raise RuntimeError("Benchmark error")
 

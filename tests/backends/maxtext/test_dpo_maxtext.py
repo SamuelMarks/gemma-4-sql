@@ -52,18 +52,21 @@ def test_real_maxtext_dpo_logps_loss_and_train_step() -> None:
         "rejected_labels": jnp.array([[4, 5, 0]], dtype=jnp.int32),
     }
 
-    logps: Any = _compute_logps(model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore[arg-type]
+    model_any: Any = model
+    pp_any: Any = policy_params
+    rp_any: Any = ref_params
+    logps: Any = _compute_logps(model_any, pp_any, batch["chosen_inputs"], batch["chosen_labels"])
     assert logps.shape == (1,)
     assert float(logps[0]) < 0.0
 
-    step_loss = _dpo_step_loss(model, policy_params, model, ref_params, batch, 0.1)  # type: ignore[arg-type]
-    assert float(step_loss) > 0.0  # type: ignore[arg-type]
+    step_loss: Any = _dpo_step_loss(model_any, pp_any, model_any, rp_any, batch, 0.1)
+    assert float(step_loss) > 0.0
 
     optimizer = optax.adamw(1e-2)
     opt_state = optimizer.init(policy_params)
-    train_step = _get_train_step_fn(model, model, optimizer, 0.1)  # type: ignore[arg-type]
+    train_step = _get_train_step_fn(model_any, model_any, optimizer, 0.1)
 
-    state = TrainerState(
+    state: Any = TrainerState(
         dataloader=[batch],
         epochs=1,
         train_step=train_step,
@@ -87,14 +90,21 @@ def test_compute_logps_scalar_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 
     model = MagicMock()
     model.apply.return_value = 5
-    res = _compute_logps(model, {"p": 1}, 2, 3)  # type: ignore[arg-type]
+    p_stub: Any = {"p": 1}
+    i_stub: Any = 2
+    l_stub: Any = 3
+    res = _compute_logps(model, p_stub, i_stub, l_stub)
     assert res == 10.0
 
 
 def test_dpo_loss_delegation() -> None:
     """Verify MaxText dpo_loss delegates to JAX dpo_loss."""
+    t1: Any = 1
+    t2: Any = 2
+    t3: Any = 3
+    t4: Any = 4
     with patch("gemma_4_sql.backends.maxtext.dpo.jax_dpo_loss", return_value=(1.0, 2.0, 3.0)) as mock_jax_dpo:
-        res = dpo_loss(1, 2, 3, 4, 0.5)  # type: ignore[arg-type]
+        res = dpo_loss(t1, t2, t3, t4, 0.5)
         assert res == (1.0, 2.0, 3.0)
         mock_jax_dpo.assert_called_once_with(1, 2, 3, 4, 0.5)
 
@@ -113,7 +123,9 @@ def test_get_train_step_fn_without_jit(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_optax.apply_updates.return_value = "new_policy_params"
     monkeypatch.setattr(mt_dpo, "optax", mock_optax)
 
-    train_step = _get_train_step_fn("pm", "rm", optimizer, 0.1)  # type: ignore[arg-type]
+    pm_stub: Any = "pm"
+    rm_stub: Any = "rm"
+    train_step = _get_train_step_fn(pm_stub, rm_stub, optimizer, 0.1)
     with patch("gemma_4_sql.backends.maxtext.dpo._dpo_step_loss", return_value=0.5):
         policy_params, opt_state, loss = train_step("pp", "rp", "os", "batch")
     assert policy_params == "new_policy_params"
@@ -128,7 +140,7 @@ def test_run_training_epochs_float_loss() -> None:
         """Return updated state tuple with float scalar loss."""
         return pp, os, 0.5
 
-    state = TrainerState(dataloader=[{"b": 1}], epochs=1, train_step=mock_train_step, policy_params="pp", ref_params="rp", opt_state="os")
+    state: Any = TrainerState(dataloader=[{"b": 1}], epochs=1, train_step=mock_train_step, policy_params="pp", ref_params="rp", opt_state="os")
     _pp, _os, loss = _run_training_epochs(state)
     assert loss == 0.5
 
@@ -179,5 +191,5 @@ def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
             run_dpo(config, raise_on_error=True)
 
     monkeypatch.setattr(mt_dpo, "jax", None)
-    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"MaxText dependencies are missing\."):
         run_dpo(config)

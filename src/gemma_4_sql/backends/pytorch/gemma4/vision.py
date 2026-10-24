@@ -45,7 +45,8 @@ class Gemma4VisionEmbeddings(nn.Module):
         positions = torch.arange(self.num_patches, device=pixel_values.device).unsqueeze(0).expand(batch_size, -1)
         position_embeds = self.position_embedding(positions)
 
-        return patch_embeds + position_embeds
+        res: torch.Tensor = patch_embeds + position_embeds
+        return res
 
 
 class Gemma4VisionAttention(nn.Module):
@@ -77,7 +78,8 @@ class Gemma4VisionAttention(nn.Module):
         attn_output = nn.functional.scaled_dot_product_attention(q, k, v)
 
         attn_output = attn_output.transpose(1, 2).contiguous().view(bsz, seq_len, self.hidden_size)
-        return self.o_proj(attn_output)
+        res: torch.Tensor = self.o_proj(attn_output)
+        return res
 
 
 class Gemma4VisionEncoderLayer(nn.Module):
@@ -111,9 +113,9 @@ class Gemma4VisionEncoderLayer(nn.Module):
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.mlp(hidden_states)
-        hidden_states = residual + hidden_states
+        out: torch.Tensor = residual + hidden_states
 
-        return hidden_states
+        return out
 
 
 class Gemma4VisionModel(nn.Module):
@@ -139,4 +141,5 @@ class Gemma4VisionModel(nn.Module):
         for layer in self.layers:
             hidden_states = layer(hidden_states)
 
-        return self.post_layernorm(hidden_states)
+        res: torch.Tensor = self.post_layernorm(hidden_states)
+        return res

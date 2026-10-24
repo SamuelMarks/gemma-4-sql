@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from tests.conftest import requires_torch
-
-pytestmark = requires_torch
-
 from collections import UserDict
 from pathlib import Path
 from typing import Any
@@ -15,61 +11,26 @@ import torch
 
 from gemma_4_sql.backends.pytorch.inference import generate_sql
 from gemma_4_sql.tokenization import SQLTokenizer
+from tests.conftest import MockPILImage, requires_torch
+
+pytestmark = requires_torch
 
 
-def test_pytorch_etl_multimodal_extraction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pytorch_etl_multimodal_extraction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_image_bytes: bytes,
+    synthetic_wav_bytes: bytes,
+) -> None:
     """Test PyTorch dataset extraction of image and audio items."""
     from gemma_4_sql.backends.pytorch import etl
 
-    _get_pytorch_classes = etl._get_pytorch_classes
-
-    class _MockOpenedImage:
-        """Mock opened PIL image."""
-
-        def __enter__(self):
-            """Enter context manager."""
-            return self
-
-        def __exit__(self, *args: object):
-            """Exit context manager."""
-
-        def convert(self, mode: Any):
-            """Convert image mode."""
-            return self
-
-        def resize(self, size: Any, resample: Any):
-            """Resize image."""
-            return self
-
-        def getpixel(self, coords: Any):
-            """Get pixel RGB tuple."""
-            return (255, 0, 0)
-
-        def __array__(self, *args: Any, **kwargs: Any):
-            """Return numpy array representation."""
-            import numpy as np
-
-            return np.zeros((224, 224, 3), dtype=np.float32)
-
-    class _MockPILImage:
-        """Mock PIL Image module."""
-
-        class Resampling:
-            """Mock PIL Resampling constants."""
-
-            BILINEAR = 2
-
-        @staticmethod
-        def open(buf: Any):
-            """Open mock image from buffer."""
-            return _MockOpenedImage()
-
-    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.Image", MockPILImage)
 
     dummy_img = tmp_path / "diagram.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
+    dummy_img.write_bytes(synthetic_image_bytes)
     dummy_audio = tmp_path / "query.wav"
-    dummy_audio.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+    dummy_audio.write_bytes(synthetic_wav_bytes)
 
     mock_records = [
         {
@@ -85,7 +46,7 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path, monkeypatch: pytest.M
     ]
 
     tokenizer = SQLTokenizer(model_name=None)
-    pt_dataset_cls = _get_pytorch_classes()
+    pt_dataset_cls = etl._get_pytorch_classes()
     ds = pt_dataset_cls(list(mock_records), tokenizer)
 
     assert len(ds) == 2
@@ -97,7 +58,6 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path, monkeypatch: pytest.M
     assert isinstance(item0["pixel_values"], torch.Tensor)
     assert isinstance(item0["audio_values"], torch.Tensor)
 
-    # Item without multimodal attachments
     item1 = ds[1]
     assert "inputs" in item1
     assert "pixel_values" not in item1
@@ -105,19 +65,8 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_pytorch_collate_multimodal() -> None:
-    """Verify pytorch collate multimodal behavior."""
-    import importlib
-
-    from gemma_4_sql.backends.pytorch import etl
-
-    importlib.reload(etl)
-    _collate_fn = etl._collate_fn
-
-    import torch
-
-    etl.torch = torch
     """Test _collate_fn stacking pixel and audio tensors when present in batch."""
-    import torch
+    from gemma_4_sql.backends.pytorch.etl import _collate_fn
 
     batch: list[dict[str, Any]] = [
         {
@@ -137,62 +86,23 @@ def test_pytorch_collate_multimodal() -> None:
     collated = _collate_fn(batch)
     assert collated["inputs"].shape == (2, 3)
     assert collated["targets"].shape == (2, 2)
-    assert "pixel_values" in collated
     assert collated["pixel_values"].shape == (2, 3, 224, 224)
-    assert "audio_values" in collated
     assert collated["audio_values"].shape == (2, 1600)
 
 
-def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pytorch_inference_multimodal_native(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_image_bytes: bytes,
+    synthetic_wav_bytes: bytes,
+) -> None:
     """Test PyTorch native inference accepting multimodal image and audio tensors."""
-
-    class _MockOpenedImage:
-        """Mock opened PIL image."""
-
-        def __enter__(self):
-            """Enter context manager."""
-            return self
-
-        def __exit__(self, *args: object):
-            """Exit context manager."""
-
-        def convert(self, mode: Any):
-            """Convert image mode."""
-            return self
-
-        def resize(self, size: Any, resample: Any):
-            """Resize image."""
-            return self
-
-        def getpixel(self, coords: Any):
-            """Get pixel RGB tuple."""
-            return (255, 0, 0)
-
-        def __array__(self, *args: Any, **kwargs: Any):
-            """Return numpy array representation."""
-            import numpy as np
-
-            return np.zeros((224, 224, 3), dtype=np.float32)
-
-    class _MockPILImage:
-        """Mock PIL Image module."""
-
-        class Resampling:
-            """Mock PIL Resampling constants."""
-
-            BILINEAR = 2
-
-        @staticmethod
-        def open(buf: Any):
-            """Open mock image from buffer."""
-            return _MockOpenedImage()
-
-    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.Image", MockPILImage)
 
     dummy_img = tmp_path / "schema.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
+    dummy_img.write_bytes(synthetic_image_bytes)
     dummy_wav = tmp_path / "voice.wav"
-    dummy_wav.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00")
+    dummy_wav.write_bytes(synthetic_wav_bytes)
 
     passed_kwargs: dict[str, Any] = {}
 
@@ -203,16 +113,19 @@ def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest
             """Set eval mode."""
 
         @classmethod
-        def from_pretrained(cls, *args: Any, **kwargs: Any) -> MockNativeModel:
+        def from_pretrained(cls, *_args: Any, **_kwargs: Any) -> MockNativeModel:
             """Instantiate mock model."""
             return cls()
 
         def generate(self, input_ids: torch.Tensor, **kwargs: Any) -> torch.Tensor:
             """Simulate generation and capture kwargs."""
             passed_kwargs.update(kwargs)
-            # Return input_ids followed by generated token IDs [10, 20, 30]
-            gen = torch.tensor([[10, 20, 30]], dtype=torch.long)
+            gen = torch.tensor([[65, 66, 67]], dtype=torch.long)
             return torch.cat([input_ids, gen], dim=-1)
+
+        def __call__(self, input_ids: torch.Tensor) -> torch.Tensor:
+            """Return vocabulary logits for confidence score computation."""
+            return torch.ones((1, input_ids.shape[-1], 256), dtype=torch.float32)
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM", MockNativeModel)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", None)
@@ -222,128 +135,95 @@ def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest
         "List all customers",
         backend_alias="pytorch_native",
         image_path=str(dummy_img),
-        modality="vision",
+        audio_path=str(dummy_wav),
+        modality="multimodal",
     )
     assert res["status"] == "success"
-    assert "pixel_values" in passed_kwargs
-
     assert isinstance(passed_kwargs["pixel_values"], torch.Tensor)
+    assert isinstance(passed_kwargs["audio_values"], torch.Tensor)
+    assert 0.0 < res["confidence_score"] <= 1.0
 
 
-def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pytorch_inference_multimodal_hf(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    synthetic_image_bytes: bytes,
+    synthetic_wav_bytes: bytes,
+) -> None:
     """Test PyTorch Hugging Face inference forwarding multimodal tensors to generate."""
-
-    class _MockOpenedImage:
-        """Mock opened PIL image."""
-
-        def __enter__(self):
-            """Enter context manager."""
-            return self
-
-        def __exit__(self, *args: object):
-            """Exit context manager."""
-
-        def convert(self, mode: Any):
-            """Convert image mode."""
-            return self
-
-        def resize(self, size: Any, resample: Any):
-            """Resize image."""
-            return self
-
-        def getpixel(self, coords: Any):
-            """Get pixel RGB tuple."""
-            return (255, 0, 0)
-
-        def __array__(self, *args: Any, **kwargs: Any):
-            """Return numpy array representation."""
-            import numpy as np
-
-            return np.zeros((224, 224, 3), dtype=np.float32)
-
-    class _MockPILImage:
-        """Mock PIL Image module."""
-
-        class Resampling:
-            """Mock PIL Resampling constants."""
-
-            BILINEAR = 2
-
-        @staticmethod
-        def open(buf: Any):
-            """Open mock image from buffer."""
-            return _MockOpenedImage()
-
-    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.Image", _MockPILImage)
+    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.Image", MockPILImage)
 
     dummy_img = tmp_path / "schema.png"
-    dummy_img.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82")
+    dummy_img.write_bytes(synthetic_image_bytes)
+    dummy_wav = tmp_path / "voice.wav"
+    dummy_wav.write_bytes(synthetic_wav_bytes)
 
-    passed_extra: dict[str, Any] = {}
+    class MockTokOut(UserDict[str, Any]):
+        """Mock tokenizer output supporting .to() and .input_ids."""
+
+        def __init__(self) -> None:
+            """Initialize MockTokOut."""
+            super().__init__({"input_ids": torch.tensor([[1, 2, 3]], dtype=torch.long)})
+            self.input_ids = self["input_ids"]
+
+        def to(self, _device: Any) -> MockTokOut:
+            """Return self."""
+            return self
+
+    class MockTokenizer:
+        """Mock AutoTokenizer."""
+
+        @classmethod
+        def from_pretrained(cls, _name: str) -> MockTokenizer:
+            """Return MockTokenizer."""
+            return cls()
+
+        def __call__(self, _prompt: str, return_tensors: str = "pt") -> MockTokOut:
+            """Tokenize prompt."""
+            _ = return_tensors
+            return MockTokOut()
+
+        def decode(self, _ids: Any, skip_special_tokens: bool = True) -> str:
+            """Decode token IDs."""
+            _ = skip_special_tokens
+            return "SELECT * FROM customers;"
+
+    captured_gen_kwargs: dict[str, Any] = {}
 
     class MockHFModel:
-        """Mock Hugging Face model."""
+        """Mock HuggingFace AutoModelForCausalLM."""
 
         device = "cpu"
 
         @classmethod
-        def from_pretrained(cls, *args: Any, **kwargs: Any) -> MockHFModel:
-            """Instantiate mock model."""
+        def from_pretrained(cls, _name: str, **_kwargs: Any) -> MockHFModel:
+            """Return MockHFModel."""
             return cls()
 
         def generate(self, **kwargs: Any) -> Any:
-            """Capture generate call."""
-            passed_extra.update(kwargs)
+            """Record kwargs and return sequences and scores."""
+            captured_gen_kwargs.update(kwargs)
 
-            class MockOutput:
-                """Test stub for `MockOutput`."""
+            class GenOut:
+                """Mock generation output."""
 
-                def __init__(self) -> None:
-                    """Initialize test stub instance."""
-                    self.sequences = torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long)
-                    self.sequences_scores = [torch.tensor(0.9)]
+                sequences = torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long)
+                scores = (torch.ones((1, 10)), torch.ones((1, 10)))
 
-            return MockOutput()
+            return GenOut()
 
-    class MockHFTokenizer:
-        """Mock Hugging Face tokenizer."""
-
-        @classmethod
-        def from_pretrained(cls, *args: Any, **kwargs: Any) -> MockHFTokenizer:
-            """Instantiate mock tokenizer."""
-            return cls()
-
-        def __call__(self, text: str, **kwargs: Any) -> Any:
-            """Simulate tokenization."""
-
-            class MockInputs(UserDict[str, Any]):
-                """Test stub for `MockInputs`."""
-
-                def __init__(self) -> None:
-                    """Initialize test stub instance."""
-                    super().__init__({"input_ids": torch.tensor([[1, 2]], dtype=torch.long)})
-                    self.input_ids = self["input_ids"]
-
-                def to(self, device: Any) -> MockInputs:
-                    """Provide to test helper."""
-                    return self
-
-            return MockInputs()
-
-        def decode(self, tokens: Any, **kwargs: Any) -> str:
-            """Simulate decoding."""
-            return "SELECT * FROM hf_table"
-
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockTokenizer)
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoModelForCausalLM", MockHFModel)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockHFTokenizer)
 
     res = generate_sql(
-        "mock-hf-model",
-        "Select records",
+        "gemma-4",
+        "List all customers",
         backend_alias="pytorch",
         image_path=str(dummy_img),
-        modality="vision",
+        audio_path=str(dummy_wav),
+        modality="multimodal",
     )
     assert res["status"] == "success"
-    assert res["sql"] == "SELECT * FROM hf_table"
-    assert "pixel_values" in passed_extra
+    assert res["sql"] == "SELECT * FROM customers;"
+    assert "pixel_values" in captured_gen_kwargs
+    assert "audio_values" in captured_gen_kwargs

@@ -134,6 +134,18 @@ class TrainingProtocol(Protocol):
         """
         ...
 
+    def get_trainer(self, **_kwargs: object) -> str:
+        """Return the canonical trainer identifier for this backend.
+
+        Args:
+            **_kwargs: Optional backend-specific keyword arguments.
+
+        Returns:
+            Trainer identifier string (e.g., `'jax_trainer'`).
+
+        """
+        ...
+
 
 @runtime_checkable
 class InferenceProtocol(Protocol):
@@ -188,7 +200,7 @@ class InferenceProtocol(Protocol):
         model_name: str,
         hardware: str = "tpu-v5p",
         batch_size: int = 32,
-        **kwargs: object,
+        **kwargs: JSONValue,
     ) -> BenchmarkResultDict:
         """Run latency, throughput, and memory benchmarking.
 

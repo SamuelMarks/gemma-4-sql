@@ -8,6 +8,7 @@ from gemma_4_sql.backends.common_data import (
     load_duckdb_dataset,
     load_hf_or_duckdb_dataset,
     pad_token_batch,
+    tokenize_dataset_element,
 )
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
@@ -49,10 +50,9 @@ class MLXDataLoader:
         batch_inputs: list[list[int]] = []
         batch_targets: list[list[int]] = []
         for item in self.ds:
-            prompt = str(item.get("sql_prompt", item.get("question", "")))
-            target = str(item.get("sql", item.get("query", "")))
-            batch_inputs.append(self.tok.encode(prompt))
-            batch_targets.append(self.tok.encode(target))
+            tokenized = tokenize_dataset_element(item, self.tok, process_multimodal=False)
+            batch_inputs.append(tokenized["inputs"])
+            batch_targets.append(tokenized["targets"])
             if len(batch_inputs) == self.bs:
                 yield _pad_batch(batch_inputs, batch_targets)
                 batch_inputs = []

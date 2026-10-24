@@ -1,6 +1,6 @@
 """Real Keras serve tests."""
 
-from typing import Any
+from typing import Any, Never
 
 import pytest
 
@@ -43,7 +43,7 @@ def test_serve_keras_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.keras.serve as srv
 
     monkeypatch.setattr(srv, "keras", None)
-    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing for serve."):
+    with pytest.raises(DependencyMissingError, match=r"Keras dependencies are missing for serve\."):
         serve_model("model")
 
 
@@ -67,7 +67,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         app.batch_generate = kwargs["batch_generate_logic"]
         return app
 
-    monkeypatch.setattr(srv, "create_common_app", mock_create_common_app)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.create_common_app", mock_create_common_app)
 
     monkeypatch.setattr(srv, "GemmaCausalLM", None)
     monkeypatch.setattr(srv, "optional_attr", lambda *_a, **_k: None)
@@ -80,7 +80,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockModel:
         """Test stub for `MockModel`."""
 
-        def generate(self, prompt: Any, **kwargs: Any):
+        def generate(self, prompt: Any, **_kwargs: Any) -> Any:
             """Provide generate test helper."""
             if isinstance(prompt, list):
                 return [f"BATCH_{p}" for p in prompt]
@@ -90,7 +90,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `DummyPreset`."""
 
         @classmethod
-        def from_preset(cls, model_name: Any):
+        def from_preset(cls, model_name: Any) -> MockModel:
             """Provide from preset test helper."""
             return MockModel()
 
@@ -107,7 +107,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockModelFail:
         """Test stub for `MockModelFail`."""
 
-        def generate(self, prompt: Any, **kwargs: Any):
+        def generate(self, prompt: Any, **kwargs: Any) -> Never:
             """Provide generate test helper."""
             raise ValueError("fail")
 
@@ -115,7 +115,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `DummyPresetFail`."""
 
         @classmethod
-        def from_preset(cls, model_name: Any):
+        def from_preset(cls, model_name: Any) -> MockModelFail:
             """Provide from preset test helper."""
             return MockModelFail()
 
@@ -133,7 +133,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockBatchModelFail:
         """Test stub for `MockBatchModelFail`."""
 
-        def generate(self, prompt: Any, **kwargs: Any):
+        def generate(self, prompt: Any, **kwargs: Any) -> str:
             """Provide generate test helper."""
             if isinstance(prompt, list):
                 raise TypeError("batch fail")
@@ -143,7 +143,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `DummyPresetBatchFail`."""
 
         @classmethod
-        def from_preset(cls, model_name: Any):
+        def from_preset(cls, model_name: Any) -> MockBatchModelFail:
             """Provide from preset test helper."""
             return MockBatchModelFail()
 
@@ -160,9 +160,11 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(InferenceError, match="empty SQL"):
         app.generate("prompt")
+    with pytest.raises(InferenceError, match="empty SQL"):
+        app.batch_generate(["prompt"])
 
     # Test generic fallback output error
-    def gen_err(**kwargs: Any):
+    def gen_err(**kwargs: Any) -> Never:
         """Provide gen err test helper."""
         raise OSError("other err")
 

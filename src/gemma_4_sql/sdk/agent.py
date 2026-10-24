@@ -6,7 +6,7 @@ import asyncio
 import concurrent.futures
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, overload
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import is_failed_status
@@ -85,6 +85,62 @@ def _classify_error_hint(error_msg: str | None) -> str:
     return ""
 
 
+def _prepare_attempt_kwargs(
+    context: AgentContext,
+    attempts: int,
+    gen_kwargs: dict[str, JSONValue],
+) -> tuple[int, int, dict[str, Any]]:
+    """Build generation parameters for the current self-correction attempt.
+
+    Args:
+        context: AgentContext containing multimodal and confidence settings.
+        attempts: 1-based attempt counter.
+        gen_kwargs: Base generation keyword arguments.
+
+    Returns:
+        Tuple of `(beam_width, max_length, extra_generation_kwargs)`.
+
+    """
+    b_width = int(str(gen_kwargs.get("beam_width", 3)))
+    m_len = int(str(gen_kwargs.get("max_length", 50)))
+    base_temp = float(str(gen_kwargs.get("temperature", 0.0)))
+    current_temp = min(1.0, base_temp + (attempts - 1) * 0.1)
+
+    other_kwargs: dict[str, Any] = {k: v for k, v in gen_kwargs.items() if k not in ("beam_width", "max_length", "temperature")}
+    other_kwargs["temperature"] = current_temp
+    if context.image_path is not None:
+        other_kwargs["image_path"] = str(context.image_path)
+    if context.audio_path is not None:
+        other_kwargs["audio_path"] = str(context.audio_path)
+    other_kwargs["modality"] = context.modality
+    if context.multimodal_context is not None:
+        other_kwargs["multimodal_context"] = context.multimodal_context
+    return (b_width, m_len, other_kwargs)
+
+
+def _format_base_prompt(prompt: str, context: AgentContext) -> str:
+    """Format prompt with multimodal placeholders when image or audio paths are present.
+
+    Args:
+        prompt: Raw natural language query string.
+        context: AgentContext with optional image/audio paths.
+
+    Returns:
+        Formatted base prompt string.
+
+    """
+    if context.image_path or context.audio_path:
+        from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
+
+        mm = format_multimodal_prompt(
+            prompt,
+            has_image=context.image_path is not None,
+            has_audio=context.audio_path is not None,
+        )
+        return str(mm.get("prompt", prompt))
+    return prompt
+
+
 async def _process_single_prompt(
     backend_name: str,
     backend_impl: BackendProtocol,
@@ -109,18 +165,7 @@ async def _process_single_prompt(
         Result dictionary containing `final_sql`, `history`, and `status`.
 
     """
-    if context.image_path or context.audio_path:
-        from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
-
-        mm = format_multimodal_prompt(
-            prompt,
-            has_image=context.image_path is not None,
-            has_audio=context.audio_path is not None,
-        )
-        base_prompt = str(mm.get("prompt", prompt))
-    else:
-        base_prompt = prompt
-
+    base_prompt = _format_base_prompt(prompt, context)
     current_prompt = base_prompt
     attempts = 0
     success = False
@@ -129,21 +174,7 @@ async def _process_single_prompt(
     history: list[AgentAttemptDict] = []
     while attempts < context.max_retries:
         attempts += 1
-        b_width = int(str(gen_kwargs.get("beam_width", 3)))
-        m_len = int(str(gen_kwargs.get("max_length", 50)))
-        base_temp = float(str(gen_kwargs.get("temperature", 0.0)))
-        current_temp = min(1.0, base_temp + (attempts - 1) * 0.1)
-
-        other_kwargs = {k: v for k, v in gen_kwargs.items() if k not in ("beam_width", "max_length", "temperature")}
-        other_kwargs["temperature"] = current_temp
-        if context.image_path is not None:
-            other_kwargs["image_path"] = str(context.image_path)
-        if context.audio_path is not None:
-            other_kwargs["audio_path"] = str(context.audio_path)
-        other_kwargs["modality"] = context.modality
-        if context.multimodal_context is not None:
-            other_kwargs["multimodal_context"] = context.multimodal_context
-
+        (b_width, m_len, other_kwargs) = _prepare_attempt_kwargs(context, attempts, gen_kwargs)
         gen_res = backend_impl.generate_sql(model_name, current_prompt, beam_width=b_width, max_length=m_len, **other_kwargs)
         sql = _extract_sql_from_response(str(gen_res.get("sql", ""))) if not is_failed_status(gen_res) else ""
         confidence_score = float(str(gen_res.get("confidence_score", 1.0)))
@@ -186,6 +217,39 @@ Please fix the SQL query."""
     }
 
 
+@overload
+async def run_agentic_loop_async(
+    model_name: str,
+    prompt: str,
+    backend: str = DEFAULT_BACKEND,
+    context: AgentContext | None = None,
+    **kwargs: JSONValue,
+) -> AgentLoopResultDict:
+    """Asynchronously run an agentic self-correction loop for a single prompt."""
+
+
+@overload
+async def run_agentic_loop_async(
+    model_name: str,
+    prompt: list[str],
+    backend: str = DEFAULT_BACKEND,
+    context: AgentContext | None = None,
+    **kwargs: JSONValue,
+) -> list[AgentLoopResultDict]:
+    """Asynchronously run an agentic self-correction loop for a batch of prompts."""
+
+
+@overload
+async def run_agentic_loop_async(
+    model_name: str,
+    prompt: str | list[str],
+    backend: str = DEFAULT_BACKEND,
+    context: AgentContext | None = None,
+    **kwargs: JSONValue,
+) -> AgentLoopResultDict | list[AgentLoopResultDict]:
+    """Asynchronously run an agentic self-correction loop for a prompt or prompt list."""
+
+
 async def run_agentic_loop_async(
     model_name: str,
     prompt: str | list[str],
@@ -219,6 +283,39 @@ async def run_agentic_loop_async(
     finally:
         await engine.close_async()
     return results if isinstance(prompt, list) else results[0]
+
+
+@overload
+def run_agentic_loop(
+    model_name: str,
+    prompt: str,
+    backend: str = DEFAULT_BACKEND,
+    context: AgentContext | None = None,
+    **kwargs: JSONValue,
+) -> AgentLoopResultDict:
+    """Run an agentic self-correction loop synchronously for a single prompt."""
+
+
+@overload
+def run_agentic_loop(
+    model_name: str,
+    prompt: list[str],
+    backend: str = DEFAULT_BACKEND,
+    context: AgentContext | None = None,
+    **kwargs: JSONValue,
+) -> list[AgentLoopResultDict]:
+    """Run an agentic self-correction loop synchronously for a batch of prompts."""
+
+
+@overload
+def run_agentic_loop(
+    model_name: str,
+    prompt: str | list[str],
+    backend: str = DEFAULT_BACKEND,
+    context: AgentContext | None = None,
+    **kwargs: JSONValue,
+) -> AgentLoopResultDict | list[AgentLoopResultDict]:
+    """Run an agentic self-correction loop synchronously for a prompt or prompt list."""
 
 
 def run_agentic_loop(

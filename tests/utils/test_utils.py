@@ -68,7 +68,7 @@ class FakeDBCursor:
         self.connection = connection
         self.arraysize = 1
         self.rowcount = -1
-        self.description = None
+        self.description: Any = None
         self._results: list[Any] = []
         self._closed = False
 
@@ -86,9 +86,9 @@ class FakeDBCursor:
             Exception: If the query matches the failure trigger.
         """
         if self._closed:
-            raise Exception("Cursor closed")  # noqa: TRY002
+            raise RuntimeError("Cursor closed")
         if operation == self.connection._fail_query:
-            raise Exception("Simulated execution failure")  # noqa: TRY002
+            raise RuntimeError("Simulated execution failure")
         self._results = self.connection._results_queue.pop(0) if self.connection._results_queue else []
         self.rowcount = len(self._results)
         if self._results:
@@ -102,7 +102,7 @@ class FakeDBCursor:
             List of result rows.
         """
         if self._closed:
-            raise Exception("Cursor closed")  # noqa: TRY002
+            raise RuntimeError("Cursor closed")
         return self._results
 
     def close(self) -> None:
@@ -128,7 +128,7 @@ class FakeDBConnection:
             A FakeDBCursor instance.
         """
         if self._closed:
-            raise Exception("Connection closed")  # noqa: TRY002
+            raise RuntimeError("Connection closed")
         return FakeDBCursor(self)
 
     def commit(self) -> None:
@@ -213,16 +213,16 @@ def test_assert_tensors_close() -> None:
     class DummyTensor:
         """Dummy tensor for testing assert_tensors_close."""
 
-        def __init__(self, data: Any):
+        def __init__(self, data: Any) -> None:
             """Initialize DummyTensor."""
             self.data = data
             self.shape = (len(data),)
 
-        def flatten(self):
+        def flatten(self) -> DummyTensor:
             """Return flattened tensor."""
             return self
 
-        def tolist(self):
+        def tolist(self) -> Any:
             """Return tensor elements as list."""
             return self.data
 
@@ -234,7 +234,7 @@ def test_assert_tensors_close() -> None:
         assert_tensors_close(t1, t2, backend="unknown")
 
 
-def test_assert_tensors_close_jax():
+def test_assert_tensors_close_jax() -> None:
     """Test assert_tensors_close for jax/mlx backends."""
 
     from tests.utils.tensor_helpers import assert_tensors_close
@@ -242,11 +242,11 @@ def test_assert_tensors_close_jax():
     class MockTensor:
         """Mock tensor with __array__ protocol."""
 
-        def __init__(self, data: Any):
+        def __init__(self, data: Any) -> None:
             """Initialize MockTensor."""
             self.data = data
 
-        def __array__(self):
+        def __array__(self) -> Any:
             """Return numpy array representation."""
             import numpy as np
 

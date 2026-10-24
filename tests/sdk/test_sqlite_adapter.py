@@ -92,7 +92,13 @@ async def test_sqlite_adapter_extra_coverage() -> None:
     class SyncMockConn:
         """Mock connection with synchronous commit, rollback, and close methods."""
 
-        async def execute(self, q: str, p: tuple[object, ...]) -> Any:
+        def __init__(self) -> None:
+            """Initialize state counters."""
+            self.committed = 0
+            self.rolled_back = 0
+            self.closed = 0
+
+        async def execute(self, _q: str, _p: tuple[object, ...]) -> Any:
             """Return a cursor with synchronous close."""
 
             class SyncMockCursor:
@@ -105,21 +111,28 @@ async def test_sqlite_adapter_extra_coverage() -> None:
 
         def commit(self) -> None:
             """Commit transaction."""
+            self.committed += 1
 
         def rollback(self) -> None:
             """Rollback transaction."""
+            self.rolled_back += 1
 
         def close(self) -> None:
             """Close connection."""
+            self.closed += 1
 
-    with patch.object(adapter, "connect_async", return_value=SyncMockConn()):
-        await adapter.execute_with_feedback_async("INSERT")
-        await adapter.execute_query_async("INSERT")
+    sync_conn = SyncMockConn()
+    with patch.object(adapter, "connect_async", return_value=sync_conn):
+        ok_fb, rows_fb, err_fb = await adapter.execute_with_feedback_async("INSERT")
+        assert ok_fb is True and rows_fb == [] and err_fb is None
+        assert await adapter.execute_query_async("INSERT") == []
+        assert sync_conn.committed == 2
+        assert sync_conn.closed == 2
 
     class EmptyMockConn:
         """Mock connection without commit, rollback, or close attributes."""
 
-        async def execute(self, q: str, p: tuple[object, ...]) -> Any:
+        async def execute(self, _q: str, _p: tuple[object, ...]) -> Any:
             """Return a minimal cursor."""
 
             class EmptyMockCursor:
@@ -128,22 +141,26 @@ async def test_sqlite_adapter_extra_coverage() -> None:
             return EmptyMockCursor()
 
     with patch.object(adapter, "connect_async", return_value=EmptyMockConn()):
-        await adapter.execute_with_feedback_async("INSERT")
-        await adapter.execute_query_async("INSERT")
+        ok_em, rows_em, _ = await adapter.execute_with_feedback_async("INSERT")
+        assert ok_em is True and rows_em == []
+        assert await adapter.execute_query_async("INSERT") == []
 
     class ErrorSyncMockConn(SyncMockConn):
         """Mock connection whose execute raises RuntimeError with sync rollback."""
 
-        async def execute(self, q: str, p: tuple[object, ...]) -> Any:
+        async def execute(self, _q: str, _p: tuple[object, ...]) -> Any:
             """Raise RuntimeError."""
             msg = "Mock error"
             raise RuntimeError(msg)
 
-    with patch.object(adapter, "connect_async", return_value=ErrorSyncMockConn()):
+    err_sync_conn = ErrorSyncMockConn()
+    with patch.object(adapter, "connect_async", return_value=err_sync_conn):
         with pytest.raises(RuntimeError, match="Mock error"):
             await adapter.execute_with_feedback_async("INSERT")
         with pytest.raises(RuntimeError, match="Mock error"):
             await adapter.execute_query_async("INSERT")
+        assert err_sync_conn.rolled_back == 2
+        assert err_sync_conn.closed == 2
 
     class ErrorEmptyMockConn(EmptyMockConn):
         """Mock connection whose execute raises RuntimeError without rollback attribute."""
@@ -187,7 +204,7 @@ async def test_sqlite_adapter_extra_coverage() -> None:
     mock_conn.close = mock_close
     mock_cursor.close = mock_close
 
-    adapter.connect_async = AsyncMock(return_value=mock_conn)  # type: ignore[method-assign]
+    setattr(adapter, "connect_async", AsyncMock(return_value=mock_conn))
 
     suc, rows, _ = await adapter.execute_with_feedback_async("INSERT")
     assert suc is True

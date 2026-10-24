@@ -1,53 +1,40 @@
 """Unit and behavioral tests for logging jax."""
 
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
+import gemma_4_sql.backends.jax.logging as log_mod
+from gemma_4_sql.backends.jax.logging import log_metrics
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
 
-from gemma_4_sql.backends.jax.logging import log_metrics
 
+def test_log_metrics_behavioral(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Verify JAX log_metrics executes through log_metrics_wrapper with SummaryWriter and JSONL fallback."""
+    mock_writer_instance = MagicMock()
+    mock_writer_cls = MagicMock(return_value=mock_writer_instance)
+    monkeypatch.setattr(log_mod, "SummaryWriter", mock_writer_cls)
 
-def test_log_metrics():
-    """Verify log metrics behavior."""
-    with patch("gemma_4_sql.backends.jax.logging.log_metrics_wrapper") as mock_wrapper:
-        mock_wrapper.return_value = {"status": "success"}
+    log_dir = str(tmp_path / "jax_logs")
+    res = log_metrics({"loss": 0.5}, 10, log_dir)
+    assert res["backend"] == "jax"
+    assert res["action"] == "log_metrics"
+    assert res["status"] == "success"
+    assert res["step"] == 10
+    mock_writer_instance.add_scalar.assert_called_once_with("loss", 0.5, 10)
+    mock_writer_instance.close.assert_called_once()
 
-        res = log_metrics({"loss": 0.5}, 10, "mylogs")
-
-        assert res == {"status": "success"}
-        mock_wrapper.assert_called_once()
-        _args, kwargs = mock_wrapper.call_args
-        assert kwargs["backend_name"] == "jax"
-        assert kwargs["metrics"] == {"loss": 0.5}
-        assert kwargs["step"] == 10
-        assert kwargs["log_dir"] == "mylogs"
-        assert kwargs["extra_fields"] == {"action": "log_metrics"}
-
-
-def test_log_metrics_success_import(monkeypatch: pytest.MonkeyPatch):
-    """Verify log metrics success import behavior."""
-    mock_tbx = MagicMock()
-    mock_tbx.SummaryWriter = "MockWriter"
-    import sys
-
-    sys.modules["tensorboardX"] = mock_tbx
-
-    # Reload the module to trigger the try block
-    import importlib
-
-    import gemma_4_sql.backends.jax.logging as log_mod
-
-    importlib.reload(log_mod)
-
-    assert log_mod.SummaryWriter == "MockWriter"
-
-    with patch("gemma_4_sql.backends.jax.logging.log_metrics_wrapper") as mock_wrapper:
-        mock_wrapper.return_value = {"status": "success"}
-        res = log_mod.log_metrics({"loss": 0.5}, 10, "mylogs")
-        assert res == {"status": "success"}
-    del sys.modules["tensorboardX"]
-    importlib.reload(log_mod)
+    monkeypatch.setattr(log_mod, "SummaryWriter", None)
+    res_fb = log_metrics({"loss": 0.5}, 11, str(tmp_path / "jax_fb"))
+    assert res_fb["status"] == "backend_unavailable"
+    fb_path = Path(str(res_fb["fallback_file"]))
+    assert fb_path.exists()
+    record = json.loads(fb_path.read_text(encoding="utf-8").strip())
+    assert record["backend"] == "jax"
+    assert record["step"] == 11

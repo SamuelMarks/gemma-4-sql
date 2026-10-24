@@ -1,5 +1,6 @@
 """Tests for common_data.py"""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +13,7 @@ from gemma_4_sql.backends.common_data import (
 )
 
 
-def test_create_hf_data_source():
+def test_create_hf_data_source() -> None:
     """Test _create_hf_data_source."""
 
     class DummyBase:
@@ -29,7 +30,7 @@ def test_create_hf_data_source():
     assert ds[2] == 3
 
 
-def test_create_base_format_transform():
+def test_create_base_format_transform() -> None:
     """Test _create_base_format_transform."""
 
     class DummyBaseMap:
@@ -66,7 +67,7 @@ def test_create_base_format_transform():
         assert res_multi["audio_values"] == "audio"
 
 
-def test_get_grain_classes():
+def test_get_grain_classes() -> None:
     """Test get_grain_classes."""
     mock_module = MagicMock()
     mock_module.RandomAccessDataSource = int
@@ -83,7 +84,7 @@ def test_get_grain_classes():
     assert issubclass(MapTransform2, object)
 
 
-def test_load_duckdb_dataset_success():
+def test_load_duckdb_dataset_success() -> None:
     """Test load_duckdb_dataset success."""
     mock_duckdb = MagicMock()
     mock_conn = MagicMock()
@@ -99,7 +100,7 @@ def test_load_duckdb_dataset_success():
         mock_conn.close.assert_called_once()
 
 
-def test_load_duckdb_dataset_fallback_description():
+def test_load_duckdb_dataset_fallback_description() -> None:
     """Test load_duckdb_dataset fallback description."""
     mock_duckdb = MagicMock()
     mock_conn = MagicMock()
@@ -112,23 +113,23 @@ def test_load_duckdb_dataset_fallback_description():
         assert res == [{"col0": 1, "col1": "test"}]
 
 
-def test_load_duckdb_dataset_missing_module():
+def test_load_duckdb_dataset_missing_module() -> None:
     """Test load_duckdb_dataset missing module."""
     with patch("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", return_value=None), pytest.raises(RuntimeError, match="duckdb is required"):
         load_duckdb_dataset("test.db", "test_table")
 
 
-def test_load_duckdb_dataset_invalid_table():
+def test_load_duckdb_dataset_invalid_table() -> None:
     """Test load_duckdb_dataset invalid table."""
     mock_duckdb = MagicMock()
     with patch("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", return_value=mock_duckdb), pytest.raises(RuntimeError, match="DuckDB error: Invalid or unsafe table name:"):
         load_duckdb_dataset("test.db", "invalid table")
 
 
-def test_load_duckdb_dataset_exception():
+def test_load_duckdb_dataset_exception() -> None:
     """Test load_duckdb_dataset exception."""
     mock_duckdb = MagicMock()
-    mock_duckdb.connect.side_effect = Exception("duckdb error")
+    mock_duckdb.connect.side_effect = RuntimeError("duckdb error")
     with patch("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", return_value=mock_duckdb), pytest.raises(RuntimeError, match="DuckDB error"):
         load_duckdb_dataset("test.db", "test_table")
 
@@ -149,7 +150,8 @@ def test_load_hf_or_duckdb_and_grain_dataloader() -> None:
 
     mock_datasets = MagicMock()
     mock_datasets.load_dataset.return_value = [{"sql_prompt": "q", "sql": "SELECT 1"}]
-    assert len(load_hf_or_duckdb_dataset("ds", "train", None, None, mock_datasets)) == 1  # type: ignore[arg-type]
+    loaded_ds: Any = load_hf_or_duckdb_dataset("ds", "train", None, None, mock_datasets)
+    assert len(loaded_ds) == 1
 
     with pytest.raises(DependencyMissingError):
         get_grain_sampler(10, False, None)
@@ -168,3 +170,17 @@ def test_load_hf_or_duckdb_and_grain_dataloader() -> None:
 
     res_no_wrap = build_grain_dataloader(cfg, "jax", mock_datasets, mock_grain)
     assert res_no_wrap["status"] == "loaded"
+
+    from gemma_4_sql.backends.common_data import tokenize_dataset_element, wrap_maxtext_transform
+    from gemma_4_sql.tokenization import SQLTokenizer
+
+    tok = SQLTokenizer()
+    tok_res = tokenize_dataset_element({"sql_prompt": "q", "sql": "SELECT 1"}, tok, process_multimodal=False)
+    assert "inputs" in tok_res and "targets" in tok_res
+
+    _, base_transform_cls = get_grain_classes(None)
+    mt_cls = wrap_maxtext_transform(base_transform_cls)
+    mt_inst = mt_cls(tok)
+    mt_mapped = mt_inst.map({"sql_prompt": "q", "sql": "SELECT 1"})
+    assert mt_mapped["segment_ids"] == [1]
+    assert mt_mapped["positions"] == [0]

@@ -29,7 +29,7 @@ from gemma_4_sql.backends.pytorch.quantize import _export_gguf, validate_gguf_fi
 from gemma_4_sql.exceptions import ExportError
 
 
-def test_flatten_values_torch():
+def test_flatten_values_torch() -> None:
     """Test _flatten_values with a torch tensor."""
     import torch
 

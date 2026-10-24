@@ -18,7 +18,7 @@ from gemma_4_sql.backends.jax.gemma4.cache import LayerCache
 from gemma_4_sql.backends.jax.gemma4.rope import RoPE
 
 
-def test_compute_attention_scores_and_output():
+def test_compute_attention_scores_and_output() -> None:
     """Verify compute attention scores and output behavior."""
     # test soft_cap
     q = jnp.ones((2, 1, 4, 16))
@@ -37,7 +37,7 @@ def test_compute_attention_scores_and_output():
     # test num_kv_heads != num_heads (handled inside _compute_attention_scores_and_output)
 
 
-def test_prepare_qkv_for_attention():
+def test_prepare_qkv_for_attention() -> None:
     """Verify prepare qkv for attention behavior."""
     q = jnp.ones((2, 1, 4, 16))
     k = jnp.ones((2, 1, 4, 16))
@@ -56,7 +56,7 @@ def test_prepare_qkv_for_attention():
     assert k_out.shape == (2, 8, 4, 16)
 
 
-def test_gemma4_attention_local():
+def test_gemma4_attention_local() -> None:
     """Verify gemma4 attention local behavior."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
@@ -93,7 +93,7 @@ def test_gemma4_attention_local():
     assert cache.cur_ind.value == 3
 
 
-def test_gemma4_attention_global():
+def test_gemma4_attention_global() -> None:
     """Verify gemma4 attention global behavior."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
@@ -126,7 +126,7 @@ def test_gemma4_attention_global():
     assert out.shape == (2, 3, 64)
 
 
-def test_gemma4_attention_global_fallback_options():
+def test_gemma4_attention_global_fallback_options() -> None:
     """Verify gemma4 attention global fallback options behavior."""
     from typing import Any
 

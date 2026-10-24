@@ -65,8 +65,10 @@ def test_db_engine_safety() -> None:
         "UPDATE t SET id=2",
         "DELETE FROM t",
         "SELECT * FROM t; SELECT * FROM t",
+        "SELECT * FROM t;;",
         "SELECT * FROM t; DROP TABLE t",
         "SELECT * FROM t /* comment */ DROP TABLE t",
+        "SELECT * FROM t /* unclosed block comment",
     ]
 
     for q in unsafe_queries:
@@ -139,6 +141,9 @@ def test_db_engine_has_top_level_order_by_and_normalization() -> None:
     res2 = [(3, 4), (1, 2)]
     assert engine._compare_results(res1, res2, strict_order=False) is True
     assert engine._compare_results(res1, res2, strict_order=True) is False
+    assert engine._compare_results([(True, None, "a")], [(1, None, "a")], strict_order=True) is False
+    assert engine._compare_results([(None,)], [("NULL",)], strict_order=True) is False
+    assert engine._compare_results([(True,)], [(True,)], strict_order=True) is True
     engine.close()
 
 
@@ -162,6 +167,6 @@ async def test_db_engine_context_managers() -> None:
         nonlocal closed_flag
         closed_flag = True
 
-    engine_coro.adapter.close_async = _fake_close_async  # type: ignore[attr-defined]
+    setattr(engine_coro.adapter, "close_async", _fake_close_async)
     await engine_coro.close_async()
     assert closed_flag is True

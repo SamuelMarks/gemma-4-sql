@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.backends.common_train import generic_run_training_epochs
+from gemma_4_sql.backends.common_train import generic_run_training_epochs, run_train_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import ETLConfig, ModelType, TensorType, TrainerState, TrainingConfig
+from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import ETLConfig, MaxTextCausalLMProtocol, MaxTextTrainerState, TensorType, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import JSONDict, TrainResultDict
 logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")
@@ -24,7 +24,7 @@ Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
 ocp = optional_import("orbax.checkpoint")
 
 
-def _loss_fn(model: ModelType, params: dict[str, TensorType], batch: JSONDict) -> Any:
+def _loss_fn(model: MaxTextCausalLMProtocol, params: dict[str, TensorType], batch: JSONDict) -> Any:
     """Compute the cross-entropy loss over a training batch.
 
     Args:
@@ -42,7 +42,7 @@ def _loss_fn(model: ModelType, params: dict[str, TensorType], batch: JSONDict) -
     return jnp.mean(loss)
 
 
-def _get_train_step_fn(model: ModelType, optimizer: object) -> Any:
+def _get_train_step_fn(model: MaxTextCausalLMProtocol, optimizer: object) -> Any:
     """Construct a JIT-compiled or standard training step execution function.
 
     Args:
@@ -82,11 +82,11 @@ def _get_train_step_fn(model: ModelType, optimizer: object) -> Any:
     return train_step
 
 
-def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> tuple[TensorType, TensorType, float]:
-    """Execute epochs over dataloader using TrainerState.
+def _run_training_epochs(state: MaxTextTrainerState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> tuple[TensorType, TensorType, float]:
+    """Execute epochs over dataloader using MaxTextTrainerState.
 
     Args:
-        state: TrainerState containing dataloader, epochs, step function, and initial states.
+        state: MaxTextTrainerState containing dataloader, epochs, step function, and initial states.
 
     Returns:
         Tuple of (final_params, final_opt_state, final_loss).
@@ -188,8 +188,8 @@ def save_maxtext_checkpoint(
         with ocp.CheckpointManager(ckpt_path, ocp.PyTreeCheckpointer(), options) as mngr:
             mngr.save(step, state_to_save)
         return ckpt_path
-    except Exception as e:
-        raise ExportError(f"Failed to persist Orbax checkpoint at '{ckpt_path}': {e}") from e
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+        raise ExportError(f"Failed to persist Orbax checkpoint at '{ckpt_path}': {e}", backend="maxtext", cause=e) from e
 
 
 def _execute_train(
@@ -289,15 +289,6 @@ def _execute_train(
         logger.info("Invoking maxtext.train.main with CLI arguments: %s", cli_args)
         dist_res = maxtext_train.main(cli_args)
         dist_loss = float(dist_res) if isinstance(dist_res, (int, float)) else 0.0
-
-        ckpt_dir = merged_kwargs.get("checkpoint_dir")
-        if ckpt_dir and ocp is not None:
-            save_maxtext_checkpoint(
-                checkpoint_dir=str(ckpt_dir),
-                step=epochs,
-                params=cast("dict[str, TensorType]", {"status": "trained_distributed"}),
-                opt_state=None,
-            )
         return "completed", dist_loss
 
     if Gemma4Model is None:
@@ -314,7 +305,7 @@ def _execute_train(
     train_step = _get_train_step_fn(model, optimizer)
 
     final_state: tuple[Any, Any, float] = _run_training_epochs(
-        TrainerState(
+        MaxTextTrainerState(
             dataloader=dataloader,
             epochs=epochs,
             train_step=train_step,
@@ -336,7 +327,7 @@ def _execute_train(
     return "completed", float(final_loss)
 
 
-def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
+def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
     """Train a Text-to-SQL model using the MaxText backend.
 
     Args:
@@ -351,24 +342,21 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
         TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
-    action = getattr(config, "action", "sft")
-    model_name = getattr(config, "model_name", "gemma-4")
+    if jax is None or jnp is None or optax is None or (Gemma4Model is None and maxtext_train is None):
+        raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
+
     dataset = getattr(config, "dataset", "dummy")
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
     extra = getattr(config, "extra_kwargs", {}) or {}
-    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
+    local_step_mode = bool(kwargs.get("local_step_mode") or extra.get("local_step_mode", False))
+    call_kwargs = dict(kwargs)
+    call_kwargs.pop("raise_on_error", None)
 
-    final_loss = 0.0
-    status = "completed"
-    if jax is None or jnp is None or optax is None or (Gemma4Model is None and maxtext_train is None):
-        raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
-
-    try:
-        local_step_mode = bool(kwargs.get("local_step_mode") or extra.get("local_step_mode", False))
-        call_kwargs = dict(kwargs)
-        call_kwargs.pop("raise_on_error", None)
-        status, final_loss = _execute_train(
+    return run_train_wrapper(
+        "maxtext",
+        config,
+        lambda: _execute_train(
             config,
             dataset=dataset,
             epochs=epochs,
@@ -376,30 +364,6 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
             batch_size=getattr(config, "batch_size", 2),
             local_step_mode=local_step_mode,
             **call_kwargs,
-        )
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        logger.exception("MaxText Train error: ")
-        if raise_on_error:
-            raise TrainingError(
-                f"MaxText training failed: {e!s}",
-                backend="maxtext",
-                model_name=model_name,
-                operation=action,
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
-
-    result: JSONDict = {
-        "backend": "maxtext",
-        "action": action,
-        "model": model_name,
-        "dataset": dataset,
-        "epochs": epochs,
-        "learning_rate": learning_rate,
-        "status": status,
-        "final_loss": float(final_loss),
-    }
-    ckpt_dir = kwargs.get("checkpoint_dir") or getattr(config, "extra_kwargs", {}).get("checkpoint_dir")
-    if ckpt_dir:
-        result["checkpoint_dir"] = str(ckpt_dir)
-    return result
+        ),
+        **kwargs,
+    )

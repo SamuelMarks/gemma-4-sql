@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk import build_few_shot_prompt, chat_turn, evaluate, generate, run_agentic_loop, serve_model
@@ -12,6 +12,8 @@ from gemma_4_sql.sdk.agent import AgentContext
 
 if TYPE_CHECKING:
     import argparse
+
+    from gemma_4_sql.type_hints import JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ def evaluate_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if evaluation fails.
 
     """
-    db_kwargs: dict[str, Any] = {}
+    db_kwargs: dict[str, JSONValue] = {}
     if args.db_kwargs:
         db_kwargs = json.loads(args.db_kwargs)
     res = evaluate(
@@ -88,7 +90,7 @@ def agent_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if agent loop fails.
 
     """
-    db_kwargs: dict[str, Any] = {}
+    db_kwargs: dict[str, JSONValue] = {}
     if args.db_kwargs:
         db_kwargs = json.loads(args.db_kwargs)
     context = AgentContext(

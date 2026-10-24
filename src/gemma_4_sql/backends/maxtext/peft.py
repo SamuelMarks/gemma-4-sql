@@ -7,11 +7,12 @@ import math
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_peft import apply_lora_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError, TrainingError
+from gemma_4_sql.exceptions import DependencyMissingError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import PEFTResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def transform_params_to_lora(
 
     injected_count = 0
 
-    def _inject(curr: Any, current_path: str = "") -> dict[str, Any]:
+    def _inject(curr: Any, current_path: str = "") -> Any:
         """Inject LoRA factors into matching parameter dictionaries."""
         nonlocal injected_count, rng
         if not isinstance(curr, dict):
@@ -146,6 +147,7 @@ def segregate_adapter_params(params: dict[str, Any]) -> tuple[dict[str, Any], di
 def create_maxtext_lora_optimizer(
     params: dict[str, Any],
     base_optimizer: object = None,
+    learning_rate: float = 1e-4,
 ) -> Any:
     """Create an Optax multi_transform optimizer updating only LoRA parameters.
 
@@ -154,7 +156,8 @@ def create_maxtext_lora_optimizer(
 
     Args:
         params: Model parameter PyTree containing LoRA adapters.
-        base_optimizer: Optax transformation for trainable weights (defaults to optax.adam(1e-4)).
+        base_optimizer: Optax transformation for trainable weights (defaults to optax.adam(learning_rate)).
+        learning_rate: Learning rate used when `base_optimizer` is None.
 
     Returns:
         An Optax GradientTransformation configured for adapter-only training.
@@ -169,7 +172,7 @@ def create_maxtext_lora_optimizer(
         raise DependencyMissingError("Optax or JAX dependencies are missing.")
 
     if base_optimizer is None:
-        base_optimizer = optax.adam(1e-4)
+        base_optimizer = optax.adam(learning_rate)
 
     def _label_fn(path: Any, _val: Any) -> str:
         """Classify parameter path as trainable adapter or frozen base."""
@@ -185,7 +188,7 @@ def create_maxtext_lora_optimizer(
     )
 
 
-def merge_lora_weights(params: Any) -> dict[str, Any]:
+def merge_lora_weights(params: Any) -> Any:
     """Fold LoRA adapter weights back into base MaxText weights.
 
     Computes:
@@ -341,7 +344,7 @@ def apply_lora(
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     **kwargs: object,
-) -> JSONDict:
+) -> PEFTResultDict:
     """Apply LoRA to a model using the MaxText backend.
 
     Args:
@@ -359,19 +362,16 @@ def apply_lora(
         DependencyMissingError: If MaxText dependencies are missing.
 
     """
-    status = "completed"
     if jax is None or jnp is None or (Gemma4Model is None and "params" not in kwargs):
         raise DependencyMissingError("MaxText dependencies are missing.")
 
-    injected_count = 0
-    try:
+    def _inject() -> int:
+        """Initialize or transform MaxText parameter PyTree with LoRA matrices."""
         params: dict[str, Any]
         raw_params: Any = kwargs.get("params")
         if raw_params is not None and isinstance(raw_params, dict):
             params = raw_params
         else:
-            if Gemma4Model is None:
-                raise DependencyMissingError("MaxText dependency missing.")
             model = Gemma4Model(model_name)
             rng = jax.random.PRNGKey(0)
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
@@ -390,31 +390,18 @@ def apply_lora(
             save_maxtext_adapters(params, str(kwargs["output_dir"]))
 
         if kwargs.get("merge"):
-            params = merge_lora_weights(params)
+            _ = merge_lora_weights(params)
 
         logger.info("MaxText LoRA applied to %d modules", injected_count)
-    except (DependencyMissingError, ConfigurationError):
-        raise
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Failed to apply LoRA: ")
-        if kwargs.get("raise_on_error"):
-            raise TrainingError(
-                f"MaxText PEFT failed: {e!s}",
-                backend="maxtext",
-                model_name=model_name,
-                operation="apply_lora",
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
+        return injected_count
 
-    return {
-        "backend": "maxtext",
-        "action": "apply_lora",
-        "model": model_name,
-        "target_modules": target_modules,
-        "lora_r": lora_r,
-        "lora_alpha": lora_alpha,
-        "lora_dropout": lora_dropout,
-        "status": status,
-        "injected_modules": injected_count,
-    }
+    return apply_lora_wrapper(
+        "maxtext",
+        model_name,
+        target_modules,
+        lora_r,
+        lora_alpha,
+        lora_dropout,
+        _inject,
+        **kwargs,
+    )

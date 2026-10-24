@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import io
 import struct
 from pathlib import Path
 from typing import Any
@@ -87,77 +86,30 @@ def test_load_image_bytes(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Image file not found"):
         load_image_bytes(tmp_path / "nonexistent.png")
 
+    bad_img: Any = 12345
     with pytest.raises(ValueError, match="Unsupported image input type"):
-        load_image_bytes(12345)  # type: ignore[arg-type]
+        load_image_bytes(bad_img)
 
 
-def test_process_image(tmp_path: Path) -> None:
+def test_process_image(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test image resizing, normalization, and patch extraction."""
-    import numpy as np
-    import pytest
-
     import gemma_4_sql.backends.common_multimodal as cm
+    from tests.conftest import MockPILImage
 
-    class _MockPILResampling:
-        """Mock PIL Resampling constants."""
+    monkeypatch.setattr(cm, "Image", MockPILImage)
+    valid_png = b"fakebytes"
 
-        BILINEAR = 2
+    res = cm.process_image(valid_png, target_size=(224, 224), patch_size=14)
+    assert "pixel_values" in res
+    assert "patches" in res
+    assert res["num_patches"] == 256
+    assert res["shape"] == (3, 224, 224)
 
-    class _MockOpenedImage:
-        """Mock opened PIL image."""
+    with pytest.raises(ValueError, match="target_size dimensions must be positive"):
+        cm.process_image(b"fake", target_size=(0, 224))
 
-        def __enter__(self):
-            """Enter context manager."""
-            return self
-
-        def __exit__(self, *args: object):
-            """Exit context manager."""
-
-        def convert(self, mode: Any):
-            """Convert image mode."""
-            return self
-
-        def resize(self, size: Any, resample: Any):
-            """Resize image."""
-            return self
-
-        def getpixel(self, coords: Any):
-            """Get pixel RGB tuple."""
-            return (255, 0, 0)
-
-        def __array__(self, *args: Any, **kwargs: Any):
-            """Return numpy array representation."""
-            return np.zeros((224, 224, 3), dtype=np.float32)
-
-    class _MockPILImage:
-        """Mock PIL Image module."""
-
-        Resampling = _MockPILResampling
-
-        @staticmethod
-        def open(buf: Any):
-            """Open mock image from buffer."""
-            return _MockOpenedImage()
-
-    monkeypatch_fix = pytest.MonkeyPatch()
-    monkeypatch_fix.setattr(cm, "Image", _MockPILImage)
-    try:
-        valid_png = b"fakebytes"
-
-        res = cm.process_image(valid_png, target_size=(224, 224), patch_size=14)
-        assert "pixel_values" in res
-        assert "patches" in res
-        assert res["num_patches"] == 256
-        assert res["shape"] == (3, 224, 224)
-
-        # Validation errors
-        with pytest.raises(ValueError, match="target_size dimensions must be positive"):
-            cm.process_image(b"fake", target_size=(0, 224))
-
-        with pytest.raises(ValueError, match="target dimensions"):
-            cm.process_image(b"fake", target_size=(224, 224), patch_size=15)
-    finally:
-        monkeypatch_fix.undo()
+    with pytest.raises(ValueError, match="target dimensions"):
+        cm.process_image(b"fake", target_size=(224, 224), patch_size=15)
 
 
 def test_load_audio_bytes(tmp_path: Path) -> None:
@@ -183,8 +135,9 @@ def test_load_audio_bytes(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Audio file not found"):
         load_audio_bytes(tmp_path / "nonexistent.wav")
 
+    bad_aud: Any = 99999
     with pytest.raises(ValueError, match="Unsupported audio input type"):
-        load_audio_bytes(99999)  # type: ignore[arg-type]
+        load_audio_bytes(bad_aud)
 
 
 def test_process_audio() -> None:
@@ -258,8 +211,9 @@ def test_format_multimodal_prompt() -> None:
     existing_res: Any = format_multimodal_prompt("<image> Query schema", has_image=True)
     assert existing_res["prompt"].count("<image>") == 1
 
-    with pytest.raises(ValueError, match="prompt cannot be empty."):
-        format_multimodal_prompt(None)  # type: ignore[arg-type]
+    bad_prompt: Any = None
+    with pytest.raises(ValueError, match=r"prompt cannot be empty\."):
+        format_multimodal_prompt(bad_prompt)
 
 
 def test_sdk_inference_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -458,85 +412,20 @@ def test_multimodal_edge_cases() -> None:
     samples_j, _ = cm._parse_wav_samples(wav_with_junk)
     assert len(samples_j) > 0
 
-    # Image available but numpy is None (covers 126->131)
+    # Image available with MockPILImage and numpy None vs available
+    from tests.conftest import MockOpenedImage, MockPILImage
 
+    assert MockOpenedImage().getpixel((0, 0)) == (255, 0, 0)
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(cm, "Image", MockPILImage)
+    res_img_with_pil = cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
+    assert res_img_with_pil["num_patches"] == 1
+    monkeypatch.setattr(cm, "np", None)
     try:
-        from PIL import Image as PILImage
-
-        buf = io.BytesIO()
-        PILImage.new("RGB", (14, 14)).save(buf, format="PNG")
-        png_bytes = buf.getvalue()
-        res_img_with_pil = cm.process_image(png_bytes, target_size=(14, 14), patch_size=14)
-        assert res_img_with_pil["num_patches"] == 1
-        monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr(cm, "np", None)
-        try:
-            with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
-                cm.process_image(png_bytes, target_size=(14, 14), patch_size=14)
-        finally:
-            monkeypatch.undo()
-    except ImportError:  # pragma: no cover
-
-        class _MockPILResampling:
-            """Mock PIL Resampling constants."""
-
-            BILINEAR = 2
-
-        class _MockPILImage:
-            """Mock PIL Image module."""
-
-            Resampling = _MockPILResampling
-
-            @staticmethod
-            def open(_buf: Any) -> Any:
-                """Mock open context manager."""
-
-                class _MockOpened:
-                    """Mock opened image."""
-
-                    def __enter__(self) -> Any:
-                        """Enter context manager."""
-                        return self
-
-                    def __exit__(self, *args: object) -> None:
-                        """Exit context manager."""
-
-                    def convert(self, _mode: str) -> Any:
-                        """Mock mode conversion."""
-                        return self
-
-                    def resize(self, _size: tuple[int, int], _resample: Any = None) -> Any:
-                        """Mock image resize."""
-                        return self
-
-                    def getpixel(self, coords: Any):
-                        """Raise ValueError to simulate missing getpixel."""
-                        raise ValueError("No getpixel")
-
-                    def __array__(self, *args: Any, **kwargs: Any) -> Any:
-                        """Provide numpy array representation."""
-                        current_np = getattr(cm, "np", None)
-                        if current_np is not None:
-                            return current_np.zeros((14, 14, 3), dtype=current_np.float32)
-                        return [[[0.0, 0.0, 0.0] for _ in range(14)] for _ in range(14)]
-
-                return _MockOpened()
-
-        monkeypatch = pytest.MonkeyPatch()
-        monkeypatch.setattr(cm, "Image", _MockPILImage)
-        monkeypatch.setattr(cm, "np", None)
         with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
             cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
+    finally:
         monkeypatch.undo()
-
-        current_np = getattr(cm, "np", None)
-        if current_np is not None:
-            monkeypatch_with_np = pytest.MonkeyPatch()
-            monkeypatch_with_np.setattr(cm, "Image", _MockPILImage)
-            monkeypatch_with_np.setattr(cm, "np", current_np)
-            res_img_with_np = cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
-            assert res_img_with_np["num_patches"] == 1
-            monkeypatch_with_np.undo()
 
     # Corrupted WAV header triggering struct.error
     corrupt_wav = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 40
@@ -547,25 +436,21 @@ def test_multimodal_edge_cases() -> None:
     monkeypatch_unpack.undo()
 
     # PIL open raising OSError handled gracefully
-    corrupted_img = b"corrupted"
-    if cm.Image is None:  # pragma: no cover
+    class _MockFailingPIL:
+        """Mock PIL Image raising OSError on open."""
 
-        class _MockFailingPIL:
-            """Mock PIL Image raising OSError on open."""
+        @staticmethod
+        def open(_buf: Any) -> Any:
+            """Raise OSError to simulate corrupted image open."""
+            raise OSError("Corrupted image")
 
-            @staticmethod
-            def open(_buf: Any) -> Any:
-                """Raise OSError to simulate corrupted image open."""
-                raise OSError("Corrupted image")
-
-        monkeypatch_pil = pytest.MonkeyPatch()
-        monkeypatch_pil.setattr(cm, "Image", _MockFailingPIL)
+    monkeypatch_pil = pytest.MonkeyPatch()
+    monkeypatch_pil.setattr(cm, "Image", _MockFailingPIL)
+    try:
         with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
-            cm.process_image(corrupted_img, target_size=(14, 14), patch_size=14)
+            cm.process_image(b"corrupted", target_size=(14, 14), patch_size=14)
+    finally:
         monkeypatch_pil.undo()
-    else:
-        with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
-            cm.process_image(corrupted_img, target_size=(14, 14), patch_size=14)
 
     # Audio file not found
     with pytest.raises(FileNotFoundError, match="Audio file not found"):

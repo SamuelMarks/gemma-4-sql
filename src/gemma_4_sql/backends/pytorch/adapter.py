@@ -11,7 +11,10 @@ class PyTorchBackend(ModuleDelegatedBackend):
     """PyTorch implementation of BackendProtocol."""
 
 
+ADAPTER_CLASS = PyTorchBackend
+
 __all__ = [
+    "ADAPTER_CLASS",
     "PyTorchBackend",
     "benchmark",
     "dpo",

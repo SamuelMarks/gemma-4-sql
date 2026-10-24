@@ -7,12 +7,11 @@ import logging
 import math
 import operator
 import re
-import threading
-from collections import OrderedDict
 from typing import Any
 
+from gemma_4_sql.backends.common_inference import BoundedLRUCache
 from gemma_4_sql.backends.lazy_loader import optional_attr
-from gemma_4_sql.type_hints import ModelType
+from gemma_4_sql.type_hints import EmbedderModelProtocol
 
 MIN_SIMILARITY = 0.1
 MAX_SCHEMA_CACHE_SIZE = 128
@@ -21,19 +20,17 @@ logger = logging.getLogger(__name__)
 SentenceTransformer: Any = optional_attr("sentence_transformers", "SentenceTransformer")
 cosine_similarity: Any = optional_attr("sklearn.metrics.pairwise", "cosine_similarity")
 
-_RAG_LOCK = threading.Lock()
-_SCHEMA_EMBEDDING_CACHE: OrderedDict[str, Any] = OrderedDict()
-_SENTENCE_TRANSFORMER_CACHE: dict[tuple[Any, str], ModelType] = {}
+_SCHEMA_EMBEDDING_CACHE: BoundedLRUCache[Any] = BoundedLRUCache(maxsize=MAX_SCHEMA_CACHE_SIZE)
+_SENTENCE_TRANSFORMER_CACHE: BoundedLRUCache[EmbedderModelProtocol] = BoundedLRUCache(maxsize=8)
 
 
 def clear_rag_model_cache() -> None:
     """Clear the cached SentenceTransformer models and schema embeddings in a thread-safe manner."""
-    with _RAG_LOCK:
-        _SCHEMA_EMBEDDING_CACHE.clear()
-        _SENTENCE_TRANSFORMER_CACHE.clear()
+    _SCHEMA_EMBEDDING_CACHE.clear()
+    _SENTENCE_TRANSFORMER_CACHE.clear()
 
 
-def _get_sentence_transformer(model_id: str = "all-MiniLM-L6-v2") -> ModelType:
+def _get_sentence_transformer(model_id: str = "all-MiniLM-L6-v2") -> EmbedderModelProtocol:
     """Return a cached `SentenceTransformer` instance keyed by class and model identifier.
 
     Args:
@@ -43,11 +40,12 @@ def _get_sentence_transformer(model_id: str = "all-MiniLM-L6-v2") -> ModelType:
         Instantiated or cached `SentenceTransformer` model.
 
     """
-    with _RAG_LOCK:
-        cache_key = (SentenceTransformer, model_id)
-        if cache_key not in _SENTENCE_TRANSFORMER_CACHE:
-            _SENTENCE_TRANSFORMER_CACHE[cache_key] = SentenceTransformer(model_id)
-        return _SENTENCE_TRANSFORMER_CACHE[cache_key]
+    cache_key = f"{id(SentenceTransformer)}:{model_id}"
+    cached = _SENTENCE_TRANSFORMER_CACHE.get_model(cache_key)
+    if cached is None:
+        cached = SentenceTransformer(model_id)
+        _SENTENCE_TRANSFORMER_CACHE.put_model(cache_key, cached)
+    return cached
 
 
 def _clean_identifier(identifier: str) -> str:
@@ -77,6 +75,8 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
         A dictionary mapping table names to lists of column names.
 
     """
+    cleaned_ddl = re.sub(r"/\*[\s\S]*?\*/", " ", ddl)
+    cleaned_ddl = re.sub(r"--[^\n]*", " ", cleaned_ddl)
     schema: dict[str, list[str]] = {}
     pattern = re.compile(
         r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\.)?("[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\s*\(',
@@ -84,7 +84,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
     )
     pos = 0
     while True:
-        match = pattern.search(ddl, pos)
+        match = pattern.search(cleaned_ddl, pos)
         if not match:
             break
         raw_table_name = match.group(1)
@@ -93,13 +93,13 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
         start_idx = match.end()
         depth = 1
         i = start_idx
-        while i < len(ddl) and depth > 0:
-            if ddl[i] == "(":
+        while i < len(cleaned_ddl) and depth > 0:
+            if cleaned_ddl[i] == "(":
                 depth += 1
-            elif ddl[i] == ")":
+            elif cleaned_ddl[i] == ")":
                 depth -= 1
             i += 1
-        columns_block = ddl[start_idx : i - 1]
+        columns_block = cleaned_ddl[start_idx : i - 1]
         pos = i
 
         raw_cols: list[str] = []
@@ -268,23 +268,17 @@ def _semantic_search(
     if SentenceTransformer is None or cosine_similarity is None:
         return _keyword_search(prompt, schema, top_k_tables)
     try:
-        model: ModelType = _get_sentence_transformer("all-MiniLM-L6-v2")
+        model: EmbedderModelProtocol = _get_sentence_transformer("all-MiniLM-L6-v2")
         table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]
 
         schema_key = hashlib.md5(";;".join(table_docs).encode()).hexdigest()
-        with _RAG_LOCK:
-            cached_embeddings = _SCHEMA_EMBEDDING_CACHE.get(schema_key)
-            if cached_embeddings is not None:
-                _SCHEMA_EMBEDDING_CACHE.move_to_end(schema_key)
+        _SCHEMA_EMBEDDING_CACHE.maxsize = MAX_SCHEMA_CACHE_SIZE
+        cached_embeddings = _SCHEMA_EMBEDDING_CACHE.get_model(schema_key)
         if cached_embeddings is not None:
             table_embeddings = cached_embeddings
         else:
             table_embeddings = model.encode(table_docs)
-            with _RAG_LOCK:
-                _SCHEMA_EMBEDDING_CACHE[schema_key] = table_embeddings
-                _SCHEMA_EMBEDDING_CACHE.move_to_end(schema_key)
-                if len(_SCHEMA_EMBEDDING_CACHE) > MAX_SCHEMA_CACHE_SIZE:
-                    _SCHEMA_EMBEDDING_CACHE.popitem(last=False)
+            _SCHEMA_EMBEDDING_CACHE.put_model(schema_key, table_embeddings)
 
         prompt_embedding: Any = model.encode([prompt])
         similarities: Any = cosine_similarity(prompt_embedding, table_embeddings)[0]

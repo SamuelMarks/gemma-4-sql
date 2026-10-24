@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
-from gemma_4_sql.type_hints import ModelType, TensorType
+from gemma_4_sql.type_hints import JaxCausalLMProtocol, TensorType, register_quantized_artifact
 
 MIN_NDIM_FOR_QUANTIZATION = 2
 if TYPE_CHECKING:
@@ -215,7 +215,7 @@ def _set_param_metadata(param: Any, key: str, value: Any) -> None:
 
 
 def _apply_quantization_to_model(
-    model: ModelType,
+    model: JaxCausalLMProtocol,
     method: str,
     calibration_samples: list[Any] | None = None,
     salient_ratio: float = 0.01,
@@ -234,7 +234,7 @@ def _apply_quantization_to_model(
     """
     quantized_params = 0
     if method == "int8":
-        scales: dict[str, object] = {}
+        scales: dict[str, float] = {}
         for path, param in nnx.graph.iter_graph(model):
             if isinstance(param, nnx.Param) and hasattr(param.value, "ndim") and (param.value.ndim >= MIN_NDIM_FOR_QUANTIZATION):
                 (q_tensor, scale) = quantize_int8(param.value)
@@ -243,7 +243,7 @@ def _apply_quantization_to_model(
                 _set_param_metadata(param, "quant_scale", scale_float)
                 scales[str(path)] = scale_float
                 quantized_params += 1
-        model._quant_scales = scales
+        register_quantized_artifact(model, method=method, scales=scales)
         status = "quantized_int8"
         memory_reduction = 0.5
         logger.info("Quantized %d parameters using uniform int8", quantized_params)
@@ -264,7 +264,7 @@ def _apply_quantization_to_model(
                 _set_param_metadata(param, "salient_mask", salient_mask)
                 scales[str(path)] = scale_float
                 quantized_params += 1
-        model._quant_scales = scales
+        register_quantized_artifact(model, method=method, scales=scales)
         status = "quantized_awq"
         memory_reduction = 0.7
         logger.info("Quantized %d parameters using AWQ (salient_ratio=%.3f)", quantized_params, salient_ratio)

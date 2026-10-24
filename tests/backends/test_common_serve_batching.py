@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Never
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from gemma_4_sql.backends.common_serve import GenerateRequest, create_common_app, serve_model_wrapper
 
 
-def test_generate_request_validation():
+def test_generate_request_validation() -> None:
     """Verify generate request validation behavior."""
     with pytest.raises(ValueError, match="Field 'prompt' must be a valid string"):
         GenerateRequest.from_dict({"not_prompt": "test"})
@@ -19,13 +19,13 @@ def test_generate_request_validation():
         GenerateRequest.from_dict({"prompt": 123})
 
 
-def test_require_handlers():
+def test_require_handlers() -> None:
     """Verify require handlers behavior."""
     with pytest.raises(ValueError, match="At least one generation logic callback must be provided"):
         create_common_app("pytorch", "test", require_handlers=True)
 
 
-def test_common_serve_endpoints():
+def test_common_serve_endpoints() -> None:
     """Verify common serve endpoints behavior."""
     app = create_common_app("pytorch", "test", generate_logic=lambda p: "SELECT 1;")
     client = TestClient(app)
@@ -35,7 +35,7 @@ def test_common_serve_endpoints():
 
         original_get = asyncio.get_running_loop
 
-        def fake_get():
+        def fake_get() -> Any:
             """Provide fake get test helper."""
             import inspect
 
@@ -55,7 +55,7 @@ def test_common_serve_endpoints():
 
 
 @pytest.mark.asyncio
-async def test_worker_async():
+async def test_worker_async() -> None:
     """Verify worker async behavior."""
     import httpx
 
@@ -78,7 +78,7 @@ async def test_worker_async():
 
 
 @pytest.mark.asyncio
-async def test_worker_async_generate_fallback():
+async def test_worker_async_generate_fallback() -> None:
     """Verify worker async generate fallback behavior."""
     import httpx
 
@@ -89,7 +89,7 @@ async def test_worker_async_generate_fallback():
 
 
 @pytest.mark.asyncio
-async def test_worker_async_both_none():
+async def test_worker_async_both_none() -> None:
     """Verify worker async both none behavior."""
     import httpx
 
@@ -100,7 +100,7 @@ async def test_worker_async_both_none():
 
 
 @pytest.mark.asyncio
-async def test_multimodal_request():
+async def test_multimodal_request() -> None:
     """Verify multimodal request behavior."""
     import httpx
 
@@ -110,7 +110,7 @@ async def test_multimodal_request():
         assert "<image>" in r.json()["sql"]
 
 
-def test_serve_model_wrapper():
+def test_serve_model_wrapper() -> None:
     """Verify serve model wrapper behavior."""
     res = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=False, app_factory=lambda: create_common_app("pytorch", "test"), run_server=False, port=8000)
     assert res["status"] == "running_pytorch_serve"
@@ -128,7 +128,7 @@ def test_serve_model_wrapper():
         serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=True, app_factory=fail_factory, run_server=False, port=8000)
 
 
-def test_json_response_fallback():
+def test_json_response_fallback() -> None:
     """Verify json response fallback behavior."""
     import gemma_4_sql.backends.common_serve as mod
 
@@ -140,7 +140,7 @@ def test_json_response_fallback():
 
         original_get = asyncio.get_running_loop
 
-        def fake_get():
+        def fake_get() -> Any:
             """Provide fake get test helper."""
             import inspect
 
@@ -160,14 +160,14 @@ def test_json_response_fallback():
         assert client.get("/v1/models").status_code == 200
 
 
-def test_sync_fallback_branches():
+def test_sync_fallback_branches() -> None:
     """Verify sync fallback branches behavior."""
     import asyncio
 
     with pytest.MonkeyPatch.context() as mp:
         original_get = asyncio.get_running_loop
 
-        def fake_get():
+        def fake_get() -> Any:
             """Provide fake get test helper."""
             import inspect
 
@@ -191,13 +191,13 @@ def test_sync_fallback_branches():
 
 
 @pytest.mark.asyncio
-async def test_common_serve_cancel_request():
+async def test_common_serve_cancel_request() -> None:
     """Verify common serve cancel request behavior."""
     import asyncio
 
     import httpx
 
-    def slow_batch(p: Any):
+    def slow_batch(p: Any) -> list[str]:
         """Provide slow batch test helper."""
         import time
 
@@ -222,7 +222,7 @@ async def test_common_serve_cancel_request():
 
 
 @pytest.mark.asyncio
-async def test_common_serve_cancel_request_exception():
+async def test_common_serve_cancel_request_exception() -> None:
     """Verify common serve cancel request exception behavior."""
     import asyncio
 
@@ -230,7 +230,7 @@ async def test_common_serve_cancel_request_exception():
 
     from gemma_4_sql.backends.common_serve import create_common_app
 
-    def error_batch(p: Any):
+    def error_batch(p: Any) -> Never:
         """Provide error batch test helper."""
         import time
 

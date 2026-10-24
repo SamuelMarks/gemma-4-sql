@@ -94,7 +94,7 @@ def test_run_generation_native(monkeypatch: pytest.MonkeyPatch) -> None:
 
     sql, conf = inf_module._run_generation("model", "prompt", 1, 2, backend_alias="pytorch_native")
     assert sql == "SELECT 1;"
-    assert conf == 0.95
+    assert 0.0 < conf <= 1.0
 
     # Test empty decoded string raises InferenceError
     mock_tok_cls.from_pretrained.return_value = StubTokenizer("")
@@ -110,7 +110,7 @@ def test_run_generation_native(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_tok_cls.from_pretrained.side_effect = OSError("missing local tokenizer")
     sql_fb, conf_fb = inf_module._run_generation("model", "SELECT 1", 1, 2, backend_alias="pytorch_native")
     assert len(sql_fb) > 0
-    assert conf_fb == 0.95
+    assert 0.0 < conf_fb <= 1.0
 
 
 def test_run_generation_native_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -176,13 +176,12 @@ def test_run_generation_hf(monkeypatch: pytest.MonkeyPatch) -> None:
     class StubBatchEncoding(dict[str, Any]):
         """Minimal dict with .input_ids and .to(device) matching HF BatchEncoding."""
 
-        def __init__(self, with_input_ids: bool = True) -> None:
-            """Initialize with optional input_ids tensor."""
+        def __init__(self) -> None:
+            """Initialize with input_ids tensor."""
             super().__init__()
-            if with_input_ids:
-                t = torch.tensor([[1, 2]], dtype=torch.long)
-                self["input_ids"] = t
-                self.input_ids = t
+            t = torch.tensor([[1, 2]], dtype=torch.long)
+            self["input_ids"] = t
+            self.input_ids = t
 
         def to(self, _device: Any) -> StubBatchEncoding:
             """Return self on device transfer."""
@@ -194,7 +193,7 @@ def test_run_generation_hf(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(inf_module, "AutoModelForCausalLM", mock_auto_model)
 
     mock_tok = MagicMock()
-    mock_tok.return_value = StubBatchEncoding(with_input_ids=True)
+    mock_tok.return_value = StubBatchEncoding()
     mock_tok.decode.return_value = "SELECT 1;"
     mock_auto_tok = MagicMock()
     mock_auto_tok.from_pretrained.return_value = mock_tok

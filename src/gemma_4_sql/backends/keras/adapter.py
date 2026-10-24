@@ -11,7 +11,10 @@ class KerasBackend(ModuleDelegatedBackend):
     """Keras implementation of BackendProtocol."""
 
 
+ADAPTER_CLASS = KerasBackend
+
 __all__ = [
+    "ADAPTER_CLASS",
     "KerasBackend",
     "benchmark",
     "dpo",

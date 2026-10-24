@@ -11,7 +11,7 @@ from gemma_4_sql.backends.jax.gemma4.config import AttentionType, ModelConfig
 from gemma_4_sql.backends.jax.gemma4.decoder_layer import Gemma4DecoderLayer
 
 
-def test_decoder_layer_mlp():
+def test_decoder_layer_mlp() -> None:
     """Verify decoder layer mlp behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
@@ -31,7 +31,7 @@ def test_decoder_layer_mlp():
     class DummyCache:
         """Test stub for `DummyCache`."""
 
-        def __init__(self):
+        def __init__(self) -> None:
             """Initialize test stub instance."""
             import jax.numpy as jnp
             from flax import nnx
@@ -52,7 +52,7 @@ def test_decoder_layer_mlp():
     assert out2.shape == (2, 10, 64)
 
 
-def test_decoder_layer_moe():
+def test_decoder_layer_moe() -> None:
     """Verify decoder layer moe behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
@@ -71,7 +71,7 @@ def test_decoder_layer_moe():
     assert out.shape == (2, 10, 64)
 
 
-def test_decoder_layer_per_layer_input():
+def test_decoder_layer_per_layer_input() -> None:
     """Verify decoder layer per layer input behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(

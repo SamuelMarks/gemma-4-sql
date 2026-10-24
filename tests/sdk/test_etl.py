@@ -47,8 +47,8 @@ def test_etl_real_duckdb_execution_mlx(tmp_path: Path) -> None:
     assert res["dataset"] == "local_duckdb"
     assert res["batch_size"] == 2
     assert res["status"] == "loaded"
-    loader = res.get("loader")
-    batches = list(loader)  # type: ignore[arg-type]
+    loader: Any = res.get("loader")
+    batches = list(loader)
     assert len(batches) == 1
     assert "inputs" in batches[0]
     assert "targets" in batches[0]

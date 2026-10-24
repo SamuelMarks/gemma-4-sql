@@ -197,4 +197,5 @@ class Gemma4MLP(nnx.Module):
         up = self.up_proj(x)
         activated = jax.nn.silu(gate) * up
         out = self.down_proj(activated)
-        return out.astype(self.dtype)
+        res: Array = out.astype(self.dtype)
+        return res

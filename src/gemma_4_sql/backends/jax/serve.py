@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
+from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
+from gemma_4_sql.exceptions import DependencyMissingError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONValue, ServeResultDict
+    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -51,51 +51,17 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
             except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
                 logger.debug("Warmup generation skipped or deferred: %s", exc)
 
-        def _generate(prompt: str) -> str:
-            """Generate SQL using JAX inference.
-
-            Args:
-                prompt: Natural language query prompt.
-
-            Returns:
-                Generated SQL query string.
-
-            Raises:
-                InferenceError: If JAX inference returns empty SQL or fails.
-
-            """
+        def _call_jax_generate(model_name: str, prompt: str) -> JSONDict:
+            """Delegate single-prompt generation to `jax.inference.generate_sql`."""
             from gemma_4_sql.backends.jax.inference import generate_sql
 
-            try:
-                out = generate_sql(model_name=model_name, prompt=prompt)
-                res_sql = out.get("sql", "")
-                if res_sql:
-                    return str(res_sql)
-                raise InferenceError(f"JAX inference returned empty SQL for prompt '{prompt}'", backend="jax")
-            except Exception as e:
-                if isinstance(e, InferenceError):
-                    raise
-                logger.warning("JAX generation error in server: %s", e)
-                raise InferenceError(f"JAX generation failed: {e}", backend="jax", cause=e) from e
+            return dict(generate_sql(model_name=model_name, prompt=prompt))
 
-        def _batch_generate(prompts: list[str]) -> list[str]:
-            """Execute batched generation across multiple bundled prompt requests.
-
-            Args:
-                prompts: List of prompt strings.
-
-            Returns:
-                List of generated SQL queries.
-
-            """
-            return [_generate(p) for p in prompts]
-
-        return create_common_app(
+        return create_backend_serve_app(
             backend_name="jax",
             model_name=model_name,
+            generate_sql_fn=_call_jax_generate,
             startup_callback=_startup_warmup,
-            generate_logic=_generate,
-            batch_generate_logic=_batch_generate,
             max_batch_size=max_batch_size,
         )
 

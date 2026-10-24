@@ -130,3 +130,25 @@ def test_is_failed_status() -> None:
     assert is_failed_status({"status": "completed"}) is False
     assert is_failed_status({"status": 123}) is False
     assert is_failed_status(123) is False
+
+
+def test_resolve_raise_on_error() -> None:
+    """Verify resolve_raise_on_error priority across explicit flag, kwargs, config field, and extra_kwargs."""
+    from gemma_4_sql.exceptions import resolve_raise_on_error
+    from gemma_4_sql.type_hints import TrainingConfig
+
+    assert resolve_raise_on_error() is False
+    assert resolve_raise_on_error(raise_on_error=True) is True
+    assert resolve_raise_on_error(raise_on_error=False, kwargs={"raise_on_error": True}) is False
+    assert resolve_raise_on_error(kwargs={"raise_on_error": True}) is True
+
+    cfg_true = TrainingConfig(raise_on_error=True)
+    assert resolve_raise_on_error(cfg_true) is True
+
+    cfg_extra = TrainingConfig(extra_kwargs={"raise_on_error": True})
+    assert resolve_raise_on_error(cfg_extra) is True
+
+    classBareObj: object = object()
+    assert resolve_raise_on_error(classBareObj) is False
+    assert is_failed_status(ExecutionStatus.BACKEND_UNAVAILABLE) is True
+    assert is_failed_status(ExecutionStatus.LOADED) is False

@@ -11,7 +11,7 @@ import jax.numpy as jnp
 from gemma_4_sql.backends.jax.gemma4.cache import LayerCache, init_cache
 
 
-def test_layer_cache():
+def test_layer_cache() -> None:
     """Verify layer cache behavior."""
     cache = LayerCache((2, 8, 4, 16), jnp.float32, None)
     assert cache.size == 8
@@ -20,7 +20,7 @@ def test_layer_cache():
     assert cache.v_cache.value.shape == (2, 8, 4, 16)
 
 
-def test_init_cache():
+def test_init_cache() -> None:
     """Verify init cache behavior."""
     config = MagicMock()
     config.num_hidden_layers = 2
@@ -36,7 +36,7 @@ def test_init_cache():
     assert caches[0].k_cache.value.shape == (2, 8, 2, 16)
 
 
-def test_init_cache_global():
+def test_init_cache_global() -> None:
     """Verify init cache global behavior."""
     config = MagicMock()
     config.num_hidden_layers = 6  # 6th is global
@@ -52,7 +52,7 @@ def test_init_cache_global():
     assert caches[5].k_cache.value.shape == (2, 8, 4, 32)
 
 
-def test_init_cache_global_fallback():
+def test_init_cache_global_fallback() -> None:
     """Verify init cache global fallback behavior."""
     config = MagicMock()
     config.num_hidden_layers = 6  # 6th is global

@@ -14,6 +14,8 @@ from gemma_4_sql.backends.common_gemma4_config import (
     GEMMA4_31B_SPEC,
     GEMMA4_E2B_SPEC,
     GEMMA4_E4B_SPEC,
+    GEMMA4_TINY_SPEC,
+    AttentionType,
     resolve_gemma4_preset_name,
 )
 
@@ -63,13 +65,6 @@ class VisionConfig:
     num_hidden_layers: int = 27
     patch_size: int = 14
     shd_cfg: VisionShardConfig = field(default_factory=VisionShardConfig.no_sharding)
-
-
-class AttentionType(Enum):
-    """Types of attention layers in Gemma 4."""
-
-    LOCAL_SLIDING = "local_sliding"
-    GLOBAL = "global"
 
 
 class ShardMode(Enum):
@@ -263,11 +258,28 @@ class ModelConfigPresets:
         return ModelConfig(**kwargs)
 
     @classmethod
+    def gemma4_tiny(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
+        """Return miniature preset configuration for Gemma 4 Tiny.
+
+        Args:
+            use_fsdp: Whether to enable FSDP sharding.
+            use_tp: Whether to enable tensor-parallel sharding.
+
+        Returns:
+            Gemma 4 Tiny `ModelConfig` instance.
+
+        """
+        kwargs: dict[str, Any] = dict(GEMMA4_TINY_SPEC)
+        if use_fsdp or use_tp:
+            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
+        return ModelConfig(**kwargs)
+
+    @classmethod
     def from_preset(cls, model_name: str, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
         """Resolve a `ModelConfig` preset from a model identifier string.
 
         Args:
-            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`, `'gemma-4-26B-A4B'`, `'gemma-4-31B'`).
+            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`, `'gemma-4-26B-A4B'`, `'gemma-4-31B'`, `'gemma-4-tiny'`).
             use_fsdp: Whether to enable FSDP sharding.
             use_tp: Whether to enable tensor-parallel sharding.
 
@@ -277,6 +289,8 @@ class ModelConfigPresets:
         """
         preset_kw = {"use_fsdp": use_fsdp, "use_tp": use_tp} if (use_fsdp or use_tp) else {}
         key = resolve_gemma4_preset_name(model_name)
+        if key == "tiny":
+            return cls.gemma4_tiny(**preset_kw)
         if key == "31b":
             return cls.gemma4_31b(**preset_kw)
         if key == "26b_a4b":
@@ -284,6 +298,20 @@ class ModelConfigPresets:
         if key == "e4b":
             return cls.gemma4_e4b(**preset_kw)
         return cls.gemma4_e2b(**preset_kw)
+
+
+def resolve_gemma4_config(config_cls: Any, model_name: str) -> Any:
+    """Resolve a `Gemma4Config` preset using `from_preset` or `gemma4_e2b` fallback.
+
+    Args:
+        config_cls: `Gemma4Config` class or mock equivalent.
+        model_name: Target model name or preset identifier.
+
+    Returns:
+        Resolved configuration instance.
+
+    """
+    return config_cls.from_preset(model_name) if hasattr(config_cls, "from_preset") else config_cls.gemma4_e2b()
 
 
 @dataclass
@@ -323,3 +351,17 @@ class ModelConfig(ModelConfigPresets):
     audio_config: AudioConfig | None = None
     mm_tokens_per_image: int = 256
     audio_token_id: int | None = None
+
+
+__all__ = [
+    "DEFAULT_GRADIENT_CLIPPING",
+    "AttentionType",
+    "AudioConfig",
+    "ModelConfig",
+    "ModelConfigPresets",
+    "ShardConfig",
+    "ShardMode",
+    "VisionConfig",
+    "VisionShardConfig",
+    "resolve_gemma4_config",
+]

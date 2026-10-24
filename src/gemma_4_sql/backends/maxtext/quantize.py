@@ -125,7 +125,7 @@ def apply_aqt_quantization(
 
     injected_count = 0
 
-    def _traverse(curr: Any, current_path: str = "") -> dict[str, Any]:
+    def _traverse(curr: Any, current_path: str = "") -> Any:
         """Traverse parameters recursively to quantize targeted kernels."""
         nonlocal injected_count
         if not isinstance(curr, dict):

@@ -29,18 +29,17 @@ CREATE TABLE orders (id UINTEGER PRIMARY KEY, user_id UINTEGER, amount DOUBLE, c
 CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL, created_at TEXT);"""
 
 
-def create_in_memory_sqlite(ddl: str | None = None) -> sqlite3.Connection:
-    """Create an in-memory SQLite connection initialized with optional DDL.
+def create_in_memory_sqlite(ddl: str = "") -> sqlite3.Connection:
+    """Create an in-memory SQLite connection initialized with DDL.
 
     Args:
-        ddl: Optional SQL DDL string to initialize database schema.
+        ddl: SQL DDL string to initialize database schema.
 
     Returns:
         An open sqlite3.Connection instance with initialized tables.
     """
     conn = sqlite3.connect(":memory:")
-    if ddl:
-        conn.executescript(ddl)
+    conn.executescript(ddl)
     return conn
 
 

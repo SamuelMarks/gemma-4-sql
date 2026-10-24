@@ -6,7 +6,7 @@ from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4VisionConfig
 from gemma_4_sql.backends.pytorch.gemma4.vision import Gemma4VisionEmbeddings, Gemma4VisionModel
 
 
-def test_gemma4_vision_embeddings():
+def test_gemma4_vision_embeddings() -> None:
     """Test Gemma4VisionEmbeddings."""
     config = Gemma4VisionConfig(hidden_size=256, patch_size=14, image_size=224)
     embeddings = Gemma4VisionEmbeddings(config)
@@ -17,7 +17,7 @@ def test_gemma4_vision_embeddings():
     assert out.shape == (2, num_patches, 256)
 
 
-def test_gemma4_vision_model():
+def test_gemma4_vision_model() -> None:
     """Test Gemma4VisionModel."""
     config = Gemma4VisionConfig(hidden_size=256, intermediate_size=512, num_hidden_layers=2, num_attention_heads=4, patch_size=14, image_size=224)
     model = Gemma4VisionModel(config)

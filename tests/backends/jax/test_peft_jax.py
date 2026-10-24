@@ -26,48 +26,6 @@ from gemma_4_sql.backends.jax.peft import (
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 
 
-class MockOptax:
-    """Mock optax for dependency isolation testing."""
-
-
-class MockJax:
-    """Mock jax for dependency isolation testing."""
-
-
-class MockGemma4Config:
-    """Mock Gemma4Config for dependency isolation testing."""
-
-    @staticmethod
-    def gemma4_e2b() -> Any:
-        """Return dummy configuration string."""
-        return "config"
-
-
-class MockGemma4ForCausalLM:
-    """Mock Gemma4ForCausalLM for dependency isolation testing."""
-
-    def __init__(self, config: Any, rngs: Any = None, **kwargs: Any) -> None:
-        """Initialize mock Gemma4ForCausalLM."""
-
-
-class MockNNX:
-    """Mock flax.nnx for dependency isolation testing."""
-
-    class Param:
-        """Mock nnx.Param."""
-
-    class Rngs:
-        """Mock nnx.Rngs."""
-
-        def __init__(self, seed: int) -> None:
-            """Initialize mock Rngs."""
-
-    @staticmethod
-    def split(model: Any, *_args: Any, **_kwargs: Any) -> tuple[Any, ...]:
-        """Return mock split tuple."""
-        return (model, {}, {})
-
-
 def test_apply_lora_jax_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test apply_lora raises DependencyMissingError when optax is missing."""
     monkeypatch.setattr(pt, "optax", None)
@@ -75,30 +33,18 @@ def test_apply_lora_jax_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
         pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
 
 
-def test_apply_lora_jax_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test apply_lora succeeds with mock dependencies."""
-    monkeypatch.setattr(pt, "optax", MockOptax())
-    monkeypatch.setattr(pt, "jax", MockJax())
-    monkeypatch.setattr(pt, "nnx", MockNNX())
-    monkeypatch.setattr(pt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
-    monkeypatch.setattr(pt, "Gemma4Config", MockGemma4Config)
-    res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
-    assert res["status"] == "completed"
-
-
 def test_apply_lora_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test apply_lora captures exceptions during execution."""
-    monkeypatch.setattr(pt, "optax", MockOptax())
-    monkeypatch.setattr(pt, "jax", MockJax())
-    monkeypatch.setattr(pt, "nnx", MockNNX())
-    monkeypatch.setattr(pt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
-    monkeypatch.setattr(pt, "Gemma4Config", MockGemma4Config)
+    """Test apply_lora captures exceptions during execution and respects raise_on_error."""
+    monkeypatch.setattr(Gemma4Config, "gemma4_e2b", Gemma4Config.gemma4_tiny)
+    res_default = pt.apply_lora("test-model", ["q_proj"], 2, 4, 0.0)
+    assert res_default["status"] == "completed"
+    assert res_default.get("injected_modules") == 1
 
-    def mock_split(*_args: Any, **_kwargs: Any) -> tuple[Any, ...]:
-        """Raise intentional ValueError to simulate split error."""
+    def mock_inject(*_args: Any, **_kwargs: Any) -> tuple[Any, int]:
+        """Raise intentional ValueError to simulate injection error."""
         raise ValueError("split error")
 
-    monkeypatch.setattr(MockNNX, "split", mock_split)
+    monkeypatch.setattr(pt, "inject_lora", mock_inject)
     res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
     assert "failed" in str(res["status"])
     with pytest.raises(TrainingError, match="split error"):
@@ -264,8 +210,8 @@ def test_inject_lora_to_decoder_layer() -> None:
     assert count_shared == 6
 
     # Test layer with non-Linear projection attribute
-    layer_with_fake = pt.Gemma4DecoderLayer(config, AttentionType.LOCAL_SLIDING, rngs=rngs)
-    layer_with_fake.mlp.gate_proj = "not_a_linear"  # type: ignore[assignment]
+    layer_with_fake: Any = pt.Gemma4DecoderLayer(config, AttentionType.LOCAL_SLIDING, rngs=rngs)
+    layer_with_fake.mlp.gate_proj = "not_a_linear"
     assert inject_lora_to_layer(layer_with_fake, ["gate_proj"]) == 0
 
     # Test layer with no self_attention or mlp
@@ -410,11 +356,11 @@ def test_apply_lora_model_construction() -> None:
             cfg.num_hidden_layers = 1
             return cfg
 
-        Gemma4Config.gemma4_e2b = small_config  # type: ignore[assignment]
+        setattr(Gemma4Config, "gemma4_e2b", small_config)
         res_default = apply_lora("gemma-default", ["q_proj"], rngs=rngs)
         assert res_default["status"] == "completed"
     finally:
-        Gemma4Config.gemma4_e2b = orig_fn  # type: ignore[assignment]
+        setattr(Gemma4Config, "gemma4_e2b", orig_fn)
 
 
 def test_lora_optimizer_gradient_flow_and_freeze_state() -> None:
@@ -448,22 +394,15 @@ def test_lora_optimizer_gradient_flow_and_freeze_state() -> None:
         return jnp.sum((pred - target) ** 2)
 
     v_ag_fn: Any = nnx.value_and_grad
-    if hasattr(nnx, "DiffState"):
-        grad_fn = v_ag_fn(loss_fn, argnums=nnx.DiffState(0, pt.LoRAParam))
-    else:
-        grad_fn = v_ag_fn(loss_fn, wrt=pt.LoRAParam)
+    grad_fn = v_ag_fn(loss_fn, argnums=nnx.DiffState(0, pt.LoRAParam))
 
     x = jnp.ones((1, 4))
     target = jnp.zeros((1, 4))
 
+    from gemma_4_sql.backends.common_train import apply_nnx_optimizer_update
+
     _loss_before, grads = grad_fn(model, x, target)
-    try:
-        optimizer.update(grads)
-    except AttributeError:
-        # Expected failure when flax.nnx is monkeypatched globally by other tests
-        return
-    except TypeError:
-        optimizer.update(model, grads)
+    apply_nnx_optimizer_update(optimizer, model, grads)
 
     # Base kernel must be completely untouched (still all ones)
     assert jnp.all(model.proj.kernel[...] == 1.0)
@@ -541,39 +480,24 @@ def test_lora_linear_no_dropout() -> None:
     assert out.shape == (1, 4)
 
 
-def test_peft_param_monkeypatch_helpers() -> None:
-    """Test _ensure_param_compat helper for nnx.Param lacking shape, dtype, and indexing."""
-
-    class DummyParam:
-        """Dummy parameter class."""
-
-        def __init__(self, value: Any = None) -> None:
-            """Initialize dummy param."""
-            self.value = value
-
-    pt._ensure_param_compat(None)
-    pt._ensure_param_compat(DummyParam)
-    # Second call exercises the false branches when attributes already exist
-    pt._ensure_param_compat(DummyParam)
-
-    # Test the dynamically attached properties and methods
-    p: Any = DummyParam(jnp.zeros((2, 3)))
+def test_nnx_param_properties_and_indexing() -> None:
+    """Test NNXParam and LoRAParam shape, dtype, __getitem__, and __setitem__ behaviors."""
+    p = pt.NNXParam(jnp.zeros((2, 3), dtype=jnp.float32))
     assert p.shape == (2, 3)
-    assert p.dtype is not None
-    assert p[0] is not None
-    p[...] = jnp.ones((2, 3))
+    assert p.dtype == jnp.float32
+    assert p[0].shape == (3,)
+    p[...] = jnp.ones((2, 3), dtype=jnp.float32)
     assert float(p.value[0, 0]) == 1.0
-    p[0] = jnp.zeros((3,))
+    p[0] = jnp.zeros((3,), dtype=jnp.float32)
     assert float(p.value[0, 0]) == 0.0
 
-    # Test without .at
-    p_no_at: Any = DummyParam([1, 2, 3])
-    p_no_at[0] = [9, 9, 9]
-    assert p_no_at.value == [9, 9, 9]
+    # Test when value is a plain Python list (without .at)
+    p_list: Any = pt.NNXParam([1, 2, 3])
+    p_list[0] = [9, 9, 9]
+    assert p_list.value == [9, 9, 9]
 
-    # Test without value attribute
-    p_empty: Any = DummyParam(None)
-    del p_empty.value
+    # Test when value is None
+    p_empty: Any = pt.NNXParam(None)
     assert p_empty.shape == ()
     assert p_empty.dtype is None
     assert p_empty[0] is None

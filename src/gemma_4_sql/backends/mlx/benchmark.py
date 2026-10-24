@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ModelType
+from gemma_4_sql.type_hints import MlxCausalLMProtocol
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
@@ -95,7 +95,7 @@ def _get_peak_memory_mb() -> float:
 
 
 def _run_benchmark_pass(
-    model: ModelType | None,
+    model: MlxCausalLMProtocol | None,
     batch_size: int,
     num_runs: int,
     prompt_len: int = 32,

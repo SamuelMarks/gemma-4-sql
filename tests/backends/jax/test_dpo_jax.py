@@ -49,7 +49,7 @@ def test_real_tiny_jax_dpo_loss_logps_and_train_step() -> None:
     assert float(step_loss) > 0.0
 
     train_step = jax_dpo._get_train_step_fn(0.1)
-    state = TrainerState(
+    state: Any = TrainerState(
         dataloader=[batch],
         epochs=1,
         policy_model=policy_model,
@@ -73,7 +73,8 @@ def test_compute_logps_single_arg_model() -> None:
 
     inputs = jnp.array([[1, 2]], dtype=jnp.int32)
     labels = jnp.array([[2, 0]], dtype=jnp.int32)
-    logps = jax_dpo._compute_logps(single_arg_model, inputs, labels)  # type: ignore[arg-type]
+    model_any: Any = single_arg_model
+    logps = jax_dpo._compute_logps(model_any, inputs, labels)
     assert logps.shape == (1,)
 
 
@@ -83,10 +84,11 @@ def test_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(jax_dpo, "jnn", None)
     monkeypatch.setattr(jax_dpo, "jnp", None)
 
-    loss, _, _ = jax_dpo.dpo_loss(None, None, None, None)  # type: ignore[arg-type]
+    none_arg: Any = None
+    loss, _, _ = jax_dpo.dpo_loss(none_arg, none_arg, none_arg, none_arg)
     assert loss == 0.0
 
-    with pytest.raises(DependencyMissingError, match="JAX DPO dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"JAX DPO dependencies are missing\."):
         jax_dpo.run_dpo(DPOConfig(model_name="m", dataset="d"))
 
 
@@ -128,13 +130,13 @@ def test_get_train_step_fn_without_nnx(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(jax_dpo, "nnx", LegacyNNX)
     assert jax_dpo._create_nnx_optimizer("m", "tx") == ("m", "tx")
     with patch.object(jax_dpo, "_dpo_step_loss", return_value=0.125):
-        step_fn = jax_dpo._get_train_step_fn(0.1)
-        assert step_fn("p", "r", LegacyOptimizer(), {}) == 0.125  # type: ignore[operator]
+        step_fn: Any = jax_dpo._get_train_step_fn(0.1)
+        assert step_fn("p", "r", LegacyOptimizer(), {}) == 0.125
 
 
 def test_run_training_epochs_float_return() -> None:
     """Verify _run_training_epochs handles plain float returns from train_step."""
-    state = TrainerState(dataloader=[{"a": 1}], epochs=1, train_step=lambda *_a: 0.25)
+    state: Any = TrainerState(dataloader=[{"a": 1}], epochs=1, train_step=lambda *_a: 0.25)
     assert jax_dpo._run_training_epochs(state) == 0.25
 
 
@@ -183,5 +185,5 @@ def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
             jax_dpo.run_dpo(cfg, raise_on_error=True)
 
     monkeypatch.setattr(jax_dpo, "optax", None)
-    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing for DPO."):
+    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing for DPO\."):
         jax_dpo._execute_dpo("model", "dataset", 0.1, 1, 1e-5)

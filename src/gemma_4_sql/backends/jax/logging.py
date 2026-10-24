@@ -25,4 +25,4 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", **_
         A dictionary containing the results.
 
     """
-    return log_metrics_wrapper(backend_name="jax", metrics=metrics, step=step, log_dir=log_dir, summary_writer_cls=SummaryWriter, extra_fields={"action": "log_metrics"})
+    return log_metrics_wrapper(backend_name="jax", metrics=metrics, step=step, log_dir=log_dir, summary_writer_cls=SummaryWriter)

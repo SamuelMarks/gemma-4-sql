@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 import jax.numpy as jnp
 from flax import nnx
 
+from gemma_4_sql.backends.common_gemma4_config import GEMMA4_ATTENTION_PATTERN
+
 from .config import AttentionType
 
 if TYPE_CHECKING:
@@ -74,4 +76,4 @@ def init_cache(config: ModelConfig, batch_size: int, max_seq_len: int) -> Cache:
     return caches
 
 
-GEMMA4_ATTENTION_PATTERN = (AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.LOCAL_SLIDING, AttentionType.GLOBAL)
+__all__ = ["GEMMA4_ATTENTION_PATTERN", "Cache", "LayerCache", "init_cache"]

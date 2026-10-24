@@ -48,16 +48,16 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
             rng = jax.random.PRNGKey(0)
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
             weights = model.init(rng, dummy_input)
-        except Exception as e:
-            raise ExportError(f"Failed to initialize MaxText model '{model_name}': {e}") from e
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+            raise ExportError(f"Failed to initialize MaxText model '{model_name}': {e}", backend="maxtext", model_name=model_name, cause=e) from e
 
     file_path = Path(export_path) / "maxtext_orbax_ckpt"
     try:
         options = ocp.CheckpointManagerOptions(max_to_keep=1)
         with ocp.CheckpointManager(file_path, ocp.PyTreeCheckpointer(), options) as mngr:
             mngr.save(0, weights)
-    except Exception as e:
-        raise ExportError(f"Failed to save MaxText Orbax checkpoint at '{file_path}': {e}") from e
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+        raise ExportError(f"Failed to save MaxText Orbax checkpoint at '{file_path}': {e}", backend="maxtext", model_name=model_name, cause=e) from e
 
     status = "exported_with_maxtext_orbax"
     return {

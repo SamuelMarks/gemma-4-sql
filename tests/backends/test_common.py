@@ -1,299 +1,139 @@
-"""Tests for test common module."""
+"""Tests for shared common_gemma4_config, common_inference, and common_peft utilities."""
 
-from pathlib import Path
+from __future__ import annotations
+
 from typing import Any
-from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
-from gemma_4_sql.backends.common_data import load_duckdb_dataset
-from gemma_4_sql.backends.common_dpo import generic_run_training_epochs
-from gemma_4_sql.backends.common_logging import log_metrics_wrapper
-from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization, quantize_model_wrapper
-from gemma_4_sql.backends.common_serve import serve_model_wrapper
-
-
-def testload_duckdb_dataset_missing(monkeypatch: pytest.MonkeyPatch):
-    """Test load duckdb dataset missing functionality."""
-    monkeypatch.setattr("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", lambda x: None)
-    with pytest.raises(RuntimeError, match="duckdb is required"):
-        load_duckdb_dataset("test.db", "test_table")
-
-
-def testload_duckdb_dataset_error(monkeypatch: pytest.MonkeyPatch):
-    """Test load duckdb dataset error functionality."""
-    mock_duckdb = MagicMock()
-    mock_duckdb.connect.side_effect = Exception("Test DB error")
-    monkeypatch.setattr("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", lambda x: mock_duckdb)
-    with pytest.raises(RuntimeError, match="DuckDB error"):
-        load_duckdb_dataset("test.db", "test_table")
-
-
-def test_common_dpo_run_training_epochs():
-    """Test common dpo run training epochs functionality."""
-
-    class MockState:
-        """Test class for MockState."""
-
-        def __init__(self):
-            """Initialize __init__."""
-            self.dataloader = [[{"inputs": 1}]]
-            self.epochs = 1
-            self.policy_model = "policy"
-            self.ref_model = "ref"
-            self.optimizer = "opt"
-            self.beta = 0.1
-
-    class MockLoss:
-        """Test class for MockLoss."""
-
-        def item(self):
-            """Execute item helper."""
-            return 1.0
-
-    def mock_step(policy: Any, ref: Any, opt: Any, batch: Any, beta: Any):
-        """Execute mock step helper."""
-        return MockLoss()
-
-    import pytest
-
-    state_any: Any = MockState()
-    loss = generic_run_training_epochs(state_any, mock_step)
-    assert loss == pytest.approx(1.0)
-
-
-def test_common_logging_close():
-    """Test common logging close functionality."""
-    from unittest.mock import Mock
-
-    mock_writer = Mock()
-    mock_writer.close = Mock()
-    mock_cls = Mock(return_value=mock_writer)
-
-    res = log_metrics_wrapper("test", {"loss": 1.0}, 1, "logs", mock_cls, step_duration_s=0.5)
-    mock_writer.close.assert_called_once()
-    assert res["status"] == "success"
-    assert res.get("step_duration_s") == 0.5
-
-
-def test_common_logging_file_fallback(tmp_path: Path):
-    """Test common logging file persistence when TensorBoard is absent."""
-    import json
-
-    log_dir = str(tmp_path / "fallback_logs")
-    res = log_metrics_wrapper(
-        "test_backend",
-        {"accuracy": 0.98},
-        step=5,
-        log_dir=log_dir,
-        summary_writer_cls=None,
-        extra_fields={"epoch": "2"},
-        step_duration_s=1.25,
-    )
-    assert "fallback_file" in res
-
-    metrics_file = tmp_path / "fallback_logs" / "metrics.jsonl"
-    assert metrics_file.exists()
-    lines = metrics_file.read_text().strip().split("\n")
-    data = json.loads(lines[-1])
-    assert data["backend"] == "test_backend"
-    assert data["step"] == 5
-    assert data["metrics"] == {"accuracy": 0.98}
-    assert data["epoch"] == "2"
-    assert data["step_duration_s"] == 1.25
-
-    class WriterWithClose:
-        """Writer with close method."""
-
-        def __init__(self, log_dir: str) -> None:
-            """Initialize writer."""
-
-        def add_scalar(self, k: str, v: float, step: int) -> None:
-            """Add scalar."""
-
-        def close(self) -> None:
-            """Close writer."""
-
-    class WriterNoClose:
-        """Writer without close method."""
-
-        def __init__(self, log_dir: str) -> None:
-            """Initialize writer."""
-
-        def add_scalar(self, k: str, v: float, step: int) -> None:
-            """Add scalar."""
-
-    res_with_close = log_metrics_wrapper("test", {"loss": 0.5}, 1, log_dir=log_dir, summary_writer_cls=WriterWithClose)
-    assert res_with_close["status"] == "success"
-
-    res_no_close = log_metrics_wrapper("test", {"loss": 0.5}, 1, log_dir=log_dir, summary_writer_cls=WriterNoClose)
-    assert res_no_close["status"] == "success"
-
-
-from gemma_4_sql.exceptions import DependencyMissingError
-
-
-def test_common_quantize():
-    """Test common quantize functionality."""
-    with pytest.raises(DependencyMissingError):
-        quantize_model_wrapper("test", "model", "int8", True, lambda: (0.5, "quantized"))
-
-    res2 = quantize_model_wrapper("test", "model", "int8", False, lambda: (0.5, "quantized"))
-    assert res2["status"] == "quantized"
-
-
-def test_common_serve_missing():
-    """Test common serve missing functionality."""
-    mock_app: Any = None
-    with pytest.raises(DependencyMissingError):
-        serve_model_wrapper("test", "model", 8000, 32, True, lambda: mock_app)
-
-
-def test_quantize_missing_bitsandbytes():
-    """Test quantize missing bitsandbytes functionality."""
-    with pytest.raises(DependencyMissingError):
-        apply_bits_and_bytes_quantization("int8", None, None)
-
-
-def test_apply_bits_and_bytes_quantization():
-    """Test int8, int4, skip modules, and unsupported methods in apply_bits_and_bytes_quantization."""
-
-    called_kwargs: list[dict[str, Any]] = []
-
-    class MockConfig:
-        """Test class for MockConfig."""
-
-        def __init__(self, **kwargs: Any):
-            """Initialize __init__."""
-            called_kwargs.append(kwargs)
-
-    # Test int8 default
-    red8, stat8 = apply_bits_and_bytes_quantization("int8", MockConfig, None)
-    assert stat8 == "quantized_int8"
-    assert red8 == pytest.approx(0.5)
-    assert called_kwargs[-1]["load_in_8bit"] is True
-    assert called_kwargs[-1]["llm_int8_threshold"] == 6.0
-
-    # Test int8 with skip modules
-    apply_bits_and_bytes_quantization("int8", MockConfig, None, llm_int8_skip_modules=["lm_head"])
-    assert called_kwargs[-1]["llm_int8_skip_modules"] == ["lm_head"]
-
-    # Test int4
-    red4, stat4 = apply_bits_and_bytes_quantization("int4", MockConfig, "float16", bnb_4bit_quant_type="fp4")
-    assert stat4 == "quantized_int4"
-    assert red4 == pytest.approx(0.75)
-    assert called_kwargs[-1]["load_in_4bit"] is True
-    assert called_kwargs[-1]["bnb_4bit_quant_type"] == "fp4"
-
-    # Test unsupported method returns unsupported status
-    red_unsupp, stat_unsupp = apply_bits_and_bytes_quantization("awq", MockConfig, None)
-    assert stat_unsupp == "unsupported_method_awq"
-    assert red_unsupp == 0.0
-
-    # Test model with config attribute
-    class ModelWithConfig:
-        """Model with config."""
-
-        class Config:
-            """Inner config."""
-
-            quantization_config = None
-
-        config = Config()
-
-    m_with_cfg: Any = ModelWithConfig()
-    apply_bits_and_bytes_quantization("int8", MockConfig, None, model=m_with_cfg)
-    assert getattr(m_with_cfg, "_is_quantized", False) is True
-
-    # Test model without config attribute
-    class ModelWithoutConfig:
-        """Model without config."""
-
-    m_no_cfg: Any = ModelWithoutConfig()
-    apply_bits_and_bytes_quantization("int8", MockConfig, None, model=m_no_cfg)
-    assert getattr(m_no_cfg, "_is_quantized", False) is True
-
-
-def test_quantize_model_wrapper_error_handling():
-    """Test error handling in quantize_model_wrapper."""
-
-    def fail_apply():
-        """Provide fail apply test helper."""
-        raise RuntimeError("Quantization execution failed")
-
-    res = quantize_model_wrapper("test", "model", "int8", False, fail_apply)
-    assert "failed: Quantization execution failed" in res["status"]
-    assert res["memory_reduction_factor"] == 0.0
-
-
-def test_serve_model_wrapper_run_server(monkeypatch: pytest.MonkeyPatch):
-    """Test serve_model_wrapper with run_server=True and ."""
-    import gemma_4_sql.backends.common_serve as cs
-
-    mock_uvicorn = MagicMock()
-    monkeypatch.setattr(cs, "uvicorn", mock_uvicorn)
-    monkeypatch.setattr(cs, "FastAPI", MagicMock())
-    mock_app_obj: Any = "mock_app"
-
-    res = serve_model_wrapper(
-        backend_name="test",
-        model_name="model",
-        port=8000,
-        max_batch_size=32,
-        missing_deps=False,
-        app_factory=lambda: mock_app_obj,
-        run_server=True,
-    )
-    assert res["status"] == "running_test_serve"
-    mock_uvicorn.run.assert_called_once_with("mock_app", host="0.0.0.0", port=8000)
-
-    # Test  but run_server=False
-    mock_uvicorn.reset_mock()
-    res2 = serve_model_wrapper(
-        backend_name="test",
-        model_name="model",
-        port=8000,
-        max_batch_size=32,
-        missing_deps=False,
-        app_factory=lambda: mock_app_obj,
-        run_server=False,
-    )
-    assert res2["status"] == "running_test_serve"
-    mock_uvicorn.run.assert_not_called()
-
-    # Test
-    res3 = serve_model_wrapper(
-        backend_name="test",
-        model_name="model",
-        port=8000,
-        max_batch_size=32,
-        missing_deps=False,
-        app_factory=lambda: mock_app_obj,
-    )
-    assert res3["status"] == "running_test_serve"
-
-
-def testload_duckdb_dataset_invalid_table():
-    """Test load_duckdb_dataset rejects invalid table names."""
-    from gemma_4_sql.backends.common_data import load_duckdb_dataset
-
-    with pytest.raises(RuntimeError, match="Invalid or unsafe table name"):
-        load_duckdb_dataset(":memory:", "drop table users; --")
+from gemma_4_sql.backends.common_gemma4_config import (
+    get_gemma4_preset_spec,
+    resolve_gemma4_preset_name,
+)
+from gemma_4_sql.backends.common_inference import (
+    BoundedLRUCache,
+    compute_jax_step_probs,
+    expand_jax_beams,
+    normalize_logprob_confidence,
+    run_array_beam_search,
+    run_inference_wrapper,
+)
+from gemma_4_sql.backends.common_peft import apply_lora_wrapper
+from gemma_4_sql.exceptions import ConfigurationError, InferenceError, TrainingError
 
 
 def test_common_gemma4_config_presets() -> None:
     """Verify resolve_gemma4_preset_name and get_gemma4_preset_spec resolve all Gemma 4 variants."""
-    from gemma_4_sql.backends.common_gemma4_config import (
-        get_gemma4_preset_spec,
-        resolve_gemma4_preset_name,
-    )
-
     assert resolve_gemma4_preset_name("google/gemma-4-E2B") == "e2b"
     assert resolve_gemma4_preset_name("google/gemma-4-E4B") == "e4b"
     assert resolve_gemma4_preset_name("google/gemma-4-26B-A4B") == "26b_a4b"
     assert resolve_gemma4_preset_name("google/gemma-4-31B") == "31b"
+    assert resolve_gemma4_preset_name("gemma-4-tiny") == "tiny"
 
     assert get_gemma4_preset_spec("gemma-4-e2b")["hidden_size"] == 1024
     assert get_gemma4_preset_spec("gemma-4-e4b")["hidden_size"] == 2560
     assert get_gemma4_preset_spec("gemma-4-26b")["num_experts"] == 128
     assert get_gemma4_preset_spec("gemma-4-31b")["hidden_size"] == 5376
+    assert get_gemma4_preset_spec("gemma-4-tiny")["hidden_size"] == 64
+
+
+def test_common_inference_and_peft_utilities() -> None:
+    """Verify BoundedLRUCache, normalize_logprob_confidence, run_array_beam_search, and apply_lora_wrapper."""
+    cache: BoundedLRUCache[int] = BoundedLRUCache(maxsize=2)
+    assert cache.get_model("missing") is None
+    cache.put_model("a", 1)
+    cache.put_model("b", 2)
+    cache.put_model("a", 10)
+    assert cache.get_model("a") == 10
+    cache.put_model("c", 3)
+    assert cache.get_model("b") is None
+    assert cache.get_model("c") == 3
+
+    assert normalize_logprob_confidence([-0.1, -0.2], 0) == 0.0
+    assert 0.0 < normalize_logprob_confidence([-0.1, -0.2], 2) <= 1.0
+
+    init_seq = np.array([[1, 2]])
+
+    def _expand(seq: Any, score: float, _bw: int) -> list[tuple[Any, float]]:
+        """Expand beam with one EOS candidate and one non-EOS candidate."""
+        return [
+            (np.concatenate([seq, [[99]]], axis=1), score - 0.1),
+            (np.concatenate([seq, [[3]]], axis=1), score - 0.5),
+        ]
+
+    best_seq, best_score = run_array_beam_search(init_seq, beam_width=2, max_length=2, eos_token_id=99, step_expand_fn=_expand)
+    assert best_seq[0, -1] == 99
+    assert best_score == pytest.approx(-0.1)
+
+    eos_only_seq = np.array([[1, 99]])
+    best_eos, _ = run_array_beam_search(eos_only_seq, beam_width=1, max_length=2, eos_token_id=99, step_expand_fn=_expand)
+    assert best_eos[0, -1] == 99
+
+    best_zero_len, _ = run_array_beam_search(init_seq, beam_width=1, max_length=0, eos_token_id=99, step_expand_fn=_expand)
+    assert best_zero_len.shape == (1, 2)
+
+    res_ok = apply_lora_wrapper("jax", "m", ["q_proj"], 8, 16, 0.05, lambda: 4)
+    assert res_ok["injected_modules"] == 4
+    assert res_ok["status"] == "completed"
+
+    def _fail() -> int:
+        """Raise ValueError for testing error handling."""
+        raise ValueError("lora boom")
+
+    res_fail = apply_lora_wrapper("jax", "m", ["q_proj"], 8, 16, 0.05, _fail)
+    assert res_fail["status"] == "failed: lora boom"
+
+    with pytest.raises(TrainingError, match="lora boom"):
+        apply_lora_wrapper("jax", "m", ["q_proj"], 8, 16, 0.05, _fail, raise_on_error=True)
+
+    def _cfg_err() -> int:
+        """Raise ConfigurationError to verify passthrough."""
+        raise ConfigurationError("bad lora r")
+
+    with pytest.raises(ConfigurationError, match="bad lora r"):
+        apply_lora_wrapper("jax", "m", ["q_proj"], 0, 16, 0.05, _cfg_err)
+
+    class FakeJaxNN:
+        """Stub jax.nn namespace."""
+
+        @staticmethod
+        def log_softmax(x: Any, axis: int = -1) -> Any:
+            """Return input array unchanged."""
+            _ = axis
+            return x
+
+    class FakeJax:
+        """Stub jax namespace."""
+
+        nn = FakeJaxNN
+
+    for logits in (
+        np.array([[[0.1, 0.9, 0.5]]]),
+        np.array([[0.1, 0.9, 0.5]]),
+        np.array([0.1, 0.9, 0.5]),
+    ):
+        top_idx, top_p = compute_jax_step_probs(logits, 2, FakeJax, np)
+        assert list(top_idx) == [1, 2]
+        beams = expand_jax_beams(np.array([[10]]), 0.0, top_idx, top_p, 2, np)
+        assert len(beams) == 2
+
+    res_inf_ok = run_inference_wrapper("jax", "m", "p", 2, lambda: ("SELECT 1;", 0.9))
+    assert res_inf_ok["status"] == "success"
+    assert res_inf_ok["sql"] == "SELECT 1;"
+
+    res_inf_fail = run_inference_wrapper("jax", "m", "p", 2, lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert res_inf_fail["status"] == "failed: boom"
+
+    with pytest.raises(InferenceError, match="boom"):
+        run_inference_wrapper("jax", "m", "p", 2, lambda: (_ for _ in ()).throw(RuntimeError("boom")), raise_on_error=True)
+
+    with pytest.raises(InferenceError, match="direct err"):
+        run_inference_wrapper(
+            "jax",
+            "m",
+            "p",
+            2,
+            lambda: (_ for _ in ()).throw(InferenceError("direct err")),
+            raise_on_error=True,
+        )

@@ -18,7 +18,7 @@ from gemma_4_sql.backends.jax.gemma4.audio_layers import (
 )
 
 
-def get_mock_audio_config():
+def get_mock_audio_config() -> MagicMock:
     """Provide get mock audio config test helper."""
     config = MagicMock()
     config.hidden_size = 16
@@ -31,7 +31,7 @@ def get_mock_audio_config():
     return config
 
 
-def test_subsample_conv_projection_layer():
+def test_subsample_conv_projection_layer() -> None:
     """Verify subsample conv projection layer behavior."""
     rngs = nnx.Rngs(0)
     layer = Gemma4AudioSubSampleConvProjectionLayer(1, 4, 1e-6, rngs=rngs)
@@ -45,7 +45,7 @@ def test_subsample_conv_projection_layer():
     assert mask2 is not None and mask2.shape == (2, 4)
 
 
-def test_subsample_conv_projection():
+def test_subsample_conv_projection() -> None:
     """Verify subsample conv projection behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
@@ -60,7 +60,7 @@ def test_subsample_conv_projection():
     assert mask2 is not None and mask2.shape == (2, 2)
 
 
-def test_feed_forward():
+def test_feed_forward() -> None:
     """Verify feed forward behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
@@ -71,7 +71,7 @@ def test_feed_forward():
     assert out.shape == (2, 4, 16)
 
 
-def test_causal_conv1d():
+def test_causal_conv1d() -> None:
     """Verify causal conv1d behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
@@ -82,7 +82,7 @@ def test_causal_conv1d():
     assert out.shape == (2, 4, 16)
 
 
-def test_light_conv1d():
+def test_light_conv1d() -> None:
     """Verify light conv1d behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)

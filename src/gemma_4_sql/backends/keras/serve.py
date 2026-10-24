@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
+from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
-from gemma_4_sql.type_hints import ModelType
+from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import KerasCausalLMProtocol
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONValue, ServeResultDict
+    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
 logger = logging.getLogger(__name__)
 
 keras = optional_import("keras")
@@ -19,22 +19,23 @@ tf = optional_import("tensorflow")
 GemmaCausalLM: Any = optional_attr("keras_nlp.models", "GemmaCausalLM")
 
 
-def create_app(model_name: str) -> FastAPIAppProtocol:
+def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
     """Create the FastAPI application for the Keras server.
 
     Args:
         model_name: The name of the target model.
+        max_batch_size: Maximum batch size per continuous batching window.
 
     Returns:
         The FastAPI application instance.
 
     """
-    loaded_model: ModelType | None = None
+    loaded_model: KerasCausalLMProtocol | None = None
 
     def _startup() -> None:
         """Initialize Keras model on server startup."""
         nonlocal loaded_model
-        logger.info("Exporting Keras model %s to SavedModel format for TF Serving...", model_name)
+        logger.info("Pre-loading Keras model %s for continuous batching server...", model_name)
         try:
             gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM")
             if gemma_causal_lm_cls is None:
@@ -43,63 +44,51 @@ def create_app(model_name: str) -> FastAPIAppProtocol:
         except (ImportError, ValueError, TypeError, AttributeError, RuntimeError) as e:
             logger.warning("Could not pre-load Keras model %s: %s", model_name, e)
 
-    def _generate(prompt: str) -> str:
-        """Generate a SQL query for a single prompt.
-
-        Args:
-            prompt: Natural language input query.
-
-        Returns:
-            Generated SQL query string.
-
-        Raises:
-            InferenceError: If model inference fails during execution.
-
-        """
+    def _call_keras_generate(model_name: str, prompt: str) -> JSONDict:
+        """Generate SQL using pre-loaded Keras model or fallback to `keras.inference.generate_sql`."""
         from gemma_4_sql.backends.keras.inference import generate_sql
 
         if loaded_model is not None and hasattr(loaded_model, "generate"):
             try:
                 out = loaded_model.generate(prompt)
-                return str(out).strip()
+                return {"sql": str(out).strip()}
             except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 logger.warning("Keras loaded_model.generate failed, falling back to generate_sql: %s", e)
 
-        try:
-            out = generate_sql(model_name=model_name, prompt=prompt)
-            sql = out.get("sql", "")
-            if sql:
-                return str(sql)
-            raise InferenceError(f"Keras inference returned empty SQL for prompt '{prompt}'", backend="keras")
-        except Exception as e:
-            if isinstance(e, InferenceError):
-                raise
-            raise InferenceError(f"Keras generation failed: {e}", backend="keras", cause=e) from e
+        return dict(generate_sql(model_name=model_name, prompt=prompt))
 
     def _batch_generate(prompts: list[str]) -> list[str]:
-        """Generate SQL queries for a batch of prompts.
+        """Generate SQL queries for a batch of prompts using pre-loaded Keras model or per-prompt fallback."""
+        from gemma_4_sql.exceptions import InferenceError
 
-        Args:
-            prompts: List of natural language input queries.
-
-        Returns:
-            List of generated SQL query strings.
-
-        """
         if loaded_model is not None and hasattr(loaded_model, "generate"):
             try:
                 outputs: Any = loaded_model.generate(prompts)
                 return [str(out).strip() for out in outputs]
             except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 logger.warning("Keras batch generation failed, falling back to individual generation: %s", e)
-        return [_generate(p) for p in prompts]
 
-    return create_common_app(
+        results: list[str] = []
+        for p in prompts:
+            try:
+                out_dict = _call_keras_generate(model_name=model_name, prompt=p)
+                sql = out_dict.get("sql", "")
+                if not sql:
+                    raise InferenceError(f"Keras inference returned empty SQL for prompt '{p}'", backend="keras")
+                results.append(str(sql))
+            except Exception as e:
+                if isinstance(e, InferenceError):
+                    raise
+                raise InferenceError(f"Keras generation failed: {e}", backend="keras", cause=e) from e
+        return results
+
+    return create_backend_serve_app(
         backend_name="keras",
         model_name=model_name,
+        generate_sql_fn=_call_keras_generate,
         startup_callback=_startup,
-        generate_logic=_generate,
         batch_generate_logic=_batch_generate,
+        max_batch_size=max_batch_size,
     )
 
 
@@ -128,5 +117,5 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         port=port,
         max_batch_size=max_batch_size,
         missing_deps=False,
-        app_factory=lambda: create_app(model_name),
+        app_factory=lambda: create_app(model_name, max_batch_size=max_batch_size),
     )

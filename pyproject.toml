@@ -65,6 +65,7 @@ all = [
     "requirements-maxtext.txt",
     "requirements-pytorch.txt",
     "requirements-duckdb.txt",
+    "requirements-mlx.txt",
 ]
 default = [
     "requirements-jax.txt",
@@ -72,6 +73,7 @@ default = [
     "requirements-maxtext.txt",
     "requirements-pytorch.txt",
     "requirements-duckdb.txt",
+    "requirements-mlx.txt",
 ]
 
 [tool.pydocstyle]
@@ -82,14 +84,18 @@ add_ignore = "D202"
 unsafe-fixes = true
 preview = true
 line-length = 320
-target-version = "py39"
+target-version = "py312"
 
 [tool.ruff.lint]
+extend-safe-fixes = [
+    "ALL",
+]
+extend-unsafe-fixes = [
+    "ALL",
+]
 ignore = [
     "non-empty-init-module",
-    "pytest-raises-ambiguous-pattern",
     "unused-unpacked-variable",
-    "assert-raises-exception",
     "star-arg-unpacking-after-keyword-arg",
     "missing-trailing-comma",
     "single-line-implicit-string-concatenation",
@@ -97,6 +103,9 @@ ignore = [
     "non-pep604-annotation-union",
     "too-many-statements-in-try-clause",
     "float-equality-comparison",
+    "set-attr-with-constant",
+    "non-pep695-generic-class",
+    "non-pep695-generic-function",
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -115,7 +124,6 @@ ignore = [
     "import-outside-top-level",
     "import-private-name",
     "too-many-locals",
-    "too-many-statements-in-try-clause",
     "float-equality-comparison",
     "subclass-builtin",
     "multiple-with-statements",
@@ -136,20 +144,10 @@ ignore = [
     "import-outside-top-level",
     "import-private-name",
     "too-many-locals",
-    "too-many-statements-in-try-clause",
     "float-equality-comparison",
     "subclass-builtin",
     "multiple-with-statements",
     "mutable-class-default",
-]
-select = [
-    "ALL",
-]
-extend-unsafe-fixes = [
-    "ALL",
-]
-extend-safe-fixes = [
-    "ALL",
 ]
 
 [tool.ruff.lint.pylint]
@@ -177,20 +175,7 @@ allow_redefinition = true
 disallow_any_generics = true
 disallow_subclassing_any = false
 disallow_untyped_decorators = false
-warn_return_any = false
-
-[[tool.mypy.overrides]]
-module = [
-    "tests.*",
-    "gemma_4_sql.backends.jax.gemma4.tests.*",
-]
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = "gemma_4_sql.*"
-disallow_subclassing_any = false
-disallow_untyped_decorators = false
-warn_return_any = false
+warn_return_any = true
 
 [tool.coverage.run]
 relative_files = true

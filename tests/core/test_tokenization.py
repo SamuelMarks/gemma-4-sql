@@ -13,28 +13,34 @@ from gemma_4_sql.tokenization import SQLTokenizer
 class MockHFTokenizer:
     """Mock Hugging Face tokenizer implementation for testing."""
 
-    def encode(self, _text: str, **_kwargs: Any) -> list[int]:
+    def encode(self, text: str, **kwargs: Any) -> list[int]:
         """Encode text using mock token IDs.
 
         Args:
-            _text: Input text to encode.
-            **_kwargs: Optional kwargs.
+            text: Input text to encode.
+            **kwargs: Optional kwargs.
 
         Returns:
             List of mock token IDs.
         """
+        _ = (text, kwargs)
         return [99, 100]
 
-    def decode(self, _tokens: list[int]) -> str:
+    def decode(self, token_ids: list[int]) -> str:
         """Decode mock token IDs into text.
 
         Args:
-            _tokens: Sequence of token IDs to decode.
+            token_ids: Sequence of token IDs to decode.
 
         Returns:
             Decoded mock string.
         """
+        _ = token_ids
         return "hf_decoded"
+
+    def get_vocab(self) -> dict[str, int]:
+        """Return mock vocabulary mapping."""
+        return {"<pad>": 0, "select": 1}
 
 
 class MockAutoTokenizer:
@@ -98,12 +104,17 @@ def test_sql_tokenizer_fallback() -> None:
     unicode_decoded = tok.decode(unicode_encoded)
     assert unicode_decoded == unicode_text
 
+    # Batch sequence encoding test
+    batch_encoded = tok.encode(["ab", "cd"])
+    assert batch_encoded == [[ord("a"), ord("b")], [ord("c"), ord("d")]]
+
 
 @pytest.mark.usefixtures("_mock_transformers")
 def test_sql_tokenizer_hf() -> None:
     """Test Hugging Face tokenizer wrapping."""
     tok = SQLTokenizer(model_name="dummy/model")
     assert tok.hf_tokenizer is not None
+    assert tok.get_vocab() == {"<pad>": 0, "select": 1}
     encoded = tok.encode("abc")
     assert encoded == [99, 100]
     decoded = tok.decode(encoded)
@@ -206,10 +217,14 @@ def test_sql_tokenizer_custom_vocab_bounds() -> None:
 def test_tokenizer_decode_ignores_non_integer_tokens() -> None:
     """Verify SQLTokenizer.decode ignores non-integer elements in token sequence."""
     tokenizer = SQLTokenizer(vocab_size=256)
-    res = tokenizer.decode([65, "bad", 66])  # type: ignore[list-item]
+    mixed_tokens: list[int | object] = [65, "bad", 66]
+    res = tokenizer.decode(mixed_tokens)
     assert res == "AB"
 
-    from gemma_4_sql.exceptions import ConfigurationError
+    from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
 
     with pytest.raises(ConfigurationError, match="vocab_size must be positive"):
         SQLTokenizer(vocab_size=0, strict_vocab=True)
+
+    with pytest.raises(DependencyMissingError, match="allow_fallback=False"):
+        SQLTokenizer(model_name="nonexistent/model/path/for/test", allow_fallback=False)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
@@ -90,14 +90,12 @@ class DuckDBAdapter(DatabaseAdapter):
             ddl: Schema DDL string to execute.
 
         """
-        if "existing_conn" in self.db_kwargs or "conn" in self.db_kwargs:
+        if not self._owns_connection:
             return
         self.conn.execute(ddl)
 
     def close(self) -> None:
         """Close the DuckDB connection if it was not externally provided."""
-        if "existing_conn" in self.db_kwargs or "conn" in self.db_kwargs:
-            return
         super().close()
 
     async def execute_with_feedback_async(
@@ -142,7 +140,6 @@ class DuckDBAdapter(DatabaseAdapter):
 
         """
         try:
-            loop = asyncio.get_running_loop()
 
             def _exec() -> list[tuple[JSONPrimitive, ...]]:
                 """Execute query on a synchronized cursor.
@@ -152,11 +149,12 @@ class DuckDBAdapter(DatabaseAdapter):
 
                 """
                 with self._lock:
-                    conn_obj = self.conn
+                    conn_obj: Any = self.conn
                     cur = conn_obj.cursor() if callable(getattr(conn_obj, "cursor", None)) else conn_obj
-                    return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
+                    rows: list[tuple[JSONPrimitive, ...]] = [tuple(r) for r in cur.execute(query, params or ()).fetchall()]
+                    return rows
 
-            return await loop.run_in_executor(None, _exec)
+            return await asyncio.to_thread(_exec)
         except self.error_classes as e:
             logger.debug("Async Query execution failed: %s", e)
             raise DatabaseExecutionError(str(e), cause=e) from e

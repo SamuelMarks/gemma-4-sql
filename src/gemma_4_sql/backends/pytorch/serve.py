@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
+from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
+from gemma_4_sql.exceptions import DependencyMissingError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, ServeResultDict
+    from gemma_4_sql.type_hints import JSONDict, JSONValue, ServeResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +65,10 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
             request_id = random_uuid() if random_uuid is not None else ""
             results_generator = engine.generate(prompt, None, request_id)
             final_output = None
-            results_iterator = results_generator.__aiter__()
+            results_iterator = aiter(results_generator)
             try:
                 while True:
-                    request_output = await results_iterator.__anext__()
+                    request_output = await anext(results_iterator)
                     if await request.is_disconnected():
                         await engine.abort(request_id)
                         return JSONResponse.__call__(content={"error": "Client disconnected"})
@@ -78,7 +78,8 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
             text = final_output.outputs[0].text if final_output else ""
             return JSONResponse.__call__(content={"sql": text})
 
-    return app
+        return app
+    return None
 
 
 _create_app = _create_vllm_app
@@ -96,50 +97,16 @@ def _create_native_app(model_name: str, max_batch_size: int) -> object:
 
     """
 
-    def _generate(prompt: str) -> str:
-        """Generate SQL query using native PyTorch causal LM inference.
-
-        Args:
-            prompt: Input text prompt.
-
-        Returns:
-            Generated SQL string.
-
-        Raises:
-            InferenceError: If PyTorch inference returns empty SQL or fails.
-
-        """
+    def _call_pytorch_generate(model_name: str, prompt: str) -> JSONDict:
+        """Delegate single-prompt generation to `pytorch.inference.generate_sql`."""
         from gemma_4_sql.backends.pytorch.inference import generate_sql
 
-        try:
-            res = generate_sql(model_name=model_name, prompt=prompt)
-            sql = res.get("sql", "")
-            if sql:
-                return str(sql)
-            raise InferenceError(f"PyTorch inference returned empty SQL for prompt '{prompt}'", backend="pytorch")
-        except Exception as exc:
-            if isinstance(exc, InferenceError):
-                raise
-            logger.warning("Native PyTorch inference encountered error: %s", exc)
-            raise InferenceError(f"PyTorch generation failed: {exc}", backend="pytorch", cause=exc) from exc
+        return dict(generate_sql(model_name=model_name, prompt=prompt))
 
-    def _batch_generate(prompts: list[str]) -> list[str]:
-        """Batch generation handler.
-
-        Args:
-            prompts: Batch of input prompt strings.
-
-        Returns:
-            List of generated SQL queries.
-
-        """
-        return [_generate(p) for p in prompts]
-
-    return create_common_app(
+    return create_backend_serve_app(
         backend_name="pytorch",
         model_name=model_name,
-        generate_logic=_generate,
-        batch_generate_logic=_batch_generate,
+        generate_sql_fn=_call_pytorch_generate,
         max_batch_size=max_batch_size,
     )
 

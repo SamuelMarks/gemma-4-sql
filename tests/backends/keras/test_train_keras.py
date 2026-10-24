@@ -24,7 +24,7 @@ def _make_tiny_keras_model() -> Any:
     x = keras.layers.Embedding(input_dim=32, output_dim=8)(inputs)
     outputs = keras.layers.Dense(32)(x)
     model = keras.Model(inputs=inputs, outputs=outputs)
-    model.preprocessor = type("Preprocessor", (), {"sequence_length": 512})()  # type: ignore[attr-defined]
+    model.preprocessor = type("Preprocessor", (), {"sequence_length": 512})()
     return model
 
 
@@ -194,7 +194,7 @@ def test_train_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.keras.train as tr
 
     monkeypatch.setattr(tr, "keras", None)
-    with pytest.raises(DependencyMissingError, match="Keras training dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"Keras training dependencies are missing\."):
         tr.train_model(TrainingConfig(model_name="m", dataset="d"))
-    with pytest.raises(DependencyMissingError, match="Keras dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"Keras dependencies are missing\."):
         tr._execute_train("m", "d", 1, 1)

@@ -32,4 +32,5 @@ class Gemma4AudioModel(nn.Module):
         for layer in self.layers:
             hidden_states = layer(hidden_states)
 
-        return self.audio_projector(hidden_states)
+        res: torch.Tensor = self.audio_projector(hidden_states)
+        return res

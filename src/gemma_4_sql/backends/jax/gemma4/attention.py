@@ -175,4 +175,5 @@ class Gemma4Attention(nnx.Module):
         out = _compute_attention_scores_and_output((q, k, v), attention_mask, (self.head_dim, self.config.attn_logits_soft_cap, self.num_kv_heads, self.num_heads))
         if cache is not None:
             cache.cur_ind.value += seq_len
-        return self.o_proj(out).astype(self.dtype)
+        res: Array = self.o_proj(out).astype(self.dtype)
+        return res

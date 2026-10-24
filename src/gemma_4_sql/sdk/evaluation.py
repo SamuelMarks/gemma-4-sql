@@ -199,7 +199,7 @@ def _run_evaluation_inference(
     limit = MAX_BATCHES if max_batches is None else int(max_batches)
     loader_iter: Any = dataloader
     for i, batch in enumerate(loader_iter):
-        if i >= limit:
+        if limit > 0 and i >= limit:
             break
 
         (input_ids, target_ids) = _process_batch_inputs(batch)

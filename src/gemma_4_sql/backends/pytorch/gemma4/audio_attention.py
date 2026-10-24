@@ -46,4 +46,5 @@ class Gemma4AudioCrossAttention(nn.Module):
             key=k,
             value=v,
         )
-        return attn_output
+        res: torch.Tensor = attn_output
+        return res

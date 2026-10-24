@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import logging
-import operator
-import threading
-from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_inference import (
+    BoundedLRUCache,
+    compute_jax_step_probs,
+    expand_jax_beams,
+    run_array_beam_search,
+    run_inference_wrapper,
+)
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import TensorType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import InferenceResultDict, JSONValue
 logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")
@@ -22,8 +26,7 @@ jnp = optional_import("jax.numpy")
 Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
 
 MAX_MODEL_CACHE_SIZE = 4
-_MODEL_CACHE: OrderedDict[str, object] = OrderedDict()
-_MODEL_CACHE_LOCK = threading.Lock()
+_MODEL_CACHE: BoundedLRUCache[object] = BoundedLRUCache(maxsize=MAX_MODEL_CACHE_SIZE)
 
 
 def _get_or_create_maxtext_model(model_name: str) -> Any:
@@ -36,16 +39,12 @@ def _get_or_create_maxtext_model(model_name: str) -> Any:
         Instantiated MaxText model.
 
     """
-    with _MODEL_CACHE_LOCK:
-        if model_name in _MODEL_CACHE:
-            _MODEL_CACHE.move_to_end(model_name)
-            return _MODEL_CACHE[model_name]
+    _MODEL_CACHE.maxsize = MAX_MODEL_CACHE_SIZE
+    cached = _MODEL_CACHE.get_model(model_name)
+    if cached is not None:
+        return cached
     model = Gemma4Model(model_name)
-    with _MODEL_CACHE_LOCK:
-        _MODEL_CACHE[model_name] = model
-        _MODEL_CACHE.move_to_end(model_name)
-        if len(_MODEL_CACHE) > MAX_MODEL_CACHE_SIZE:
-            _MODEL_CACHE.popitem(last=False)
+    _MODEL_CACHE.put_model(model_name, model)
     return model
 
 
@@ -63,24 +62,17 @@ def _beam_search_step(seq: TensorType, score: float, model_apply_fn: Any, beam_w
 
     """
     logits = model_apply_fn(seq)
-    if hasattr(logits, "shape") and len(logits.shape) == 3:
-        last_logits = logits[0, -1, :]
-    elif hasattr(logits, "shape") and len(logits.shape) == 2:
-        last_logits = logits[-1, :]
-    else:
-        last_logits = logits
-    log_probs = jax.nn.log_softmax(last_logits, axis=-1)
-    top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]
-    top_probs = log_probs[top_indices]
+    if jax is not None and hasattr(jax, "jit"):
 
-    new_beams: list[tuple[Any, float]] = []
-    for i in range(beam_width):
-        token = top_indices[i].reshape(1, 1)
-        new_seq = jnp.concatenate([seq, token], axis=-1)
-        prob_val = top_probs[i].item() if hasattr(top_probs[i], "item") else float(top_probs[i])
-        new_score = score + prob_val
-        new_beams.append((new_seq, new_score))
-    return new_beams
+        def _step_probs(l_arr: Any, bw: int) -> tuple[Any, Any]:
+            """Compute step probabilities for JIT compilation."""
+            return compute_jax_step_probs(l_arr, bw, jax, jnp)
+
+        step_fn = jax.jit(_step_probs, static_argnums=(1,))
+        (top_indices, top_probs) = step_fn(logits, beam_width)
+    else:
+        (top_indices, top_probs) = compute_jax_step_probs(logits, beam_width, jax, jnp)
+    return expand_jax_beams(seq, score, top_indices, top_probs, beam_width, jnp)
 
 
 def maxtext_beam_search(model_apply_fn: Any, input_ids: Any, beam_width: int, max_length: int, eos_token_id: int) -> tuple[Any, float]:
@@ -97,22 +89,13 @@ def maxtext_beam_search(model_apply_fn: Any, input_ids: Any, beam_width: int, ma
         Tuple of `(best_token_sequence, cumulative_log_probability)`.
 
     """
-    beams: list[tuple[Any, float]] = [(input_ids, 0.0)]
-    for _ in range(max_length):
-        new_beams: list[tuple[Any, float]] = []
-        for seq, score in beams:
-            if seq[0, -1] == eos_token_id:
-                new_beams.append((seq, score))
-                continue
-
-            expanded_beams = _beam_search_step(seq, score, model_apply_fn, beam_width)
-            new_beams.extend(expanded_beams)
-
-        new_beams.sort(key=operator.itemgetter(1), reverse=True)
-        beams = new_beams[:beam_width]
-        if all(seq[0, -1] == eos_token_id for (seq, _) in beams):
-            break
-    return (beams[0][0], beams[0][1])
+    return run_array_beam_search(
+        input_ids,
+        beam_width,
+        max_length,
+        eos_token_id,
+        lambda seq, score, bw: _beam_search_step(seq, score, model_apply_fn, bw),
+    )
 
 
 def _execute_generate(model_name: str, input_tokens: list[int], beam_width: int, max_length: int, eos_token_id: int, tokenizer: SQLTokenizer) -> tuple[str, str, float]:
@@ -133,16 +116,25 @@ def _execute_generate(model_name: str, input_tokens: list[int], beam_width: int,
     logger.info("Generating with MaxText: %s", model_name)
     input_ids = jnp.array([input_tokens], dtype=jnp.int32)
     model = _get_or_create_maxtext_model(model_name)
-    apply_fn = model.apply if hasattr(model, "apply") else model
-    jitted_beam_search = jax.jit(maxtext_beam_search, static_argnums=(2, 3, 4))
-    (output_ids, logprob_sum) = jitted_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
+    if hasattr(model, "apply") and hasattr(model, "init"):
+        rng = jax.random.PRNGKey(0)
+        params = model.init(rng, input_ids)
+
+        def _apply_with_params(seq_in: Any) -> Any:
+            """Apply stateless MaxText model with initialized parameters."""
+            return model.apply(params, seq_in)
+
+        apply_fn: Any = _apply_with_params
+    else:
+        apply_fn = model.apply if hasattr(model, "apply") else model
+    (output_ids, logprob_sum) = maxtext_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
     sql = tokenizer.decode(output_ids[0].tolist())
     out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
     confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))
     return "success", sql, confidence_score
 
 
-def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50, **kwargs: JSONValue) -> JSONDict:
+def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: int = 50, **kwargs: JSONValue) -> InferenceResultDict:
     """Generate a SQL query from a natural language prompt using MaxText.
 
     Args:
@@ -159,16 +151,16 @@ def generate_sql(model_name: str, prompt: str, beam_width: int = 3, max_length: 
         DependencyMissingError: If MaxText dependencies are missing.
 
     """
+    if jax is None or jnp is None or Gemma4Model is None:
+        raise DependencyMissingError("MaxText dependencies are missing.")
+
     tokenizer = SQLTokenizer(model_name=None)
     input_tokens = tokenizer.encode(prompt)
     eos_token_id = tokenizer.vocab_size - 1
-    confidence_score = 0.0
-    if jax is None or jnp is None or Gemma4Model is None:
-        raise DependencyMissingError("MaxText dependencies are missing.")
-    try:
-        status, sql, confidence_score = _execute_generate(model_name, input_tokens, beam_width, max_length, eos_token_id, tokenizer)
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("MaxText Generation Error: ")
-        status = f"failed: {e!s}"
-        sql = ""
-    return {"backend": "maxtext", "model": model_name, "prompt": prompt, "sql": sql, "status": status, "beam_width": beam_width, "confidence_score": confidence_score}
+
+    def _execute() -> tuple[str, float]:
+        """Run MaxText beam search generation and return (sql, confidence_score)."""
+        _status, sql, confidence_score = _execute_generate(model_name, input_tokens, beam_width, max_length, eos_token_id, tokenizer)
+        return (sql, confidence_score)
+
+    return run_inference_wrapper("maxtext", model_name, prompt, beam_width, _execute, **kwargs)

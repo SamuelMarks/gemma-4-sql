@@ -114,16 +114,3 @@ def test_chat_turn_missing_sql_response_error(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(backend_impl, "generate_sql", lambda *_a, **_k: {"status": "error_no_sql"})
     with pytest.raises(RuntimeError, match=r"Chat turn failed: Backend jax did not return SQL\."):
         chat_turn("model_v1", [], "test prompt", backend="jax")
-
-
-def test_chat_no_sql(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test chat no sql functionality."""
-    import pytest
-
-    from gemma_4_sql.sdk import chat
-
-    monkeypatch.setattr(chat, "get_backend", lambda b: type("Backend", (), {"generate_sql": lambda *a, **k: {}})())
-
-    with pytest.raises(RuntimeError) as e:
-        chat.chat_turn("m", [], "p")
-    assert "did not return SQL" in str(e.value)

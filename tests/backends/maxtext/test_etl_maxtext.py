@@ -1,119 +1,61 @@
-"""Unit and behavioral tests for etl maxtext."""
+"""Unit and behavioral tests for MaxText Grain ETL pipeline."""
+
+from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from gemma_4_sql.backends.maxtext.etl import _get_sampler, _load_hf_or_duckdb, build_dataloader
+import gemma_4_sql.backends.maxtext.etl as maxtext_etl
+from gemma_4_sql.backends.maxtext.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ETLConfig
 
 
-def test_load_hf_or_duckdb():
-    """Verify load hf or duckdb behavior."""
-    with patch("gemma_4_sql.backends.maxtext.etl.load_duckdb_dataset", return_value="duckdb_ds") as mock_duckdb:
-        res = _load_hf_or_duckdb("ds", "split", "path", "table")
-        assert res == "duckdb_ds"
-        mock_duckdb.assert_called_once_with("path", "table")
+def test_maxtext_etl_build_dataloader_real_transform(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify maxtext.etl.build_dataloader wraps BaseFormatTransform with MaxText segment_ids and positions."""
+
+    class FakeGrainDataLoader:
+        """Lightweight Grain DataLoader substitute executing real MaxTextFormatTransform."""
+
+        def __init__(self, *, data_source: Any, sampler: Any, operations: list[Any], worker_count: int = 0) -> None:
+            """Store arguments and transform the first record."""
+            self.data_source = data_source
+            self.sampler = sampler
+            self.first_mapped = operations[0].map(data_source[0])
+            self.worker_count = worker_count
 
     mock_datasets = MagicMock()
-    mock_datasets.load_dataset.return_value = "hf_ds"
-    with patch("gemma_4_sql.backends.maxtext.etl.datasets", mock_datasets):
-        res = _load_hf_or_duckdb("ds", "split", None, None)
-        assert res == "hf_ds"
-        mock_datasets.load_dataset.assert_called_once_with("ds", split="split")
-
-
-def test_load_hf_missing_deps():
-    """Verify load hf missing deps behavior."""
-    with patch("gemma_4_sql.backends.maxtext.etl.datasets", None), pytest.raises(DependencyMissingError, match="Datasets dependency is missing."):
-        _load_hf_or_duckdb("ds", "split", None, None)
-
-
-def test_get_sampler():
-    """Verify get sampler behavior."""
+    mock_datasets.load_dataset.return_value = [{"sql_prompt": "SELECT 1", "sql": "SELECT 1;"}]
     mock_grain = MagicMock()
-    mock_grain.JAXDistributedSharding = MagicMock(return_value="shard")
-    mock_grain.NoSharding = MagicMock(return_value="no_shard")
-    mock_grain.IndexSampler.return_value = "sampler"
+    mock_grain.RandomAccessDataSource = object
+    mock_grain.MapTransform = object
+    mock_grain.DataLoader = FakeGrainDataLoader
 
-    with patch("gemma_4_sql.backends.maxtext.etl.grain", mock_grain):
-        res = _get_sampler(10, True)
-        assert res == "sampler"
-        mock_grain.JAXDistributedSharding.assert_called_once()
-        mock_grain.IndexSampler.assert_called_once_with(num_records=10, shard_options="shard", shuffle=False, num_epochs=1)
+    monkeypatch.setattr(maxtext_etl, "datasets", mock_datasets)
+    monkeypatch.setattr(maxtext_etl, "grain", mock_grain)
 
-        mock_grain.IndexSampler.reset_mock()
-        res = _get_sampler(10, False)
-        assert res == "sampler"
-        mock_grain.NoSharding.assert_called_once()
-        mock_grain.IndexSampler.assert_called_once_with(num_records=10, shard_options="no_shard", shuffle=False, num_epochs=1)
-
-
-def test_get_sampler_missing_deps():
-    """Verify get sampler missing deps behavior."""
-    with patch("gemma_4_sql.backends.maxtext.etl.grain", None), pytest.raises(DependencyMissingError, match="Grain dependency is missing."):
-        _get_sampler(10, True)
-
-
-def test_build_dataloader():
-    """Verify build dataloader behavior."""
     config = ETLConfig(dataset_name="ds", split="split", batch_size=2, distributed=True, tokenizer_name="tok")
+    res = build_dataloader(config)
+    assert res["dataset"] == "ds"
+    assert res["split"] == "split"
+    assert res["status"] == "loaded"
+    assert res["batch_size"] == 2
+    assert res["backend"] == "maxtext"
+    assert res.get("distributed") is True
 
-    mock_datasets = MagicMock()
-    mock_grain = MagicMock()
-    mock_grain.DataLoader.return_value = "loader"
-    mock_grain.Batch = MagicMock(return_value="batch_op")
-
-    class MockBaseTransform:
-        """Test stub for `MockBaseTransform`."""
-
-        def __init__(self, tokenizer: Any):
-            """Initialize test stub instance."""
-
-        def map(self, element: Any):
-            """Provide map test helper."""
-            return {"a": 1}
-
-    class MockDataSource:
-        """Test stub for `MockDataSource`."""
-
-        def __init__(self, ds: Any):
-            """Initialize test stub instance."""
-
-        def __len__(self):
-            """Provide len   test helper."""
-            return 10
-
-    with (
-        patch("gemma_4_sql.backends.maxtext.etl.datasets", mock_datasets),
-        patch("gemma_4_sql.backends.maxtext.etl.grain", mock_grain),
-        patch("gemma_4_sql.backends.maxtext.etl._load_hf_or_duckdb", return_value="hf_ds") as mock_load,
-        patch("gemma_4_sql.backends.maxtext.etl.get_grain_classes", return_value=(MockDataSource, MockBaseTransform)),
-        patch("gemma_4_sql.backends.maxtext.etl.SQLTokenizer", return_value="tokenizer"),
-        patch("gemma_4_sql.backends.maxtext.etl._get_sampler", return_value="sampler"),
-    ):
-        res = build_dataloader(config)
-        assert res["dataset"] == "ds"
-        assert res["split"] == "split"
-        assert res["status"] == "loaded"
-        assert res["batch_size"] == 2
-        assert res["backend"] == "maxtext"
-        assert res.get("distributed") is True
-        assert res.get("loader") == "loader"
-
-        mock_load.assert_called_once_with("ds", "split", "", "")
-        mock_grain.DataLoader.assert_called_once()
-
-        # Test the MaxTextFormatTransform
-        op = mock_grain.DataLoader.call_args[1]["operations"][0]
-        mapped = op.map({"b": 2})
-        assert mapped == {"a": 1, "segment_ids": [1], "positions": [0]}
+    loader: Any = res["loader"]
+    mapped = loader.first_mapped
+    assert "inputs" in mapped
+    assert "targets" in mapped
+    assert mapped["segment_ids"] == [1]
+    assert mapped["positions"] == [0]
 
 
-def test_build_dataloader_missing_deps():
-    """Verify build dataloader missing deps behavior."""
+def test_build_dataloader_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify build_dataloader raises DependencyMissingError when datasets is None."""
     config = ETLConfig(dataset_name="ds", split="split")
-    with patch("gemma_4_sql.backends.maxtext.etl.datasets", None), pytest.raises(DependencyMissingError, match="Missing grain or datasets. Cannot load ds."):
+    monkeypatch.setattr(maxtext_etl, "datasets", None)
+    with pytest.raises(DependencyMissingError, match=r"Missing grain or datasets\. Cannot load ds\."):
         build_dataloader(config)

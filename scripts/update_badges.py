@@ -168,7 +168,6 @@ def main() -> None:
     new_content = re.sub(r"<!-- badges -->.*<!-- /badges -->", badges, content, flags=re.DOTALL)
     if content != new_content:
         readme_path.write_text(new_content, encoding="utf-8")
-        sys.exit(0)
     sys.exit(0)
 
 

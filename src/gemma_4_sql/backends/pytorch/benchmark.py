@@ -6,9 +6,9 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.type_hints import ModelType
+from gemma_4_sql.type_hints import TorchCausalLMProtocol
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
@@ -91,7 +91,7 @@ def _sync_cuda(device: str) -> None:
         torch.mps.synchronize()
 
 
-def _get_memory_mb(model: ModelType, device: str) -> float:
+def _get_memory_mb(model: TorchCausalLMProtocol, device: str) -> float:
     """Provide max memory allocated in MB.
 
     Args:
@@ -102,14 +102,15 @@ def _get_memory_mb(model: ModelType, device: str) -> float:
         The max memory.
 
     """
+    _ = model
     if device == "cuda" and hasattr(torch, "cuda") and hasattr(torch.cuda, "max_memory_allocated"):
         return float(torch.cuda.max_memory_allocated() / (1024 * 1024))
     if device == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "driver_allocated_memory"):
         return float(torch.mps.driver_allocated_memory() / (1024 * 1024))
-    return 8192.0
+    return get_current_rss_mb()
 
 
-def _run_benchmark_pass(model: ModelType, device: str, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int) -> tuple[float, float, float]:
+def _run_benchmark_pass(model: TorchCausalLMProtocol, device: str, batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
     Args:

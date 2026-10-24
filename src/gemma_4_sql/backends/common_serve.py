@@ -137,13 +137,13 @@ def create_common_app(
             first_item = await request_queue.get()
             batch = [first_item]
 
-            end_time = asyncio.get_event_loop().time() + (max_wait_ms / 1000.0)
+            end_time = asyncio.get_running_loop().time() + (max_wait_ms / 1000.0)
             while len(batch) < max_batch_size:
-                timeout = max(0.0, end_time - asyncio.get_event_loop().time())
+                timeout = max(0.0, end_time - asyncio.get_running_loop().time())
                 try:
                     next_item = await asyncio.wait_for(request_queue.get(), timeout=timeout)
                     batch.append(next_item)
-                except (TimeoutError, asyncio.TimeoutError):
+                except TimeoutError:
                     break
 
             prompts = [item["prompt"] for item in batch]
@@ -293,7 +293,8 @@ def create_common_app(
             return JSONResponse(content=content)
         return content
 
-    return app
+    typed_app: FastAPIAppProtocol = app
+    return typed_app
 
 
 def create_backend_serve_app(
@@ -321,25 +322,33 @@ def create_backend_serve_app(
 
     def _generate(prompt: str) -> str:
         """Execute backend SQL generation and validate non-empty output."""
+        display_name = {"jax": "JAX", "mlx": "MLX", "maxtext": "MaxText", "pytorch": "PyTorch", "keras": "Keras"}.get(
+            backend_name.lower(),
+            backend_name.title(),
+        )
         try:
             out = generate_sql_fn(model_name=model_name, prompt=prompt)
             sql = out.get("sql", "")
             if sql:
                 return str(sql)
-            msg = f"{backend_name.title()} inference returned empty SQL for prompt '{prompt}'"
+            msg = f"{display_name} inference returned empty SQL for prompt '{prompt}'"
             raise InferenceError(msg, backend=backend_name)
         except Exception as e:
             if isinstance(e, InferenceError):
                 raise
-            msg = f"{backend_name.title()} generation failed: {e}"
+            msg = f"{display_name} generation failed: {e}"
             raise InferenceError(msg, backend=backend_name, cause=e) from e
+
+    def _default_batch_generate(prompts: list[str]) -> list[str]:
+        """Execute single-prompt generation across a batch of prompts."""
+        return [_generate(p) for p in prompts]
 
     return create_common_app(
         backend_name=backend_name,
         model_name=model_name,
         startup_callback=startup_callback,
         generate_logic=_generate,
-        batch_generate_logic=batch_generate_logic,
+        batch_generate_logic=batch_generate_logic if batch_generate_logic is not None else _default_batch_generate,
         max_batch_size=max_batch_size,
     )
 

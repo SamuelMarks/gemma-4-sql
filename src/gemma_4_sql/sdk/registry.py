@@ -16,6 +16,13 @@ _BACKEND_CACHE: dict[str, BackendProtocol] = {}
 _CACHE_LOCK = threading.Lock()
 
 
+def clear_backend_cache() -> None:
+    """Clear the cached backend instances and discovered entry points."""
+    with _CACHE_LOCK:
+        ENTRY_POINTS.clear()
+        _BACKEND_CACHE.clear()
+
+
 def get_backend(name: str) -> BackendProtocol:
     """Provide a registered backend instance by name.
 
@@ -53,19 +60,14 @@ def get_backend(name: str) -> BackendProtocol:
             msg = f"Backend {name} is missing the adapter module."
             raise ConfigurationError(msg, backend=name, cause=e) from e
 
-        adapter_class_name = f"{name.capitalize().replace('_hf', '').replace('_native', '')}Backend"
-        if name == "pytorch" or name.startswith("pytorch_"):
-            adapter_class_name = "PyTorchBackend"
-        elif name == "mlx":
-            adapter_class_name = "MLXBackend"
-        elif name == "maxtext":
-            adapter_class_name = "MaxTextBackend"
-
-        try:
-            adapter_class = getattr(adapter_module, adapter_class_name)
-        except AttributeError as e:
-            msg = f"Adapter class {adapter_class_name} not found in {adapter_module_name}"
-            raise ConfigurationError(msg, backend=name, cause=e) from e
+        adapter_class = getattr(adapter_module, "ADAPTER_CLASS", None)
+        if adapter_class is None:
+            adapter_class_name = f"{name.capitalize()}Backend"
+            try:
+                adapter_class = getattr(adapter_module, adapter_class_name)
+            except AttributeError as e:
+                msg = f"Adapter class {adapter_class_name} not found in {adapter_module_name}"
+                raise ConfigurationError(msg, backend=name, cause=e) from e
 
         raw_instance = adapter_class(backend_alias=name) if name.startswith("pytorch_") else adapter_class()
         if not isinstance(raw_instance, BackendProtocol):
@@ -75,4 +77,4 @@ def get_backend(name: str) -> BackendProtocol:
         return raw_instance
 
 
-__all__ = ["get_backend"]
+__all__ = ["clear_backend_cache", "get_backend"]

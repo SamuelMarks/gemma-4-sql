@@ -90,7 +90,7 @@ def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
         return kwargs
 
     monkeypatch.setattr(srv, "serve_model_wrapper", mock_serve_model_wrapper)
-    monkeypatch.setattr(srv, "create_common_app", mock_create_common_app)
+    monkeypatch.setattr("gemma_4_sql.backends.common_serve.create_common_app", mock_create_common_app)
 
     res = srv.serve_model("foo", port=8000, max_batch_size=16)
     assert res["backend"] == "jax"

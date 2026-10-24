@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.type_hints import ModelType, TensorType
+from gemma_4_sql.type_hints import KerasCausalLMProtocol, TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
@@ -18,7 +18,7 @@ keras = optional_import("keras")
 tf = optional_import("tensorflow")
 
 
-def _load_keras_model(model_name: str, dtype: str) -> ModelType:
+def _load_keras_model(model_name: str, dtype: str) -> KerasCausalLMProtocol:
     """Load and configure a compiled KerasNLP `GemmaCausalLM` model for benchmarking.
 
     Args:
@@ -30,7 +30,7 @@ def _load_keras_model(model_name: str, dtype: str) -> ModelType:
 
     Raises:
         DependencyMissingError: If Keras dependencies are missing.
-        ValueError: If the model preset cannot be loaded.
+        InferenceError: If the model preset cannot be loaded.
 
     """
     if keras is None:
@@ -42,10 +42,13 @@ def _load_keras_model(model_name: str, dtype: str) -> ModelType:
         gemma_causal_lm_cls = optional_attr("keras_nlp.models", "GemmaCausalLM")
         if gemma_causal_lm_cls is None:
             raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
-        return cast(ModelType, gemma_causal_lm_cls.from_preset(model_name))
+        loaded_model: KerasCausalLMProtocol = gemma_causal_lm_cls.from_preset(model_name)
+        return loaded_model
     except (ImportError, ValueError) as err:
+        from gemma_4_sql.exceptions import InferenceError
+
         msg = f"Failed to load actual model {model_name}"
-        raise ValueError(msg) from err
+        raise InferenceError(msg, backend="keras", model_name=model_name, cause=err) from err
 
 
 def _get_device_str(hardware: str) -> str:

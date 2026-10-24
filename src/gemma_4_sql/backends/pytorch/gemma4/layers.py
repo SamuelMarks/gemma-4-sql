@@ -55,4 +55,5 @@ class Gemma4MLP(nn.Module):
             Projected output tensor.
 
         """
-        return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        res: torch.Tensor = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        return res

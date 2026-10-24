@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class ExecutionStatus(str, Enum):
+class ExecutionStatus(StrEnum):
     """Canonical execution status values for backend operations."""
 
     SUCCESS = "success"
     COMPLETED = "completed"
+    LOADED = "loaded"
     FAILED = "failed"
     ERROR = "error"
     UNSUPPORTED = "unsupported"
     MISSING_DEPENDENCY = "missing_dependency"
+    BACKEND_UNAVAILABLE = "backend_unavailable"
+    INJECTED = "injected"
+    NO_MATCHING_MODULES = "no_matching_modules"
+    EMPTY_DATASET = "empty_dataset"
 
 
 class GemmaSQLError(Exception):
@@ -118,7 +123,7 @@ class UnsupportedQuantizationMethodError(GemmaSQLError, ValueError):
         self.supported_methods = supported_methods
 
 
-class InferenceError(GemmaSQLError, RuntimeError):
+class InferenceError(GemmaSQLError, RuntimeError, ValueError):
     """Raised when model inference or SQL generation fails.
 
     Attributes:
@@ -194,7 +199,7 @@ class ExportError(GemmaSQLError, RuntimeError, ValueError):
         )
 
 
-class TrainingError(GemmaSQLError, RuntimeError):
+class TrainingError(GemmaSQLError, RuntimeError, ValueError):
     """Raised when pretraining, SFT, post-training, PEFT, or DPO execution fails.
 
     Attributes:
@@ -257,7 +262,33 @@ _FAILED_STATUS_VALUES: frozenset[str] = frozenset({
     ExecutionStatus.ERROR.value,
     ExecutionStatus.UNSUPPORTED.value,
     ExecutionStatus.MISSING_DEPENDENCY.value,
+    ExecutionStatus.BACKEND_UNAVAILABLE.value,
 })
+
+
+def resolve_raise_on_error(config: object | None = None, *, raise_on_error: bool | None = None, kwargs: dict[str, object] | None = None) -> bool:
+    """Resolve whether an operation should raise a `GemmaSQLError` on failure.
+
+    Args:
+        config: Optional configuration object (`TrainingConfig`, `DPOConfig`, `ETLConfig`).
+        raise_on_error: Explicit boolean override if provided by the caller.
+        kwargs: Optional keyword arguments dictionary that may contain `'raise_on_error'`.
+
+    Returns:
+        `True` if errors should be raised rather than returned in the status dictionary.
+
+    """
+    if raise_on_error is not None:
+        return bool(raise_on_error)
+    if kwargs is not None and "raise_on_error" in kwargs:
+        return bool(kwargs["raise_on_error"])
+    if config is not None:
+        if bool(getattr(config, "raise_on_error", False)):
+            return True
+        extra = getattr(config, "extra_kwargs", None)
+        if isinstance(extra, dict) and "raise_on_error" in extra:
+            return bool(extra["raise_on_error"])
+    return False
 
 
 def is_failed_status(result: object) -> bool:
@@ -274,7 +305,7 @@ def is_failed_status(result: object) -> bool:
         return result.value in _FAILED_STATUS_VALUES
     if isinstance(result, str):
         norm = result.strip().lower()
-        return norm in _FAILED_STATUS_VALUES or norm.startswith(("failed", "error:", "unsupported_", "missing_"))
+        return norm in _FAILED_STATUS_VALUES or norm.startswith(("failed", "error:", "unsupported_", "missing_", "backend_unavailable"))
     if isinstance(result, dict):
         err = result.get("error")
         if isinstance(err, str) and err:
@@ -299,4 +330,5 @@ __all__ = [
     "TrainingError",
     "UnsupportedQuantizationMethodError",
     "is_failed_status",
+    "resolve_raise_on_error",
 ]

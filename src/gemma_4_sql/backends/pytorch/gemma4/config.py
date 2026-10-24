@@ -10,6 +10,7 @@ from gemma_4_sql.backends.common_gemma4_config import (
     GEMMA4_31B_SPEC,
     GEMMA4_E2B_SPEC,
     GEMMA4_E4B_SPEC,
+    GEMMA4_TINY_SPEC,
     resolve_gemma4_preset_name,
 )
 
@@ -267,17 +268,29 @@ class Gemma4Config:
         return cls(**GEMMA4_31B_SPEC)
 
     @classmethod
+    def gemma4_tiny(cls) -> Gemma4Config:
+        """Return miniature preset configuration for Gemma 4 Tiny.
+
+        Returns:
+            Configured `Gemma4Config` for Tiny.
+
+        """
+        return cls(**GEMMA4_TINY_SPEC)
+
+    @classmethod
     def from_preset(cls, model_name: str) -> Gemma4Config:
         """Resolve a `Gemma4Config` preset from a model identifier string.
 
         Args:
-            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`, `'gemma-4-26B-A4B'`, `'gemma-4-31B'`).
+            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`, `'gemma-4-26B-A4B'`, `'gemma-4-31B'`, `'gemma-4-tiny'`).
 
         Returns:
             Matching `Gemma4Config` preset instance.
 
         """
         key = resolve_gemma4_preset_name(model_name)
+        if key == "tiny":
+            return cls.gemma4_tiny()
         if key == "31b":
             return cls.gemma4_31b()
         if key == "26b_a4b":

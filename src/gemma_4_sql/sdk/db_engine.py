@@ -10,7 +10,14 @@ import math
 import re
 from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.exceptions import ConfigurationError, SQLSafetyViolationError
+from gemma_4_sql.exceptions import ConfigurationError
+from gemma_4_sql.sdk.adapters.base import (
+    DatabaseAdapter,
+    validate_readonly_sql,
+)
+from gemma_4_sql.sdk.adapters.base import (
+    strip_comments_and_literals as _strip_comments_and_literals,
+)
 from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
 from gemma_4_sql.sdk.adapters.postgres_adapter import PostgresAdapter
 from gemma_4_sql.sdk.adapters.snowflake_adapter import SnowflakeAdapter
@@ -18,72 +25,17 @@ from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from typing_extensions import Self
+    from typing import Self
 
     from gemma_4_sql.type_hints import JSONPrimitive
 
 logger = logging.getLogger(__name__)
-_ADAPTERS = {
+_ADAPTERS: dict[str, type[DatabaseAdapter]] = {
     "sqlite": SQLiteAdapter,
     "postgresql": PostgresAdapter,
     "snowflake": SnowflakeAdapter,
     "duckdb": DuckDBAdapter,
 }
-
-_DANGEROUS_KEYWORDS = frozenset({
-    "DROP",
-    "CREATE",
-    "ALTER",
-    "TRUNCATE",
-    "RENAME",
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "MERGE",
-    "UPSERT",
-    "ATTACH",
-    "DETACH",
-    "PRAGMA",
-    "COPY",
-    "INSTALL",
-    "LOAD",
-    "VACUUM",
-    "EXECUTE",
-    "CALL",
-    "GRANT",
-    "REVOKE",
-})
-
-_SQL_TOKEN_PATTERN = re.compile(
-    r"""
-    (\$(?P<dtag>[A-Za-z0-9_]*)\$[\s\S]*?\$(?P=dtag)\$) | # PostgreSQL dollar-quoted string literal
-    ('(?:''|\\.|[^'\\])*')      | # Single-quoted string literal (SQL & backslash escapes)
-    ("(?:""|\\.|[^"\\])*")      | # Double-quoted identifier/literal
-    (`(?:``|[^`])*`)            | # Backtick-quoted identifier
-    (\[[^\]]*\])                | # Bracket-quoted identifier
-    (/\*[\s\S]*?\*/)            | # Block comment
-    (--[^\n]*)                    # Single-line comment
-    """,
-    re.VERBOSE,
-)
-
-
-def _strip_comments_and_literals(query: str) -> str:
-    """Replace SQL comments and quoted literals with spaces in a single lexical pass.
-
-    By matching string literals and comments simultaneously from left to right,
-    comment markers (`--`, `/*`) inside string literals and quotes inside comments
-    are handled accurately without corrupting surrounding tokens.
-
-    Args:
-        query: Raw SQL query string.
-
-    Returns:
-        SQL string with all comments and quoted segments replaced by a single space.
-
-    """
-    return _SQL_TOKEN_PATTERN.sub(" ", query)
 
 
 class LiveDatabaseEngine:
@@ -121,7 +73,7 @@ class LiveDatabaseEngine:
         if adapter_cls is None:
             msg = f"Unsupported db_type: {self.db_type}"
             raise ConfigurationError(msg)
-        self.adapter = adapter_cls(self.db_path, self.db_kwargs, read_only=self.read_only)
+        self.adapter: DatabaseAdapter = adapter_cls(self.db_path, self.db_kwargs, read_only=self.read_only)
         self.conn = self.adapter.conn
         self._pending_ddl: str | None = ddl if kwargs.get("defer_ddl") else None
         if ddl and not kwargs.get("defer_ddl"):
@@ -143,12 +95,11 @@ class LiveDatabaseEngine:
             The active asynchronous database connection object.
 
         """
-        conn = await self.adapter.connect_async()
         if self._pending_ddl:
             ddl_to_run = self._pending_ddl
             self._pending_ddl = None
             await self.setup_schema_async(ddl_to_run)
-        return conn
+        return await self.adapter.connect_async()
 
     def _validate_safety(self, query: str) -> None:
         """Ensure the query is safe to execute when `read_only` is True.
@@ -160,20 +111,7 @@ class LiveDatabaseEngine:
             SQLSafetyViolationError: If mutating statements or stacked queries are attempted in read-only mode.
 
         """
-        if not self.read_only:
-            return
-
-        cleaned = _strip_comments_and_literals(query)
-        statements = [stmt.strip() for stmt in cleaned.split(";") if stmt.strip()]
-        if len(statements) > 1:
-            msg = "Safety Violation: Multiple stacked SQL statements are not allowed in read-only mode."
-            raise SQLSafetyViolationError(msg)
-
-        words = re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", cleaned.upper())
-        for word in words:
-            if word in _DANGEROUS_KEYWORDS:
-                msg = f"Safety Violation: Mutating statements ({word}) are not allowed in read-only mode."
-                raise SQLSafetyViolationError(msg)
+        validate_readonly_sql(query, read_only=self.read_only)
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL statements to construct the database schema.
@@ -350,8 +288,24 @@ class LiveDatabaseEngine:
             True if the result sets match under the specified ordering rule.
 
         """
-        norm_pred = [self._normalize_row(r) for r in pred_results]
-        norm_truth = [self._normalize_row(r) for r in truth_results]
+
+        def _tag_row(row: tuple[JSONPrimitive, ...]) -> tuple[tuple[str, JSONPrimitive], ...]:
+            """Tag each normalized cell with its canonical type category to prevent cross-type collisions."""
+            norm = self._normalize_row(row)
+            tagged: list[tuple[str, JSONPrimitive]] = []
+            for cell in norm:
+                if cell is None:
+                    tagged.append(("null", None))
+                elif isinstance(cell, bool):
+                    tagged.append(("bool", cell))
+                elif isinstance(cell, (int, float)):
+                    tagged.append(("num", float(cell)))
+                else:
+                    tagged.append(("str", str(cell)))
+            return tuple(tagged)
+
+        norm_pred = [_tag_row(r) for r in pred_results]
+        norm_truth = [_tag_row(r) for r in truth_results]
 
         if strict_order:
             return norm_pred == norm_truth

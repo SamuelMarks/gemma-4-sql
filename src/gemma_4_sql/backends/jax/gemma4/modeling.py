@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import jax
 import jax.numpy as jnp
@@ -124,7 +124,8 @@ class Gemma4Model(nnx.Module):
             return input_ids
         ple = self.embed_tokens_per_layer(input_ids) * float(self.config.hidden_size_per_layer_input) ** 0.5
         (batch_size, seq_len, _) = ple.shape
-        return ple.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
+        res: Array = ple.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
+        return res
 
     def project_per_layer_inputs(self, inputs_embeds: Array, per_layer_inputs: Array | None = None) -> Array:
         """Project `inputs_embeds` and combine with token-identity `per_layer_inputs`.
@@ -159,20 +160,21 @@ class Gemma4Model(nnx.Module):
             Normalized final hidden states tensor.
 
         """
-        attention_mask = kwargs.get("attention_mask")
-        per_layer_inputs = kwargs.get("per_layer_inputs")
+        kw_any: dict[str, Any] = dict(kwargs)
+        attention_mask: Array | None = kw_any.get("attention_mask")
+        per_layer_inputs: Any = kw_any.get("per_layer_inputs")
         x = self.embed_tokens(input_ids) * self.embed_scale
         if self.config.hidden_size_per_layer_input:
             if per_layer_inputs is None:
                 per_layer_inputs = self.get_per_layer_inputs(input_ids)
-            per_layer_inputs = self.project_per_layer_inputs(x, cast(Array | None, per_layer_inputs))
+            per_layer_inputs = self.project_per_layer_inputs(x, per_layer_inputs)
         for i in range(len(self.layers)):
             layer = getattr(self.layers, str(i), None)
             if layer is None:
                 continue
             layer_cache = cache[i] if cache is not None else None
-            layer_ple = cast(Array, per_layer_inputs)[:, :, i, :] if per_layer_inputs is not None else None
-            x = layer(x, positions, layer_cache, attention_mask=cast(Array | None, attention_mask), per_layer_input=layer_ple)
+            layer_ple = per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
+            x = layer(x, positions, layer_cache, attention_mask=attention_mask, per_layer_input=layer_ple)
         return self.norm(x)
 
 
@@ -210,7 +212,9 @@ def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = 
     else:
         resolved_config = config
     model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
-    return cast(Gemma4ForCausalLM, create_gemma4_from_pretrained(model_ckpt_path, resolved_config))
+    loaded: Any = create_gemma4_from_pretrained(model_ckpt_path, resolved_config)
+    res: Gemma4ForCausalLM = loaded
+    return res
 
 
 class Gemma4ForCausalLM(nnx.Module):
@@ -338,12 +342,12 @@ class Gemma4ForCausalLM(nnx.Module):
         return self.model.norm(hidden_states)
 
     @jax.named_scope("gemma4_causal_lm")
-    def __call__(self, input_ids: Array, positions: Array, cache: Cache | None = None, **kwargs: object) -> Array:
+    def __call__(self, input_ids: Array, positions: Array | None = None, cache: Cache | None = None, **kwargs: object) -> Array:
         """Compute logits for the given sequence, optionally applying soft-capping.
 
         Args:
             input_ids: Input sequence token IDs.
-            positions: Sequence position indices.
+            positions: Optional sequence position indices (defaults to `0..seq_len-1`).
             cache: Key-value cache for autoregressive decoding.
             **kwargs: Optional keyword arguments for multimodal and attention masks.
 
@@ -351,14 +355,17 @@ class Gemma4ForCausalLM(nnx.Module):
             Logits tensor for the output vocabulary.
 
         """
-        attention_mask = cast(Array | None, kwargs.get("attention_mask"))
+        if positions is None:
+            positions = jnp.arange(input_ids.shape[-1])[None, :]
+        kw_any: dict[str, Any] = dict(kwargs)
+        attention_mask: Array | None = kw_any.get("attention_mask")
         mm_inputs = MultimodalInputs(
             input_ids=input_ids,
-            pixel_values=cast(Array | None, kwargs.get("pixel_values")),
-            image_token_mask=cast(Array | None, kwargs.get("image_token_mask")),
-            input_features=cast(Array | None, kwargs.get("input_features")),
-            input_features_mask=cast(Array | None, kwargs.get("input_features_mask")),
-            audio_token_mask=cast(Array | None, kwargs.get("audio_token_mask")),
+            pixel_values=kw_any.get("pixel_values"),
+            image_token_mask=kw_any.get("image_token_mask"),
+            input_features=kw_any.get("input_features"),
+            input_features_mask=kw_any.get("input_features_mask"),
+            audio_token_mask=kw_any.get("audio_token_mask"),
             attention_mask=attention_mask,
         )
         (inputs_embeds, is_multimodal) = self._process_multimodal(mm_inputs)

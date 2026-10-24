@@ -12,26 +12,19 @@ from gemma_4_sql.sdk.benchmark import benchmark
 
 def test_benchmark_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify benchmark executes or propagates expected status for JAX backend."""
-    import gemma_4_sql.backends.jax.benchmark as jbm
-    from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
+    from unittest.mock import MagicMock
 
-    tiny_cfg = ModelConfig(
-        vocab_size=64,
-        hidden_size=8,
-        intermediate_size=16,
-        num_hidden_layers=1,
-        num_attention_heads=2,
-        num_key_value_heads=1,
-        head_dim=4,
-    )
-    if jbm.Gemma4Config is not None:
-        monkeypatch.setattr(jbm.Gemma4Config, "gemma4_e2b", staticmethod(lambda: tiny_cfg))
-    if jbm.jax is not None:
-        monkeypatch.setattr(jbm.jax, "jit", lambda fn, *_a, **_k: fn)
+    import gemma_4_sql.backends.jax.benchmark as jbm
+
+    monkeypatch.setattr(jbm, "jax", MagicMock())
+    monkeypatch.setattr(jbm, "jnp", MagicMock())
+    monkeypatch.setattr(jbm, "Gemma4Config", MagicMock())
+    monkeypatch.setattr(jbm, "Gemma4ForCausalLM", MagicMock())
+    monkeypatch.setattr(jbm, "_run_benchmark_pass", lambda *_a, **_k: (100.0, 10.0, 64.0))
 
     res = benchmark("gemma-4", "cpu", 1, "jax", warmup_steps=1)
     assert res["backend"] == "jax"
-    assert "tokens_per_sec" in res or "latency_ms" in res or "status" in res
+    assert res["tokens_per_sec"] == 100.0
 
 
 def test_benchmark_keras_routing_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:

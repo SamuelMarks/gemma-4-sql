@@ -8,7 +8,7 @@ import os
 import re
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import jax
 from flax import nnx
@@ -16,7 +16,7 @@ from flax import nnx
 from gemma_4_sql.backends.lazy_loader import optional_attr
 from gemma_4_sql.type_hints import TensorType
 
-TransformValueType = Optional[tuple[tuple[int, ...], Optional[tuple[int, ...]], bool]]
+TransformValueType = tuple[tuple[int, ...], tuple[int, ...] | None, bool] | None
 TransformType = Any
 KeyMapType = tuple[str, TransformType]
 logger = logging.getLogger(__name__)

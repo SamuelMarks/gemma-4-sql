@@ -19,8 +19,7 @@ pytestmark = requires_jax
 @pytest.fixture(autouse=True)
 def _bypass_jax_jit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Bypass XLA jit compilation during unit tests for fast, deterministic execution."""
-    if inf.jax is not None:
-        monkeypatch.setattr(inf.jax, "jit", lambda fn, *_args, **_kwargs: fn)
+    monkeypatch.setattr(inf.jax, "jit", lambda fn, *_args, **_kwargs: fn)
 
 
 def _make_tiny_jax_model() -> Any:
@@ -88,9 +87,11 @@ def test_beam_search_step_and_jax_beam_search_real_model(monkeypatch: pytest.Mon
     assert stopped_score == 0.0
 
     # Verify fallback when jax.jit is not present on the jax namespace
+    import jax as real_jax
+
     fake_jax = MagicMock()
     del fake_jax.jit
-    fake_jax.nn = inf.jax.nn  # type: ignore[union-attr]
+    fake_jax.nn = real_jax.nn
     monkeypatch.setattr(inf, "jax", fake_jax)
     beams_no_jit = inf._beam_search_step(input_ids, 0.0, model, beam_width=2)
     assert len(beams_no_jit) == 2
@@ -159,7 +160,7 @@ def test_generate_sql_checkpoint_restore_branches(monkeypatch: pytest.MonkeyPatc
         inf.generate_sql(str(ckpt_dir), "SELECT 1", beam_width=1, max_length=1, strict_checkpoint=True)
 
     # 4. Verify _BoundedModelCache LRU eviction and update
-    small_cache = inf._BoundedModelCache(maxsize=2)
+    small_cache: Any = inf._BoundedModelCache(maxsize=2)
     small_cache.put_model("a", 1)
     small_cache.put_model("a", 10)
     small_cache.put_model("b", 2)

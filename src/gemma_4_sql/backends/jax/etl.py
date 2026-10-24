@@ -22,54 +22,6 @@ datasets: typing.Any = optional_import("datasets")
 grain: typing.Any = optional_import("grain.python")
 
 
-def _load_hf_or_duckdb(
-    dataset_name: str,
-    split: str,
-    duckdb_path: str | None,
-    duckdb_table: str | None,
-) -> object:
-    """Load a dataset from Hugging Face or DuckDB.
-
-    Args:
-        dataset_name: The name of the Hugging Face dataset.
-        split: The dataset split to load.
-        duckdb_path: Optional path to a DuckDB database.
-        duckdb_table: Optional name of the DuckDB table.
-
-    Returns:
-        The loaded dataset.
-
-    Raises:
-        DependencyMissingError: If datasets dependency is missing.
-
-    """
-    return load_hf_or_duckdb_dataset(
-        dataset_name,
-        split,
-        duckdb_path,
-        duckdb_table,
-        datasets,
-        load_duckdb_fn=load_duckdb_dataset,
-    )
-
-
-def _get_sampler(source_len: int, distributed: bool) -> object:
-    """Provide the appropriate Grain sampler for data loading.
-
-    Args:
-        source_len: The length of the source data.
-        distributed: Whether to use distributed sharding.
-
-    Returns:
-        A Grain IndexSampler.
-
-    Raises:
-        DependencyMissingError: If Grain dependency is missing.
-
-    """
-    return get_grain_sampler(source_len, distributed, grain)
-
-
 def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> ETLResultDict:
     """Build a JAX-specific Grain dataloader.
 
@@ -89,9 +41,19 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> ETLResultDict:
         backend_name="jax",
         datasets_module=datasets,
         grain_module=grain,
-        load_fn=_load_hf_or_duckdb,
         grain_classes_fn=get_grain_classes,
         tokenizer_cls=SQLTokenizer,
-        sampler_fn=_get_sampler,
         **kwargs,
     )
+
+
+__all__ = [
+    "SQLTokenizer",
+    "build_dataloader",
+    "datasets",
+    "get_grain_classes",
+    "get_grain_sampler",
+    "grain",
+    "load_duckdb_dataset",
+    "load_hf_or_duckdb_dataset",
+]

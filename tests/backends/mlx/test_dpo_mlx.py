@@ -47,17 +47,21 @@ def test_real_mlx_dpo_loss_logps_and_step() -> None:
         "rejected_labels": mx.array([[4, 5, 0]], dtype=mx.int32),
     }
 
-    logps = dpo_module._compute_mlx_logps(policy_model, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore[arg-type]
+    pm_any: Any = policy_model
+    rm_any: Any = ref_model
+    opt_any: Any = optimizer
+    labels_list_any: Any = [[2, 3, 0]]
+    logps = dpo_module._compute_mlx_logps(pm_any, batch["chosen_inputs"], batch["chosen_labels"])
     mx.eval(logps)
     assert logps.shape == (1,)
     assert float(logps.item()) < 0.0
 
     # Also test _compute_mlx_logps when labels is a Python list
-    logps_list = dpo_module._compute_mlx_logps(policy_model, batch["chosen_inputs"], [[2, 3, 0]])  # type: ignore[arg-type]
+    logps_list = dpo_module._compute_mlx_logps(pm_any, batch["chosen_inputs"], labels_list_any)
     mx.eval(logps_list)
     assert logps_list.shape == (1,)
 
-    step_loss = dpo_module._run_dpo_step(policy_model, ref_model, optimizer, batch, 0.1)  # type: ignore[arg-type]
+    step_loss = dpo_module._run_dpo_step(pm_any, rm_any, opt_any, batch, 0.1)
     assert float(step_loss.item()) > 0.0
 
 
@@ -70,9 +74,13 @@ def test_dpo_loss_and_fallback_log_sigmoid(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(dpo_module, "mx", mock_mx)
     monkeypatch.setattr(dpo_module, "mx_nn", mock_nn)
 
+    t1: Any = 1
+    t2: Any = 2
+    t3: Any = 3
+    t4: Any = 4
     with patch.object(dpo_module, "generic_dpo_loss") as mock_generic:
         mock_generic.return_value = (1.0, 2.0, 3.0)
-        res = dpo_module.dpo_loss(1, 2, 3, 4, 0.1)  # type: ignore[arg-type]
+        res = dpo_module.dpo_loss(t1, t2, t3, t4, 0.1)
         assert res == (1.0, 2.0, 3.0)
 
         log_sig_fn = mock_generic.call_args[0][5]
@@ -93,7 +101,7 @@ def test_dpo_loss_and_fallback_log_sigmoid(monkeypatch: pytest.MonkeyPatch) -> N
         assert log_sig_fn(NegatableScalar()) == "negated_scalar"
 
     monkeypatch.setattr(dpo_module, "mx", None)
-    assert dpo_module.dpo_loss(1, 2, 3, 4, 0.1) == (0.0, 0.0, 0.0)  # type: ignore[arg-type]
+    assert dpo_module.dpo_loss(t1, t2, t3, t4, 0.1) == (0.0, 0.0, 0.0)
 
 
 def test_run_dpo_step_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,7 +134,7 @@ def test_run_training_epochs() -> None:
     """Verify _run_training_epochs averages step losses across multiple epochs."""
     import gemma_4_sql.backends.mlx.dpo as dpo_module
 
-    state = TrainerState(
+    state: Any = TrainerState(
         dataloader=[{"chosen_inputs": 1}, {"chosen_inputs": 2}],
         epochs=2,
         policy_model="p",

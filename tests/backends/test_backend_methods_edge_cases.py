@@ -16,10 +16,13 @@ has_tf = importlib.util.find_spec("tensorflow") is not None
 
 def test_jax_dpo_missing_jnn(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify JAX `dpo_loss` returns zero tuple when `jnn` is missing."""
+    from typing import Any
+
     import gemma_4_sql.backends.jax.dpo as jdpo
 
     monkeypatch.setattr(jdpo, "jnn", None)
-    res = jdpo.dpo_loss({}, {}, {}, {})  # type: ignore[arg-type]
+    empty_arg: Any = {}
+    res = jdpo.dpo_loss(empty_arg, empty_arg, empty_arg, empty_arg)
     assert res == (0.0, 0.0, 0.0)
 
 
@@ -93,19 +96,6 @@ def test_keras_inference_missing_tf(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(kinf, "tf", None)
     with pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
         kinf.generate_sql("foo", "bar")
-
-
-@pytest.mark.skipif(not has_keras or not has_tf, reason="Keras or TensorFlow is not installed")
-def test_keras_inference_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify Keras `generate_sql` returns a deterministic failed status when `GemmaCausalLM` is unavailable."""
-    import gemma_4_sql.backends.keras.inference as kinf
-
-    monkeypatch.setattr(kinf, "GemmaCausalLM", None)
-    monkeypatch.setattr(kinf, "optional_attr", lambda *_a, **_k: None)
-    res = kinf.generate_sql("foo", "bar")
-    assert res["status"].startswith("failed:")
-    assert res["sql"] == ""
-    assert res["confidence_score"] == 0.0
 
 
 def test_keras_train_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:

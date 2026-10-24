@@ -6,7 +6,7 @@ from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
 from gemma_4_sql.backends.pytorch.gemma4.moe import Gemma4MoE, calculate_load_balancing_loss
 
 
-def test_moe_layer():
+def test_moe_layer() -> None:
     """Test Gemma4MoE layer."""
     config = Gemma4Config(hidden_size=256, intermediate_size=512, num_experts=4, num_experts_per_tok=2, router_jitter_noise=0.1)
     moe = Gemma4MoE(config)

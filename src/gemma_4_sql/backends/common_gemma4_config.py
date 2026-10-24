@@ -2,7 +2,25 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
+
+
+class AttentionType(Enum):
+    """Types of attention layers in Gemma 4."""
+
+    LOCAL_SLIDING = "local_sliding"
+    GLOBAL = "global"
+
+
+GEMMA4_ATTENTION_PATTERN: tuple[AttentionType, ...] = (
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.LOCAL_SLIDING,
+    AttentionType.GLOBAL,
+)
 
 GEMMA4_E2B_SPEC: dict[str, Any] = {
     "num_hidden_layers": 35,
@@ -54,18 +72,32 @@ GEMMA4_31B_SPEC: dict[str, Any] = {
     "vocab_size": 262144,
 }
 
+GEMMA4_TINY_SPEC: dict[str, Any] = {
+    "num_hidden_layers": 1,
+    "hidden_size": 64,
+    "intermediate_size": 128,
+    "num_attention_heads": 2,
+    "num_key_value_heads": 1,
+    "head_dim": 32,
+    "global_head_dim": 32,
+    "num_experts": 1,
+    "vocab_size": 128,
+}
+
 
 def resolve_gemma4_preset_name(model_name: str) -> str:
     """Resolve the canonical Gemma 4 preset variant key from a model identifier string.
 
     Args:
-        model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-31B'`).
+        model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-31B'`, `'gemma-4-tiny'`).
 
     Returns:
-        Canonical preset key (`'e2b'`, `'e4b'`, `'26b_a4b'`, or `'31b'`).
+        Canonical preset key (`'tiny'`, `'e2b'`, `'e4b'`, `'26b_a4b'`, or `'31b'`).
 
     """
     lowered = model_name.lower()
+    if "tiny" in lowered or lowered.startswith(("test", "model")):
+        return "tiny"
     if "31b" in lowered:
         return "31b"
     if "26b" in lowered or "a4b" in lowered:
@@ -87,6 +119,7 @@ def get_gemma4_preset_spec(model_name: str) -> dict[str, Any]:
     """
     key = resolve_gemma4_preset_name(model_name)
     specs = {
+        "tiny": GEMMA4_TINY_SPEC,
         "e2b": GEMMA4_E2B_SPEC,
         "e4b": GEMMA4_E4B_SPEC,
         "26b_a4b": GEMMA4_26B_A4B_SPEC,
@@ -98,8 +131,11 @@ def get_gemma4_preset_spec(model_name: str) -> dict[str, Any]:
 __all__ = [
     "GEMMA4_26B_A4B_SPEC",
     "GEMMA4_31B_SPEC",
+    "GEMMA4_ATTENTION_PATTERN",
     "GEMMA4_E2B_SPEC",
     "GEMMA4_E4B_SPEC",
+    "GEMMA4_TINY_SPEC",
+    "AttentionType",
     "get_gemma4_preset_spec",
     "resolve_gemma4_preset_name",
 ]

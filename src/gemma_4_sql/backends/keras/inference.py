@@ -6,9 +6,10 @@ import logging
 import math
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_inference import run_inference_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
-from gemma_4_sql.type_hints import ModelType
+from gemma_4_sql.type_hints import KerasCausalLMProtocol
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import InferenceResultDict, JSONValue
@@ -83,7 +84,7 @@ def compute_keras_confidence(scores: Any, num_tokens: int) -> float:
     return max(0.1, min(0.95, 1.0 / (1.0 + math.exp(-0.1 * num_tokens))))
 
 
-def configure_beam_sampler(model: ModelType, beam_width: int) -> Any:
+def configure_beam_sampler(model: KerasCausalLMProtocol, beam_width: int) -> Any:
     """Configure KerasNLP BeamSampler on a causal language model.
 
     Args:
@@ -144,19 +145,15 @@ def generate_sql(
     if keras is None or tf is None:
         raise DependencyMissingError("Keras dependencies are missing.")
 
-    confidence_score = 0.0
-    sql = ""
-    try:
+    def _execute() -> tuple[str, float]:
+        """Run Keras model preset loading, BeamSampler configuration, and generation."""
         logger.info("Generating with Keras %s (beam_width=%d)", model_name, beam_width)
         gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM")
         if gemma_causal_lm_cls is None:
             raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
         model = gemma_causal_lm_cls.from_preset(model_name)
 
-        # Configure beam search sampler
         configure_beam_sampler(model, beam_width)
-
-        # Execute generation
         output: Any = model.generate(prompt, max_length=max_length)
 
         scores = None
@@ -178,19 +175,6 @@ def generate_sql(
 
         num_tokens = len(sql.split())
         confidence_score = compute_keras_confidence(scores, num_tokens)
-        status = "success"
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, ImportError) as e:
-        logger.exception("Keras Generation Error: ")
-        status = f"failed: {e!s}"
-        sql = ""
-        confidence_score = 0.0
+        return (sql, confidence_score)
 
-    return {
-        "backend": "keras",
-        "model": model_name,
-        "prompt": prompt,
-        "sql": sql,
-        "status": status,
-        "beam_width": beam_width,
-        "confidence_score": confidence_score,
-    }
+    return run_inference_wrapper("keras", model_name, prompt, beam_width, _execute, **kwargs)

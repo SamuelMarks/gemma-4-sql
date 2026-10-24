@@ -40,5 +40,4 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", **k
         step=step,
         log_dir=log_dir,
         summary_writer_cls=SummaryWriter,
-        extra_fields={"action": "log_metrics", "metrics": metrics, "logged_metrics": metrics},
     )

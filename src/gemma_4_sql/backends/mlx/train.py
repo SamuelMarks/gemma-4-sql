@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_train import run_train_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.mlx.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import ETLConfig, ModelType, TensorType, TrainerState, TrainingConfig
+from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import ETLConfig, MlxCausalLMProtocol, TensorType, TrainerState, TrainingConfig, TrainingLoopState
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import TrainResultDict
 
 mx = optional_import("mlx.core")
 nn = optional_import("mlx.nn")
@@ -18,11 +19,11 @@ optim = optional_import("mlx.optimizers")
 load = optional_attr("mlx_lm", "load")
 
 
-def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
+def _run_training_epochs(state: TrainingLoopState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> float:
     """Run MLX supervised training epochs over the dataloader.
 
     Args:
-        state: `TrainerState` holding model, optimizer, dataloader, and value_and_grad function.
+        state: `TrainingLoopState` holding model, optimizer, dataloader, and value_and_grad function.
 
     Returns:
         Mean batch loss from the final epoch.
@@ -30,7 +31,7 @@ def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
     """
     dataloader: Any = state.dataloader or ()
     epochs = state.epochs
-    model: Any = state.policy_model
+    model: Any = state.model if isinstance(state, TrainingLoopState) else state.policy_model
     optimizer: Any = state.optimizer
     loss_and_grad_fn = state.train_step
     assert loss_and_grad_fn is not None
@@ -73,7 +74,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
         raise DependencyMissingError("MLX dependencies are missing.")
 
     loaded: Any = load(model_name)
-    model: ModelType = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
+    model: MlxCausalLMProtocol = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
 
     def loss_fn(model_t: Any, inputs: TensorType, targets: TensorType) -> Any:
         """Compute training loss.
@@ -96,11 +97,11 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
     dataloader = data_dict.get("loader", None)
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
-    final_loss = _run_training_epochs(TrainerState(dataloader=dataloader, epochs=epochs, policy_model=model, optimizer=optimizer, train_step=loss_and_grad_fn))
+    final_loss = _run_training_epochs(TrainingLoopState(dataloader=dataloader, epochs=epochs, model=model, optimizer=optimizer, train_step=loss_and_grad_fn))
     return "completed", float(final_loss)
 
 
-def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
+def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
     """Train a Text-to-SQL model using the MLX backend.
 
     Args:
@@ -115,30 +116,19 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
         TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
-    action = getattr(config, "action", "sft")
+    if mx is None or nn is None or optim is None or load is None:
+        raise DependencyMissingError("MLX dependencies are missing.", backend="mlx")
     model_name = getattr(config, "model_name", "gemma-4")
     dataset = getattr(config, "dataset", "dummy")
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
-    extra = getattr(config, "extra_kwargs", {}) or {}
-    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
-
+    batch_size = getattr(config, "batch_size", 2)
     distributed_strategy = str(kwargs.get("distributed_strategy", "none"))
-    final_loss = 0.0
-    status = "completed"
-    if mx is None or nn is None or optim is None or load is None:
-        raise DependencyMissingError("MLX dependencies are missing.", backend="mlx")
-    try:
-        batch_size = getattr(config, "batch_size", 2)
-        status, final_loss = _execute_train(model_name, dataset, epochs, learning_rate, batch_size=batch_size)
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        if raise_on_error:
-            raise TrainingError(
-                f"MLX training failed: {e!s}",
-                backend="mlx",
-                model_name=model_name,
-                operation=action,
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
-    return {"backend": "mlx", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": final_loss, "distributed_strategy": distributed_strategy}
+    call_kwargs = dict(kwargs)
+    call_kwargs["distributed_strategy"] = distributed_strategy
+    return run_train_wrapper(
+        "mlx",
+        config,
+        lambda: _execute_train(model_name, dataset, epochs, learning_rate, batch_size=batch_size),
+        **call_kwargs,
+    )

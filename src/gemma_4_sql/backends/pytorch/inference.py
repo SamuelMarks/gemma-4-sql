@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_inference import normalize_logprob_confidence, run_inference_wrapper
+from gemma_4_sql.backends.common_multimodal import prepare_multimodal_inputs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import InferenceResultDict
 logger = logging.getLogger(__name__)
 
 torch = optional_import("torch")
@@ -44,38 +46,20 @@ def _run_generation(
         InferenceError: If generation yields an empty sequence or SQL decoding fails.
 
     """
+
+    def _to_torch_tensor(arr: Any) -> Any:
+        """Convert feature array into a batched float32 PyTorch tensor."""
+        return torch.tensor(arr, dtype=torch.float32).unsqueeze(0)
+
+    (prompt, pixel_values, audio_values) = prepare_multimodal_inputs(
+        prompt,
+        dict(kwargs),
+        _to_torch_tensor,
+    )
+
     if backend_alias == "pytorch_native":
         from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
         from gemma_4_sql.tokenization import SQLTokenizer
-
-        image_path = kwargs.get("image_path")
-        audio_path = kwargs.get("audio_path")
-        pixel_values = kwargs.get("pixel_values")
-        audio_values = kwargs.get("audio_values")
-
-        if image_path is not None or audio_path is not None:
-            from gemma_4_sql.backends.common_multimodal import (
-                format_multimodal_prompt,
-                process_audio,
-                process_image,
-            )
-
-            formatted = format_multimodal_prompt(
-                prompt,
-                has_image=image_path is not None or pixel_values is not None,
-                has_audio=audio_path is not None or audio_values is not None,
-            )
-            prompt = str(formatted.get("prompt", prompt))
-
-            if image_path is not None and pixel_values is None:
-                img_in: Any = image_path
-                img_res = process_image(img_in)
-                pixel_values = torch.tensor(img_res["pixel_values"], dtype=torch.float32).unsqueeze(0)
-
-            if audio_path is not None and audio_values is None:
-                aud_in: Any = audio_path
-                aud_res = process_audio(aud_in)
-                audio_values = torch.tensor(aud_res["audio_values"], dtype=torch.float32).unsqueeze(0)
 
         tokenizer = None
         input_ids = None
@@ -111,42 +95,22 @@ def _run_generation(
         if tokenizer is not None and hasattr(tokenizer, "decode"):
             sql = tokenizer.decode(gen_tokens, skip_special_tokens=True).strip()
         else:
-            sql = SQLTokenizer().decode(cast(list[int], gen_tokens.tolist())).strip()
+            tok_list: list[int] = [int(t) for t in gen_tokens.tolist()]
+            sql = SQLTokenizer().decode(tok_list).strip()
 
         if not sql:
             raise InferenceError("PyTorch native generation decoded into an empty SQL query string.")
 
-        confidence_score = 0.95
+        with torch.no_grad():
+            fwd_out: Any = model(output_ids)
+            logits: Any = fwd_out[0] if isinstance(fwd_out, tuple) else getattr(fwd_out, "logits", fwd_out)
+            prompt_len = int(input_ids.shape[-1])
+            step_logits = logits[0, prompt_len - 1 : -1, :]
+            log_probs = torch.nn.functional.log_softmax(step_logits, dim=-1)
+            selected_log_probs = log_probs.gather(-1, gen_tokens.unsqueeze(-1)).squeeze(-1)
+            logprob_sum = float(selected_log_probs.sum().item())
+        confidence_score = normalize_logprob_confidence(logprob_sum, len(gen_tokens))
         return (sql, confidence_score)
-
-    image_path = kwargs.get("image_path")
-    audio_path = kwargs.get("audio_path")
-    pixel_values = kwargs.get("pixel_values")
-    audio_values = kwargs.get("audio_values")
-
-    if image_path is not None or audio_path is not None:
-        from gemma_4_sql.backends.common_multimodal import (
-            format_multimodal_prompt,
-            process_audio,
-            process_image,
-        )
-
-        formatted = format_multimodal_prompt(
-            prompt,
-            has_image=image_path is not None or pixel_values is not None,
-            has_audio=audio_path is not None or audio_values is not None,
-        )
-        prompt = str(formatted.get("prompt", prompt))
-
-        if image_path is not None and pixel_values is None:
-            img_in_hf: Any = image_path
-            img_res = process_image(img_in_hf)
-            pixel_values = torch.tensor(img_res["pixel_values"], dtype=torch.float32).unsqueeze(0)
-
-        if audio_path is not None and audio_values is None:
-            aud_in_hf: Any = audio_path
-            aud_res = process_audio(aud_in_hf)
-            audio_values = torch.tensor(aud_res["audio_values"], dtype=torch.float32).unsqueeze(0)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
@@ -207,7 +171,7 @@ def generate_sql(
     beam_width: int = 3,
     max_length: int = 50,
     **kwargs: object,
-) -> JSONDict:
+) -> InferenceResultDict:
     """Generate a SQL query from a natural language prompt using PyTorch.
 
     Args:
@@ -225,16 +189,17 @@ def generate_sql(
 
     """
     backend_alias = str(kwargs.get("backend_alias", kwargs.get("backend", "pytorch")))
-    confidence_score = 0.0
     if torch is None or (backend_alias != "pytorch_native" and (AutoModelForCausalLM is None or AutoTokenizer is None)):
         raise DependencyMissingError("PyTorch dependencies are missing.")
 
-    try:
+    gen_kwargs = dict(kwargs)
+    gen_kwargs.pop("backend_alias", None)
+    gen_kwargs.pop("backend", None)
+
+    def _execute() -> tuple[str, float]:
+        """Run PyTorch native or HuggingFace generation."""
         logger.info("Generating with %s", model_name)
-        gen_kwargs = dict(kwargs)
-        gen_kwargs.pop("backend_alias", None)
-        gen_kwargs.pop("backend", None)
-        (sql, confidence_score) = _run_generation(
+        return _run_generation(
             model_name,
             prompt,
             beam_width,
@@ -242,19 +207,5 @@ def generate_sql(
             backend_alias=backend_alias,
             **gen_kwargs,
         )
-        status = "success"
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Generation failed: ")
-        sql = ""
-        confidence_score = 0.0
-        status = f"failed: {e!s}"
 
-    return {
-        "backend": backend_alias,
-        "model": model_name,
-        "prompt": prompt,
-        "sql": sql,
-        "status": status,
-        "beam_width": beam_width,
-        "confidence_score": confidence_score,
-    }
+    return run_inference_wrapper(backend_alias, model_name, prompt, beam_width, _execute, **kwargs)

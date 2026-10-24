@@ -86,8 +86,11 @@ def log_metrics_wrapper(
 
     result: LogMetricsResultDict = {
         "backend": backend_name,
+        "action": "log_metrics",
         "step": step,
+        "logged_step": step,
         "metrics": metrics,
+        "logged_metrics": metrics,
         "status": status,
         "log_dir": log_dir,
         "timestamp": timestamp,

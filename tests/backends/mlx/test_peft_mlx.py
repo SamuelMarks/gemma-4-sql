@@ -1,290 +1,292 @@
-"""Tests for mlx peft."""
+"""Unit and behavioral tests for MLX PEFT / LoRA."""
+
+from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+import pytest
+
+import gemma_4_sql.backends.mlx.peft as peft_module
+from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from tests.conftest import requires_mlx
 
 pytestmark = requires_mlx
 
-import pytest
+mx: Any = optional_import("mlx.core")
+nn: Any = optional_import("mlx.nn")
 
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 
-
-def test_mlx_peft_imports():
-    """Test mlx peft imports fallback."""
+def test_mlx_peft_imports() -> None:
+    """Test MLX PEFT optional import fallback when MLX packages are absent."""
     with patch.dict(sys.modules, {"mlx": None, "mlx.core": None, "mlx.nn": None, "mlx_lm": None}):
-        if "gemma_4_sql.backends.mlx.peft" in sys.modules:
-            del sys.modules["gemma_4_sql.backends.mlx.peft"]
-        import gemma_4_sql.backends.mlx.peft as peft_module
+        sys.modules.pop("gemma_4_sql.backends.mlx.peft", None)
+        import gemma_4_sql.backends.mlx.peft as reloaded_peft
 
-        assert peft_module.mx is None
-        assert peft_module.nn is None
+        assert reloaded_peft.mx is None
+        assert reloaded_peft.nn is None
+
+    sys.modules.pop("gemma_4_sql.backends.mlx.peft", None)
+    import gemma_4_sql.backends.mlx.peft as restored_peft
+
+    assert restored_peft.mx is not None
 
 
-def test_mlx_lora_linear_init():
-    """Test MLXLoRALinear initialization."""
-    import gemma_4_sql.backends.mlx.peft as peft_module
-
-    peft_module.nn = MagicMock()
-    peft_module.mx = MagicMock()
-
+def test_mlx_lora_linear_init_and_math(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify MLXLoRALinear initializes real MLX arrays and computes low-rank updates."""
     with pytest.raises(ValueError, match="LoRA rank r must be positive"):
-        peft_module.MLXLoRALinear(10, 10, r=0)
+        peft_module.MLXLoRALinear(4, 4, r=0)
 
-    from typing import Any
-
-    layer: Any = peft_module.MLXLoRALinear(10, 20, bias=True)
-    assert layer.in_features == 10
-    assert layer.out_features == 20
+    layer: Any = peft_module.MLXLoRALinear(4, 6, r=2, lora_alpha=4.0, lora_dropout=0.1, bias=True)
+    assert layer.in_features == 4
+    assert layer.out_features == 6
     assert layer.bias is not None
-    assert layer.W is layer.weight
-    assert layer.A is layer.lora_a
-    assert layer.B is layer.lora_b
+    assert tuple(layer.W.shape) == (6, 4)
+    assert tuple(layer.A.shape) == (4, 2)
+    assert tuple(layer.B.shape) == (2, 6)
 
-    layer.W = "w2"
-    assert layer.weight == "w2"
-    layer.A = "a2"
-    assert layer.lora_a == "a2"
-    layer.B = "b2"
-    assert layer.lora_b == "b2"
-    layer.other = "o"
-    assert layer.other == "o"
+    w_new = mx.ones((6, 4))
+    a_new = mx.full((4, 2), 0.5)
+    b_new = mx.full((2, 6), 0.25)
+    layer.W = w_new
+    assert mx.array_equal(layer.weight, w_new)
+    layer.A = a_new
+    assert mx.array_equal(layer.lora_a, a_new)
+    layer.B = b_new
+    assert mx.array_equal(layer.lora_b, b_new)
+    layer.other = "custom_attr"
+    assert layer.other == "custom_attr"
 
-    peft_module.MLXLoRALinear(10, 20, lora_dropout=0.0)
+    layer_no_drop: Any = peft_module.MLXLoRALinear(4, 6, r=2, lora_alpha=4.0, lora_dropout=0.0, bias=False)
+    layer_no_drop.W = w_new
+    layer_no_drop.A = a_new
+    layer_no_drop.B = b_new
+    x = mx.ones((2, 4))
+    out = layer_no_drop(x)
+    # y = x @ W.T + (4/2) * ((x @ A) @ B) = 4.0 + 2.0 * (2.0 * 0.5) = 6.0
+    assert tuple(out.shape) == (2, 6)
+    assert np.allclose(np.array(out), np.full((2, 6), 6.0), atol=1e-5)
 
-    peft_module.nn = None
+    # Also test forward pass with bias and dropout
+    out_bias = layer(x)
+    assert tuple(out_bias.shape) == (2, 6)
+
+    monkeypatch.setattr(peft_module, "nn", None)
     with pytest.raises(DependencyMissingError):
-        peft_module.MLXLoRALinear(10, 10)
+        peft_module.MLXLoRALinear(4, 4)
 
 
-def test_mlx_lora_linear_from_linear():
-    """Test MLXLoRALinear from_linear."""
-    import gemma_4_sql.backends.mlx.peft as peft_module
+def test_mlx_lora_linear_from_linear() -> None:
+    """Verify MLXLoRALinear.from_linear wraps real mlx.nn.Linear layers with and without bias."""
+    base_lin = nn.Linear(4, 6, bias=True)
+    lora_lin = peft_module.MLXLoRALinear.from_linear(base_lin, r=2, lora_alpha=8.0, lora_dropout=0.0)
+    assert mx.array_equal(lora_lin.weight, base_lin.weight)
+    assert lora_lin.bias is not None
 
-    peft_module.nn = MagicMock()
-    peft_module.mx = MagicMock()
+    x = mx.ones((2, 4))
+    # Initially lora_b is zeros, so output equals base_lin(x)
+    assert np.allclose(np.array(lora_lin(x)), np.array(base_lin(x)), atol=1e-5)
 
-    linear = MagicMock()
-    linear.weight.shape = (20, 10)
-    linear.bias = "bias"
-
-    layer = peft_module.MLXLoRALinear.from_linear(linear)
-    assert layer.weight == linear.weight
-    assert layer.bias == "bias"
-
-    linear.bias = None
-    peft_module.MLXLoRALinear.from_linear(linear)
+    base_no_bias = nn.Linear(4, 6, bias=False)
+    lora_no_bias = peft_module.MLXLoRALinear.from_linear(base_no_bias, r=2)
+    assert lora_no_bias.bias is None
 
 
-def test_mlx_lora_linear_call():
-    """Test MLXLoRALinear call."""
-    import gemma_4_sql.backends.mlx.peft as peft_module
-
-    peft_module.nn = MagicMock()
-    peft_module.mx = MagicMock()
-
-    layer = peft_module.MLXLoRALinear(10, 20)
-
-    x = MagicMock()
-    w_t = MagicMock()
-    layer.weight.T = w_t
-    base = MagicMock()
-    x.__matmul__.return_value = base
-
-    layer(x)
-
-    layer.bias = MagicMock()
-    layer(x)
-
-
-def test_mlx_lora_linear_save_load(tmp_path: Path):
-    """Test save/load adapters."""
-    import gemma_4_sql.backends.mlx.peft as peft_module
-
-    peft_module.nn = MagicMock()
-    peft_module.mx = MagicMock()
-
-    layer = peft_module.MLXLoRALinear(10, 20)
+def test_mlx_lora_linear_save_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify MLXLoRALinear saves and loads real safetensors adapter weights."""
+    layer: Any = peft_module.MLXLoRALinear(4, 6, r=2)
+    layer.A = mx.full((4, 2), 1.5)
+    layer.B = mx.full((2, 6), -0.5)
 
     path = tmp_path / "adapters.safetensors"
     layer.save_adapters(path)
-    peft_module.mx.save_safetensors.assert_called_once()
+    assert path.exists()
 
-    peft_module.mx.load.return_value = {"lora_a": "a", "lora_b": "b"}
-    layer.load_adapters(path)
-    assert layer.lora_a == "a"
-    assert layer.lora_b == "b"
+    layer2 = peft_module.MLXLoRALinear(4, 6, r=2)
+    layer2.load_adapters(path)
+    assert np.allclose(np.array(layer2.lora_a), 1.5)
+    assert np.allclose(np.array(layer2.lora_b), -0.5)
 
-    peft_module.mx.load.return_value = {"lora_a": "a"}
-    with pytest.raises(KeyError):
-        layer.load_adapters(path)
+    bad_path = tmp_path / "incomplete.safetensors"
+    mx.save_safetensors(str(bad_path), {"lora_a": mx.zeros((4, 2))})
+    with pytest.raises(KeyError, match="missing 'lora_a' or 'lora_b'"):
+        layer2.load_adapters(bad_path)
 
-    peft_module.mx = None
+    monkeypatch.setattr(peft_module, "mx", None)
     with pytest.raises(DependencyMissingError):
         layer.save_adapters(path)
     with pytest.raises(DependencyMissingError):
         layer.load_adapters(path)
 
 
-def test_inject_lora():
-    """Test inject_lora."""
-    import gemma_4_sql.backends.mlx.peft as peft_module
+def test_inject_lora(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify inject_lora replaces matching nn.Linear modules in nested MLX models and lists."""
 
-    peft_module.nn = MagicMock()
-    peft_module.mx = MagicMock()
+    class SubBlock(nn.Module):
+        """Inner MLX module with q_proj and k_proj linear layers."""
 
-    from typing import Any
+        def __init__(self) -> None:
+            """Initialize SubBlock."""
+            super().__init__()
+            self.q_proj = nn.Linear(4, 4)
+            self.k_proj = nn.Linear(4, 4)
 
-    class MockLinear:
-        """Test stub for `MockLinear`."""
+    class ToyMLXModel(nn.Module):
+        """Toy MLX model with nested blocks and a direct q_proj layer."""
 
-        named_modules: Any = None
+        def __init__(self) -> None:
+            """Initialize ToyMLXModel."""
+            super().__init__()
+            self.layers = [SubBlock()]
+            self.q_proj = nn.Linear(4, 4)
 
-    peft_module.nn.Linear = MockLinear
+    model: Any = ToyMLXModel()
+    adapted, count = peft_module.inject_lora(model, ["q_proj"], lora_r=2)
+    assert count == 2
+    assert isinstance(adapted.q_proj, peft_module.MLXLoRALinear)
+    assert isinstance(adapted.layers[0].q_proj, peft_module.MLXLoRALinear)
+    assert isinstance(adapted.layers[0].k_proj, nn.Linear)
 
-    model = MagicMock()
-    # Mock model WITHOUT freeze
-    del model.freeze
+    # List container with top-level numeric index
+    class ListModel(list[Any]):
+        """List model exposing named_modules with numeric root index."""
 
-    # 1: matches, 2: not matching, 3: not linear, 4: list part
-    model.named_modules.return_value = [("l1.q_proj", MockLinear()), ("q_proj", MockLinear()), ("other", MockLinear()), ("not_lin", MagicMock())]
+        def named_modules(self) -> list[tuple[str, Any]]:
+            """Yield indexed modules."""
+            return [("0.q_proj", self[0].q_proj), ("1", self[1])]
 
-    with patch.object(peft_module, "MLXLoRALinear") as mock_lora:
-        mock_lora.from_linear.return_value = MagicMock()
-        _model_out, count = peft_module.inject_lora(model, ["q_proj"])
-        assert count == 2
+    holder = SubBlock()
+    model_list: Any = ListModel([holder, nn.Linear(4, 4)])
+    _, count_list = peft_module.inject_lora(model_list, ["q_proj", "1"], lora_r=2)
+    assert count_list == 2
+    assert isinstance(model_list[1], peft_module.MLXLoRALinear)
 
-        # list index part
-        model2 = [MockLinear()]
-        model2[0].named_modules = MagicMock(return_value=[("0.q_proj", MockLinear()), ("0.1", MockLinear())])
+    # Empty target_modules and missing named_modules
+    _, count_empty = peft_module.inject_lora(model, [])
+    assert count_empty == 0
 
-        # We need model2 to be a list containing an object with named_modules that yields paths starting with 0.
-        # Wait, if name is '0.1', parts is ['0', '1'].
-        # curr is model2 (a list).
-        # part '0' is digit and curr is list -> curr = curr[0].
-        # next, part '1' is last. last='1'. isdigit and curr (now model2[0]) is NOT list -> setattr.
-        # Wait, to hit 324 `curr[int(last)] = lora_module`, `last` must be digit and `curr` must be list.
-        # So name = '1', curr = [0, MockLinear()].
-        class ListModel(list[Any]):
-            """Test stub for `ListModel`."""
+    class NoNamedModules:
+        """Object without named_modules."""
 
-            def named_modules(self) -> Any:
-                """Provide named modules test helper."""
-                return [("0.q_proj", MockLinear()), ("1", MockLinear())]
+    no_nm: Any = NoNamedModules()
+    _, count_no_nm = peft_module.inject_lora(no_nm, ["q_proj"])
+    assert count_no_nm == 0
 
-        model_list: Any = ListModel([MagicMock(), MockLinear()])
-        _model_out, count = peft_module.inject_lora(model_list, ["q_proj", "1"])
-        assert count == 2
-
-    peft_module.nn = None
+    monkeypatch.setattr(peft_module, "nn", None)
     with pytest.raises(DependencyMissingError):
         peft_module.inject_lora(model, ["q_proj"])
 
 
-def test_save_load_adapter_weights(tmp_path: Path):
-    """Test save/load adapter weights."""
-    import gemma_4_sql.backends.mlx.peft as peft_module
+def test_save_load_adapter_weights(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify save_adapter_weights and load_adapter_weights persist and restore safetensors."""
 
-    peft_module.nn = MagicMock()
-    peft_module.mx = MagicMock()
+    class SimpleMLP(nn.Module):
+        """Single-layer MLX module."""
 
-    model = MagicMock()
+        def __init__(self) -> None:
+            """Initialize SimpleMLP."""
+            super().__init__()
+            self.q_proj = nn.Linear(4, 4)
 
-    with patch("builtins.__import__") as mock_import:
-        mock_tree = MagicMock()
-        mock_tree.tree_flatten.return_value = [("a", 1)]
-        mock_import.return_value = mock_tree
-        peft_module.save_adapter_weights(model, tmp_path)
-        peft_module.save_adapter_weights(model, tmp_path / "test.safetensors")
-        peft_module.save_adapter_weights(model, tmp_path / "test.txt")  # hits path.suffix != .safetensors
+    model: Any = SimpleMLP()
+    peft_module.inject_lora(model, ["q_proj"], lora_r=2)
+    model.q_proj.lora_b = mx.ones((2, 4))
 
-    # Create mock file
-    (tmp_path / "test.safetensors").touch()
+    peft_module.save_adapter_weights(model, tmp_path)
+    assert (tmp_path / "adapter.safetensors").exists()
 
-    peft_module.load_adapter_weights(model, tmp_path / "test.safetensors")
-    model.load_weights.assert_called_once()
+    explicit_file = tmp_path / "custom.safetensors"
+    peft_module.save_adapter_weights(model, explicit_file)
+    assert explicit_file.exists()
 
-    # Test without load_weights attr
-    del model.load_weights
-    peft_module.load_adapter_weights(model, tmp_path / "test.safetensors")
+    txt_file = tmp_path / "custom.txt"
+    peft_module.save_adapter_weights(model, txt_file)
+    assert (tmp_path / "custom.txt" / "adapter.safetensors").exists()
+
+    model2: Any = SimpleMLP()
+    peft_module.inject_lora(model2, ["q_proj"], lora_r=2)
+    peft_module.load_adapter_weights(model2, explicit_file)
+    assert np.allclose(np.array(model2.q_proj.lora_b), 1.0)
+
+    class DictLoadModel:
+        """Model without load_weights but with update()."""
+
+        def __init__(self) -> None:
+            """Initialize DictLoadModel."""
+            self.updated = False
+
+        def update(self, _weights: Any) -> None:
+            """Mark updated."""
+            self.updated = True
+
+    dm: Any = DictLoadModel()
+    peft_module.load_adapter_weights(dm, explicit_file)
+    assert dm.updated is True
 
     with pytest.raises(FileNotFoundError):
-        peft_module.load_adapter_weights(model, tmp_path / "not_found.safetensors")
+        peft_module.load_adapter_weights(model2, tmp_path / "not_found.safetensors")
 
-    peft_module.mx = None
+    monkeypatch.setattr(peft_module, "mx", None)
     with pytest.raises(DependencyMissingError):
         peft_module.save_adapter_weights(model, tmp_path)
     with pytest.raises(DependencyMissingError):
-        peft_module.load_adapter_weights(model, tmp_path / "test.safetensors")
+        peft_module.load_adapter_weights(model, explicit_file)
 
 
-def test_apply_lora():
-    """Test apply_lora."""
-    import gemma_4_sql.backends.mlx.peft as peft_module
+def test_apply_lora(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify apply_lora end-to-end execution, output_dir saving, and error handling."""
+    import gemma_4_sql.backends.mlx as mlx_pkg
+    from gemma_4_sql.backends.mlx.adapter import MLXBackend
 
-    peft_module.nn = MagicMock()
-    peft_module.mx = MagicMock()
-    peft_module.load = MagicMock(return_value=(MagicMock(), None))
+    assert mlx_pkg.get_trainer() == "mlx_trainer"
+    assert isinstance(MLXBackend(), MLXBackend)
 
-    with patch.object(peft_module, "inject_lora") as mock_inject:
-        mock_inject.return_value = (MagicMock(), 1)
-        with patch.object(peft_module, "save_adapter_weights"):
-            res = peft_module.apply_lora("model", ["q_proj"], output_dir="dir")
-            assert res["status"] == "completed"
+    class SimpleMLP(nn.Module):
+        """Single-layer MLX module."""
 
-            res2 = peft_module.apply_lora("model", ["q_proj"], model="model_obj")
-            assert res2["status"] == "completed"
+        def __init__(self) -> None:
+            """Initialize SimpleMLP."""
+            super().__init__()
+            self.q_proj = nn.Linear(4, 4)
 
-            mock_inject.side_effect = RuntimeError("error")
-            res3 = peft_module.apply_lora("model", ["q_proj"])
-            assert "failed: error" in res3["status"]
-            with pytest.raises(TrainingError, match="error"):
-                peft_module.apply_lora("model", ["q_proj"], raise_on_error=True)
+    monkeypatch.setattr(peft_module, "load", lambda _name: (SimpleMLP(), None))
+    res = peft_module.apply_lora("model", ["q_proj"], lora_r=2, output_dir=str(tmp_path))
+    assert res["status"] == "completed"
+    assert res["injected_modules"] == 1
+    assert (tmp_path / "adapter.safetensors").exists()
 
-    peft_module.nn = None
+    res2 = peft_module.apply_lora("model", ["q_proj"], lora_r=2, model=SimpleMLP())
+    assert res2["status"] == "completed"
+
+    # Model without freeze() method
+    class NoFreezeContainer:
+        """Container with named_modules but no freeze method."""
+
+        def __init__(self) -> None:
+            """Initialize NoFreezeContainer."""
+            self.q_proj = nn.Linear(4, 4)
+
+        def named_modules(self) -> list[tuple[str, Any]]:
+            """Yield q_proj."""
+            return [("q_proj", self.q_proj)]
+
+    nf_model: Any = NoFreezeContainer()
+    _, count_nf = peft_module.inject_lora(nf_model, ["q_proj"], lora_r=2)
+    assert count_nf == 1
+
+    # Model without load_weights or update in load_adapter_weights
+    peft_module.load_adapter_weights(nf_model, tmp_path / "adapter.safetensors")
+
+    monkeypatch.setattr(peft_module, "inject_lora", MagicMock(side_effect=RuntimeError("error")))
+    res3 = peft_module.apply_lora("model", ["q_proj"])
+    assert "failed: error" in res3["status"]
+    with pytest.raises(TrainingError, match="error"):
+        peft_module.apply_lora("model", ["q_proj"], raise_on_error=True)
+
+    monkeypatch.setattr(peft_module, "nn", None)
     with pytest.raises(DependencyMissingError):
         peft_module.apply_lora("model", ["q_proj"])
-
-
-def test_inject_lora_coverage():
-    """Test inject_lora missing branches."""
-    from unittest.mock import MagicMock
-
-    import gemma_4_sql.backends.mlx.peft as peft_module
-
-    peft_module.nn = MagicMock()
-    peft_module.mx = MagicMock()
-
-    model = MagicMock()
-    model.freeze = MagicMock()
-
-    # Empty target_modules
-    _out, count = peft_module.inject_lora(model, [])
-    assert count == 0
-    model.freeze.assert_called_once()
-
-    # Missing named_modules
-    model2 = MagicMock()
-    del model2.named_modules
-    _out2, count2 = peft_module.inject_lora(model2, ["q"])
-    assert count2 == 0
-
-
-def test_mlx_lm_import_success_real(monkeypatch: pytest.MonkeyPatch):
-    """Verify mlx lm import success real behavior."""
-    import sys
-    from unittest.mock import MagicMock
-
-    mock_mlxlm = MagicMock()
-    mock_mlxlm.load = "MockLoad"
-
-    with patch.dict(sys.modules, {"mlx_lm": mock_mlxlm}):
-        if "gemma_4_sql.backends.mlx.peft" in sys.modules:
-            del sys.modules["gemma_4_sql.backends.mlx.peft"]
-
-        import gemma_4_sql.backends.mlx.peft as peft_module
-
-        assert peft_module.load == "MockLoad"

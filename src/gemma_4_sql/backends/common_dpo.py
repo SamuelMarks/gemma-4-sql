@@ -2,12 +2,72 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
+
+from gemma_4_sql.exceptions import TrainingError, resolve_raise_on_error
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from gemma_4_sql.type_hints import TensorType, TrainerState
+    from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, DPOResultDict, TensorType, TrainerState
+
+logger = logging.getLogger(__name__)
+
+
+def run_dpo_wrapper(
+    backend_name: str,
+    config: DPOConfig,
+    execute_fn: Callable[[str, str, float, int, float, int], tuple[str, float]],
+    **kwargs: object,
+) -> DPOResultDict:
+    """Execute a backend DPO loop with standardized config unpacking, error handling, and result formatting.
+
+    Args:
+        backend_name: Target backend identifier ('jax', 'keras', 'maxtext', 'mlx', 'pytorch').
+        config: `DPOConfig` dataclass instance.
+        execute_fn: Backend callable `(model_name, dataset, beta, epochs, lr, batch_size) -> (status, final_loss)`.
+        **kwargs: Runtime keyword overrides (including `raise_on_error`).
+
+    Returns:
+        Structured `DPOResultDict` containing DPO execution status and final loss.
+
+    Raises:
+        TrainingError: If `execute_fn` raises an exception and `raise_on_error` is True.
+
+    """
+    model_name = str(getattr(config, "model_name", "model"))
+    dataset = str(getattr(config, "dataset", "dataset"))
+    beta = float(getattr(config, "beta", 0.1))
+    epochs = int(getattr(config, "epochs", 1))
+    learning_rate = float(getattr(config, "learning_rate", 1e-05))
+    batch_size = int(getattr(config, "batch_size", 2))
+    raise_on_error = resolve_raise_on_error(config, kwargs=dict(kwargs))
+
+    final_loss = 0.0
+    try:
+        status, final_loss = execute_fn(model_name, dataset, beta, epochs, learning_rate, batch_size)
+    except (TrainingError, ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError, KeyError) as e:
+        logger.exception("%s DPO failed: ", backend_name)
+        if raise_on_error:
+            raise TrainingError(
+                f"{backend_name} DPO failed: {e!s}",
+                backend=backend_name,
+                model_name=model_name,
+                operation="dpo",
+                cause=e,
+            ) from e
+        status = f"failed: {e!s}"
+
+    return {
+        "backend": backend_name,
+        "action": "dpo",
+        "model": model_name,
+        "dataset": dataset,
+        "beta": beta,
+        "status": status,
+        "final_loss": float(final_loss),
+    }
 
 
 def generic_dpo_loss(
@@ -16,7 +76,7 @@ def generic_dpo_loss(
     ref_chosen_logps: TensorType,
     ref_rejected_logps: TensorType,
     beta: float,
-    log_sigmoid_fn: Callable[[TensorType], TensorType],
+    log_sigmoid_fn: Callable[[Any], Any],
 ) -> tuple[TensorType, TensorType, TensorType]:
     """Compute the Direct Preference Optimization (DPO) loss generically across tensor frameworks.
 
@@ -47,7 +107,7 @@ def generic_dpo_loss(
 
 
 def generic_run_training_epochs(
-    state: TrainerState[Any, Any, Any, Any],
+    state: DPOLoopState[Any, Any, Any] | TrainerState[Any, Any, Any, Any],
     step_fn: Callable[[Any, Any, Any, Any, float], Any],
 ) -> float:
     """Run DPO training epochs abstracting backend-specific step execution.

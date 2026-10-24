@@ -11,7 +11,10 @@ class MLXBackend(ModuleDelegatedBackend):
     """MLX implementation of BackendProtocol."""
 
 
+ADAPTER_CLASS = MLXBackend
+
 __all__ = [
+    "ADAPTER_CLASS",
     "MLXBackend",
     "benchmark",
     "dpo",

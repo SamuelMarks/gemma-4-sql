@@ -8,7 +8,7 @@ from gemma_4_sql.backends.pytorch.gemma4.audio_layers import Gemma4AudioEncoderB
 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4AudioConfig, Gemma4Config
 
 
-def test_gemma4_audio_feature_extractor():
+def test_gemma4_audio_feature_extractor() -> None:
     """Test Gemma4AudioFeatureExtractor."""
     config = Gemma4AudioConfig(hidden_size=256)
     extractor = Gemma4AudioFeatureExtractor(config)
@@ -18,7 +18,7 @@ def test_gemma4_audio_feature_extractor():
     assert out.shape[2] == 256
 
 
-def test_gemma4_audio_encoder_block():
+def test_gemma4_audio_encoder_block() -> None:
     """Test Gemma4AudioEncoderBlock."""
     config = Gemma4AudioConfig(hidden_size=256, num_attention_heads=4)
     block = Gemma4AudioEncoderBlock(config)
@@ -27,7 +27,7 @@ def test_gemma4_audio_encoder_block():
     assert out.shape == (2, 50, 256)
 
 
-def test_gemma4_audio_model():
+def test_gemma4_audio_model() -> None:
     """Test Gemma4AudioModel."""
     config = Gemma4Config(
         hidden_size=512,
@@ -40,7 +40,7 @@ def test_gemma4_audio_model():
     assert out.shape[2] == 512
 
 
-def test_gemma4_audio_cross_attention():
+def test_gemma4_audio_cross_attention() -> None:
     """Test Gemma4AudioCrossAttention."""
     config = Gemma4Config(hidden_size=512, num_attention_heads=4, audio_config={"hidden_size": 256})
     attn = Gemma4AudioCrossAttention(config)

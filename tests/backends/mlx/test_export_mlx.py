@@ -1,32 +1,22 @@
-"""Tests for mlx export."""
+"""Tests for MLX export."""
+
+from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import pytest
+
+import gemma_4_sql.backends.mlx.export as export_module
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 from tests.conftest import requires_mlx
 
 pytestmark = requires_mlx
 
-import pytest
 
-
-def test_mlx_export_imports():
-    """Test mlx export imports fallback."""
-    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None}):
-        if "gemma_4_sql.backends.mlx.export" in sys.modules:
-            del sys.modules["gemma_4_sql.backends.mlx.export"]
-        import gemma_4_sql.backends.mlx.export as export_module
-
-        assert export_module.mx is None
-
-
-def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Test export_model."""
-    import gemma_4_sql.backends.mlx.export as export_module
-    from gemma_4_sql.exceptions import DependencyMissingError, ExportError
-
+def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify MLX export_model writes safetensors and config.json without sys.modules deletion."""
     mock_mx = MagicMock()
     monkeypatch.setattr(export_module, "mx", mock_mx)
 
@@ -44,32 +34,28 @@ def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert res["backend"] == "mlx"
     assert res["status"] == "exported_with_safetensors"
     assert res["format"] == "safetensors"
-
     assert (export_dir / "model.safetensors").parent.exists()
     mock_mx.save_safetensors.assert_called_once()
 
     config_path = export_dir / "config.json"
     assert config_path.exists()
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         cfg = json.load(f)
         assert cfg == {"k": "v"}
 
-    # Test model config object fallback
     mock_model.config = MagicMock()
     mock_model.config.__dict__ = {"k2": "v2"}
     export_module.export_model("model", str(export_dir))
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         cfg = json.load(f)
         assert cfg == {"k2": "v2"}
 
-    # Test missing model config
     del mock_model.config
     export_module.export_model("model", str(export_dir))
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         cfg = json.load(f)
         assert cfg == {"model_type": "gemma4", "model_name": "model"}
 
-    # Test missing mlx_load falling back to optional_attr returning None -> ExportError
     monkeypatch.setattr(export_module, "mlx_load", None)
     monkeypatch.setattr(export_module, "optional_attr", lambda *_a, **_k: None)
     with pytest.raises(ExportError, match="Failed to load MLX model"):

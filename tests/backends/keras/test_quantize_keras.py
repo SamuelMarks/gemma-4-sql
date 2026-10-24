@@ -1,131 +1,128 @@
-"""Unit and behavioral tests for quantize keras."""
+"""Unit and behavioral tests for Keras model quantization."""
+
+from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
-
-from tests.conftest import requires_keras
-
-pytestmark = requires_keras
 
 import numpy as np
 import pytest
 
 import gemma_4_sql.backends.keras.quantize as q
+from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
+from tests.conftest import requires_keras
+
+pytestmark = requires_keras
+
+keras: Any = optional_import("keras")
 
 
-def test_quantize_layer_weights(monkeypatch: pytest.MonkeyPatch):
-    """Verify quantize layer weights behavior."""
-    mock_layer = MagicMock()
-    mock_layer.name = "dense"
+def test_quantize_layer_weights_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify quantize_layer_weights quantizes real Keras Dense 2D kernels in-place for int8 and int4."""
+    dense_int8 = keras.layers.Dense(4, use_bias=True, name="dense_int8")
+    _ = dense_int8(keras.ops.ones((2, 4), dtype="float32"))
+    orig_w = np.linspace(-2.0, 2.0, 16, dtype=np.float32).reshape(4, 4)
+    dense_int8.kernel.assign(orig_w)
 
-    # Missing np
+    count_int8 = q.quantize_layer_weights(dense_int8, "int8")
+    assert count_int8 == 1
+    q_w8 = dense_int8.kernel.numpy()
+    assert np.allclose(q_w8, orig_w, atol=0.05)
+    assert not np.array_equal(q_w8, orig_w)
+
+    dense_int4 = keras.layers.Dense(4, use_bias=False, name="dense_int4")
+    _ = dense_int4(keras.ops.ones((2, 4), dtype="float32"))
+    dense_int4.kernel.assign(orig_w)
+    count_int4 = q.quantize_layer_weights(dense_int4, "int4")
+    assert count_int4 == 1
+    q_w4 = dense_int4.kernel.numpy()
+    assert np.allclose(q_w4, orig_w, atol=0.35)
+
+    # All-zero 2D weight matrix and weight without .assign()
+    mock_layer_zero = MagicMock()
+    mock_w_zero = MagicMock()
+    mock_w_zero.numpy.return_value = np.zeros((2, 2), dtype=np.float32)
+    del mock_w_zero.assign
+    mock_layer_zero.weights = [mock_w_zero]
+    assert q.quantize_layer_weights(mock_layer_zero, "int4") == 1
+
+    # Runtime error inside weight numpy extraction is caught gracefully
+    mock_layer_err = MagicMock()
+    mock_w_err = MagicMock()
+    mock_w_err.numpy.side_effect = RuntimeError("sim")
+    mock_layer_err.weights = [mock_w_err]
+    assert q.quantize_layer_weights(mock_layer_err, "int8") == 0
+
+    # Missing numpy returns 0
     monkeypatch.setattr(q, "np", None)
-    assert q.quantize_layer_weights(mock_layer, "int8") == 0
-
-    monkeypatch.setattr(q, "np", np)
-
-    # Needs np array ndim >= 2
-    mock_w = MagicMock()
-    mock_w.name = "kernel"
-    mock_w.numpy.return_value = np.array([[1.0, -1.0], [2.0, -2.0]])
-    mock_layer.weights = [mock_w]
-
-    # int8
-    res = q.quantize_layer_weights(mock_layer, "int8")
-    assert res > 0
-
-    # int4 and zero max
-    mock_layer3 = MagicMock()
-    mock_layer3.name = "dense"
-    mock_w3 = MagicMock()
-    mock_w3.name = "kernel"
-    mock_w3.numpy.return_value = np.array([[0.0, 0.0]])  # ndim=2, zero max
-    del mock_w3.assign  # make hasattr(w, "assign") False
-    mock_layer3.weights = [mock_w3]
-    res3 = q.quantize_layer_weights(mock_layer3, "int4")
-    assert res3 > 0
-
-    # ndim < 2
-    mock_layer_ndim1 = MagicMock()
-    mock_w_ndim1 = MagicMock()
-    mock_w_ndim1.numpy.return_value = np.array([1.0, 2.0])
-    mock_layer_ndim1.weights = [mock_w_ndim1]
-    res_ndim1 = q.quantize_layer_weights(mock_layer_ndim1, "int8")
-    assert res_ndim1 == 0
-
-    # runtime error
-    mock_layer4 = MagicMock()
-    mock_w4 = MagicMock()
-    mock_w4.numpy.side_effect = RuntimeError("sim")
-    mock_layer4.weights = [mock_w4]
-    assert q.quantize_layer_weights(mock_layer4, "int8") == 0
+    assert q.quantize_layer_weights(dense_int8, "int8") == 0
 
 
-def test_quantize_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """Verify quantize model behavior."""
-    from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
+def test_quantize_model_real(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Verify quantize_model quantizes a real Keras Sequential model and saves weights."""
+    inp = keras.Input(shape=(4,))
+    out = keras.layers.Dense(4, name="proj")(inp)
+    real_model: Any = keras.Model(inputs=inp, outputs=out)
+    orig_w = np.linspace(-1.5, 1.5, 16, dtype=np.float32).reshape(4, 4)
+    real_model.layers[1].kernel.assign(orig_w)
 
-    # 1. Missing keras
-    monkeypatch.setattr(q, "keras", None)
-    with pytest.raises(DependencyMissingError):
-        q.quantize_model("m", "int8")
+    export_dir = tmp_path / "export"
+    res = q.quantize_model("m", "int8", model=real_model, export_path=str(export_dir))
+    assert res["status"] == "quantized_int8"
+    assert res["quantized_layers_count"] == 1
+    assert Path(str(res["export_path"])).exists()
+    assert not np.array_equal(real_model.layers[1].kernel.numpy(), orig_w)
 
-    mock_keras = MagicMock()
-    monkeypatch.setattr(q, "keras", mock_keras)
-
-    # 2. Unsupported method
+    # Unsupported method raises UnsupportedQuantizationMethodError
     with pytest.raises(UnsupportedQuantizationMethodError):
         q.quantize_model("m", "unknown")
 
-    # 3. Model passed in kwargs, success, export_path
-    mock_model = MagicMock()
-    mock_layer = MagicMock()
-    mock_model.layers = [mock_layer]
-
-    monkeypatch.setattr(q, "quantize_layer_weights", MagicMock(return_value=1))
-
-    export_dir = tmp_path / "export"
-    res = q.quantize_model("m", "int8", model=mock_model, export_path=str(export_dir))
-    assert res["status"] == "quantized_int8"
-    assert "export_path" in res
-    assert res["quantized_layers_count"] == 1
-
-    # 4. Keras config.set_dtype_policy mock
-    del mock_keras.dtype_policies
-    mock_keras.config.set_dtype_policy = MagicMock()
-    q.quantize_model("m", "int4", model=mock_model)
-
-    # 4.b Keras without dtype_policies and without config
-    del mock_keras.config
-    q.quantize_model("m", "int4", model=mock_model)
-
-    # 5. Load model from preset
+    # Preset loading fallback and error paths
     mock_gemma_cls = MagicMock()
-    mock_gemma_cls.from_preset.return_value = mock_model
+    mock_gemma_cls.from_preset.return_value = real_model
     monkeypatch.setattr(q, "optional_attr", lambda *_a, **_k: mock_gemma_cls)
+    res_preset = q.quantize_model("m", "int4")
+    assert res_preset["status"] == "quantized_int4"
 
-    res = q.quantize_model("m", "int8")
-    assert res["status"] == "quantized_int8"
+    mock_gemma_cls.from_preset.return_value = None
+    assert q.quantize_model("m", "int8")["status"] == "quantized_int8"
 
-    # 6. Load model from preset error / None
     monkeypatch.setattr(q, "optional_attr", lambda *_a, **_k: None)
-    res_none = q.quantize_model("m", "int8")
-    assert res_none["status"] == "quantized_int8"
+    assert q.quantize_model("m", "int8")["status"] == "quantized_int8"
 
     mock_gemma_cls.from_preset.side_effect = ValueError("sim")
     monkeypatch.setattr(q, "optional_attr", lambda *_a, **_k: mock_gemma_cls)
-    res = q.quantize_model("m", "int8")
-    assert res["status"] == "quantized_int8"  # Doesn't fail, model is just None
+    assert q.quantize_model("m", "int8")["status"] == "quantized_int8"
 
-    # 7. Model runtime error
-    mock_model.save.side_effect = RuntimeError("sim")
-    res = q.quantize_model("m", "int8", model=mock_model, export_path=str(export_dir))
-    assert "failed" in res["status"]
-    assert res["memory_reduction_factor"] == 0.0
+    # Keras dtype policy fallback branches
+    mock_keras = MagicMock()
+    del mock_keras.config
+    mock_keras.dtype_policies.set_dtype_policy = MagicMock()
+    monkeypatch.setattr(q, "keras", mock_keras)
+    q.quantize_model("m", "int4", model=real_model)
 
-    # 8. Model without save
-    mock_model_nosave = MagicMock()
-    del mock_model_nosave.save
-    mock_model_nosave.layers = [mock_layer]
-    res = q.quantize_model("m", "int8", model=mock_model_nosave, export_path=str(export_dir))
-    assert res["status"] == "quantized_int8"
+    del mock_keras.dtype_policies
+    q.quantize_model("m", "int4", model=real_model)
+
+    # Save failure handling
+    bad_save_model = MagicMock()
+    bad_save_model.layers = []
+    bad_save_model.save.side_effect = RuntimeError("save failed")
+    res_fail = q.quantize_model("m", "int8", model=bad_save_model, export_path=str(export_dir))
+    assert "failed" in str(res_fail["status"])
+    assert res_fail["memory_reduction_factor"] == 0.0
+
+    # Model without save attribute
+    nosave_model = MagicMock()
+    del nosave_model.save
+    nosave_model.layers = []
+    assert q.quantize_model("m", "int8", model=nosave_model, export_path=str(export_dir))["status"] == "quantized_int8"
+
+    # Missing keras raises DependencyMissingError
+    real_keras = keras
+    real_keras.config.set_dtype_policy("float32")
+    monkeypatch.setattr(q, "keras", None)
+    with pytest.raises(DependencyMissingError):
+        q.quantize_model("m", "int8")

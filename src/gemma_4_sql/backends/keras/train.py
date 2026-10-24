@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_train import run_train_wrapper
 from gemma_4_sql.backends.keras.etl import build_dataloader
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
 
 if TYPE_CHECKING:
@@ -77,30 +78,16 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
         TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
-    action = getattr(config, "action", "sft")
-    model_name = getattr(config, "model_name", "gemma-4")
-    dataset = getattr(config, "dataset", "dummy")
-    epochs = getattr(config, "epochs", 1)
-    extra = getattr(config, "extra_kwargs", {}) or {}
-    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
-
     if keras is None or tf is None:
         raise DependencyMissingError("Keras training dependencies are missing.", backend="keras")
 
-    logger.info("Starting Keras %s on %s using %s", action, model_name, dataset)
-    final_loss = 0.0
-    try:
-        batch_size = getattr(config, "batch_size", 2)
-        status, final_loss = _execute_train(model_name, dataset, epochs, batch_size=batch_size)
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        logger.exception("Keras training error: ")
-        if raise_on_error:
-            raise TrainingError(
-                f"Keras training failed: {e!s}",
-                backend="keras",
-                model_name=model_name,
-                operation=action,
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
-    return {"backend": "keras", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "status": status, "final_loss": final_loss}
+    model_name = getattr(config, "model_name", "gemma-4")
+    dataset = getattr(config, "dataset", "dummy")
+    epochs = getattr(config, "epochs", 1)
+    batch_size = getattr(config, "batch_size", 2)
+    return run_train_wrapper(
+        "keras",
+        config,
+        lambda: _execute_train(model_name, dataset, epochs, batch_size=batch_size),
+        **kwargs,
+    )

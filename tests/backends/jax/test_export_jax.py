@@ -1,143 +1,70 @@
-"""Unit and behavioral tests for export jax."""
+"""Unit and behavioral tests for JAX model export with real Orbax checkpoints."""
+
+from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
 
+import jax.numpy as jnp
+import orbax.checkpoint as ocp
 import pytest
+from flax import nnx
+
+import gemma_4_sql.backends.jax.export as jax_export
+from gemma_4_sql.backends.jax.gemma4 import Gemma4Config
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 
 
-@pytest.fixture(autouse=True)
-def mock_dependencies(monkeypatch: pytest.MonkeyPatch):
-    """Provide mocked JAX, Orbax, and Flax NNX dependencies for export unit tests."""
-    import gemma_4_sql.backends.jax.export as jax_export
-    import gemma_4_sql.backends.jax.gemma4 as real_gemma4_pkg
+def test_export_model_with_real_orbax_checkpoint(tmp_path: Path) -> None:
+    """Verify export_model saves a real Orbax checkpoint that can be restored."""
+    export_dir = tmp_path / "orbax_ckpt"
+    weights = {"w": jnp.array([1.0, 2.0, 3.0], dtype=jnp.float32)}
 
-    mock_jax = MagicMock()
-    mock_jnp = MagicMock()
-    mock_ocp = MagicMock()
-    mock_orbax = MagicMock(checkpoint=mock_ocp)
-    mock_nnx = MagicMock()
-    mock_flax = MagicMock()
-    mock_flax.nnx = mock_nnx
-
-    mock_checkpointer = MagicMock()
-    mock_ocp.PyTreeCheckpointer.return_value = mock_checkpointer
-
-    mock_nnx.state.return_value = "mock_weights"
-
-    mock_gemma4_config = MagicMock()
-    mock_gemma4_config.gemma4_e2b.return_value = MagicMock()
-    mock_gemma4_model = MagicMock()
-
-    mock_gemma4_mod = MagicMock()
-    mock_gemma4_mod.Gemma4Config = mock_gemma4_config
-    mock_gemma4_mod.Gemma4ForCausalLM = mock_gemma4_model
-
-    monkeypatch.setattr(jax_export, "jax", mock_jax)
-    monkeypatch.setattr(jax_export, "jnp", mock_jnp)
-    monkeypatch.setattr(jax_export, "ocp", mock_ocp)
-
-    with (
-        patch.dict(
-            sys.modules,
-            {
-                "jax": mock_jax,
-                "jax.numpy": mock_jnp,
-                "orbax": mock_orbax,
-                "orbax.checkpoint": mock_ocp,
-                "flax": mock_flax,
-                "flax.nnx": mock_nnx,
-                "gemma_4_sql.backends.jax.gemma4": mock_gemma4_mod,
-            },
-        ),
-        patch.object(real_gemma4_pkg, "Gemma4Config", mock_gemma4_config),
-        patch.object(real_gemma4_pkg, "Gemma4ForCausalLM", mock_gemma4_model),
-    ):
-        yield mock_jax, mock_jnp, mock_ocp, mock_nnx, mock_gemma4_config, mock_gemma4_model, mock_checkpointer
-
-
-def reload_module():
-    """Return the `gemma_4_sql.backends.jax.export` module."""
-    import gemma_4_sql.backends.jax.export as jax_export
-
-    return jax_export
-
-
-def test_export_model_with_weights(tmp_path: Path):
-    """Verify export model with weights behavior."""
-    jax_export = reload_module()
-
-    export_path = str(tmp_path / "export")
-
-    res = jax_export.export_model("test_model", export_path, weights="w")
-
+    res = jax_export.export_model("test_model", str(export_dir), weights=weights)
     assert res["status"] == "exported_with_orbax"
-    assert res["model"] == "test_model"
+    assert res["backend"] == "jax"
     assert res["format"] == "orbax/saved_model"
+    assert Path(res["file_path"]).exists()
+
+    restored = ocp.PyTreeCheckpointer().restore(Path(res["file_path"]))
+    assert jnp.allclose(restored["w"], weights["w"])
 
 
-def test_export_model_extract_weights(tmp_path: Path):
-    """Verify export model extract weights behavior."""
-    jax_export = reload_module()
+def test_export_model_extracts_real_gemma4_weights(tmp_path: Path) -> None:
+    """Verify export_model instantiates a tiny Gemma4ForCausalLM model and exports its NNX state."""
+    cfg = Gemma4Config.gemma4_tiny()
+    export_dir = tmp_path / "model_export"
 
-    export_path = str(tmp_path / "export")
-
-    # "test_model" will hit the test model config branch
-    res = jax_export.export_model("test_model", export_path)
+    res = jax_export.export_model("gemma-4-tiny", str(export_dir), config=cfg)
     assert res["status"] == "exported_with_orbax"
+    assert Path(res["file_path"]).exists()
 
-    # "model" will hit the e2b config branch
-    res2 = jax_export.export_model("other_model", export_path)
+    # Also test preset resolution when config is omitted
+    export_dir2 = tmp_path / "preset_export"
+    res2 = jax_export.export_model("test_tiny_preset", str(export_dir2))
     assert res2["status"] == "exported_with_orbax"
-
-    # Use config argument
-    res3 = jax_export.export_model("test_model", export_path, config="custom_config")
-    assert res3["status"] == "exported_with_orbax"
+    assert Path(res2["file_path"]).exists()
 
 
-def test_export_model_extract_weights_missing_flax(tmp_path: Path):
-    """Verify export model extract weights missing flax behavior."""
-    jax_export = reload_module()
+def test_export_model_error_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify export_model raises DependencyMissingError and ExportError on failures."""
+    with patch.dict(sys.modules, {"flax": None}), pytest.raises(DependencyMissingError, match="Flax NNX dependency missing"):
+        jax_export.export_model("test_model", str(tmp_path / "no_flax"))
 
-    with patch.dict(sys.modules, {"flax": None}), pytest.raises(Exception, match="Flax NNX dependency missing:"):
-        # Will raise ImportError when trying to import flax inside function
-        jax_export.export_model("test_model", str(tmp_path / "export"))
+    with patch.object(nnx, "state", side_effect=RuntimeError("State Extraction Failed")), pytest.raises(ExportError, match="Failed to extract state for model 'test_model'"):
+        jax_export.export_model("test_model", str(tmp_path / "state_err"))
 
+    mock_ocp = MagicMock()
+    mock_ocp.PyTreeCheckpointer.return_value.save.side_effect = OSError("Disk full")
+    monkeypatch.setattr(jax_export, "ocp", mock_ocp)
+    with pytest.raises(ExportError, match="Failed to save Orbax checkpoint"):
+        jax_export.export_model("test_model", str(tmp_path / "save_err"), weights={"a": 1})
 
-def test_export_model_extract_weights_error(tmp_path: Path, mock_dependencies: Any):
-    """Verify export model extract weights error behavior."""
-    jax_export = reload_module()
-
-    # Make extraction fail
-    _, _, _, mock_nnx, _, _, _ = mock_dependencies
-    mock_nnx.state.side_effect = Exception("State Extraction Failed")
-
-    with pytest.raises(Exception, match="Failed to extract state for model 'test_model':"):
-        jax_export.export_model("test_model", str(tmp_path / "export"))
-
-
-def test_export_model_save_error(tmp_path: Path, mock_dependencies: Any):
-    """Verify export model save error behavior."""
-    jax_export = reload_module()
-
-    _, _, _, _, _, _, mock_checkpointer = mock_dependencies
-    mock_checkpointer.save.side_effect = Exception("Save Error")
-
-    with pytest.raises(Exception, match="Failed to save Orbax checkpoint at"):
-        jax_export.export_model("test_model", str(tmp_path / "export"), weights="w")
-
-
-def test_jax_export_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `export_model` raises `DependencyMissingError` when `jax` is None."""
-    import gemma_4_sql.backends.jax.export as mod
-
-    monkeypatch.setattr(mod, "jax", None)
-    assert mod.jax is None
-    with pytest.raises(Exception, match="JAX export dependencies are missing."):
-        mod.export_model("model", "path")
+    monkeypatch.setattr(jax_export, "jax", None)
+    with pytest.raises(DependencyMissingError, match=r"JAX export dependencies are missing\."):
+        jax_export.export_model("model", str(tmp_path / "no_jax"))

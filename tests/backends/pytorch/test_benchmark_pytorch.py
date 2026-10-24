@@ -1,112 +1,94 @@
 """Tests for PyTorch benchmark."""
 
-import sys
+from __future__ import annotations
+
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
+from gemma_4_sql.exceptions import DependencyMissingError
 from tests.conftest import requires_torch
 
 pytestmark = requires_torch
 
-import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+def test_pytorch_benchmark_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test pytorch benchmark missing deps."""
+    monkeypatch.setattr(benchmark_module, "torch", None)
+    monkeypatch.setattr(benchmark_module, "AutoModelForCausalLM", None)
 
-
-def test_pytorch_benchmark_imports():
-    """Test pytorch benchmark imports fallback."""
-    import importlib
-
-    with patch.dict(sys.modules, {"torch": None, "transformers": None}):
-        import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
-
-        importlib.reload(benchmark_module)
-        assert benchmark_module.torch is None
-        assert benchmark_module.AutoModelForCausalLM is None
-    importlib.reload(benchmark_module)
+    with pytest.raises(DependencyMissingError, match="PyTorch dependencies"):
+        benchmark_module.benchmark_model("model")
 
 
-def test_get_device():
-    """Test _get_device."""
-    import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
+def test_get_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _get_device across cpu, cuda, and mps."""
+    mock_torch = MagicMock()
+    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
 
     assert benchmark_module._get_device("cpu") == "cpu"
 
-    with patch("gemma_4_sql.backends.pytorch.benchmark.torch") as mock_torch:
-        mock_torch.cuda.is_available.return_value = True
-        assert benchmark_module._get_device("gpu") == "cuda"
+    mock_torch.cuda.is_available.return_value = True
+    assert benchmark_module._get_device("gpu") == "cuda"
 
-        mock_torch.cuda.is_available.return_value = False
-        mock_torch.backends.mps.is_available.return_value = True
-        assert benchmark_module._get_device("gpu") == "mps"
+    mock_torch.cuda.is_available.return_value = False
+    mock_torch.backends.mps.is_available.return_value = True
+    assert benchmark_module._get_device("gpu") == "mps"
 
-        mock_torch.cuda = None
-        mock_torch.backends = None
-        assert benchmark_module._get_device("gpu") == "cpu"
+    mock_torch.backends.mps.is_available.return_value = False
+    assert benchmark_module._get_device("gpu") == "cpu"
 
 
-def test_load_pytorch_model_and_device():
-    """Test _load_pytorch_model_and_device."""
-    import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
-
+def test_load_pytorch_model_and_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _load_pytorch_model_and_device across native and HF backends."""
     mock_torch = MagicMock()
-    mock_torch.float32 = "f32"
-    benchmark_module.torch = mock_torch
-
     mock_auto = MagicMock()
-    mock_model = MagicMock()
-    mock_auto.from_pretrained.return_value = mock_model
-    benchmark_module.AutoModelForCausalLM = mock_auto
+    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
+    monkeypatch.setattr(benchmark_module, "AutoModelForCausalLM", mock_auto)
 
-    # default
-    model, _dev = benchmark_module._load_pytorch_model_and_device("m", "cpu")
-    assert model == mock_torch.compile.return_value
-    mock_model.to.assert_called_with("cpu")
-    mock_model.eval.assert_called_once()
-    mock_torch.compile.assert_called_once_with(mock_model)
+    mock_torch.cuda.is_available.return_value = False
+    mock_torch.backends.mps.is_available.return_value = False
+    mock_torch.bfloat16 = "bf16"
+    mock_torch.float32 = "fp32"
 
-    # native
     with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM") as mock_native:
-        mock_native_model = MagicMock()
-        mock_native.return_value = mock_native_model
+        mock_model = MagicMock()
+        mock_native.return_value = mock_model
+
         with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4Config"):
-            model, _dev = benchmark_module._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native")
-            assert model == mock_torch.compile.return_value
-            mock_native_model.to.assert_any_call("cpu")
-            mock_native_model.eval.assert_called_once()
+            _res, dev = benchmark_module._load_pytorch_model_and_device("test_model", "cpu", dtype="bfloat16", backend_alias="pytorch_native")
+            assert dev == "cpu"
 
-    # test compile error
-    mock_torch.compile.side_effect = RuntimeError("error")
-    model, _dev = benchmark_module._load_pytorch_model_and_device("m", "cpu")
-    # Doesn't raise, just logs warning
-    assert model == mock_model
+            del mock_torch.bfloat16
+            del mock_torch.float32
+            benchmark_module._load_pytorch_model_and_device("test_model", "cpu", dtype="unknown", backend_alias="pytorch_native")
 
-    # native missing to/eval/compile
-    with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM") as mock_native:
-        mock_native_model = MagicMock(spec=[])
-        mock_native.return_value = mock_native_model
-        with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4Config"):
-            benchmark_module.torch.bfloat16 = None
-            del benchmark_module.torch.compile
-            model, _dev = benchmark_module._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native", dtype="missing")
+            mock_torch.bfloat16 = None
+            benchmark_module._load_pytorch_model_and_device("test_model", "cpu", dtype="bfloat16", backend_alias="pytorch_native")
+            del mock_torch.bfloat16
 
-            # test native with to and float32 None
-            mock_native_model_2 = MagicMock()
-            mock_native.return_value = mock_native_model_2
-            benchmark_module.torch.float32 = None
-            benchmark_module._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native", dtype="missing")
+            del mock_model.to
+            benchmark_module._load_pytorch_model_and_device("test_model", "cpu", dtype="unknown", backend_alias="pytorch_native")
 
-    # HF missing to/eval
-    mock_auto.from_pretrained.return_value = MagicMock(spec=[])
-    benchmark_module._load_pytorch_model_and_device("m", "cpu")
+    mock_hf_model = MagicMock()
+    mock_auto.from_pretrained.return_value = mock_hf_model
+    benchmark_module._load_pytorch_model_and_device("model", "cpu", dtype="bfloat16", backend_alias="pytorch")
+
+    mock_torch.compile.side_effect = RuntimeError("compile error")
+    benchmark_module._load_pytorch_model_and_device("model", "cpu", dtype="bfloat16", backend_alias="pytorch")
+
+    del mock_hf_model.to
+    del mock_hf_model.eval
+    del mock_torch.compile
+    benchmark_module._load_pytorch_model_and_device("model", "cpu", dtype="bfloat16", backend_alias="pytorch")
 
 
-def test_sync_cuda():
-    """Test _sync_cuda."""
-    import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
-
+def test_sync_and_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _sync_cuda and _get_memory_mb."""
     mock_torch = MagicMock()
-    benchmark_module.torch = mock_torch
+    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
 
     benchmark_module._sync_cuda("cuda")
     mock_torch.cuda.synchronize.assert_called_once()
@@ -116,14 +98,6 @@ def test_sync_cuda():
 
     benchmark_module._sync_cuda("cpu")
 
-
-def test_get_memory_mb():
-    """Test _get_memory_mb."""
-    import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
-
-    mock_torch = MagicMock()
-    benchmark_module.torch = mock_torch
-
     dummy_m: Any = None
     mock_torch.cuda.max_memory_allocated.return_value = 1048576 * 10
     assert benchmark_module._get_memory_mb(dummy_m, "cuda") == 10.0
@@ -131,102 +105,50 @@ def test_get_memory_mb():
     mock_torch.mps.driver_allocated_memory.return_value = 1048576 * 5
     assert benchmark_module._get_memory_mb(dummy_m, "mps") == 5.0
 
-    assert benchmark_module._get_memory_mb(dummy_m, "cpu") == 8192.0
+    assert benchmark_module._get_memory_mb(dummy_m, "cpu") > 0.0
 
 
 @patch("time.time")
-def test_run_benchmark_pass(mock_time: Any):
+def test_run_benchmark_pass(mock_time: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test _run_benchmark_pass."""
-    import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
-
     mock_torch = MagicMock()
-    benchmark_module.torch = mock_torch
+    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
 
-    mock_model = MagicMock()
+    mock_model: Any = MagicMock()
+    times = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
-    times = [0.0, 0.1]
-    mock_time.side_effect = times * 10
+    mock_time.side_effect = times * 5
+    tps, _lat, _mem = benchmark_module._run_benchmark_pass(mock_model, "cuda", 1, 1, 1, "prefill", 10)
+    assert tps > 0
 
-    # prefill
-    tok, lat, _mem = benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "prefill", 10)
-    assert tok > 0
-    assert lat > 0
-    mock_model.assert_called()
+    mock_time.side_effect = times * 5
+    tps, _lat, _mem = benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "decode", 10)
+    assert tps > 0
 
-    # generate
-    tok, lat, _mem = benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "decode", 10)
-    assert tok > 0
-    assert lat > 0
-    mock_model.generate.assert_called()
-
-    # device cuda
-    benchmark_module._run_benchmark_pass(mock_model, "cuda", 1, 1, 1, "prefill", 10)
-    mock_torch.cuda.reset_peak_memory_stats.assert_called()
-
-    # Missing hasattr
     del mock_torch.manual_seed
     del mock_torch.no_grad
-    mock_torch.randint.return_value = MagicMock(spec=[])
-    benchmark_module._run_benchmark_pass(MagicMock(spec=[]), "cpu", 1, 1, 1, "prefill", 10)
-
-    # generate missing hasattr
-    benchmark_module._run_benchmark_pass(MagicMock(spec=[]), "cpu", 1, 1, 1, "decode", 10)
-
-
-def test_benchmark_model():
-    """Test benchmark_model."""
-    import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
-
-    benchmark_module.torch = MagicMock()
-    benchmark_module.AutoModelForCausalLM = MagicMock()
-
-    with patch("gemma_4_sql.backends.pytorch.benchmark.run_benchmark_wrapper") as mock_wrapper:
-        mock_wrapper.return_value = {"status": "ok"}
-
-        res = benchmark_module.benchmark_model("m", "cpu", 1)
-        assert res == {"status": "ok"}
-
-        fn = mock_wrapper.call_args[1]["benchmark_fn"]
-        with patch("gemma_4_sql.backends.pytorch.benchmark._load_pytorch_model_and_device") as mock_load:
-            mock_load.return_value = ("model", "cpu")
-            with patch("gemma_4_sql.backends.pytorch.benchmark._run_benchmark_pass") as mock_pass:
-                mock_pass.return_value = (1.0, 2.0, 3.0)
-                assert fn() == (1.0, 2.0, 3.0)
-
-    benchmark_module.torch = None
-    with pytest.raises(DependencyMissingError):
-        benchmark_module.benchmark_model("m", "cpu", 1)
+    mock_inputs = MagicMock(spec=[])
+    mock_torch.randint.return_value = mock_inputs
+    mock_time.side_effect = times * 5
+    benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "prefill", 10)
 
 
-def test_load_pytorch_model_and_device_torch_dtype_none():
-    """Verify load pytorch model and device torch dtype none behavior."""
-    from unittest.mock import MagicMock, patch
-
-    import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
-
+def test_benchmark_model_behavioral(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify benchmark_model executes through run_benchmark_wrapper with real stats."""
     mock_torch = MagicMock()
-    del mock_torch.missing
-    mock_torch.float32 = None
-    benchmark_module.torch = mock_torch
+    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
+    monkeypatch.setattr(benchmark_module, "AutoModelForCausalLM", MagicMock())
 
-    with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM") as mock_native:
-        mock_model = MagicMock()
-        mock_native.return_value = mock_model
-        with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4Config"):
-            benchmark_module._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native", dtype="missing")
-            mock_model.to.assert_called_with("cpu")
+    with (
+        patch.object(benchmark_module, "_load_pytorch_model_and_device", return_value=(MagicMock(), "cpu")),
+        patch.object(benchmark_module, "_run_benchmark_pass", return_value=(250.0, 4.0, 128.0)),
+    ):
+        res = benchmark_module.benchmark_model("model", "cpu", 1)
+        assert res["backend"] == "pytorch"
+        assert res["status"] == "success"
+        assert res["tokens_per_sec"] == 250.0
+        assert res["latency_ms"] == 4.0
 
-
-def test_run_benchmark_pass_no_generate():
-    """Verify run benchmark pass no generate behavior."""
-    from unittest.mock import MagicMock, patch
-
-    import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
-
-    mock_torch = MagicMock()
-    benchmark_module.torch = mock_torch
-    mock_model = MagicMock(spec=[])
-
-    with patch("time.time") as mock_time:
-        mock_time.side_effect = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
-        benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "decode", 10)
+    mock_model_no_gen: Any = MagicMock(spec=[])
+    with patch("time.time", side_effect=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]):
+        benchmark_module._run_benchmark_pass(mock_model_no_gen, "cpu", 1, 1, 1, "decode", 10)

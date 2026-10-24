@@ -57,7 +57,8 @@ def test_loss_fn_single_arg_model() -> None:
         "inputs": jnp.array([[1, 2]], dtype=jnp.int32),
         "targets": jnp.array([[2, 3]], dtype=jnp.int32),
     }
-    loss = tr._loss_fn(single_arg_model, batch)  # type: ignore[arg-type]
+    model_any: Any = single_arg_model
+    loss = tr._loss_fn(model_any, batch)
     assert float(loss) > 0.0
 
 
@@ -124,8 +125,8 @@ def test_get_train_step_fn_and_optimizer_fallbacks(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(tr, "nnx", LegacyNNX)
     assert tr._create_nnx_optimizer("m", "tx") == ("m", "tx")
-    step_fn_no_jit = tr._get_train_step_fn()
-    assert step_fn_no_jit("m", LegacyOptimizer(), {}) == 0.25  # type: ignore[operator]
+    step_fn_no_jit: Any = tr._get_train_step_fn()
+    assert step_fn_no_jit("m", LegacyOptimizer(), {}) == 0.25
 
     monkeypatch.setattr(tr, "nnx", MagicMock(spec=[]))
     with pytest.raises(DependencyMissingError, match="value_and_grad"):
@@ -138,7 +139,7 @@ def test_get_train_step_fn_and_optimizer_fallbacks(monkeypatch: pytest.MonkeyPat
 
 def test_run_training_epochs_float_return() -> None:
     """Verify _run_training_epochs handles plain float returns from train_step."""
-    state = TrainerState(
+    state: Any = TrainerState(
         dataloader=[{"inputs": [1], "targets": [1]}],
         epochs=1,
         policy_model=None,

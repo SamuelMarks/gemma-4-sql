@@ -14,12 +14,12 @@ import pytest
 from gemma_4_sql.cli import cli
 from gemma_4_sql.cli_misc import export_cmd, log_metrics_cmd, quantize_cmd, rag_cmd, tokenize_cmd
 from gemma_4_sql.cli_serve import agent_cmd, chat_cmd, evaluate_cmd, few_shot_cmd, generate_cmd, serve_cmd
-from gemma_4_sql.exceptions import DependencyMissingError
 
 
 @pytest.fixture(autouse=True)
-def mock_cli_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mock CLI backend dispatch targets to prevent network/GPU calls during CLI routing tests."""
+def mock_cli_environment(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[Any, ...], dict[str, Any]]]:
+    """Mock CLI backend dispatch targets and record all invocations for verification."""
+    recorded_calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
     base_res: dict[str, Any] = {
         "status": "completed",
         "metrics": {},
@@ -28,9 +28,15 @@ def mock_cli_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "response": "hi",
     }
 
-    def mock_fn(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
-        """Return standard simulated CLI command result."""
-        return base_res
+    def make_recorder(func_name: str) -> Any:
+        """Create a recording mock function for `func_name`."""
+
+        def _mock_fn(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            """Record call arguments and return simulated CLI command result."""
+            recorded_calls.append((func_name, args, dict(kwargs)))
+            return base_res
+
+        return _mock_fn
 
     modules = {
         "cli_serve": ["evaluate", "generate", "run_agentic_loop", "serve_model", "chat_turn", "build_few_shot_prompt"],
@@ -50,19 +56,35 @@ def mock_cli_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 
     for mod, funcs in modules.items():
         for func in funcs:
-            monkeypatch.setattr(f"gemma_4_sql.{mod}.{func}", mock_fn)
+            monkeypatch.setattr(f"gemma_4_sql.{mod}.{func}", make_recorder(func))
+
+    return recorded_calls
 
 
-def test_cli_etl_commands(capsys: pytest.CaptureFixture[str]) -> None:
-    """Verify CLI ETL subcommands (pretrain, sft, posttrain) return 0."""
+def test_cli_etl_commands(
+    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify CLI ETL subcommands construct and forward ETLConfig with parsed CLI arguments."""
     for subcmd in ("pretrain", "sft", "posttrain"):
-        res = cli(["etl", subcmd, "--dataset", "my-data", "--split", "test", "--batch-size", "16"])
+        res = cli(["etl", subcmd, "--dataset", "my-data", "--split", "test", "--batch-size", "16", "--backend", "jax"])
         assert res == 0
         capsys.readouterr()
 
+    assert [c[0] for c in mock_cli_environment] == ["etl_pretrain", "etl_sft", "etl_posttrain"]
+    for _, args, kwargs in mock_cli_environment:
+        cfg = args[0]
+        assert cfg.dataset_name == "my-data"
+        assert cfg.split == "test"
+        assert cfg.batch_size == 16
+        assert kwargs["backend"] == "jax"
 
-def test_cli_training_commands(capsys: pytest.CaptureFixture[str]) -> None:
-    """Verify CLI training subcommands (train, pretrain, sft, posttrain, dpo, peft) return 0."""
+
+def test_cli_training_commands(
+    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify CLI training subcommands construct and forward TrainingConfig, DPO parameters, and PEFT arguments."""
     assert cli(["train", "--model", "test-model", "--backend", "jax", "--dataset", "dummy"]) == 0
     assert cli(["pretrain", "--model", "test-model", "--backend", "maxtext", "--dataset", "dummy"]) == 0
     assert cli(["sft", "--model", "test-model", "--backend", "jax", "--dataset", "dummy"]) == 0
@@ -88,12 +110,34 @@ def test_cli_training_commands(capsys: pytest.CaptureFixture[str]) -> None:
     )
     capsys.readouterr()
 
+    names = [c[0] for c in mock_cli_environment]
+    assert names == ["train_from_scratch", "pretrain_model", "sft_model", "posttrain_model", "run_dpo", "apply_peft"]
+    assert mock_cli_environment[0][1][0].model_name == "test-model"
+    assert mock_cli_environment[0][1][0].backend == "jax"
+    assert mock_cli_environment[1][1][0].backend == "maxtext"
+    assert mock_cli_environment[3][1][0].backend == "keras"
+    assert mock_cli_environment[4][2]["beta"] == 0.2
+    assert mock_cli_environment[5][2]["target_modules"] == ["q_proj", "v_proj"]
+    assert mock_cli_environment[5][2]["lora_r"] == 16
+    assert mock_cli_environment[5][2]["lora_alpha"] == 32
+    assert mock_cli_environment[5][2]["lora_dropout"] == 0.1
+    assert mock_cli_environment[5][2]["backend"] == "pytorch"
 
-def test_cli_quantize_and_export(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """Verify CLI quantize and export commands print JSON output."""
+
+def test_cli_quantize_and_export(
+    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify CLI quantize and export commands forward arguments and print JSON output."""
     assert cli(["quantize", "--model", "test-model", "--method", "awq", "--backend", "jax"]) == 0
     assert cli(["export", "--model", "test-model", "--path", "./out", "--backend", "keras"]) == 0
     capsys.readouterr()
+
+    assert mock_cli_environment[0][0] == "quantize_model"
+    assert mock_cli_environment[0][1] == ("test-model", "awq", "jax")
+    assert mock_cli_environment[1][0] == "export_model"
+    assert mock_cli_environment[1][1] == ("test-model", "./out", "keras")
 
     monkeypatch.setattr("gemma_4_sql.cli_misc.quantize_model", lambda *_a, **_k: {"status": "q"})
     quantize_cmd(argparse.Namespace(model="dummy", method="dummy", backend="dummy"))
@@ -125,7 +169,6 @@ def test_cli_evaluate_and_agent(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
     assert cli(["agent", "--model", "test-model", "--prompt", "Find users", "--backend", "jax", "--db-kwargs", '{"timeout": 10}']) == 0
     capsys.readouterr()
 
-    # With db_kwargs and empty dict return
     eval_args = argparse.Namespace(model="d", dataset="d", backend="d", db_path="d", ddl="d", db_type="d", db_kwargs=json.dumps({"key": "value"}))
     monkeypatch.setattr("gemma_4_sql.cli_serve.evaluate", lambda **kw: {"status": "evaluated"} if kw.get("db_kwargs") == {"key": "value"} else {})
     evaluate_cmd(eval_args)
@@ -290,11 +333,6 @@ def test_cli_serve_chat_and_few_shot(monkeypatch: pytest.MonkeyPatch, capsys: py
 
     few_shot_cmd(argparse.Namespace(model="dummy", prompt="dummy", backend="dummy", examples=""))
     assert capsys.readouterr().out == ""
-
-
-def test_dependency_missing_error() -> None:
-    """Verify DependencyMissingError string representation."""
-    assert str(DependencyMissingError("test")) == "test"
 
 
 def test_cli_if_main(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

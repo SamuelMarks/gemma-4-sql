@@ -30,12 +30,16 @@ def test_log_metrics_pytorch() -> None:
     assert res.get("metrics") == {"loss": 0.5}
 
 
-@pytest.mark.skipif(not has_tf, reason="TensorFlow is not installed")
-def test_log_metrics_keras() -> None:
+def test_log_metrics_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify log metrics keras behavior."""
+    from unittest.mock import MagicMock
+
+    import gemma_4_sql.backends.keras.logging as klog
+
+    mock_tf = MagicMock()
+    monkeypatch.setattr(klog, "tf", mock_tf)
     res = log_metrics({"loss": 0.5}, 10, backend="keras")
     assert res["backend"] == "keras"
-
     assert res.get("metrics") == {"loss": 0.5}
 
 

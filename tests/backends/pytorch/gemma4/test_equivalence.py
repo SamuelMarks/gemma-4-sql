@@ -71,9 +71,7 @@ def test_logit_equivalence() -> None:
             if hasattr(v, "items"):
                 flat.update(_flatten_state(v, new_key))
             else:
-                val = getattr(v, "value", v)
-                if val is not None:
-                    flat[new_key] = val
+                flat[new_key] = getattr(v, "value", v)
         return flat
 
     jax_params_flat = _flatten_state(jax_state)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -103,8 +103,9 @@ async def test_postgres_adapter_execution(
         msg = "Simulated"
         raise postgres_error_cls(msg)
 
-    conn.cursor = MagicMock()  # type: ignore[method-assign]
-    conn.cursor.return_value.execute = mock_fail
+    mock_cur_fn = MagicMock()
+    mock_cur_fn.return_value.execute = mock_fail
+    monkeypatch.setattr(conn, "cursor", mock_cur_fn)
 
     suc, res, err = await adapter.execute_with_feedback_async("FAIL")
     assert suc is False
@@ -140,19 +141,17 @@ async def test_postgres_adapter_missing_deps(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(pa, "psycopg2", None)
     monkeypatch.setattr(pa, "asyncpg", None)
-    with patch.object(pa.PostgresAdapter, "__init__", return_value=None):
-        dummy_adapter = pa.PostgresAdapter("path", {})
-        assert Exception in dummy_adapter.error_classes
+    assert Exception in adapter.error_classes
 
-        mock_p = MagicMock()
-        mock_p.Error = 123
-        monkeypatch.setattr(pa, "psycopg2", mock_p)
+    mock_p = MagicMock()
+    mock_p.Error = 123
+    monkeypatch.setattr(pa, "psycopg2", mock_p)
 
-        mock_a = MagicMock()
-        mock_a.PostgresError = 123
-        monkeypatch.setattr(pa, "asyncpg", mock_a)
+    mock_a = MagicMock()
+    mock_a.PostgresError = 123
+    monkeypatch.setattr(pa, "asyncpg", mock_a)
 
-        assert Exception in dummy_adapter.error_classes
+    assert Exception in adapter.error_classes
 
 
 def test_postgres_adapter_schema(
@@ -172,3 +171,18 @@ def test_postgres_adapter_schema(
     conn.set_fail_query("FAIL")
     with pytest.raises(Exception, match="Simulated execution failure"):
         adapter.setup_schema("FAIL")
+
+    # Test synchronous close() outside an active event loop when _async_conn is populated
+    closed_outside_loop = False
+
+    class SyncClosableAsyncConn:
+        """Async connection stub for testing synchronous close() fallback."""
+
+        async def close(self) -> None:
+            """Mark connection as closed."""
+            nonlocal closed_outside_loop
+            closed_outside_loop = True
+
+    adapter._async_conn = SyncClosableAsyncConn()
+    adapter.close()
+    assert closed_outside_loop is True

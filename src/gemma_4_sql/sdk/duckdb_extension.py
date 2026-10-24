@@ -90,20 +90,19 @@ def embed_in_duckdb(
             if cached_ddl is None:
                 cached_ddl = _extract_duckdb_ddl(cur)
             context = AgentContext(db_path=db_path, ddl=cached_ddl, db_type="duckdb", max_retries=max_retries)
-            loop_res = run_agentic_loop(
+            res: AgentLoopResultDict = run_agentic_loop(
                 model_name=model_name,
                 prompt=prompt,
                 backend=backend,
                 context=context,
                 db_kwargs={"existing_conn": cur},
             )
-            res: AgentLoopResultDict = loop_res[0] if isinstance(loop_res, list) else loop_res
             return json.dumps({
                 "generated_sql": res.get("final_sql", ""),
                 "results": res.get("results", []),
                 "success": res.get("success", False),
             })
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
             logger.exception("DuckDB UDF ask_gemma failed: ")
             return json.dumps({
                 "error": str(e),

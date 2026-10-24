@@ -47,18 +47,7 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
 
             cfg: Any = kwargs.get("config")
             if cfg is None:
-                if model_name.startswith(("test", "model")):
-                    cfg = Gemma4Config(
-                        vocab_size=128,
-                        hidden_size=64,
-                        num_hidden_layers=1,
-                        num_attention_heads=2,
-                        num_key_value_heads=1,
-                        head_dim=32,
-                        intermediate_size=128,
-                    )
-                else:
-                    cfg = Gemma4Config.gemma4_e2b()
+                cfg = Gemma4Config.from_preset(model_name) if hasattr(Gemma4Config, "from_preset") else Gemma4Config.gemma4_e2b()
             model = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0))
             weights = nnx.state(model)
         except ImportError as e:

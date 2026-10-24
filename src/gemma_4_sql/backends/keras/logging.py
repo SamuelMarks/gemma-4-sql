@@ -71,7 +71,6 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", **_
         step=step,
         log_dir=log_dir,
         summary_writer_cls=writer_cls,
-        extra_fields={"metrics": metrics},
     )
     if not has_summary:
         res["status"] = "missing_summary_attr"

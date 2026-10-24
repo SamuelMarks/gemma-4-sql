@@ -6,7 +6,7 @@ import torch
 from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_pytorch
 
 
-def test_translate_jax_to_pytorch():
+def test_translate_jax_to_pytorch() -> None:
     """Test JAX to PyTorch state dict translation."""
     rng = np.random.default_rng(42)
     jax_params = {

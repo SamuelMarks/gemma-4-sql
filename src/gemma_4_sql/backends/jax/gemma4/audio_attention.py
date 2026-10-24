@@ -149,7 +149,8 @@ def compute_audio_attention_outputs(attn: Any, qkv: tuple[jax.Array, jax.Array, 
     out = jnp.transpose(out, (0, 2, 3, 1, 4))
     out = out.reshape((batch_size, num_blocks * attn.chunk_size, -1))
     out = out[:, :seq_len, :]
-    return attn.post(out)
+    res: jax.Array = attn.post(out)
+    return res
 
 
 class Gemma4AudioAttention(nnx.Module):

@@ -7,21 +7,26 @@
   "reportMissingImports": "none",
   "reportMissingModuleSource": "none",
   "reportMissingTypeStubs": "none",
-  "reportUnknownMemberType": "warning",
-  "reportUnknownVariableType": "warning",
-  "reportUnknownArgumentType": "warning",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownArgumentType": "none",
   "reportUnknownParameterType": "error",
-  "reportUnknownLambdaType": "none",
+  "reportUnknownLambdaType": "error",
   "reportMissingParameterType": "error",
-  "reportPrivateUsage": "warning",
-  "reportUntypedBaseClass": "none",
+  "reportPrivateUsage": "none",
+  "reportTypedDictNotRequiredAccess": "none",
+  "reportUntypedBaseClass": "error",
   "reportUntypedFunctionDecorator": "none",
   "executionEnvironments": [
     {
-      "root": "src/gemma_4_sql"
+      "root": "src/gemma_4_sql",
+      "reportUnknownLambdaType": "error",
+      "reportUntypedBaseClass": "error"
     },
     {
-      "root": "tests"
+      "root": "tests",
+      "reportUnknownLambdaType": "none",
+      "reportUntypedBaseClass": "none"
     }
   ]
 }

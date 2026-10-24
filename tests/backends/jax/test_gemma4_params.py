@@ -11,7 +11,7 @@ pytestmark = requires_jax
 import pytest
 
 
-def test_stack_expert_tensors_none_key():
+def test_stack_expert_tensors_none_key() -> None:
     """Verify stack expert tensors none key behavior."""
     import jax.numpy as jnp
 
@@ -20,14 +20,14 @@ def test_stack_expert_tensors_none_key():
     expert_tensors = {0: {"test_proj": {0: jnp.zeros((1,)), 1: jnp.zeros((1,))}}}
 
     # mapping that returns (None, None) for jax_key
-    mapping = {}
+    mapping: dict[str, Any] = {}
 
-    jax_state = {}
+    jax_state: dict[str, Any] = {}
     _stack_and_assign_expert_tensors(expert_tensors, mapping, jax_state)
     assert jax_state == {}
 
 
-def test_create_gemma4_from_pretrained(tmp_path: Path):
+def test_create_gemma4_from_pretrained(tmp_path: Path) -> None:
     """Verify create gemma4 from pretrained behavior."""
     import numpy as np
     from safetensors.numpy import save_file
@@ -76,7 +76,7 @@ def test_create_gemma4_from_pretrained(tmp_path: Path):
         create_gemma4_from_pretrained(str(tmp_path / "empty"), cfg)
 
 
-def test_process_standard_tensor_errors():
+def test_process_standard_tensor_errors() -> None:
     """Verify process standard tensor errors behavior."""
     import numpy as np
 
@@ -87,12 +87,12 @@ def test_process_standard_tensor_errors():
     class FakeSF:
         """Test stub for `FakeSF`."""
 
-        def get_tensor(self, key: Any):
+        def get_tensor(self, key: Any) -> Any:
             """Provide get tensor test helper."""
             return np.zeros((1,))
 
     # Test skipping standard KeyError exception by assign_weights_from_eval_shape
-    jax_state = {}
+    jax_state: dict[str, Any] = {}
     process_standard_tensor(FakeSF(), "model.embed_tokens.weight", jax_state, mapping)
 
     # Test jax_key is None
@@ -102,7 +102,7 @@ def test_process_standard_tensor_errors():
     class FakeSF2:
         """Test stub for `FakeSF2`."""
 
-        def get_tensor(self, key: Any):
+        def get_tensor(self, key: Any) -> Any:
             """Provide get tensor test helper."""
             return np.zeros((1,))
 
@@ -111,7 +111,7 @@ def test_process_standard_tensor_errors():
             process_standard_tensor(FakeSF2(), "model.embed_tokens.weight", jax_state, mapping)
 
 
-def test_create_gemma4_from_pretrained_etils_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_create_gemma4_from_pretrained_etils_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify create gemma4 from pretrained etils success behavior."""
     import sys
 
@@ -134,7 +134,7 @@ def test_create_gemma4_from_pretrained_etils_success(tmp_path: Path, monkeypatch
                 create_gemma4_from_pretrained(str(tmp_path), cfg)
 
 
-def test_create_gemma4_from_pretrained_etils_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_create_gemma4_from_pretrained_etils_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify create gemma4 from pretrained etils missing behavior."""
     import sys
 
@@ -152,7 +152,7 @@ def test_create_gemma4_from_pretrained_etils_missing(tmp_path: Path, monkeypatch
     orig_import = builtins.__import__
     with patch("builtins.__import__") as mock_import:
 
-        def side_effect(name: Any, *args: Any, **kwargs: Any):
+        def side_effect(name: Any, *args: Any, **kwargs: Any) -> Any:
             """Provide side effect test helper."""
             if name == "etils":
                 raise ImportError("no etils")
@@ -164,7 +164,7 @@ def test_create_gemma4_from_pretrained_etils_missing(tmp_path: Path, monkeypatch
             create_gemma4_from_pretrained(str(tmp_path), cfg)
 
 
-def test_fix_jax_state_embeddings_coverage():
+def test_fix_jax_state_embeddings_coverage() -> None:
     """Verify fix jax state embeddings coverage behavior."""
     import jax
     import jax.numpy as jnp
@@ -187,7 +187,7 @@ def test_fix_jax_state_embeddings_coverage():
     _fix_jax_state_embeddings(jax_state2, None, cfg2)
 
 
-def test_create_gemma4_state_dict_fallbacks(tmp_path: Path):
+def test_create_gemma4_state_dict_fallbacks(tmp_path: Path) -> None:
     """Verify create gemma4 state dict fallbacks behavior."""
     import numpy as np
     from safetensors.numpy import save_file
@@ -203,7 +203,7 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path: Path):
         class MockState0:
             """Test stub for `MockState0`."""
 
-            def to_pure_dict(self):
+            def to_pure_dict(self) -> dict[str, int]:
                 """Provide to pure dict test helper."""
                 return {"a": 0}
 
@@ -218,7 +218,7 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path: Path):
         class MockState1:
             """Test stub for `MockState1`."""
 
-            def to_flat_dict(self):
+            def to_flat_dict(self) -> dict[str, int]:
                 """Provide to flat dict test helper."""
                 return {"a": 1}
 

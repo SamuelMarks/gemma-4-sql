@@ -5,23 +5,24 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
+from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
+from gemma_4_sql.exceptions import DependencyMissingError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONValue, ServeResultDict
+    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
 logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")
 gemma4 = optional_import("maxtext.models.gemma4")
 
 
-def _create_app(model_name: str) -> FastAPIAppProtocol:
+def _create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
     """Create the FastAPI application for the MaxText server.
 
     Args:
         model_name: The name of the target model.
+        max_batch_size: Maximum batch size per continuous batching window.
 
     Returns:
         The FastAPI application instance.
@@ -35,37 +36,18 @@ def _create_app(model_name: str) -> FastAPIAppProtocol:
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
             logger.warning("jax.distributed.initialize() failed: %s", e)
 
-    def _generate(prompt: str) -> str:
-        """Generate SQL using MaxText inference.
-
-        Args:
-            prompt: Natural language query prompt.
-
-        Returns:
-            Generated SQL query string.
-
-        Raises:
-            InferenceError: If model inference fails during execution.
-
-        """
+    def _call_maxtext_generate(model_name: str, prompt: str) -> JSONDict:
+        """Delegate single-prompt generation to `maxtext.inference.generate_sql`."""
         from gemma_4_sql.backends.maxtext.inference import generate_sql
 
-        try:
-            out = generate_sql(model_name=model_name, prompt=prompt)
-            sql = out.get("sql", "")
-            if sql:
-                return str(sql)
-            raise InferenceError(f"MaxText inference returned empty SQL for prompt '{prompt}'", backend="maxtext")
-        except Exception as e:
-            if isinstance(e, InferenceError):
-                raise
-            raise InferenceError(f"MaxText generation failed: {e}", backend="maxtext", cause=e) from e
+        return dict(generate_sql(model_name=model_name, prompt=prompt))
 
-    return create_common_app(
+    return create_backend_serve_app(
         backend_name="maxtext",
         model_name=model_name,
+        generate_sql_fn=_call_maxtext_generate,
         startup_callback=_startup,
-        generate_logic=_generate,
+        max_batch_size=max_batch_size,
     )
 
 
@@ -93,5 +75,5 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         port=port,
         max_batch_size=max_batch_size,
         missing_deps=False,
-        app_factory=lambda: _create_app(model_name),
+        app_factory=lambda: _create_app(model_name, max_batch_size=max_batch_size),
     )

@@ -7,7 +7,7 @@ import sys
 import warnings
 from collections.abc import AsyncGenerator, Generator
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Self
 from unittest.mock import patch
 
 import pytest
@@ -109,3 +109,64 @@ def missing_dependency_context() -> Any:
             yield
 
     return _mock_missing
+
+
+class MockOpenedImage:
+    """Shared mock opened PIL image for multimodal tests."""
+
+    def __init__(self) -> None:
+        """Initialize MockOpenedImage with default 224x224 dimensions."""
+        self._size: tuple[int, int] = (224, 224)
+
+    def __enter__(self) -> Self:
+        """Enter context manager."""
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        """Exit context manager."""
+
+    def convert(self, _mode: Any) -> MockOpenedImage:
+        """Return self on mode conversion."""
+        return self
+
+    def resize(self, size: Any, _resample: Any = None) -> MockOpenedImage:
+        """Record resized dimensions and return self."""
+        self._size = (int(size[0]), int(size[1]))
+        return self
+
+    def getpixel(self, _coords: Any) -> tuple[int, int, int]:
+        """Return red RGB pixel tuple."""
+        return (255, 0, 0)
+
+    def __array__(self, *_args: Any, **_kwargs: Any) -> Any:
+        """Return (H, W, 3) float32 numpy array matching resized dimensions."""
+        import numpy as np
+
+        w, h = self._size
+        return np.zeros((h, w, 3), dtype=np.float32)
+
+
+class MockPILImage:
+    """Shared mock PIL.Image module for multimodal tests."""
+
+    class Resampling:
+        """Mock PIL Resampling constants."""
+
+        BILINEAR = 2
+
+    @staticmethod
+    def open(_buf: Any) -> MockOpenedImage:
+        """Return a new MockOpenedImage."""
+        return MockOpenedImage()
+
+
+@pytest.fixture
+def synthetic_image_bytes() -> bytes:
+    """Provide a minimal valid 1x1 PNG byte sequence."""
+    return b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82"
+
+
+@pytest.fixture
+def synthetic_wav_bytes() -> bytes:
+    """Provide a minimal valid 16-bit PCM RIFF WAVE byte sequence."""
+    return b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00"

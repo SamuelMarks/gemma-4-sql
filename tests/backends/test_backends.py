@@ -25,8 +25,22 @@ EXPECTED_EXPORTS = (
 )
 
 
+EXPECTED_SUBMODULES = (
+    "benchmark",
+    "dpo",
+    "etl",
+    "export",
+    "inference",
+    "logging",
+    "peft",
+    "quantize",
+    "serve",
+    "train",
+)
+
+
 def test_backend_apis_exist() -> None:
-    """Verify all 5 backend packages export the complete 11-function public API with matching first parameters."""
+    """Verify all 5 backend packages export the complete 11-function public API and all 10 submodules."""
     packages = {
         "jax": jax_pkg,
         "keras": keras_pkg,
@@ -40,4 +54,6 @@ def test_backend_apis_exist() -> None:
             assert callable(fn), f"{name}.{export_name} is missing or not callable"
             sig = inspect.signature(fn)
             assert sig.return_annotation is not inspect.Signature.empty, f"{name}.{export_name} lacks return type annotation"
+        for submod_name in EXPECTED_SUBMODULES:
+            assert hasattr(pkg, submod_name), f"{name}.{submod_name} submodule is missing"
         assert pkg.get_trainer() == f"{name}_trainer"

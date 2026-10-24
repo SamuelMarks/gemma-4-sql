@@ -1,7 +1,7 @@
 """Tests for native PyTorch Gemma 4 modeling."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 
 import pytest
 import torch
@@ -20,7 +20,7 @@ from gemma_4_sql.backends.pytorch.gemma4 import (
 )
 
 
-def test_gemma4_config():
+def test_gemma4_config() -> None:
     """Test Gemma4Config."""
     config = Gemma4Config(hidden_size=512, test_kwarg=True, vision_config={"hidden_size": 128, "extra": 1}, audio_config={"hidden_size": 128, "extra": 1})
     assert config.hidden_size == 512
@@ -52,7 +52,7 @@ def test_gemma4_config():
     assert Gemma4Config.from_preset("google/gemma-4-E2B").num_hidden_layers == 35
 
 
-def test_gemma4_rmsnorm():
+def test_gemma4_rmsnorm() -> None:
     """Test Gemma4RMSNorm."""
     norm = Gemma4RMSNorm(dim=512)
     x = torch.randn(2, 4, 512)
@@ -60,7 +60,7 @@ def test_gemma4_rmsnorm():
     assert out.shape == x.shape
 
 
-def test_gemma4_mlp():
+def test_gemma4_mlp() -> None:
     """Test Gemma4MLP."""
     config = Gemma4Config(hidden_size=256, intermediate_size=512)
     mlp = Gemma4MLP(config)
@@ -69,16 +69,21 @@ def test_gemma4_mlp():
     assert out.shape == (2, 4, 256)
 
 
-def test_apply_rotary_pos_emb():
-    """Test apply_rotary_pos_emb."""
-    q = torch.randn(1, 1, 2)
-    k = torch.randn(1, 1, 2)
+def test_apply_rotary_pos_emb() -> None:
+    """Test apply_rotary_pos_emb mathematical identity and 90-degree rotation."""
+    q = torch.tensor([[[1.0, 2.0]]])
+    k = torch.tensor([[[3.0, 4.0]]])
     cos = torch.ones(1, 2)
     sin = torch.zeros(1, 2)
     position_ids = torch.zeros(1, dtype=torch.long)
     q_out, k_out = apply_rotary_pos_emb(q, k, cos, sin, position_ids)
-    assert q_out is not None
-    assert k_out is not None
+    assert torch.allclose(q_out, q)
+    assert torch.allclose(k_out, k)
+
+    # 90-degree rotation: cos=0, sin=1 -> rotate_half([x1, x2]) = [-x2, x1]
+    q_rot, k_rot = apply_rotary_pos_emb(q, k, torch.zeros(1, 2), torch.ones(1, 2), position_ids)
+    assert torch.allclose(q_rot, torch.tensor([[[-2.0, 1.0]]]))
+    assert torch.allclose(k_rot, torch.tensor([[[-4.0, 3.0]]]))
 
     emb = Gemma4RotaryEmbedding(dim=64, max_position_embeddings=10)
     cos, sin = emb(torch.randn(1, 10, 64), seq_len=15)
@@ -90,7 +95,7 @@ def test_apply_rotary_pos_emb():
     assert cos2d.shape == (196, 64)
 
 
-def test_gemma4_attention():
+def test_gemma4_attention() -> None:
     """Test Gemma4Attention."""
     config = Gemma4Config(hidden_size=256, num_attention_heads=4, num_key_value_heads=2, head_dim=64)
     attn = Gemma4Attention(config, layer_idx=0)
@@ -120,7 +125,7 @@ def test_gemma4_attention():
     assert out5.shape == (2, 4, 256)
 
 
-def test_gemma4_decoder_layer():
+def test_gemma4_decoder_layer() -> None:
     """Test Gemma4DecoderLayer."""
     config = Gemma4Config(hidden_size=256, num_attention_heads=4, num_key_value_heads=2, head_dim=64, intermediate_size=512, num_experts=1)
     layer = Gemma4DecoderLayer(config, layer_idx=0)
@@ -139,7 +144,7 @@ def test_gemma4_decoder_layer():
     assert router_logits_moe.shape == (8, 4)
 
 
-def test_gemma4_for_causal_lm():
+def test_gemma4_for_causal_lm() -> None:
     """Test Gemma4ForCausalLM."""
     config = Gemma4Config(
         vocab_size=1000,
@@ -186,7 +191,7 @@ def test_gemma4_for_causal_lm():
     assert dyn_cache.get_seq_length(0) == 4
 
 
-def test_attention_edge_cases(monkeypatch: pytest.MonkeyPatch):
+def test_attention_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test attention edge cases functionality."""
     import torch
 
@@ -213,11 +218,13 @@ def test_attention_edge_cases(monkeypatch: pytest.MonkeyPatch):
 
     # attention_mask not None, position_ids provided, is_global=True, sliding_window not None
     # this covers 64->67 (position_ids provided) and 99->105 (not self.is_global is False)
-    res = attention(hidden_states, attention_mask=torch.ones(1, 1, 2, 2), position_ids=position_ids)
-    assert res is not None
+    res, past = attention(hidden_states, attention_mask=torch.ones(1, 1, 2, 2), position_ids=position_ids)
+    assert res.shape == (1, 2, 32)
+    assert torch.isfinite(res).all()
+    assert past is not None
 
 
-def test_attention_edge_cases2(monkeypatch: pytest.MonkeyPatch):
+def test_attention_edge_cases2(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test manual attention fallback with sliding_window=None."""
     import torch
 
@@ -241,11 +248,13 @@ def test_attention_edge_cases2(monkeypatch: pytest.MonkeyPatch):
 
     hidden_states = torch.randn(1, 2, 32)
     position_ids = torch.tensor([[0, 1]], dtype=torch.long)
-    res = attention(hidden_states, position_ids=position_ids)
-    assert res is not None
+    res, past = attention(hidden_states, position_ids=position_ids)
+    assert res.shape == (1, 2, 32)
+    assert torch.isfinite(res).all()
+    assert past is not None
 
 
-def test_audio_layers_edge_cases(monkeypatch: pytest.MonkeyPatch):
+def test_audio_layers_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test audio layers edge cases functionality."""
     import torch
 
@@ -263,10 +272,12 @@ def test_audio_layers_edge_cases(monkeypatch: pytest.MonkeyPatch):
     layer = al.Gemma4AudioFeatureExtractor(config)
     hidden_states = torch.randn(1, 1, 32)
     res = layer(hidden_states)
-    assert res is not None
+    assert res.shape[0] == 1
+    assert res.shape[-1] == 32
+    assert torch.isfinite(res).all()
 
 
-def test_gemma4_native_save_load_and_generate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_gemma4_native_save_load_and_generate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test save_pretrained, from_pretrained, and generate with DynamicCache."""
     config = Gemma4Config(
         vocab_size=128,
@@ -303,7 +314,7 @@ def test_gemma4_native_save_load_and_generate(tmp_path: Path, monkeypatch: pytes
     assert model_empty is not None
 
     # Test Exception in load_file
-    def mock_load_file_exc(*args: Any, **kwargs: Any):
+    def mock_load_file_exc(*args: Any, **kwargs: Any) -> Never:
         """Provide mock load file exc test helper."""
         raise RuntimeError("Custom exception")
 
@@ -313,7 +324,7 @@ def test_gemma4_native_save_load_and_generate(tmp_path: Path, monkeypatch: pytes
     assert model_exc is not None
 
 
-def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test pytorch_native backend integration for train, inference, and export."""
     from gemma_4_sql.backends.pytorch.export import export_model
     from gemma_4_sql.backends.pytorch.inference import generate_sql
@@ -345,11 +356,11 @@ def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest
     class MockLoader:
         """Test class for MockLoader."""
 
-        def __iter__(self):
+        def __iter__(self) -> Any:
             """Initialize __iter__."""
             yield {"inputs": torch.tensor([[1, 2]], dtype=torch.long), "targets": torch.tensor([[2, 3]], dtype=torch.long)}
 
-        def __len__(self):
+        def __len__(self) -> int:
             """Initialize __len__."""
             return 1
 
@@ -364,21 +375,28 @@ def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest
 
 
 def test_modeling_position_ids_and_longer_attention_mask() -> None:
-    """Verify Gemma4ForCausalLM handles explicit position_ids and longer attention_mask."""
+    """Verify Gemma4ForCausalLM handles explicit position_ids and longer attention_mask with KV cache."""
     config = Gemma4Config(
         hidden_size=32,
         num_hidden_layers=1,
         num_attention_heads=2,
         num_key_value_heads=1,
+        head_dim=16,
         intermediate_size=64,
         vocab_size=100,
     )
     model = Gemma4ForCausalLM(config)
+    prefill_ids = torch.randint(0, 100, (1, 5))
+    _, past_cache = model(input_ids=prefill_ids, past_key_values=DynamicCache())
+
     input_ids = torch.randint(0, 100, (1, 5))
-    position_ids = torch.arange(5).unsqueeze(0)
+    position_ids = torch.arange(5, 10).unsqueeze(0)
     attention_mask = torch.ones((1, 10))
-    try:
-        out = model(input_ids=input_ids, position_ids=position_ids, attention_mask=attention_mask)
-        assert out is not None
-    except RuntimeError:
-        pass
+    logits, updated_cache = model(
+        input_ids=input_ids,
+        position_ids=position_ids,
+        attention_mask=attention_mask,
+        past_key_values=past_cache,
+    )
+    assert logits.shape == (1, 5, 100)
+    assert updated_cache is not None

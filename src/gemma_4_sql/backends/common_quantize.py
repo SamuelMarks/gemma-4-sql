@@ -10,7 +10,7 @@ from gemma_4_sql.exceptions import (
     GemmaSQLError,
     UnsupportedQuantizationMethodError,
 )
-from gemma_4_sql.type_hints import ModelType
+from gemma_4_sql.type_hints import ModelType, register_quantized_artifact
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -80,10 +80,10 @@ def apply_bits_and_bytes_quantization(
         return (0.0, f"unsupported_method_{method}")
 
     if model is not None:
-        if hasattr(model, "config") and model.config is not None:
-            model.config.quantization_config = bnb_config
-        model._is_quantized = True
-        model._quant_method = method
+        model_any: Any = model
+        if hasattr(model_any, "config") and model_any.config is not None:
+            model_any.config.quantization_config = bnb_config
+        register_quantized_artifact(model, method=method)
 
     return (memory_reduction, f"quantized_{method}")
 

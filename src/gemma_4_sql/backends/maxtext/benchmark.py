@@ -6,9 +6,9 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.type_hints import ModelType, TensorType
+from gemma_4_sql.type_hints import MaxTextCausalLMProtocol, TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
@@ -39,7 +39,7 @@ def _get_device(hardware: str) -> Any:
     return jax.devices("cpu")[0] if jax is not None else None
 
 
-def _run_benchmark_pass(model: ModelType, params: dict[str, TensorType], batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, device: str | object) -> tuple[float, float, float]:
+def _run_benchmark_pass(model: MaxTextCausalLMProtocol, params: dict[str, TensorType], batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, device: str | object) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
     Args:
@@ -124,9 +124,9 @@ def _run_benchmark_pass(model: ModelType, params: dict[str, TensorType], batch_s
         try:
             dev_any: Any = device
             stats = dev_any.memory_stats()
-            memory_mb = stats.get("peak_bytes_in_use", 16384.0 * 1024 * 1024) / (1024 * 1024)
+            memory_mb = stats.get("peak_bytes_in_use", get_current_rss_mb() * 1024 * 1024) / (1024 * 1024)
         except (AttributeError, KeyError, RuntimeError, TypeError):
-            memory_mb = 16384.0
+            memory_mb = get_current_rss_mb()
 
     return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 

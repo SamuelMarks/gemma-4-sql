@@ -18,7 +18,7 @@ from gemma_4_sql.backends.maxtext.config_generator import (
 )
 
 
-def test_maxtext_hyperparameters_defaults():
+def test_maxtext_hyperparameters_defaults() -> None:
     """Verify maxtext hyperparameters defaults behavior."""
     hp = MaxTextHyperparameters()
     assert hp.model_architecture == "gemma4_2b"
@@ -36,7 +36,7 @@ def test_maxtext_hyperparameters_defaults():
     assert hp.checkpoint_period == 500
 
 
-def test_to_float():
+def test_to_float() -> None:
     """Verify to float behavior."""
     assert _to_float(None, 1.5) == 1.5
     assert _to_float(2, 1.5) == 2.0
@@ -46,7 +46,7 @@ def test_to_float():
     assert _to_float({}, 1.5) == 1.5
 
 
-def test_to_int():
+def test_to_int() -> None:
     """Verify to int behavior."""
     assert _to_int(None, 5) == 5
     assert _to_int(2, 5) == 2
@@ -56,7 +56,7 @@ def test_to_int():
     assert _to_int({}, 5) == 5
 
 
-def test_normalize_model_architecture():
+def test_normalize_model_architecture() -> None:
     """Verify normalize model architecture behavior."""
     assert normalize_model_architecture("gemma-4") == "gemma4_2b"
     assert normalize_model_architecture("gemma-4-7b") == "gemma4_7b"
@@ -73,7 +73,7 @@ def test_normalize_model_architecture():
         normalize_model_architecture(none_val)
 
 
-def test_build_maxtext_hyperparameters_defaults():
+def test_build_maxtext_hyperparameters_defaults() -> None:
     """Verify build maxtext hyperparameters defaults behavior."""
     config = MagicMock()
     config.extra_kwargs = None
@@ -99,7 +99,7 @@ def test_build_maxtext_hyperparameters_defaults():
     assert hp.checkpoint_period == 500
 
 
-def test_build_maxtext_hyperparameters_overrides():
+def test_build_maxtext_hyperparameters_overrides() -> None:
     """Verify build maxtext hyperparameters overrides behavior."""
     config = MagicMock()
     config.extra_kwargs = {"run_name": "custom_run", "warmup_steps_fraction": 0.2}
@@ -130,7 +130,7 @@ def test_build_maxtext_hyperparameters_overrides():
     assert hp.checkpoint_period == 100
 
 
-def test_build_maxtext_hyperparameters_validation_errors():
+def test_build_maxtext_hyperparameters_validation_errors() -> None:
     """Verify build maxtext hyperparameters validation errors behavior."""
     config = MagicMock()
     config.extra_kwargs = {}
@@ -156,9 +156,9 @@ def test_build_maxtext_hyperparameters_validation_errors():
         build_maxtext_hyperparameters(config, learning_rate_schedule_steps=-5)
 
     # warmup_steps_fraction not in [0, 1]
-    with pytest.raises(ValueError, match="warmup_steps_fraction must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"warmup_steps_fraction must be between 0\.0 and 1\.0"):
         build_maxtext_hyperparameters(config, warmup_steps_fraction=1.5)
-    with pytest.raises(ValueError, match="warmup_steps_fraction must be between 0.0 and 1.0"):
+    with pytest.raises(ValueError, match=r"warmup_steps_fraction must be between 0\.0 and 1\.0"):
         build_maxtext_hyperparameters(config, warmup_steps_fraction=-0.1)
 
     # opt_type empty
@@ -178,7 +178,7 @@ def test_build_maxtext_hyperparameters_validation_errors():
         build_maxtext_hyperparameters(config, checkpoint_period=0)
 
 
-def test_generate_maxtext_gin_config():
+def test_generate_maxtext_gin_config() -> None:
     """Verify generate maxtext gin config behavior."""
     config = MagicMock()
     config.extra_kwargs = {}
@@ -203,7 +203,7 @@ def test_generate_maxtext_gin_config():
     assert "checkpoint_period = 500" in gin_str
 
 
-def test_save_maxtext_gin_config_with_path(tmp_path: Path):
+def test_save_maxtext_gin_config_with_path(tmp_path: Path) -> None:
     """Verify save maxtext gin config with path behavior."""
     output_path = tmp_path / "custom" / "test.gin"
     gin_content = "some_config = 1\n"
@@ -215,7 +215,7 @@ def test_save_maxtext_gin_config_with_path(tmp_path: Path):
     assert result_path.read_text(encoding="utf-8") == gin_content
 
 
-def test_save_maxtext_gin_config_without_path():
+def test_save_maxtext_gin_config_without_path() -> None:
     """Verify save maxtext gin config without path behavior."""
     gin_content = "some_config = 1\n"
     result_path = save_maxtext_gin_config(gin_content)
@@ -227,7 +227,7 @@ def test_save_maxtext_gin_config_without_path():
         os.remove(result_path)
 
 
-def test_save_maxtext_gin_config_empty_content():
+def test_save_maxtext_gin_config_empty_content() -> None:
     """Verify save maxtext gin config empty content behavior."""
     with pytest.raises(ValueError, match="gin_content cannot be empty"):
         save_maxtext_gin_config("")
@@ -236,7 +236,7 @@ def test_save_maxtext_gin_config_empty_content():
         save_maxtext_gin_config("   \n")
 
 
-def test_build_maxtext_cli_args_without_gin_path():
+def test_build_maxtext_cli_args_without_gin_path() -> None:
     """Verify build maxtext cli args without gin path behavior."""
     config = MagicMock()
     config.extra_kwargs = {}
@@ -256,7 +256,7 @@ def test_build_maxtext_cli_args_without_gin_path():
     os.remove(path)
 
 
-def test_build_maxtext_cli_args_with_gin_path(tmp_path: Path):
+def test_build_maxtext_cli_args_with_gin_path(tmp_path: Path) -> None:
     """Verify build maxtext cli args with gin path behavior."""
     config = MagicMock()
     gin_path = tmp_path / "my_config.gin"

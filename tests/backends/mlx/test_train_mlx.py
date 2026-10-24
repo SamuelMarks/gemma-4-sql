@@ -53,7 +53,7 @@ def test_run_training_epochs_scalar_loss() -> None:
     """Verify _run_training_epochs handles plain float loss returns without .item()."""
     import gemma_4_sql.backends.mlx.train as train_module
 
-    state = TrainerState(
+    state: Any = TrainerState(
         dataloader=[{"inputs": [[1, 2]], "targets": [[2, 3]]}],
         epochs=1,
         policy_model=MagicMock(),

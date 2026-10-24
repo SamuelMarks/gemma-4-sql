@@ -4,16 +4,12 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_peft import apply_lora_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType
-
-if TYPE_CHECKING:
-    from jax import Array
-
-    from gemma_4_sql.type_hints import PEFTResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -25,51 +21,56 @@ Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
 Gemma4DecoderLayer = optional_attr("gemma_4_sql.backends.jax.gemma4.decoder_layer", "Gemma4DecoderLayer")
 Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
-_ModuleBase: Any = nnx.Module if nnx is not None else object
-_ParamBase: Any = nnx.Param if nnx is not None else object
+if TYPE_CHECKING:
+    from flax.nnx import Module as _ModuleBase
+    from flax.nnx import Param
+    from jax import Array
+
+    from gemma_4_sql.type_hints import PEFTResultDict
+
+    _ParamBase = Param[Any]
+else:
+    _ModuleBase = nnx.Module if nnx is not None else object
+    _ParamBase = nnx.Param if nnx is not None else object
 
 
-def _ensure_param_compat(param_cls: Any) -> None:
-    """Attach `.shape`, `.dtype`, `__getitem__`, and `__setitem__` to a Flax NNX Param class if absent.
+class NNXParam(_ParamBase):
+    """Flax NNX parameter subclass providing uniform `.shape`, `.dtype`, and slice indexing."""
 
-    Args:
-        param_cls: The Flax NNX `Param` class to patch.
+    value: Any
 
-    """
-    if param_cls is None:
-        return
-    if not hasattr(param_cls, "shape"):
-        param_cls.shape = property(lambda self: self.value.shape if hasattr(self, "value") else ())
-    if not hasattr(param_cls, "dtype"):
-        param_cls.dtype = property(lambda self: self.value.dtype if hasattr(self, "value") else None)
-    if not hasattr(param_cls, "__setitem__"):
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Return the shape of the underlying parameter value."""
+        val = getattr(self, "value", None)
+        return tuple(val.shape) if val is not None and hasattr(val, "shape") else ()
 
-        def _param_setitem(self: Any, idx: Any, val: Any) -> None:
-            """Assign values into the underlying array of Flax NNX Param."""
-            if hasattr(self, "value"):
-                if idx is Ellipsis or idx == slice(None):
-                    self.value = val
-                elif hasattr(self.value, "at"):
-                    self.value = self.value.at[idx].set(val)
-                else:
-                    self.value = val
+    @property
+    def dtype(self) -> Any:
+        """Return the data type of the underlying parameter value."""
+        val = getattr(self, "value", None)
+        return val.dtype if val is not None and hasattr(val, "dtype") else None
+
+    def __getitem__(self, idx: Any) -> Any:
+        """Index into the underlying parameter array."""
+        val = getattr(self, "value", None)
+        return val[idx] if val is not None else None
+
+    def __setitem__(self, idx: Any, new_val: Any) -> None:
+        """Assign values into the underlying parameter array."""
+        val = getattr(self, "value", None)
+        if val is not None:
+            if idx is Ellipsis or idx == slice(None):
+                self.value = new_val
+            elif hasattr(val, "at"):
+                self.value = val.at[idx].set(new_val)
             else:
-                self.value = val
-
-        param_cls.__setitem__ = _param_setitem
-    if not hasattr(param_cls, "__getitem__"):
-
-        def _param_getitem(self: Any, idx: Any) -> Any:
-            """Index into the underlying array of Flax NNX Param."""
-            return self.value[idx] if hasattr(self, "value") else None
-
-        param_cls.__getitem__ = _param_getitem
+                self.value = new_val
+        else:
+            self.value = new_val
 
 
-_ensure_param_compat(getattr(nnx, "Param", None))
-
-
-class LoRAParam(_ParamBase):
+class LoRAParam(NNXParam):
     """Marker parameter class designating low-rank adapter weights in Flax NNX."""
 
 
@@ -144,9 +145,9 @@ class NNXLoRALinear(_ModuleBase):
             rngs = nnx.Rngs(0)
 
         # Base frozen weights
-        self.kernel = nnx.Param(jnp.zeros((in_features, out_features), dtype=self.dtype))
+        self.kernel = NNXParam(jnp.zeros((in_features, out_features), dtype=self.dtype))
         if use_bias:
-            self.bias = nnx.Param(jnp.zeros((out_features,), dtype=self.dtype))
+            self.bias = NNXParam(jnp.zeros((out_features,), dtype=self.dtype))
         else:
             self.bias = None
 
@@ -176,7 +177,8 @@ class NNXLoRALinear(_ModuleBase):
             The base weight array value.
 
         """
-        return getattr(self.kernel, "value", self.kernel)
+        res: Array = getattr(self.kernel, "value", self.kernel)
+        return res
 
     @property
     def A(self) -> Array:
@@ -186,7 +188,8 @@ class NNXLoRALinear(_ModuleBase):
             The down-projection adapter array value.
 
         """
-        return getattr(self.lora_a, "value", self.lora_a)
+        res: Array = getattr(self.lora_a, "value", self.lora_a)
+        return res
 
     @property
     def B(self) -> Array:
@@ -196,24 +199,32 @@ class NNXLoRALinear(_ModuleBase):
             The up-projection adapter array value.
 
         """
-        return getattr(self.lora_b, "value", self.lora_b)
+        res: Array = getattr(self.lora_b, "value", self.lora_b)
+        return res
 
-    def train(self, mode: bool = True) -> None:
+    def train(self, mode: bool = True, **attributes: Any) -> None:
         """Set module training mode to toggle LoRA dropout active/inactive.
 
         Args:
             mode: True to enable training dropout, False for inference mode.
+            **attributes: Optional Flax NNX module state attributes.
 
         """
+        _ = attributes
         if self.dropout is not None:
             if mode:
                 self.dropout.train()
             else:
                 self.dropout.eval()
 
-    def eval(self) -> None:
-        """Set module to evaluation/inference mode disabling LoRA dropout."""
-        self.train(False)
+    def eval(self, **attributes: Any) -> None:
+        """Set module to evaluation/inference mode disabling LoRA dropout.
+
+        Args:
+            **attributes: Optional Flax NNX module state attributes.
+
+        """
+        self.train(False, **attributes)
 
     @classmethod
     def from_linear(
@@ -287,7 +298,8 @@ class NNXLoRALinear(_ModuleBase):
         lora_a_val = getattr(self.lora_a, "value", self.lora_a)
         lora_b_val = getattr(self.lora_b, "value", self.lora_b)
         lora_term = jnp.dot(jnp.dot(dropped_x, lora_a_val), lora_b_val)
-        return (base + self.scale * lora_term).astype(self.dtype)
+        out: Array = (base + self.scale * lora_term).astype(self.dtype)
+        return out
 
 
 def inject_lora_to_layer(
@@ -459,7 +471,7 @@ def inject_lora(
 
 
 def create_lora_optimizer(
-    model: ModelType,
+    model: ModelType | NNXLoRALinear | Any,
     tx: Any = None,
 ) -> Any:
     """Create a Flax NNX Optimizer configured to update only LoRA adapter parameters.
@@ -533,55 +545,43 @@ def apply_lora(
         DependencyMissingError: If JAX PEFT dependencies are missing.
 
     """
-    status = "completed"
     if optax is None or jax is None or nnx is None or Gemma4ForCausalLM is None:
         raise DependencyMissingError("JAX PEFT dependencies are missing.")
 
-    injected_count = 0
-    try:
+    def _inject() -> int:
+        """Instantiate or reuse JAX model and inject LoRA layers."""
         rngs = kwargs.get("rngs")
         if rngs is None:
             rngs = nnx.Rngs(0)
 
         if "model" in kwargs and kwargs["model"] is not None:
-            model = kwargs["model"]
+            model_obj: Any = kwargs["model"]
         else:
             config = kwargs.get("config")
             if config is None and Gemma4Config is not None:
                 from_preset_fn = getattr(Gemma4Config, "from_preset", None)
                 config = from_preset_fn(model_name) if callable(from_preset_fn) else Gemma4Config.gemma4_e2b()
-            model = Gemma4ForCausalLM(config, rngs=rngs)
+            model_obj = Gemma4ForCausalLM(config, rngs=rngs)
 
         model, injected_count = inject_lora(
-            model=cast(ModelType, model),
+            model=model_obj,
             target_modules=target_modules,
             lora_r=lora_r,
             lora_alpha=lora_alpha,
             lora_dropout=lora_dropout,
             rngs=rngs,
         )
-        # Verify NNX state separation
         _ = nnx.split(model, LoRAParam, ...)
         logger.info("Injected LoRA into %d targets", injected_count)
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        if kwargs.get("raise_on_error"):
-            raise TrainingError(
-                f"JAX PEFT failed: {e!s}",
-                backend="jax",
-                model_name=model_name,
-                operation="apply_lora",
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
+        return injected_count
 
-    return {
-        "backend": "jax",
-        "action": "apply_lora",
-        "model": model_name,
-        "target_modules": target_modules,
-        "lora_r": lora_r,
-        "lora_alpha": lora_alpha,
-        "lora_dropout": lora_dropout,
-        "status": status,
-        "injected_modules": injected_count,
-    }
+    return apply_lora_wrapper(
+        "jax",
+        model_name,
+        target_modules,
+        lora_r,
+        lora_alpha,
+        lora_dropout,
+        _inject,
+        **kwargs,
+    )

@@ -89,7 +89,7 @@ def test_mlx_beam_search_no_mx(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_tok.encode.return_value = [1, 2, 3]
     mock_tok.eos_token_id = 2
     m_raw: Any = lambda _x: [1, 2]
-    with pytest.raises(InferenceError, match="yielded an empty sequence|yielded only an EOS"):
+    with pytest.raises(InferenceError, match=r"yielded an empty sequence|yielded only an EOS"):
         inf_module.mlx_beam_search(m_raw, mock_tok, "prompt", max_length=1)
 
 

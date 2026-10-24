@@ -1,161 +1,112 @@
-"""Unit and behavioral tests for benchmark jax."""
+"""Unit and behavioral tests for JAX benchmarking."""
 
-import importlib
-import sys
-from typing import Any
-from unittest.mock import MagicMock, patch
+from __future__ import annotations
+
+from unittest.mock import MagicMock
 
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
 
 import pytest
+from flax import nnx
+
+import gemma_4_sql.backends.jax.benchmark as jax_benchmark
+from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
+from gemma_4_sql.exceptions import DependencyMissingError
 
 
-@pytest.fixture(autouse=True)
-def mock_dependencies():
-    """Provide mock dependencies test helper."""
+def test_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify benchmark_model raises DependencyMissingError when jax is None."""
+    monkeypatch.setattr(jax_benchmark, "jax", None)
+    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing\."):
+        jax_benchmark.benchmark_model("test_model", "cpu", 1)
+
+
+def test_get_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _get_device resolves CPU/GPU/TPU devices and falls back to CPU on RuntimeError."""
+    dev_cpu = jax_benchmark._get_device("cpu")
+    assert dev_cpu is not None
+
     mock_jax = MagicMock()
-    mock_jnp = MagicMock()
-    mock_nnx = MagicMock()
-    mock_flax = MagicMock()
-    mock_flax.nnx = mock_nnx
-
-    mock_jax.devices.side_effect = lambda x: [f"mock_{x}_device"] if x in ("gpu", "tpu", "cpu") else []
-
-    # Return the original function for jit
-    mock_nnx.jit.side_effect = lambda f: f
-
-    mock_jnp.int32 = "int32"
-    mock_jnp.bfloat16 = "bfloat16"
-
-    # Model config
-    mock_gemma4_config = MagicMock()
-    mock_gemma4_config.gemma4_e2b.return_value = MagicMock()
-    mock_gemma4_model = MagicMock()
-
-    mock_gemma4_mod = MagicMock()
-    mock_gemma4_mod.Gemma4Config = mock_gemma4_config
-    mock_gemma4_mod.Gemma4ForCausalLM = mock_gemma4_model
-
-    import gemma_4_sql.backends.jax.gemma4 as real_gemma4_pkg
-
-    with (
-        patch.dict(
-            sys.modules,
-            {
-                "jax": mock_jax,
-                "jax.numpy": mock_jnp,
-                "flax": mock_flax,
-                "flax.nnx": mock_nnx,
-                "gemma_4_sql.backends.jax.gemma4": mock_gemma4_mod,
-            },
-        ),
-        patch.object(real_gemma4_pkg, "Gemma4Config", mock_gemma4_config),
-        patch.object(real_gemma4_pkg, "Gemma4ForCausalLM", mock_gemma4_model),
-    ):
-        yield mock_jax, mock_jnp, mock_nnx, mock_gemma4_config, mock_gemma4_model
-
-
-def reload_module():
-    """Provide reload module test helper."""
-    import gemma_4_sql.backends.jax.benchmark as jax_benchmark
-
-    importlib.reload(jax_benchmark)
-    jax_benchmark.jax = sys.modules.get("jax")
-    jax_benchmark.jnp = sys.modules.get("jax.numpy")
-    jax_benchmark.nnx = sys.modules.get("flax.nnx")
-    g4_mod = sys.modules.get("gemma_4_sql.backends.jax.gemma4")
-    jax_benchmark.Gemma4Config = getattr(g4_mod, "Gemma4Config", None)
-    jax_benchmark.Gemma4ForCausalLM = getattr(g4_mod, "Gemma4ForCausalLM", None)
-    return jax_benchmark
-
-
-def test_missing_dependencies():
-    """Verify missing dependencies behavior."""
-    with patch.dict(sys.modules, {"jax": None, "jax.numpy": None, "flax": None, "flax.nnx": None}):
-        jax_benchmark = reload_module()
-        with pytest.raises(Exception, match="JAX dependencies are missing."):
-            jax_benchmark.benchmark_model("test", "cpu", 1)
-
-
-def test_get_device():
-    """Verify get device behavior."""
-    jax_benchmark = reload_module()
-
+    mock_jax.devices.side_effect = lambda hw: [f"mock_{hw}_device"] if hw in ("gpu", "tpu", "cpu") else []
+    monkeypatch.setattr(jax_benchmark, "jax", mock_jax)
     assert jax_benchmark._get_device("gpu") == "mock_gpu_device"
     assert jax_benchmark._get_device("tpu") == "mock_tpu_device"
-    assert jax_benchmark._get_device("unknown") == "mock_cpu_device"
 
-    def side_effect(hw: Any):
-        """Provide side effect test helper."""
+    def raise_on_accel(hw: str) -> list[str]:
+        """Raise RuntimeError on tpu/gpu."""
         if hw in ("tpu", "gpu"):
-            raise RuntimeError("Mock error")
-        return [f"mock_{hw}_device"]
+            raise RuntimeError("No accelerator")
+        return ["mock_cpu_device"]
 
-    jax_benchmark.jax.devices.side_effect = side_effect
+    mock_jax.devices.side_effect = raise_on_accel
     assert jax_benchmark._get_device("tpu") == "mock_cpu_device"
 
 
-def test_run_benchmark_pass_prefill():
-    """Verify run benchmark pass prefill behavior."""
-    jax_benchmark = reload_module()
+def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _run_benchmark_pass and benchmark_model execute real JAX forward and generate passes."""
+    cfg = Gemma4Config.gemma4_tiny()
+    model = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0))
+    cpu_device = jax_benchmark._get_device("cpu")
 
-    mock_model = MagicMock()
-    mock_device = MagicMock()
+    tokens_prefill, latency_prefill, mem_prefill = jax_benchmark._run_benchmark_pass(
+        model=model,
+        batch_size=1,
+        num_runs=1,
+        warmup_steps=1,
+        mode="prefill",
+        max_new_tokens=2,
+        device=cpu_device,
+    )
+    assert tokens_prefill > 0.0
+    assert latency_prefill > 0.0
+    assert mem_prefill >= 0.0
 
-    mock_device.memory_stats.return_value = {"peak_bytes_in_use": 1024 * 1024 * 100}
+    # Device with explicit peak_bytes_in_use memory_stats and warmup in generate mode
+    from contextlib import nullcontext
 
-    # We remove block_until_ready from jax to test the negative branch of hasattr
-    del jax_benchmark.jax.block_until_ready
+    mock_device_with_stats = MagicMock()
+    mock_device_with_stats.memory_stats.return_value = {"peak_bytes_in_use": 64 * 1024 * 1024}
+    monkeypatch.setattr(jax_benchmark.jax, "default_device", lambda _d: nullcontext())
+    _, _, mem_stats = jax_benchmark._run_benchmark_pass(
+        model=model,
+        batch_size=1,
+        num_runs=1,
+        warmup_steps=1,
+        mode="generate",
+        max_new_tokens=2,
+        device=mock_device_with_stats,
+    )
+    assert mem_stats == 64.0
 
-    tokens, latency, memory = jax_benchmark._run_benchmark_pass(model=mock_model, batch_size=2, num_runs=2, warmup_steps=1, mode="prefill", max_new_tokens=10, device=mock_device)
+    # Also test when nnx is None and jax lacks block_until_ready
+    monkeypatch.setattr(jax_benchmark, "nnx", None)
+    monkeypatch.delattr(jax_benchmark.jax, "block_until_ready", raising=False)
+    _, _, _ = jax_benchmark._run_benchmark_pass(
+        model=model,
+        batch_size=1,
+        num_runs=1,
+        warmup_steps=1,
+        mode="prefill",
+        max_new_tokens=1,
+        device=mock_device_with_stats,
+    )
+    monkeypatch.setattr(jax_benchmark, "nnx", nnx)
 
-    assert isinstance(tokens, float)
-    assert isinstance(latency, float)
-    assert memory == 100.0
-
-
-def test_run_benchmark_pass_generate():
-    """Verify run benchmark pass generate behavior."""
-    jax_benchmark = reload_module()
-    del jax_benchmark.nnx.jit
-    jax_benchmark = reload_module()
-
-    mock_model = MagicMock()
-    mock_model.return_value = MagicMock()
-
-    jax_benchmark.jnp.argmax.return_value = MagicMock()
-    # Mock sequence shape for arange
-    mock_inputs = MagicMock()
-    mock_inputs.shape = (1, 10)
-    jax_benchmark.jnp.concatenate.return_value = mock_inputs
-    jax_benchmark.jnp.arange.return_value = MagicMock()
-    jax_benchmark.jnp.arange.return_value.__getitem__.return_value = MagicMock()
-
-    mock_device = MagicMock()
-    mock_device.memory_stats.side_effect = AttributeError("No memory stats")
-
-    tokens, latency, memory = jax_benchmark._run_benchmark_pass(model=mock_model, batch_size=1, num_runs=1, warmup_steps=1, mode="generate", max_new_tokens=2, device=mock_device)
-
-    assert isinstance(tokens, float)
-    assert isinstance(latency, float)
-    assert memory == 8192.0
-
-
-def test_benchmark_model_execution():
-    """Verify benchmark model execution behavior."""
-    jax_benchmark = reload_module()
-
-    # We don't mock _run_benchmark_pass, we let it run with mocked jax
-    with patch("gemma_4_sql.backends.jax.benchmark.run_benchmark_wrapper") as mock_wrapper:
-
-        def side_effect(backend_name: Any, model_name: Any, hardware: Any, batch_size: Any, missing_deps: Any, benchmark_fn: Any, **kwargs: Any):
-            """Provide side effect test helper."""
-            return benchmark_fn()
-
-        mock_wrapper.side_effect = side_effect
-
-        # This will call _run() -> _run_benchmark_pass
-        res = jax_benchmark.benchmark_model("test_model", "cpu", 2, dtype="float32", mode="generate", max_new_tokens=1, warmup_steps=1, num_runs=1)
-        assert len(res) == 3
+    # End-to-end benchmark_model with tiny config
+    monkeypatch.setattr(Gemma4Config, "gemma4_e2b", classmethod(lambda _cls: cfg))
+    res = jax_benchmark.benchmark_model(
+        "tiny_model",
+        "cpu",
+        1,
+        dtype="float32",
+        mode="prefill",
+        max_new_tokens=2,
+        warmup_steps=1,
+        num_runs=1,
+    )
+    assert res["status"] == "success"
+    assert res["backend"] == "jax"
+    assert res["tokens_per_sec"] > 0.0
+    assert res["latency_ms"] > 0.0

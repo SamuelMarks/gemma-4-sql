@@ -225,19 +225,25 @@ def test_quantize_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         assert int(validated["tensor_count"]) > 0
 
     # 2. End-to-end INT8 and INT4 quantization on tiny PyTorch model
+    from gemma_4_sql.type_hints import get_quantized_artifact
+
     monkeypatch.setattr(quantize_module, "BitsAndBytesConfig", lambda **kw: kw)
     res_int8 = quantize_module.quantize_model("tiny-gemma4", "int8", model=tiny_model)
     assert res_int8["status"] == "quantized_int8"
     assert res_int8["memory_reduction_factor"] == 0.5
-    assert getattr(tiny_model, "_is_quantized", False) is True
-    assert getattr(tiny_model, "_quant_method", None) == "int8"
+    art_int8 = get_quantized_artifact(tiny_model)
+    assert art_int8 is not None
+    assert art_int8.is_quantized is True
+    assert art_int8.method == "int8"
 
     tiny_model_int4 = Gemma4ForCausalLM(cfg)
     res_int4 = quantize_module.quantize_model("tiny-gemma4", "int4", model=tiny_model_int4)
     assert res_int4["status"] == "quantized_int4"
     assert res_int4["memory_reduction_factor"] == 0.75
-    assert getattr(tiny_model_int4, "_is_quantized", False) is True
-    assert getattr(tiny_model_int4, "_quant_method", None) == "int4"
+    art_int4 = get_quantized_artifact(tiny_model_int4)
+    assert art_int4 is not None
+    assert art_int4.is_quantized is True
+    assert art_int4.method == "int4"
 
     # 3. End-to-end AWQ and GPTQ dispatch through quantize_model
     mock_awq = MagicMock()

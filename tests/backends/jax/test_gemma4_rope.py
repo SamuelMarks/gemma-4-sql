@@ -10,14 +10,14 @@ pytestmark = requires_jax
 from gemma_4_sql.backends.jax.gemma4.rope import RoPE, apply_rope, default_rope_params, segment_ids_to_positions
 
 
-def test_segment_ids_to_positions():
+def test_segment_ids_to_positions() -> None:
     """Verify segment ids to positions behavior."""
     segment_ids = jnp.array([[1, 1, 1], [1, 0, 1]])
     positions = segment_ids_to_positions(segment_ids)
     assert jnp.allclose(positions, jnp.array([[1, 2, 3], [1, 1, 2]]))
 
 
-def test_default_rope_params():
+def test_default_rope_params() -> None:
     """Verify default rope params behavior."""
     positions = jnp.array([1, 2, 3])
     freq, factor = default_rope_params(positions, head_dim=4, rope_theta=10000, factor=2.0)
@@ -25,7 +25,7 @@ def test_default_rope_params():
     assert factor == 1.0
 
 
-def test_apply_rope():
+def test_apply_rope() -> None:
     """Verify apply rope behavior."""
     x = jnp.ones((2, 3, 2, 4))
     sin = jnp.zeros((2, 3, 2))
@@ -43,7 +43,7 @@ def test_apply_rope():
         apply_rope(x, sin, jnp.zeros((2, 3)))
 
 
-def test_rope_module():
+def test_rope_module() -> None:
     """Verify rope module behavior."""
     rope = RoPE(rope_type="default", head_dim=4, rope_theta=10000, factor=2.0)
     positions = jnp.array([[1, 2]])

@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import logging
-import operator
-import threading
-from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_inference import (
+    BoundedLRUCache,
+    compute_jax_step_probs,
+    expand_jax_beams,
+    run_array_beam_search,
+    run_inference_wrapper,
+)
+from gemma_4_sql.backends.common_multimodal import prepare_multimodal_inputs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import InferenceError
 from gemma_4_sql.tokenization import SQLTokenizer
@@ -25,55 +30,8 @@ Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
 Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
 MAX_MODEL_CACHE_SIZE = 4
-
-
-class _BoundedModelCache(OrderedDict[str, object]):
-    """Thread-safe LRU-bounded dictionary for caching initialized JAX models."""
-
-    def __init__(self, maxsize: int = MAX_MODEL_CACHE_SIZE) -> None:
-        """Initialize the bounded model cache.
-
-        Args:
-            maxsize: Maximum number of cached models to retain.
-
-        """
-        super().__init__()
-        self.maxsize = maxsize
-        self._lock = threading.Lock()
-
-    def get_model(self, key: str) -> object | None:
-        """Retrieve a cached model and mark it as recently used.
-
-        Args:
-            key: Model identifier key.
-
-        Returns:
-            Cached model object or `None` if absent.
-
-        """
-        with self._lock:
-            if key not in self:
-                return None
-            self.move_to_end(key)
-            return self[key]
-
-    def put_model(self, key: str, value: object) -> None:
-        """Insert or update a cached model, evicting the oldest entry if full.
-
-        Args:
-            key: Model identifier key.
-            value: Model instance to cache.
-
-        """
-        with self._lock:
-            if key in self:
-                self.move_to_end(key)
-            super().__setitem__(key, value)
-            if len(self) > self.maxsize:
-                self.popitem(last=False)
-
-
-_MODEL_CACHE = _BoundedModelCache()
+_BoundedModelCache = BoundedLRUCache
+_MODEL_CACHE: BoundedLRUCache[object] = BoundedLRUCache(maxsize=MAX_MODEL_CACHE_SIZE)
 
 
 def _compute_step_probs(logits: TensorType, beam_width: int) -> tuple[Any, Any]:
@@ -87,16 +45,7 @@ def _compute_step_probs(logits: TensorType, beam_width: int) -> tuple[Any, Any]:
         Tuple of top indices array and top probabilities array.
 
     """
-    if hasattr(logits, "shape") and len(logits.shape) == 3:
-        last_logits = logits[0, -1, :]
-    elif hasattr(logits, "shape") and len(logits.shape) == 2:
-        last_logits = logits[-1, :]
-    else:
-        last_logits = logits
-    log_probs = jax.nn.log_softmax(last_logits, axis=-1)
-    top_indices = jnp.argsort(log_probs)[-beam_width:][::-1]
-    top_probs = log_probs[top_indices]
-    return (top_indices, top_probs)
+    return compute_jax_step_probs(logits, beam_width, jax, jnp)
 
 
 def _beam_search_step(seq: TensorType, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
@@ -119,15 +68,7 @@ def _beam_search_step(seq: TensorType, score: float, model_apply_fn: Any, beam_w
         (top_indices, top_probs) = step_fn(logits, beam_width)
     else:
         (top_indices, top_probs) = _compute_step_probs(logits, beam_width)
-
-    new_beams: list[tuple[Any, float]] = []
-    for i in range(beam_width):
-        token = top_indices[i].reshape(1, 1)
-        new_seq = jnp.concatenate([seq, token], axis=-1)
-        prob_val = top_probs[i].item() if hasattr(top_probs[i], "item") else float(top_probs[i])
-        new_score = score + prob_val
-        new_beams.append((new_seq, new_score))
-    return new_beams
+    return expand_jax_beams(seq, score, top_indices, top_probs, beam_width, jnp)
 
 
 def jax_beam_search(model_apply_fn: Any, input_ids: Any, beam_width: int, max_length: int, eos_token_id: int) -> tuple[Any, float]:
@@ -144,22 +85,13 @@ def jax_beam_search(model_apply_fn: Any, input_ids: Any, beam_width: int, max_le
         The sequence of token IDs representing the best beam and its score.
 
     """
-    beams = [(input_ids, 0.0)]
-    for _ in range(max_length):
-        new_beams: list[tuple[Any, float]] = []
-        for seq, score in beams:
-            if seq[0, -1] == eos_token_id:
-                new_beams.append((seq, score))
-                continue
-
-            expanded_beams = _beam_search_step(seq, score, model_apply_fn, beam_width)
-            new_beams.extend(expanded_beams)
-
-        new_beams.sort(key=operator.itemgetter(1), reverse=True)
-        beams = new_beams[:beam_width]
-        if all(s[0, -1] == eos_token_id for s, _ in beams):
-            break
-    return (beams[0][0], beams[0][1])
+    return run_array_beam_search(
+        input_ids,
+        beam_width,
+        max_length,
+        eos_token_id,
+        lambda seq, score, bw: _beam_search_step(seq, score, model_apply_fn, bw),
+    )
 
 
 def generate_sql(
@@ -185,106 +117,82 @@ def generate_sql(
         DependencyMissingError: If JAX inference dependencies are missing.
 
     """
-    image_path = kwargs.get("image_path")
-    audio_path = kwargs.get("audio_path")
-    pixel_values = kwargs.get("pixel_values")
-    audio_values = kwargs.get("audio_values")
-
-    if image_path is not None or audio_path is not None:
-        from gemma_4_sql.backends.common_multimodal import (
-            format_multimodal_prompt,
-            process_audio,
-            process_image,
-        )
-
-        formatted = format_multimodal_prompt(
-            prompt,
-            has_image=image_path is not None or pixel_values is not None,
-            has_audio=audio_path is not None or audio_values is not None,
-        )
-        prompt = str(formatted.get("prompt", prompt))
-
-        if image_path is not None and pixel_values is None:
-            img_in: Any = image_path
-            img_res = process_image(img_in)
-            pixel_values = jnp.array([img_res["pixel_values"]], dtype=jnp.float32)
-
-        if audio_path is not None and audio_values is None:
-            aud_in: Any = audio_path
-            aud_res = process_audio(aud_in)
-            audio_values = jnp.array([aud_res["audio_values"]], dtype=jnp.float32)
-
-    tokenizer = SQLTokenizer(model_name=None)
-    input_tokens = tokenizer.encode(prompt)
-    eos_token_id = tokenizer.vocab_size - 1
     if jax is None or jnp is None or Gemma4ForCausalLM is None:
         from gemma_4_sql.exceptions import DependencyMissingError
 
         raise DependencyMissingError("JAX inference dependencies are missing.")
 
-    input_ids = jnp.array([input_tokens], dtype=jnp.int32)
-    cached_model = _MODEL_CACHE.get_model(model_name)
-    if cached_model is not None:
-        model = cached_model
-    else:
-        rngs = nnx.Rngs(0) if nnx is not None and hasattr(nnx, "Rngs") else None
-        model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=rngs)
-        from pathlib import Path
+    def _to_jax_tensor(arr: Any) -> Any:
+        """Convert feature array into a batched float32 JAX array."""
+        return jnp.array([arr], dtype=jnp.float32)
 
-        model_path = Path(model_name)
-        if model_path.exists():
+    (prompt, pixel_values, audio_values) = prepare_multimodal_inputs(
+        prompt,
+        dict(kwargs),
+        _to_jax_tensor,
+    )
+
+    tokenizer = SQLTokenizer(model_name=None)
+    input_tokens = tokenizer.encode(prompt)
+    eos_token_id = tokenizer.vocab_size - 1
+
+    def _execute() -> tuple[str, float]:
+        """Run JAX model loading, optional Orbax restore, and beam search decoding."""
+        input_ids = jnp.array([input_tokens], dtype=jnp.int32)
+        cached_model = _MODEL_CACHE.get_model(model_name)
+        if cached_model is not None:
+            model = cached_model
+        else:
+            rngs = nnx.Rngs(0) if nnx is not None and hasattr(nnx, "Rngs") else None
+            model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=rngs)
+            from pathlib import Path
+
+            model_path = Path(model_name)
+            if model_path.exists():
+                try:
+                    import orbax.checkpoint as ocp
+
+                    checkpointer = ocp.PyTreeCheckpointer()
+                    restored = checkpointer.restore(model_path)
+                    if restored is not None and nnx is not None and hasattr(nnx, "update"):
+                        nnx.update(model, restored)
+                except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+                    logger.warning("Failed to restore Orbax checkpoint from %s: %s", model_path, e)
+                    if kwargs.get("strict_checkpoint"):
+                        raise InferenceError(
+                            f"Failed to restore Orbax checkpoint from {model_path}: {e!s}",
+                            backend="jax",
+                            model_name=model_name,
+                            cause=e,
+                        ) from e
+            _MODEL_CACHE.put_model(model_name, model)
+
+        def _model_forward(seq: TensorType, pos: Any) -> Any:
+            """Call model with optional multimodal keyword arguments.
+
+            Args:
+                seq: Token ID sequence array.
+                pos: Position index array.
+
+            Returns:
+                Model prediction logits array.
+
+            """
+            extra_kwargs: dict[str, Any] = {}
+            if pixel_values is not None:
+                extra_kwargs["pixel_values"] = pixel_values
+            if audio_values is not None:
+                extra_kwargs["audio_values"] = audio_values
+            model_fn: Any = model
             try:
-                import orbax.checkpoint as ocp
+                return model_fn(seq, pos, **extra_kwargs)
+            except TypeError:
+                return model_fn(seq, pos)
 
-                checkpointer = ocp.PyTreeCheckpointer()
-                restored = checkpointer.restore(model_path)
-                if restored is not None and nnx is not None and hasattr(nnx, "update"):
-                    nnx.update(model, restored)
-            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-                logger.warning("Failed to restore Orbax checkpoint from %s: %s", model_path, e)
-                if kwargs.get("strict_checkpoint"):
-                    raise InferenceError(
-                        f"Failed to restore Orbax checkpoint from {model_path}: {e!s}",
-                        backend="jax",
-                        model_name=model_name,
-                        cause=e,
-                    ) from e
-        _MODEL_CACHE.put_model(model_name, model)
+        (output_ids, logprob_sum) = jax_beam_search(_model_forward, input_ids, beam_width, max_length, eos_token_id)
+        sql_out = tokenizer.decode(output_ids[0].tolist())
+        out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
+        conf = float(logprob_sum / max(1, out_len - len(input_tokens)))
+        return (sql_out, conf)
 
-    def _model_forward(seq: TensorType, pos: Any) -> Any:
-        """Call model with optional multimodal keyword arguments.
-
-        Args:
-            seq: Token ID sequence array.
-            pos: Position index array.
-
-        Returns:
-            Model prediction logits array.
-
-        """
-        extra_kwargs: dict[str, Any] = {}
-        if pixel_values is not None:
-            extra_kwargs["pixel_values"] = pixel_values
-        if audio_values is not None:
-            extra_kwargs["audio_values"] = audio_values
-        model_fn: Any = model
-        try:
-            return model_fn(seq, pos, **extra_kwargs)
-        except TypeError:
-            return model_fn(seq, pos)
-
-    (output_ids, logprob_sum) = jax_beam_search(_model_forward, input_ids, beam_width, max_length, eos_token_id)
-    sql = tokenizer.decode(output_ids[0].tolist())
-    out_len = len(output_ids[0]) if hasattr(output_ids[0], "__len__") else output_ids.shape[1]
-    confidence_score = float(logprob_sum / max(1, out_len - len(input_tokens)))
-    status = "success"
-
-    return {
-        "backend": "jax",
-        "model": model_name,
-        "prompt": prompt,
-        "sql": sql,
-        "status": status,
-        "beam_width": beam_width,
-        "confidence_score": confidence_score,
-    }
+    return run_inference_wrapper("jax", model_name, prompt, beam_width, _execute, **kwargs)

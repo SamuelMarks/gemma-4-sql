@@ -9,7 +9,7 @@ pytestmark = requires_jax
 from gemma_4_sql.backends.jax.gemma4.multimodal import MultimodalInputs, batched_merge_modalities
 
 
-def test_batched_merge_modalities():
+def test_batched_merge_modalities() -> None:
     """Verify batched merge modalities behavior."""
     img_emb = jnp.array([[[1.0, 1.0], [2.0, 2.0]], [[3.0, 3.0], [4.0, 4.0]]])
     text_emb = jnp.array([[[10.0, 10.0], [20.0, 20.0], [30.0, 30.0]], [[40.0, 40.0], [50.0, 50.0], [60.0, 60.0]]])
@@ -22,7 +22,7 @@ def test_batched_merge_modalities():
     assert jnp.allclose(res[1], jnp.array([[40.0, 40.0], [3.0, 3.0], [60.0, 60.0]]))
 
 
-def test_multimodal_inputs():
+def test_multimodal_inputs() -> None:
     """Verify multimodal inputs behavior."""
     inputs = MultimodalInputs(input_ids=jnp.array([1, 2, 3]), pixel_values=jnp.array([1.0]), image_token_mask=jnp.array([True]), input_features=None, input_features_mask=None, audio_token_mask=None, attention_mask=None)
     assert inputs.input_ids.shape == (3,)

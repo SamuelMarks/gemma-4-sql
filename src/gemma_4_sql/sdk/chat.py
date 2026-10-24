@@ -53,13 +53,13 @@ def chat_turn(
         ml = int(ml_raw) if isinstance(ml_raw, (int, float, str)) else 50
         result = backend_impl.generate_sql(model_name, full_prompt, beam_width=bw, max_length=ml, **call_kwargs)
         if "sql" not in result or is_failed_status(result):
-            raise ValueError(f"Backend {backend} did not return SQL.")
+            raise InferenceError(f"Backend {backend} did not return SQL.", backend=backend, model_name=model_name)
         response = str(result["sql"])
         status = f"success_{backend}_chat"
-    except Exception as e:
+    except (InferenceError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("%s chat error", backend.capitalize())
         status = f"failed: {e!s}"
-        raise InferenceError(f"Chat turn failed: {e!s}", cause=e) from e
+        raise InferenceError(f"Chat turn failed: {e!s}", backend=backend, model_name=model_name, cause=e) from e
     updated_history: list[ChatMessageDict] = [{"role": str(turn["role"]), "content": str(turn["content"])} for turn in history]
     updated_history.extend(({"role": "user", "content": new_prompt}, {"role": "assistant", "content": response}))
     return {

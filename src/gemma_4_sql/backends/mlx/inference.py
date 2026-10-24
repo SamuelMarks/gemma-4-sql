@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import logging
-import math
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_inference import normalize_logprob_confidence, run_inference_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
-from gemma_4_sql.type_hints import ModelType
+from gemma_4_sql.type_hints import MlxCausalLMProtocol
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import InferenceResultDict, JSONValue
 
 logger = logging.getLogger(__name__)
 
@@ -35,16 +35,11 @@ def compute_confidence_score(log_probs: list[float] | float, num_tokens: int) ->
         Sequence confidence score between 0.0 and 1.0.
 
     """
-    if num_tokens <= 0:
-        return 0.0
-    total_log_prob = sum(log_probs) if isinstance(log_probs, list) else float(log_probs)
-    normalized_log_prob = total_log_prob / max(1, num_tokens)
-    normalized_log_prob = min(normalized_log_prob, 0.0)
-    return max(0.0, min(1.0, math.exp(normalized_log_prob)))
+    return normalize_logprob_confidence(log_probs, num_tokens)
 
 
 def mlx_beam_search(
-    model: ModelType | None,
+    model: MlxCausalLMProtocol | None,
     tokenizer: Any,
     prompt: str,
     beam_width: int = 3,
@@ -172,7 +167,7 @@ def generate_sql(
     beam_width: int = 3,
     max_length: int = 50,
     **kwargs: JSONValue,
-) -> JSONDict:
+) -> InferenceResultDict:
     """Generate a SQL query from a natural language prompt using MLX.
 
     Args:
@@ -192,16 +187,15 @@ def generate_sql(
     if load is None:
         raise DependencyMissingError("MLX dependencies are missing.")
 
-    confidence_score = 0.0
-    sql = ""
-    try:
+    def _execute() -> tuple[str, float]:
+        """Load MLX model and run beam search decoding."""
         logger.info("Generating with MLX %s (beam_width=%d)", model_name, beam_width)
         loaded: Any = load(model_name)
-        model: ModelType = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
+        model: MlxCausalLMProtocol = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
         tokenizer = loaded[1] if isinstance(loaded, (tuple, list)) and len(loaded) > 1 else None
         eos_id_arg = kwargs.get("eos_token_id")
         eos_id = int(eos_id_arg) if isinstance(eos_id_arg, (int, str, float)) else None
-        sql, confidence_score = mlx_beam_search(
+        return mlx_beam_search(
             model=model,
             tokenizer=tokenizer,
             prompt=prompt,
@@ -209,19 +203,5 @@ def generate_sql(
             max_length=max_length,
             eos_token_id=eos_id,
         )
-        status = "success"
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("MLX generation failed: ")
-        sql = ""
-        confidence_score = 0.0
-        status = f"failed: {e!s}"
 
-    return {
-        "backend": "mlx",
-        "model": model_name,
-        "prompt": prompt,
-        "sql": sql,
-        "status": status,
-        "beam_width": beam_width,
-        "confidence_score": confidence_score,
-    }
+    return run_inference_wrapper("mlx", model_name, prompt, beam_width, _execute, **kwargs)

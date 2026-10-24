@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 import torch
 
@@ -35,8 +37,9 @@ class DummyConcreteCache(Cache):
 
 def test_cache_abstract_instantiation() -> None:
     """Test that Cache cannot be directly instantiated."""
+    cache_cls: Any = Cache
     with pytest.raises(TypeError, match="Can't instantiate abstract class Cache"):
-        Cache()  # type: ignore[abstract]
+        cache_cls()
 
     concrete = DummyConcreteCache(seen_tokens=5, max_batch_size=4, device=torch.device("cpu"))
     assert concrete.seen_tokens == 5

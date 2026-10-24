@@ -4,21 +4,42 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_peft import apply_lora_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType, TensorType
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
 
 logger = logging.getLogger(__name__)
 
 keras = optional_import("keras")
 ops = optional_attr("keras", "ops")
 
-_LayerBase: Any = getattr(getattr(keras, "layers", None), "Layer", object) if keras is not None else object
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import PEFTResultDict
+
+    class _LayerBase:
+        """Static base class stub representing `keras.layers.Layer` during type checking."""
+
+        built: bool
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            """Initialize layer base."""
+
+        def add_weight(self, *args: object, **kwargs: object) -> Any:
+            """Create a layer weight variable."""
+            return None
+
+        def build(self, input_shape: Any) -> None:
+            """Build layer weights for `input_shape`."""
+
+        def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            """Execute the layer forward pass."""
+            return None
+
+else:
+    _LayerBase = getattr(getattr(keras, "layers", None), "Layer", object) if keras is not None else object
 
 
 class KerasLoRADense(_LayerBase):
@@ -202,7 +223,48 @@ class KerasLoRADense(_LayerBase):
 
         delta = self.scale * ops.matmul(self.lora_a, self.lora_b)
         self.dense.kernel.assign(self.dense.kernel + delta)
+        self.dense.trainable = True
         return self.dense
+
+
+def _traverse_keras_layers(model: Any, visitor_fn: Any) -> None:
+    """Recursively traverse a Keras model or layer hierarchy with tracker lock/unlock management.
+
+    Args:
+        model: Root Keras model, layer, or container object.
+        visitor_fn: Callback `(parent_obj, attr_name, child_val, recurse_fn)` invoked for each public attribute.
+
+    """
+    visited: set[int] = set()
+
+    def _traverse(curr: Any) -> None:
+        """Traverse object attributes and invoke `visitor_fn` while unlocking Keras 3 tracker."""
+        curr_id = id(curr)
+        if curr_id in visited:
+            return
+        visited.add(curr_id)
+
+        has_tracker = hasattr(curr, "_tracker")
+        if has_tracker:
+            curr._tracker.unlock()
+
+        curr_any: Any = curr
+        try:
+            attrs: list[str] = list(vars(curr_any).keys()) if hasattr(curr_any, "__dict__") else []
+            if hasattr(curr_any, "_modules") and isinstance(curr_any._modules, dict):
+                attrs.extend(curr_any._modules.keys())
+            for attr_name in set(attrs):
+                if attr_name.startswith("_"):
+                    continue
+                val = getattr(curr_any, attr_name, None)
+                if val is None:
+                    continue
+                visitor_fn(curr_any, attr_name, val, _traverse)
+        finally:
+            if has_tracker:
+                curr_any._tracker.lock()
+
+    _traverse(model)
 
 
 def inject_lora(
@@ -238,76 +300,50 @@ def inject_lora(
         return model, 0
 
     injected_count = 0
-    visited: set[int] = set()
     adapted_ids: set[int] = set()
 
-    def _traverse(curr: Any) -> None:
-        """Traverse model hierarchy to inject LoRA wrappers on matching Dense layers."""
+    def _visit_inject(curr_any: Any, attr_name: str, val: Any, recurse_fn: Any) -> None:
+        """Visit a single attribute during LoRA injection."""
         nonlocal injected_count
-        curr_id = id(curr)
-        if curr_id in visited:
-            return
-        visited.add(curr_id)
-
-        # Unlock tracker if built in Keras 3
-        has_tracker = hasattr(curr, "_tracker")
-        if has_tracker:
-            curr._tracker.unlock()
-
-        curr_any: Any = curr
-        try:
-            attrs: list[str] = list(vars(curr_any).keys()) if hasattr(curr_any, "__dict__") else []
-            if hasattr(curr_any, "_modules") and isinstance(curr_any._modules, dict):
-                attrs.extend(curr_any._modules.keys())
-            for attr_name in set(attrs):
-                if attr_name.startswith("_"):
-                    continue
-                val = getattr(curr_any, attr_name, None)
-                if val is None:
-                    continue
-
-                dense_cls: Any = getattr(getattr(keras, "layers", None), "Dense", type(None))
-                if keras is not None and isinstance(val, dense_cls) and id(val) not in adapted_ids:
-                    if any(attr_name == t or t in attr_name or getattr(val, "name", "") == t for t in target_modules):
+        dense_cls: Any = getattr(getattr(keras, "layers", None), "Dense", type(None))
+        if keras is not None and isinstance(val, dense_cls) and id(val) not in adapted_ids:
+            if any(attr_name == t or t in attr_name or getattr(val, "name", "") == t for t in target_modules):
+                lora_layer = KerasLoRADense(
+                    dense=val,
+                    r=lora_r,
+                    lora_alpha=lora_alpha,
+                    lora_dropout=lora_dropout,
+                )
+                setattr(curr_any, attr_name, lora_layer)
+                adapted_ids.add(id(val))
+                injected_count += 1
+            else:
+                val.trainable = False
+        elif isinstance(val, list):
+            list_modified = False
+            for idx, item in enumerate(val):
+                if keras is not None and isinstance(item, dense_cls) and id(item) not in adapted_ids:
+                    if any(f"{attr_name}_{idx}" == t or getattr(item, "name", "") == t for t in target_modules):
                         lora_layer = KerasLoRADense(
-                            dense=val,
+                            dense=item,
                             r=lora_r,
                             lora_alpha=lora_alpha,
                             lora_dropout=lora_dropout,
                         )
-                        setattr(curr, attr_name, lora_layer)
-                        adapted_ids.add(id(val))
+                        val[idx] = lora_layer
+                        adapted_ids.add(id(item))
                         injected_count += 1
+                        list_modified = True
                     else:
-                        val.trainable = False
-                elif isinstance(val, list):
-                    list_modified = False
-                    for idx, item in enumerate(val):
-                        if keras is not None and isinstance(item, dense_cls) and id(item) not in adapted_ids:
-                            if any(f"{attr_name}_{idx}" == t or getattr(item, "name", "") == t for t in target_modules):
-                                lora_layer = KerasLoRADense(
-                                    dense=item,
-                                    r=lora_r,
-                                    lora_alpha=lora_alpha,
-                                    lora_dropout=lora_dropout,
-                                )
-                                val[idx] = lora_layer
-                                adapted_ids.add(id(item))
-                                injected_count += 1
-                                list_modified = True
-                            else:
-                                item.trainable = False
-                        else:
-                            _traverse(item)
-                    if list_modified:
-                        setattr(curr_any, attr_name, list(val))
-                elif hasattr(val, "__dict__"):
-                    _traverse(val)
-        finally:
-            if has_tracker:
-                curr_any._tracker.lock()
+                        item.trainable = False
+                else:
+                    recurse_fn(item)
+            if list_modified:
+                setattr(curr_any, attr_name, list(val))
+        elif hasattr(val, "__dict__"):
+            recurse_fn(val)
 
-    _traverse(model)
+    _traverse_keras_layers(model, _visit_inject)
     return model, injected_count
 
 
@@ -326,51 +362,25 @@ def merge_lora_weights(model: ModelType) -> Any:
     if not hasattr(model, "__dict__"):
         return model
 
-    visited: set[int] = set()
+    def _visit_merge(curr_any: Any, attr_name: str, val: Any, recurse_fn: Any) -> None:
+        """Visit a single attribute during LoRA weight merging."""
+        if isinstance(val, KerasLoRADense):
+            merged_dense = val.merge_weights()
+            setattr(curr_any, attr_name, merged_dense)
+        elif isinstance(val, list):
+            list_modified = False
+            for idx, item in enumerate(val):
+                if isinstance(item, KerasLoRADense):
+                    val[idx] = item.merge_weights()
+                    list_modified = True
+                else:
+                    recurse_fn(item)
+            if list_modified:
+                setattr(curr_any, attr_name, list(val))
+        elif hasattr(val, "__dict__"):
+            recurse_fn(val)
 
-    def _traverse(curr: Any) -> None:
-        """Traverse model hierarchy to merge LoRA adapters into base Dense kernels."""
-        curr_id = id(curr)
-        if curr_id in visited:
-            return
-        visited.add(curr_id)
-
-        has_tracker = hasattr(curr, "_tracker")
-        if has_tracker:
-            curr._tracker.unlock()
-
-        curr_any: Any = curr
-        try:
-            attrs: list[str] = list(vars(curr_any).keys()) if hasattr(curr_any, "__dict__") else []
-            if hasattr(curr_any, "_modules") and isinstance(curr_any._modules, dict):
-                attrs.extend(curr_any._modules.keys())
-            for attr_name in set(attrs):
-                if attr_name.startswith("_"):
-                    continue
-                val = getattr(curr_any, attr_name, None)
-                if val is None:
-                    continue
-
-                if isinstance(val, KerasLoRADense):
-                    merged_dense = val.merge_weights()
-                    setattr(curr_any, attr_name, merged_dense)
-                elif isinstance(val, list):
-                    list_modified = False
-                    for idx, item in enumerate(val):
-                        if isinstance(item, KerasLoRADense):
-                            val[idx] = item.merge_weights()
-                            list_modified = True
-                        else:
-                            _traverse(item)
-                    if list_modified:
-                        setattr(curr_any, attr_name, list(val))
-                elif hasattr(val, "__dict__"):
-                    _traverse(val)
-        finally:
-            if has_tracker:
-                curr_any._tracker.lock()
-
-    _traverse(model)
+    _traverse_keras_layers(model, _visit_merge)
     return model
 
 
@@ -396,7 +406,7 @@ def apply_lora(
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     **kwargs: object,
-) -> JSONDict:
+) -> PEFTResultDict:
     """Apply LoRA to a model using the Keras backend.
 
     Args:
@@ -414,12 +424,11 @@ def apply_lora(
         DependencyMissingError: If Keras dependencies are missing.
 
     """
-    status = "completed"
     if keras is None:
         raise DependencyMissingError("Keras dependencies are missing.")
 
-    injected_count = 0
-    try:
+    def _inject() -> int:
+        """Load or reuse Keras model and inject or merge LoRA weights."""
         if "model" in kwargs and kwargs["model"] is not None:
             model = kwargs["model"]
         else:
@@ -431,7 +440,6 @@ def apply_lora(
         model_any: Any = model
         if hasattr(model_any, "backbone") and hasattr(model_any.backbone, "enable_lora"):
             model_any.backbone.enable_lora(rank=lora_r)
-            # Explicitly freeze non-adapter layers
             for layer in getattr(model_any.backbone, "layers", []):
                 if not getattr(layer, "trainable_variables", []):
                     layer.trainable = False
@@ -439,7 +447,7 @@ def apply_lora(
             injected_count = len(target_modules)
         else:
             model, injected_count = inject_lora(
-                model=cast(ModelType, model),
+                model=model_any,
                 target_modules=target_modules,
                 lora_r=lora_r,
                 lora_alpha=lora_alpha,
@@ -447,28 +455,16 @@ def apply_lora(
             )
 
         if kwargs.get("merge"):
-            model = merge_lora_weights(cast(ModelType, model))
+            _ = merge_lora_weights(model_any)
+        return injected_count
 
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, ImportError) as e:
-        logger.exception("Keras LoRA error: ")
-        if kwargs.get("raise_on_error"):
-            raise TrainingError(
-                f"Keras PEFT failed: {e!s}",
-                backend="keras",
-                model_name=model_name,
-                operation="apply_lora",
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
-
-    return {
-        "backend": "keras",
-        "action": "apply_lora",
-        "model": model_name,
-        "target_modules": target_modules,
-        "lora_r": lora_r,
-        "lora_alpha": lora_alpha,
-        "lora_dropout": lora_dropout,
-        "status": status,
-        "injected_modules": injected_count,
-    }
+    return apply_lora_wrapper(
+        "keras",
+        model_name,
+        target_modules,
+        lora_r,
+        lora_alpha,
+        lora_dropout,
+        _inject,
+        **kwargs,
+    )

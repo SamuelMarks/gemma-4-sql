@@ -60,7 +60,7 @@ def test_real_tiny_pytorch_training_step() -> None:
         "inputs": torch.tensor([[1, 2, 3, 4]], dtype=torch.long),
         "targets": torch.tensor([[2, 3, 4, 5]], dtype=torch.long),
     }
-    state = TrainerState(
+    state: Any = TrainerState(
         policy_model=model,
         optimizer=optimizer,
         criterion=criterion,
@@ -160,7 +160,7 @@ def test_run_training_epochs() -> None:
     tuple_model = TupleTinyLM()
     w_before = tuple_model.head.weight.detach().clone()
     opt1 = torch.optim.SGD(tuple_model.parameters(), lr=0.1)
-    state1 = TrainerState(
+    state1: Any = TrainerState(
         policy_model=tuple_model,
         optimizer=opt1,
         criterion=torch.nn.CrossEntropyLoss(),
@@ -175,7 +175,7 @@ def test_run_training_epochs() -> None:
     obj_model = ObjectTinyLM()
     w2_before = obj_model.head.weight.detach().clone()
     opt2 = torch.optim.SGD(obj_model.parameters(), lr=0.1)
-    state2 = TrainerState(
+    state2: Any = TrainerState(
         policy_model=obj_model,
         optimizer=opt2,
         criterion=torch.nn.CrossEntropyLoss(),
@@ -198,13 +198,14 @@ def test_wrap_model_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
         mock_torch = MagicMock()
         mock_torch.cuda.is_available.return_value = True
         monkeypatch.setattr(train_module, "torch", mock_torch)
-        train_module._wrap_model_distributed("m", "ddp", 0)  # type: ignore[arg-type]
+        m_stub: Any = "m"
+        train_module._wrap_model_distributed(m_stub, "ddp", 0)
 
         mock_fsdp = MagicMock()
         mock_import.return_value.FullyShardedDataParallel = mock_fsdp
-        train_module._wrap_model_distributed("m", "fsdp", 0)  # type: ignore[arg-type]
+        train_module._wrap_model_distributed(m_stub, "fsdp", 0)
 
-        res = train_module._wrap_model_distributed("m", "none", 0)  # type: ignore[arg-type]
+        res = train_module._wrap_model_distributed(m_stub, "none", 0)
         assert res == "m"
 
 

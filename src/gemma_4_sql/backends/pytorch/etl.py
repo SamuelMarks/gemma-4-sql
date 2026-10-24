@@ -8,6 +8,7 @@ from typing import Any
 from gemma_4_sql.backends.common_data import (
     load_duckdb_dataset,
     load_hf_or_duckdb_dataset,
+    tokenize_dataset_element,
 )
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
@@ -62,31 +63,16 @@ def _get_pytorch_classes() -> Any:
                 Dictionary of input/target tensors and optional multimodal features.
 
             """
-            from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt, process_audio, process_image
-
             element = self._ds[idx]
-            prompt = str(element.get("sql_prompt", element.get("question", "")))
-            target = str(element.get("sql", element.get("query", "")))
-
-            image_input = element.get("image_bytes") or element.get("image_url") or element.get("image")
-            audio_input = element.get("audio_clip") or element.get("audio")
-
-            formatted = format_multimodal_prompt(
-                prompt,
-                has_image=image_input is not None,
-                has_audio=audio_input is not None,
-            )
-            prompt_str = str(formatted.get("prompt", prompt))
+            tokenized = tokenize_dataset_element(element, self.tokenizer, process_multimodal=True)
             res: JSONDict = {
-                "inputs": torch.tensor(self.tokenizer.encode(prompt_str), dtype=torch.long),
-                "targets": torch.tensor(self.tokenizer.encode(target), dtype=torch.long),
+                "inputs": torch.tensor(tokenized["inputs"], dtype=torch.long),
+                "targets": torch.tensor(tokenized["targets"], dtype=torch.long),
             }
-            if image_input is not None:
-                img_data = process_image(image_input)
-                res["pixel_values"] = torch.tensor(img_data["pixel_values"], dtype=torch.float32)
-            if audio_input is not None:
-                aud_data = process_audio(audio_input)
-                res["audio_values"] = torch.tensor(aud_data["audio_values"], dtype=torch.float32)
+            if "pixel_values" in tokenized:
+                res["pixel_values"] = torch.tensor(tokenized["pixel_values"], dtype=torch.float32)
+            if "audio_values" in tokenized:
+                res["audio_values"] = torch.tensor(tokenized["audio_values"], dtype=torch.float32)
             return res
 
     return PyTorchDataset

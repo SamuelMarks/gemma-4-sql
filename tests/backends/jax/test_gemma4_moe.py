@@ -12,7 +12,7 @@ from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
 from gemma_4_sql.backends.jax.gemma4.moe import Gemma4MoE, Gemma4RoutedExperts
 
 
-def test_gemma4_routed_experts():
+def test_gemma4_routed_experts() -> None:
     """Verify gemma4 routed experts behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
@@ -30,7 +30,7 @@ def test_gemma4_routed_experts():
     assert out.shape == (2, 10, 64)
 
 
-def test_gemma4_routed_experts_moe_intermediate():
+def test_gemma4_routed_experts_moe_intermediate() -> None:
     """Verify gemma4 routed experts moe intermediate behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
@@ -49,7 +49,7 @@ def test_gemma4_routed_experts_moe_intermediate():
     assert out.shape == (2, 10, 64)
 
 
-def test_gemma4_moe():
+def test_gemma4_moe() -> None:
     """Verify gemma4 moe behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
@@ -66,7 +66,7 @@ def test_gemma4_moe():
     assert out.shape == (2, 10, 64)
 
 
-def test_gemma4_moe_no_gate_logits():
+def test_gemma4_moe_no_gate_logits() -> None:
     """Verify gemma4 moe no gate logits behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
@@ -84,7 +84,7 @@ def test_gemma4_moe_no_gate_logits():
     assert out.shape == (2, 10, 64)
 
 
-def test_gemma4_moe_no_gate_attr():
+def test_gemma4_moe_no_gate_attr() -> None:
     """Verify gemma4 moe no gate attr behavior."""
     # Simulate if gate is somehow missing or None
     rngs = nnx.Rngs(0)

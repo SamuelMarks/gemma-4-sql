@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_dpo import run_dpo_wrapper
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
+from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import DPOConfig, ETLConfig, MaxTextCausalLMProtocol, MaxTextTrainerState, TensorType, TrainerState
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -51,7 +52,7 @@ def dpo_loss(
 
 
 def _compute_logps(
-    model: ModelType,
+    model: MaxTextCausalLMProtocol,
     params: dict[str, TensorType],
     inputs: TensorType,
     labels: TensorType,
@@ -80,14 +81,16 @@ def _compute_logps(
         selected_log_probs = jnp.squeeze(jnp.take_along_axis(log_probs, labels_expanded, axis=-1), axis=-1)
         labels_any: Any = labels
         mask = labels_any != 0
-        return cast(TensorType, jnp.sum(selected_log_probs * mask, axis=-1))
-    return cast(TensorType, jnp.sum(logits * labels, axis=-1) if jnp is not None else logits)
+        summed: TensorType = jnp.sum(selected_log_probs * mask, axis=-1)
+        return summed
+    fallback: TensorType = jnp.sum(logits * labels, axis=-1) if jnp is not None else logits
+    return fallback
 
 
 def _dpo_step_loss(
-    policy_model: ModelType,
+    policy_model: MaxTextCausalLMProtocol,
     policy_params: dict[str, TensorType],
-    ref_model: ModelType,
+    ref_model: MaxTextCausalLMProtocol,
     ref_params: dict[str, TensorType],
     batch: Mapping[str, TensorType],
     beta: float,
@@ -115,8 +118,8 @@ def _dpo_step_loss(
 
 
 def _get_train_step_fn(
-    policy_model: ModelType,
-    ref_model: ModelType,
+    policy_model: MaxTextCausalLMProtocol,
+    ref_model: MaxTextCausalLMProtocol,
     optimizer: object,
     beta: float,
 ) -> Callable[..., tuple[Any, Any, Any]]:
@@ -167,16 +170,16 @@ def _get_train_step_fn(
         return (updated_params, new_opt_state, loss)
 
     if jax is not None and hasattr(jax, "jit"):
-        jit_fn: Any = jax.jit(train_step)
+        jit_fn: Callable[..., tuple[Any, Any, Any]] = jax.jit(train_step)
         return jit_fn
     return train_step
 
 
-def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> tuple[Any, Any, float]:
+def _run_training_epochs(state: MaxTextTrainerState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> tuple[Any, Any, float]:
     """Run DPO training epochs for MaxText.
 
     Args:
-        state: Trainer state containing dataloader and parameters.
+        state: MaxTextTrainerState containing dataloader and parameters.
 
     Returns:
         A 3-tuple of `(policy_params, opt_state, final_loss)`.
@@ -245,14 +248,14 @@ def _execute_dpo(
     opt_state = optimizer.init(policy_params)
     train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
-    dataloader = data_dict.get("loader", None)
+    dataloader: Any = data_dict.get("loader", None)
 
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
     (policy_params, opt_state, final_loss) = _run_training_epochs(
-        TrainerState(
-            dataloader=cast("Iterable[object]", dataloader),
+        MaxTextTrainerState(
+            dataloader=dataloader,
             epochs=epochs,
             train_step=train_step,
             policy_params=policy_params,
@@ -278,45 +281,11 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
         TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
-    model_name = getattr(config, "model_name", "model")
-    dataset = getattr(config, "dataset", "dataset")
-    beta = getattr(config, "beta", 0.1)
-    epochs = getattr(config, "epochs", 1)
-    learning_rate = getattr(config, "learning_rate", 1e-05)
-    extra = getattr(config, "extra_kwargs", {}) or {}
-    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
-
-    final_loss = 0.0
-    status = "completed"
     if jax is None or jnp is None or optax is None or Gemma4Model is None:
         raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
-    try:
-        batch_size = getattr(config, "batch_size", 2)
-        status, final_loss = _execute_dpo(
-            model_name,
-            dataset,
-            beta,
-            epochs,
-            learning_rate,
-            batch_size=batch_size,
-        )
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        logger.exception("DPO Train error: ")
-        if raise_on_error:
-            raise TrainingError(
-                f"MaxText DPO failed: {e!s}",
-                backend="maxtext",
-                model_name=model_name,
-                operation="dpo",
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
-    return {
-        "backend": "maxtext",
-        "action": "dpo",
-        "model": model_name,
-        "dataset": dataset,
-        "beta": beta,
-        "status": status,
-        "final_loss": final_loss,
-    }
+    return run_dpo_wrapper(
+        "maxtext",
+        config,
+        lambda m, d, b, ep, lr, bs: _execute_dpo(m, d, b, ep, lr, batch_size=bs),
+        **kwargs,
+    )

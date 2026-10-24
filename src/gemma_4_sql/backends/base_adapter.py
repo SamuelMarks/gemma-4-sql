@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import sys
-from typing import TYPE_CHECKING, Any, TypeVar, cast
+import importlib
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from gemma_4_sql.sdk.protocols import BackendProtocol
 
@@ -36,7 +36,6 @@ if TYPE_CHECKING:
     )
 
 TSubmod = TypeVar("TSubmod")
-TVal = TypeVar("TVal")
 
 
 class ModuleDelegatedBackend(BackendProtocol):
@@ -50,8 +49,9 @@ class ModuleDelegatedBackend(BackendProtocol):
 
         """
         self.backend_alias = backend_alias
+        self._adapter_module = importlib.import_module(self.__class__.__module__)
 
-    def _inject_alias(self, kwargs: dict[str, TVal]) -> dict[str, TVal]:
+    def _inject_alias(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """Inject `backend_alias` into `kwargs` if configured and not already present.
 
         Args:
@@ -64,7 +64,7 @@ class ModuleDelegatedBackend(BackendProtocol):
         if self.backend_alias is not None and "backend_alias" not in kwargs:
             merged: dict[str, Any] = dict(kwargs)
             merged["backend_alias"] = self.backend_alias
-            return cast("dict[str, TVal]", merged)
+            return merged
         return kwargs
 
     def _get_submodule(self, attr_name: str, _protocol_cls: type[TSubmod] | object = object) -> TSubmod:
@@ -78,8 +78,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             The resolved submodule object satisfying `TSubmod`.
 
         """
-        adapter_mod = sys.modules[self.__class__.__module__]
-        submod: TSubmod = getattr(adapter_mod, attr_name)
+        submod: TSubmod = getattr(self._adapter_module, attr_name)
         return submod
 
     def train_model(self, config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
@@ -247,7 +246,7 @@ class ModuleDelegatedBackend(BackendProtocol):
         model_name: str,
         hardware: str = "tpu-v5p",
         batch_size: int = 32,
-        **kwargs: object,
+        **kwargs: JSONValue,
     ) -> BenchmarkResultDict:
         """Run latency, throughput, and memory benchmarking.
 
@@ -263,6 +262,21 @@ class ModuleDelegatedBackend(BackendProtocol):
         """
         mod: BenchmarkSubmoduleProtocol = self._get_submodule("benchmark")
         return mod.benchmark_model(model_name, hardware, batch_size, **self._inject_alias(kwargs))
+
+    def get_trainer(self, **_kwargs: object) -> str:
+        """Return the canonical trainer identifier from the parent backend package.
+
+        Args:
+            **_kwargs: Optional backend-specific keyword arguments.
+
+        Returns:
+            Trainer identifier string (e.g., `'jax_trainer'`).
+
+        """
+        pkg_name = self.__class__.__module__.rsplit(".", 1)[0]
+        pkg_mod = importlib.import_module(pkg_name)
+        trainer_fn = getattr(pkg_mod, "get_trainer", None)
+        return str(trainer_fn()) if callable(trainer_fn) else f"{pkg_name.rsplit('.', 1)[-1]}_trainer"
 
 
 __all__ = ["ModuleDelegatedBackend"]

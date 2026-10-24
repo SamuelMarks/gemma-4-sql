@@ -13,17 +13,16 @@ from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ETLConfig
 
 
-def test_mlx_etl_imports():
+def test_mlx_etl_imports() -> None:
     """Test mlx etl imports fallback."""
     with patch.dict(sys.modules, {"datasets": None}):
-        if "gemma_4_sql.backends.mlx.etl" in sys.modules:
-            del sys.modules["gemma_4_sql.backends.mlx.etl"]
+        sys.modules.pop("gemma_4_sql.backends.mlx.etl", None)
         import gemma_4_sql.backends.mlx.etl as etl_module
 
         assert etl_module.datasets is None
 
 
-def test_pad_batch():
+def test_pad_batch() -> None:
     """Test _pad_batch."""
     import gemma_4_sql.backends.mlx.etl as etl_module
 
@@ -36,7 +35,7 @@ def test_pad_batch():
     assert res["targets"] == [[4, 0], [4, 5]]
 
 
-def test_mlx_data_loader():
+def test_mlx_data_loader() -> None:
     """Test MLXDataLoader."""
     import gemma_4_sql.backends.mlx.etl as etl_module
 
@@ -57,7 +56,7 @@ def test_mlx_data_loader():
     assert list(empty_loader) == []
 
 
-def test_load_hf_or_duckdb():
+def test_load_hf_or_duckdb() -> None:
     """Test _load_hf_or_duckdb."""
     import gemma_4_sql.backends.mlx.etl as etl_module
 
@@ -78,7 +77,7 @@ def test_load_hf_or_duckdb():
         etl_module._load_hf_or_duckdb("ds", "split", None, None)
 
 
-def test_build_dataloader():
+def test_build_dataloader() -> None:
     """Test build_dataloader."""
     import gemma_4_sql.backends.mlx.etl as etl_module
 

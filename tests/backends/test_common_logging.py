@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 
 import pytest
 
@@ -12,17 +12,17 @@ from gemma_4_sql.backends.common_logging import log_metrics_wrapper
 class MockWriterWithClose:
     """Test stub for `MockWriterWithClose`."""
 
-    def __init__(self, log_dir: Any):
+    def __init__(self, log_dir: Any) -> None:
         """Initialize test stub instance."""
         self.log_dir = log_dir
-        self.scalars = []
+        self.scalars: list[Any] = []
         self.closed = False
 
-    def add_scalar(self, tag: Any, scalar_value: Any, global_step: Any):
+    def add_scalar(self, tag: Any, scalar_value: Any, global_step: Any) -> None:
         """Provide add scalar test helper."""
         self.scalars.append((tag, scalar_value, global_step))
 
-    def close(self):
+    def close(self) -> None:
         """Provide close test helper."""
         self.closed = True
 
@@ -30,17 +30,17 @@ class MockWriterWithClose:
 class MockWriterWithoutClose:
     """Test stub for `MockWriterWithoutClose`."""
 
-    def __init__(self, log_dir: Any):
+    def __init__(self, log_dir: Any) -> None:
         """Initialize test stub instance."""
         self.log_dir = log_dir
-        self.scalars = []
+        self.scalars: list[Any] = []
 
-    def add_scalar(self, tag: Any, scalar_value: Any, global_step: Any):
+    def add_scalar(self, tag: Any, scalar_value: Any, global_step: Any) -> None:
         """Provide add scalar test helper."""
         self.scalars.append((tag, scalar_value, global_step))
 
 
-def test_log_metrics_wrapper_with_writer_with_close(tmp_path: Path):
+def test_log_metrics_wrapper_with_writer_with_close(tmp_path: Path) -> None:
     """Verify log metrics wrapper with writer with close behavior."""
     log_dir = str(tmp_path / "logs")
     metrics = {"loss": 0.5, "accuracy": 0.9}
@@ -51,7 +51,7 @@ def test_log_metrics_wrapper_with_writer_with_close(tmp_path: Path):
     class FactoryWithClose:
         """Test stub for `FactoryWithClose`."""
 
-        def __new__(cls, log_dir: Any):
+        def __new__(cls, log_dir: Any) -> Any:
             """Provide new   test helper."""
             inst = MockWriterWithClose(log_dir)
             writer_instances.append(inst)
@@ -74,7 +74,7 @@ def test_log_metrics_wrapper_with_writer_with_close(tmp_path: Path):
     assert ("accuracy", 0.9, 10) in writer.scalars
 
 
-def test_log_metrics_wrapper_with_writer_without_close(tmp_path: Path):
+def test_log_metrics_wrapper_with_writer_without_close(tmp_path: Path) -> None:
     """Verify log metrics wrapper with writer without close behavior."""
     log_dir = str(tmp_path / "logs")
     metrics = {"loss": 0.3}
@@ -84,7 +84,7 @@ def test_log_metrics_wrapper_with_writer_without_close(tmp_path: Path):
     class FactoryWithoutClose:
         """Test stub for `FactoryWithoutClose`."""
 
-        def __new__(cls, log_dir: Any):
+        def __new__(cls, log_dir: Any) -> Any:
             """Provide new   test helper."""
             inst = MockWriterWithoutClose(log_dir)
             writer_instances.append(inst)
@@ -108,7 +108,7 @@ def test_log_metrics_wrapper_with_writer_without_close(tmp_path: Path):
     assert ("loss", 0.3, 5) in writer.scalars
 
 
-def test_log_metrics_wrapper_without_writer_fallback(tmp_path: Path):
+def test_log_metrics_wrapper_without_writer_fallback(tmp_path: Path) -> None:
     """Verify log metrics wrapper without writer fallback behavior."""
     log_dir = str(tmp_path / "logs")
     metrics = {"val_loss": 0.8}
@@ -138,7 +138,7 @@ def test_log_metrics_wrapper_without_writer_fallback(tmp_path: Path):
     assert "timestamp" in record
 
 
-def test_log_metrics_wrapper_without_writer_fallback_minimal(tmp_path: Path):
+def test_log_metrics_wrapper_without_writer_fallback_minimal(tmp_path: Path) -> None:
     """Verify log metrics wrapper without writer fallback minimal behavior."""
     log_dir = str(tmp_path / "logs_minimal")
     metrics = {"val_loss": 1.2}
@@ -164,7 +164,7 @@ def test_log_metrics_wrapper_without_writer_fallback_minimal(tmp_path: Path):
     assert "step_duration_s" not in record
 
 
-def test_log_metrics_wrapper_writer_closes_on_error(tmp_path: Path):
+def test_log_metrics_wrapper_writer_closes_on_error(tmp_path: Path) -> None:
     """Verify log metrics wrapper writer closes on error behavior."""
     log_dir = str(tmp_path / "logs_err")
     metrics = {"loss": 0.1}
@@ -174,12 +174,12 @@ def test_log_metrics_wrapper_writer_closes_on_error(tmp_path: Path):
     class FailingWriterWithClose(MockWriterWithClose):
         """Test stub for `FailingWriterWithClose`."""
 
-        def __init__(self, log_dir: Any):
+        def __init__(self, log_dir: Any) -> None:
             """Initialize test stub instance."""
             super().__init__(log_dir)
             writer_instances.append(self)
 
-        def add_scalar(self, tag: Any, scalar_value: Any, global_step: Any):
+        def add_scalar(self, tag: Any, scalar_value: Any, global_step: Any) -> Never:
             """Provide add scalar test helper."""
             raise ValueError("Intentional error")
 

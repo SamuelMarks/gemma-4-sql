@@ -12,7 +12,7 @@ from flax import nnx
 from gemma_4_sql.backends.jax.gemma4.audio import Gemma4AudioLayer, Gemma4AudioModel
 
 
-def get_mock_audio_config():
+def get_mock_audio_config() -> MagicMock:
     """Provide get mock audio config test helper."""
     config = MagicMock()
     config.hidden_size = 16
@@ -34,7 +34,7 @@ def get_mock_audio_config():
     return config
 
 
-def test_gemma4_audio_layer():
+def test_gemma4_audio_layer() -> None:
     """Verify gemma4 audio layer behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
@@ -47,56 +47,29 @@ def test_gemma4_audio_layer():
     assert out.shape == (2, 4, 16)
 
 
-def test_gemma4_audio_model():
+def test_gemma4_audio_model() -> None:
     """Verify gemma4 audio model behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     model = Gemma4AudioModel(config, rngs=rngs)
 
-    # Subsampling expects input like (batch, channel, seq_len, feat)
-    # Actually wait: subsampling does `jnp.expand_dims(x, 1)` -> `(batch, 1, seq_len, feat)`
-    # Wait, the shape for x is typically (batch_size, seq_len, feat_dim)
     input_features = jnp.ones((2, 8, 4))
 
     out = model(input_features)
-    assert out.shape == (2, 2, 8)  # subsampled seq_len will be 8/4 = 2, output_proj_dims=8
+    assert out.shape == (2, 2, 8)
 
-    # with mask
     mask = jnp.ones((2, 8))
     out_mask = model(input_features, attention_mask=mask)
     assert out_mask.shape == (2, 2, 8)
 
 
-def test_gemma4_audio_layer_clipped():
+def test_gemma4_audio_layer_clipped() -> None:
     """Verify gemma4 audio layer clipped behavior."""
     config = get_mock_audio_config()
     config.use_clipped_linears = True
-    from flax import nnx
-
     rngs = nnx.Rngs(0)
-    import jax.numpy as jnp
-
-    from gemma_4_sql.backends.jax.gemma4.audio import Gemma4AudioLayer
-
     layer = Gemma4AudioLayer(config, rngs=rngs)
     x = jnp.ones((2, 4, 16))
     pos_emb = jnp.ones((1, 4, 16))
     out = layer(x, pos_emb)
     assert out.shape == (2, 4, 16)
-
-
-def test_gemma4_audio_model_with_mask():
-    """Verify gemma4 audio model with mask behavior."""
-    config = get_mock_audio_config()
-    from flax import nnx
-
-    rngs = nnx.Rngs(0)
-    import jax.numpy as jnp
-
-    from gemma_4_sql.backends.jax.gemma4.audio import Gemma4AudioModel
-
-    model = Gemma4AudioModel(config, rngs=rngs)
-    input_features = jnp.ones((2, 8, 4))
-    mask = jnp.ones((2, 8))
-    out = model(input_features, mask)
-    assert len(out.shape) == 3 and out.shape[:2] == (2, 2)

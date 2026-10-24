@@ -211,6 +211,9 @@ def test_run_evaluation_inference_max_batches() -> None:
     preds_custom, _, _ = _run_evaluation_inference("model", "dataset", backend_impl, max_batches=4)
     assert len(preds_custom) == 4
 
+    preds_all, _, _ = _run_evaluation_inference("model", "dataset", backend_impl, max_batches=0)
+    assert len(preds_all) == 15
+
 
 def test_evaluate_with_db_kwargs_and_ddl() -> None:
     """Verify evaluate initializes schema DDL and executes queries against the live engine."""

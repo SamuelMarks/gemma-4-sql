@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
-from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -97,19 +96,19 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
         """Configure Keras dtype policy, quantize layer weights, and optionally save artifact."""
         nonlocal quantized_layers_count, export_file
         logger.info("Setting Keras model dtype policy to %s", policy_name)
-        if hasattr(keras, "dtype_policies") and hasattr(keras.dtype_policies, "set_dtype_policy"):
-            keras.dtype_policies.set_dtype_policy(policy_name)
-        elif hasattr(keras, "config") and hasattr(keras.config, "set_dtype_policy"):
+        if hasattr(keras, "config") and hasattr(keras.config, "set_dtype_policy"):
             keras.config.set_dtype_policy(policy_name)
+        elif hasattr(keras, "dtype_policies") and hasattr(keras.dtype_policies, "set_dtype_policy"):
+            keras.dtype_policies.set_dtype_policy(policy_name)
 
-        model: ModelType | None = cast("ModelType | None", kwargs.get("model"))
+        model: Any = kwargs.get("model")
         if model is None:
             try:
                 gemma_causal_lm_cls = optional_attr("keras_nlp.models", "GemmaCausalLM")
                 if gemma_causal_lm_cls is not None:
                     model = gemma_causal_lm_cls.from_preset(model_name)
-            except (ImportError, ValueError, RuntimeError, AttributeError, OSError):
-                model = None
+            except (ImportError, ValueError, RuntimeError, AttributeError, OSError) as err:
+                logger.debug("Preset loading skipped during Keras quantization: %s", err)
 
         if model is not None:
             layers = getattr(model, "layers", [])

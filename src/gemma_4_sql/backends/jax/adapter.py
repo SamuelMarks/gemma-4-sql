@@ -11,7 +11,10 @@ class JaxBackend(ModuleDelegatedBackend):
     """JAX implementation of BackendProtocol."""
 
 
+ADAPTER_CLASS = JaxBackend
+
 __all__ = [
+    "ADAPTER_CLASS",
     "JaxBackend",
     "benchmark",
     "dpo",

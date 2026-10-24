@@ -80,8 +80,9 @@ async def test_snowflake_adapter_execution(
             msg = "Simulated"
             raise snowflake_error_cls(msg)
 
-        conn.cursor = MagicMock()  # type: ignore[method-assign]
-        conn.cursor.return_value.execute = mock_fail
+        mock_cur_fn = MagicMock()
+        mock_cur_fn.return_value.execute = mock_fail
+        setattr(conn, "cursor", mock_cur_fn)
         suc, res, err = await adapter.execute_with_feedback_async("FAIL")
         assert suc is False
         assert "Simulated" in str(err)
@@ -91,15 +92,21 @@ async def test_snowflake_adapter_execution(
 
 
 @pytest.mark.asyncio
-async def test_snowflake_adapter_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_snowflake_adapter_missing_deps(
+    fake_snowflake_module: tuple[MagicMock, FakeDBConnection, type[Exception]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Verify SnowflakeAdapter raises DependencyMissingError when snowflake-connector-python is missing."""
+    mock_snowflake, _, _ = fake_snowflake_module
+    monkeypatch.setattr(sa, "snowflake", mock_snowflake)
+    adapter = sa.SnowflakeAdapter("path", {})
+
     monkeypatch.setattr(sa, "snowflake", None)
     with pytest.raises(DependencyMissingError, match="snowflake-connector-python is required"):
         sa.SnowflakeAdapter("path", {})
 
-    with patch.dict("sys.modules", {"snowflake.connector": None}), patch.object(sa.SnowflakeAdapter, "__init__", return_value=None):
-        dummy_adapter = sa.SnowflakeAdapter("path", {})
-        assert Exception in dummy_adapter.error_classes
+    with patch.dict("sys.modules", {"snowflake.connector": None}):
+        assert Exception in adapter.error_classes
 
 
 def test_snowflake_adapter_schema(

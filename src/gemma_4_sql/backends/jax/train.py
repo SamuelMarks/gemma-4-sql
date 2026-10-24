@@ -4,11 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.backends.common_train import generic_run_training_epochs
+from gemma_4_sql.backends.common_train import (
+    apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
+)
+from gemma_4_sql.backends.common_train import (
+    create_nnx_optimizer,
+    generic_run_training_epochs,
+    run_train_wrapper,
+)
 from gemma_4_sql.backends.jax.etl import build_dataloader
+from gemma_4_sql.backends.jax.gemma4.config import resolve_gemma4_config
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import ETLConfig, ModelType, TrainerState, TrainingConfig
+from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import ETLConfig, JaxCausalLMProtocol, TrainerState, TrainingConfig, TrainingLoopState
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -34,28 +42,10 @@ def _create_nnx_optimizer(model: Any, tx: Any) -> Any:
         Configured `nnx.Optimizer` instance.
 
     """
-    try:
-        return nnx.Optimizer(model, tx, wrt=nnx.Param)
-    except TypeError:
-        return nnx.Optimizer(model, tx)
+    return create_nnx_optimizer(nnx, model, tx)
 
 
-def _apply_nnx_optimizer_update(optimizer: Any, model: Any, grads: Any) -> None:
-    """Apply gradient updates on an `nnx.Optimizer` across Flax NNX versions.
-
-    Args:
-        optimizer: Flax NNX optimizer instance.
-        model: Flax NNX module being optimized.
-        grads: Computed gradient PyTree.
-
-    """
-    try:
-        optimizer.update(model, grads)
-    except TypeError:
-        optimizer.update(grads)
-
-
-def _loss_fn(model: ModelType, batch: JSONDict) -> Any:
+def _loss_fn(model: JaxCausalLMProtocol, batch: JSONDict) -> Any:
     """Compute the mean cross-entropy loss for the model on a given token batch.
 
     Args:
@@ -95,7 +85,7 @@ def _get_train_step_fn() -> Callable[..., Any]:
             backend="jax",
         )
 
-    def train_step(model: ModelType, optimizer: Any, batch: JSONDict) -> Any:
+    def train_step(model: JaxCausalLMProtocol, optimizer: Any, batch: JSONDict) -> Any:
         """Execute a single JAX-compiled training step.
 
         Args:
@@ -112,15 +102,16 @@ def _get_train_step_fn() -> Callable[..., Any]:
         return loss
 
     if hasattr(nnx, "jit"):
-        return nnx.jit(train_step)
+        jit_fn: Callable[..., Any] = nnx.jit(train_step)
+        return jit_fn
     return train_step
 
 
-def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
+def _run_training_epochs(state: TrainingLoopState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> float:
     """Run supervised training epochs over the JAX dataloader.
 
     Args:
-        state: `TrainerState` holding dataloader, model, optimizer, sharding, and step function.
+        state: `TrainingLoopState` holding dataloader, model, optimizer, sharding, and step function.
 
     Returns:
         Mean batch loss from the final epoch.
@@ -128,6 +119,8 @@ def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
     """
     dataloader: Any = state.dataloader or ()
     train_step = state.train_step
+    model = state.model if isinstance(state, TrainingLoopState) else state.policy_model
+    sharding = state.sharding if isinstance(state, TrainingLoopState) else state.params
 
     def process_batch(batch: dict[str, Any]) -> float:
         """Place batch tensors onto target sharding and execute one training step.
@@ -139,10 +132,10 @@ def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
             Scalar batch loss as a float.
 
         """
-        batch["inputs"] = jax.device_put(batch["inputs"], state.params)
-        batch["targets"] = jax.device_put(batch["targets"], state.params)
+        batch["inputs"] = jax.device_put(batch["inputs"], sharding)
+        batch["targets"] = jax.device_put(batch["targets"], sharding)
         assert train_step is not None
-        loss = train_step(state.policy_model, state.optimizer, batch)
+        loss = train_step(model, state.optimizer, batch)
         return float(loss.item() if hasattr(loss, "item") else loss)
 
     return generic_run_training_epochs(state.epochs, dataloader, process_batch)
@@ -158,7 +151,7 @@ def _resolve_gemma4_config(model_name: str) -> Any:
         Resolved `Gemma4Config` object.
 
     """
-    return Gemma4Config.from_preset(model_name) if hasattr(Gemma4Config, "from_preset") else Gemma4Config.gemma4_e2b()
+    return resolve_gemma4_config(Gemma4Config, model_name)
 
 
 def _execute_train(
@@ -205,13 +198,13 @@ def _execute_train(
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
     final_loss = _run_training_epochs(
-        TrainerState(
+        TrainingLoopState(
             dataloader=dataloader,
             epochs=epochs,
-            policy_model=model,
+            model=model,
             optimizer=optimizer,
             train_step=train_step,
-            params=sharding,
+            sharding=sharding,
         )
     )
     return "completed", final_loss
@@ -232,31 +225,17 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
         TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
-    action = getattr(config, "action", "sft")
+    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:
+        raise DependencyMissingError("JAX dependencies are missing for training.", backend="jax")
+
     model_name = getattr(config, "model_name", "gemma-4")
     dataset = getattr(config, "dataset", "dataset")
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-4)
     batch_size = getattr(config, "batch_size", 2)
-    extra = getattr(config, "extra_kwargs", {}) or {}
-    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
-
-    final_loss = 0.0
-    status = "completed"
-    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:
-        raise DependencyMissingError("JAX dependencies are missing for training.", backend="jax")
-
-    try:
-        status, final_loss = _execute_train(dataset, epochs, learning_rate, batch_size=batch_size, model_name=model_name)
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        if raise_on_error:
-            raise TrainingError(
-                f"JAX training failed: {e!s}",
-                backend="jax",
-                model_name=model_name,
-                operation=action,
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
-
-    return {"backend": "jax", "action": action, "model": model_name, "dataset": dataset, "epochs": epochs, "learning_rate": learning_rate, "status": status, "final_loss": float(final_loss)}
+    return run_train_wrapper(
+        "jax",
+        config,
+        lambda: _execute_train(dataset, epochs, learning_rate, batch_size=batch_size, model_name=model_name),
+        **kwargs,
+    )

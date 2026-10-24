@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
-from gemma_4_sql.type_hints import ModelType, TensorType
+from gemma_4_sql.type_hints import TensorType
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import QuantizeResultDict
@@ -188,12 +188,12 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
         except ImportError as exc:
             raise DependencyMissingError(f"mlx and mlx_lm are required for MLX quantization: {exc!s}") from exc
 
-        model: ModelType | None = cast("ModelType | None", kwargs.get("model"))
+        model: Any = kwargs.get("model")
         if model is None:
             try:
                 loaded: Any = mlx_lm.load(model_name)
                 model = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
-            except Exception as exc:
+            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, ImportError) as exc:
                 logger.warning("mlx_lm.load failed for model '%s': %s", model_name, exc)
                 raise RuntimeError(f"MLX quantization failed: {exc!s}") from exc
 
@@ -217,8 +217,8 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
             raw_w = getattr(model, "weight", None)
             w_arr: Any = np.array(raw_w, dtype=np.float32) if (np is not None and raw_w is not None and hasattr(raw_w, "shape") and len(raw_w.shape) == 2) else (np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64)
             in_dim = int(w_arr.shape[1]) if hasattr(w_arr, "shape") and len(w_arr.shape) == 2 else 64
-            calib_acts = np.random.randn(max(1, len(calib_data)), in_dim).astype(np.float32) if np is not None else [1.0] * in_dim
-            awq_scales = calibrate_awq_scales(cast(TensorType, w_arr), cast(TensorType, calib_acts))
+            calib_acts: Any = np.random.randn(max(1, len(calib_data)), in_dim).astype(np.float32) if np is not None else [1.0] * in_dim
+            awq_scales = calibrate_awq_scales(w_arr, calib_acts)
             try:
                 model_any._awq_scales = awq_scales
             except (AttributeError, TypeError):
@@ -232,7 +232,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
             w_arr = np.array(raw_w, dtype=np.float32) if (np is not None and raw_w is not None and hasattr(raw_w, "shape") and len(raw_w.shape) == 2) else (np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64)
             in_dim = int(w_arr.shape[1]) if hasattr(w_arr, "shape") and len(w_arr.shape) == 2 else 64
             calib_acts = np.random.randn(max(1, len(calib_data) * 2), in_dim).astype(np.float32) if np is not None else [1.0] * in_dim
-            gptq_weights = calibrate_gptq_weights(cast(TensorType, w_arr), cast(TensorType, calib_acts))
+            gptq_weights = calibrate_gptq_weights(w_arr, calib_acts)
             try:
                 model_any._gptq_compensated_weights = gptq_weights
             except (AttributeError, TypeError):

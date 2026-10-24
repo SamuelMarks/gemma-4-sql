@@ -50,7 +50,8 @@ class SiglipVisionEmbeddings(nnx.Module):
         (b, h, w, c) = patch_embeds.shape
         embeddings = patch_embeds.reshape((b, h * w, c))
         position_ids = jnp.expand_dims(jnp.arange(self.num_patches), 0)
-        return embeddings + self.position_embedding(position_ids)
+        res: Array = embeddings + self.position_embedding(position_ids)
+        return res
 
 
 class SiglipAttention(nnx.Module):
@@ -96,7 +97,8 @@ class SiglipAttention(nnx.Module):
         attn_weights = jax.nn.softmax(scores, axis=-1)
         out = jnp.matmul(attn_weights, v)
         out = jnp.transpose(out, (0, 2, 1, 3)).reshape((b, t, -1))
-        return self.proj(out)
+        res: Array = self.proj(out)
+        return res
 
 
 class SiglipMLP(nnx.Module):
@@ -130,7 +132,8 @@ class SiglipMLP(nnx.Module):
         """
         x = self.fc1(x)
         x = jax.nn.gelu(x, approximate=True)
-        return self.fc2(x)
+        res: Array = self.fc2(x)
+        return res
 
 
 class SiglipEncoderLayer(nnx.Module):

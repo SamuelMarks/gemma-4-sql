@@ -60,7 +60,9 @@ def test_calibrate_gptq_weights(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.mlx.quantize as quantize_module
 
     monkeypatch.setattr(quantize_module, "np", None)
-    res = quantize_module.calibrate_gptq_weights("w", "a")  # type: ignore[arg-type]
+    w_dummy: Any = "w"
+    a_dummy: Any = "a"
+    res = quantize_module.calibrate_gptq_weights(w_dummy, a_dummy)
     assert res == "w"
 
     monkeypatch.setattr(quantize_module, "np", np)
@@ -99,7 +101,10 @@ def test_quantize_model_real_mlx() -> None:
             return self.proj(x)
 
     # INT8 real quantization
+    import mlx.core as mx
+
     m_int8 = TinyMLXModel()
+    assert m_int8(mx.ones((1, 64))).shape == (1, 64)
     res_int8 = quantize_module.quantize_model("tiny-mlx", "int8", model=m_int8, group_size=64)
     assert res_int8["status"] == "quantized_int8"
     assert res_int8["memory_reduction_factor"] == 0.5

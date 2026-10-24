@@ -40,7 +40,8 @@ def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array)
         aligned_images = i_emb[safe_indices]
         return jnp.where(mask[:, None], aligned_images, t_emb)
 
-    return jax.vmap(merge_modalities)(img_emb, text_emb, token_mask)
+    res: Array = jax.vmap(merge_modalities)(img_emb, text_emb, token_mask)
+    return res
 
 
 @dataclass

@@ -20,7 +20,7 @@ from gemma_4_sql.backends.jax.gemma4.layers import (
 )
 
 
-def test_make_linear():
+def test_make_linear() -> None:
     """Verify make linear behavior."""
     rngs = nnx.Rngs(0)
     linear = make_linear(10, 20, kernel_metadata={"foo": "bar"}, bias_metadata={"baz": "qux"}, rngs=rngs)
@@ -29,7 +29,7 @@ def test_make_linear():
     assert linear.out_features == 20
 
 
-def test_make_embed():
+def test_make_embed() -> None:
     """Verify make embed behavior."""
     rngs = nnx.Rngs(0)
     embed = make_embed(100, 32, embedding_metadata={"foo": "bar"}, rngs=rngs)
@@ -38,7 +38,7 @@ def test_make_embed():
     assert embed.features == 32
 
 
-def test_gemma4_rms_norm():
+def test_gemma4_rms_norm() -> None:
     """Verify gemma4 rms norm behavior."""
     rngs = nnx.Rngs(0)
     norm = Gemma4RMSNorm(16, rngs=rngs)
@@ -52,19 +52,19 @@ def test_gemma4_rms_norm():
     assert out_no_scale.shape == (2, 16)
 
 
-def test_const_var():
+def test_const_var() -> None:
     """Verify const var behavior."""
     v = ConstVar(jnp.array(1.0))
     assert v.value == 1.0
 
 
-def test_stat_var():
+def test_stat_var() -> None:
     """Verify stat var behavior."""
     v = StatVar(jnp.array(1.0))
     assert v.value == 1.0
 
 
-def test_gemma4_clippable_linear():
+def test_gemma4_clippable_linear() -> None:
     """Verify gemma4 clippable linear behavior."""
     rngs = nnx.Rngs(0)
     linear = Gemma4ClippableLinear(10, 20, rngs=rngs)
@@ -77,7 +77,7 @@ def test_gemma4_clippable_linear():
     assert out_no_clip.shape == (2, 20)
 
 
-def test_gemma4_mlp():
+def test_gemma4_mlp() -> None:
     """Verify gemma4 mlp behavior."""
     rngs = nnx.Rngs(0)
     mlp = Gemma4MLP(16, 64, rngs=rngs)
@@ -95,34 +95,3 @@ def test_gemma4_mlp():
     mlp3 = Gemma4MLP(16, 64, rngs=rngs, shd=shd_full)
     out3 = mlp3(x, original_x=x)
     assert out3.shape == (2, 16)
-
-
-def test_gemma4_rms_norm_with_scale():
-    """Verify gemma4 rms norm with scale behavior."""
-    import jax.numpy as jnp
-    from flax import nnx
-
-    from gemma_4_sql.backends.jax.gemma4.layers import Gemma4RMSNorm
-
-    rngs = nnx.Rngs(0)
-    # Using float32 for dummy test
-    norm = Gemma4RMSNorm(64, with_scale=True, eps=1e-6, dtype=jnp.float32, rngs=rngs)
-    x = jnp.ones((2, 10, 64))
-    out = norm(x)
-    assert out.shape == (2, 10, 64)
-
-
-def test_stat_var_and_make_embed():
-    """Verify stat var and make embed behavior."""
-    from flax import nnx
-
-    from gemma_4_sql.backends.jax.gemma4.layers import StatVar, make_embed
-
-    rngs = nnx.Rngs(0)
-    var = StatVar(1.0)
-    assert var.value == 1.0
-
-    # cover line 42 in layers.py
-    # make_embed uses None for _shd default
-    emb = make_embed(10, 16, embedding_metadata={}, rngs=rngs)
-    assert emb.embedding.value.shape == (10, 16)

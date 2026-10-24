@@ -11,7 +11,10 @@ class MaxTextBackend(ModuleDelegatedBackend):
     """MaxText implementation of BackendProtocol."""
 
 
+ADAPTER_CLASS = MaxTextBackend
+
 __all__ = [
+    "ADAPTER_CLASS",
     "MaxTextBackend",
     "benchmark",
     "dpo",

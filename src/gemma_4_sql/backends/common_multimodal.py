@@ -403,3 +403,45 @@ def format_multimodal_prompt(
         "audio_token_mask": audio_mask,
         "modality": modality,
     }
+
+
+def prepare_multimodal_inputs(
+    prompt: str,
+    kwargs: dict[str, Any],
+    tensor_convert_fn: Any,
+) -> tuple[str, Any, Any]:
+    """Format multimodal prompt and convert image/audio inputs into backend tensors.
+
+    Args:
+        prompt: Input natural language prompt.
+        kwargs: Generation keyword arguments containing optional `image_path`, `audio_path`, `pixel_values`, `audio_values`.
+        tensor_convert_fn: Backend callable converting raw feature arrays into batched backend tensors.
+
+    Returns:
+        A 3-tuple of `(formatted_prompt, pixel_values, audio_values)`.
+
+    """
+    image_path = kwargs.get("image_path")
+    audio_path = kwargs.get("audio_path")
+    pixel_values = kwargs.get("pixel_values")
+    audio_values = kwargs.get("audio_values")
+
+    if image_path is not None or audio_path is not None:
+        formatted = format_multimodal_prompt(
+            prompt,
+            has_image=image_path is not None or pixel_values is not None,
+            has_audio=audio_path is not None or audio_values is not None,
+        )
+        prompt = str(formatted.get("prompt", prompt))
+
+        if image_path is not None and pixel_values is None:
+            img_in: Any = image_path
+            img_res = process_image(img_in)
+            pixel_values = tensor_convert_fn(img_res["pixel_values"])
+
+        if audio_path is not None and audio_values is None:
+            aud_in: Any = audio_path
+            aud_res = process_audio(aud_in)
+            audio_values = tensor_convert_fn(aud_res["audio_values"])
+
+    return (prompt, pixel_values, audio_values)

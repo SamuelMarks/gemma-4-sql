@@ -54,7 +54,10 @@ def test_real_pytorch_dpo_loss_logps_and_step() -> None:
     assert logps.shape == (1,)
     assert float(logps.item()) < 0.0
 
-    step_loss = dpo_module._run_dpo_step(policy_model, ref_model, optimizer, batch, 0.1)  # type: ignore[arg-type]
+    pm_any: Any = policy_model
+    rm_any: Any = ref_model
+    opt_any: Any = optimizer
+    step_loss = dpo_module._run_dpo_step(pm_any, rm_any, opt_any, batch, 0.1)
     assert float(step_loss.item()) > 0.0
 
 
@@ -63,7 +66,8 @@ def test_dpo_loss_missing_torch(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.pytorch.dpo as dpo_module
 
     monkeypatch.setattr(dpo_module, "torch", None)
-    assert dpo_module.dpo_loss(1, 2, 3, 4, 0.1) == (0.0, 0.0, 0.0)  # type: ignore[arg-type]
+    t_any: Any = 1
+    assert dpo_module.dpo_loss(t_any, t_any, t_any, t_any, 0.1) == (0.0, 0.0, 0.0)
 
 
 def test_run_dpo_step_fallback_branches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,7 +105,7 @@ def test_run_training_epochs() -> None:
     """Verify _run_training_epochs handles both tensor-like and float step outputs."""
     import gemma_4_sql.backends.pytorch.dpo as dpo_module
 
-    state = TrainerState(dataloader=[{"a": 1}, {"a": 2}], epochs=2)
+    state: Any = TrainerState(dataloader=[{"a": 1}, {"a": 2}], epochs=2)
 
     with patch("gemma_4_sql.backends.pytorch.dpo._run_dpo_step") as mock_step:
         mock_l = MagicMock()

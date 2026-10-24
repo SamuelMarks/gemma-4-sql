@@ -67,6 +67,91 @@ def _create_hf_data_source(base_ds: Any) -> Any:
     return HFDataSource
 
 
+def tokenize_dataset_element(
+    element: JSONDict,
+    tokenizer: SQLTokenizer,
+    *,
+    process_multimodal: bool = False,
+) -> dict[str, Any]:
+    """Extract and tokenize prompt, SQL target, and optional multimodal inputs from a dataset element.
+
+    Args:
+        element: Input dictionary element from dataset.
+        tokenizer: `SQLTokenizer` instance.
+        process_multimodal: Whether to format multimodal placeholders and extract image/audio tensors.
+
+    Returns:
+        Dictionary containing `'inputs'`, `'targets'`, and optional `'pixel_values'` / `'audio_values'`.
+
+    """
+    prompt = str(element.get("sql_prompt", element.get("question", "")))
+    target = str(element.get("sql", element.get("query", "")))
+
+    if not process_multimodal:
+        return {
+            "inputs": tokenizer.encode(prompt),
+            "targets": tokenizer.encode(target),
+        }
+
+    from gemma_4_sql.backends.common_multimodal import (
+        format_multimodal_prompt,
+        process_audio,
+        process_image,
+    )
+
+    image_input = element.get("image_bytes") or element.get("image_url") or element.get("image")
+    audio_input = element.get("audio_clip") or element.get("audio")
+
+    formatted = format_multimodal_prompt(
+        prompt,
+        has_image=image_input is not None,
+        has_audio=audio_input is not None,
+    )
+    res: dict[str, Any] = {
+        "inputs": tokenizer.encode(str(formatted.get("prompt", prompt))),
+        "targets": tokenizer.encode(str(target)),
+    }
+    if image_input is not None:
+        img_data = process_image(image_input)
+        res["pixel_values"] = img_data["pixel_values"]
+    if audio_input is not None:
+        aud_data = process_audio(audio_input)
+        res["audio_values"] = aud_data["audio_values"]
+    return res
+
+
+def wrap_maxtext_transform(base_transform_cls: Any) -> Any:
+    """Wrap the base Grain transform class to inject MaxText `segment_ids` and `positions`.
+
+    Args:
+        base_transform_cls: Base transform class from `get_grain_classes`.
+
+    Returns:
+        `MaxTextFormatTransform` subclass.
+
+    """
+
+    class MaxTextFormatTransform(base_transform_cls):
+        """Transforms data into MaxText expected format with segment_ids and positions."""
+
+        def map(self, element: JSONDict) -> JSONDict:
+            """Map an element with MaxText specific features.
+
+            Args:
+                element: Input dataset element dictionary.
+
+            Returns:
+                Tokenized dictionary augmented with `segment_ids` and `positions`.
+
+            """
+            result: dict[str, Any] = super().map(element)
+            result["segment_ids"] = [1]
+            result["positions"] = [0]
+            return result
+
+    return MaxTextFormatTransform
+
+
 def _create_base_format_transform(base_map: Any) -> Any:
     """Create a Grain MapTransform subclass for SQL tokenization and multimodal preprocessing.
 
@@ -100,34 +185,7 @@ def _create_base_format_transform(base_map: Any) -> Any:
                 Dictionary with tokenized inputs, targets, and optional multimodal features.
 
             """
-            from gemma_4_sql.backends.common_multimodal import (
-                format_multimodal_prompt,
-                process_audio,
-                process_image,
-            )
-
-            prompt = str(element.get("sql_prompt", element.get("question", "")))
-            target = str(element.get("sql", element.get("query", "")))
-
-            image_input = element.get("image_bytes") or element.get("image_url") or element.get("image")
-            audio_input = element.get("audio_clip") or element.get("audio")
-
-            formatted = format_multimodal_prompt(
-                prompt,
-                has_image=image_input is not None,
-                has_audio=audio_input is not None,
-            )
-            res: dict[str, Any] = {
-                "inputs": self.tokenizer.encode(str(formatted.get("prompt", prompt))),
-                "targets": self.tokenizer.encode(str(target)),
-            }
-            if image_input is not None:
-                img_data = process_image(image_input)
-                res["pixel_values"] = img_data["pixel_values"]
-            if audio_input is not None:
-                aud_data = process_audio(audio_input)
-                res["audio_values"] = aud_data["audio_values"]
-            return res
+            return tokenize_dataset_element(element, self.tokenizer, process_multimodal=True)
 
     return BaseFormatTransform
 
@@ -212,10 +270,10 @@ def build_grain_dataloader(
     backend_name: str,
     datasets_module: Any,
     grain_module: Any,
-    load_fn: Callable[[str, str, str | None, str | None], object] | None = None,
-    grain_classes_fn: Callable[[Any], tuple[type, type]] | None = None,
-    tokenizer_cls: type = SQLTokenizer,
-    sampler_fn: Callable[[int, bool], object] | None = None,
+    load_fn: Any = None,
+    grain_classes_fn: Any = None,
+    tokenizer_cls: Any = SQLTokenizer,
+    sampler_fn: Any = None,
     transform_wrapper: Any = None,
     **kwargs: Any,
 ) -> ETLResultDict:
@@ -327,18 +385,23 @@ def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
         msg = "duckdb is required. Install with `pip install duckdb`."
         raise DependencyMissingError(msg, dependency_name="duckdb")
 
+    raw_err = getattr(duckdb_module, "Error", None)
+    duckdb_error: type[Exception] = raw_err if isinstance(raw_err, type) and issubclass(raw_err, Exception) else RuntimeError
+    conn: Any = None
     try:
         if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table):
             msg = f"Invalid or unsafe table name: {table!r}"
             raise ValueError(msg)
-        conn: Any = duckdb_module.connect(db_path, read_only=True)
+        conn = duckdb_module.connect(db_path, read_only=True)
         results: list[tuple[Any, ...]] = conn.execute(f'SELECT * FROM "{table}"').fetchall()
         default_cols = [("col" + str(i),) for i in range(len(results[0]))] if results else []
         desc_list: list[tuple[str, ...]] = getattr(conn, "description", default_cols)
         columns = [desc[0] for desc in desc_list]
-        conn.close()
         return [dict(zip(columns, row)) for row in results]
-    except Exception as e:
+    except (duckdb_error, ValueError, TypeError, OSError, RuntimeError, AttributeError) as e:
         logger.exception("Failed to load dataset from DuckDB")
         msg = f"DuckDB error: {e}"
         raise ETLError(msg, cause=e) from e
+    finally:
+        if conn is not None and hasattr(conn, "close"):
+            conn.close()

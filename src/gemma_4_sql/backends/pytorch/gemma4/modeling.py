@@ -96,8 +96,8 @@ class Gemma4MultiModalProjector(nn.Module):
         """
         hidden_states = self.linear_1(image_features)
         hidden_states = self.act(hidden_states)
-        hidden_states = self.linear_2(hidden_states)
-        return hidden_states
+        res: torch.Tensor = self.linear_2(hidden_states)
+        return res
 
 
 class Gemma4ForCausalLM(nn.Module):

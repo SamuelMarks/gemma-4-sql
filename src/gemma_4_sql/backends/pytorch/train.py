@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_train import run_train_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import ETLConfig, ModelType, TrainerState, TrainingConfig
+from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import ETLConfig, TorchCausalLMProtocol, TorchTrainerState, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import TrainResultDict
@@ -48,11 +49,11 @@ def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object,
     return (is_distributed, dist_mod, device, device_id)
 
 
-def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
+def _run_training_epochs(state: TorchTrainerState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> float:
     """Run PyTorch supervised training epochs over the dataloader.
 
     Args:
-        state: `TrainerState` holding model, optimizer, criterion, dataloader, and device.
+        state: `TorchTrainerState` holding model, optimizer, criterion, dataloader, and device.
 
     Returns:
         Mean batch loss from the final epoch.
@@ -60,7 +61,7 @@ def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
     """
     dataloader: Any = state.dataloader or ()
     epochs = state.epochs
-    model: Any = state.policy_model
+    model: Any = state.model if isinstance(state, TorchTrainerState) else state.policy_model
     optimizer: Any = state.optimizer
     criterion: Any = state.criterion
     device = state.device
@@ -84,7 +85,7 @@ def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
     return final_loss
 
 
-def _wrap_model_distributed(model: ModelType, distributed_strategy: str, device_id: int) -> object:
+def _wrap_model_distributed(model: TorchCausalLMProtocol, distributed_strategy: str, device_id: int) -> object:
     """Wrap model for distributed training.
 
     Args:
@@ -162,7 +163,8 @@ def _execute_train(
             raw_model = NativeGemma4.from_pretrained(model_name, config=cfg_in).to(dev_any)
         else:
             raw_model = Gemma4ForCausalLM.from_pretrained(model_name).to(dev_any)
-        model: ModelType = cast(ModelType, _wrap_model_distributed(cast(ModelType, raw_model), distributed_strategy, device_id))
+        raw_model_any: Any = raw_model
+        model: Any = _wrap_model_distributed(raw_model_any, distributed_strategy, device_id)
         optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
         data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size, distributed=is_distributed))
@@ -170,7 +172,7 @@ def _execute_train(
         if dataloader is None or not hasattr(dataloader, "__iter__"):
             raise ValueError(f"Invalid dataloader for dataset: {dataset}")
         model.train()
-        final_loss = _run_training_epochs(TrainerState(policy_model=model, dataloader=dataloader, epochs=epochs, optimizer=optimizer, criterion=criterion, device=device))
+        final_loss = _run_training_epochs(TorchTrainerState(model=model, dataloader=dataloader, epochs=epochs, optimizer=optimizer, criterion=criterion, device=device))
         return "completed", float(final_loss)
     finally:
         _cleanup_distributed(dist=dist_module)
@@ -191,27 +193,27 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
         TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
-    action = getattr(config, "action", "sft")
     model_name = getattr(config, "model_name", "gemma-4")
     dataset = getattr(config, "dataset", "dummy")
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
-    extra = getattr(config, "extra_kwargs", {}) or {}
-    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
+    batch_size = getattr(config, "batch_size", 2)
     distributed_strategy = str(kwargs.get("distributed_strategy") or getattr(config, "distributed_strategy", "none"))
     backend_alias = str(kwargs.get("backend_alias") or kwargs.get("backend") or ("pytorch_native" if getattr(config, "backend", None) == "pytorch_native" else "pytorch"))
 
-    final_loss = 0.0
-    status = "completed"
     if torch is None or optim is None or (nn is None) or (backend_alias != "pytorch_native" and Gemma4ForCausalLM is None):
         raise DependencyMissingError("PyTorch dependencies are missing.", backend=backend_alias)
-    try:
-        batch_size = getattr(config, "batch_size", 2)
-        train_kwargs = dict(kwargs)
-        train_kwargs.pop("backend_alias", None)
-        train_kwargs.pop("backend", None)
-        train_kwargs.pop("raise_on_error", None)
-        status, final_loss = _execute_train(
+
+    train_kwargs = dict(kwargs)
+    train_kwargs.pop("backend_alias", None)
+    train_kwargs.pop("backend", None)
+    train_kwargs.pop("raise_on_error", None)
+    wrapper_kwargs = dict(kwargs)
+    wrapper_kwargs["distributed_strategy"] = distributed_strategy
+    return run_train_wrapper(
+        backend_alias,
+        config,
+        lambda: _execute_train(
             model_name,
             dataset,
             epochs,
@@ -220,25 +222,6 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
             batch_size=batch_size,
             backend_alias=backend_alias,
             **train_kwargs,
-        )
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        if raise_on_error:
-            raise TrainingError(
-                f"PyTorch training failed: {e!s}",
-                backend=backend_alias,
-                model_name=model_name,
-                operation=action,
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
-    return {
-        "backend": backend_alias,
-        "action": action,
-        "model": model_name,
-        "dataset": dataset,
-        "epochs": epochs,
-        "learning_rate": learning_rate,
-        "status": status,
-        "final_loss": float(final_loss),
-        "distributed_strategy": distributed_strategy,
-    }
+        ),
+        **wrapper_kwargs,
+    )

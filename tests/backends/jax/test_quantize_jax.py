@@ -151,14 +151,14 @@ def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `MockGemma4Config`."""
 
         @staticmethod
-        def gemma4_e2b():
+        def gemma4_e2b() -> str:
             """Provide gemma4 e2b test helper."""
             return "mock_config"
 
     class MockGemma4ForCausalLM:
         """Test stub for `MockGemma4ForCausalLM`."""
 
-        def __init__(self, config: Any, rngs: Any):
+        def __init__(self, config: Any, rngs: Any) -> None:
             """Initialize test stub instance."""
 
     monkeypatch.setattr(qt, "Gemma4Config", MockGemma4Config)
@@ -167,7 +167,7 @@ def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockParam:
         """Test stub for `MockParam`."""
 
-        def __init__(self, val: Any):
+        def __init__(self, val: Any) -> None:
             """Initialize test stub instance."""
             self.value = val
 
@@ -175,7 +175,7 @@ def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `MockGraph`."""
 
         @staticmethod
-        def iter_graph(model: Any):
+        def iter_graph(model: Any) -> Any:
             """Provide iter graph test helper."""
             # Return 3 mock parameters for quantize
             yield ("path1", MockParam(jnp.array([[1.0, 2.0], [3.0, 4.0]])))
@@ -194,7 +194,7 @@ def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
         class Rngs:
             """Test stub for `Rngs`."""
 
-            def __init__(self, seed: Any):
+            def __init__(self, seed: Any) -> None:
                 """Initialize test stub instance."""
 
     monkeypatch.setattr(qt, "nnx", MockNNX())

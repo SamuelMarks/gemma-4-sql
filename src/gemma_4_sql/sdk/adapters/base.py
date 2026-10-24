@@ -5,14 +5,96 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.exceptions import DatabaseExecutionError
+from gemma_4_sql.exceptions import DatabaseExecutionError, SQLSafetyViolationError
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONPrimitive
 
 logger = logging.getLogger(__name__)
+
+_DANGEROUS_KEYWORDS = frozenset({
+    "DROP",
+    "CREATE",
+    "ALTER",
+    "TRUNCATE",
+    "RENAME",
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "MERGE",
+    "UPSERT",
+    "ATTACH",
+    "DETACH",
+    "PRAGMA",
+    "COPY",
+    "INSTALL",
+    "LOAD",
+    "VACUUM",
+    "EXECUTE",
+    "CALL",
+    "GRANT",
+    "REVOKE",
+})
+
+_SQL_TOKEN_PATTERN = re.compile(
+    r"""
+    (\$(?P<dtag>[A-Za-z0-9_]*)\$[\s\S]*?\$(?P=dtag)\$) | # PostgreSQL dollar-quoted string literal
+    ('(?:''|\\.|[^'\\])*')      | # Single-quoted string literal (SQL & backslash escapes)
+    ("(?:""|\\.|[^"\\])*")      | # Double-quoted identifier/literal
+    (`(?:``|[^`])*`)            | # Backtick-quoted identifier
+    (\[[^\]]*\])                | # Bracket-quoted identifier
+    (/\*[\s\S]*?\*/)            | # Block comment
+    (--[^\n]*)                    # Single-line comment
+    """,
+    re.VERBOSE,
+)
+
+
+def strip_comments_and_literals(query: str) -> str:
+    """Replace SQL comments and quoted literals with spaces in a single lexical pass.
+
+    Args:
+        query: Raw SQL query string.
+
+    Returns:
+        SQL string with all comments and quoted segments replaced by a single space.
+
+    """
+    return _SQL_TOKEN_PATTERN.sub(" ", query)
+
+
+def validate_readonly_sql(query: str, *, read_only: bool = True) -> None:
+    """Ensure the SQL query is safe to execute when `read_only` is True.
+
+    Args:
+        query: SQL query string to inspect.
+        read_only: Whether read-only enforcement is active.
+
+    Raises:
+        SQLSafetyViolationError: If mutating statements or stacked queries are attempted in read-only mode.
+
+    """
+    if not read_only:
+        return
+
+    cleaned = strip_comments_and_literals(query)
+    if "/*" in cleaned:
+        msg = "Safety Violation: Unclosed block comment is not allowed in read-only mode."
+        raise SQLSafetyViolationError(msg)
+
+    statements = [stmt.strip() for stmt in cleaned.split(";") if stmt.strip()]
+    if len(statements) > 1 or cleaned.count(";") > 1:
+        msg = "Safety Violation: Multiple stacked SQL statements are not allowed in read-only mode."
+        raise SQLSafetyViolationError(msg)
+
+    words = re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", cleaned.upper())
+    for word in words:
+        if word in _DANGEROUS_KEYWORDS:
+            msg = f"Safety Violation: Mutating statements ({word}) are not allowed in read-only mode."
+            raise SQLSafetyViolationError(msg)
 
 
 class DatabaseAdapter(abc.ABC):
@@ -30,6 +112,7 @@ class DatabaseAdapter(abc.ABC):
         self.db_path = db_path
         self.db_kwargs = db_kwargs
         self.read_only = read_only
+        self._owns_connection: bool = not (("existing_conn" in db_kwargs and db_kwargs["existing_conn"] is not None) or ("conn" in db_kwargs and db_kwargs["conn"] is not None))
         self.conn: Any = self.connect()
 
     @property
@@ -126,11 +209,12 @@ class DatabaseAdapter(abc.ABC):
             if hasattr(self.conn, "cursor"):
                 cursor = self.conn.cursor()
                 cursor.execute(query, params or ())
-                results: list[tuple[JSONPrimitive, ...]] = cursor.fetchall() if getattr(cursor, "description", None) is not None else []
+                results: list[tuple[JSONPrimitive, ...]] = [tuple(r) for r in cursor.fetchall()] if getattr(cursor, "description", None) is not None else []
                 if hasattr(cursor, "close"):
                     cursor.close()
                 return results
-            return self.conn.execute(query, params or ()).fetchall()
+            raw_rows: Any = self.conn.execute(query, params or ()).fetchall()
+            return [tuple(r) for r in raw_rows]
         except self.error_classes as e:
             logger.debug("Query execution failed: %s", e)
             raise DatabaseExecutionError(str(e), cause=e) from e
@@ -156,6 +240,6 @@ class DatabaseAdapter(abc.ABC):
         return await asyncio.to_thread(self.execute_query, query, params)
 
     def close(self) -> None:
-        """Close the active database connection if open."""
-        if hasattr(self.conn, "close"):
+        """Close the active database connection if owned by this adapter and open."""
+        if self._owns_connection and hasattr(self.conn, "close"):
             self.conn.close()

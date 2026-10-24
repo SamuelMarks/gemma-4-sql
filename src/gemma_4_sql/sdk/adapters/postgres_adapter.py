@@ -188,9 +188,12 @@ class PostgresAdapter(DatabaseAdapter):
             import asyncio
             from contextlib import suppress
 
-            with suppress(RuntimeError):
+            try:
                 loop = asyncio.get_running_loop()
                 task = loop.create_task(cached.close())
                 self._closing_tasks.add(task)
                 task.add_done_callback(self._closing_tasks.discard)
+            except RuntimeError:
+                with suppress(RuntimeError, OSError):
+                    asyncio.run(cached.close())
         super().close()

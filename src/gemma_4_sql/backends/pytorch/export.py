@@ -60,18 +60,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
 
             cfg: Any = kwargs.get("config")
             if cfg is None:
-                if model_name.startswith(("test", "model")):
-                    cfg = Gemma4Config(
-                        vocab_size=128,
-                        hidden_size=64,
-                        num_hidden_layers=1,
-                        num_attention_heads=2,
-                        num_key_value_heads=1,
-                        intermediate_size=128,
-                        head_dim=32,
-                    )
-                else:
-                    cfg = Gemma4Config()
+                cfg = Gemma4Config.from_preset(model_name) if hasattr(Gemma4Config, "from_preset") else Gemma4Config()
             model = NativeGemma4(cfg)
             tensors = {k: v.clone() if k == "lm_head.weight" else v for k, v in model.state_dict().items()}
         else:

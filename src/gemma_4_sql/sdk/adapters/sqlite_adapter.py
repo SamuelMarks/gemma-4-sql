@@ -38,7 +38,9 @@ class SQLiteAdapter(DatabaseAdapter):
 
         """
         self._actual_path = f"file:mem_{id(self)}?mode=memory&cache=shared" if db_path == ":memory:" else db_path
-        super().__init__(db_path, db_kwargs or {}, read_only=read_only)
+        clean_kwargs = dict(db_kwargs) if db_kwargs else {}
+        clean_kwargs.pop("defer_ddl", None)
+        super().__init__(db_path, clean_kwargs, read_only=read_only)
 
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
@@ -61,8 +63,10 @@ class SQLiteAdapter(DatabaseAdapter):
         if self.db_path == ":memory:":
             kwargs["uri"] = True
             kwargs.setdefault("check_same_thread", False)
-            return sqlite3.connect(self._actual_path, **kwargs)
-        return sqlite3.connect(self.db_path, **kwargs)
+            conn_mem: sqlite3.Connection = sqlite3.connect(self._actual_path, **kwargs)
+            return conn_mem
+        conn_file: sqlite3.Connection = sqlite3.connect(self.db_path, **kwargs)
+        return conn_file
 
     async def connect_async(self) -> object:
         """Connect asynchronously to SQLite via `aiosqlite`.
@@ -141,7 +145,8 @@ class SQLiteAdapter(DatabaseAdapter):
                 cursor = await async_conn.execute(query, params or ())
                 try:
                     if getattr(cursor, "description", None) is not None:
-                        return await cursor.fetchall()
+                        fetched = await cursor.fetchall()
+                        return [tuple(r) for r in fetched]
                     if hasattr(async_conn, "commit"):
                         res_c = async_conn.commit()
                         if asyncio.iscoroutine(res_c):

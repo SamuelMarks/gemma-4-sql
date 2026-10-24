@@ -2,12 +2,114 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+import logging
+from typing import TYPE_CHECKING, Any, TypeVar
+
+from gemma_4_sql.exceptions import TrainingError, resolve_raise_on_error
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from gemma_4_sql.type_hints import TrainingConfig, TrainResultDict
+
 T_Batch = TypeVar("T_Batch")
+logger = logging.getLogger(__name__)
+
+
+def create_nnx_optimizer(nnx_module: Any, model: Any, tx: Any) -> Any:
+    """Create a Flax NNX Optimizer compatible with both Flax <0.11 and >=0.11 (`wrt=nnx.Param`).
+
+    Args:
+        nnx_module: Loaded `flax.nnx` module.
+        model: Flax NNX module to optimize.
+        tx: Optax gradient transformation.
+
+    Returns:
+        Configured `nnx.Optimizer` instance.
+
+    """
+    try:
+        return nnx_module.Optimizer(model, tx, wrt=nnx_module.Param)
+    except TypeError:
+        return nnx_module.Optimizer(model, tx)
+
+
+def apply_nnx_optimizer_update(optimizer: Any, model: Any, grads: Any) -> None:
+    """Apply gradient updates on an `nnx.Optimizer` across Flax NNX versions.
+
+    Args:
+        optimizer: Flax NNX optimizer instance.
+        model: Flax NNX module being optimized.
+        grads: Computed gradient PyTree.
+
+    """
+    try:
+        optimizer.update(model, grads)
+    except TypeError:
+        optimizer.update(grads)
+
+
+def run_train_wrapper(
+    backend_name: str,
+    config: TrainingConfig,
+    execute_fn: Callable[[], tuple[str, float]],
+    **kwargs: object,
+) -> TrainResultDict:
+    """Execute a backend training loop with standardized config unpacking, error handling, and result formatting.
+
+    Args:
+        backend_name: Target backend identifier ('jax', 'keras', 'maxtext', 'mlx', 'pytorch').
+        config: `TrainingConfig` dataclass instance.
+        execute_fn: Zero-argument callable executing the backend training pass and returning `(status, final_loss)`.
+        **kwargs: Runtime keyword overrides (including `raise_on_error`, `distributed_strategy`, `checkpoint_dir`).
+
+    Returns:
+        Structured `TrainResultDict` containing training status and final loss.
+
+    Raises:
+        TrainingError: If `execute_fn` raises an exception and `raise_on_error` is True.
+
+    """
+    action = str(getattr(config, "action", "sft") or "sft")
+    model_name = str(getattr(config, "model_name", "gemma-4"))
+    dataset = str(getattr(config, "dataset", "dummy"))
+    epochs = int(getattr(config, "epochs", 1))
+    learning_rate = float(getattr(config, "learning_rate", 1e-4))
+    raise_on_error = resolve_raise_on_error(config, kwargs=dict(kwargs))
+
+    final_loss = 0.0
+    try:
+        status, final_loss = execute_fn()
+    except (TrainingError, ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError, KeyError) as e:
+        logger.exception("%s training failed: ", backend_name)
+        if raise_on_error:
+            raise TrainingError(
+                f"{backend_name} training failed: {e!s}",
+                backend=backend_name,
+                model_name=model_name,
+                operation=action,
+                cause=e,
+            ) from e
+        status = f"failed: {e!s}"
+
+    result: TrainResultDict = {
+        "backend": backend_name,
+        "action": action,
+        "model": model_name,
+        "dataset": dataset,
+        "epochs": epochs,
+        "learning_rate": learning_rate,
+        "status": status,
+        "final_loss": float(final_loss),
+    }
+    dist_strat = kwargs.get("distributed_strategy")
+    if dist_strat is not None:
+        result["distributed_strategy"] = str(dist_strat)
+    extra = getattr(config, "extra_kwargs", {}) or {}
+    ckpt_dir = kwargs.get("checkpoint_dir") or extra.get("checkpoint_dir")
+    if ckpt_dir:
+        result["checkpoint_dir"] = str(ckpt_dir)
+    return result
 
 
 def generic_run_training_epochs(

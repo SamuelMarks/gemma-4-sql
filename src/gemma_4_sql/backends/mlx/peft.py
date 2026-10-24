@@ -5,14 +5,12 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_peft import apply_lora_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import ModelType
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import PEFTResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +18,23 @@ mx = optional_import("mlx.core")
 nn = optional_import("mlx.nn")
 load = optional_attr("mlx_lm", "load")
 
-_ModuleBase: Any = nn.Module if nn is not None else object
+if TYPE_CHECKING:
+    from gemma_4_sql.type_hints import PEFTResultDict
+
+    class _ModuleBase:
+        """Static base class stub representing `mlx.nn.Module` during type checking."""
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            """Initialize module base."""
+
+        def freeze(self, *args: object, **kwargs: object) -> None:
+            """Freeze module parameters."""
+
+        def unfreeze(self, *args: object, **kwargs: object) -> None:
+            """Unfreeze module parameters."""
+
+else:
+    _ModuleBase = nn.Module if nn is not None else object
 
 
 class MLXLoRALinear(_ModuleBase):
@@ -274,14 +288,15 @@ def inject_lora(
     if nn is None:
         raise DependencyMissingError("MLX dependencies are missing.")
 
-    if hasattr(model, "freeze"):
-        model.freeze()
+    model_any: Any = model
+    if hasattr(model_any, "freeze"):
+        model_any.freeze()
 
-    if not target_modules or not hasattr(model, "named_modules"):
+    if not target_modules or not hasattr(model_any, "named_modules"):
         return model, 0
 
     to_replace: list[tuple[str, Any]] = []
-    for name, submodule in model.named_modules():
+    for name, submodule in model_any.named_modules():
         if isinstance(submodule, nn.Linear):
             leaf_name = name.split(".")[-1]
             if name in target_modules or leaf_name in target_modules or any(name.endswith(f".{t}") or f".{t}." in name for t in target_modules):
@@ -290,7 +305,7 @@ def inject_lora(
     injected_count = 0
     for name, submodule in to_replace:
         parts = name.split(".")
-        curr = model
+        curr: Any = model
         for part in parts[:-1]:
             if (part.isdigit() and isinstance(curr, list)) or (part.isdigit() and isinstance(curr, tuple)):
                 curr = curr[int(part)]
@@ -334,7 +349,7 @@ def save_adapter_weights(model: ModelType, save_path: str | Path) -> None:
         raise DependencyMissingError("MLX dependencies are missing.")
     import mlx.utils as _mlx_utils
 
-    tree_flatten: Any = getattr(_mlx_utils, "tree_flatten", lambda x: x)
+    tree_flatten: Any = _mlx_utils.tree_flatten
 
     path = Path(save_path)
     if path.is_dir() or path.suffix != ".safetensors":
@@ -363,8 +378,12 @@ def load_adapter_weights(model: ModelType, load_path: str | Path) -> None:
     path = Path(load_path)
     if not path.exists():
         raise FileNotFoundError(f"Adapter weights not found at {load_path}")
-    if hasattr(model, "load_weights"):
-        model.load_weights(str(path), strict=False)
+    model_any: Any = model
+    if hasattr(model_any, "load_weights"):
+        model_any.load_weights(str(path), strict=False)
+    elif hasattr(model_any, "update"):
+        weights = mx.load(str(path))
+        model_any.update(weights)
 
 
 def apply_lora(
@@ -395,16 +414,16 @@ def apply_lora(
     """
     if nn is None or load is None or mx is None:
         raise DependencyMissingError("MLX dependencies are missing.", backend="mlx")
-    status = "completed"
-    injected_count = 0
-    try:
+
+    def _inject() -> int:
+        """Load or reuse MLX model and inject LoRA linear layers."""
         if "model" in kwargs and kwargs["model"] is not None:
-            model = kwargs["model"]
+            model_obj: Any = kwargs["model"]
         else:
-            (model, _) = load(model_name)
+            (model_obj, _) = load(model_name)
 
         model, injected_count = inject_lora(
-            model=cast(ModelType, model),
+            model=model_obj,
             target_modules=target_modules,
             lora_r=lora_r,
             lora_alpha=lora_alpha,
@@ -413,25 +432,15 @@ def apply_lora(
 
         if "output_dir" in kwargs and kwargs["output_dir"] is not None:
             save_adapter_weights(model, str(kwargs["output_dir"]))
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Failed to apply LoRA: ")
-        if kwargs.get("raise_on_error"):
-            raise TrainingError(
-                f"MLX PEFT failed: {e!s}",
-                backend="mlx",
-                model_name=model_name,
-                operation="apply_lora",
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
-    return {
-        "backend": "mlx",
-        "action": "apply_lora",
-        "model": model_name,
-        "target_modules": target_modules,
-        "lora_r": lora_r,
-        "lora_alpha": lora_alpha,
-        "lora_dropout": lora_dropout,
-        "status": status,
-        "injected_modules": injected_count,
-    }
+        return injected_count
+
+    return apply_lora_wrapper(
+        "mlx",
+        model_name,
+        target_modules,
+        lora_r,
+        lora_alpha,
+        lora_dropout,
+        _inject,
+        **kwargs,
+    )

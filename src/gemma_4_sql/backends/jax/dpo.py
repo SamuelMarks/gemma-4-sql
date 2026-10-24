@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.backends.common_dpo import generic_dpo_loss
-from gemma_4_sql.backends.common_train import generic_run_training_epochs
+from gemma_4_sql.backends.common_dpo import generic_dpo_loss, run_dpo_wrapper
+from gemma_4_sql.backends.common_train import (
+    apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
+)
+from gemma_4_sql.backends.common_train import (
+    create_nnx_optimizer,
+    generic_run_training_epochs,
+)
 from gemma_4_sql.backends.jax.etl import build_dataloader
+from gemma_4_sql.backends.jax.gemma4.config import resolve_gemma4_config
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
+from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, ETLConfig, JaxCausalLMProtocol, TensorType, TrainerState
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -36,25 +43,7 @@ def _create_nnx_optimizer(model: Any, tx: Any) -> Any:
         Configured `nnx.Optimizer` instance.
 
     """
-    try:
-        return nnx.Optimizer(model, tx, wrt=nnx.Param)
-    except TypeError:
-        return nnx.Optimizer(model, tx)
-
-
-def _apply_nnx_optimizer_update(optimizer: Any, model: Any, grads: Any) -> None:
-    """Apply gradient updates on an `nnx.Optimizer` across Flax NNX versions.
-
-    Args:
-        optimizer: Flax NNX optimizer instance.
-        model: Flax NNX module being optimized.
-        grads: Computed gradient PyTree.
-
-    """
-    try:
-        optimizer.update(model, grads)
-    except TypeError:
-        optimizer.update(grads)
+    return create_nnx_optimizer(nnx, model, tx)
 
 
 def dpo_loss(
@@ -82,7 +71,7 @@ def dpo_loss(
     return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, jnn.log_sigmoid)
 
 
-def _compute_logps(model: ModelType, inputs: Any, labels: Any) -> Any:
+def _compute_logps(model: JaxCausalLMProtocol, inputs: Any, labels: Any) -> Any:
     """Compute sequence log probabilities for DPO using token-level log-softmax.
 
     Args:
@@ -109,7 +98,7 @@ def _compute_logps(model: ModelType, inputs: Any, labels: Any) -> Any:
     return jnp.sum(selected_log_probs * mask, axis=-1)
 
 
-def _dpo_step_loss(policy_model: ModelType, ref_model: ModelType, batch: Mapping[str, Any], beta: float) -> Any:
+def _dpo_step_loss(policy_model: JaxCausalLMProtocol, ref_model: JaxCausalLMProtocol, batch: Mapping[str, Any], beta: float) -> Any:
     """Compute scalar DPO loss for a preference batch.
 
     Args:
@@ -154,7 +143,7 @@ def _get_train_step_fn(beta: float) -> Callable[..., Any]:
             backend="jax",
         )
 
-    def train_step(policy_model: ModelType, ref_model: ModelType, optimizer: Any, batch: JSONDict) -> Any:
+    def train_step(policy_model: JaxCausalLMProtocol, ref_model: JaxCausalLMProtocol, optimizer: Any, batch: JSONDict) -> Any:
         """Execute a single JAX-compiled DPO training step.
 
         Args:
@@ -177,15 +166,16 @@ def _get_train_step_fn(beta: float) -> Callable[..., Any]:
         return loss
 
     if hasattr(nnx, "jit"):
-        return nnx.jit(train_step)
+        jit_fn: Callable[..., Any] = nnx.jit(train_step)
+        return jit_fn
     return train_step
 
 
-def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
+def _run_training_epochs(state: DPOLoopState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> float:
     """Run DPO training epochs over the preference dataloader.
 
     Args:
-        state: `TrainerState` holding models, optimizer, dataloader, and step function.
+        state: `DPOLoopState` holding models, optimizer, dataloader, and step function.
 
     Returns:
         Mean batch loss from the final epoch.
@@ -216,7 +206,7 @@ def _resolve_gemma4_config(model_name: str) -> Any:
         Resolved `Gemma4Config` object.
 
     """
-    return Gemma4Config.from_preset(model_name) if hasattr(Gemma4Config, "from_preset") else Gemma4Config.gemma4_e2b()
+    return resolve_gemma4_config(Gemma4Config, model_name)
 
 
 def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
@@ -253,7 +243,7 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
     final_loss = _run_training_epochs(
-        TrainerState(
+        DPOLoopState(
             dataloader=dataloader,
             epochs=epochs,
             policy_model=policy_model,
@@ -280,30 +270,12 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
         TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
-    model_name = getattr(config, "model_name", "model")
-    dataset = getattr(config, "dataset", "dataset")
-    beta = getattr(config, "beta", 0.1)
-    epochs = getattr(config, "epochs", 1)
-    learning_rate = getattr(config, "learning_rate", 1e-05)
-    batch_size = getattr(config, "batch_size", 2)
-    extra = getattr(config, "extra_kwargs", {}) or {}
-    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
-    final_loss = 0.0
-    status = "completed"
     if jax is None or jnp is None or jnn is None or optax is None or Gemma4ForCausalLM is None:
         raise DependencyMissingError("JAX DPO dependencies are missing.", backend="jax")
 
-    try:
-        status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, batch_size=batch_size)
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        if raise_on_error:
-            raise TrainingError(
-                f"JAX DPO failed: {e!s}",
-                backend="jax",
-                model_name=model_name,
-                operation="dpo",
-                cause=e,
-            ) from e
-        status = f"failed: {e!s}"
-
-    return {"backend": "jax", "action": "dpo", "model": model_name, "dataset": dataset, "beta": beta, "status": status, "final_loss": final_loss}
+    return run_dpo_wrapper(
+        "jax",
+        config,
+        lambda m, d, b, ep, lr, bs: _execute_dpo(m, d, b, ep, lr, batch_size=bs),
+        **kwargs,
+    )

@@ -66,6 +66,12 @@ def test_backend_adapter(
     assert adapter.generate_sql("model", "prompt") == {"status": "generated"}
     assert adapter.serve_model("model") == {"status": "served"}
     assert adapter.benchmark_model("model") == {"status": "benchmarked"}
+    assert adapter.get_trainer().endswith("_trainer")
+
+    # Test fallback when get_trainer is not callable on package
+    pkg_mod = sys.modules[backend_cls.__module__.rsplit(".", 1)[0]]
+    monkeypatch.setattr(pkg_mod, "get_trainer", None)
+    assert adapter.get_trainer().endswith("_trainer")
 
     aliased = PyTorchBackend(backend_alias="pytorch_native")
     captured_kw: dict[str, Any] = {}

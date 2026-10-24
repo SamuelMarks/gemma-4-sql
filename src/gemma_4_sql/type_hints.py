@@ -6,7 +6,7 @@ import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Generic, NotRequired, Protocol, Self, TypedDict, TypeVar, Union, runtime_checkable
+from typing import Any, Generic, NotRequired, Protocol, Self, TypedDict, TypeVar, Union, overload, runtime_checkable
 
 __all__ = [
     "AgentAttemptDict",
@@ -18,16 +18,18 @@ __all__ = [
     "CausalLMProtocol",
     "ChatMessageDict",
     "ChatTurnResultDict",
+    "CursorProtocol",
     "DPOConfig",
     "DPOLoopState",
     "DPOResultDict",
     "DPOSubmoduleProtocol",
-    "DPOTrajectoryState",
     "DataLoaderProtocol",
+    "DatabaseConnectionProtocol",
     "DataloaderResultDict",
     "ETLConfig",
     "ETLResultDict",
     "ETLSubmoduleProtocol",
+    "EmbedderModelProtocol",
     "EvaluationMetricsDict",
     "EvaluationResultDict",
     "ExportResultDict",
@@ -42,15 +44,19 @@ __all__ = [
     "JSONDict",
     "JSONPrimitive",
     "JSONValue",
+    "JaxCausalLMProtocol",
     "JaxModelProtocol",
+    "KerasCausalLMProtocol",
     "KerasModelProtocol",
     "KerasTrainerState",
     "LatencyStatsDict",
     "LogMetricsResultDict",
     "LoggingSubmoduleProtocol",
     "MLXModelProtocol",
+    "MaxTextCausalLMProtocol",
     "MaxTextModelProtocol",
     "MaxTextTrainerState",
+    "MlxCausalLMProtocol",
     "MlxModelProtocol",
     "ModelType",
     "MultimodalInput",
@@ -60,12 +66,14 @@ __all__ = [
     "QuantizableModelProtocol",
     "QuantizeResultDict",
     "QuantizeSubmoduleProtocol",
+    "QuantizedModelArtifact",
     "ServeResultDict",
     "ServeSubmoduleProtocol",
     "TensorIndex",
     "TensorProtocol",
     "TensorType",
     "TokenizerProtocol",
+    "TorchCausalLMProtocol",
     "TorchModelProtocol",
     "TorchTrainerState",
     "TrainResultDict",
@@ -74,7 +82,9 @@ __all__ = [
     "TrainerState",
     "TrainingConfig",
     "TrainingLoopState",
+    "get_quantized_artifact",
     "ndarray",
+    "register_quantized_artifact",
 ]
 
 JSONPrimitive = Union[str, int, float, bool, None]
@@ -127,14 +137,24 @@ class NDArrayProtocol(Protocol):
 class TokenizerProtocol(Protocol):
     """Protocol representing a text/SQL tokenizer."""
 
+    @overload
     def encode(self, text: str) -> list[int]:
-        """Encode a text string into a sequence of integer token IDs.
+        """Encode a single string into a list of integer token IDs."""
+        ...
+
+    @overload
+    def encode(self, text: list[str] | tuple[str, ...]) -> list[list[int]]:
+        """Encode a sequence of strings into a list of integer token ID lists."""
+        ...
+
+    def encode(self, text: str | Sequence[str]) -> list[int] | list[list[int]]:
+        """Encode a text string or sequence of strings into integer token IDs.
 
         Args:
-            text: Input text string to tokenize.
+            text: Input text string or sequence of strings to tokenize.
 
         Returns:
-            List of integer token IDs.
+            List of integer token IDs or list of token ID lists.
 
         """
         ...
@@ -149,6 +169,40 @@ class TokenizerProtocol(Protocol):
             Decoded text string.
 
         """
+        ...
+
+
+@runtime_checkable
+class HFTokenizerProtocol(Protocol):
+    """Protocol representing a Hugging Face PreTrainedTokenizer instance."""
+
+    def encode(self, text: str, **kwargs: Any) -> Sequence[int]:
+        """Encode a text string into a sequence of integer token IDs.
+
+        Args:
+            text: Input text string to tokenize.
+            **kwargs: Optional keyword arguments (such as `add_special_tokens`).
+
+        Returns:
+            Sequence of integer token IDs.
+
+        """
+        ...
+
+    def decode(self, token_ids: list[int]) -> str:
+        """Decode a list of integer token IDs back into a string.
+
+        Args:
+            token_ids: List of integer token IDs.
+
+        Returns:
+            Decoded text string.
+
+        """
+        ...
+
+    def get_vocab(self) -> Mapping[str, int]:
+        """Return the vocabulary mapping token strings to integer IDs."""
         ...
 
 
@@ -171,15 +225,15 @@ class TensorProtocol(Protocol):
         """Provide the data type of the tensor."""
         ...
 
-    def reshape(self, *shape: Any) -> Self:
+    def reshape(self, *shape: Any, **kwargs: Any) -> Any:
         """Reshape the tensor to the given dimensions."""
         ...
 
-    def transpose(self, *axes: Any) -> Self:
+    def transpose(self, *axes: Any, **kwargs: Any) -> Any:
         """Transpose the tensor axes."""
         ...
 
-    def astype(self, dtype: Any) -> Self:
+    def astype(self, dtype: Any, *args: Any, **kwargs: Any) -> Any:
         """Cast the tensor to a different data type."""
         ...
 
@@ -240,7 +294,7 @@ class TorchModelProtocol(CausalLMProtocol, Protocol):
         """Yield trainable parameter tensors."""
         ...
 
-    def named_modules(self) -> Iterable[tuple[str, object]]:
+    def named_modules(self) -> Iterable[tuple[str, Any]]:
         """Yield `(name, module)` pairs across the module hierarchy."""
         ...
 
@@ -257,6 +311,9 @@ class TorchModelProtocol(CausalLMProtocol, Protocol):
         ...
 
 
+TorchCausalLMProtocol = TorchModelProtocol
+
+
 @runtime_checkable
 class KerasModelProtocol(CausalLMProtocol, Protocol):
     """Focused protocol for Keras 3 / KerasNLP causal language models."""
@@ -265,49 +322,63 @@ class KerasModelProtocol(CausalLMProtocol, Protocol):
         """Compile the model with loss and optimizer."""
         ...
 
-    def fit(self, *args: object, **kwargs: object) -> object:
+    def fit(self, *args: object, **kwargs: object) -> Any:
         """Fit the model on a dataset iterator."""
         ...
 
     @property
-    def layers(self) -> Sequence[object]:
+    def layers(self) -> Any:
         """Provide the sequence of Keras layers."""
         ...
 
-    def save(self, *args: object, **kwargs: object) -> None:
+    @property
+    def sampler(self) -> Any:
+        """Provide the model's token sampler."""
+        ...
+
+    @property
+    def preprocessor(self) -> Any:
+        """Provide the model's input preprocessor."""
+        ...
+
+    def save(self, *args: object, **kwargs: object) -> Any:
         """Save model weights or checkpoint to disk."""
         ...
 
-    def load_weights(self, *args: object, **kwargs: object) -> None:
+    def load_weights(self, *args: object, **kwargs: object) -> Any:
         """Load serialized weights into the model."""
         ...
+
+
+KerasCausalLMProtocol = KerasModelProtocol
 
 
 @runtime_checkable
 class FlaxNNXModelProtocol(Protocol):
     """Focused protocol for JAX/Flax NNX causal language models."""
 
-    def __call__(self, *args: object, **kwargs: object) -> TensorProtocol | object:
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Execute the forward pass of the NNX module."""
         ...
 
     @property
-    def config(self) -> object:
+    def config(self) -> Any:
         """Provide the model configuration object."""
         ...
 
     @property
-    def model(self) -> object:
+    def model(self) -> Any:
         """Provide the inner transformer trunk module."""
         ...
 
     @property
-    def lm_head(self) -> object:
+    def lm_head(self) -> Any:
         """Provide the language modeling output head."""
         ...
 
 
 JaxModelProtocol = FlaxNNXModelProtocol
+JaxCausalLMProtocol = FlaxNNXModelProtocol
 
 
 @runtime_checkable
@@ -318,29 +389,46 @@ class MaxTextModelProtocol(Protocol):
         """Initialize stateless model parameters with a PRNGKey and sample input."""
         ...
 
-    def apply(self, *args: object, **kwargs: object) -> TensorProtocol | object:
+    def apply(self, *args: object, **kwargs: object) -> Any:
         """Apply a stateless transformation or forward pass."""
         ...
+
+
+MaxTextCausalLMProtocol = MaxTextModelProtocol
 
 
 @runtime_checkable
 class MLXModelProtocol(Protocol):
     """Focused protocol for Apple Silicon MLX models."""
 
-    def __call__(self, *args: object, **kwargs: object) -> TensorProtocol | object:
+    def __call__(self, *args: object, **kwargs: object) -> Any:
         """Execute the forward pass of the MLX model."""
         ...
 
-    def parameters(self) -> dict[str, object]:
+    def parameters(self) -> Any:
         """Return the parameter tree of the MLX model."""
         ...
 
-    def update(self, parameters: dict[str, object]) -> Self | None:
+    def update(self, parameters: dict[str, Any]) -> Self | None:
         """Update the parameters of the MLX model with a parameter tree."""
+        ...
+
+    def freeze(self) -> None:
+        """Freeze base model parameters prior to adapter training."""
         ...
 
 
 MlxModelProtocol = MLXModelProtocol
+MlxCausalLMProtocol = MLXModelProtocol
+
+
+@runtime_checkable
+class EmbedderModelProtocol(Protocol):
+    """Focused protocol for text and schema embedding models."""
+
+    def encode(self, *args: object, **kwargs: object) -> Any:
+        """Encode text or features into dense vector embeddings."""
+        ...
 
 
 @runtime_checkable
@@ -413,50 +501,126 @@ class QuantizableModelProtocol(TrainableModelProtocol, Protocol):
         """Provide the model configuration object."""
         ...
 
-    @property
-    def _quant_scales(self) -> Any:
-        """Provide quantization scale factors."""
-        ...
-
-    @_quant_scales.setter
-    def _quant_scales(self, value: Any) -> None:
-        """Set quantization scale factors."""
-        ...
-
-    @property
-    def _is_quantized(self) -> bool:
-        """Provide whether the model has been quantized."""
-        ...
-
-    @_is_quantized.setter
-    def _is_quantized(self, value: bool) -> None:
-        """Set whether the model has been quantized."""
-        ...
-
-    @property
-    def _quant_method(self) -> str:
-        """Provide the applied quantization method identifier."""
-        ...
-
-    @_quant_method.setter
-    def _quant_method(self, value: str) -> None:
-        """Set the applied quantization method identifier."""
-        ...
-
     def encode(self, *args: object, **kwargs: object) -> Any:
         """Encode text or features into embeddings."""
         ...
 
 
-ModelType = QuantizableModelProtocol
+@runtime_checkable
+class CursorProtocol(Protocol):
+    """Protocol representing a DB-API 2.0 compatible database cursor."""
 
-ndarray: type[Any]
-try:
-    import numpy as _np_mod
+    def execute(self, query: str, params: Any = ...) -> Any:
+        """Execute a SQL query on the cursor."""
+        ...
 
-    ndarray = _np_mod.ndarray
-except (ImportError, AttributeError):
-    ndarray = object
+    def fetchall(self) -> list[tuple[JSONPrimitive, ...]]:
+        """Fetch all remaining rows of a query result set."""
+        ...
+
+    def close(self) -> Any:
+        """Close the cursor."""
+        ...
+
+
+@runtime_checkable
+class DatabaseConnectionProtocol(Protocol):
+    """Protocol representing a DB-API 2.0 or analytical database connection."""
+
+    def cursor(self) -> CursorProtocol:
+        """Return a new `CursorProtocol` object using the connection."""
+        ...
+
+    def execute(self, query: str, params: Any = ...) -> Any:
+        """Execute a SQL statement directly on the connection."""
+        ...
+
+    def commit(self) -> Any:
+        """Commit any pending transaction to the database."""
+        ...
+
+    def rollback(self) -> Any:
+        """Roll back to the start of any pending transaction."""
+        ...
+
+    def close(self) -> Any:
+        """Close the database connection immediately."""
+        ...
+
+
+TQuantModel = TypeVar("TQuantModel")
+
+
+def _empty_scales_dict() -> dict[str, float]:
+    """Return an empty quantization scale dictionary."""
+    return {}
+
+
+@dataclass
+class QuantizedModelArtifact(Generic[TQuantModel]):
+    """Strongly-typed wrapper recording quantization state and scales for a model."""
+
+    model: TQuantModel
+    method: str
+    is_quantized: bool = True
+    scales: dict[str, float] = field(default_factory=_empty_scales_dict)
+
+
+_QUANTIZED_ARTIFACT_REGISTRY: dict[int, QuantizedModelArtifact[Any]] = {}
+
+
+def register_quantized_artifact(
+    model: TQuantModel,
+    method: str,
+    scales: dict[str, float] | None = None,
+) -> QuantizedModelArtifact[TQuantModel]:
+    """Register quantization metadata for a model in the typed artifact registry.
+
+    Args:
+        model: Target model instance.
+        method: Applied quantization method identifier ('int8', 'int4', 'awq', etc.).
+        scales: Optional per-layer or per-parameter quantization scale factors.
+
+    Returns:
+        Registered `QuantizedModelArtifact` wrapping `model`.
+
+    """
+    artifact = QuantizedModelArtifact(
+        model=model,
+        method=method,
+        is_quantized=True,
+        scales=dict(scales) if scales is not None else {},
+    )
+    _QUANTIZED_ARTIFACT_REGISTRY[id(model)] = artifact
+    return artifact
+
+
+def get_quantized_artifact(model: TQuantModel) -> QuantizedModelArtifact[TQuantModel] | None:
+    """Retrieve the registered `QuantizedModelArtifact` for a quantized model instance.
+
+    Args:
+        model: Target model instance to inspect.
+
+    Returns:
+        Registered `QuantizedModelArtifact` if the model was quantized, or `None`.
+
+    """
+    return _QUANTIZED_ARTIFACT_REGISTRY.get(id(model))
+
+
+ModelType = Union[
+    JaxCausalLMProtocol,
+    TorchCausalLMProtocol,
+    KerasCausalLMProtocol,
+    MaxTextCausalLMProtocol,
+    MlxCausalLMProtocol,
+    EmbedderModelProtocol,
+    QuantizableModelProtocol,
+]
+
+from gemma_4_sql.backends.lazy_loader import optional_attr
+
+ndarray: type[Any] = optional_attr("numpy", "ndarray") or object
 
 ImageInput = Union[str, Path, bytes, Sequence[float], NDArrayProtocol, None]
 AudioInput = Union[str, Path, bytes, Sequence[float], NDArrayProtocol, None]
@@ -763,6 +927,7 @@ class DPOConfig:
     epochs: int = 1
     learning_rate: float = 1e-05
     batch_size: int = 2
+    raise_on_error: bool = False
     extra_kwargs: dict[str, Any] = field(default_factory=_empty_extra_kwargs)
 
 
@@ -781,6 +946,7 @@ class ETLConfig:
     image_column: str | None = None
     audio_column: str | None = None
     stage: str = "sft"
+    raise_on_error: bool = False
 
 
 @dataclass
@@ -796,6 +962,7 @@ class TrainingConfig:
     backend: str = "jax"
     distributed_strategy: str = "none"
     modality: str = "text"
+    raise_on_error: bool = False
     extra_kwargs: dict[str, Any] = field(default_factory=_empty_extra_kwargs)
 
 
@@ -809,47 +976,35 @@ TParams = TypeVar("TParams")
 class TrainingLoopState(Generic[TModel, TOpt, TBatch]):
     """Strongly-typed state container for standard supervised training loops."""
 
-    dataloader: Iterable[TBatch]
+    dataloader: Iterable[TBatch] | None = None
     epochs: int = 1
     learning_rate: float = 1e-4
     model: TModel | None = None
     optimizer: TOpt | None = None
-    train_step: Callable[..., object] | None = None
+    train_step: Callable[..., Any] | None = None
+    sharding: Any = None
 
 
 @dataclass
 class DPOLoopState(Generic[TModel, TOpt, TBatch]):
     """Strongly-typed state container for Direct Preference Optimization (DPO) loops."""
 
-    policy_model: TModel
-    ref_model: TModel
-    dataloader: Iterable[TBatch]
-    optimizer: TOpt | None = None
-    epochs: int = 1
-    beta: float = 0.1
-    train_step: Callable[..., object] | None = None
-
-
-@dataclass
-class DPOTrajectoryState(Generic[TModel, TOpt, TBatch]):
-    """Typed DPO training trajectory state across policy and reference models."""
-
-    dataloader: Iterable[TBatch]
+    dataloader: Iterable[TBatch] | None = None
     epochs: int = 1
     policy_model: TModel | None = None
     ref_model: TModel | None = None
     optimizer: TOpt | None = None
     beta: float = 0.1
-    train_step: Callable[..., object] | None = None
+    train_step: Callable[..., Any] | None = None
 
 
 @dataclass
 class MaxTextTrainerState(Generic[TParams, TOpt, TBatch]):
     """Typed trainer state for stateless JAX/MaxText parameter and optimizer PyTrees."""
 
-    dataloader: Iterable[TBatch]
+    dataloader: Iterable[TBatch] | None = None
     epochs: int = 1
-    train_step: Callable[..., tuple[TParams, TOpt, object]] | None = None
+    train_step: Callable[..., tuple[TParams, TOpt, Any]] | None = None
     params: TParams | None = None
     policy_params: TParams | None = None
     ref_params: TParams | None = None
@@ -860,28 +1015,28 @@ class MaxTextTrainerState(Generic[TParams, TOpt, TBatch]):
 class TorchTrainerState(Generic[TModel, TOpt, TBatch]):
     """Typed trainer state for PyTorch models, optimizers, and loss criteria."""
 
-    dataloader: Iterable[TBatch]
+    dataloader: Iterable[TBatch] | None = None
     epochs: int = 1
     model: TModel | None = None
     optimizer: TOpt | None = None
-    criterion: Callable[..., object] | None = None
-    device: str = "cpu"
+    criterion: Callable[..., Any] | None = None
+    device: str | object = "cpu"
 
 
 @dataclass
 class KerasTrainerState(Generic[TModel, TOpt, TBatch]):
     """Typed trainer state for Keras / TensorFlow compiled step execution."""
 
-    dataloader: Iterable[TBatch]
+    dataloader: Iterable[TBatch] | None = None
     epochs: int = 1
     model: TModel | None = None
     optimizer: TOpt | None = None
-    train_step: Callable[[TBatch], object] | None = None
+    train_step: Callable[[TBatch], Any] | None = None
 
 
 @dataclass
 class TrainerState(Generic[TModel, TParams, TOpt, TBatch]):
-    """Unified generic state container for training and DPO epoch runners across backends."""
+    """Compact generic state container for training and DPO epoch runners."""
 
     dataloader: Iterable[TBatch] | None = None
     epochs: int = 1
@@ -890,16 +1045,12 @@ class TrainerState(Generic[TModel, TParams, TOpt, TBatch]):
     opt_state: TOpt | None = None
     policy_params: TParams | None = None
     ref_params: TParams | None = None
-    policy_model: TModel | TorchModelProtocol | JaxModelProtocol | KerasModelProtocol | MaxTextModelProtocol | MlxModelProtocol | QuantizableModelProtocol | None = None
-    ref_model: TModel | TorchModelProtocol | JaxModelProtocol | KerasModelProtocol | MaxTextModelProtocol | MlxModelProtocol | QuantizableModelProtocol | None = None
+    policy_model: TModel | ModelType | None = None
+    ref_model: TModel | ModelType | None = None
     optimizer: TOpt | None = None
     criterion: Callable[..., Any] | None = None
     device: str | object | None = None
-    dummy_batch: dict[str, TensorProtocol] | None = None
     beta: float = 0.1
-    dataset: str = ""
-    learning_rate: float = 0.0
-    extra_kwargs: dict[str, JSONValue] | None = None
 
 
 @runtime_checkable
@@ -1013,7 +1164,7 @@ class BenchmarkSubmoduleProtocol(Protocol):
         model_name: str,
         hardware: str = "tpu-v5p",
         batch_size: int = 32,
-        **kwargs: object,
+        **kwargs: JSONValue,
     ) -> BenchmarkResultDict:
         """Execute backend hardware benchmark."""
         ...

@@ -12,7 +12,7 @@ from flax import nnx
 from gemma_4_sql.backends.jax.gemma4.audio_attention import Gemma4AudioAttention, Gemma4AudioRelPositionalEncoding, convert_to_block, extract_block_context, rel_shift
 
 
-def get_mock_audio_config():
+def get_mock_audio_config() -> MagicMock:
     """Provide get mock audio config test helper."""
     config = MagicMock()
     config.hidden_size = 16
@@ -26,7 +26,7 @@ def get_mock_audio_config():
     return config
 
 
-def test_rel_pos_encoding():
+def test_rel_pos_encoding() -> None:
     """Verify rel pos encoding behavior."""
     config = get_mock_audio_config()
     pos_enc = Gemma4AudioRelPositionalEncoding(config)
@@ -36,7 +36,7 @@ def test_rel_pos_encoding():
     # Ah, let's just check it doesn't crash
 
 
-def test_convert_to_block():
+def test_convert_to_block() -> None:
     """Verify convert to block behavior."""
     x = jnp.ones((2, 5, 2, 8))  # batch, seq_len, num_heads, head_dim
     out = convert_to_block(x, 2)
@@ -44,7 +44,7 @@ def test_convert_to_block():
     assert out.shape == (2, 3, 2, 2, 8)
 
 
-def test_extract_block_context():
+def test_extract_block_context() -> None:
     """Verify extract block context behavior."""
     attn = MagicMock()
     attn.chunk_size = 2
@@ -57,7 +57,7 @@ def test_extract_block_context():
     assert out.shape == (2, 3, 4, 2, 8)
 
 
-def test_rel_shift():
+def test_rel_shift() -> None:
     """Verify rel shift behavior."""
     # x shape: (batch, num_heads, num_blocks, block_size, position_length)
     x = jnp.ones((2, 2, 3, 2, 5))
@@ -65,7 +65,7 @@ def test_rel_shift():
     assert out.shape == (2, 2, 3, 2, 4)
 
 
-def test_gemma4_audio_attention():
+def test_gemma4_audio_attention() -> None:
     """Verify gemma4 audio attention behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)

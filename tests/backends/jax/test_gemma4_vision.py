@@ -58,7 +58,7 @@ class DummyConfig:
     mm_tokens_per_image = 4
 
 
-def test_siglip_vision_embeddings():
+def test_siglip_vision_embeddings() -> None:
     """Verify siglip vision embeddings behavior."""
     rngs = nnx.Rngs(0)
     config: Any = DummyVisionConfig()
@@ -70,7 +70,7 @@ def test_siglip_vision_embeddings():
     assert out.shape == (2, 4, 16)
 
 
-def test_siglip_attention():
+def test_siglip_attention() -> None:
     """Verify siglip attention behavior."""
     rngs = nnx.Rngs(0)
     config: Any = DummyVisionConfig()
@@ -81,7 +81,7 @@ def test_siglip_attention():
     assert out.shape == (2, 4, 16)
 
 
-def test_siglip_mlp():
+def test_siglip_mlp() -> None:
     """Verify siglip mlp behavior."""
     rngs = nnx.Rngs(0)
     config: Any = DummyVisionConfig()
@@ -92,7 +92,7 @@ def test_siglip_mlp():
     assert out.shape == (2, 4, 16)
 
 
-def test_siglip_encoder_layer():
+def test_siglip_encoder_layer() -> None:
     """Verify siglip encoder layer behavior."""
     rngs = nnx.Rngs(0)
     config: Any = DummyVisionConfig()
@@ -103,7 +103,7 @@ def test_siglip_encoder_layer():
     assert out.shape == (2, 4, 16)
 
 
-def test_gemma4_multimodal_embedder():
+def test_gemma4_multimodal_embedder() -> None:
     """Verify gemma4 multimodal embedder behavior."""
     rngs = nnx.Rngs(0)
 
@@ -121,7 +121,7 @@ def test_gemma4_multimodal_embedder():
     assert out2.shape == (2, 4, 16)
 
 
-def test_siglip_vision_transformer():
+def test_siglip_vision_transformer() -> None:
     """Verify siglip vision transformer behavior."""
     rngs = nnx.Rngs(0)
     config: Any = DummyVisionConfig()
@@ -132,7 +132,7 @@ def test_siglip_vision_transformer():
     assert out.shape == (2, 4, 16)
 
 
-def test_avg_pool_vision_outputs():
+def test_avg_pool_vision_outputs() -> None:
     """Verify avg pool vision outputs behavior."""
     config: Any = DummyVisionConfig()
     # 4 patches. image_size=32, patch_size=16 -> 2 patches per side.
@@ -144,7 +144,7 @@ def test_avg_pool_vision_outputs():
     assert jnp.allclose(out, jnp.ones((2, 1, 16)))
 
 
-def test_gemma4_multi_modal_projector():
+def test_gemma4_multi_modal_projector() -> None:
     """Verify gemma4 multi modal projector behavior."""
     rngs = nnx.Rngs(0)
     config: Any = DummyConfig()

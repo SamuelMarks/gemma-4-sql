@@ -1,5 +1,6 @@
 """Unit and behavioral tests for quantize maxtext."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -26,11 +27,12 @@ def test_quantize_tensor_aqt_missing_jax() -> None:
     """Verify quantize_tensor_aqt raises DependencyMissingError when JAX is missing."""
     quantize_mod.jax = None
     quantize_mod.jnp = None
-    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing."):
-        quantize_mod.quantize_tensor_aqt(None)  # type: ignore[arg-type]
+    none_tensor: Any = None
+    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing\."):
+        quantize_mod.quantize_tensor_aqt(none_tensor)
 
 
-def test_quantize_tensor_aqt_negative_bits():
+def test_quantize_tensor_aqt_negative_bits() -> None:
     """Verify quantize tensor aqt negative bits behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = MagicMock()
@@ -40,7 +42,7 @@ def test_quantize_tensor_aqt_negative_bits():
         quantize_mod.quantize_tensor_aqt(MagicMock(), bits=-1)
 
 
-def test_quantize_tensor_aqt_int8():
+def test_quantize_tensor_aqt_int8() -> None:
     """Verify quantize tensor aqt int8 behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
@@ -57,7 +59,7 @@ def test_quantize_tensor_aqt_int8():
     assert scale.shape == (2, 1)
 
 
-def test_quantize_tensor_aqt_int16():
+def test_quantize_tensor_aqt_int16() -> None:
     """Verify quantize tensor aqt int16 behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
@@ -68,20 +70,20 @@ def test_quantize_tensor_aqt_int16():
     assert quantized.dtype == np.int16
 
 
-def test_apply_aqt_quantization_missing_jax():
+def test_apply_aqt_quantization_missing_jax() -> None:
     """Verify apply aqt quantization missing jax behavior."""
     quantize_mod.jax = None
     quantize_mod.jnp = None
-    with pytest.raises(DependencyMissingError, match="JAX dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing\."):
         quantize_mod.apply_aqt_quantization({})
 
 
-def test_apply_aqt_quantization_methods():
+def test_apply_aqt_quantization_methods() -> None:
     """Verify apply aqt quantization methods behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
-    params = {}
+    params: dict[str, Any] = {}
 
     # int8
     _, meta, _ = quantize_mod.apply_aqt_quantization(params, method="int8")
@@ -99,7 +101,7 @@ def test_apply_aqt_quantization_methods():
     assert meta["memory_reduction_factor"] == 0.7
 
 
-def test_apply_aqt_quantization_targets_and_traverse():
+def test_apply_aqt_quantization_targets_and_traverse() -> None:
     """Verify apply aqt quantization targets and traverse behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
@@ -125,22 +127,22 @@ def test_apply_aqt_quantization_targets_and_traverse():
     assert meta2["aqt_native"] is True
 
 
-def test_quantize_model_missing_maxtext_deps():
+def test_quantize_model_missing_maxtext_deps() -> None:
     """Verify quantize model missing maxtext deps behavior."""
     quantize_mod.jax = None
-    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"MaxText dependencies are missing\."):
         quantize_mod.quantize_model("model")
 
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = None
-    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"MaxText dependencies are missing\."):
         quantize_mod.quantize_model("model")
 
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
     quantize_mod.Gemma4Model = None
     # No params provided
-    with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
+    with pytest.raises(DependencyMissingError, match=r"MaxText dependencies are missing\."):
         quantize_mod.quantize_model("model")
 
     # Gemma4Model missing but inside try block
@@ -148,11 +150,11 @@ def test_quantize_model_missing_maxtext_deps():
     # But outer check is `jax is None or jnp is None or (Gemma4Model is None and "params" not in kwargs)`
     # We can pass params to bypass outer check, then remove params inside? No, it's kwargs.
     # To hit the inner `DependencyMissingError("MaxText dependency missing.")`, we provide params=None!
-    with pytest.raises(DependencyMissingError, match="MaxText dependency missing."):
+    with pytest.raises(DependencyMissingError, match=r"MaxText dependency missing\."):
         quantize_mod.quantize_model("model", params=None)
 
 
-def test_quantize_model_with_gemma4_init():
+def test_quantize_model_with_gemma4_init() -> None:
     """Verify quantize model with gemma4 init behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
@@ -173,7 +175,7 @@ def test_quantize_model_with_gemma4_init():
     assert res["metadata"]["quantized_modules_count"] == 1
 
 
-def test_quantize_model_with_params_kwargs_dict():
+def test_quantize_model_with_params_kwargs_dict() -> None:
     """Verify quantize model with params kwargs dict behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
@@ -187,7 +189,7 @@ def test_quantize_model_with_params_kwargs_dict():
     assert res["metadata"]["bits"] == 4
 
 
-def test_apply_aqt_quantization_non_dict_param():
+def test_apply_aqt_quantization_non_dict_param() -> None:
     """Verify apply aqt quantization non dict param behavior."""
     from typing import Any
 
@@ -199,7 +201,7 @@ def test_apply_aqt_quantization_non_dict_param():
     assert res[0] == "not_a_dict"
 
 
-def test_quantize_model_with_params_non_dict():
+def test_quantize_model_with_params_non_dict() -> None:
     """Verify quantize model with params non dict behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
@@ -213,7 +215,7 @@ def test_quantize_model_with_params_non_dict():
     assert res["metadata"]["memory_reduction_factor"] == 0.7
 
 
-def test_quantize_model_exception_handling():
+def test_quantize_model_exception_handling() -> None:
     """Verify quantize model exception handling behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np

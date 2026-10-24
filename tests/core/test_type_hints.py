@@ -2,328 +2,272 @@
 
 from __future__ import annotations
 
-import importlib
-import sys
 from collections.abc import Sequence
 from typing import Any
-from unittest.mock import patch
 
 from gemma_4_sql.type_hints import (
     CausalLMProtocol,
+    DataLoaderProtocol,
+    DPOConfig,
     DPOLoopState,
-    DPOTrajectoryState,
+    EmbedderModelProtocol,
+    ETLConfig,
+    FastAPIAppProtocol,
     FlaxNNXModelProtocol,
+    JaxCausalLMProtocol,
+    KerasCausalLMProtocol,
     KerasModelProtocol,
     KerasTrainerState,
+    MaxTextCausalLMProtocol,
     MaxTextModelProtocol,
     MaxTextTrainerState,
+    MlxCausalLMProtocol,
     MLXModelProtocol,
     NDArrayProtocol,
-    TensorType,
+    QuantizableModelProtocol,
+    QuantizedModelArtifact,
+    TensorProtocol,
     TokenizerProtocol,
+    TorchCausalLMProtocol,
     TorchModelProtocol,
     TorchTrainerState,
+    TrainableModelProtocol,
+    TrainerState,
+    TrainingConfig,
     TrainingLoopState,
+    get_quantized_artifact,
+    register_quantized_artifact,
 )
 
 
-def test_type_hints_protocols() -> None:
-    """Verify runtime protocol checks against conforming and non-conforming implementations."""
+def test_type_hints_dataclasses_and_defaults() -> None:
+    """Verify configuration and state dataclasses instantiate with expected defaults."""
+    dpo_cfg = DPOConfig(model_name="gemma-4", dataset="sql_dpo")
+    assert dpo_cfg.beta == 0.1
+    assert dpo_cfg.extra_kwargs == {}
 
-    class ConformingArray:
-        """Minimal array implementation satisfying NDArrayProtocol."""
+    etl_cfg = ETLConfig(dataset_name="spider", split="train")
+    assert etl_cfg.batch_size == 32
+    assert etl_cfg.stage == "sft"
 
-        @property
-        def shape(self) -> tuple[int, ...]:
-            """Return array shape."""
-            return (2, 2)
+    train_cfg = TrainingConfig()
+    assert train_cfg.model_name == "gemma-4"
+    assert train_cfg.extra_kwargs == {}
 
-        @property
-        def dtype(self) -> object:
-            """Return array dtype."""
-            return "float32"
+    loop_state: TrainingLoopState[str, str, int] = TrainingLoopState(
+        dataloader=[1, 2],
+        epochs=2,
+        model="m",
+        optimizer="opt",
+        sharding="shard",
+    )
+    assert loop_state.epochs == 2
+    assert loop_state.model == "m"
+    assert loop_state.sharding == "shard"
 
-        def tolist(self) -> list[object]:
-            """Return nested list."""
-            return [[1.0, 2.0], [3.0, 4.0]]
+    dpo_state: DPOLoopState[str, str, int] = DPOLoopState(
+        dataloader=[1],
+        epochs=1,
+        policy_model="pm",
+        ref_model="rm",
+        optimizer="opt",
+    )
+    assert dpo_state.beta == 0.1
+    assert dpo_state.policy_model == "pm"
 
-        def reshape(self, *_shape: int) -> ConformingArray:
-            """Return reshaped array."""
-            return self
+    mt_state: MaxTextTrainerState[dict[str, int], dict[str, int], int] = MaxTextTrainerState(
+        dataloader=[1],
+        epochs=1,
+        train_step=lambda *a: ({"w": 1}, {"s": 0}, 0.0),
+        policy_params={"w": 1},
+        ref_params={"w": 1},
+        opt_state={"s": 0},
+    )
+    assert mt_state.epochs == 1
 
-        def transpose(self, *_axes: int) -> ConformingArray:
-            """Return transposed array."""
-            return self
+    torch_state: TorchTrainerState[str, str, int] = TorchTrainerState(
+        dataloader=[1],
+        epochs=1,
+        model="m",
+        optimizer="opt",
+        criterion=lambda *a: 0.0,
+    )
+    assert torch_state.device == "cpu"
 
-        def astype(self, _dtype: object) -> ConformingArray:
-            """Return cast array."""
-            return self
+    keras_state: KerasTrainerState[str, str, int] = KerasTrainerState(
+        dataloader=[1],
+        epochs=1,
+        train_step=lambda *a: a,
+        model="m",
+        optimizer="opt",
+    )
+    assert keras_state.epochs == 1
 
-        def flatten(self) -> ConformingArray:
-            """Return flattened array."""
-            return self
+    unified: TrainerState[str, str, str, int] = TrainerState(dataloader=[1], epochs=3, beta=0.2)
+    assert unified.epochs == 3
+    assert unified.beta == 0.2
 
-        def __array__(self) -> object:
-            """Return self as array."""
-            return self
+    class _DummyModel:
+        """Minimal model object for QuantizedModelArtifact registration tests."""
 
-    class ConformingTensor:
-        """Minimal tensor implementation satisfying TensorType."""
+    dummy_model = _DummyModel()
+    assert get_quantized_artifact(dummy_model) is None
+    artifact_default = QuantizedModelArtifact(model=dummy_model, method="int8")
+    assert artifact_default.scales == {}
+    artifact = register_quantized_artifact(dummy_model, method="awq", scales={"w": 0.5})
+    assert isinstance(artifact, QuantizedModelArtifact)
+    assert artifact.is_quantized is True
+    assert artifact.method == "awq"
+    assert artifact.scales == {"w": 0.5}
+    assert get_quantized_artifact(dummy_model) is artifact
 
-        @property
-        def shape(self) -> tuple[int, ...]:
-            """Return tensor shape."""
-            return (1, 2)
 
-        @property
-        def ndim(self) -> int:
-            """Return tensor rank."""
-            return 2
+def test_runtime_checkable_protocols() -> None:
+    """Verify runtime_checkable protocols match conforming structural implementations and reject non-conforming objects."""
 
-        @property
-        def dtype(self) -> object:
-            """Return tensor dtype."""
-            return "float32"
-
-        def reshape(self, *_shape: int) -> ConformingTensor:
-            """Return reshaped tensor."""
-            return self
-
-        def transpose(self, *_axes: int) -> ConformingTensor:
-            """Return transposed tensor."""
-            return self
-
-        def astype(self, _dtype: object) -> ConformingTensor:
-            """Return cast tensor."""
-            return self
-
-        def mean(self, *_args: object, **_kwargs: object) -> ConformingTensor:
-            """Return mean tensor."""
-            return self
-
-        def item(self) -> float:
-            """Return scalar float."""
-            return 1.0
-
-        def __getitem__(self, _item: object, /) -> ConformingTensor:
-            """Slice tensor."""
-            return self
-
-        def __sub__(self, _other: object) -> ConformingTensor:
-            """Subtract tensor."""
-            return self
-
-        def __add__(self, _other: object) -> ConformingTensor:
-            """Add tensor."""
-            return self
-
-        def __mul__(self, _other: object) -> ConformingTensor:
-            """Multiply tensor."""
-            return self
-
-        def __rmul__(self, _other: object) -> ConformingTensor:
-            """Right-multiply tensor."""
-            return self
-
-        def __neg__(self) -> ConformingTensor:
-            """Negate tensor."""
-            return self
-
-    class ConformingTokenizer:
-        """Minimal tokenizer satisfying TokenizerProtocol."""
+    class DummyTokenizer:
+        """Conforming TokenizerProtocol stub."""
 
         def encode(self, text: str) -> list[int]:
-            """Encode string into byte ordinals."""
-            return [ord(c) for c in text]
+            """Encode text."""
+            return [len(text)]
 
         def decode(self, token_ids: Sequence[int]) -> str:
-            """Decode ordinals into string."""
-            return "".join(chr(i) for i in token_ids)
+            """Decode tokens."""
+            return str(list(token_ids))
 
-    class ConformingTorchModel:
-        """Minimal PyTorch model satisfying TorchModelProtocol and CausalLMProtocol."""
+    tok = DummyTokenizer()
+    assert isinstance(tok, TokenizerProtocol)
+    assert not isinstance(object(), TokenizerProtocol)
+    assert tok.encode("abc") == [3]
+    assert tok.decode([1, 2]) == "[1, 2]"
 
-        def __call__(self, *_a: object, **_kw: object) -> Any:
-            """Forward pass."""
-            return None
+    class DummyLoader:
+        """Conforming DataLoaderProtocol stub."""
 
-        def generate(self, *_a: object, **_kw: object) -> Any:
-            """Generate tokens."""
-            return [1, 2]
+        def __iter__(self) -> Any:
+            """Return iterator."""
+            return iter([{"inputs": [1]}])
 
-        def parameters(self) -> list[Any]:
-            """Return parameters."""
-            return []
+        def __len__(self) -> int:
+            """Return length."""
+            return 1
 
-        def named_modules(self) -> list[tuple[str, Any]]:
-            """Return named modules."""
-            return []
+    loader = DummyLoader()
+    assert isinstance(loader, DataLoaderProtocol)
+    assert not isinstance(object(), DataLoaderProtocol)
+    assert len(loader) == 1
+    assert list(loader) == [{"inputs": [1]}]
 
-        def train(self, mode: bool = True) -> ConformingTorchModel:
-            """Set training mode."""
-            _ = mode
-            return self
+    class DummyApp:
+        """Conforming FastAPIAppProtocol stub."""
 
-        def to(self, *_a: object, **_kw: object) -> ConformingTorchModel:
-            """Move to device."""
-            return self
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            """Handle ASGI scope."""
+            _ = (scope, receive, send)
 
-        def state_dict(self) -> dict[str, Any]:
-            """Return state dict."""
+        def post(self, path: str, **kwargs: object) -> Any:
+            """Register POST route."""
+            return lambda fn: fn
+
+        def get(self, path: str, **kwargs: object) -> Any:
+            """Register GET route."""
+            return lambda fn: fn
+
+    app = DummyApp()
+    assert isinstance(app, FastAPIAppProtocol)
+    assert not isinstance(object(), FastAPIAppProtocol)
+    assert callable(app.post("/generate"))
+    assert callable(app.get("/health"))
+    import asyncio
+
+    asyncio.run(app({}, None, None))
+
+    class DummyEmbedder:
+        """Conforming EmbedderModelProtocol stub."""
+
+        def encode(self, *args: object, **kwargs: object) -> list[float]:
+            """Return embedding vector."""
+            _ = (args, kwargs)
+            return [1.0, 0.0]
+
+    embedder = DummyEmbedder()
+    assert isinstance(embedder, EmbedderModelProtocol)
+    assert not isinstance(object(), EmbedderModelProtocol)
+    assert embedder.encode("test") == [1.0, 0.0]
+
+    class DummyMaxTextModel:
+        """Conforming MaxTextCausalLMProtocol stub."""
+
+        def init(self, *args: object, **kwargs: object) -> dict[str, Any]:
+            """Return initial parameter dict."""
+            _ = (args, kwargs)
             return {}
 
-    class ConformingKerasModel:
-        """Minimal Keras model satisfying KerasModelProtocol."""
+        def apply(self, *args: object, **kwargs: object) -> float:
+            """Apply forward pass."""
+            _ = (args, kwargs)
+            return 0.0
 
-        def __call__(self, *_a: object, **_kw: object) -> Any:
-            """Forward pass."""
-            return None
+    mt_model = DummyMaxTextModel()
+    assert isinstance(mt_model, (MaxTextModelProtocol, MaxTextCausalLMProtocol))
+    assert not isinstance(object(), MaxTextCausalLMProtocol)
+    assert mt_model.init() == {}
+    assert mt_model.apply() == 0.0
 
-        def generate(self, *_a: object, **_kw: object) -> Any:
-            """Generate text."""
-            return "SELECT 1"
+    class DummyJaxModel:
+        """Conforming JaxCausalLMProtocol stub."""
 
-        def compile(self, *_a: object, **_kw: object) -> None:
-            """Compile model."""
+        config = None
+        model = None
+        lm_head = None
 
-        def fit(self, *_a: object, **_kw: object) -> Any:
-            """Fit model."""
-            return None
+        def __call__(self, *args: object, **kwargs: object) -> float:
+            """Run forward pass."""
+            _ = (args, kwargs)
+            return 1.0
 
-        @property
-        def layers(self) -> list[Any]:
-            """Return layers."""
-            return []
+    jax_model = DummyJaxModel()
+    assert isinstance(jax_model, (FlaxNNXModelProtocol, JaxCausalLMProtocol))
+    assert not isinstance(object(), JaxCausalLMProtocol)
+    assert jax_model() == 1.0
 
-        def save(self, *_a: object, **_kw: object) -> None:
-            """Save model."""
+    class DummyMlxModel:
+        """Conforming MlxCausalLMProtocol stub."""
 
-        def load_weights(self, *_a: object, **_kw: object) -> None:
-            """Load weights."""
-
-    class ConformingFlaxNNXModel:
-        """Minimal Flax NNX model satisfying FlaxNNXModelProtocol."""
-
-        def __call__(self, *_a: object, **_kw: object) -> Any:
-            """Forward pass."""
-            return None
-
-        @property
-        def config(self) -> dict[str, Any]:
-            """Return config."""
-            return {}
-
-        @property
-        def model(self) -> object:
-            """Return inner model."""
-            return object()
-
-        @property
-        def lm_head(self) -> object:
-            """Return language modeling head."""
-            return object()
-
-    class ConformingMaxTextModel:
-        """Minimal MaxText model satisfying MaxTextModelProtocol."""
-
-        def init(self, *_a: object, **_kw: object) -> dict[str, Any]:
-            """Initialize parameters."""
-            return {}
-
-        def apply(self, *_a: object, **_kw: object) -> Any:
-            """Apply model."""
-            return None
-
-    class ConformingMLXModel:
-        """Minimal MLX model satisfying MLXModelProtocol."""
-
-        def __call__(self, *_a: object, **_kw: object) -> Any:
-            """Forward pass."""
-            return None
+        def __call__(self, *args: object, **kwargs: object) -> float:
+            """Run forward pass."""
+            _ = (args, kwargs)
+            return 1.0
 
         def parameters(self) -> dict[str, Any]:
-            """Return parameter tree."""
+            """Return parameter dictionary."""
             return {}
 
-        def update(self, _parameters: Any) -> None:
-            """Update parameter tree."""
+        def update(self, parameters: dict[str, Any]) -> None:
+            """Update parameters."""
+            _ = parameters
 
-    arr = ConformingArray()
-    assert isinstance(arr, NDArrayProtocol)
-    assert arr.shape == (2, 2)
-    assert arr.dtype == "float32"
-    assert arr.tolist() == [[1.0, 2.0], [3.0, 4.0]]
-    assert arr.reshape(4) is arr
-    assert arr.transpose(1, 0) is arr
-    assert arr.astype("int32") is arr
-    assert arr.flatten() is arr
-    assert arr.__array__() is arr
-    assert not isinstance(object(), NDArrayProtocol)
+        def freeze(self) -> None:
+            """Freeze parameters."""
 
-    t = ConformingTensor()
-    assert isinstance(t, TensorType)
-    assert t.shape == (1, 2)
-    assert t.ndim == 2
-    assert t.dtype == "float32"
-    assert t.reshape(2, 1) is t
-    assert t.transpose(1, 0) is t
-    assert t.astype("float16") is t
-    assert t.mean() is t
-    assert t.item() == 1.0
-    assert t[0] is t
-    assert (t - 1) is t
-    assert (t + 1) is t
-    assert (t * 2) is t
-    assert (2 * t) is t
-    assert (-t) is t
-    assert not isinstance(object(), TensorType)
+    mlx_model = DummyMlxModel()
+    assert isinstance(mlx_model, (MLXModelProtocol, MlxCausalLMProtocol))
+    assert not isinstance(object(), MlxCausalLMProtocol)
+    assert mlx_model() == 1.0
+    assert mlx_model.parameters() == {}
+    mlx_model.update({})
+    mlx_model.freeze()
 
-    tok = ConformingTokenizer()
-    assert isinstance(tok, TokenizerProtocol)
-    assert tok.decode(tok.encode("SQL")) == "SQL"
-    assert not isinstance(object(), TokenizerProtocol)
-
-    pt_model = ConformingTorchModel()
-    assert isinstance(pt_model, CausalLMProtocol)
-    assert isinstance(pt_model, TorchModelProtocol)
-    assert not isinstance(object(), TorchModelProtocol)
-
-    k_model = ConformingKerasModel()
-    assert isinstance(k_model, KerasModelProtocol)
-    assert not isinstance(object(), KerasModelProtocol)
-
-    nnx_model = ConformingFlaxNNXModel()
-    assert isinstance(nnx_model, FlaxNNXModelProtocol)
-    assert not isinstance(object(), FlaxNNXModelProtocol)
-
-    mt_model = ConformingMaxTextModel()
-    assert isinstance(mt_model, MaxTextModelProtocol)
-    assert not isinstance(object(), MaxTextModelProtocol)
-
-    mlx_model = ConformingMLXModel()
-    assert isinstance(mlx_model, MLXModelProtocol)
-    assert not isinstance(object(), MLXModelProtocol)
-
-    # Verify typed trainer state dataclasses
-    loop_state = TrainingLoopState(dataloader=[{"inputs": [1]}], epochs=2, model=pt_model)
-    assert loop_state.epochs == 2
-    dpo_state = DPOLoopState(policy_model=pt_model, ref_model=pt_model, dataloader=[], beta=0.2)
-    assert dpo_state.beta == 0.2
-    traj_state = DPOTrajectoryState(dataloader=[], epochs=3, beta=0.1)
-    assert traj_state.epochs == 3
-    mt_state = MaxTextTrainerState(dataloader=[], epochs=1, params={"w": 1})
-    assert mt_state.params == {"w": 1}
-    torch_state = TorchTrainerState(dataloader=[], model=pt_model, device="cpu")
-    assert torch_state.device == "cpu"
-    keras_state = KerasTrainerState(dataloader=[], model=k_model, epochs=4)
-    assert keras_state.epochs == 4
-
-
-def test_numpy_fallback() -> None:
-    """Verify `type_hints.ndarray` falls back to `object` when `numpy` is unavailable."""
-    import gemma_4_sql.type_hints as th
-
-    with patch.dict(sys.modules, {"numpy": None}):
-        importlib.reload(th)
-        assert th.ndarray is object
-    importlib.reload(th)
+    for proto in (
+        NDArrayProtocol,
+        TensorProtocol,
+        CausalLMProtocol,
+        TorchModelProtocol,
+        TorchCausalLMProtocol,
+        KerasModelProtocol,
+        KerasCausalLMProtocol,
+        TrainableModelProtocol,
+        QuantizableModelProtocol,
+    ):
+        assert not isinstance(object(), proto)

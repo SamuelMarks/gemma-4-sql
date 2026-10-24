@@ -41,10 +41,10 @@ class LazyLoader(Generic[T]):
 
         """
         self.module_name = module_name
-        self._module: Any = None
+        self._module: T | None = None
         self._loaded = False
 
-    def get_module(self) -> Any:
+    def get_module(self) -> T | None:
         """Provide the imported module if available, otherwise return None.
 
         Returns:
@@ -53,8 +53,10 @@ class LazyLoader(Generic[T]):
         """
         if not self._loaded:
             try:
-                self._module = importlib.import_module(self.module_name)
-            except (ImportError, AttributeError):
+                loaded_mod: Any = importlib.import_module(self.module_name)
+                self._module = loaded_mod
+            except (ImportError, AttributeError) as err:
+                logger.debug("Optional module %s not available: %s", self.module_name, err)
                 self._module = None
             self._loaded = True
         return self._module
