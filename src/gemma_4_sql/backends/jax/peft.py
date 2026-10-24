@@ -7,7 +7,7 @@ import math
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
@@ -401,10 +401,11 @@ def inject_lora(
 
     # If the model is a Gemma4ForCausalLM or contains layers sequence
     layers: list[Any] | None = None
-    if hasattr(model, "model") and hasattr(model.model, "layers"):
-        layers = cast(list[Any], model.model.layers)
-    elif hasattr(model, "layers") and isinstance(model.layers, list):
-        layers = model.layers
+    model_any: Any = model
+    if hasattr(model_any, "model") and hasattr(model_any.model, "layers"):
+        layers = list(model_any.model.layers)
+    elif hasattr(model_any, "layers") and isinstance(model_any.layers, list):
+        layers = model_any.layers
 
     if layers is not None:
         for layer in layers:
@@ -443,11 +444,11 @@ def inject_lora(
             elif isinstance(val, nnx.Module) or hasattr(val, "__dict__"):
                 _traverse(val)
             elif isinstance(val, (list, tuple)):
-                for item in cast(list[Any], val):
+                for item in val:
                     if isinstance(item, nnx.Module):
                         _traverse(item)
             elif isinstance(val, dict):
-                for item in cast(dict[str, Any], val).values():
+                for item in val.values():
                     if isinstance(item, nnx.Module):
                         _traverse(item)
 
@@ -563,6 +564,14 @@ def apply_lora(
         _ = nnx.split(model, LoRAParam, ...)
         logger.info("Injected LoRA into %d targets", injected_count)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        if kwargs.get("raise_on_error"):
+            raise TrainingError(
+                f"JAX PEFT failed: {e!s}",
+                backend="jax",
+                model_name=model_name,
+                operation="apply_lora",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
 
     return {

@@ -110,22 +110,22 @@ def test_process_image(tmp_path: Path) -> None:
             """Enter context manager."""
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object):
             """Exit context manager."""
 
-        def convert(self, mode):
+        def convert(self, mode: Any):
             """Convert image mode."""
             return self
 
-        def resize(self, size, resample):
+        def resize(self, size: Any, resample: Any):
             """Resize image."""
             return self
 
-        def getpixel(self, coords):
+        def getpixel(self, coords: Any):
             """Get pixel RGB tuple."""
             return (255, 0, 0)
 
-        def __array__(self, *args, **kwargs):
+        def __array__(self, *args: Any, **kwargs: Any):
             """Return numpy array representation."""
             return np.zeros((224, 224, 3), dtype=np.float32)
 
@@ -135,7 +135,7 @@ def test_process_image(tmp_path: Path) -> None:
         Resampling = _MockPILResampling
 
         @staticmethod
-        def open(buf):
+        def open(buf: Any):
             """Open mock image from buffer."""
             return _MockOpenedImage()
 
@@ -228,13 +228,13 @@ def test_format_multimodal_prompt() -> None:
     """Test formatting prompt with multimodal placeholder tokens and masks."""
     # Text only
     text_res = format_multimodal_prompt("Show all active users")
-    assert text_res["prompt"] == "Show all active users"
-    assert text_res["modality"] == "text"
-    assert text_res["image_token_mask"] is None
-    assert text_res["audio_token_mask"] is None
+    assert text_res.get("prompt") == "Show all active users"
+    assert text_res.get("modality") == "text"
+    assert text_res.get("image_token_mask") is None
+    assert text_res.get("audio_token_mask") is None
 
     # Vision only
-    vis_res = format_multimodal_prompt("Count departments", has_image=True)
+    vis_res: Any = format_multimodal_prompt("Count departments", has_image=True)
     assert vis_res["prompt"].startswith("<image>")
     assert vis_res["modality"] == "vision"
     assert vis_res["image_token_mask"] is not None
@@ -242,20 +242,20 @@ def test_format_multimodal_prompt() -> None:
     assert vis_res["image_token_mask"][1] is False
 
     # Audio only
-    aud_res = format_multimodal_prompt("Calculate sum", has_audio=True)
+    aud_res: Any = format_multimodal_prompt("Calculate sum", has_audio=True)
     assert aud_res["prompt"].startswith("<audio>")
     assert aud_res["modality"] == "audio"
     assert aud_res["audio_token_mask"] is not None
     assert aud_res["audio_token_mask"][0] is True
 
     # Multimodal (vision + audio)
-    mm_res = format_multimodal_prompt("Find customer with id 10", has_image=True, has_audio=True)
+    mm_res: Any = format_multimodal_prompt("Find customer with id 10", has_image=True, has_audio=True)
     assert "<image>" in mm_res["prompt"]
     assert "<audio>" in mm_res["prompt"]
     assert mm_res["modality"] == "multimodal"
 
     # Already has tokens in prompt
-    existing_res = format_multimodal_prompt("<image> Query schema", has_image=True)
+    existing_res: Any = format_multimodal_prompt("<image> Query schema", has_image=True)
     assert existing_res["prompt"].count("<image>") == 1
 
     with pytest.raises(ValueError, match="prompt cannot be empty."):
@@ -319,8 +319,8 @@ def test_sdk_agent_multimodal_preservation(monkeypatch: pytest.MonkeyPatch) -> N
         image_path="schema.png",
         modality="vision",
     )
-    result = run_agentic_loop("test-model", "List users", backend="jax", context=ctx)
-    assert result["success"] is True
+    result: Any = run_agentic_loop("test-model", "List users", backend="jax", context=ctx)
+    assert result.get("success") is True
     assert result["attempts"] == 2
     # Verify that <image> placeholder is retained in retry prompt
     assert "<image>" in attempts_seen[0]
@@ -356,8 +356,8 @@ def test_sdk_evaluation_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
         modality="vision",
     )
     assert res["status"] == "completed"
-    assert res["modality"] == "vision"
-    assert res["image_path"] == "/path/to/erd.png"
+    assert res.get("modality") == "vision"
+    assert res.get("image_path") == "/path/to/erd.png"
 
 
 @pytest.mark.asyncio
@@ -389,7 +389,8 @@ async def test_common_serve_multimodal() -> None:
             """Return mock JSON."""
             return self._data
 
-    generate_route = next(r.endpoint for r in app.routes if getattr(r, "path", None) == "/generate")
+    app_any: Any = app
+    generate_route = next(r.endpoint for r in app_any.routes if getattr(r, "path", None) == "/generate")
     res = await generate_route(MockReq(req_payload))
     body_raw = res.body if hasattr(res, "body") else res
     import json
@@ -508,7 +509,7 @@ def test_multimodal_edge_cases() -> None:
                         """Mock image resize."""
                         return self
 
-                    def getpixel(self, coords):
+                    def getpixel(self, coords: Any):
                         """Raise ValueError to simulate missing getpixel."""
                         raise ValueError("No getpixel")
 

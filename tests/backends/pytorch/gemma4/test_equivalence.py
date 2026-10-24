@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -61,9 +63,9 @@ def test_logit_equivalence() -> None:
     # Get JAX params and translate to PyTorch
     _, jax_state = nnx.split(jax_model)
 
-    def _flatten_state(state, prefix=""):
+    def _flatten_state(state: Any, prefix: str = "") -> dict[str, Any]:
         """Recursively flatten nested Flax NNX state dictionary."""
-        flat = {}
+        flat: dict[str, Any] = {}
         for k, v in state.items():
             new_key = f"{prefix}.{k}" if prefix else k
             if hasattr(v, "items"):
@@ -113,6 +115,7 @@ def test_rmsnorm_numerical_equivalence() -> None:
     jax_norm = JaxRMSNorm(dim=dim, rngs=rngs)
 
     scale = np.random.default_rng(42).normal(size=(dim,)).astype(np.float32)
+    assert jax_norm.scale is not None
     jax_norm.scale.value = jnp.array(scale)
     pt_norm.weight.data = torch.from_numpy(1.0 + scale)
 

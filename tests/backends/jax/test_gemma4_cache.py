@@ -12,7 +12,7 @@ from gemma_4_sql.backends.jax.gemma4.cache import LayerCache, init_cache
 
 
 def test_layer_cache():
-    """Execute and verify `test_layer_cache` behavior and invariants."""
+    """Verify layer cache behavior."""
     cache = LayerCache((2, 8, 4, 16), jnp.float32, None)
     assert cache.size == 8
     assert cache.cur_ind.value == 0
@@ -21,7 +21,7 @@ def test_layer_cache():
 
 
 def test_init_cache():
-    """Execute and verify `test_init_cache` behavior and invariants."""
+    """Verify init cache behavior."""
     config = MagicMock()
     config.num_hidden_layers = 2
     # attention patterns have GLOBAL at index 5. so index 0 and 1 are LOCAL_SLIDING
@@ -37,7 +37,7 @@ def test_init_cache():
 
 
 def test_init_cache_global():
-    """Execute and verify `test_init_cache_global` behavior and invariants."""
+    """Verify init cache global behavior."""
     config = MagicMock()
     config.num_hidden_layers = 6  # 6th is global
     config.num_key_value_heads = 2
@@ -53,7 +53,7 @@ def test_init_cache_global():
 
 
 def test_init_cache_global_fallback():
-    """Execute and verify `test_init_cache_global_fallback` behavior and invariants."""
+    """Verify init cache global fallback behavior."""
     config = MagicMock()
     config.num_hidden_layers = 6  # 6th is global
     config.num_key_value_heads = 2

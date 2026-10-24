@@ -1,5 +1,6 @@
 """Unit and behavioral tests for quantize keras."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from tests.conftest import requires_keras
@@ -12,8 +13,8 @@ import pytest
 import gemma_4_sql.backends.keras.quantize as q
 
 
-def test_quantize_layer_weights(monkeypatch):
-    """Execute and verify `test_quantize_layer_weights` behavior and invariants."""
+def test_quantize_layer_weights(monkeypatch: pytest.MonkeyPatch):
+    """Verify quantize layer weights behavior."""
     mock_layer = MagicMock()
     mock_layer.name = "dense"
 
@@ -60,8 +61,8 @@ def test_quantize_layer_weights(monkeypatch):
     assert q.quantize_layer_weights(mock_layer4, "int8") == 0
 
 
-def test_quantize_model(monkeypatch, tmp_path):
-    """Execute and verify `test_quantize_model` behavior and invariants."""
+def test_quantize_model(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Verify quantize model behavior."""
     from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 
     # 1. Missing keras

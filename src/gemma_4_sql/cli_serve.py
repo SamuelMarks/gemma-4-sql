@@ -6,6 +6,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk import build_few_shot_prompt, chat_turn, evaluate, generate, run_agentic_loop, serve_model
 from gemma_4_sql.sdk.agent import AgentContext
 
@@ -15,11 +16,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def evaluate_cmd(args: argparse.Namespace) -> None:
+def evaluate_cmd(args: argparse.Namespace) -> int:
     """Evaluate an existing model.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code `0` on success, or `1` if evaluation fails.
 
     """
     db_kwargs: dict[str, Any] = {}
@@ -39,13 +43,17 @@ def evaluate_cmd(args: argparse.Namespace) -> None:
         modality=getattr(args, "modality", "text"),
     )
     print(json.dumps(res, indent=2))
+    return 1 if is_failed_status(res) else 0
 
 
-def generate_cmd(args: argparse.Namespace) -> None:
+def generate_cmd(args: argparse.Namespace) -> int:
     """Generate SQL from text.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code `0` on success, or `1` if generation fails.
 
     """
     res = generate(
@@ -67,13 +75,17 @@ def generate_cmd(args: argparse.Namespace) -> None:
         print(str(sql_output))
     if getattr(args, "show_confidence", False) and res and "confidence_score" in res:
         print(f"Confidence: {float(str(res['confidence_score'])):.4f}")
+    return 1 if is_failed_status(res) else 0
 
 
-def agent_cmd(args: argparse.Namespace) -> None:
+def agent_cmd(args: argparse.Namespace) -> int:
     """Run agentic self-correction loop.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code `0` on success, or `1` if agent loop fails.
 
     """
     db_kwargs: dict[str, Any] = {}
@@ -97,13 +109,17 @@ def agent_cmd(args: argparse.Namespace) -> None:
         db_kwargs=db_kwargs,
     )
     print(json.dumps(res, indent=2))
+    return 1 if is_failed_status(res) else 0
 
 
-def serve_cmd(args: argparse.Namespace) -> None:
+def serve_cmd(args: argparse.Namespace) -> int:
     """Serve a model using continuous batching.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code `0` on success, or `1` if server initialization fails.
 
     """
     res = serve_model(
@@ -115,13 +131,17 @@ def serve_cmd(args: argparse.Namespace) -> None:
     )
     status = (res or {}).get("status", "unknown")
     print(f"Serving model {args.model} on port {args.port} (status: {status})")
+    return 1 if is_failed_status(res) else 0
 
 
-def chat_cmd(args: argparse.Namespace) -> None:
+def chat_cmd(args: argparse.Namespace) -> int:
     """Run a multi-turn conversational SQL chat turn.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code `0` on success, or `1` if chat turn fails.
 
     """
     history: list[dict[str, str]] = []
@@ -130,7 +150,7 @@ def chat_cmd(args: argparse.Namespace) -> None:
             history = json.loads(args.history)
         except json.JSONDecodeError as exc:
             logger.warning("Invalid JSON history provided to chat_cmd: %s", exc)
-            return
+            return 0
     res = chat_turn(
         model_name=args.model,
         history=history,
@@ -140,13 +160,17 @@ def chat_cmd(args: argparse.Namespace) -> None:
     response_text = (res or {}).get("response", "")
     if response_text:
         print(str(response_text))
+    return 1 if is_failed_status(res) else 0
 
 
-def few_shot_cmd(args: argparse.Namespace) -> None:
+def few_shot_cmd(args: argparse.Namespace) -> int:
     """Run dynamic few-shot prompting.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code `0` on success, or `1` if few-shot prompt generation fails.
 
     """
     examples: list[dict[str, str]] = []
@@ -155,7 +179,7 @@ def few_shot_cmd(args: argparse.Namespace) -> None:
             examples = json.loads(args.examples)
         except json.JSONDecodeError as exc:
             logger.warning("Invalid JSON examples provided to few_shot_cmd: %s", exc)
-            return
+            return 0
     res = build_few_shot_prompt(
         model_name=args.model,
         prompt=args.prompt,
@@ -165,3 +189,4 @@ def few_shot_cmd(args: argparse.Namespace) -> None:
     prompt_text = (res or {}).get("few_shot_prompt", "")
     if prompt_text:
         print(str(prompt_text))
+    return 1 if is_failed_status(res) else 0

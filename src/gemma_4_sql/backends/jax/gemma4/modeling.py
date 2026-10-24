@@ -406,7 +406,8 @@ def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array,
     input_features_mask = kwargs.get("input_features_mask")
     audio_token_mask = kwargs.get("audio_token_mask")
     pixel_values = kwargs.get("pixel_values")
-    logits = cast(Any, model)(
+    model_fn: Any = model
+    logits = model_fn(
         input_ids=input_ids,
         positions=positions,
         cache=cache,

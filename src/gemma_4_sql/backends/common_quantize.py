@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import (
+    DependencyMissingError,
+    GemmaSQLError,
+    UnsupportedQuantizationMethodError,
+)
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
@@ -90,6 +94,8 @@ def quantize_model_wrapper(
     method: str,
     missing_deps: bool,
     apply_fn: Callable[..., tuple[float, str]],
+    *,
+    raise_on_error: bool = False,
 ) -> QuantizeResultDict:
     """Wrap and standardize execution and error handling for quantization.
 
@@ -99,12 +105,15 @@ def quantize_model_wrapper(
         method: The quantization method.
         missing_deps: Whether dependencies are missing.
         apply_fn: Function that applies quantization and returns `(memory_reduction, status)`.
+        raise_on_error: Whether to raise `GemmaSQLError` on runtime failure.
 
     Returns:
         A dictionary containing the quantization results.
 
     Raises:
-        DependencyMissingError: If `missing_deps` is True.
+        DependencyMissingError: If `missing_deps` is True or raised by `apply_fn`.
+        UnsupportedQuantizationMethodError: If raised by `apply_fn`.
+        GemmaSQLError: If `raise_on_error` is True and `apply_fn` fails.
 
     """
     if missing_deps:
@@ -117,8 +126,18 @@ def quantize_model_wrapper(
         (memory_reduction, status) = apply_fn()
         if not status.startswith("unsupported"):
             logger.info("Loading model %s with %s quantization...", model_name, method)
+    except (DependencyMissingError, UnsupportedQuantizationMethodError):
+        raise
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to quantize: ")
+        if raise_on_error:
+            raise GemmaSQLError(
+                f"Quantization failed on {backend_name}: {e!s}",
+                backend=backend_name,
+                model_name=model_name,
+                operation="quantize",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
         memory_reduction = 0.0
 

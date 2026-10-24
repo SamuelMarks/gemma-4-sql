@@ -11,12 +11,7 @@ from gemma_4_sql.sdk.rag import build_rag_prompt, extract_schema_entities, retri
 
 
 def test_extract_schema_entities() -> None:
-    """Execute test helper or verification step.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify extract schema entities behavior."""
     ddl = "\n\n    CREATE TABLE users (\n        id INT,\n        name VARCHAR,\n        PRIMARY KEY (id)\n    );\n    CREATE TABLE orders (\n        order_id INT,\n        user_id INT,\n        amount DECIMAL,\n        FOREIGN KEY (user_id) REFERENCES users(id)\n    );\n    "
     schema = extract_schema_entities(ddl)
     assert "users" in schema
@@ -26,12 +21,7 @@ def test_extract_schema_entities() -> None:
 
 
 def test_extract_schema_entities_ignore_comments() -> None:
-    """Execute test helper or verification step.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify extract schema entities ignore comments behavior."""
     ddl = "\n\n    -- This is a comment\n    CREATE TABLE test (\n        col1 INT\n    );\n    "
     schema = extract_schema_entities(ddl)
     assert "test" in schema
@@ -39,12 +29,7 @@ def test_extract_schema_entities_ignore_comments() -> None:
 
 
 def test_retrieve_relevant_schema() -> None:
-    """Execute test helper or verification step.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify retrieve relevant schema behavior."""
     schema = {"users": ["id", "name"], "orders": ["order_id", "user_id", "amount"], "products": ["prod_id", "name", "price"]}
     context = retrieve_relevant_schema("Find all users names", schema)
     assert "Table: users | Columns: id, name" in context
@@ -55,24 +40,14 @@ def test_retrieve_relevant_schema() -> None:
 
 
 def test_retrieve_relevant_schema_fallback() -> None:
-    """Execute test helper or verification step.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify retrieve relevant schema fallback behavior."""
     schema = {"users": ["id", "name"], "orders": ["order_id", "user_id", "amount"]}
     context = retrieve_relevant_schema("Show everything", schema, top_k_tables=1)
     assert "Table: users | Columns: id, name" in context
 
 
 def test_retrieve_relevant_schema_empty() -> None:
-    """Execute test helper or verification step.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify retrieve relevant schema empty behavior."""
     context = retrieve_relevant_schema("Show everything", {})
     assert context == ""
 
@@ -81,14 +56,10 @@ class MockSentenceTransformer:
     """Provide class docstring."""
 
     def __init__(self, name: str) -> None:
-        """Execute test helper or verification step."""
+        """Initialize test stub instance."""
 
     def encode(self, docs: list[str]) -> list[list[float]]:
-        """Execute test helper or verification step.
-
-        Returns: Any: Description of return.
-
-        """
+        """Provide encode test helper."""
         return [[1.0] for _ in docs]
 
 
@@ -96,38 +67,21 @@ class MockSimilarities:
     """Provide class docstring."""
 
     def argsort(self) -> Any:
-        """Execute test helper or verification step.
-
-        Returns: Any: Description of return.
-
-        """
+        """Provide argsort test helper."""
         return [0]
 
     def __getitem__(self, idx: Any) -> Any:
-        """Execute test helper or verification step.
-
-        Returns: Any: Description of return.
-
-        """
+        """Provide getitem   test helper."""
         return 1.0
 
 
-def mock_cosine_similarity(_a: Any, _b: Any) -> list:
-    """Execute test helper or verification step.
-
-    Returns: Any: Description of return.
-
-    """
+def mock_cosine_similarity(_a: Any, _b: Any) -> list[Any]:
+    """Provide mock cosine similarity test helper."""
     return [MockSimilarities()]
 
 
 def test_retrieve_relevant_schema_semantic(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute test helper or verification step.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify retrieve relevant schema semantic behavior."""
     monkeypatch.setattr(rag, "SentenceTransformer", MockSentenceTransformer)
     monkeypatch.setattr(rag, "cosine_similarity", mock_cosine_similarity)
     schema = {"users": ["id", "name"]}
@@ -136,22 +90,12 @@ def test_retrieve_relevant_schema_semantic(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute test helper or verification step.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify retrieve relevant schema semantic error behavior."""
     monkeypatch.setattr(rag, "SentenceTransformer", MockSentenceTransformer)
     __import__("typing", fromlist=[""])
 
     def raise_err(*_args: Any, **_kwargs: Any) -> Any:
-        """Execute test helper or verification step.
-
-        Raises:
-            ValueError: Description.
-
-        """
+        """Provide raise err test helper."""
         msg = "err"
         raise ValueError(msg)
 
@@ -162,22 +106,12 @@ def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch
 
 
 def test_build_rag_prompt_no_ddl() -> None:
-    """Execute test helper or verification step.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify build rag prompt no ddl behavior."""
     assert build_rag_prompt("Find users") == "Find users"
 
 
 def test_build_rag_prompt_with_ddl() -> None:
-    """Execute test helper or verification step.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify build rag prompt with ddl behavior."""
     ddl = "CREATE TABLE users (id INT, name VARCHAR);"
     prompt = "Find all users"
     rag_prompt = build_rag_prompt(prompt, ddl)
@@ -407,8 +341,13 @@ def test_rag_successful_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     assert mock_model.encode.call_count == 2
     mock_cos.assert_called_once()
 
-    # Second call with same schema reuses cached table embeddings (only encodes prompt)
+    # Second call with same schema should hit cached table embeddings (only encodes prompt)
     res2 = rag._semantic_search("second query", schema, ["table1", "table2"], top_k_tables=1)
     assert res2 == ["table1"]
     assert mock_model.encode.call_count == 3
+
+    # Verify LRU eviction when MAX_SCHEMA_CACHE_SIZE is exceeded
+    monkeypatch.setattr(rag, "MAX_SCHEMA_CACHE_SIZE", 1)
+    rag._semantic_search("third query", {"table3": ["c"]}, ["table3"], top_k_tables=1)
+    assert len(rag._SCHEMA_EMBEDDING_CACHE) == 1
     rag.clear_rag_model_cache()

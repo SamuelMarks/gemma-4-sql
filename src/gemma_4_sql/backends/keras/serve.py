@@ -11,7 +11,7 @@ from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, ServeResultDict
+    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONValue, ServeResultDict
 logger = logging.getLogger(__name__)
 
 keras = optional_import("keras")
@@ -19,7 +19,7 @@ tf = optional_import("tensorflow")
 GemmaCausalLM: Any = optional_attr("keras_nlp.models", "GemmaCausalLM")
 
 
-def create_app(model_name: str) -> object:
+def create_app(model_name: str) -> FastAPIAppProtocol:
     """Create the FastAPI application for the Keras server.
 
     Args:
@@ -88,7 +88,7 @@ def create_app(model_name: str) -> object:
         """
         if loaded_model is not None and hasattr(loaded_model, "generate"):
             try:
-                outputs = loaded_model.generate(prompts)
+                outputs: Any = loaded_model.generate(prompts)
                 return [str(out).strip() for out in outputs]
             except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 logger.warning("Keras batch generation failed, falling back to individual generation: %s", e)

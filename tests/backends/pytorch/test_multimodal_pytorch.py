@@ -30,22 +30,22 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path, monkeypatch: pytest.M
             """Enter context manager."""
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object):
             """Exit context manager."""
 
-        def convert(self, mode):
+        def convert(self, mode: Any):
             """Convert image mode."""
             return self
 
-        def resize(self, size, resample):
+        def resize(self, size: Any, resample: Any):
             """Resize image."""
             return self
 
-        def getpixel(self, coords):
+        def getpixel(self, coords: Any):
             """Get pixel RGB tuple."""
             return (255, 0, 0)
 
-        def __array__(self, *args, **kwargs):
+        def __array__(self, *args: Any, **kwargs: Any):
             """Return numpy array representation."""
             import numpy as np
 
@@ -60,7 +60,7 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path, monkeypatch: pytest.M
             BILINEAR = 2
 
         @staticmethod
-        def open(buf):
+        def open(buf: Any):
             """Open mock image from buffer."""
             return _MockOpenedImage()
 
@@ -105,7 +105,7 @@ def test_pytorch_etl_multimodal_extraction(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_pytorch_collate_multimodal() -> None:
-    """Execute and verify `test_pytorch_collate_multimodal` behavior and invariants."""
+    """Verify pytorch collate multimodal behavior."""
     import importlib
 
     from gemma_4_sql.backends.pytorch import etl
@@ -153,22 +153,22 @@ def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest
             """Enter context manager."""
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object):
             """Exit context manager."""
 
-        def convert(self, mode):
+        def convert(self, mode: Any):
             """Convert image mode."""
             return self
 
-        def resize(self, size, resample):
+        def resize(self, size: Any, resample: Any):
             """Resize image."""
             return self
 
-        def getpixel(self, coords):
+        def getpixel(self, coords: Any):
             """Get pixel RGB tuple."""
             return (255, 0, 0)
 
-        def __array__(self, *args, **kwargs):
+        def __array__(self, *args: Any, **kwargs: Any):
             """Return numpy array representation."""
             import numpy as np
 
@@ -183,7 +183,7 @@ def test_pytorch_inference_multimodal_native(tmp_path: Path, monkeypatch: pytest
             BILINEAR = 2
 
         @staticmethod
-        def open(buf):
+        def open(buf: Any):
             """Open mock image from buffer."""
             return _MockOpenedImage()
 
@@ -240,22 +240,22 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
             """Enter context manager."""
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object):
             """Exit context manager."""
 
-        def convert(self, mode):
+        def convert(self, mode: Any):
             """Convert image mode."""
             return self
 
-        def resize(self, size, resample):
+        def resize(self, size: Any, resample: Any):
             """Resize image."""
             return self
 
-        def getpixel(self, coords):
+        def getpixel(self, coords: Any):
             """Get pixel RGB tuple."""
             return (255, 0, 0)
 
-        def __array__(self, *args, **kwargs):
+        def __array__(self, *args: Any, **kwargs: Any):
             """Return numpy array representation."""
             import numpy as np
 
@@ -270,7 +270,7 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
             BILINEAR = 2
 
         @staticmethod
-        def open(buf):
+        def open(buf: Any):
             """Open mock image from buffer."""
             return _MockOpenedImage()
 
@@ -296,10 +296,10 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
             passed_extra.update(kwargs)
 
             class MockOutput:
-                """Execute and verify `MockOutput` behavior and invariants."""
+                """Test stub for `MockOutput`."""
 
                 def __init__(self) -> None:
-                    """Execute and verify `__init__` behavior and invariants."""
+                    """Initialize test stub instance."""
                     self.sequences = torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long)
                     self.sequences_scores = [torch.tensor(0.9)]
 
@@ -316,16 +316,16 @@ def test_pytorch_inference_multimodal_hf(tmp_path: Path, monkeypatch: pytest.Mon
         def __call__(self, text: str, **kwargs: Any) -> Any:
             """Simulate tokenization."""
 
-            class MockInputs(UserDict):
-                """Execute and verify `MockInputs` behavior and invariants."""
+            class MockInputs(UserDict[str, Any]):
+                """Test stub for `MockInputs`."""
 
                 def __init__(self) -> None:
-                    """Execute and verify `__init__` behavior and invariants."""
+                    """Initialize test stub instance."""
                     super().__init__({"input_ids": torch.tensor([[1, 2]], dtype=torch.long)})
                     self.input_ids = self["input_ids"]
 
                 def to(self, device: Any) -> MockInputs:
-                    """Execute and verify `to` behavior and invariants."""
+                    """Provide to test helper."""
                     return self
 
             return MockInputs()

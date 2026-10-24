@@ -6,6 +6,7 @@ import contextlib
 import logging
 import os
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Optional
 
@@ -88,7 +89,7 @@ def _apply_transform(tensor: TensorType, transform: Any) -> Any:
 
 
 def assign_weights(
-    keys: list[str],
+    keys: Sequence[str | int],
     tensor: TensorType,
     state_dict: Any,
     st_key: str,
@@ -134,7 +135,7 @@ def assign_weights(
 
 
 def assign_weights_from_eval_shape(
-    keys: list[str],
+    keys: Sequence[str | int],
     tensor: TensorType,
     state_dict: Any,
     st_key: str,
@@ -251,7 +252,9 @@ def create_model_from_safe_tensors(
     model_cls: Any,
     cfg: object,
     key_mapping: dict[str, Any],
-) -> object:
+    *,
+    strict: bool = False,
+) -> Any:
     """Stream tensors from `.safetensors` shards in `file_dir` into a newly initialized model.
 
     Args:
@@ -259,9 +262,13 @@ def create_model_from_safe_tensors(
         model_cls: Model class to instantiate.
         cfg: Model configuration instance.
         key_mapping: Regex mapping from source keys to target JAX state keys.
+        strict: If True, raise `ExportError` when `nnx.update(model, state)` fails.
 
     Returns:
         Instantiated model updated with loaded weights.
+
+    Raises:
+        ExportError: If `strict=True` and updating the model state fails.
 
     """
     if safe_open is None or not Path(file_dir).is_dir():
@@ -273,6 +280,10 @@ def create_model_from_safe_tensors(
 
     try:
         nnx.update(model, state)
-    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError):
+    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as e:
         logger.exception("Failed to update model with loaded state")
+        if strict:
+            from gemma_4_sql.exceptions import ExportError
+
+            raise ExportError(f"Failed to update JAX model state from {file_dir}: {e!s}", backend="jax", cause=e) from e
     return model

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
@@ -107,7 +107,7 @@ def mlx_beam_search(
             full_seq = input_ids + gen_tokens
             if mx is not None:
                 tensor_in = mx.array([full_seq])
-                out = model(tensor_in)
+                out: Any = model(tensor_in)
             else:
                 out = model(full_seq)
 
@@ -118,7 +118,7 @@ def mlx_beam_search(
             elif hasattr(out, "ndim") and out.ndim == 2:
                 next_logits = out[-1, slice(None)]
             elif isinstance(out, (list, tuple)):
-                next_logits = cast(Any, out)[-1]
+                next_logits = out[-1]
             else:
                 next_logits = out
 
@@ -196,9 +196,9 @@ def generate_sql(
     sql = ""
     try:
         logger.info("Generating with MLX %s (beam_width=%d)", model_name, beam_width)
-        loaded = load(model_name)
-        model: ModelType = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
-        tokenizer = cast(Any, loaded)[1] if isinstance(loaded, (tuple, list)) and len(cast(list[Any], loaded)) > 1 else None
+        loaded: Any = load(model_name)
+        model: ModelType = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
+        tokenizer = loaded[1] if isinstance(loaded, (tuple, list)) and len(loaded) > 1 else None
         eos_id_arg = kwargs.get("eos_token_id")
         eos_id = int(eos_id_arg) if isinstance(eos_id_arg, (int, str, float)) else None
         sql, confidence_score = mlx_beam_search(

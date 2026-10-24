@@ -37,15 +37,17 @@ def generic_dpo_loss(
     logits = pi_logratios - ref_logratios
     loss = -log_sigmoid_fn(beta * logits)
     diff_chosen = policy_chosen_logps - ref_chosen_logps
-    chosen_rewards = beta * diff_chosen.detach() if hasattr(diff_chosen, "detach") else beta * diff_chosen
+    detach_ch: Callable[[], TensorType] | None = getattr(diff_chosen, "detach", None)
+    chosen_rewards = beta * detach_ch() if detach_ch is not None else beta * diff_chosen
     diff_rejected = policy_rejected_logps - ref_rejected_logps
-    rejected_rewards = beta * diff_rejected.detach() if hasattr(diff_rejected, "detach") else beta * diff_rejected
+    detach_re: Callable[[], TensorType] | None = getattr(diff_rejected, "detach", None)
+    rejected_rewards = beta * detach_re() if detach_re is not None else beta * diff_rejected
     mean_loss = loss.mean() if hasattr(loss, "mean") else loss
     return (mean_loss, chosen_rewards, rejected_rewards)
 
 
 def generic_run_training_epochs(
-    state: TrainerState,
+    state: TrainerState[Any, Any, Any, Any],
     step_fn: Callable[[Any, Any, Any, Any, float], Any],
 ) -> float:
     """Run DPO training epochs abstracting backend-specific step execution.

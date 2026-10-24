@@ -10,7 +10,7 @@ import pytest
 from gemma_4_sql.sdk.export import export_model
 
 
-def test_export_model_jax_unified(monkeypatch, tmp_path: Path) -> None:
+def test_export_model_jax_unified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Test unified model export using JAX backend."""
     from unittest.mock import MagicMock
 

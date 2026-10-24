@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import gemma_4_sql.backends.jax.dpo as jax_dpo
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, TrainerState
 from tests.conftest import requires_jax
 
@@ -33,8 +33,8 @@ def test_real_tiny_jax_dpo_loss_logps_and_train_step() -> None:
         head_dim=8,
         num_experts=1,
     )
-    policy_model = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0))
-    ref_model = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(1))
+    policy_model: Any = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0))
+    ref_model: Any = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(1))
     optimizer = jax_dpo._create_nnx_optimizer(policy_model, optax.adamw(1e-2))
 
     batch: dict[str, Any] = {
@@ -93,9 +93,8 @@ def test_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_get_train_step_fn_without_nnx(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _get_train_step_fn and optimizer helpers handle legacy 1-arg and missing-attribute objects."""
     monkeypatch.setattr(jax_dpo, "nnx", MagicMock(spec=[]))
-    train_step = jax_dpo._get_train_step_fn(0.1)
-    loss = train_step(MagicMock(), MagicMock(), MagicMock(spec=[]), {})  # type: ignore[operator]
-    assert loss == 0.0
+    with pytest.raises(DependencyMissingError, match="value_and_grad"):
+        jax_dpo._get_train_step_fn(0.1)
 
     # Test _apply_nnx_optimizer_update fallback to 1-arg update(grads)
     called_with: list[Any] = []
@@ -110,9 +109,9 @@ def test_get_train_step_fn_without_nnx(monkeypatch: pytest.MonkeyPatch) -> None:
     jax_dpo._apply_nnx_optimizer_update(LegacyOptimizer(), "model", "grads")
     assert called_with == ["grads"]
 
-    # Test _create_nnx_optimizer fallback when wrt is rejected
+    # Test _create_nnx_optimizer fallback when wrt is rejected and _get_train_step_fn without jit
     class LegacyNNX:
-        """NNX module stub whose Optimizer rejects wrt keyword argument."""
+        """NNX module stub whose Optimizer rejects wrt keyword argument and lacks jit."""
 
         Param = object
 
@@ -121,8 +120,16 @@ def test_get_train_step_fn_without_nnx(monkeypatch: pytest.MonkeyPatch) -> None:
             """Accept only 2 positional arguments."""
             return (model, tx)
 
+        @staticmethod
+        def value_and_grad(fn: Any) -> Any:
+            """Invoke fn and return loss and dummy grads."""
+            return lambda p, r, b: (fn(p, r, b), "grads")
+
     monkeypatch.setattr(jax_dpo, "nnx", LegacyNNX)
     assert jax_dpo._create_nnx_optimizer("m", "tx") == ("m", "tx")
+    with patch.object(jax_dpo, "_dpo_step_loss", return_value=0.125):
+        step_fn = jax_dpo._get_train_step_fn(0.1)
+        assert step_fn("p", "r", LegacyOptimizer(), {}) == 0.125  # type: ignore[operator]
 
 
 def test_run_training_epochs_float_return() -> None:
@@ -172,6 +179,8 @@ def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
     with patch.object(jax_dpo, "_execute_dpo", side_effect=ValueError("Test Error")):
         res_err = jax_dpo.run_dpo(cfg)
         assert res_err["status"] == "failed: Test Error"
+        with pytest.raises(TrainingError, match="Test Error"):
+            jax_dpo.run_dpo(cfg, raise_on_error=True)
 
     monkeypatch.setattr(jax_dpo, "optax", None)
     with pytest.raises(DependencyMissingError, match="JAX dependencies are missing for DPO."):

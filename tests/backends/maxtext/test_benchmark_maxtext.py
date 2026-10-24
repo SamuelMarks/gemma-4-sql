@@ -1,5 +1,6 @@
 """Unit and behavioral tests for benchmark maxtext."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import jax.numpy as jnp
@@ -8,7 +9,7 @@ from gemma_4_sql.backends.maxtext import benchmark
 
 
 def test_get_device():
-    """Execute and verify `test_get_device` behavior and invariants."""
+    """Verify get device behavior."""
     mock_jax = MagicMock()
     mock_jax.devices.side_effect = lambda x: ["tpu0"] if x == "tpu" else ["gpu0"] if x == "gpu" else ["cpu0"]
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", mock_jax):
@@ -18,11 +19,11 @@ def test_get_device():
 
 
 def test_get_device_runtime_error():
-    """Execute and verify `test_get_device_runtime_error` behavior and invariants."""
+    """Verify get device runtime error behavior."""
     mock_jax = MagicMock()
 
-    def mock_devices(t):
-        """Execute and verify `mock_devices` behavior and invariants."""
+    def mock_devices(t: Any):
+        """Provide mock devices test helper."""
         if t == "cpu":
             return ["cpu0"]
         raise RuntimeError()
@@ -33,13 +34,13 @@ def test_get_device_runtime_error():
 
 
 def test_get_device_no_jax():
-    """Execute and verify `test_get_device_no_jax` behavior and invariants."""
+    """Verify get device no jax behavior."""
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", None):
         assert benchmark._get_device("tpu") is None
 
 
 def test_run_benchmark_pass():
-    """Execute and verify `test_run_benchmark_pass` behavior and invariants."""
+    """Verify run benchmark pass behavior."""
     mock_model = MagicMock()
     mock_model.apply.return_value = jnp.zeros((2, 32, 256))
 
@@ -56,17 +57,17 @@ def test_run_benchmark_pass():
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", mock_jax), patch("gemma_4_sql.backends.maxtext.benchmark.jnp", jnp), patch("time.time", side_effect=[float(i) for i in range(100)]):
         # forward pass (prefill) with warmup and block_until_ready
         mock_jax.block_until_ready = MagicMock()
-        tps, mem, mem2 = benchmark._run_benchmark_pass(mock_model, {}, 2, 1, 1, "prefill", 10, mock_device)
+        tps, _mem, _mem2 = benchmark._run_benchmark_pass(mock_model, {}, 2, 1, 1, "prefill", 10, mock_device)
         assert tps > 0
 
         # generate pass with warmup and NO block_until_ready / NO jit
         del mock_jax.block_until_ready
         del mock_jax.jit
-        tps, mem, mem2 = benchmark._run_benchmark_pass(mock_model, {}, 2, 1, 1, "generate", 1, mock_device)
+        tps, _mem, _mem2 = benchmark._run_benchmark_pass(mock_model, {}, 2, 1, 1, "generate", 1, mock_device)
         assert tps > 0
 
         # 0 num_runs
-        tps, mem, mem2 = benchmark._run_benchmark_pass(mock_model, {}, 2, 0, 0, "prefill", 10, mock_device)
+        tps, _mem, _mem2 = benchmark._run_benchmark_pass(mock_model, {}, 2, 0, 0, "prefill", 10, mock_device)
 
         # exception memory_stats
         mock_device.memory_stats.side_effect = AttributeError
@@ -75,7 +76,7 @@ def test_run_benchmark_pass():
 
 
 def test_benchmark_model():
-    """Execute and verify `test_benchmark_model` behavior and invariants."""
+    """Verify benchmark model behavior."""
     with (
         patch("gemma_4_sql.backends.maxtext.benchmark.Gemma4Model", MagicMock()),
         patch("gemma_4_sql.backends.maxtext.benchmark.jax", MagicMock()),
@@ -100,7 +101,7 @@ def test_benchmark_model():
 
 
 def test_benchmark_model_error():
-    """Execute and verify `test_benchmark_model_error` behavior and invariants."""
+    """Verify benchmark model error behavior."""
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", None):
         res = benchmark.benchmark_model("gemma4", "cpu", 2)
         assert res["status"] == "backend_unavailable"

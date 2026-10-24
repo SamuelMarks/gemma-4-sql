@@ -10,7 +10,7 @@ from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
@@ -72,15 +72,16 @@ def _compute_logps(
         Summed non-padding log probability per sequence.
 
     """
-    logits = cast(Any, model.apply(params, inputs))
+    logits: Any = model.apply(params, inputs)
     ndim = getattr(logits, "ndim", 0)
     if jnn is not None and jnp is not None and isinstance(ndim, int) and ndim >= 2 and hasattr(jnn, "log_softmax") and hasattr(jnp, "take_along_axis"):
         log_probs = jnn.log_softmax(logits, axis=-1)
         labels_expanded = jnp.expand_dims(labels, axis=-1)
         selected_log_probs = jnp.squeeze(jnp.take_along_axis(log_probs, labels_expanded, axis=-1), axis=-1)
-        mask = cast(Any, labels) != 0
+        labels_any: Any = labels
+        mask = labels_any != 0
         return cast(TensorType, jnp.sum(selected_log_probs * mask, axis=-1))
-    return cast(TensorType, jnp.sum(logits * labels, axis=-1))
+    return cast(TensorType, jnp.sum(logits * labels, axis=-1) if jnp is not None else logits)
 
 
 def _dpo_step_loss(
@@ -159,18 +160,19 @@ def _get_train_step_fn(
             """Compute DPO step loss for gradient differentiation."""
             return _dpo_step_loss(policy_model, p, ref_model, r, b, beta)
 
-        opt_obj = cast(Any, optimizer)
+        opt_obj: Any = optimizer
         (loss, grads) = jax.value_and_grad(_wrapper)(policy_params, ref_params, batch)
         (updates, new_opt_state) = opt_obj.update(grads, opt_state, policy_params)
         updated_params = optax.apply_updates(policy_params, updates)
         return (updated_params, new_opt_state, loss)
 
     if jax is not None and hasattr(jax, "jit"):
-        return cast(Callable[..., tuple[Any, Any, Any]], jax.jit(train_step))
+        jit_fn: Any = jax.jit(train_step)
+        return jit_fn
     return train_step
 
 
-def _run_training_epochs(state: TrainerState) -> tuple[Any, Any, float]:
+def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> tuple[Any, Any, float]:
     """Run DPO training epochs for MaxText.
 
     Args:
@@ -182,8 +184,8 @@ def _run_training_epochs(state: TrainerState) -> tuple[Any, Any, float]:
     """
     policy_params = state.policy_params
     opt_state = state.opt_state
-    step_fn = cast(Callable[..., tuple[Any, Any, Any]], state.train_step)
-    dataloader = cast("Iterable[dict[str, TensorType]]", state.dataloader or ())
+    step_fn = state.train_step
+    dataloader: Iterable[dict[str, TensorType]] = state.dataloader or ()
 
     def process_batch(batch: dict[str, TensorType]) -> float:
         """Process a single training batch.
@@ -196,6 +198,7 @@ def _run_training_epochs(state: TrainerState) -> tuple[Any, Any, float]:
 
         """
         nonlocal policy_params, opt_state
+        assert step_fn is not None
         (policy_params, opt_state, loss) = step_fn(policy_params, state.ref_params, opt_state, batch)
         return float(loss.item() if hasattr(loss, "item") else loss)
 
@@ -265,13 +268,14 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
 
     Args:
         config: DPO configuration object.
-        **kwargs: Extra parameters.
+        **kwargs: Extra parameters (such as `raise_on_error=True`).
 
     Returns:
         Structured `DPOResultDict` with the execution status and metrics.
 
     Raises:
         DependencyMissingError: If MaxText or JAX dependencies are missing.
+        TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
     model_name = getattr(config, "model_name", "model")
@@ -279,11 +283,13 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
     beta = getattr(config, "beta", 0.1)
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
+    extra = getattr(config, "extra_kwargs", {}) or {}
+    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
 
     final_loss = 0.0
     status = "completed"
     if jax is None or jnp is None or optax is None or Gemma4Model is None:
-        raise DependencyMissingError("MaxText dependencies are missing.")
+        raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
     try:
         batch_size = getattr(config, "batch_size", 2)
         status, final_loss = _execute_dpo(
@@ -296,6 +302,14 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
         )
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         logger.exception("DPO Train error: ")
+        if raise_on_error:
+            raise TrainingError(
+                f"MaxText DPO failed: {e!s}",
+                backend="maxtext",
+                model_name=model_name,
+                operation="dpo",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
     return {
         "backend": "maxtext",

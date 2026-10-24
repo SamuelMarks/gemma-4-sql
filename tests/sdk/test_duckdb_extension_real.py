@@ -115,7 +115,7 @@ def test_duckdb_udf_error_handling(monkeypatch: pytest.MonkeyPatch) -> None:
     conn.close()
 
 
-def test_duckdb_missing_skip(monkeypatch):
+def test_duckdb_missing_skip(monkeypatch: pytest.MonkeyPatch):
     """Test that tests are skipped if duckdb is missing."""
     import sys
 

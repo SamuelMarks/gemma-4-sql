@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import ETLConfig, ModelType, TensorType, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
@@ -72,7 +72,8 @@ def _get_train_step_fn(model: ModelType, optimizer: object) -> Any:
             return _loss_fn(model, p, b)
 
         (loss, grads) = jax.value_and_grad(_wrapper)(params, batch)
-        (updates, opt_state) = cast(Any, optimizer).update(grads, opt_state, params)
+        opt_any: Any = optimizer
+        (updates, opt_state) = opt_any.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
         return (params, opt_state, loss)
 
@@ -81,7 +82,7 @@ def _get_train_step_fn(model: ModelType, optimizer: object) -> Any:
     return train_step
 
 
-def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, float]:
+def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> tuple[TensorType, TensorType, float]:
     """Execute epochs over dataloader using TrainerState.
 
     Args:
@@ -91,8 +92,10 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
         Tuple of (final_params, final_opt_state, final_loss).
 
     """
-    params = state.params
-    opt_state = state.opt_state
+    params: Any = state.params
+    opt_state: Any = state.opt_state
+    train_step = state.train_step
+    dataloader: Any = state.dataloader or ()
 
     def process_batch(batch: dict[str, Any]) -> float:
         """Process a single batch during epoch iteration.
@@ -105,10 +108,11 @@ def _run_training_epochs(state: TrainerState) -> tuple[TensorType, TensorType, f
 
         """
         nonlocal params, opt_state
-        (params, opt_state, loss) = state.train_step(params, opt_state, batch)
+        assert train_step is not None
+        (params, opt_state, loss) = train_step(params, opt_state, batch)
         return float(loss.item() if hasattr(loss, "item") else loss)
 
-    final_loss = generic_run_training_epochs(state.epochs, state.dataloader, process_batch)
+    final_loss = generic_run_training_epochs(state.epochs, dataloader, process_batch)
     return (params, opt_state, final_loss)
 
 
@@ -283,7 +287,8 @@ def _execute_train(
         )
         cli_args = build_maxtext_cli_args(cfg, gin_config_path=gin_file_path, **merged_kwargs)
         logger.info("Invoking maxtext.train.main with CLI arguments: %s", cli_args)
-        maxtext_train.main(cli_args)
+        dist_res = maxtext_train.main(cli_args)
+        dist_loss = float(dist_res) if isinstance(dist_res, (int, float)) else 0.0
 
         ckpt_dir = merged_kwargs.get("checkpoint_dir")
         if ckpt_dir and ocp is not None:
@@ -293,7 +298,7 @@ def _execute_train(
                 params=cast("dict[str, TensorType]", {"status": "trained_distributed"}),
                 opt_state=None,
             )
-        return "completed", 0.0
+        return "completed", dist_loss
 
     if Gemma4Model is None:
         from gemma_4_sql.exceptions import DependencyMissingError
@@ -336,13 +341,14 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
 
     Args:
         config: The TrainingConfig specifying hyperparameters and settings.
-        **kwargs: Extra parameters passed to the training pipeline.
+        **kwargs: Extra parameters passed to the training pipeline (including `raise_on_error`).
 
     Returns:
         A dictionary containing MaxText training status and metrics.
 
     Raises:
         DependencyMissingError: If required MaxText dependencies are missing.
+        TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
     action = getattr(config, "action", "sft")
@@ -350,14 +356,18 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
     dataset = getattr(config, "dataset", "dummy")
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
+    extra = getattr(config, "extra_kwargs", {}) or {}
+    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
 
     final_loss = 0.0
     status = "completed"
     if jax is None or jnp is None or optax is None or (Gemma4Model is None and maxtext_train is None):
-        raise DependencyMissingError("MaxText dependencies are missing.")
+        raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
 
     try:
-        local_step_mode = bool(kwargs.get("local_step_mode") or getattr(config, "extra_kwargs", {}).get("local_step_mode", False))
+        local_step_mode = bool(kwargs.get("local_step_mode") or extra.get("local_step_mode", False))
+        call_kwargs = dict(kwargs)
+        call_kwargs.pop("raise_on_error", None)
         status, final_loss = _execute_train(
             config,
             dataset=dataset,
@@ -365,10 +375,18 @@ def train_model(config: TrainingConfig, **kwargs: object) -> JSONDict:
             learning_rate=learning_rate,
             batch_size=getattr(config, "batch_size", 2),
             local_step_mode=local_step_mode,
-            **kwargs,
+            **call_kwargs,
         )
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         logger.exception("MaxText Train error: ")
+        if raise_on_error:
+            raise TrainingError(
+                f"MaxText training failed: {e!s}",
+                backend="maxtext",
+                model_name=model_name,
+                operation=action,
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
 
     result: JSONDict = {

@@ -47,7 +47,6 @@ def run_dpo(
             batch_size=batch_size,
             extra_kwargs=dict(kwargs),
         ),
-        **kwargs,
     )
 
 

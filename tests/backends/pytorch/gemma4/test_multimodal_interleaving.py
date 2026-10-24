@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
+from pathlib import Path
+
 import torch
 
 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
@@ -138,7 +139,7 @@ def test_gemma4_causal_lm_multimodal_interleaving_forward() -> None:
     assert model.embed_tokens.weight.grad is not None
 
 
-def test_gemma4_causal_lm_from_pretrained(tmp_path: pytest.TempPathFactory) -> None:
+def test_gemma4_causal_lm_from_pretrained(tmp_path: Path) -> None:
     """Test Gemma4ForCausalLM.from_pretrained with config=None and safetensors file."""
     import json
 
@@ -242,7 +243,7 @@ def test_gemma4_causal_lm_multimodal_concat_fallback_attention_mask_padding() ->
     assert logits.shape[2] == 100
 
 
-def test_gemma4_causal_lm_from_pretrained_default_config(tmp_path: pytest.TempPathFactory) -> None:
+def test_gemma4_causal_lm_from_pretrained_default_config(tmp_path: Path) -> None:
     """Test Gemma4ForCausalLM.from_pretrained fallback when config is None and no config.json exists."""
     from unittest.mock import patch
 

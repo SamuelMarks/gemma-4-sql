@@ -1,5 +1,6 @@
 """Unit and behavioral tests for export maxtext."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,8 +9,8 @@ from gemma_4_sql.backends.maxtext.export import export_model
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 
 
-def test_export_model_success_with_kwargs(tmp_path):
-    """Execute and verify `test_export_model_success_with_kwargs` behavior and invariants."""
+def test_export_model_success_with_kwargs(tmp_path: Path):
+    """Verify export model success with kwargs behavior."""
     export_path = tmp_path / "export_dir"
     weights = {"w": 1}
 
@@ -40,8 +41,8 @@ def test_export_model_success_with_kwargs(tmp_path):
     mock_mngr_instance.save.assert_called_once_with(0, weights)
 
 
-def test_export_model_success_without_kwargs(tmp_path):
-    """Execute and verify `test_export_model_success_without_kwargs` behavior and invariants."""
+def test_export_model_success_without_kwargs(tmp_path: Path):
+    """Verify export model success without kwargs behavior."""
     export_path = tmp_path / "export_dir"
 
     mock_mngr_instance = MagicMock()
@@ -72,14 +73,14 @@ def test_export_model_success_without_kwargs(tmp_path):
     mock_mngr_instance.save.assert_called_once_with(0, {"w": 2})
 
 
-def test_export_model_missing_jax(tmp_path):
-    """Execute and verify `test_export_model_missing_jax` behavior and invariants."""
+def test_export_model_missing_jax(tmp_path: Path):
+    """Verify export model missing jax behavior."""
     with patch("gemma_4_sql.backends.maxtext.export.jax", None), pytest.raises(DependencyMissingError, match="MaxText export dependencies \\(jax, orbax.checkpoint\\) are missing."):
         export_model("test_model", str(tmp_path))
 
 
-def test_export_model_missing_gemma4model(tmp_path):
-    """Execute and verify `test_export_model_missing_gemma4model` behavior and invariants."""
+def test_export_model_missing_gemma4model(tmp_path: Path):
+    """Verify export model missing gemma4model behavior."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_ocp = MagicMock()
@@ -93,8 +94,8 @@ def test_export_model_missing_gemma4model(tmp_path):
         export_model("test_model", str(tmp_path))
 
 
-def test_export_model_init_error(tmp_path):
-    """Execute and verify `test_export_model_init_error` behavior and invariants."""
+def test_export_model_init_error(tmp_path: Path):
+    """Verify export model init error behavior."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_ocp = MagicMock()
@@ -109,8 +110,8 @@ def test_export_model_init_error(tmp_path):
         export_model("test_model", str(tmp_path))
 
 
-def test_export_model_save_error(tmp_path):
-    """Execute and verify `test_export_model_save_error` behavior and invariants."""
+def test_export_model_save_error(tmp_path: Path):
+    """Verify export model save error behavior."""
     export_path = tmp_path / "export_dir"
 
     mock_mngr_class = MagicMock(side_effect=Exception("Save failed"))

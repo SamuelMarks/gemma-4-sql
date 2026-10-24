@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.type_hints import ModelType, TensorType
 
 MIN_NDIM_FOR_QUANTIZATION = 2
@@ -287,19 +288,29 @@ def quantize_model(
         method: The quantization method ('int8', 'awq', etc.).
         calibration_samples: Optional calibration activation samples for AWQ.
         salient_ratio: Ratio of salient weights to protect in AWQ.
-        **kwargs: Additional backend keyword arguments.
+        **kwargs: Additional backend keyword arguments (such as `strict_method=True`).
 
     Returns:
         A dictionary containing quantization status and metadata.
 
     Raises:
         DependencyMissingError: If JAX quantization dependencies are missing.
+        UnsupportedQuantizationMethodError: If `strict_method=True` and `method` is unsupported.
 
     """
     if jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None:
-        raise DependencyMissingError("JAX dependencies are missing.")
+        raise DependencyMissingError("JAX dependencies are missing.", backend="jax")
 
-    try:
+    if kwargs.get("strict_method") and method not in {"int8", "awq"}:
+        raise UnsupportedQuantizationMethodError(
+            f"Unsupported quantization method '{method}' for JAX backend.",
+            method=method,
+            supported_methods=("int8", "awq"),
+            backend="jax",
+        )
+
+    def _apply() -> tuple[float, str]:
+        """Instantiate or resolve JAX model and apply uniform INT8 or AWQ quantization."""
         from_preset_fn = getattr(Gemma4Config, "from_preset", None)
         cfg = from_preset_fn(model_name) if callable(from_preset_fn) else Gemma4Config.gemma4_e2b()
         model = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0))
@@ -309,14 +320,13 @@ def quantize_model(
             calibration_samples=calibration_samples,
             salient_ratio=salient_ratio,
         )
-    except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
-        status = f"failed: {e!s}"
-        memory_reduction = 0.0
+        return (float(memory_reduction), status)
 
-    return {
-        "backend": "jax",
-        "model": model_name,
-        "method": method,
-        "status": status,
-        "memory_reduction_factor": float(memory_reduction),
-    }
+    return quantize_model_wrapper(
+        backend_name="jax",
+        model_name=model_name,
+        method=method,
+        missing_deps=False,
+        apply_fn=_apply,
+        raise_on_error=bool(kwargs.get("raise_on_error")),
+    )

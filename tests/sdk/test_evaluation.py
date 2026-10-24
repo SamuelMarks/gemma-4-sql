@@ -62,7 +62,7 @@ def test_evaluate_keras_with_live_sqlite(monkeypatch: pytest.MonkeyPatch) -> Non
     assert res["metrics"]["exact_match"] == pytest.approx(1.0)
     assert res["metrics"]["valid_sql"] == pytest.approx(1.0)
     assert res["metrics"]["execution_accuracy"] == pytest.approx(1.0)
-    assert res["metrics"]["mean_confidence"] == pytest.approx(0.92)
+    assert res["metrics"].get("mean_confidence") == pytest.approx(0.92)
 
 
 def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -135,7 +135,7 @@ def test_evaluate_mock_predictions() -> None:
     ):
         res = evaluate("model", "dataset")
         assert res["metrics"]["exact_match"] == pytest.approx(1.0)
-        assert res["metrics"]["mean_confidence"] == pytest.approx(1.0)
+        assert res["metrics"].get("mean_confidence") == pytest.approx(1.0)
 
 
 def test_run_evaluation_inference_no_dataloader() -> None:
@@ -244,8 +244,8 @@ def test_evaluate_with_audio_path() -> None:
     ):
         res = evaluate("model", "dataset", "jax", audio_path="/path/to/query.wav", modality="audio")
         assert res["status"] == "completed"
-        assert res["audio_path"] == "/path/to/query.wav"
-        assert res["modality"] == "audio"
+        assert res.get("audio_path") == "/path/to/query.wav"
+        assert res.get("modality") == "audio"
 
 
 def test_evaluate_with_image_path() -> None:
@@ -259,8 +259,8 @@ def test_evaluate_with_image_path() -> None:
     ):
         res = evaluate("model", "dataset", "jax", image_path="/path/to/schema.png", modality="vision")
         assert res["status"] == "completed"
-        assert res["image_path"] == "/path/to/schema.png"
-        assert res["modality"] == "vision"
+        assert res.get("image_path") == "/path/to/schema.png"
+        assert res.get("modality") == "vision"
 
 
 def test_collect_predictions_batch_multimodal() -> None:

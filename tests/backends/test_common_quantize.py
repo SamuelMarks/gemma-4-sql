@@ -5,17 +5,21 @@ from unittest.mock import MagicMock
 import pytest
 
 from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization, quantize_model_wrapper
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import (
+    DependencyMissingError,
+    GemmaSQLError,
+    UnsupportedQuantizationMethodError,
+)
 
 
 def test_apply_bits_and_bytes_quantization_missing_deps():
-    """Execute and verify `test_apply_bits_and_bytes_quantization_missing_deps` behavior and invariants."""
+    """Verify apply bits and bytes quantization missing deps behavior."""
     with pytest.raises(DependencyMissingError):
         apply_bits_and_bytes_quantization("int8", None)
 
 
 def test_apply_bits_and_bytes_quantization_int8():
-    """Execute and verify `test_apply_bits_and_bytes_quantization_int8` behavior and invariants."""
+    """Verify apply bits and bytes quantization int8 behavior."""
     mock_cls = MagicMock()
     mock_cls.return_value = "config_obj"
     reduction, status = apply_bits_and_bytes_quantization("int8", mock_cls, llm_int8_skip_modules=["skipme"])
@@ -29,7 +33,7 @@ def test_apply_bits_and_bytes_quantization_int8():
 
 
 def test_apply_bits_and_bytes_quantization_int4():
-    """Execute and verify `test_apply_bits_and_bytes_quantization_int4` behavior and invariants."""
+    """Verify apply bits and bytes quantization int4 behavior."""
     mock_cls = MagicMock()
     mock_cls.return_value = "config_obj"
     reduction, status = apply_bits_and_bytes_quantization("int4", mock_cls, "float16")
@@ -39,14 +43,14 @@ def test_apply_bits_and_bytes_quantization_int4():
 
 
 def test_apply_bits_and_bytes_quantization_unsupported():
-    """Execute and verify `test_apply_bits_and_bytes_quantization_unsupported` behavior and invariants."""
+    """Verify apply bits and bytes quantization unsupported behavior."""
     mock_cls = MagicMock()
-    reduction, status = apply_bits_and_bytes_quantization("unknown", mock_cls)
+    _reduction, status = apply_bits_and_bytes_quantization("unknown", mock_cls)
     assert status == "unsupported_method_unknown"
 
 
 def test_apply_bits_and_bytes_quantization_with_model():
-    """Execute and verify `test_apply_bits_and_bytes_quantization_with_model` behavior and invariants."""
+    """Verify apply bits and bytes quantization with model behavior."""
     mock_cls = MagicMock()
     mock_model = MagicMock()
     mock_model.config = MagicMock()
@@ -57,7 +61,7 @@ def test_apply_bits_and_bytes_quantization_with_model():
 
 
 def test_quantize_model_wrapper():
-    """Execute and verify `test_quantize_model_wrapper` behavior and invariants."""
+    """Verify quantize model wrapper behavior."""
     with pytest.raises(DependencyMissingError):
         quantize_model_wrapper("b", "m", "int8", True, lambda: (0, ""))
 
@@ -68,8 +72,18 @@ def test_quantize_model_wrapper():
     assert res["status"] == "unsupported_xyz"
 
     def fail_fn():
-        """Execute and verify `fail_fn` behavior and invariants."""
+        """Provide fail fn test helper."""
         raise ValueError("oops")
 
     res = quantize_model_wrapper("b", "m", "int8", False, fail_fn)
     assert res["status"] == "failed: oops"
+
+    with pytest.raises(GemmaSQLError, match="oops"):
+        quantize_model_wrapper("b", "m", "int8", False, fail_fn, raise_on_error=True)
+
+    def unsupported_fn():
+        """Raise UnsupportedQuantizationMethodError."""
+        raise UnsupportedQuantizationMethodError("bad method")
+
+    with pytest.raises(UnsupportedQuantizationMethodError, match="bad method"):
+        quantize_model_wrapper("b", "m", "int8", False, unsupported_fn)

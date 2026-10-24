@@ -190,15 +190,12 @@ def build_dataloader(config: ETLConfig, **kwargs: object) -> DataloaderResultDic
     source = PyTorchDataset(hf_dataset, tokenizer=tokenizer)
     sampler = _get_sampler(source, distributed)
     dataloader = DataLoader(source, batch_size=batch_size, shuffle=False, sampler=sampler, collate_fn=_collate_fn)
-    return typing.cast(
-        "DataloaderResultDict",
-        {
-            "dataset": dataset_name,
-            "split": split,
-            "status": "loaded",
-            "batch_size": batch_size,
-            "backend": "pytorch",
-            "distributed": distributed,
-            "loader": dataloader,
-        },
-    )
+    return {
+        "dataset": dataset_name,
+        "split": split,
+        "status": "loaded",
+        "batch_size": batch_size,
+        "backend": "pytorch",
+        "distributed": distributed,
+        "loader": dataloader,
+    }

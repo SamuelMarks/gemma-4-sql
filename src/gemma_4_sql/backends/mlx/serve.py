@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_serve import create_common_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
@@ -12,7 +12,7 @@ from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, ServeResultDict
+    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONValue, ServeResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,8 @@ def _load_mlx_model(model_name: str) -> tuple[Any, Any]:
 
         loaded: Any = mlx_lm.load(model_name)
         if isinstance(loaded, (tuple, list)):
-            model: ModelType = cast(list[Any], loaded)[0]
-            tokenizer = cast(list[Any], loaded)[1] if len(cast(list[Any], loaded)) > 1 else None
+            model: ModelType = loaded[0]
+            tokenizer = loaded[1] if len(loaded) > 1 else None
         else:
             model = loaded
             tokenizer = None
@@ -105,7 +105,7 @@ def _batch_generate_queries(prompts: list[str], model_name: str = "") -> list[st
     return [_generate_query(p, model_name=model_name) for p in prompts]
 
 
-def _app_factory(model_name: str) -> object:
+def _app_factory(model_name: str) -> FastAPIAppProtocol:
     """Construct FastAPI app for MLX model serving.
 
     Args:

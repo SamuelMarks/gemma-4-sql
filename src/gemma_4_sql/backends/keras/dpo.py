@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.keras.etl import build_dataloader
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
     from gemma_4_sql.type_hints import DPOResultDict
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def _compute_logps(model: ModelType, inputs: Any, labels: Any) -> Any:
     """
     if tf is None:
         return 0.0
-    raw_logits = model(inputs)
+    raw_logits: Any = model(inputs)
     if hasattr(raw_logits, "detach") and hasattr(raw_logits, "cpu"):
         logits = tf.convert_to_tensor(raw_logits.detach().cpu().numpy())
     else:
@@ -80,11 +80,11 @@ def _compute_logps(model: ModelType, inputs: Any, labels: Any) -> Any:
     labels_expanded = tf.expand_dims(tf.cast(labels, tf.int32), axis=-1)
     selected_log_probs = tf.gather(log_probs, labels_expanded, batch_dims=2)
     selected_log_probs = tf.squeeze(selected_log_probs, axis=-1)
-    mask = tf.cast(cast(Any, labels) != 0, tf.float32)
+    mask = tf.cast(labels != 0, tf.float32)
     return tf.reduce_sum(selected_log_probs * mask, axis=-1)
 
 
-def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer: Any, beta: float) -> object:
+def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer: Any, beta: float) -> Callable[..., Any]:
     """Return a `tf.function` compiled DPO train step function.
 
     Args:
@@ -129,7 +129,7 @@ def _get_train_step_fn(policy_model: ModelType, ref_model: ModelType, optimizer:
     return tf.function(train_step)
 
 
-def _run_training_epochs(state: TrainerState) -> float:
+def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
     """Run Keras DPO training epochs over the preference dataloader.
 
     Args:
@@ -139,11 +139,12 @@ def _run_training_epochs(state: TrainerState) -> float:
         Mean batch loss from the final epoch.
 
     """
-    dataloader = cast("Iterable[dict[str, Any]]", state.dataloader or ())
+    dataloader: Iterable[dict[str, Any]] = state.dataloader or ()
     train_step = state.train_step
 
     def _step(batch: dict[str, Any]) -> float:
         """Execute a single Keras DPO step and extract scalar float loss."""
+        assert train_step is not None
         loss: Any = train_step(batch)
         if hasattr(loss, "numpy"):
             return float(loss.numpy())
@@ -202,13 +203,14 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
 
     Args:
         config: DPO configuration object.
-        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
+        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate, raise_on_error).
 
     Returns:
         Structured `DPOResultDict` containing execution status and loss.
 
     Raises:
         DependencyMissingError: If Keras DPO dependencies are missing.
+        TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
     model_name = getattr(config, "model_name", "model")
@@ -216,16 +218,26 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
     beta = getattr(config, "beta", 0.1)
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
+    extra = getattr(config, "extra_kwargs", {}) or {}
+    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
     final_loss = 0.0
     status = "completed"
     if keras is None or tf is None:
-        raise DependencyMissingError("Keras DPO dependencies are missing.")
+        raise DependencyMissingError("Keras DPO dependencies are missing.", backend="keras")
 
     batch_size = getattr(config, "batch_size", 2)
     try:
         status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, batch_size=batch_size)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
         logger.exception("Keras DPO error: ")
+        if raise_on_error:
+            raise TrainingError(
+                f"Keras DPO failed: {e!s}",
+                backend="keras",
+                model_name=model_name,
+                operation="dpo",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
 
     return {"backend": "keras", "action": "dpo", "model": model_name, "dataset": dataset, "beta": beta, "status": status, "final_loss": final_loss}

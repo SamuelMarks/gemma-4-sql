@@ -1,0 +1,100 @@
+{
+  "$schema": "../libscript/packaging/packaging.schema.json",
+  "name": "gemma-4-sql",
+  "title": "Gemma-4-SQL Text-to-SQL Platform",
+  "version": "0.0.1",
+  "publisher": "Gemma-4-SQL Open Source Project",
+  "upgrade_code": "D4E82A91-3C57-4B1E-8F62-9A1C5E7B3D04",
+  "topology": "standalone",
+  "database_contracts": [
+    {
+      "engine": "postgres",
+      "min_version": "16.0.0",
+      "allow_shared_instance": true,
+      "default_schema_name": "gemma_4_sql",
+      "default_user_name": "postgres",
+      "default_port": 5432,
+      "ssl_required": false,
+      "dbaas_supported": true
+    },
+    {
+      "engine": "sqlite",
+      "min_version": "3.40.0",
+      "allow_shared_instance": true,
+      "default_schema_name": "gemma_4_sql",
+      "ssl_required": false,
+      "dbaas_supported": false
+    }
+  ],
+  "services": [
+    {
+      "id": "gemma-4-sql-serve",
+      "type": "asgi",
+      "port_binding": 8000,
+      "environment_overrides": {
+        "PORT": "8000"
+      }
+    },
+    {
+      "id": "tensorboard",
+      "type": "custom",
+      "port_binding": 6006,
+      "environment_overrides": {
+        "PORT": "6006"
+      }
+    }
+  ],
+  "directories": {
+    "app_default": "[ProgramFiles64Folder][ProductName]",
+    "data_default": "[CommonAppDataFolder][ProductName]\\data",
+    "logs_default": "[CommonAppDataFolder][ProductName]\\logs",
+    "backups_default": "[CommonAppDataFolder][ProductName]\\backups"
+  },
+  "branding_palette": {
+    "primary_color": "#0F172A",
+    "secondary_color": "#1D4ED8",
+    "dark_color": "#020617",
+    "app_title": "Gemma-4-SQL"
+  },
+  "features": [
+    {
+      "id": "CoreSDK",
+      "title": "Gemma-4-SQL Core SDK & CLI",
+      "description": "Installs the multi-backend Gemma 4 Text-to-SQL CLI, SDK, and DuckDB UDF integration.",
+      "default": true,
+      "mandatory": true
+    },
+    {
+      "id": "ServingDaemon",
+      "title": "Continuous Batching Inference Server",
+      "description": "Installs the high-throughput HTTP serving daemon on port 8000.",
+      "default": true,
+      "mandatory": false
+    },
+    {
+      "id": "TensorBoard",
+      "title": "TensorBoard Observability Server",
+      "description": "Installs the TensorBoard metrics visualization service on port 6006.",
+      "default": true,
+      "mandatory": false
+    }
+  ],
+  "lifecycle_hooks": {
+    "pre_install": [
+      {
+        "id": "verify_python",
+        "description": "Verify Python 3.12+ runtime availability",
+        "command": "python3 --version",
+        "optional": true
+      }
+    ],
+    "post_install": [
+      {
+        "id": "verify_gemma_cli",
+        "description": "Verify gemma-4-sql CLI installation",
+        "command": "gemma-4-sql --help",
+        "optional": true
+      }
+    ]
+  }
+}

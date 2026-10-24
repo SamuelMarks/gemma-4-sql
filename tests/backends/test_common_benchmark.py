@@ -25,7 +25,7 @@ def test_get_current_rss_mb_psutil():
         assert get_current_rss_mb() == 1.0
 
 
-def test_get_current_rss_mb_fallback_darwin(monkeypatch):
+def test_get_current_rss_mb_fallback_darwin(monkeypatch: pytest.MonkeyPatch):
     """Test get_current_rss_mb fallback on darwin."""
     with patch.dict("sys.modules", {"psutil": None}), patch("sys.platform", "darwin"):
         mock_resource = MagicMock()
@@ -36,7 +36,7 @@ def test_get_current_rss_mb_fallback_darwin(monkeypatch):
             assert get_current_rss_mb() == 2.0
 
 
-def test_get_current_rss_mb_fallback_linux(monkeypatch):
+def test_get_current_rss_mb_fallback_linux(monkeypatch: pytest.MonkeyPatch):
     """Test get_current_rss_mb fallback on linux."""
     with patch.dict("sys.modules", {"psutil": None}), patch("sys.platform", "linux"):
         mock_resource = MagicMock()
@@ -87,7 +87,7 @@ def test_run_benchmark_wrapper_success():
     """Test run_benchmark_wrapper success."""
 
     def mock_benchmark():
-        """Execute and verify `mock_benchmark` behavior and invariants."""
+        """Provide mock benchmark test helper."""
         return (10.0, 50.0, 100.0)
 
     with patch("gemma_4_sql.backends.common_benchmark.get_current_rss_mb", return_value=10.0):
@@ -97,7 +97,7 @@ def test_run_benchmark_wrapper_success():
     assert res["tokens_per_sec"] == 10.0
     assert res["latency_ms"] == 50.0
     assert res["memory_mb"] == 100.0
-    assert res["rss_memory_mb"] == 10.0
+    assert res.get("rss_memory_mb") == 10.0
     assert "latency_stats" in res
     assert res["latency_stats"]["mean_ms"] == 15.0
 
@@ -106,7 +106,7 @@ def test_run_benchmark_wrapper_failure():
     """Test run_benchmark_wrapper failure."""
 
     def mock_benchmark():
-        """Execute and verify `mock_benchmark` behavior and invariants."""
+        """Provide mock benchmark test helper."""
         raise RuntimeError("Benchmark error")
 
     with patch("gemma_4_sql.backends.common_benchmark.get_current_rss_mb", return_value=10.0):

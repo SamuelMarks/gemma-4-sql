@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import TYPE_CHECKING, cast
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
@@ -20,6 +21,24 @@ duckdb = LazyLoader("duckdb").get_module()
 
 class DuckDBAdapter(DatabaseAdapter):
     """Adapter for DuckDB analytical databases."""
+
+    def __init__(
+        self,
+        db_path: str = ":memory:",
+        db_kwargs: dict[str, object] | None = None,
+        *,
+        read_only: bool = False,
+    ) -> None:
+        """Initialize the DuckDB adapter with a thread synchronization lock.
+
+        Args:
+            db_path: Path to DuckDB database file or `':memory:'`.
+            db_kwargs: Optional connection keyword arguments.
+            read_only: Whether to open the database in read-only mode.
+
+        """
+        self._lock = threading.Lock()
+        super().__init__(db_path, db_kwargs or {}, read_only=read_only)
 
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
@@ -126,15 +145,16 @@ class DuckDBAdapter(DatabaseAdapter):
             loop = asyncio.get_running_loop()
 
             def _exec() -> list[tuple[JSONPrimitive, ...]]:
-                """Execute query on a thread-safe cursor.
+                """Execute query on a synchronized cursor.
 
                 Returns:
                     Query result rows.
 
                 """
-                conn_obj = self.conn
-                cur = conn_obj.cursor() if callable(getattr(conn_obj, "cursor", None)) else conn_obj
-                return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
+                with self._lock:
+                    conn_obj = self.conn
+                    cur = conn_obj.cursor() if callable(getattr(conn_obj, "cursor", None)) else conn_obj
+                    return cast("list[tuple[JSONPrimitive, ...]]", cur.execute(query, params or ()).fetchall())
 
             return await loop.run_in_executor(None, _exec)
         except self.error_classes as e:

@@ -10,7 +10,7 @@ import logging
 import struct
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import ExportError
@@ -65,7 +65,7 @@ def _flatten_values(arr: Any) -> list[float]:
         return [float(x) for x in arr.detach().cpu().flatten().numpy().tolist()]
     if isinstance(arr, (list, tuple)):
         out: list[float] = []
-        for item in cast(list[Any], arr):
+        for item in arr:
             out.extend(_flatten_values(item))
         return out
     return [float(arr)]
@@ -300,7 +300,7 @@ def extract_pytorch_state_dict(model_or_name: Any, *, allow_dummy_fallback: bool
     raw_dict: dict[str, Any] = {}
 
     if isinstance(model_or_name, dict):
-        raw_dict = cast(dict[str, Any], model_or_name)
+        raw_dict = model_or_name
     elif hasattr(model_or_name, "state_dict") and callable(model_or_name.state_dict):
         state_dict_res: Any = model_or_name.state_dict()
         raw_dict = {str(k): v for k, v in state_dict_res.items()}
@@ -439,7 +439,7 @@ def write_gguf_v3(
                 f.write(struct.pack("<I", GGUF_TYPE_FLOAT32))
                 f.write(struct.pack("<f", v))
             elif isinstance(v, (list, tuple)):
-                v_list = cast(list[Any], v)
+                v_list: Sequence[Any] = v
                 f.write(struct.pack("<I", GGUF_TYPE_ARRAY))
                 f.write(struct.pack("<I", GGUF_TYPE_STRING))
                 f.write(struct.pack("<Q", len(v_list)))
@@ -460,10 +460,10 @@ def write_gguf_v3(
             shape: tuple[int, ...]
             if hasattr(arr, "shape"):
                 shape = tuple(arr.shape)
-            elif isinstance(arr, Sequence) and len(cast(list[Any], arr)) > 0 and isinstance(cast(list[Any], arr)[0], Sequence):
-                shape = (len(cast(list[Any], arr)), len(cast(list[Any], cast(list[Any], arr)[0])))
+            elif isinstance(arr, Sequence) and len(arr) > 0 and isinstance(arr[0], Sequence):
+                shape = (len(arr), len(arr[0]))
             else:
-                shape = (len(cast(list[Any], arr)),) if hasattr(cast(Any, arr), "__len__") else (16, 16)
+                shape = (len(arr),) if hasattr(arr, "__len__") else (16, 16)
 
             payload: bytes
             if isinstance(arr, (bytes, bytearray)):

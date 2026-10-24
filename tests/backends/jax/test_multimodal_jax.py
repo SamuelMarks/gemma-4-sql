@@ -26,22 +26,22 @@ def test_jax_grain_multimodal_map(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             """Enter context manager."""
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object):
             """Exit context manager."""
 
-        def convert(self, mode):
+        def convert(self, mode: Any):
             """Convert image mode."""
             return self
 
-        def resize(self, size, resample):
+        def resize(self, size: Any, resample: Any):
             """Resize image."""
             return self
 
-        def getpixel(self, coords):
+        def getpixel(self, coords: Any):
             """Get pixel RGB tuple."""
             return (255, 0, 0)
 
-        def __array__(self, *args, **kwargs):
+        def __array__(self, *args: Any, **kwargs: Any):
             """Return numpy array representation."""
             import numpy as np
 
@@ -56,7 +56,7 @@ def test_jax_grain_multimodal_map(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             BILINEAR = 2
 
         @staticmethod
-        def open(buf):
+        def open(buf: Any):
             """Open mock image from buffer."""
             return _MockOpenedImage()
 
@@ -99,22 +99,22 @@ def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             """Enter context manager."""
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object):
             """Exit context manager."""
 
-        def convert(self, mode):
+        def convert(self, mode: Any):
             """Convert image mode."""
             return self
 
-        def resize(self, size, resample):
+        def resize(self, size: Any, resample: Any):
             """Resize image."""
             return self
 
-        def getpixel(self, coords):
+        def getpixel(self, coords: Any):
             """Get pixel RGB tuple."""
             return (255, 0, 0)
 
-        def __array__(self, *args, **kwargs):
+        def __array__(self, *args: Any, **kwargs: Any):
             """Return numpy array representation."""
             import numpy as np
 
@@ -129,7 +129,7 @@ def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             BILINEAR = 2
 
         @staticmethod
-        def open(buf):
+        def open(buf: Any):
             """Open mock image from buffer."""
             return _MockOpenedImage()
 
@@ -142,13 +142,15 @@ def test_jax_inference_multimodal(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         """Mock JAX causal model for beam search."""
 
         def __call__(self, input_ids: Any, positions: Any = None, **kwargs: Any) -> Any:
-            """Execute and verify `__call__` behavior and invariants."""
+            """Execute callable test stub."""
             import jax.numpy as jnp
 
             batch, seq = input_ids.shape
             return jnp.ones((batch, seq, 100), dtype=jnp.float32)
 
-    monkeypatch.setattr("gemma_4_sql.backends.jax.inference._MODEL_CACHE", {"mock-jax-model": MockJAXModel()})
+    import gemma_4_sql.backends.jax.inference as jax_inf
+
+    monkeypatch.setitem(jax_inf._MODEL_CACHE, "mock-jax-model", MockJAXModel())
 
     res = generate_sql(
         "mock-jax-model",
@@ -171,22 +173,22 @@ def test_jax_inference_multimodal_live(tmp_path: Path, monkeypatch: pytest.Monke
             """Enter context manager."""
             return self
 
-        def __exit__(self, *args):
+        def __exit__(self, *args: object):
             """Exit context manager."""
 
-        def convert(self, mode):
+        def convert(self, mode: Any):
             """Convert image mode."""
             return self
 
-        def resize(self, size, resample):
+        def resize(self, size: Any, resample: Any):
             """Resize image."""
             return self
 
-        def getpixel(self, coords):
+        def getpixel(self, coords: Any):
             """Get pixel RGB tuple."""
             return (255, 0, 0)
 
-        def __array__(self, *args, **kwargs):
+        def __array__(self, *args: Any, **kwargs: Any):
             """Return numpy array representation."""
             import numpy as np
 
@@ -201,7 +203,7 @@ def test_jax_inference_multimodal_live(tmp_path: Path, monkeypatch: pytest.Monke
             BILINEAR = 2
 
         @staticmethod
-        def open(buf):
+        def open(buf: Any):
             """Open mock image from buffer."""
             return _MockOpenedImage()
 
@@ -223,7 +225,9 @@ def test_jax_inference_multimodal_live(tmp_path: Path, monkeypatch: pytest.Monke
             # Return logits with high probability for eos token
             return jnp.ones((batch, seq, 100), dtype=jnp.float32)
 
-    monkeypatch.setattr("gemma_4_sql.backends.jax.inference._MODEL_CACHE", {"mock_live": MockJAXModel()})
+    import gemma_4_sql.backends.jax.inference as jax_inf
+
+    monkeypatch.setitem(jax_inf._MODEL_CACHE, "mock_live", MockJAXModel())
 
     res = generate_sql(
         "mock_live",

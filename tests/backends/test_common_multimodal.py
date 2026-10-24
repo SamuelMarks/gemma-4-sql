@@ -146,10 +146,10 @@ def test_format_multimodal_prompt_and_image_processing(monkeypatch: pytest.Monke
     with pytest.raises(ValueError):
         mod.format_multimodal_prompt("")
 
-    assert mod.format_multimodal_prompt("hello", has_image=True, has_audio=True)["modality"] == "multimodal"
-    assert mod.format_multimodal_prompt("hello", has_image=True)["modality"] == "vision"
-    assert mod.format_multimodal_prompt("hello", has_audio=True)["modality"] == "audio"
-    assert mod.format_multimodal_prompt("hello")["modality"] == "text"
+    assert mod.format_multimodal_prompt("hello", has_image=True, has_audio=True).get("modality") == "multimodal"
+    assert mod.format_multimodal_prompt("hello", has_image=True).get("modality") == "vision"
+    assert mod.format_multimodal_prompt("hello", has_audio=True).get("modality") == "audio"
+    assert mod.format_multimodal_prompt("hello").get("modality") == "text"
 
     assert mod.load_image_bytes("data:image/png;base64,iVBORw0KGgo=") == bytes.fromhex("89504e470d0a1a0a")
 
@@ -160,11 +160,12 @@ def test_format_multimodal_prompt_and_image_processing(monkeypatch: pytest.Monke
             """Write dummy PNG bytes."""
             buf.write(b"saved_png_bytes")
 
+    savable_img: Any = SavableImage()
     monkeypatch.setattr(mod, "Image", object())
-    assert mod.load_image_bytes(SavableImage()) == b"saved_png_bytes"
+    assert mod.load_image_bytes(savable_img) == b"saved_png_bytes"
     monkeypatch.setattr(mod, "Image", None)
     monkeypatch.setitem(sys.modules, "PIL", MagicMock(Image=object()))
-    assert mod.load_image_bytes(SavableImage()) == b"saved_png_bytes"
+    assert mod.load_image_bytes(savable_img) == b"saved_png_bytes"
 
     with pytest.raises(ValueError, match="target_size dimensions must be positive"):
         mod.process_image(b"", target_size=(0, 0))

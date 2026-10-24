@@ -6,7 +6,7 @@ import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Generic, NotRequired, Protocol, TypedDict, TypeVar, Union, runtime_checkable
+from typing import Any, Generic, NotRequired, Protocol, Self, TypedDict, TypeVar, Union, runtime_checkable
 
 __all__ = [
     "AgentAttemptDict",
@@ -23,6 +23,7 @@ __all__ = [
     "DPOResultDict",
     "DPOSubmoduleProtocol",
     "DPOTrajectoryState",
+    "DataLoaderProtocol",
     "DataloaderResultDict",
     "ETLConfig",
     "ETLResultDict",
@@ -31,6 +32,7 @@ __all__ = [
     "EvaluationResultDict",
     "ExportResultDict",
     "ExportSubmoduleProtocol",
+    "FastAPIAppProtocol",
     "FewShotPromptResultDict",
     "FewShotResultDict",
     "FlaxNNXModelProtocol",
@@ -40,6 +42,7 @@ __all__ = [
     "JSONDict",
     "JSONPrimitive",
     "JSONValue",
+    "JaxModelProtocol",
     "KerasModelProtocol",
     "KerasTrainerState",
     "LatencyStatsDict",
@@ -48,6 +51,7 @@ __all__ = [
     "MLXModelProtocol",
     "MaxTextModelProtocol",
     "MaxTextTrainerState",
+    "MlxModelProtocol",
     "ModelType",
     "MultimodalInput",
     "NDArrayProtocol",
@@ -59,6 +63,7 @@ __all__ = [
     "ServeResultDict",
     "ServeSubmoduleProtocol",
     "TensorIndex",
+    "TensorProtocol",
     "TensorType",
     "TokenizerProtocol",
     "TorchModelProtocol",
@@ -89,31 +94,31 @@ class NDArrayProtocol(Protocol):
         ...
 
     @property
-    def dtype(self) -> object:
+    def dtype(self) -> Any:
         """Provide the element data type of the array."""
         ...
 
-    def tolist(self) -> list[object]:
+    def tolist(self) -> Any:
         """Convert the array into nested Python lists."""
         ...
 
-    def reshape(self, *shape: int) -> NDArrayProtocol:
+    def reshape(self, *shape: Any, **kwargs: Any) -> Any:
         """Reshape the array without changing its data."""
         ...
 
-    def transpose(self, *axes: int) -> NDArrayProtocol:
+    def transpose(self, *axes: Any) -> Any:
         """Permute the dimensions of the array."""
         ...
 
-    def astype(self, dtype: object) -> NDArrayProtocol:
+    def astype(self, dtype: Any, *args: Any, **kwargs: Any) -> Any:
         """Return a copy of the array cast to a specified type."""
         ...
 
-    def flatten(self) -> NDArrayProtocol:
+    def flatten(self) -> Any:
         """Return a copy of the array collapsed into one dimension."""
         ...
 
-    def __array__(self) -> object:
+    def __array__(self, *args: Any, **kwargs: Any) -> Any:
         """Return a NumPy array representation."""
         ...
 
@@ -148,7 +153,7 @@ class TokenizerProtocol(Protocol):
 
 
 @runtime_checkable
-class TensorType(Protocol):
+class TensorProtocol(Protocol):
     """Protocol defining the interface for framework tensor objects (JAX, PyTorch, TF, MLX)."""
 
     @property
@@ -166,15 +171,15 @@ class TensorType(Protocol):
         """Provide the data type of the tensor."""
         ...
 
-    def reshape(self, *shape: Any, **kwargs: Any) -> Any:
+    def reshape(self, *shape: Any) -> Self:
         """Reshape the tensor to the given dimensions."""
         ...
 
-    def transpose(self, *axes: Any, **kwargs: Any) -> Any:
+    def transpose(self, *axes: Any) -> Self:
         """Transpose the tensor axes."""
         ...
 
-    def astype(self, dtype: Any, *args: Any, **kwargs: Any) -> Any:
+    def astype(self, dtype: Any) -> Self:
         """Cast the tensor to a different data type."""
         ...
 
@@ -182,44 +187,47 @@ class TensorType(Protocol):
         """Compute the arithmetic mean of the tensor elements."""
         ...
 
-    def item(self) -> float:
-        """Extract a Python float scalar from a single-element tensor."""
+    def item(self, *args: Any) -> Any:
+        """Extract a Python scalar from a single-element tensor."""
         ...
 
-    def __getitem__(self, item: Any, /) -> Any:
+    def __getitem__(self, item: Any, /) -> Self:
         """Slice or index into the tensor."""
         ...
 
-    def __sub__(self, other: Any, /) -> Any:
+    def __sub__(self, other: Any, /) -> Self:
         """Subtract another tensor or scalar from this tensor."""
         ...
 
-    def __add__(self, other: Any, /) -> Any:
+    def __add__(self, other: Any, /) -> Self:
         """Add another tensor or scalar to this tensor."""
         ...
 
-    def __mul__(self, other: Any, /) -> Any:
+    def __mul__(self, other: Any, /) -> Self:
         """Multiply this tensor by another tensor or scalar."""
         ...
 
-    def __rmul__(self, other: Any, /) -> Any:
+    def __rmul__(self, other: Any, /) -> Self:
         """Right-multiply this tensor by a scalar or tensor."""
         ...
 
-    def __neg__(self) -> Any:
+    def __neg__(self) -> Self:
         """Negate the tensor elementwise."""
         ...
+
+
+TensorType = TensorProtocol
 
 
 @runtime_checkable
 class CausalLMProtocol(Protocol):
     """Protocol for causal language models supporting forward pass and autoregressive generation."""
 
-    def __call__(self, *args: object, **kwargs: object) -> Any:
+    def __call__(self, *args: object, **kwargs: object) -> TensorProtocol | object:
         """Execute the forward pass of the causal language model."""
         ...
 
-    def generate(self, *args: object, **kwargs: object) -> Any:
+    def generate(self, *args: object, **kwargs: object) -> TensorProtocol | Sequence[int] | str | object:
         """Generate token sequences autoregressively."""
         ...
 
@@ -228,23 +236,23 @@ class CausalLMProtocol(Protocol):
 class TorchModelProtocol(CausalLMProtocol, Protocol):
     """Focused protocol for PyTorch causal language models."""
 
-    def parameters(self) -> Iterable[Any]:
+    def parameters(self) -> Iterable[TensorProtocol]:
         """Yield trainable parameter tensors."""
         ...
 
-    def named_modules(self) -> Iterable[tuple[str, Any]]:
+    def named_modules(self) -> Iterable[tuple[str, object]]:
         """Yield `(name, module)` pairs across the module hierarchy."""
         ...
 
-    def train(self, mode: bool = True) -> Any:
+    def train(self, mode: bool = True) -> Self:
         """Toggle training mode on the PyTorch model."""
         ...
 
-    def to(self, *args: object, **kwargs: object) -> Any:
+    def to(self, *args: object, **kwargs: object) -> Self:
         """Move and/or cast the parameters and buffers."""
         ...
 
-    def state_dict(self) -> dict[str, Any]:
+    def state_dict(self) -> dict[str, TensorProtocol]:
         """Return a dictionary containing references to the whole state of the module."""
         ...
 
@@ -257,20 +265,20 @@ class KerasModelProtocol(CausalLMProtocol, Protocol):
         """Compile the model with loss and optimizer."""
         ...
 
-    def fit(self, *args: object, **kwargs: object) -> Any:
+    def fit(self, *args: object, **kwargs: object) -> object:
         """Fit the model on a dataset iterator."""
         ...
 
     @property
-    def layers(self) -> Sequence[Any]:
+    def layers(self) -> Sequence[object]:
         """Provide the sequence of Keras layers."""
         ...
 
-    def save(self, *args: object, **kwargs: object) -> Any:
+    def save(self, *args: object, **kwargs: object) -> None:
         """Save model weights or checkpoint to disk."""
         ...
 
-    def load_weights(self, *args: object, **kwargs: object) -> Any:
+    def load_weights(self, *args: object, **kwargs: object) -> None:
         """Load serialized weights into the model."""
         ...
 
@@ -279,35 +287,38 @@ class KerasModelProtocol(CausalLMProtocol, Protocol):
 class FlaxNNXModelProtocol(Protocol):
     """Focused protocol for JAX/Flax NNX causal language models."""
 
-    def __call__(self, *args: object, **kwargs: object) -> Any:
+    def __call__(self, *args: object, **kwargs: object) -> TensorProtocol | object:
         """Execute the forward pass of the NNX module."""
         ...
 
     @property
-    def config(self) -> Any:
+    def config(self) -> object:
         """Provide the model configuration object."""
         ...
 
     @property
-    def model(self) -> Any:
+    def model(self) -> object:
         """Provide the inner transformer trunk module."""
         ...
 
     @property
-    def lm_head(self) -> Any:
+    def lm_head(self) -> object:
         """Provide the language modeling output head."""
         ...
+
+
+JaxModelProtocol = FlaxNNXModelProtocol
 
 
 @runtime_checkable
 class MaxTextModelProtocol(Protocol):
     """Focused protocol for stateless Flax Linen / MaxText models."""
 
-    def init(self, *args: object, **kwargs: object) -> dict[str, Any]:
+    def init(self, *args: object, **kwargs: object) -> dict[str, TensorProtocol]:
         """Initialize stateless model parameters with a PRNGKey and sample input."""
         ...
 
-    def apply(self, *args: object, **kwargs: object) -> Any:
+    def apply(self, *args: object, **kwargs: object) -> TensorProtocol | object:
         """Apply a stateless transformation or forward pass."""
         ...
 
@@ -316,17 +327,20 @@ class MaxTextModelProtocol(Protocol):
 class MLXModelProtocol(Protocol):
     """Focused protocol for Apple Silicon MLX models."""
 
-    def __call__(self, *args: object, **kwargs: object) -> Any:
+    def __call__(self, *args: object, **kwargs: object) -> TensorProtocol | object:
         """Execute the forward pass of the MLX model."""
         ...
 
-    def parameters(self) -> Any:
+    def parameters(self) -> dict[str, object]:
         """Return the parameter tree of the MLX model."""
         ...
 
-    def update(self, parameters: Any) -> Any:
+    def update(self, parameters: dict[str, object]) -> Self | None:
         """Update the parameters of the MLX model with a parameter tree."""
         ...
+
+
+MlxModelProtocol = MLXModelProtocol
 
 
 @runtime_checkable
@@ -641,6 +655,31 @@ class BenchmarkResultDict(TypedDict):
     latency_stats: NotRequired[LatencyStatsDict]
 
 
+@runtime_checkable
+class FastAPIAppProtocol(Protocol):
+    """Protocol representing an ASGI / FastAPI application instance."""
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        """Handle an ASGI request scope."""
+        ...
+
+    def post(self, path: str, *args: object, **kwargs: object) -> Callable[..., Any]:
+        """Register a POST route handler."""
+        ...
+
+    def get(self, path: str, *args: object, **kwargs: object) -> Callable[..., Any]:
+        """Register a GET route handler."""
+        ...
+
+
+TBatchItem_co = TypeVar("TBatchItem_co", covariant=True)
+
+
+@runtime_checkable
+class DataLoaderProtocol(Iterable[TBatchItem_co], Protocol[TBatchItem_co]):
+    """Protocol representing an iterable batch data loader."""
+
+
 class ServeResultDict(TypedDict):
     """Structured return dictionary for continuous batching server initialization."""
 
@@ -650,7 +689,7 @@ class ServeResultDict(TypedDict):
     max_batch_size: int
     status: str
     mode: NotRequired[str]
-    app: NotRequired[Any]
+    app: NotRequired[FastAPIAppProtocol | None]
 
 
 class ETLResultDict(TypedDict):
@@ -662,7 +701,7 @@ class ETLResultDict(TypedDict):
     batch_size: int
     backend: str
     distributed: NotRequired[bool]
-    loader: NotRequired[Any]
+    loader: NotRequired[DataLoaderProtocol[Any] | Iterable[Any] | None]
 
 
 DataloaderResultDict = ETLResultDict
@@ -675,7 +714,8 @@ class LogMetricsResultDict(TypedDict):
     logged_step: NotRequired[int]
     step: NotRequired[int]
     log_dir: str
-    metrics: dict[str, float]
+    metrics: NotRequired[dict[str, float]]
+    logged_metrics: NotRequired[dict[str, float]]
     status: str
     timestamp: NotRequired[float]
     step_duration_s: NotRequired[float]
@@ -840,58 +880,26 @@ class KerasTrainerState(Generic[TModel, TOpt, TBatch]):
 
 
 @dataclass
-class SFTTrainerState(Generic[TModel, TOpt, TBatch]):
-    """Strongly-typed generic state container for supervised fine-tuning (SFT) loops."""
+class TrainerState(Generic[TModel, TParams, TOpt, TBatch]):
+    """Unified generic state container for training and DPO epoch runners across backends."""
 
-    dataloader: Iterable[TBatch]
+    dataloader: Iterable[TBatch] | None = None
     epochs: int = 1
-    model: TModel | None = None
-    policy_model: TModel | None = None
-    optimizer: TOpt | None = None
     train_step: Callable[..., Any] | None = None
-    params: Any = None
-    opt_state: Any = None
+    params: TParams | None = None
+    opt_state: TOpt | None = None
+    policy_params: TParams | None = None
+    ref_params: TParams | None = None
+    policy_model: TModel | TorchModelProtocol | JaxModelProtocol | KerasModelProtocol | MaxTextModelProtocol | MlxModelProtocol | QuantizableModelProtocol | None = None
+    ref_model: TModel | TorchModelProtocol | JaxModelProtocol | KerasModelProtocol | MaxTextModelProtocol | MlxModelProtocol | QuantizableModelProtocol | None = None
+    optimizer: TOpt | None = None
     criterion: Callable[..., Any] | None = None
-    device: Any = "cpu"
-
-
-@dataclass
-class DPOTrainerState(Generic[TModel, TOpt, TBatch]):
-    """Strongly-typed generic state container for Direct Preference Optimization (DPO) loops."""
-
-    dataloader: Iterable[TBatch]
-    epochs: int = 1
-    beta: float = 0.1
-    policy_model: TModel | None = None
-    ref_model: TModel | None = None
-    optimizer: TOpt | None = None
-    train_step: Callable[..., Any] | None = None
-    policy_params: Any = None
-    ref_params: Any = None
-    opt_state: Any = None
-
-
-@dataclass
-class TrainerState:
-    """Unified state container for training and DPO epoch runners across backends."""
-
-    dataloader: Any = None
-    epochs: int = 1
-    train_step: Any = None
-    params: Any = None
-    opt_state: Any = None
-    policy_params: Any = None
-    ref_params: Any = None
-    policy_model: Any = None
-    ref_model: Any = None
-    optimizer: Any = None
-    criterion: Any = None
-    device: Any = None
-    dummy_batch: dict[str, Any] | None = None
+    device: str | object | None = None
+    dummy_batch: dict[str, TensorProtocol] | None = None
     beta: float = 0.1
     dataset: str = ""
     learning_rate: float = 0.0
-    extra_kwargs: dict[str, Any] | None = None
+    extra_kwargs: dict[str, JSONValue] | None = None
 
 
 @runtime_checkable

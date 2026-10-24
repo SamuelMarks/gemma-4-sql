@@ -47,7 +47,7 @@ def test_run_dpo_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured_cfg[0].learning_rate == 2e-5
     assert captured_cfg[0].batch_size == 4
     assert captured_cfg[0].extra_kwargs == {"custom_flag": "enabled"}
-    assert captured_kw["custom_flag"] == "enabled"
+    assert captured_kw == {}
 
 
 def test_run_dpo_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
@@ -57,12 +57,12 @@ class SQLiteAdapter(DatabaseAdapter):
             An active `sqlite3.Connection` instance.
 
         """
-        kwargs = dict(self.db_kwargs)
+        kwargs: dict[str, Any] = dict(self.db_kwargs)
         if self.db_path == ":memory:":
             kwargs["uri"] = True
             kwargs.setdefault("check_same_thread", False)
-            return sqlite3.connect(self._actual_path, **cast(dict[str, Any], kwargs))
-        return sqlite3.connect(self.db_path, **cast(dict[str, Any], self.db_kwargs))
+            return sqlite3.connect(self._actual_path, **kwargs)
+        return sqlite3.connect(self.db_path, **kwargs)
 
     async def connect_async(self) -> object:
         """Connect asynchronously to SQLite via `aiosqlite`.
@@ -136,7 +136,7 @@ class SQLiteAdapter(DatabaseAdapter):
 
         """
         try:
-            async_conn = cast(Any, await self.connect_async())
+            async_conn: Any = await self.connect_async()
             try:
                 cursor = await async_conn.execute(query, params or ())
                 try:

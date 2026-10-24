@@ -9,6 +9,7 @@ from gemma_4_sql.exceptions import (
     DatabaseExecutionError,
     DependencyMissingError,
     ETLError,
+    ExecutionStatus,
     ExportError,
     GemmaSQLError,
     InferenceError,
@@ -21,12 +22,20 @@ from gemma_4_sql.exceptions import (
 
 
 def test_gemma_sql_error_base() -> None:
-    """Verify GemmaSQLError stores message, backend, and cause attributes."""
+    """Verify GemmaSQLError stores message, backend, model_name, operation, and cause attributes."""
     cause = ValueError("underlying")
-    err = GemmaSQLError("root failure", backend="jax", cause=cause)
+    err = GemmaSQLError(
+        "root failure",
+        backend="jax",
+        model_name="gemma-4-E2B",
+        operation="custom_op",
+        cause=cause,
+    )
     assert str(err) == "root failure"
     assert err.message == "root failure"
     assert err.backend == "jax"
+    assert err.model_name == "gemma-4-E2B"
+    assert err.operation == "custom_op"
     assert err.cause is cause
     assert isinstance(err, Exception)
 
@@ -88,11 +97,36 @@ def test_domain_exception_inheritance(
         assert isinstance(err, DatabaseExecutionError)
 
 
+def test_structured_operation_exceptions() -> None:
+    """Verify TrainingError, InferenceError, and ExportError store default and custom attributes."""
+    t_err = TrainingError("sft boom", backend="jax", model_name="gemma-4-E2B")
+    assert t_err.backend == "jax"
+    assert t_err.model_name == "gemma-4-E2B"
+    assert t_err.operation == "train"
+
+    i_err = InferenceError("beam boom", backend="pytorch", model_name="gemma-4-E4B", operation="generate_sql")
+    assert i_err.backend == "pytorch"
+    assert i_err.model_name == "gemma-4-E4B"
+    assert i_err.operation == "generate_sql"
+
+    e_err = ExportError("orbax boom", backend="maxtext", model_name="gemma-4-31B")
+    assert e_err.backend == "maxtext"
+    assert e_err.model_name == "gemma-4-31B"
+    assert e_err.operation == "export"
+
+
 def test_is_failed_status() -> None:
-    """Verify is_failed_status detects failed status strings and error dictionaries."""
+    """Verify is_failed_status detects ExecutionStatus, failed status strings, and error dictionaries."""
+    assert is_failed_status(ExecutionStatus.FAILED) is True
+    assert is_failed_status(ExecutionStatus.UNSUPPORTED) is True
+    assert is_failed_status(ExecutionStatus.SUCCESS) is False
     assert is_failed_status("failed: boom") is True
+    assert is_failed_status("unsupported_method_fp4") is True
+    assert is_failed_status("missing_tensorboard") is True
     assert is_failed_status("completed") is False
     assert is_failed_status({"status": "failed: err"}) is True
+    assert is_failed_status({"status": ExecutionStatus.ERROR}) is True
     assert is_failed_status({"status": "completed", "error": "boom"}) is True
     assert is_failed_status({"status": "completed"}) is False
+    assert is_failed_status({"status": 123}) is False
     assert is_failed_status(123) is False

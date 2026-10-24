@@ -1,5 +1,7 @@
 """Real Keras serve tests."""
 
+from typing import Any
+
 import pytest
 
 from tests.conftest import requires_keras
@@ -10,8 +12,8 @@ from gemma_4_sql.backends.keras.serve import serve_model
 from gemma_4_sql.exceptions import DependencyMissingError
 
 
-def test_serve_model(monkeypatch) -> None:
-    """Execute and verify `test_serve_model` behavior and invariants."""
+def test_serve_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify serve model behavior."""
     from unittest.mock import MagicMock
 
     import gemma_4_sql.backends.keras.serve as serve_module
@@ -28,7 +30,7 @@ def test_serve_model(monkeypatch) -> None:
 
 
 def test_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_serve_missing_deps` behavior and invariants."""
+    """Verify serve missing deps behavior."""
     import gemma_4_sql.backends.common_serve as cs
 
     monkeypatch.setattr(cs, "FastAPI", None)
@@ -37,7 +39,7 @@ def test_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_serve_keras_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_serve_keras_missing_deps` behavior and invariants."""
+    """Verify serve keras missing deps behavior."""
     import gemma_4_sql.backends.keras.serve as srv
 
     monkeypatch.setattr(srv, "keras", None)
@@ -46,15 +48,19 @@ def test_serve_keras_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_create_app_generation_logic` behavior and invariants."""
+    """Verify create app generation logic behavior."""
     import gemma_4_sql.backends.keras.serve as srv
     from gemma_4_sql.exceptions import InferenceError
 
     class MockApp:
-        """Execute and verify `MockApp` behavior and invariants."""
+        """Test stub for `MockApp`."""
 
-    def mock_create_common_app(**kwargs):
-        """Execute and verify `mock_create_common_app` behavior and invariants."""
+        startup: Any = None
+        generate: Any = None
+        batch_generate: Any = None
+
+    def mock_create_common_app(**kwargs: Any) -> Any:
+        """Provide mock create common app test helper."""
         app = MockApp()
         app.startup = kwargs["startup_callback"]
         app.generate = kwargs["generate_logic"]
@@ -65,27 +71,27 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(srv, "GemmaCausalLM", None)
     monkeypatch.setattr(srv, "optional_attr", lambda *_a, **_k: None)
-    app = srv.create_app("test_model")
+    app: Any = srv.create_app("test_model")
 
     # Test startup failure path (keras_nlp missing)
     app.startup()
 
     # Test generation with mock loaded_model via startup
     class MockModel:
-        """Execute and verify `MockModel` behavior and invariants."""
+        """Test stub for `MockModel`."""
 
-        def generate(self, prompt, **kwargs):
-            """Execute and verify `generate` behavior and invariants."""
+        def generate(self, prompt: Any, **kwargs: Any):
+            """Provide generate test helper."""
             if isinstance(prompt, list):
                 return [f"BATCH_{p}" for p in prompt]
             return "MOCK_SQL"
 
     class DummyPreset:
-        """Execute and verify `DummyPreset` behavior and invariants."""
+        """Test stub for `DummyPreset`."""
 
         @classmethod
-        def from_preset(cls, model_name):
-            """Execute and verify `from_preset` behavior and invariants."""
+        def from_preset(cls, model_name: Any):
+            """Provide from preset test helper."""
             return MockModel()
 
     monkeypatch.setattr(srv, "GemmaCausalLM", DummyPreset)
@@ -99,18 +105,18 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test individual generation fallback
     class MockModelFail:
-        """Execute and verify `MockModelFail` behavior and invariants."""
+        """Test stub for `MockModelFail`."""
 
-        def generate(self, prompt, **kwargs):
-            """Execute and verify `generate` behavior and invariants."""
+        def generate(self, prompt: Any, **kwargs: Any):
+            """Provide generate test helper."""
             raise ValueError("fail")
 
     class DummyPresetFail:
-        """Execute and verify `DummyPresetFail` behavior and invariants."""
+        """Test stub for `DummyPresetFail`."""
 
         @classmethod
-        def from_preset(cls, model_name):
-            """Execute and verify `from_preset` behavior and invariants."""
+        def from_preset(cls, model_name: Any):
+            """Provide from preset test helper."""
             return MockModelFail()
 
     import gemma_4_sql.backends.keras.inference as real_inf
@@ -125,20 +131,20 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test batch generation fallback exception
     class MockBatchModelFail:
-        """Execute and verify `MockBatchModelFail` behavior and invariants."""
+        """Test stub for `MockBatchModelFail`."""
 
-        def generate(self, prompt, **kwargs):
-            """Execute and verify `generate` behavior and invariants."""
+        def generate(self, prompt: Any, **kwargs: Any):
+            """Provide generate test helper."""
             if isinstance(prompt, list):
                 raise TypeError("batch fail")
             return "MOCK_SQL"
 
     class DummyPresetBatchFail:
-        """Execute and verify `DummyPresetBatchFail` behavior and invariants."""
+        """Test stub for `DummyPresetBatchFail`."""
 
         @classmethod
-        def from_preset(cls, model_name):
-            """Execute and verify `from_preset` behavior and invariants."""
+        def from_preset(cls, model_name: Any):
+            """Provide from preset test helper."""
             return MockBatchModelFail()
 
     monkeypatch.setattr(srv, "GemmaCausalLM", DummyPresetBatchFail)
@@ -156,15 +162,15 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         app.generate("prompt")
 
     # Test generic fallback output error
-    def gen_err(**kwargs):
-        """Execute and verify `gen_err` behavior and invariants."""
+    def gen_err(**kwargs: Any):
+        """Provide gen err test helper."""
         raise OSError("other err")
 
     monkeypatch.setattr(real_inf, "generate_sql", gen_err)
     monkeypatch.setattr(srv, "GemmaCausalLM", None)
     monkeypatch.setattr(srv, "optional_attr", lambda *_a, **_k: None)
 
-    app_none = srv.create_app("test_model")
+    app_none: Any = srv.create_app("test_model")
     app_none.startup()
 
     with pytest.raises(InferenceError, match="Keras generation failed"):

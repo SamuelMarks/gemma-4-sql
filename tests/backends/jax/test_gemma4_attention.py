@@ -19,7 +19,7 @@ from gemma_4_sql.backends.jax.gemma4.rope import RoPE
 
 
 def test_compute_attention_scores_and_output():
-    """Execute and verify `test_compute_attention_scores_and_output` behavior and invariants."""
+    """Verify compute attention scores and output behavior."""
     # test soft_cap
     q = jnp.ones((2, 1, 4, 16))
     k = jnp.ones((2, 4, 4, 16))
@@ -38,7 +38,7 @@ def test_compute_attention_scores_and_output():
 
 
 def test_prepare_qkv_for_attention():
-    """Execute and verify `test_prepare_qkv_for_attention` behavior and invariants."""
+    """Verify prepare qkv for attention behavior."""
     q = jnp.ones((2, 1, 4, 16))
     k = jnp.ones((2, 1, 4, 16))
     v = jnp.ones((2, 1, 4, 16))
@@ -57,7 +57,7 @@ def test_prepare_qkv_for_attention():
 
 
 def test_gemma4_attention_local():
-    """Execute and verify `test_gemma4_attention_local` behavior and invariants."""
+    """Verify gemma4 attention local behavior."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
     config.num_attention_heads = 4
@@ -73,11 +73,14 @@ def test_gemma4_attention_local():
     config.sliding_window_size = 512
 
     class LocalType:
-        """Execute and verify `LocalType` behavior and invariants."""
+        """Test stub for `LocalType`."""
 
         name = "LOCAL_SLIDING"
 
-    attn = Gemma4Attention(config, LocalType(), rngs=rngs)
+    from typing import Any
+
+    loc_type: Any = LocalType()
+    attn = Gemma4Attention(config, loc_type, rngs=rngs)
 
     x = jnp.ones((2, 3, 64))
     positions = jnp.array([[0, 1, 2], [0, 1, 2]])
@@ -91,7 +94,7 @@ def test_gemma4_attention_local():
 
 
 def test_gemma4_attention_global():
-    """Execute and verify `test_gemma4_attention_global` behavior and invariants."""
+    """Verify gemma4 attention global behavior."""
     rngs = nnx.Rngs(0)
     config = MagicMock()
     config.num_attention_heads = 4
@@ -107,11 +110,14 @@ def test_gemma4_attention_global():
     config.attn_logits_soft_cap = 50.0
 
     class GlobalType:
-        """Execute and verify `GlobalType` behavior and invariants."""
+        """Test stub for `GlobalType`."""
 
         name = "GLOBAL"
 
-    attn = Gemma4Attention(config, GlobalType(), rngs=rngs)
+    from typing import Any
+
+    glob_type: Any = GlobalType()
+    attn = Gemma4Attention(config, glob_type, rngs=rngs)
 
     x = jnp.ones((2, 3, 64))
     positions = jnp.array([[0, 1, 2], [0, 1, 2]])
@@ -121,7 +127,9 @@ def test_gemma4_attention_global():
 
 
 def test_gemma4_attention_global_fallback_options():
-    """Execute and verify `test_gemma4_attention_global_fallback_options` behavior and invariants."""
+    """Verify gemma4 attention global fallback options behavior."""
+    from typing import Any
+
     rngs = nnx.Rngs(0)
     config = MagicMock()
     config.num_attention_heads = 4
@@ -140,11 +148,12 @@ def test_gemma4_attention_global_fallback_options():
     config.rope_max_timescale = 10000
 
     class GlobalType:
-        """Execute and verify `GlobalType` behavior and invariants."""
+        """Test stub for `GlobalType`."""
 
         name = "GLOBAL"
 
-    attn = Gemma4Attention(config, GlobalType(), rngs=rngs)
+    glob_type: Any = GlobalType()
+    attn = Gemma4Attention(config, glob_type, rngs=rngs)
     assert attn.num_kv_heads == 2
     assert attn.head_dim == 16
     assert attn.rope.rope_kwargs["rope_theta"] == 10000

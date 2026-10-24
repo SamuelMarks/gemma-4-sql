@@ -16,7 +16,7 @@ def test_create_hf_data_source():
     """Test _create_hf_data_source."""
 
     class DummyBase:
-        """Execute and verify `DummyBase` behavior and invariants."""
+        """Test stub for `DummyBase`."""
 
     HFDataSource = _create_hf_data_source(DummyBase)
 
@@ -33,7 +33,7 @@ def test_create_base_format_transform():
     """Test _create_base_format_transform."""
 
     class DummyBaseMap:
-        """Execute and verify `DummyBaseMap` behavior and invariants."""
+        """Test stub for `DummyBaseMap`."""
 
     BaseFormatTransform = _create_base_format_transform(DummyBaseMap)
 
@@ -143,7 +143,7 @@ def test_load_hf_or_duckdb_and_grain_dataloader() -> None:
     from gemma_4_sql.exceptions import DependencyMissingError
     from gemma_4_sql.type_hints import ETLConfig
 
-    assert load_hf_or_duckdb_dataset("ds", "train", "db.duckdb", "tbl", None, load_duckdb_fn=lambda p, t: f"{p}:{t}") == "db.duckdb:tbl"
+    assert load_hf_or_duckdb_dataset("ds", "train", "db.duckdb", "tbl", None, load_duckdb_fn=lambda p, t: [{"db": f"{p}:{t}"}]) == [{"db": "db.duckdb:tbl"}]
     with pytest.raises(DependencyMissingError):
         load_hf_or_duckdb_dataset("ds", "train", None, None, None)
 

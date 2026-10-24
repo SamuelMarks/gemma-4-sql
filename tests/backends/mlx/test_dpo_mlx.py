@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, TrainerState
 from tests.conftest import requires_mlx
 
@@ -17,19 +17,19 @@ pytestmark = requires_mlx
 def test_real_mlx_dpo_loss_logps_and_step() -> None:
     """Verify MLX dpo_loss, _compute_mlx_logps, and _run_dpo_step execute with real MLX arrays and nn.Module."""
     import mlx.core as mx
+    import mlx.nn as mlx_nn
     import mlx.optimizers as optim
-    from mlx import nn
 
     import gemma_4_sql.backends.mlx.dpo as dpo_module
 
-    class TinyMLXPolicy(nn.Module):
+    class TinyMLXPolicy(mlx_nn.Module):
         """Minimal MLX causal language model for DPO testing."""
 
         def __init__(self) -> None:
             """Initialize TinyMLXPolicy with embedding and linear head."""
             super().__init__()
-            self.embed = nn.Embedding(32, 8)
-            self.head = nn.Linear(8, 32)
+            self.embed = mlx_nn.Embedding(32, 8)
+            self.head = mlx_nn.Linear(8, 32)
 
         def __call__(self, x: Any) -> Any:
             """Compute vocabulary logits from token IDs."""
@@ -166,6 +166,8 @@ def test_run_dpo_lifecycle_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
             mock_run_epochs.side_effect = RuntimeError("error")
             res2 = dpo_module.run_dpo(config)
             assert "failed: error" in res2["status"]
+            with pytest.raises(TrainingError, match="error"):
+                dpo_module.run_dpo(config, raise_on_error=True)
 
         mock_build_dataloader.return_value = {}
         res3 = dpo_module.run_dpo(config)

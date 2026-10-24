@@ -1,5 +1,7 @@
 """Tests for test common module."""
 
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,14 +13,14 @@ from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantizati
 from gemma_4_sql.backends.common_serve import serve_model_wrapper
 
 
-def testload_duckdb_dataset_missing(monkeypatch):
+def testload_duckdb_dataset_missing(monkeypatch: pytest.MonkeyPatch):
     """Test load duckdb dataset missing functionality."""
     monkeypatch.setattr("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", lambda x: None)
     with pytest.raises(RuntimeError, match="duckdb is required"):
         load_duckdb_dataset("test.db", "test_table")
 
 
-def testload_duckdb_dataset_error(monkeypatch):
+def testload_duckdb_dataset_error(monkeypatch: pytest.MonkeyPatch):
     """Test load duckdb dataset error functionality."""
     mock_duckdb = MagicMock()
     mock_duckdb.connect.side_effect = Exception("Test DB error")
@@ -49,13 +51,14 @@ def test_common_dpo_run_training_epochs():
             """Execute item helper."""
             return 1.0
 
-    def mock_step(policy, ref, opt, batch, beta):
+    def mock_step(policy: Any, ref: Any, opt: Any, batch: Any, beta: Any):
         """Execute mock step helper."""
         return MockLoss()
 
     import pytest
 
-    loss = generic_run_training_epochs(MockState(), mock_step)
+    state_any: Any = MockState()
+    loss = generic_run_training_epochs(state_any, mock_step)
     assert loss == pytest.approx(1.0)
 
 
@@ -70,10 +73,10 @@ def test_common_logging_close():
     res = log_metrics_wrapper("test", {"loss": 1.0}, 1, "logs", mock_cls, step_duration_s=0.5)
     mock_writer.close.assert_called_once()
     assert res["status"] == "success"
-    assert res["step_duration_s"] == 0.5
+    assert res.get("step_duration_s") == 0.5
 
 
-def test_common_logging_file_fallback(tmp_path):
+def test_common_logging_file_fallback(tmp_path: Path):
     """Test common logging file persistence when TensorBoard is absent."""
     import json
 
@@ -141,8 +144,9 @@ def test_common_quantize():
 
 def test_common_serve_missing():
     """Test common serve missing functionality."""
+    mock_app: Any = None
     with pytest.raises(DependencyMissingError):
-        serve_model_wrapper("test", "model", 8000, 32, True, lambda: None)
+        serve_model_wrapper("test", "model", 8000, 32, True, lambda: mock_app)
 
 
 def test_quantize_missing_bitsandbytes():
@@ -154,12 +158,12 @@ def test_quantize_missing_bitsandbytes():
 def test_apply_bits_and_bytes_quantization():
     """Test int8, int4, skip modules, and unsupported methods in apply_bits_and_bytes_quantization."""
 
-    called_kwargs: list[dict] = []
+    called_kwargs: list[dict[str, Any]] = []
 
     class MockConfig:
         """Test class for MockConfig."""
 
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: Any):
             """Initialize __init__."""
             called_kwargs.append(kwargs)
 
@@ -197,7 +201,7 @@ def test_apply_bits_and_bytes_quantization():
 
         config = Config()
 
-    m_with_cfg = ModelWithConfig()
+    m_with_cfg: Any = ModelWithConfig()
     apply_bits_and_bytes_quantization("int8", MockConfig, None, model=m_with_cfg)
     assert getattr(m_with_cfg, "_is_quantized", False) is True
 
@@ -205,7 +209,7 @@ def test_apply_bits_and_bytes_quantization():
     class ModelWithoutConfig:
         """Model without config."""
 
-    m_no_cfg = ModelWithoutConfig()
+    m_no_cfg: Any = ModelWithoutConfig()
     apply_bits_and_bytes_quantization("int8", MockConfig, None, model=m_no_cfg)
     assert getattr(m_no_cfg, "_is_quantized", False) is True
 
@@ -214,7 +218,7 @@ def test_quantize_model_wrapper_error_handling():
     """Test error handling in quantize_model_wrapper."""
 
     def fail_apply():
-        """Execute and verify `fail_apply` behavior and invariants."""
+        """Provide fail apply test helper."""
         raise RuntimeError("Quantization execution failed")
 
     res = quantize_model_wrapper("test", "model", "int8", False, fail_apply)
@@ -222,13 +226,14 @@ def test_quantize_model_wrapper_error_handling():
     assert res["memory_reduction_factor"] == 0.0
 
 
-def test_serve_model_wrapper_run_server(monkeypatch):
+def test_serve_model_wrapper_run_server(monkeypatch: pytest.MonkeyPatch):
     """Test serve_model_wrapper with run_server=True and ."""
     import gemma_4_sql.backends.common_serve as cs
 
     mock_uvicorn = MagicMock()
     monkeypatch.setattr(cs, "uvicorn", mock_uvicorn)
     monkeypatch.setattr(cs, "FastAPI", MagicMock())
+    mock_app_obj: Any = "mock_app"
 
     res = serve_model_wrapper(
         backend_name="test",
@@ -236,7 +241,7 @@ def test_serve_model_wrapper_run_server(monkeypatch):
         port=8000,
         max_batch_size=32,
         missing_deps=False,
-        app_factory=lambda: "mock_app",
+        app_factory=lambda: mock_app_obj,
         run_server=True,
     )
     assert res["status"] == "running_test_serve"
@@ -250,7 +255,7 @@ def test_serve_model_wrapper_run_server(monkeypatch):
         port=8000,
         max_batch_size=32,
         missing_deps=False,
-        app_factory=lambda: "mock_app",
+        app_factory=lambda: mock_app_obj,
         run_server=False,
     )
     assert res2["status"] == "running_test_serve"
@@ -263,7 +268,7 @@ def test_serve_model_wrapper_run_server(monkeypatch):
         port=8000,
         max_batch_size=32,
         missing_deps=False,
-        app_factory=lambda: "mock_app",
+        app_factory=lambda: mock_app_obj,
     )
     assert res3["status"] == "running_test_serve"
 
@@ -274,3 +279,21 @@ def testload_duckdb_dataset_invalid_table():
 
     with pytest.raises(RuntimeError, match="Invalid or unsafe table name"):
         load_duckdb_dataset(":memory:", "drop table users; --")
+
+
+def test_common_gemma4_config_presets() -> None:
+    """Verify resolve_gemma4_preset_name and get_gemma4_preset_spec resolve all Gemma 4 variants."""
+    from gemma_4_sql.backends.common_gemma4_config import (
+        get_gemma4_preset_spec,
+        resolve_gemma4_preset_name,
+    )
+
+    assert resolve_gemma4_preset_name("google/gemma-4-E2B") == "e2b"
+    assert resolve_gemma4_preset_name("google/gemma-4-E4B") == "e4b"
+    assert resolve_gemma4_preset_name("google/gemma-4-26B-A4B") == "26b_a4b"
+    assert resolve_gemma4_preset_name("google/gemma-4-31B") == "31b"
+
+    assert get_gemma4_preset_spec("gemma-4-e2b")["hidden_size"] == 1024
+    assert get_gemma4_preset_spec("gemma-4-e4b")["hidden_size"] == 2560
+    assert get_gemma4_preset_spec("gemma-4-26b")["num_experts"] == 128
+    assert get_gemma4_preset_spec("gemma-4-31b")["hidden_size"] == 5376

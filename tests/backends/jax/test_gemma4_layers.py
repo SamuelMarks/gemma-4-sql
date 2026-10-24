@@ -21,7 +21,7 @@ from gemma_4_sql.backends.jax.gemma4.layers import (
 
 
 def test_make_linear():
-    """Execute and verify `test_make_linear` behavior and invariants."""
+    """Verify make linear behavior."""
     rngs = nnx.Rngs(0)
     linear = make_linear(10, 20, kernel_metadata={"foo": "bar"}, bias_metadata={"baz": "qux"}, rngs=rngs)
     assert isinstance(linear, nnx.Linear)
@@ -30,7 +30,7 @@ def test_make_linear():
 
 
 def test_make_embed():
-    """Execute and verify `test_make_embed` behavior and invariants."""
+    """Verify make embed behavior."""
     rngs = nnx.Rngs(0)
     embed = make_embed(100, 32, embedding_metadata={"foo": "bar"}, rngs=rngs)
     assert isinstance(embed, nnx.Embed)
@@ -39,7 +39,7 @@ def test_make_embed():
 
 
 def test_gemma4_rms_norm():
-    """Execute and verify `test_gemma4_rms_norm` behavior and invariants."""
+    """Verify gemma4 rms norm behavior."""
     rngs = nnx.Rngs(0)
     norm = Gemma4RMSNorm(16, rngs=rngs)
     x = jax.random.normal(jax.random.PRNGKey(0), (2, 16))
@@ -53,19 +53,19 @@ def test_gemma4_rms_norm():
 
 
 def test_const_var():
-    """Execute and verify `test_const_var` behavior and invariants."""
+    """Verify const var behavior."""
     v = ConstVar(jnp.array(1.0))
     assert v.value == 1.0
 
 
 def test_stat_var():
-    """Execute and verify `test_stat_var` behavior and invariants."""
+    """Verify stat var behavior."""
     v = StatVar(jnp.array(1.0))
     assert v.value == 1.0
 
 
 def test_gemma4_clippable_linear():
-    """Execute and verify `test_gemma4_clippable_linear` behavior and invariants."""
+    """Verify gemma4 clippable linear behavior."""
     rngs = nnx.Rngs(0)
     linear = Gemma4ClippableLinear(10, 20, rngs=rngs)
     x = jax.random.normal(jax.random.PRNGKey(0), (2, 10))
@@ -78,7 +78,7 @@ def test_gemma4_clippable_linear():
 
 
 def test_gemma4_mlp():
-    """Execute and verify `test_gemma4_mlp` behavior and invariants."""
+    """Verify gemma4 mlp behavior."""
     rngs = nnx.Rngs(0)
     mlp = Gemma4MLP(16, 64, rngs=rngs)
     x = jax.random.normal(jax.random.PRNGKey(0), (2, 16))
@@ -98,7 +98,7 @@ def test_gemma4_mlp():
 
 
 def test_gemma4_rms_norm_with_scale():
-    """Execute and verify `test_gemma4_rms_norm_with_scale` behavior and invariants."""
+    """Verify gemma4 rms norm with scale behavior."""
     import jax.numpy as jnp
     from flax import nnx
 
@@ -113,7 +113,7 @@ def test_gemma4_rms_norm_with_scale():
 
 
 def test_stat_var_and_make_embed():
-    """Execute and verify `test_stat_var_and_make_embed` behavior and invariants."""
+    """Verify stat var and make embed behavior."""
     from flax import nnx
 
     from gemma_4_sql.backends.jax.gemma4.layers import StatVar, make_embed

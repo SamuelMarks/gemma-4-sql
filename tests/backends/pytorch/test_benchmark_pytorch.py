@@ -1,6 +1,7 @@
 """Tests for PyTorch benchmark."""
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_torch
@@ -58,7 +59,7 @@ def test_load_pytorch_model_and_device():
     benchmark_module.AutoModelForCausalLM = mock_auto
 
     # default
-    model, dev = benchmark_module._load_pytorch_model_and_device("m", "cpu")
+    model, _dev = benchmark_module._load_pytorch_model_and_device("m", "cpu")
     assert model == mock_torch.compile.return_value
     mock_model.to.assert_called_with("cpu")
     mock_model.eval.assert_called_once()
@@ -69,14 +70,14 @@ def test_load_pytorch_model_and_device():
         mock_native_model = MagicMock()
         mock_native.return_value = mock_native_model
         with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4Config"):
-            model, dev = benchmark_module._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native")
+            model, _dev = benchmark_module._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native")
             assert model == mock_torch.compile.return_value
             mock_native_model.to.assert_any_call("cpu")
             mock_native_model.eval.assert_called_once()
 
     # test compile error
     mock_torch.compile.side_effect = RuntimeError("error")
-    model, dev = benchmark_module._load_pytorch_model_and_device("m", "cpu")
+    model, _dev = benchmark_module._load_pytorch_model_and_device("m", "cpu")
     # Doesn't raise, just logs warning
     assert model == mock_model
 
@@ -87,7 +88,7 @@ def test_load_pytorch_model_and_device():
         with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4Config"):
             benchmark_module.torch.bfloat16 = None
             del benchmark_module.torch.compile
-            model, dev = benchmark_module._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native", dtype="missing")
+            model, _dev = benchmark_module._load_pytorch_model_and_device("m", "cpu", backend_alias="pytorch_native", dtype="missing")
 
             # test native with to and float32 None
             mock_native_model_2 = MagicMock()
@@ -123,17 +124,18 @@ def test_get_memory_mb():
     mock_torch = MagicMock()
     benchmark_module.torch = mock_torch
 
+    dummy_m: Any = None
     mock_torch.cuda.max_memory_allocated.return_value = 1048576 * 10
-    assert benchmark_module._get_memory_mb(None, "cuda") == 10.0
+    assert benchmark_module._get_memory_mb(dummy_m, "cuda") == 10.0
 
     mock_torch.mps.driver_allocated_memory.return_value = 1048576 * 5
-    assert benchmark_module._get_memory_mb(None, "mps") == 5.0
+    assert benchmark_module._get_memory_mb(dummy_m, "mps") == 5.0
 
-    assert benchmark_module._get_memory_mb(None, "cpu") == 8192.0
+    assert benchmark_module._get_memory_mb(dummy_m, "cpu") == 8192.0
 
 
 @patch("time.time")
-def test_run_benchmark_pass(mock_time):
+def test_run_benchmark_pass(mock_time: Any):
     """Test _run_benchmark_pass."""
     import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
 
@@ -146,13 +148,13 @@ def test_run_benchmark_pass(mock_time):
     mock_time.side_effect = times * 10
 
     # prefill
-    tok, lat, mem = benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "prefill", 10)
+    tok, lat, _mem = benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "prefill", 10)
     assert tok > 0
     assert lat > 0
     mock_model.assert_called()
 
     # generate
-    tok, lat, mem = benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "decode", 10)
+    tok, lat, _mem = benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "decode", 10)
     assert tok > 0
     assert lat > 0
     mock_model.generate.assert_called()
@@ -197,7 +199,7 @@ def test_benchmark_model():
 
 
 def test_load_pytorch_model_and_device_torch_dtype_none():
-    """Execute and verify `test_load_pytorch_model_and_device_torch_dtype_none` behavior and invariants."""
+    """Verify load pytorch model and device torch dtype none behavior."""
     from unittest.mock import MagicMock, patch
 
     import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
@@ -216,7 +218,7 @@ def test_load_pytorch_model_and_device_torch_dtype_none():
 
 
 def test_run_benchmark_pass_no_generate():
-    """Execute and verify `test_run_benchmark_pass_no_generate` behavior and invariants."""
+    """Verify run benchmark pass no generate behavior."""
     from unittest.mock import MagicMock, patch
 
     import gemma_4_sql.backends.pytorch.benchmark as benchmark_module

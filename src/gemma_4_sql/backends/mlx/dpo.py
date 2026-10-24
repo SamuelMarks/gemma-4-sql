@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 import types
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.mlx.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
@@ -76,7 +76,7 @@ def _compute_mlx_logps(model: ModelType, inputs: Any, labels: Any = None) -> Any
         Per-sequence log-probability tensor of shape `(batch_size,)`.
 
     """
-    logits = model(inputs)
+    logits: Any = model(inputs)
     target = labels if labels is not None else inputs
     ndim = getattr(logits, "ndim", 0)
     if mx is not None and isinstance(ndim, int) and ndim >= 2 and hasattr(mx, "take_along_axis") and hasattr(mx, "expand_dims") and target is not None and not isinstance(target, str):
@@ -142,7 +142,7 @@ def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: Any,
     return _loss_fn(policy_model, ref_model, batch, beta)
 
 
-def _run_training_epochs(state: TrainerState) -> float:
+def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
     """Run MLX DPO training epochs over the preference dataloader.
 
     Args:
@@ -152,9 +152,9 @@ def _run_training_epochs(state: TrainerState) -> float:
         Mean batch loss from the final epoch.
 
     """
-    dataloader = cast("Iterable[JSONDict]", state.dataloader or ())
-    policy_model = state.policy_model
-    ref_model = state.ref_model
+    dataloader: Iterable[JSONDict] = state.dataloader or ()
+    policy_model: Any = state.policy_model
+    ref_model: Any = state.ref_model
     optimizer = state.optimizer
     beta = state.beta
 
@@ -171,13 +171,14 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
 
     Args:
         config: DPO configuration parameters.
-        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
+        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate, raise_on_error).
 
     Returns:
         Structured `DPOResultDict` containing backend, model, dataset, beta, status, and final_loss.
 
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
+        TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
     model_name = getattr(config, "model_name", "model")
@@ -185,15 +186,17 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
     beta = getattr(config, "beta", 0.1)
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
+    extra = getattr(config, "extra_kwargs", {}) or {}
+    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
 
     if mlx is None or mx is None or nn is None or optim is None or load is None:
-        raise DependencyMissingError("MLX dependencies are missing.")
+        raise DependencyMissingError("MLX dependencies are missing.", backend="mlx")
     final_loss = 0.0
     try:
-        loaded_p = load(model_name)
-        policy_model: ModelType = cast(Any, loaded_p)[0] if isinstance(loaded_p, (tuple, list)) else loaded_p
-        loaded_r = load(model_name)
-        ref_model: ModelType = cast(Any, loaded_r)[0] if isinstance(loaded_r, (tuple, list)) else loaded_r
+        loaded_p: Any = load(model_name)
+        policy_model: ModelType = loaded_p[0] if isinstance(loaded_p, (tuple, list)) else loaded_p
+        loaded_r: Any = load(model_name)
+        ref_model: ModelType = loaded_r[0] if isinstance(loaded_r, (tuple, list)) else loaded_r
         optimizer = optim.AdamW(learning_rate=learning_rate)
         batch_size = getattr(config, "batch_size", 2)
         data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
@@ -213,8 +216,15 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
         status = "completed"
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("DPO failed: ")
+        if raise_on_error:
+            raise TrainingError(
+                f"MLX DPO failed: {e!s}",
+                backend="mlx",
+                model_name=model_name,
+                operation="dpo",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
-        final_loss = 0.0
     return {
         "backend": "mlx",
         "action": "dpo",

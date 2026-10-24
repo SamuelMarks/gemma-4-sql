@@ -10,6 +10,8 @@ from gemma_4_sql.exceptions import InferenceError, is_failed_status
 from gemma_4_sql.sdk.registry import get_backend
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from gemma_4_sql.type_hints import ChatMessageDict, ChatTurnResultDict, JSONValue
 
 logger = logging.getLogger(__name__)
@@ -17,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def chat_turn(
     model_name: str,
-    history: list[dict[str, str]],
+    history: Sequence[Mapping[str, str] | ChatMessageDict],
     new_prompt: str,
     backend: str = DEFAULT_BACKEND,
     **kwargs: JSONValue,

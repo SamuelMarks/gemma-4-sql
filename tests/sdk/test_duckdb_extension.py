@@ -24,7 +24,9 @@ def test_embed_in_duckdb_success() -> None:
         mock_agent.return_value = {"final_sql": "SELECT * FROM users", "results": [(42,)], "success": True}
 
         # Test using the registered function
-        res_str = conn.execute("SELECT ask_gemma('Get users')").fetchone()[0]
+        row1 = conn.execute("SELECT ask_gemma('Get users')").fetchone()
+        assert row1 is not None
+        res_str = row1[0]
 
         import json
 
@@ -38,7 +40,9 @@ def test_embed_in_duckdb_success() -> None:
         assert "CREATE TABLE users" in kwargs["context"].ddl
 
         # Second invocation reuses cached DDL without re-extracting
-        res_str2 = conn.execute("SELECT ask_gemma('Get users again')").fetchone()[0]
+        row2 = conn.execute("SELECT ask_gemma('Get users again')").fetchone()
+        assert row2 is not None
+        res_str2 = row2[0]
         assert json.loads(res_str2)["success"] is True
 
 

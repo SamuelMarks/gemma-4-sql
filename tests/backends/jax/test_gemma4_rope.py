@@ -11,14 +11,14 @@ from gemma_4_sql.backends.jax.gemma4.rope import RoPE, apply_rope, default_rope_
 
 
 def test_segment_ids_to_positions():
-    """Execute and verify `test_segment_ids_to_positions` behavior and invariants."""
+    """Verify segment ids to positions behavior."""
     segment_ids = jnp.array([[1, 1, 1], [1, 0, 1]])
     positions = segment_ids_to_positions(segment_ids)
     assert jnp.allclose(positions, jnp.array([[1, 2, 3], [1, 1, 2]]))
 
 
 def test_default_rope_params():
-    """Execute and verify `test_default_rope_params` behavior and invariants."""
+    """Verify default rope params behavior."""
     positions = jnp.array([1, 2, 3])
     freq, factor = default_rope_params(positions, head_dim=4, rope_theta=10000, factor=2.0)
     assert jnp.allclose(freq, jnp.array([0.5, 0.005]))
@@ -26,7 +26,7 @@ def test_default_rope_params():
 
 
 def test_apply_rope():
-    """Execute and verify `test_apply_rope` behavior and invariants."""
+    """Verify apply rope behavior."""
     x = jnp.ones((2, 3, 2, 4))
     sin = jnp.zeros((2, 3, 2))
     cos = jnp.ones((2, 3, 2))
@@ -44,7 +44,7 @@ def test_apply_rope():
 
 
 def test_rope_module():
-    """Execute and verify `test_rope_module` behavior and invariants."""
+    """Verify rope module behavior."""
     rope = RoPE(rope_type="default", head_dim=4, rope_theta=10000, factor=2.0)
     positions = jnp.array([[1, 2]])
     sin, cos = rope(positions)

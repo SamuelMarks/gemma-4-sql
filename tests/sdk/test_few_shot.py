@@ -78,6 +78,6 @@ def test_generate_few_shot_sql(monkeypatch: pytest.MonkeyPatch) -> None:
         top_k=1,
     )
     assert res["status"] == "success"
-    assert res["sql"] == "SELECT COUNT(*) FROM users"
-    assert res["confidence_score"] == 0.92
-    assert res["num_examples"] == 1
+    assert res.get("sql") == "SELECT COUNT(*) FROM users"
+    assert res.get("confidence_score") == 0.92
+    assert res.get("num_examples") == 1

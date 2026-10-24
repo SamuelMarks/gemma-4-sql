@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import gemma_4_sql.backends.jax.train as tr
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import TrainerState, TrainingConfig
 from tests.conftest import requires_jax
 
@@ -84,6 +84,14 @@ def test_train_model_jax_error_and_invalid_dataloader(monkeypatch: pytest.Monkey
     res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=1, learning_rate=0.1))
     assert "failed: Invalid dataloader" in res["status"]
 
+    with pytest.raises(TrainingError, match="Invalid dataloader") as exc_info:
+        tr.train_model(
+            TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=1, learning_rate=0.1),
+            raise_on_error=True,
+        )
+    assert exc_info.value.backend == "jax"
+    assert exc_info.value.model_name == "mod"
+
 
 def test_get_train_step_fn_and_optimizer_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _get_train_step_fn, _create_nnx_optimizer, and _apply_nnx_optimizer_update fallback branches."""
@@ -100,7 +108,7 @@ def test_get_train_step_fn_and_optimizer_fallbacks(monkeypatch: pytest.MonkeyPat
     assert called_with == ["grads"]
 
     class LegacyNNX:
-        """NNX module stub whose Optimizer rejects wrt keyword argument."""
+        """NNX module stub whose Optimizer rejects wrt keyword argument and lacks jit."""
 
         Param = object
 
@@ -109,16 +117,23 @@ def test_get_train_step_fn_and_optimizer_fallbacks(monkeypatch: pytest.MonkeyPat
             """Accept only 2 positional arguments."""
             return (model, tx)
 
+        @staticmethod
+        def value_and_grad(fn: Any) -> Any:
+            """Return a dummy value_and_grad callable."""
+            return lambda *_a: (0.25, "grads")
+
     monkeypatch.setattr(tr, "nnx", LegacyNNX)
     assert tr._create_nnx_optimizer("m", "tx") == ("m", "tx")
+    step_fn_no_jit = tr._get_train_step_fn()
+    assert step_fn_no_jit("m", LegacyOptimizer(), {}) == 0.25  # type: ignore[operator]
 
     monkeypatch.setattr(tr, "nnx", MagicMock(spec=[]))
-    step_fn_no_grad = tr._get_train_step_fn()
-    assert step_fn_no_grad(None, None, {}) == 0.0  # type: ignore[operator]
+    with pytest.raises(DependencyMissingError, match="value_and_grad"):
+        tr._get_train_step_fn()
 
     monkeypatch.setattr(tr, "nnx", None)
-    step_fn_no_nnx = tr._get_train_step_fn()
-    assert step_fn_no_nnx(None, None, {}) == 0.0  # type: ignore[operator]
+    with pytest.raises(DependencyMissingError, match="value_and_grad"):
+        tr._get_train_step_fn()
 
 
 def test_run_training_epochs_float_return() -> None:

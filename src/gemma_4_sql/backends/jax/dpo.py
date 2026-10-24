@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.jax.etl import build_dataloader
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
     from gemma_4_sql.type_hints import DPOResultDict, JSONDict
 
@@ -51,11 +51,10 @@ def _apply_nnx_optimizer_update(optimizer: Any, model: Any, grads: Any) -> None:
         grads: Computed gradient PyTree.
 
     """
-    if optimizer is not None and hasattr(optimizer, "update"):
-        try:
-            optimizer.update(model, grads)
-        except TypeError:
-            optimizer.update(grads)
+    try:
+        optimizer.update(model, grads)
+    except TypeError:
+        optimizer.update(grads)
 
 
 def dpo_loss(
@@ -97,7 +96,7 @@ def _compute_logps(model: ModelType, inputs: Any, labels: Any) -> Any:
     """
     try:
         seq_len = inputs.shape[1] if hasattr(inputs, "shape") and len(inputs.shape) > 1 else 1
-        positions = jnp.arange(seq_len)[None, :] if jnp is not None and hasattr(jnp, "arange") else None
+        positions = jnp.arange(seq_len)[None, :] if hasattr(jnp, "arange") else None
         logits = model(inputs, positions) if positions is not None else model(inputs)
     except TypeError:
         logits = model(inputs)
@@ -106,7 +105,7 @@ def _compute_logps(model: ModelType, inputs: Any, labels: Any) -> Any:
     labels_expanded = jnp.expand_dims(labels, axis=-1)
     selected_log_probs = jnp.take_along_axis(log_probs, labels_expanded, axis=-1)
     selected_log_probs = jnp.squeeze(selected_log_probs, axis=-1)
-    mask = cast(Any, labels) != 0
+    mask = labels != 0
     return jnp.sum(selected_log_probs * mask, axis=-1)
 
 
@@ -135,7 +134,7 @@ def _dpo_step_loss(policy_model: ModelType, ref_model: ModelType, batch: Mapping
     return loss
 
 
-def _get_train_step_fn(beta: float) -> object:
+def _get_train_step_fn(beta: float) -> Callable[..., Any]:
     """Return a JIT-compiled DPO training step function for the given beta.
 
     Args:
@@ -144,7 +143,16 @@ def _get_train_step_fn(beta: float) -> object:
     Returns:
         Compiled or eager training step callable.
 
+    Raises:
+        DependencyMissingError: If `flax.nnx.value_and_grad` is unavailable.
+
     """
+    if nnx is None or not hasattr(nnx, "value_and_grad"):
+        raise DependencyMissingError(
+            "Flax NNX value_and_grad is required for JAX DPO.",
+            dependency_name="flax.nnx",
+            backend="jax",
+        )
 
     def train_step(policy_model: ModelType, ref_model: ModelType, optimizer: Any, batch: JSONDict) -> Any:
         """Execute a single JAX-compiled DPO training step.
@@ -159,24 +167,21 @@ def _get_train_step_fn(beta: float) -> object:
             Scalar step loss.
 
         """
-        if nnx is not None and hasattr(nnx, "value_and_grad"):
 
-            def _loss_wrapper(p: Any, r: Any, b: Any) -> Any:
-                """Evaluate _dpo_step_loss for gradient transformation."""
-                return _dpo_step_loss(p, r, b, beta)
+        def _loss_wrapper(p: Any, r: Any, b: Any) -> Any:
+            """Evaluate _dpo_step_loss for gradient transformation."""
+            return _dpo_step_loss(p, r, b, beta)
 
-            (loss, grads) = nnx.value_and_grad(_loss_wrapper)(policy_model, ref_model, batch)
-        else:
-            loss, grads = 0.0, None
+        (loss, grads) = nnx.value_and_grad(_loss_wrapper)(policy_model, ref_model, batch)
         _apply_nnx_optimizer_update(optimizer, policy_model, grads)
         return loss
 
-    if nnx is not None and hasattr(nnx, "jit"):
+    if hasattr(nnx, "jit"):
         return nnx.jit(train_step)
     return train_step
 
 
-def _run_training_epochs(state: TrainerState) -> float:
+def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
     """Run DPO training epochs over the preference dataloader.
 
     Args:
@@ -186,7 +191,7 @@ def _run_training_epochs(state: TrainerState) -> float:
         Mean batch loss from the final epoch.
 
     """
-    dataloader = cast("Iterable[JSONDict]", state.dataloader or ())
+    dataloader: Iterable[JSONDict] = state.dataloader or ()
     policy_model = state.policy_model
     ref_model = state.ref_model
     optimizer = state.optimizer
@@ -194,6 +199,7 @@ def _run_training_epochs(state: TrainerState) -> float:
 
     def _step(batch: JSONDict) -> float:
         """Execute a single JAX DPO step and extract scalar float loss."""
+        assert train_step is not None
         loss = train_step(policy_model, ref_model, optimizer, batch)
         return float(loss.item() if hasattr(loss, "item") else loss)
 
@@ -264,13 +270,14 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
 
     Args:
         config: DPO training configuration.
-        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate).
+        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate, raise_on_error).
 
     Returns:
         Structured `DPOResultDict` with execution status and metrics.
 
     Raises:
         DependencyMissingError: If JAX dependencies are missing.
+        TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
     model_name = getattr(config, "model_name", "model")
@@ -279,14 +286,24 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
     batch_size = getattr(config, "batch_size", 2)
+    extra = getattr(config, "extra_kwargs", {}) or {}
+    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
     final_loss = 0.0
     status = "completed"
     if jax is None or jnp is None or jnn is None or optax is None or Gemma4ForCausalLM is None:
-        raise DependencyMissingError("JAX DPO dependencies are missing.")
+        raise DependencyMissingError("JAX DPO dependencies are missing.", backend="jax")
 
     try:
         status, final_loss = _execute_dpo(model_name, dataset, beta, epochs, learning_rate, batch_size=batch_size)
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        if raise_on_error:
+            raise TrainingError(
+                f"JAX DPO failed: {e!s}",
+                backend="jax",
+                model_name=model_name,
+                operation="dpo",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
 
     return {"backend": "jax", "action": "dpo", "model": model_name, "dataset": dataset, "beta": beta, "status": status, "final_loss": final_loss}

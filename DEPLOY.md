@@ -252,13 +252,44 @@ gemma-4-sql log --step 1000 --metrics "eval_loss=0.3,execution_accuracy=0.89" --
 
 ## Automated Infrastructure Provisioning (Libscript)
 
-To automatically provision and orchestrate this hardware (including DNS, network, firewall, storage, and nodes) across Google Cloud (or AWS/Azure), `gemma-4-sql` relies on the `libscript` multicloud abstractions. 
+To automatically provision and orchestrate this hardware (including DNS, network, firewall, storage, and nodes) across Google Cloud (or AWS/Azure) or synthesize native OS installers, `gemma-4-sql` includes root [`libscript.json`](./libscript.json) and [`packaging.json`](./packaging.json) manifests along with [`deploy_with_libscript.sh`](./deploy_with_libscript.sh) (POSIX) and [`deploy_with_libscript.cmd`](./deploy_with_libscript.cmd) (Windows Batch).
 
-### Higher-Level Abstraction (Provision / Deprovision)
-For completely hands-off provisioning of the entire cluster state, use the generic libscript multicloud orchestrator:
+### Declarative Dependency, Database, ML, Ingress & Service Lifecycle (`libscript.json` & `packaging.json`)
+From a `libscript` checkout (or using `./deploy_with_libscript.sh` / `deploy_with_libscript.cmd`), you can bootstrap the required toolchains (`python` 3.12, `huggingface-cli`, `xpk`) and local verification databases (`duckdb`, `sqlite`, `postgres`), execute declarative `.ml` training/inference workflows across local or cloud targets (`local`, `gcp-tpu-vm`, `gcp-gpu-vm`, `gke-xpk`), apply `.ingress` reverse-proxy routes via `netctl`, manage the serving/TensorBoard services, or build native packages:
 ```bash
-# Provisions network, firewall, nodes, shared storage, and maps DNS
-./libscript.sh provision --tpu --shared-storage gcp my-gemma-cluster default-rg us-central2-b
+# Bootstrap local toolchains & editable install (or pass --tpu-vm / --gpu-vm / --gke-xpk / --train / --infer)
+./deploy_with_libscript.sh
+
+# Resolve and install dependencies (and execute pre_install / post_install / build hooks) declared in libscript.json
+./libscript.sh install-deps /path/to/gemma-4-sql/libscript.json
+
+# Run declarative ML training or inference workflows across local or cloud targets (supports --dry-run, --target, --backend)
+./libscript.sh train /path/to/gemma-4-sql/libscript.json
+./libscript.sh infer /path/to/gemma-4-sql/libscript.json
+./libscript.sh train /path/to/gemma-4-sql/libscript.json --target gcp-tpu-vm --dry-run
+
+# Provision declared databases (.databases -> .env.libscript), run db_migrate/pre_start hooks, start daemons, and apply .ingress
+./libscript.sh start /path/to/gemma-4-sql/libscript.json
+./libscript.sh status /path/to/gemma-4-sql/libscript.json
+./libscript.sh logs /path/to/gemma-4-sql/libscript.json
+./libscript.sh stop /path/to/gemma-4-sql/libscript.json
+
+# Emit or apply reverse-proxy configuration from the .ingress block in libscript.json
+./libscript.sh netctl apply /path/to/gemma-4-sql/libscript.json --format nginx
+
+# Synthesize container definitions or native installers driven by libscript.json & packaging.json
+./libscript.sh package-as docker_compose /path/to/gemma-4-sql/libscript.json
+```
+
+### Higher-Level Cloud Abstraction (Provision / Deprovision & Payloads)
+For hands-off provisioning of the entire cluster state, use the `libscript` multicloud orchestrator or declarative Tier 4 AI payloads:
+```bash
+# Provisions network, firewall, nodes, shared storage, syncs gemma-4-sql, and maps DNS
+./libscript.sh provision --tpu --shared-storage gcp my-gemma-cluster default-rg us-central2-b /path/to/gemma-4-sql ~/gemma-4-sql
+
+# Submit distributed training or inference payloads to GKE + XPK
+./libscript.sh payload submit payloads/ai/gke-xpk-training/payload.json --scheduler xpk
+./libscript.sh payload submit payloads/ai/gke-xpk-inference/payload.json --scheduler xpk
 
 # Deprovisions the entire infrastructure slice
 ./libscript.sh deprovision --tpu --shared-storage gcp my-gemma-cluster default-rg us-central2-b

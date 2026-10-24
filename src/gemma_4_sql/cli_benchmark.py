@@ -5,17 +5,21 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk import benchmark
 
 if TYPE_CHECKING:
     import argparse
 
 
-def benchmark_cmd(args: argparse.Namespace) -> None:
+def benchmark_cmd(args: argparse.Namespace) -> int:
     """Benchmark a model on target hardware.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code `0` on success, or `1` if benchmarking fails.
 
     """
     res = benchmark(
@@ -32,3 +36,4 @@ def benchmark_cmd(args: argparse.Namespace) -> None:
         modality=getattr(args, "modality", "text"),
     )
     print(json.dumps(res, indent=2))
+    return 1 if is_failed_status(res) else 0

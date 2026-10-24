@@ -10,7 +10,7 @@ from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, ServeResultDict
+    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONValue, ServeResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
     """
 
-    def _app_factory() -> object:
+    def _app_factory() -> FastAPIAppProtocol:
         """Construct the configured continuous batching FastAPI application.
 
         Returns:

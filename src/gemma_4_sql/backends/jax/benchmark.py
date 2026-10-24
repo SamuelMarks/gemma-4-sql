@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -86,7 +86,7 @@ def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup
         # A simple unrolled loop for benchmarking generation throughput
         for _ in range(max_new_tokens):
             positions = jnp.arange(seq.shape[1])[None, :]
-            logits = model(seq, positions)
+            logits: Any = model(seq, positions)
             token = jnp.argmax(logits[..., -1, :], axis=-1, keepdims=True)
             seq = jnp.concatenate([seq, token], axis=-1)
         return seq
@@ -127,7 +127,8 @@ def _run_benchmark_pass(model: ModelType, batch_size: int, num_runs: int, warmup
             tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
 
         try:
-            stats = cast(Any, device).memory_stats()
+            dev_any: Any = device
+            stats = dev_any.memory_stats()
             memory_mb = stats.get("peak_bytes_in_use", 8192.0 * 1024 * 1024) / (1024 * 1024)
         except (AttributeError, KeyError, RuntimeError, TypeError):
             memory_mb = 8192.0

@@ -42,7 +42,7 @@ def etl_pretrain(config: ETLConfig | None = None, backend: str = DEFAULT_BACKEND
     if config is None:
         cfg = ETLConfig(dataset_name=DEFAULT_PRETRAIN_DATASET, split="train", stage="pretrain")
     else:
-        cfg = copy.copy(config)
+        cfg = copy.deepcopy(config)
         cfg.stage = "pretrain"
     return _route_backend(cfg, backend)
 
@@ -61,7 +61,7 @@ def etl_sft(config: ETLConfig | None = None, backend: str = DEFAULT_BACKEND) -> 
     if config is None:
         cfg = ETLConfig(dataset_name=DEFAULT_SFT_DATASET, split="train", stage="sft")
     else:
-        cfg = copy.copy(config)
+        cfg = copy.deepcopy(config)
         cfg.stage = "sft"
     return _route_backend(cfg, backend)
 
@@ -80,7 +80,7 @@ def etl_posttrain(config: ETLConfig | None = None, backend: str = DEFAULT_BACKEN
     if config is None:
         cfg = ETLConfig(dataset_name=DEFAULT_POSTTRAIN_DATASET, split="train", stage="posttrain")
     else:
-        cfg = copy.copy(config)
+        cfg = copy.deepcopy(config)
         cfg.stage = "posttrain"
     return _route_backend(cfg, backend)
 

@@ -217,7 +217,7 @@ async def run_agentic_loop_async(
         tasks = [_process_single_prompt(backend, backend_impl, model_name, p, engine, context, **gen_kwargs) for p in prompts]
         results = list(await asyncio.gather(*tasks))
     finally:
-        engine.close()
+        await engine.close_async()
     return results if isinstance(prompt, list) else results[0]
 
 

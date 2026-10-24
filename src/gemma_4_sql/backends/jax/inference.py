@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 import operator
-from typing import TYPE_CHECKING, Any, cast
+import threading
+from collections import OrderedDict
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.exceptions import InferenceError
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import TensorType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import InferenceResultDict
+
+logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
@@ -18,7 +24,56 @@ nnx = optional_import("flax.nnx")
 Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
 Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
-_MODEL_CACHE: dict[str, object] = {}
+MAX_MODEL_CACHE_SIZE = 4
+
+
+class _BoundedModelCache(OrderedDict[str, object]):
+    """Thread-safe LRU-bounded dictionary for caching initialized JAX models."""
+
+    def __init__(self, maxsize: int = MAX_MODEL_CACHE_SIZE) -> None:
+        """Initialize the bounded model cache.
+
+        Args:
+            maxsize: Maximum number of cached models to retain.
+
+        """
+        super().__init__()
+        self.maxsize = maxsize
+        self._lock = threading.Lock()
+
+    def get_model(self, key: str) -> object | None:
+        """Retrieve a cached model and mark it as recently used.
+
+        Args:
+            key: Model identifier key.
+
+        Returns:
+            Cached model object or `None` if absent.
+
+        """
+        with self._lock:
+            if key not in self:
+                return None
+            self.move_to_end(key)
+            return self[key]
+
+    def put_model(self, key: str, value: object) -> None:
+        """Insert or update a cached model, evicting the oldest entry if full.
+
+        Args:
+            key: Model identifier key.
+            value: Model instance to cache.
+
+        """
+        with self._lock:
+            if key in self:
+                self.move_to_end(key)
+            super().__setitem__(key, value)
+            if len(self) > self.maxsize:
+                self.popitem(last=False)
+
+
+_MODEL_CACHE = _BoundedModelCache()
 
 
 def _compute_step_probs(logits: TensorType, beam_width: int) -> tuple[Any, Any]:
@@ -112,8 +167,8 @@ def generate_sql(
     prompt: str,
     beam_width: int = 3,
     max_length: int = 50,
-    **kwargs: JSONValue,
-) -> JSONDict:
+    **kwargs: object,
+) -> InferenceResultDict:
     """Generate a SQL query from a natural language prompt using JAX.
 
     Args:
@@ -150,11 +205,13 @@ def generate_sql(
         prompt = str(formatted.get("prompt", prompt))
 
         if image_path is not None and pixel_values is None:
-            img_res = process_image(cast(Any, image_path))
+            img_in: Any = image_path
+            img_res = process_image(img_in)
             pixel_values = jnp.array([img_res["pixel_values"]], dtype=jnp.float32)
 
         if audio_path is not None and audio_values is None:
-            aud_res = process_audio(cast(Any, audio_path))
+            aud_in: Any = audio_path
+            aud_res = process_audio(aud_in)
             audio_values = jnp.array([aud_res["audio_values"]], dtype=jnp.float32)
 
     tokenizer = SQLTokenizer(model_name=None)
@@ -166,8 +223,9 @@ def generate_sql(
         raise DependencyMissingError("JAX inference dependencies are missing.")
 
     input_ids = jnp.array([input_tokens], dtype=jnp.int32)
-    if model_name in _MODEL_CACHE:
-        model = _MODEL_CACHE[model_name]
+    cached_model = _MODEL_CACHE.get_model(model_name)
+    if cached_model is not None:
+        model = cached_model
     else:
         rngs = nnx.Rngs(0) if nnx is not None and hasattr(nnx, "Rngs") else None
         model = Gemma4ForCausalLM(Gemma4Config.gemma4_e2b(), rngs=rngs)
@@ -182,9 +240,16 @@ def generate_sql(
                 restored = checkpointer.restore(model_path)
                 if restored is not None and nnx is not None and hasattr(nnx, "update"):
                     nnx.update(model, restored)
-            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError):
-                pass
-        _MODEL_CACHE[model_name] = model
+            except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+                logger.warning("Failed to restore Orbax checkpoint from %s: %s", model_path, e)
+                if kwargs.get("strict_checkpoint"):
+                    raise InferenceError(
+                        f"Failed to restore Orbax checkpoint from {model_path}: {e!s}",
+                        backend="jax",
+                        model_name=model_name,
+                        cause=e,
+                    ) from e
+        _MODEL_CACHE.put_model(model_name, model)
 
     def _model_forward(seq: TensorType, pos: Any) -> Any:
         """Call model with optional multimodal keyword arguments.
@@ -202,10 +267,11 @@ def generate_sql(
             extra_kwargs["pixel_values"] = pixel_values
         if audio_values is not None:
             extra_kwargs["audio_values"] = audio_values
+        model_fn: Any = model
         try:
-            return cast(Any, model)(seq, pos, **extra_kwargs)
+            return model_fn(seq, pos, **extra_kwargs)
         except TypeError:
-            return cast(Any, model)(seq, pos)
+            return model_fn(seq, pos)
 
     (output_ids, logprob_sum) = jax_beam_search(_model_forward, input_ids, beam_width, max_length, eos_token_id)
     sql = tokenizer.decode(output_ids[0].tolist())

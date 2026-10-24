@@ -9,6 +9,14 @@ from typing import Any
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec
 
+from gemma_4_sql.backends.common_gemma4_config import (
+    GEMMA4_26B_A4B_SPEC,
+    GEMMA4_31B_SPEC,
+    GEMMA4_E2B_SPEC,
+    GEMMA4_E4B_SPEC,
+    resolve_gemma4_preset_name,
+)
+
 DEFAULT_GRADIENT_CLIPPING = 10000000000.0
 
 
@@ -198,21 +206,10 @@ class ModelConfigPresets:
             Gemma 4 E2B `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, Any] = dict(GEMMA4_E2B_SPEC)
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(
-            num_hidden_layers=35,
-            hidden_size=1024,
-            intermediate_size=4096,
-            num_attention_heads=8,
-            num_key_value_heads=4,
-            head_dim=256,
-            global_head_dim=512,
-            num_experts=1,
-            vocab_size=262144,
-            **kwargs,
-        )
+        return ModelConfig(**kwargs)
 
     @classmethod
     def gemma4_e4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -226,21 +223,10 @@ class ModelConfigPresets:
             Gemma 4 E4B `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, Any] = dict(GEMMA4_E4B_SPEC)
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(
-            num_hidden_layers=42,
-            hidden_size=2560,
-            intermediate_size=10240,
-            num_attention_heads=10,
-            num_key_value_heads=1,
-            head_dim=256,
-            global_head_dim=512,
-            num_experts=1,
-            vocab_size=262144,
-            **kwargs,
-        )
+        return ModelConfig(**kwargs)
 
     @classmethod
     def gemma4_26b_a4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -254,23 +240,10 @@ class ModelConfigPresets:
             Gemma 4 26B-A4B `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, Any] = dict(GEMMA4_26B_A4B_SPEC)
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(
-            num_hidden_layers=30,
-            hidden_size=2816,
-            intermediate_size=2112,
-            moe_intermediate_size=704,
-            num_attention_heads=8,
-            num_key_value_heads=4,
-            head_dim=256,
-            global_head_dim=512,
-            num_experts=128,
-            num_experts_per_tok=2,
-            vocab_size=262144,
-            **kwargs,
-        )
+        return ModelConfig(**kwargs)
 
     @classmethod
     def gemma4_31b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -284,21 +257,10 @@ class ModelConfigPresets:
             Gemma 4 31B `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, Any] = dict(GEMMA4_31B_SPEC)
         if use_fsdp or use_tp:
             kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(
-            num_hidden_layers=60,
-            hidden_size=5376,
-            intermediate_size=21504,
-            num_attention_heads=32,
-            num_key_value_heads=16,
-            head_dim=256,
-            global_head_dim=512,
-            num_experts=1,
-            vocab_size=262144,
-            **kwargs,
-        )
+        return ModelConfig(**kwargs)
 
     @classmethod
     def from_preset(cls, model_name: str, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -314,12 +276,12 @@ class ModelConfigPresets:
 
         """
         preset_kw = {"use_fsdp": use_fsdp, "use_tp": use_tp} if (use_fsdp or use_tp) else {}
-        lowered = model_name.lower()
-        if "31b" in lowered:
+        key = resolve_gemma4_preset_name(model_name)
+        if key == "31b":
             return cls.gemma4_31b(**preset_kw)
-        if "26b" in lowered or "a4b" in lowered:
+        if key == "26b_a4b":
             return cls.gemma4_26b_a4b(**preset_kw)
-        if "e4b" in lowered:
+        if key == "e4b":
             return cls.gemma4_e4b(**preset_kw)
         return cls.gemma4_e2b(**preset_kw)
 

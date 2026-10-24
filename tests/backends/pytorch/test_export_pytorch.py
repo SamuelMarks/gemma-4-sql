@@ -1,6 +1,7 @@
 """Tests for PyTorch export."""
 
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_torch
@@ -37,7 +38,7 @@ def test_is_rank_zero():
         assert export_module._is_rank_zero() is False
 
 
-def test_save_real_model(tmp_path):
+def test_save_real_model(tmp_path: Path):
     """Test _save_real_model."""
     import gemma_4_sql.backends.pytorch.export as export_module
 

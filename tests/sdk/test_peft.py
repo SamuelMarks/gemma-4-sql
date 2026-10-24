@@ -40,7 +40,7 @@ def test_apply_peft_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res["lora_r"] == 16
     assert res["lora_alpha"] == 32
     assert res["lora_dropout"] == pytest.approx(0.1)
-    assert int(str(res["injected_modules"])) == 2
+    assert int(str(res.get("injected_modules"))) == 2
 
 
 def test_apply_peft_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,5 +1,6 @@
 """Unit and behavioral tests for etl maxtext."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,7 +11,7 @@ from gemma_4_sql.type_hints import ETLConfig
 
 
 def test_load_hf_or_duckdb():
-    """Execute and verify `test_load_hf_or_duckdb` behavior and invariants."""
+    """Verify load hf or duckdb behavior."""
     with patch("gemma_4_sql.backends.maxtext.etl.load_duckdb_dataset", return_value="duckdb_ds") as mock_duckdb:
         res = _load_hf_or_duckdb("ds", "split", "path", "table")
         assert res == "duckdb_ds"
@@ -25,13 +26,13 @@ def test_load_hf_or_duckdb():
 
 
 def test_load_hf_missing_deps():
-    """Execute and verify `test_load_hf_missing_deps` behavior and invariants."""
+    """Verify load hf missing deps behavior."""
     with patch("gemma_4_sql.backends.maxtext.etl.datasets", None), pytest.raises(DependencyMissingError, match="Datasets dependency is missing."):
         _load_hf_or_duckdb("ds", "split", None, None)
 
 
 def test_get_sampler():
-    """Execute and verify `test_get_sampler` behavior and invariants."""
+    """Verify get sampler behavior."""
     mock_grain = MagicMock()
     mock_grain.JAXDistributedSharding = MagicMock(return_value="shard")
     mock_grain.NoSharding = MagicMock(return_value="no_shard")
@@ -51,13 +52,13 @@ def test_get_sampler():
 
 
 def test_get_sampler_missing_deps():
-    """Execute and verify `test_get_sampler_missing_deps` behavior and invariants."""
+    """Verify get sampler missing deps behavior."""
     with patch("gemma_4_sql.backends.maxtext.etl.grain", None), pytest.raises(DependencyMissingError, match="Grain dependency is missing."):
         _get_sampler(10, True)
 
 
 def test_build_dataloader():
-    """Execute and verify `test_build_dataloader` behavior and invariants."""
+    """Verify build dataloader behavior."""
     config = ETLConfig(dataset_name="ds", split="split", batch_size=2, distributed=True, tokenizer_name="tok")
 
     mock_datasets = MagicMock()
@@ -66,23 +67,23 @@ def test_build_dataloader():
     mock_grain.Batch = MagicMock(return_value="batch_op")
 
     class MockBaseTransform:
-        """Execute and verify `MockBaseTransform` behavior and invariants."""
+        """Test stub for `MockBaseTransform`."""
 
-        def __init__(self, tokenizer):
-            """Execute and verify `__init__` behavior and invariants."""
+        def __init__(self, tokenizer: Any):
+            """Initialize test stub instance."""
 
-        def map(self, element):
-            """Execute and verify `map` behavior and invariants."""
+        def map(self, element: Any):
+            """Provide map test helper."""
             return {"a": 1}
 
     class MockDataSource:
-        """Execute and verify `MockDataSource` behavior and invariants."""
+        """Test stub for `MockDataSource`."""
 
-        def __init__(self, ds):
-            """Execute and verify `__init__` behavior and invariants."""
+        def __init__(self, ds: Any):
+            """Initialize test stub instance."""
 
         def __len__(self):
-            """Execute and verify `__len__` behavior and invariants."""
+            """Provide len   test helper."""
             return 10
 
     with (
@@ -99,8 +100,8 @@ def test_build_dataloader():
         assert res["status"] == "loaded"
         assert res["batch_size"] == 2
         assert res["backend"] == "maxtext"
-        assert res["distributed"] is True
-        assert res["loader"] == "loader"
+        assert res.get("distributed") is True
+        assert res.get("loader") == "loader"
 
         mock_load.assert_called_once_with("ds", "split", "", "")
         mock_grain.DataLoader.assert_called_once()
@@ -112,7 +113,7 @@ def test_build_dataloader():
 
 
 def test_build_dataloader_missing_deps():
-    """Execute and verify `test_build_dataloader_missing_deps` behavior and invariants."""
+    """Verify build dataloader missing deps behavior."""
     config = ETLConfig(dataset_name="ds", split="split")
     with patch("gemma_4_sql.backends.maxtext.etl.datasets", None), pytest.raises(DependencyMissingError, match="Missing grain or datasets. Cannot load ds."):
         build_dataloader(config)

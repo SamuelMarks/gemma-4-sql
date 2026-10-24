@@ -7,7 +7,7 @@ pytestmark = requires_keras
 
 
 def test_keras_apis() -> None:
-    """Execute and verify `test_keras_apis` behavior and invariants."""
+    """Verify keras apis behavior."""
     assert callable(train_model)
     assert callable(serve_model)
     assert callable(benchmark_model)

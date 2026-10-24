@@ -20,40 +20,40 @@ from gemma_4_sql.backends.jax.gemma4.config import (
 
 
 def test_vision_shard_config():
-    """Execute and verify `test_vision_shard_config` behavior and invariants."""
+    """Verify vision shard config behavior."""
     cfg = VisionShardConfig.no_sharding()
     assert isinstance(cfg, VisionShardConfig)
     assert cfg.attn_kernel is None
 
 
 def test_vision_config():
-    """Execute and verify `test_vision_config` behavior and invariants."""
+    """Verify vision config behavior."""
     cfg = VisionConfig()
     assert cfg.hidden_size == 1152
     assert cfg.image_size == 896
 
 
 def test_attention_type():
-    """Execute and verify `test_attention_type` behavior and invariants."""
+    """Verify attention type behavior."""
     assert AttentionType.LOCAL_SLIDING.value == "local_sliding"
     assert AttentionType.GLOBAL.value == "global"
 
 
 def test_shard_mode():
-    """Execute and verify `test_shard_mode` behavior and invariants."""
+    """Verify shard mode behavior."""
     assert ShardMode.FSDP.value == "fsdp"
     assert ShardMode.TP.value == "tp"
 
 
 def test_make_spec():
-    """Execute and verify `test_make_spec` behavior and invariants."""
+    """Verify make spec behavior."""
     spec = _make_spec(None, "fsdp")
     assert isinstance(spec, PartitionSpec)
     assert spec == PartitionSpec(None, "fsdp")
 
 
 def test_shard_config():
-    """Execute and verify `test_shard_config` behavior and invariants."""
+    """Verify shard config behavior."""
     no_shard = ShardConfig.no_sharding()
     assert no_shard.attn_kernel is None
 
@@ -71,13 +71,13 @@ def test_shard_config():
 
 
 def test_audio_config():
-    """Execute and verify `test_audio_config` behavior and invariants."""
+    """Verify audio config behavior."""
     cfg = AudioConfig()
     assert cfg.hidden_size == 1024
 
 
 def test_model_config_presets():
-    """Execute and verify `test_model_config_presets` behavior and invariants."""
+    """Verify model config presets behavior."""
     cfg1 = ModelConfigPresets.gemma4_base()
     assert isinstance(cfg1, ModelConfigPresets)
 
@@ -110,14 +110,14 @@ def test_model_config_presets():
 
 
 def test_model_config():
-    """Execute and verify `test_model_config` behavior and invariants."""
+    """Verify model config behavior."""
     cfg = ModelConfig()
     assert cfg.vocab_size == 256000
     assert cfg.hidden_size == 2048
 
 
 def test_model_config_presets_2():
-    """Execute and verify `test_model_config_presets_2` behavior and invariants."""
+    """Verify model config presets 2 behavior."""
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfigPresets
 
     assert ModelConfigPresets.gemma4_e2b(use_fsdp=True).num_hidden_layers == 35
@@ -128,3 +128,10 @@ def test_model_config_presets_2():
     assert ModelConfigPresets.from_preset("google/gemma-4-26B-A4B").num_hidden_layers == 30
     assert ModelConfigPresets.from_preset("google/gemma-4-E4B").num_hidden_layers == 42
     assert ModelConfigPresets.from_preset("google/gemma-4-E2B").num_hidden_layers == 35
+
+    from gemma_4_sql.backends.common_gemma4_config import get_gemma4_preset_spec
+
+    assert get_gemma4_preset_spec("google/gemma-4-31B")["num_hidden_layers"] == 60
+    assert get_gemma4_preset_spec("google/gemma-4-26B-A4B")["num_experts"] == 128
+    assert get_gemma4_preset_spec("google/gemma-4-E4B")["num_hidden_layers"] == 42
+    assert get_gemma4_preset_spec("google/gemma-4-E2B")["num_hidden_layers"] == 35

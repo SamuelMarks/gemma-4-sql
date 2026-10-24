@@ -34,23 +34,12 @@ def test_chat_turn_routing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_chat_turn_routing_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test chat_turn error handling.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-
-    Raises:
-        AssertionError: Description.
-    """
+    """Verify chat turn routing error behavior."""
     get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend("jax")
 
     def mock_generate(*_args: Any, **_kwargs: Any) -> Never:
-        """Execute test helper or verification step.
-
-        Raises:
-            ValueError: Description.
-        """
+        """Provide mock generate test helper."""
         msg = "mock error"
         raise ValueError(msg)
 

@@ -13,15 +13,17 @@ Implements:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
+from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
+from gemma_4_sql.exceptions import (
+    DependencyMissingError,
+    UnsupportedQuantizationMethodError,
+)
 
 if TYPE_CHECKING:
-    from jax import Array
-
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import JSONDict, TensorType
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +44,9 @@ DEFAULT_AQT_TARGETS: tuple[str, ...] = (
 
 
 def quantize_tensor_aqt(
-    tensor: Array,
+    tensor: TensorType,
     bits: int = 8,
-) -> tuple[Array, Array]:
+) -> tuple[Any, Any]:
     """Quantize a tensor using Google AQT symmetric numerical quantization.
 
     Computes per-channel dynamic scaling:
@@ -132,7 +134,7 @@ def apply_aqt_quantization(
         for k, v in curr.items():
             sub_path = f"{current_path}.{k}" if current_path else k
             if isinstance(v, dict):
-                v_dict = cast(dict[str, Any], v)
+                v_dict: dict[str, Any] = v
                 # Check if this leaf dictionary is a target projection module
                 if "kernel" in v_dict and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in targets):
                     kernel = v_dict["kernel"]
@@ -148,7 +150,7 @@ def apply_aqt_quantization(
                     res[k] = new_v
                     injected_count += 1
                 else:
-                    res[k] = _traverse(cast(dict[str, Any], v), sub_path)
+                    res[k] = _traverse(v_dict, sub_path)
             else:
                 res[k] = v
         return res
@@ -187,49 +189,60 @@ def quantize_model(
 
     """
     if jax is None or jnp is None or (Gemma4Model is None and "params" not in kwargs):
-        raise DependencyMissingError("MaxText dependencies are missing.")
+        raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
 
-    status = f"quantized_{method}"
-    memory_reduction = 0.5 if method == "int8" else (0.75 if method == "int4" else 0.7)
+    if kwargs.get("strict_method") and method not in {"int8", "int4"}:
+        raise UnsupportedQuantizationMethodError(
+            f"Unsupported quantization method '{method}' for MaxText backend.",
+            method=method,
+            supported_methods=("int8", "int4"),
+            backend="maxtext",
+        )
+
+    default_reduction = 0.5 if method == "int8" else (0.75 if method == "int4" else 0.7)
     metadata: dict[str, Any] = {}
 
-    try:
+    def _apply() -> tuple[float, str]:
+        """Resolve MaxText model parameters and apply AQT quantization."""
+        nonlocal metadata
         if "params" in kwargs and kwargs["params"] is not None:
             params = kwargs["params"]
         else:
             if Gemma4Model is None:
-                raise DependencyMissingError("MaxText dependency missing.")
+                raise DependencyMissingError("MaxText dependency missing.", backend="maxtext")
             model = Gemma4Model(model_name)
             rng = jax.random.PRNGKey(0)
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
             params = model.init(rng, dummy_input)
 
         if isinstance(params, dict):
+            params_dict: dict[str, Any] = params
             quant_targets = kwargs.get("quant_targets")
-            targets_list: list[str] | None = list(cast(list[str], quant_targets)) if isinstance(quant_targets, (list, tuple)) else None
+            targets_list: list[str] | None = [str(t) for t in quant_targets] if isinstance(quant_targets, (list, tuple)) else None
             _quantized_params, meta, count = apply_aqt_quantization(
-                params=cast(dict[str, Any], params),
+                params=params_dict,
                 method=method,
                 quant_targets=targets_list,
             )
             metadata = meta
-            memory_reduction = float(meta["memory_reduction_factor"])
-            logger.info("AQT quantization applied to %d modules with reduction %f", count, memory_reduction)
+            reduction = float(meta["memory_reduction_factor"])
+            logger.info("AQT quantization applied to %d modules with reduction %f", count, reduction)
         else:
-            metadata = {"method": method, "memory_reduction_factor": memory_reduction}
-    except (DependencyMissingError, ConfigurationError):
-        raise
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Failed to apply MaxText quantization: ")
-        status = f"failed: {e!s}"
+            reduction = default_reduction
+            metadata = {"method": method, "memory_reduction_factor": reduction}
+        return (reduction, f"quantized_{method}")
 
-    res: JSONDict = {
-        "backend": "maxtext",
-        "model": model_name,
-        "method": method,
-        "status": status,
-        "memory_reduction_factor": float(memory_reduction),
-    }
+    wrapped = quantize_model_wrapper(
+        backend_name="maxtext",
+        model_name=model_name,
+        method=method,
+        missing_deps=False,
+        apply_fn=_apply,
+        raise_on_error=bool(kwargs.get("raise_on_error")),
+    )
+    res: JSONDict = dict(wrapped)
+    if res["status"].startswith("failed:"):
+        res["memory_reduction_factor"] = float(default_reduction)
     if metadata:
         res["metadata"] = metadata
     return res

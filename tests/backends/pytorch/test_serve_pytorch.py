@@ -1,5 +1,6 @@
 """Tests for PyTorch serve."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_torch
@@ -24,7 +25,7 @@ def _restore_serve_mod(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_vllm_app(monkeypatch):
+async def test_create_vllm_app(monkeypatch: pytest.MonkeyPatch):
     """Test _create_vllm_app."""
     import gemma_4_sql.backends.pytorch.serve as serve_module
 
@@ -46,11 +47,11 @@ async def test_create_vllm_app(monkeypatch):
     generate_fn = mock_app.post.call_args_list[0][0][0]  # No wait, it's a decorator
 
     # We can inspect the decorator by capturing it
-    def mock_decorator(path):
-        """Execute and verify `mock_decorator` behavior and invariants."""
+    def mock_decorator(path: Any):
+        """Provide mock decorator test helper."""
 
-        def wrapper(func):
-            """Execute and verify `wrapper` behavior and invariants."""
+        def wrapper(func: Any):
+            """Provide wrapper test helper."""
             mock_app.generate_func = func
             return func
 
@@ -64,13 +65,13 @@ async def test_create_vllm_app(monkeypatch):
     mock_req = MagicMock()
 
     async def mock_json():
-        """Execute and verify `mock_json` behavior and invariants."""
+        """Provide mock json test helper."""
         return {"prompt": "p"}
 
     mock_req.json = mock_json
 
     async def mock_disconnected():
-        """Execute and verify `mock_disconnected` behavior and invariants."""
+        """Provide mock disconnected test helper."""
         return False
 
     await mock_disconnected()
@@ -81,23 +82,23 @@ async def test_create_vllm_app(monkeypatch):
     serve_module.AsyncLLMEngine.from_engine_args.return_value = mock_engine
 
     class MockOutput:
-        """Execute and verify `MockOutput` behavior and invariants."""
+        """Test stub for `MockOutput`."""
 
         class Out:
-            """Execute and verify `Out` behavior and invariants."""
+            """Test stub for `Out`."""
 
             text = "sql"
 
         outputs = [Out()]
 
-    async def mock_generate_stream(*args, **kwargs):
-        """Execute and verify `mock_generate_stream` behavior and invariants."""
+    async def mock_generate_stream(*args: Any, **kwargs: Any):
+        """Provide mock generate stream test helper."""
         yield MockOutput()
 
     mock_engine.generate.return_value = mock_generate_stream()
 
-    def mock_json_response(content):
-        """Execute and verify `mock_json_response` behavior and invariants."""
+    def mock_json_response(content: Any):
+        """Provide mock json response test helper."""
         return {"response": content}
 
     serve_module.JSONResponse.__call__ = mock_json_response
@@ -110,13 +111,13 @@ async def test_create_vllm_app(monkeypatch):
 
     # Test disconnect
     async def mock_disconnected_true():
-        """Execute and verify `mock_disconnected_true` behavior and invariants."""
+        """Provide mock disconnected true test helper."""
         return True
 
     mock_req.is_disconnected = mock_disconnected_true
 
-    async def mock_abort(*args):
-        """Execute and verify `mock_abort` behavior and invariants."""
+    async def mock_abort(*args: Any):
+        """Provide mock abort test helper."""
 
     mock_engine.abort = mock_abort
 
@@ -161,7 +162,7 @@ def test_create_native_app():
             assert batch_generate_logic(["p1", "p2"]) == ["sql", "sql"]
 
 
-def test_serve_model(monkeypatch):
+def test_serve_model(monkeypatch: pytest.MonkeyPatch):
     """Test serve_model."""
     import gemma_4_sql.backends.pytorch.serve as serve_module
 
@@ -209,8 +210,8 @@ def test_serve_model(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_vllm_app_empty_generator(monkeypatch):
-    """Execute and verify `test_create_vllm_app_empty_generator` behavior and invariants."""
+async def test_create_vllm_app_empty_generator(monkeypatch: pytest.MonkeyPatch):
+    """Verify create vllm app empty generator behavior."""
     from unittest.mock import MagicMock
 
     import gemma_4_sql.backends.pytorch.serve as serve_module
@@ -224,11 +225,11 @@ async def test_create_vllm_app_empty_generator(monkeypatch):
     monkeypatch.setattr(serve_module, "AsyncLLMEngine", MagicMock())
     monkeypatch.setattr(serve_module, "JSONResponse", MagicMock())
 
-    def mock_decorator(path):
-        """Execute and verify `mock_decorator` behavior and invariants."""
+    def mock_decorator(path: Any):
+        """Provide mock decorator test helper."""
 
-        def wrapper(func):
-            """Execute and verify `wrapper` behavior and invariants."""
+        def wrapper(func: Any):
+            """Provide wrapper test helper."""
             mock_app.generate_func = func
             return func
 
@@ -242,13 +243,13 @@ async def test_create_vllm_app_empty_generator(monkeypatch):
     mock_req = MagicMock()
 
     async def mock_json():
-        """Execute and verify `mock_json` behavior and invariants."""
+        """Provide mock json test helper."""
         return {"prompt": "p"}
 
     mock_req.json = mock_json
 
     async def mock_disconnected():
-        """Execute and verify `mock_disconnected` behavior and invariants."""
+        """Provide mock disconnected test helper."""
         return False
 
     await mock_disconnected()
@@ -279,8 +280,8 @@ async def test_create_vllm_app_empty_generator(monkeypatch):
 
     mock_engine.generate.return_value = EmptyAsyncGen()
 
-    def mock_json_response(content):
-        """Execute and verify `mock_json_response` behavior and invariants."""
+    def mock_json_response(content: Any):
+        """Provide mock json response test helper."""
         return {"response": content}
 
     serve_module.JSONResponse.__call__ = mock_json_response

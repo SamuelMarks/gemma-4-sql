@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, TrainerState
 from tests.conftest import requires_torch
 
@@ -21,10 +21,10 @@ def test_real_pytorch_dpo_loss_logps_and_step() -> None:
     import gemma_4_sql.backends.pytorch.dpo as dpo_module
     from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config, Gemma4ForCausalLM
 
-    p_chosen = torch.tensor([-1.0, -1.2], requires_grad=True)
-    p_rejected = torch.tensor([-2.0, -2.5], requires_grad=True)
-    r_chosen = torch.tensor([-1.1, -1.3])
-    r_rejected = torch.tensor([-1.9, -2.4])
+    p_chosen: Any = torch.tensor([-1.0, -1.2], requires_grad=True)
+    p_rejected: Any = torch.tensor([-2.0, -2.5], requires_grad=True)
+    r_chosen: Any = torch.tensor([-1.1, -1.3])
+    r_rejected: Any = torch.tensor([-1.9, -2.4])
 
     loss, chosen_rew, rejected_rew = dpo_module.dpo_loss(p_chosen, p_rejected, r_chosen, r_rejected, beta=0.1)
     assert float(loss.item()) > 0.0
@@ -164,6 +164,8 @@ def test_run_dpo_and_load_models(monkeypatch: pytest.MonkeyPatch) -> None:
         mock_run.side_effect = RuntimeError("epoch error")
         res_err = dpo_module.run_dpo(config)
         assert "failed: epoch error" in res_err["status"]
+        with pytest.raises(TrainingError, match="epoch error"):
+            dpo_module.run_dpo(config, raise_on_error=True)
 
     # Test model load failure when both gemma4 and AutoModelForCausalLM are None
     monkeypatch.setattr(dpo_module, "AutoModelForCausalLM", None)

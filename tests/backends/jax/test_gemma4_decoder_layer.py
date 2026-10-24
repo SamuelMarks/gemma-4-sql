@@ -12,7 +12,7 @@ from gemma_4_sql.backends.jax.gemma4.decoder_layer import Gemma4DecoderLayer
 
 
 def test_decoder_layer_mlp():
-    """Execute and verify `test_decoder_layer_mlp` behavior and invariants."""
+    """Verify decoder layer mlp behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -29,10 +29,10 @@ def test_decoder_layer_mlp():
 
     # Test with cache and mask
     class DummyCache:
-        """Execute and verify `DummyCache` behavior and invariants."""
+        """Test stub for `DummyCache`."""
 
         def __init__(self):
-            """Execute and verify `__init__` behavior and invariants."""
+            """Initialize test stub instance."""
             import jax.numpy as jnp
             from flax import nnx
 
@@ -40,7 +40,9 @@ def test_decoder_layer_mlp():
             self.v_cache = nnx.Variable(jnp.zeros((2, 10, 2, 16)))
             self.cur_ind = nnx.Variable(jnp.array(0))
 
-    layer_cache = DummyCache()
+    from typing import Any
+
+    layer_cache: Any = DummyCache()
     attention_mask = jnp.ones((2, 1, 10, 10))
     out = layer(x, positions, layer_cache=layer_cache, attention_mask=attention_mask)
     assert out.shape == (2, 10, 64)
@@ -51,7 +53,7 @@ def test_decoder_layer_mlp():
 
 
 def test_decoder_layer_moe():
-    """Execute and verify `test_decoder_layer_moe` behavior and invariants."""
+    """Verify decoder layer moe behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -70,7 +72,7 @@ def test_decoder_layer_moe():
 
 
 def test_decoder_layer_per_layer_input():
-    """Execute and verify `test_decoder_layer_per_layer_input` behavior and invariants."""
+    """Verify decoder layer per layer input behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,

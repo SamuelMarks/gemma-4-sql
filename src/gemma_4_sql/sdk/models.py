@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.type_hints import TrainingConfig
 
@@ -18,6 +19,23 @@ __all__ = [
     "sft_model",
     "train_from_scratch",
 ]
+
+
+def _clone_training_config(config: TrainingConfig | None, *, action: str, default_backend: str = DEFAULT_BACKEND) -> TrainingConfig:
+    """Deep-copy a TrainingConfig or create a default one with the specified action.
+
+    Args:
+        config: Optional source TrainingConfig to copy.
+        action: Training stage action (`'train_from_scratch'`, `'pretrain'`, `'sft'`, `'posttrain'`).
+        default_backend: Default backend name when `config` is `None`.
+
+    Returns:
+        An isolated `TrainingConfig` instance whose `extra_kwargs` will not mutate the caller's dict.
+
+    """
+    cfg = copy.deepcopy(config) if config is not None else TrainingConfig(backend=default_backend)
+    cfg.action = action
+    return cfg
 
 
 def _route_training(config: TrainingConfig) -> TrainResultDict:
@@ -45,8 +63,7 @@ def train_from_scratch(config: TrainingConfig | None = None) -> TrainResultDict:
         A dictionary indicating the training job status.
 
     """
-    cfg = copy.copy(config) if config is not None else TrainingConfig()
-    cfg.action = "train_from_scratch"
+    cfg = _clone_training_config(config, action="train_from_scratch", default_backend=DEFAULT_BACKEND)
     return _route_training(cfg)
 
 
@@ -60,8 +77,7 @@ def pretrain_model(config: TrainingConfig | None = None) -> TrainResultDict:
         A dictionary indicating the pretraining job status.
 
     """
-    cfg = copy.copy(config) if config is not None else TrainingConfig(backend="maxtext")
-    cfg.action = "pretrain"
+    cfg = _clone_training_config(config, action="pretrain", default_backend="maxtext")
     return _route_training(cfg)
 
 
@@ -75,8 +91,7 @@ def sft_model(config: TrainingConfig | None = None) -> TrainResultDict:
         A dictionary indicating the SFT job status.
 
     """
-    cfg = copy.copy(config) if config is not None else TrainingConfig()
-    cfg.action = "sft"
+    cfg = _clone_training_config(config, action="sft", default_backend=DEFAULT_BACKEND)
     return _route_training(cfg)
 
 
@@ -90,6 +105,5 @@ def posttrain_model(config: TrainingConfig | None = None) -> TrainResultDict:
         A dictionary indicating the post-training job status.
 
     """
-    cfg = copy.copy(config) if config is not None else TrainingConfig(backend="keras")
-    cfg.action = "posttrain"
+    cfg = _clone_training_config(config, action="posttrain", default_backend="keras")
     return _route_training(cfg)

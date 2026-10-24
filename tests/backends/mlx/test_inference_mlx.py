@@ -36,8 +36,9 @@ def test_real_mlx_beam_search_and_confidence() -> None:
     mock_tok.eos_token_id = 2
     mock_tok.decode.return_value = "SELECT 1;"
 
+    model_fn: Any = real_mlx_model
     sql, conf = inf_module.mlx_beam_search(
-        model=real_mlx_model,
+        model=model_fn,
         tokenizer=mock_tok,
         prompt="prompt",
         beam_width=2,
@@ -64,20 +65,20 @@ def test_mlx_beam_search_shape_variants() -> None:
     mock_tok.eos_token_id = 2
     mock_tok.decode.return_value = "SELECT 1;"
 
-    # 2D output
-    sql_2d, _ = inf_module.mlx_beam_search(lambda _x: mx.stack([hot, hot]), mock_tok, "prompt", max_length=1)
+    m_2d: Any = lambda _x: mx.stack([hot, hot])
+    sql_2d, _ = inf_module.mlx_beam_search(m_2d, mock_tok, "prompt", max_length=1)
     assert sql_2d == "SELECT 1;"
 
-    # list output
-    sql_list, _ = inf_module.mlx_beam_search(lambda _x: [hot], mock_tok, "prompt", max_length=1)
+    m_list: Any = lambda _x: [hot]
+    sql_list, _ = inf_module.mlx_beam_search(m_list, mock_tok, "prompt", max_length=1)
     assert sql_list == "SELECT 1;"
 
-    # tuple output
-    sql_tuple, _ = inf_module.mlx_beam_search(lambda _x: (hot,), mock_tok, "prompt", max_length=1)
+    m_tuple: Any = lambda _x: (hot,)
+    sql_tuple, _ = inf_module.mlx_beam_search(m_tuple, mock_tok, "prompt", max_length=1)
     assert sql_tuple == "SELECT 1;"
 
-    # 1D output
-    sql_1d, _ = inf_module.mlx_beam_search(lambda _x: hot, mock_tok, "prompt", max_length=1)
+    m_1d: Any = lambda _x: hot
+    sql_1d, _ = inf_module.mlx_beam_search(m_1d, mock_tok, "prompt", max_length=1)
     assert sql_1d == "SELECT 1;"
 
 
@@ -87,8 +88,9 @@ def test_mlx_beam_search_no_mx(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_tok = MagicMock()
     mock_tok.encode.return_value = [1, 2, 3]
     mock_tok.eos_token_id = 2
+    m_raw: Any = lambda _x: [1, 2]
     with pytest.raises(InferenceError, match="yielded an empty sequence|yielded only an EOS"):
-        inf_module.mlx_beam_search(lambda _x: [1, 2], mock_tok, "prompt", max_length=1)
+        inf_module.mlx_beam_search(m_raw, mock_tok, "prompt", max_length=1)
 
 
 def test_mlx_beam_search_fallbacks_and_empty_results() -> None:
@@ -97,26 +99,28 @@ def test_mlx_beam_search_fallbacks_and_empty_results() -> None:
 
     hot_tok5 = mx.array([10.0 if i == 5 else 0.0 for i in range(8)], dtype=mx.float32)
     mock_tok_empty = MagicMock(spec=[])
+    m_tok5: Any = lambda _x: hot_tok5
 
     with patch("gemma_4_sql.tokenization.SQLTokenizer") as mock_sql_tok:
         mock_sql_tok.return_value.encode.return_value = [5, 6]
         mock_sql_tok.return_value.decode.return_value = "sql"
-        sql, _conf = inf_module.mlx_beam_search(lambda _x: hot_tok5, mock_tok_empty, "prompt", max_length=1)
+        sql, _conf = inf_module.mlx_beam_search(m_tok5, mock_tok_empty, "prompt", max_length=1)
         assert sql == "sql"
 
     hot_eos1 = mx.array([10.0 if i == 1 else 0.0 for i in range(8)], dtype=mx.float32)
+    m_eos1: Any = lambda _x: hot_eos1
     mock_tok = MagicMock()
     mock_tok.encode.return_value = []
     mock_tok.eos_token_id = 1
     with pytest.raises(InferenceError, match="yielded only an EOS"):
-        inf_module.mlx_beam_search(lambda _x: hot_eos1, mock_tok, "prompt", max_length=1)
+        inf_module.mlx_beam_search(m_eos1, mock_tok, "prompt", max_length=1)
 
     mock_tok.decode.return_value = ""
     with pytest.raises(InferenceError, match="empty SQL query string"):
-        inf_module.mlx_beam_search(lambda _x: hot_tok5, mock_tok, "prompt", max_length=1)
+        inf_module.mlx_beam_search(m_tok5, mock_tok, "prompt", max_length=1)
 
     with pytest.raises(InferenceError, match="yielded an empty sequence"):
-        inf_module.mlx_beam_search(lambda _x: hot_tok5, mock_tok, "prompt", max_length=0, eos_token_id=5)
+        inf_module.mlx_beam_search(m_tok5, mock_tok, "prompt", max_length=0, eos_token_id=5)
 
 
 def test_generate_sql(monkeypatch: pytest.MonkeyPatch) -> None:

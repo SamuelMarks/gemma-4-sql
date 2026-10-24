@@ -1,6 +1,7 @@
 """Tests for mlx benchmark."""
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_mlx
@@ -139,7 +140,7 @@ def test_get_peak_memory_mb():
 
 
 @patch("time.perf_counter")
-def test_run_benchmark_pass(mock_perf):
+def test_run_benchmark_pass(mock_perf: Any):
     """Test run benchmark pass."""
     import gemma_4_sql.backends.mlx.benchmark as benchmark_module
 
@@ -156,7 +157,7 @@ def test_run_benchmark_pass(mock_perf):
     times = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
     mock_perf.side_effect = times * 10
 
-    tokens_sec, lat_ms, mem_mb = benchmark_module._run_benchmark_pass(model=mock_model, batch_size=1, num_runs=1, prompt_len=2, decode_tokens=2)
+    tokens_sec, lat_ms, _mem_mb = benchmark_module._run_benchmark_pass(model=mock_model, batch_size=1, num_runs=1, prompt_len=2, decode_tokens=2)
 
     assert tokens_sec > 0
     assert lat_ms > 0

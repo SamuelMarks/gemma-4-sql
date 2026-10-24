@@ -45,10 +45,8 @@ def _load_mlx_model_and_device(model_name: str, hardware: str) -> tuple[Any, str
         except (ValueError, TypeError, RuntimeError, AttributeError):
             pass
 
-    from typing import cast
-
-    loaded = load(model_name) if load is not None else None
-    model_any = cast(Any, loaded)[0] if isinstance(loaded, (tuple, list)) else loaded
+    loaded: Any = load(model_name) if load is not None else None
+    model_any = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
     return (model_any, target_device)
 
 

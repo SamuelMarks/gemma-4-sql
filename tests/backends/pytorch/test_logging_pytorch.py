@@ -2,12 +2,14 @@
 
 from unittest.mock import patch
 
+import pytest
+
 from tests.conftest import requires_torch
 
 pytestmark = requires_torch
 
 
-def test_pytorch_logging_imports(monkeypatch):
+def test_pytorch_logging_imports(monkeypatch: pytest.MonkeyPatch):
     """Test pytorch logging imports fallback."""
     import gemma_4_sql.backends.pytorch.logging as logging_module
 

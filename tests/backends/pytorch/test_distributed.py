@@ -19,6 +19,7 @@ import torch
 import torch.distributed as dist
 from torch import nn
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 import gemma_4_sql.backends.pytorch.export as ex
 import gemma_4_sql.backends.pytorch.train as tr
@@ -27,25 +28,25 @@ from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
 
 
 def mock_build_dataloader(config: ETLConfig, *args: Any, **kwargs: Any) -> dict[str, typing.Any]:
-    """Execute and verify `mock_build_dataloader` behavior and invariants."""
+    """Provide mock build dataloader test helper."""
     inputs = torch.randint(0, 128, (4, 10))
     targets = torch.randint(0, 128, (4, 10))
 
     # We return dictionaries so it matches the expected batch structure
-    class DictDataset(torch.utils.data.Dataset):
-        """Execute and verify `DictDataset` behavior and invariants."""
+    class DictDataset(torch.utils.data.Dataset[dict[str, Any]]):
+        """Test stub for `DictDataset`."""
 
-        def __init__(self, inputs, targets):
-            """Execute and verify `__init__` behavior and invariants."""
+        def __init__(self, inputs: Any, targets: Any):
+            """Initialize test stub instance."""
             self.inputs = inputs
             self.targets = targets
 
         def __len__(self):
-            """Execute and verify `__len__` behavior and invariants."""
+            """Provide len   test helper."""
             return len(self.inputs)
 
-        def __getitem__(self, idx):
-            """Execute and verify `__getitem__` behavior and invariants."""
+        def __getitem__(self, idx: Any):
+            """Provide getitem   test helper."""
             return {"inputs": self.inputs[idx], "targets": self.targets[idx]}
 
     dataset = DictDataset(inputs, targets)
@@ -58,7 +59,7 @@ def mock_build_dataloader(config: ETLConfig, *args: Any, **kwargs: Any) -> dict[
         distributed = False
 
     if getattr(config, "distributed", False) and dist.is_initialized():  # pragma: no branch
-        sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+        sampler = DistributedSampler(dataset)
         _ = getattr(DummyConfig(), "distributed", False)
 
     loader = DataLoader(dataset, batch_size=2, sampler=sampler)
@@ -67,7 +68,7 @@ def mock_build_dataloader(config: ETLConfig, *args: Any, **kwargs: Any) -> dict[
 
 @pytest.fixture
 def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> typing.Iterator[None]:
-    """Execute and verify `_mock_torch_env` behavior and invariants."""
+    """Provide mock torch env test helper."""
     # We want to run real DDP on gloo
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
@@ -80,19 +81,19 @@ def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> typing.Iterator[None]:
 
     # We can mock the model instantiation to return a tiny Gemma4 so it fits in memory and runs fast
     class DummyModel(nn.Module):
-        """Execute and verify `DummyModel` behavior and invariants."""
+        """Test stub for `DummyModel`."""
 
         def __init__(self):
-            """Execute and verify `__init__` behavior and invariants."""
+            """Initialize test stub instance."""
             super().__init__()
             self.emb = nn.Embedding(128, 128)
 
-        def forward(self, x, *args, **kwargs):
-            """Execute and verify `forward` behavior and invariants."""
+        def forward(self, x: Any, *args: Any, **kwargs: Any):
+            """Provide forward test helper."""
             return self.emb(x.long())
 
-    def mock_gemma_from_pretrained(*args, **kwargs):
-        """Execute and verify `mock_gemma_from_pretrained` behavior and invariants."""
+    def mock_gemma_from_pretrained(*args: Any, **kwargs: Any):
+        """Provide mock gemma from pretrained test helper."""
         return DummyModel()
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM.from_pretrained", mock_gemma_from_pretrained)
@@ -108,15 +109,15 @@ def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> typing.Iterator[None]:
 
 @pytest.mark.usefixtures("_mock_torch_env")
 def test_train_model_ddp() -> None:
-    """Execute and verify `test_train_model_ddp` behavior and invariants."""
+    """Verify train model ddp behavior."""
     res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=1, learning_rate=0.1, distributed_strategy="ddp", backend="pytorch_native"))
     assert res["status"] == "completed"
-    assert res["distributed_strategy"] == "ddp"
+    assert res.get("distributed_strategy") == "ddp"
 
 
 @pytest.mark.usefixtures("_mock_torch_env")
 def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_train_model_fsdp` behavior and invariants."""
+    """Verify train model fsdp behavior."""
     # FSDP in PyTorch on CPU might raise errors in _get_compute_device.
     # To test that train_model uses the FSDP path correctly without crashing the test runner,
     # we patch _wrap_model_distributed just for this test, or we catch the FSDP initialization error.
@@ -132,22 +133,22 @@ def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
     # wait, instead of mocking FSDP, let's just make sure we are not calling it and raising an exception that makes the test fail.
     # I'll just use a DummyModule that extends nn.Module to simulate FSDP if it raises on this platform.
     class DummyFSDP(nn.Module):
-        """Execute and verify `DummyFSDP` behavior and invariants."""
+        """Test stub for `DummyFSDP`."""
 
-        def __init__(self, module):
-            """Execute and verify `__init__` behavior and invariants."""
+        def __init__(self, module: Any):
+            """Initialize test stub instance."""
             super().__init__()
             self.module = module
 
-        def forward(self, *args, **kwargs):
-            """Execute and verify `forward` behavior and invariants."""
+        def forward(self, *args: Any, **kwargs: Any):
+            """Provide forward test helper."""
             return self.module(*args, **kwargs)
 
     # We patch fsdp_module.FullyShardedDataParallel to DummyFSDP
     import sys
 
     class MockFSDPModule:
-        """Execute and verify `MockFSDPModule` behavior and invariants."""
+        """Test stub for `MockFSDPModule`."""
 
         FullyShardedDataParallel = DummyFSDP
 
@@ -155,11 +156,11 @@ def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
 
     res = tr.train_model(TrainingConfig(action="sft", model_name="mod", dataset="dat", epochs=1, learning_rate=0.1, distributed_strategy="fsdp", backend="pytorch_native"))
     assert res["status"] == "completed"
-    assert res["distributed_strategy"] == "fsdp"
+    assert res.get("distributed_strategy") == "fsdp"
 
 
 def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Execute and verify `test_export_distributed_rank_zero` behavior and invariants."""
+    """Verify export distributed rank zero behavior."""
     # We don't need real model export for this error check, but we need real torch.
     monkeypatch.setattr(ex, "save_file", lambda *args, **kwargs: None)
 
@@ -175,7 +176,7 @@ def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 
 def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
-    """Execute and verify `test_export_distributed_rank_one` behavior and invariants."""
+    """Verify export distributed rank one behavior."""
     monkeypatch.setattr(ex, "save_file", lambda *args, **kwargs: None)
 
     os.environ["MASTER_ADDR"] = "localhost"
@@ -192,7 +193,7 @@ def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 
 def test_etl_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_etl_distributed` behavior and invariants."""
+    """Verify etl distributed behavior."""
     # etl_distributed tests build_dataloader with distributed=True
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12358"
@@ -215,22 +216,22 @@ def test_etl_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
 
         # Real tokenizer
         class DummyTokenizer:
-            """Execute and verify `DummyTokenizer` behavior and invariants."""
+            """Test stub for `DummyTokenizer`."""
 
-            def __init__(self, **kwargs):
+            def __init__(self, **kwargs: Any):
                 """Initialize DummyTokenizer."""
 
-            def encode(self, text):
-                """Execute and verify `encode` behavior and invariants."""
+            def encode(self, text: Any):
+                """Provide encode test helper."""
                 return [1, 2, 3]  # pragma: no cover
 
         monkeypatch.setattr(etl, "SQLTokenizer", DummyTokenizer)
 
         res = etl.build_dataloader(ETLConfig(dataset_name="ds", split="train", distributed=True))
 
-        assert res["distributed"] is True
-        loader = res["loader"]
+        assert res.get("distributed") is True
+        loader: Any = res.get("loader")
         # Real DataLoader with Real DistributedSampler
-        assert isinstance(loader.sampler, torch.utils.data.distributed.DistributedSampler)
+        assert isinstance(loader.sampler, DistributedSampler)
     finally:
         dist.destroy_process_group()

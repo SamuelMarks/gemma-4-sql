@@ -117,9 +117,10 @@ async def test_postgres_adapter_execution(
     await adapter.close_async()
     await adapter.close_async()
     await empty_adapter.close_async()
-    # Test synchronous close() while an async connection is cached inside a running event loop
+    # Test synchronous close() while an async connection is cached inside a running event loop, followed by close_async()
     await adapter.connect_async()
     adapter.close()
+    await adapter.close_async()
     empty_adapter.close()
 
 

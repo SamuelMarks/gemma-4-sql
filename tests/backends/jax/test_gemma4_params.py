@@ -1,5 +1,7 @@
 """Unit and behavioral tests for gemma4 params."""
 
+from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from tests.conftest import requires_jax
@@ -10,7 +12,7 @@ import pytest
 
 
 def test_stack_expert_tensors_none_key():
-    """Execute and verify `test_stack_expert_tensors_none_key` behavior and invariants."""
+    """Verify stack expert tensors none key behavior."""
     import jax.numpy as jnp
 
     from gemma_4_sql.backends.jax.gemma4.params import _stack_and_assign_expert_tensors
@@ -25,8 +27,8 @@ def test_stack_expert_tensors_none_key():
     assert jax_state == {}
 
 
-def test_create_gemma4_from_pretrained(tmp_path):
-    """Execute and verify `test_create_gemma4_from_pretrained` behavior and invariants."""
+def test_create_gemma4_from_pretrained(tmp_path: Path):
+    """Verify create gemma4 from pretrained behavior."""
     import numpy as np
     from safetensors.numpy import save_file
 
@@ -75,7 +77,7 @@ def test_create_gemma4_from_pretrained(tmp_path):
 
 
 def test_process_standard_tensor_errors():
-    """Execute and verify `test_process_standard_tensor_errors` behavior and invariants."""
+    """Verify process standard tensor errors behavior."""
     import numpy as np
 
     from gemma_4_sql.backends.jax.gemma4.params import _get_key_and_transform_mapping, process_standard_tensor
@@ -83,10 +85,10 @@ def test_process_standard_tensor_errors():
     mapping = _get_key_and_transform_mapping()
 
     class FakeSF:
-        """Execute and verify `FakeSF` behavior and invariants."""
+        """Test stub for `FakeSF`."""
 
-        def get_tensor(self, key):
-            """Execute and verify `get_tensor` behavior and invariants."""
+        def get_tensor(self, key: Any):
+            """Provide get tensor test helper."""
             return np.zeros((1,))
 
     # Test skipping standard KeyError exception by assign_weights_from_eval_shape
@@ -98,10 +100,10 @@ def test_process_standard_tensor_errors():
 
     # Test raising AttributeError inside try block
     class FakeSF2:
-        """Execute and verify `FakeSF2` behavior and invariants."""
+        """Test stub for `FakeSF2`."""
 
-        def get_tensor(self, key):
-            """Execute and verify `get_tensor` behavior and invariants."""
+        def get_tensor(self, key: Any):
+            """Provide get tensor test helper."""
             return np.zeros((1,))
 
     with patch("gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape", side_effect=AttributeError("bad")):
@@ -109,8 +111,8 @@ def test_process_standard_tensor_errors():
             process_standard_tensor(FakeSF2(), "model.embed_tokens.weight", jax_state, mapping)
 
 
-def test_create_gemma4_from_pretrained_etils_success(tmp_path, monkeypatch):
-    """Execute and verify `test_create_gemma4_from_pretrained_etils_success` behavior and invariants."""
+def test_create_gemma4_from_pretrained_etils_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify create gemma4 from pretrained etils success behavior."""
     import sys
 
     import numpy as np
@@ -132,8 +134,8 @@ def test_create_gemma4_from_pretrained_etils_success(tmp_path, monkeypatch):
                 create_gemma4_from_pretrained(str(tmp_path), cfg)
 
 
-def test_create_gemma4_from_pretrained_etils_missing(tmp_path, monkeypatch):
-    """Execute and verify `test_create_gemma4_from_pretrained_etils_missing` behavior and invariants."""
+def test_create_gemma4_from_pretrained_etils_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Verify create gemma4 from pretrained etils missing behavior."""
     import sys
 
     from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
@@ -150,8 +152,8 @@ def test_create_gemma4_from_pretrained_etils_missing(tmp_path, monkeypatch):
     orig_import = builtins.__import__
     with patch("builtins.__import__") as mock_import:
 
-        def side_effect(name, *args, **kwargs):
-            """Execute and verify `side_effect` behavior and invariants."""
+        def side_effect(name: Any, *args: Any, **kwargs: Any):
+            """Provide side effect test helper."""
             if name == "etils":
                 raise ImportError("no etils")
             return orig_import(name, *args, **kwargs)
@@ -163,7 +165,7 @@ def test_create_gemma4_from_pretrained_etils_missing(tmp_path, monkeypatch):
 
 
 def test_fix_jax_state_embeddings_coverage():
-    """Execute and verify `test_fix_jax_state_embeddings_coverage` behavior and invariants."""
+    """Verify fix jax state embeddings coverage behavior."""
     import jax
     import jax.numpy as jnp
 
@@ -173,7 +175,7 @@ def test_fix_jax_state_embeddings_coverage():
     cfg = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16, vision_config=VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4))
 
     # Test when embed_scale is ShapeDtypeStruct
-    jax_state = {"model": {"embed_scale": jax.ShapeDtypeStruct((), jnp.float32)}, "vision_tower": {"embeddings": {"position_ids": jax.ShapeDtypeStruct((1, 100), jnp.int32)}}}
+    jax_state: dict[str, Any] = {"model": {"embed_scale": jax.ShapeDtypeStruct((), jnp.float32)}, "vision_tower": {"embeddings": {"position_ids": jax.ShapeDtypeStruct((1, 100), jnp.int32)}}}
 
     _fix_jax_state_embeddings(jax_state, None, cfg)
     assert isinstance(jax_state["model"]["embed_scale"], jax.Array)
@@ -185,8 +187,8 @@ def test_fix_jax_state_embeddings_coverage():
     _fix_jax_state_embeddings(jax_state2, None, cfg2)
 
 
-def test_create_gemma4_state_dict_fallbacks(tmp_path):
-    """Execute and verify `test_create_gemma4_state_dict_fallbacks` behavior and invariants."""
+def test_create_gemma4_state_dict_fallbacks(tmp_path: Path):
+    """Verify create gemma4 state dict fallbacks behavior."""
     import numpy as np
     from safetensors.numpy import save_file
 
@@ -199,10 +201,10 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path):
     with patch("flax.nnx.split") as mock_split:
         # Test to_pure_dict
         class MockState0:
-            """Execute and verify `MockState0` behavior and invariants."""
+            """Test stub for `MockState0`."""
 
             def to_pure_dict(self):
-                """Execute and verify `to_pure_dict` behavior and invariants."""
+                """Provide to pure dict test helper."""
                 return {"a": 0}
 
         mock_split.return_value = (None, MockState0())
@@ -214,10 +216,10 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path):
 
         # Test to_flat_dict fallback
         class MockState1:
-            """Execute and verify `MockState1` behavior and invariants."""
+            """Test stub for `MockState1`."""
 
             def to_flat_dict(self):
-                """Execute and verify `to_flat_dict` behavior and invariants."""
+                """Provide to flat dict test helper."""
                 return {"a": 1}
 
         mock_split.return_value = (None, MockState1())
@@ -229,10 +231,10 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path):
 
         # Test dict() fallback
         class MockState2:
-            """Execute and verify `MockState2` behavior and invariants."""
+            """Test stub for `MockState2`."""
 
-            def __iter__(self):
-                """Execute and verify `__iter__` behavior and invariants."""
+            def __iter__(self) -> Any:
+                """Provide iter   test helper."""
                 yield from {"b": 2}.items()
 
         mock_split.return_value = (None, MockState2())

@@ -9,11 +9,34 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import gemma_4_sql.backends.maxtext.train as train_module
-from gemma_4_sql.exceptions import DependencyMissingError, ExportError
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError, TrainingError
 from gemma_4_sql.type_hints import TrainerState, TrainingConfig
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
+
+
+class TinyStatelessModel:
+    """Minimal stateless Flax/MaxText-style model."""
+
+    def __init__(self, _model_name: str = "tiny") -> None:
+        """Initialize stateless model stub."""
+
+    def init(self, _rng: Any, _inputs: Any) -> dict[str, Any]:
+        """Initialize embedding and output head arrays."""
+        import jax.numpy as jnp
+
+        return {
+            "embed": jnp.ones((16, 4), dtype=jnp.float32) * 0.1,
+            "head": jnp.ones((4, 16), dtype=jnp.float32) * 0.1,
+        }
+
+    def apply(self, params: dict[str, Any], inputs: Any) -> Any:
+        """Project token embeddings to vocabulary logits."""
+        import jax.numpy as jnp
+
+        emb = jnp.take(params["embed"], inputs, axis=0)
+        return jnp.dot(emb, params["head"])
 
 
 def test_real_maxtext_loss_and_train_step() -> None:
@@ -21,19 +44,8 @@ def test_real_maxtext_loss_and_train_step() -> None:
     import jax.numpy as jnp
     import optax
 
-    class TinyStatelessModel:
-        """Minimal stateless Flax/MaxText-style model."""
-
-        def apply(self, params: dict[str, Any], inputs: Any) -> Any:
-            """Project token embeddings to vocabulary logits."""
-            emb = jnp.take(params["embed"], inputs, axis=0)
-            return jnp.dot(emb, params["head"])
-
     model = TinyStatelessModel()
-    params: dict[str, Any] = {
-        "embed": jnp.ones((16, 4), dtype=jnp.float32) * 0.1,
-        "head": jnp.ones((4, 16), dtype=jnp.float32) * 0.1,
-    }
+    params = model.init(None, None)
     batch: dict[str, Any] = {
         "inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
         "targets": jnp.array([[2, 3, 4]], dtype=jnp.int32),
@@ -53,6 +65,7 @@ def test_real_maxtext_loss_and_train_step() -> None:
         params=params,
         opt_state=opt_state,
     )
+    new_params: Any
     new_params, _new_opt_state, final_loss = train_module._run_training_epochs(state)
     assert final_loss > 0.0
     assert not jnp.allclose(new_params["head"], params["head"])
@@ -101,33 +114,35 @@ def test_save_maxtext_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 
 def test_execute_train_local_and_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify _execute_train supports both local step mode and distributed gin orchestration."""
-    monkeypatch.setattr(train_module, "jax", MagicMock())
-    monkeypatch.setattr(train_module, "jnp", MagicMock())
-    monkeypatch.setattr(train_module, "optax", MagicMock())
-    monkeypatch.setattr(train_module, "maxtext_train", MagicMock())
-    monkeypatch.setattr(train_module, "Gemma4Model", MagicMock())
+    """Verify _execute_train runs real JAX/Optax updates with TinyStatelessModel in local mode and supports distributed Gin mode."""
+    import jax.numpy as jnp
+
+    monkeypatch.setattr(train_module, "Gemma4Model", TinyStatelessModel)
+    monkeypatch.setattr(train_module, "maxtext_train", MagicMock(main=MagicMock(return_value=0.0)))
     monkeypatch.setattr(train_module, "ocp", MagicMock())
 
-    config = TrainingConfig(model_name="model", dataset="dataset", epochs=1, batch_size=2)
+    batch: dict[str, Any] = {
+        "inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
+        "targets": jnp.array([[2, 3, 4]], dtype=jnp.int32),
+    }
+    config = TrainingConfig(model_name="model", dataset="dataset", epochs=1, batch_size=1, learning_rate=1e-2)
 
     with (
-        patch.object(train_module, "build_dataloader", return_value={"loader": [1, 2]}),
-        patch.object(train_module, "_get_train_step_fn"),
-        patch.object(train_module, "_run_training_epochs", return_value=("params", "opt_state", 0.5)),
-        patch.object(train_module, "save_maxtext_checkpoint"),
+        patch.object(train_module, "build_dataloader", return_value={"loader": [batch]}),
+        patch.object(train_module, "save_maxtext_checkpoint") as mock_save_ckpt,
     ):
         status, loss = train_module._execute_train(config, local_step_mode=True, checkpoint_dir="dir")
         assert status == "completed"
-        assert loss == 0.5
+        assert loss > 0.0
+        mock_save_ckpt.assert_called_once()
 
         status_no_ckpt, loss_no_ckpt = train_module._execute_train(config, local_step_mode=True)
         assert status_no_ckpt == "completed"
-        assert loss_no_ckpt == 0.5
+        assert loss_no_ckpt > 0.0
 
     # Distributed mode
     with (
-        patch.object(train_module, "build_dataloader", return_value={"loader": [1, 2]}),
+        patch.object(train_module, "build_dataloader", return_value={"loader": [batch]}),
         patch("gemma_4_sql.backends.maxtext.config_generator.generate_maxtext_gin_config", return_value="gin"),
         patch("gemma_4_sql.backends.maxtext.config_generator.save_maxtext_gin_config", return_value=Path("gin.file")),
         patch("gemma_4_sql.backends.maxtext.config_generator.build_maxtext_cli_args", return_value=["arg"]),
@@ -157,7 +172,7 @@ def test_execute_train_local_and_distributed(monkeypatch: pytest.MonkeyPatch) ->
     # Missing Gemma4Model
     monkeypatch.setattr(train_module, "Gemma4Model", None)
     with (
-        patch.object(train_module, "build_dataloader", return_value={"loader": [1, 2]}),
+        patch.object(train_module, "build_dataloader", return_value={"loader": [batch]}),
         pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"),
     ):
         train_module._execute_train(config, local_step_mode=True)
@@ -170,13 +185,9 @@ def test_execute_train_local_and_distributed(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_train_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify train_model returns structured results and handles errors and missing dependencies."""
-    monkeypatch.setattr(train_module, "jax", MagicMock())
-    monkeypatch.setattr(train_module, "jnp", MagicMock())
-    monkeypatch.setattr(train_module, "optax", MagicMock())
-    monkeypatch.setattr(train_module, "Gemma4Model", MagicMock())
+    monkeypatch.setattr(train_module, "Gemma4Model", TinyStatelessModel)
 
-    config = TrainingConfig(model_name="model")
-    config.extra_kwargs = {"local_step_mode": True, "checkpoint_dir": "dir2"}
+    config = TrainingConfig(model_name="model", extra_kwargs={"local_step_mode": True, "checkpoint_dir": "dir2"})
 
     with patch.object(train_module, "_execute_train") as mock_exec:
         mock_exec.return_value = ("completed", 0.5)
@@ -185,13 +196,15 @@ def test_train_model(monkeypatch: pytest.MonkeyPatch) -> None:
         assert res["final_loss"] == 0.5
         assert res["checkpoint_dir"] == "dir"
 
-        config.extra_kwargs = {}
-        res_no_dir = train_module.train_model(config)
+        config_no_dir = TrainingConfig(model_name="model")
+        res_no_dir = train_module.train_model(config_no_dir)
         assert "checkpoint_dir" not in res_no_dir
 
         mock_exec.side_effect = ValueError("test error")
-        res2 = train_module.train_model(config)
-        assert "failed: test error" in res2["status"]
+        res2 = train_module.train_model(config_no_dir)
+        assert "failed: test error" in str(res2["status"])
+        with pytest.raises(TrainingError, match="test error"):
+            train_module.train_model(config_no_dir, raise_on_error=True)
 
     monkeypatch.setattr(train_module, "jax", None)
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):

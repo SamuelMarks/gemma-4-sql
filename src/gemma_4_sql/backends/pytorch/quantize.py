@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import struct
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization, quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -195,12 +195,12 @@ def _apply_awq_quantization(
     }
 
     tokenizer = tok_cls.from_pretrained(model_name)
-    model: ModelType = awq_cls.from_pretrained(model_name)
-    cast(Any, model).quantize(tokenizer, quant_config=quant_config, calib_data=calib_data)
+    model: Any = awq_cls.from_pretrained(model_name)
+    model.quantize(tokenizer, quant_config=quant_config, calib_data=calib_data)
 
     out_dir = Path(export_path) if export_path else Path(f"./quantized_awq/{Path(model_name).name or 'model'}")
     out_dir.mkdir(parents=True, exist_ok=True)
-    cast(Any, model).save_quantized(str(out_dir))
+    model.save_quantized(str(out_dir))
     tokenizer.save_pretrained(str(out_dir))
 
     return (0.75, "quantized_awq")
@@ -340,7 +340,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
             return _apply_awq_quantization(
                 model_name=model_name,
                 export_path=export_path,
-                calib_data=cast(list[str], calib_data) if isinstance(calib_data, list) else None,
+                calib_data=[str(x) for x in calib_data] if isinstance(calib_data, list) else None,
                 w_bit=w_bit,
                 q_group_size=q_group_size,
             )
@@ -367,7 +367,7 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
 
         def apply_fn() -> tuple[float, str]:
             """Execute BitsAndBytes INT8/INT4 quantization."""
-            model_target = cast("ModelType | None", kwargs.get("model"))
+            model_target: Any = kwargs.get("model")
             raw_threshold = kwargs.get("llm_int8_threshold", 6.0)
             threshold = float(raw_threshold) if isinstance(raw_threshold, (int, float, str)) else 6.0
             return apply_bits_and_bytes_quantization(

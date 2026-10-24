@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from gemma_4_sql.backends.keras import dpo
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, TrainerState
 from tests.conftest import requires_keras
 
@@ -157,3 +157,5 @@ def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dpo, "_execute_dpo", MagicMock(side_effect=ValueError("simulated dpo failure")))
     res_err = dpo.run_dpo(cfg)
     assert "failed: simulated dpo failure" in str(res_err["status"])
+    with pytest.raises(TrainingError, match="simulated dpo failure"):
+        dpo.run_dpo(cfg, raise_on_error=True)

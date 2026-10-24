@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.backends.pytorch.train import _cleanup_distributed
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, ETLConfig, ModelType, TensorType, TrainerState
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-    from gemma_4_sql.type_hints import DPOResultDict, JSONDict
+    from gemma_4_sql.type_hints import DPOResultDict
 logger = logging.getLogger(__name__)
 
 torch = optional_import("torch")
@@ -119,7 +120,7 @@ def _run_dpo_step(policy_model: ModelType, ref_model: ModelType, optimizer: Any,
     return loss
 
 
-def _run_training_epochs(state: TrainerState) -> float:
+def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
     """Run PyTorch DPO training epochs over the preference dataloader.
 
     Args:
@@ -129,13 +130,13 @@ def _run_training_epochs(state: TrainerState) -> float:
         Mean batch loss from the final epoch.
 
     """
-    dataloader = cast("Iterable[JSONDict]", state.dataloader or ())
-    policy_model = state.policy_model
-    ref_model = state.ref_model
+    dataloader: Iterable[dict[str, Any]] = state.dataloader or ()
+    policy_model: Any = state.policy_model
+    ref_model: Any = state.ref_model
     optimizer = state.optimizer
     beta = state.beta
 
-    def _step(batch: JSONDict) -> float:
+    def _step(batch: dict[str, Any]) -> float:
         """Execute a single PyTorch DPO step and extract scalar float loss."""
         loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)
         return float(loss.item() if hasattr(loss, "item") else loss)
@@ -181,13 +182,14 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
 
     Args:
         config: The DPO configuration.
-        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate, backend_alias).
+        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate, backend_alias, raise_on_error).
 
     Returns:
         Structured `DPOResultDict` with execution status and final loss.
 
     Raises:
         DependencyMissingError: If PyTorch dependencies are missing.
+        TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
     model_name = getattr(config, "model_name", "model")
@@ -195,12 +197,16 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
     beta = getattr(config, "beta", 0.1)
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
-    backend_alias = str(kwargs.get("backend_alias", "pytorch"))
-    model_config = kwargs.get("model_config") or getattr(config, "extra_kwargs", {}).get("model_config")
+    extra = getattr(config, "extra_kwargs", {}) or {}
+    backend_alias = str(kwargs.get("backend_alias", extra.get("backend_alias", "pytorch")))
+    model_config = kwargs.get("model_config") or extra.get("model_config")
+    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
+    dist_module = kwargs.get("dist_module") or extra.get("dist_module")
 
     if torch is None or nn is None or optim is None:
-        raise DependencyMissingError("PyTorch dependencies are missing.")
+        raise DependencyMissingError("PyTorch dependencies are missing.", backend=backend_alias)
 
+    final_loss = 0.0
     try:
         (policy_model, ref_model) = _load_dpo_models(model_name, backend_alias=backend_alias, model_config=model_config)
         optimizer = optim.AdamW(policy_model.parameters(), lr=learning_rate)
@@ -222,8 +228,17 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
         status = "completed"
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("DPO failed: ")
+        if raise_on_error:
+            raise TrainingError(
+                f"PyTorch DPO failed: {e!s}",
+                backend=backend_alias,
+                model_name=model_name,
+                operation="dpo",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
-        final_loss = 0.0
+    finally:
+        _cleanup_distributed(dist_module)
 
     return {
         "backend": backend_alias,

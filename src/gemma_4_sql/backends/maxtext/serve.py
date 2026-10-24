@@ -10,14 +10,14 @@ from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, ServeResultDict
+    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONValue, ServeResultDict
 logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")
 gemma4 = optional_import("maxtext.models.gemma4")
 
 
-def _create_app(model_name: str) -> object:
+def _create_app(model_name: str) -> FastAPIAppProtocol:
     """Create the FastAPI application for the MaxText server.
 
     Args:

@@ -2,6 +2,19 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
+
+class ExecutionStatus(str, Enum):
+    """Canonical execution status values for backend operations."""
+
+    SUCCESS = "success"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    ERROR = "error"
+    UNSUPPORTED = "unsupported"
+    MISSING_DEPENDENCY = "missing_dependency"
+
 
 class GemmaSQLError(Exception):
     """Root base exception for all gemma-4-sql errors.
@@ -9,6 +22,8 @@ class GemmaSQLError(Exception):
     Attributes:
         message: Human-readable error message.
         backend: Optional backend identifier where the error originated.
+        model_name: Optional model identifier associated with the operation.
+        operation: Optional operation name where the error occurred.
         cause: Optional underlying exception that triggered this error.
 
     """
@@ -18,6 +33,8 @@ class GemmaSQLError(Exception):
         message: str = "",
         *,
         backend: str | None = None,
+        model_name: str | None = None,
+        operation: str | None = None,
         cause: Exception | None = None,
     ) -> None:
         """Initialize GemmaSQLError with structured context.
@@ -25,12 +42,16 @@ class GemmaSQLError(Exception):
         Args:
             message: Human-readable error description.
             backend: Optional name of the backend where the error occurred.
+            model_name: Optional name of the model associated with the operation.
+            operation: Optional name of the operation that failed.
             cause: Optional underlying exception cause.
 
         """
         super().__init__(message)
         self.message = message
         self.backend = backend
+        self.model_name = model_name
+        self.operation = operation
         self.cause = cause
 
 
@@ -98,15 +119,117 @@ class UnsupportedQuantizationMethodError(GemmaSQLError, ValueError):
 
 
 class InferenceError(GemmaSQLError, RuntimeError):
-    """Raised when model inference or SQL generation fails."""
+    """Raised when model inference or SQL generation fails.
+
+    Attributes:
+        backend: Optional backend identifier where inference failed.
+        model_name: Optional model identifier used during inference.
+        operation: Operation name (defaults to `'inference'`).
+
+    """
+
+    def __init__(
+        self,
+        message: str = "Inference failed.",
+        *,
+        backend: str | None = None,
+        model_name: str | None = None,
+        operation: str | None = "inference",
+        cause: Exception | None = None,
+    ) -> None:
+        """Initialize InferenceError with structured backend and model context.
+
+        Args:
+            message: Human-readable error description.
+            backend: Optional backend identifier where inference failed.
+            model_name: Optional model identifier used during inference.
+            operation: Optional operation identifier (defaults to `'inference'`).
+            cause: Optional underlying exception cause.
+
+        """
+        super().__init__(
+            message,
+            backend=backend,
+            model_name=model_name,
+            operation=operation,
+            cause=cause,
+        )
 
 
 class ExportError(GemmaSQLError, RuntimeError, ValueError):
-    """Raised when checkpoint serialization or model export fails."""
+    """Raised when checkpoint serialization or model export fails.
+
+    Attributes:
+        backend: Optional backend identifier where export failed.
+        model_name: Optional model identifier being exported.
+        operation: Operation name (defaults to `'export'`).
+
+    """
+
+    def __init__(
+        self,
+        message: str = "Model export failed.",
+        *,
+        backend: str | None = None,
+        model_name: str | None = None,
+        operation: str | None = "export",
+        cause: Exception | None = None,
+    ) -> None:
+        """Initialize ExportError with structured backend and model context.
+
+        Args:
+            message: Human-readable error description.
+            backend: Optional backend identifier where export failed.
+            model_name: Optional model identifier being exported.
+            operation: Optional operation identifier (defaults to `'export'`).
+            cause: Optional underlying exception cause.
+
+        """
+        super().__init__(
+            message,
+            backend=backend,
+            model_name=model_name,
+            operation=operation,
+            cause=cause,
+        )
 
 
 class TrainingError(GemmaSQLError, RuntimeError):
-    """Raised when pretraining, SFT, post-training, or DPO execution fails."""
+    """Raised when pretraining, SFT, post-training, PEFT, or DPO execution fails.
+
+    Attributes:
+        backend: Optional backend identifier where training failed.
+        model_name: Optional model identifier being trained.
+        operation: Operation name (defaults to `'train'`).
+
+    """
+
+    def __init__(
+        self,
+        message: str = "Training failed.",
+        *,
+        backend: str | None = None,
+        model_name: str | None = None,
+        operation: str | None = "train",
+        cause: Exception | None = None,
+    ) -> None:
+        """Initialize TrainingError with structured backend and model context.
+
+        Args:
+            message: Human-readable error description.
+            backend: Optional backend identifier where training failed.
+            model_name: Optional model identifier being trained.
+            operation: Optional operation identifier (defaults to `'train'`).
+            cause: Optional underlying exception cause.
+
+        """
+        super().__init__(
+            message,
+            backend=backend,
+            model_name=model_name,
+            operation=operation,
+            cause=cause,
+        )
 
 
 class ETLError(GemmaSQLError, RuntimeError):
@@ -129,24 +252,36 @@ class ConfigurationError(GemmaSQLError, ValueError):
     """Raised when hyperparameters, backend names, or configuration parameters are invalid."""
 
 
+_FAILED_STATUS_VALUES: frozenset[str] = frozenset({
+    ExecutionStatus.FAILED.value,
+    ExecutionStatus.ERROR.value,
+    ExecutionStatus.UNSUPPORTED.value,
+    ExecutionStatus.MISSING_DEPENDENCY.value,
+})
+
+
 def is_failed_status(result: object) -> bool:
-    """Return True if a backend result dictionary or status string indicates execution failure.
+    """Return True if a backend result dictionary, status enum, or status string indicates failure.
 
     Args:
-        result: A backend result mapping (containing `'status'` or `'error'`) or a status string.
+        result: A backend result mapping (containing `'status'` or `'error'`), `ExecutionStatus`, or status string.
 
     Returns:
-        True if the status starts with `'failed'` or a non-empty `'error'` field is present.
+        True if the status represents a failed, unsupported, or missing-dependency outcome.
 
     """
+    if isinstance(result, ExecutionStatus):
+        return result.value in _FAILED_STATUS_VALUES
     if isinstance(result, str):
-        return result.lower().startswith("failed")
+        norm = result.strip().lower()
+        return norm in _FAILED_STATUS_VALUES or norm.startswith(("failed", "error:", "unsupported_", "missing_"))
     if isinstance(result, dict):
         err = result.get("error")
         if isinstance(err, str) and err:
             return True
         status = result.get("status", "")
-        return isinstance(status, str) and status.lower().startswith("failed")
+        if isinstance(status, (str, ExecutionStatus)):
+            return is_failed_status(status)
     return False
 
 
@@ -155,6 +290,7 @@ __all__ = [
     "DatabaseExecutionError",
     "DependencyMissingError",
     "ETLError",
+    "ExecutionStatus",
     "ExportError",
     "GemmaSQLError",
     "InferenceError",

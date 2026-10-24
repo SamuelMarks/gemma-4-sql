@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from gemma_4_sql.type_hints import LogMetricsResultDict
 
 
@@ -30,7 +32,7 @@ def log_metrics_wrapper(
     step: int,
     log_dir: str,
     summary_writer_cls: type | None,
-    extra_fields: dict[str, str] | None = None,
+    extra_fields: Mapping[str, object] | None = None,
     step_duration_s: float | None = None,
 ) -> LogMetricsResultDict:
     """Log metrics for a training run using TensorBoard or a structured file-based fallback.
@@ -96,7 +98,7 @@ def log_metrics_wrapper(
     if fallback_file is not None:
         result["fallback_file"] = fallback_file
     if extra_fields:
-        raw_res = cast("dict[str, Any]", result)
+        raw_res: Any = result
         raw_res.update(extra_fields)
 
     return result

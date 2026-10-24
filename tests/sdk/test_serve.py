@@ -19,8 +19,8 @@ def test_serve_model_routing(monkeypatch: pytest.MonkeyPatch) -> None:
             assert res["model"] == "foo"
             assert res["port"] == 8123
             assert res["max_batch_size"] == 16
-            assert res["mode"] == "continuous_batching"
-            assert res["app"] is not None
+            assert res.get("mode") == "continuous_batching"
+            assert res.get("app") is not None
         except DependencyMissingError:
             pass
 

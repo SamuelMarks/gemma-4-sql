@@ -1,5 +1,6 @@
 """Unit and behavioral tests for inference maxtext."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -11,8 +12,8 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 
 @pytest.fixture(autouse=True)
-def mock_dependencies(monkeypatch):
-    """Execute and verify `mock_dependencies` behavior and invariants."""
+def mock_dependencies(monkeypatch: pytest.MonkeyPatch):
+    """Provide mock dependencies test helper."""
     mock_jax = MagicMock()
     mock_jnp = MagicMock()
     mock_gemma4 = MagicMock()
@@ -26,16 +27,17 @@ def mock_dependencies(monkeypatch):
     monkeypatch.setattr(inference, "jax", mock_jax)
     monkeypatch.setattr(inference, "jnp", mock_jnp)
     monkeypatch.setattr(inference, "Gemma4Model", mock_gemma4)
+    inference._MODEL_CACHE.clear()
 
     return mock_jax, mock_jnp, mock_gemma4
 
 
 def test_beam_search_step():
-    """Execute and verify `test_beam_search_step` behavior and invariants."""
+    """Verify beam search step behavior."""
     seq = np.array([[1, 2, 3]])
 
-    def model_apply_fn(s):
-        """Execute and verify `model_apply_fn` behavior and invariants."""
+    def model_apply_fn(s: Any):
+        """Provide model apply fn test helper."""
         # Return logits where shape is 3D
         logits = np.zeros((1, 3, 5))
         # Top indices will be 4, 3, 2, 1, 0 based on values
@@ -52,11 +54,11 @@ def test_beam_search_step():
 
 
 def test_beam_search_step_shapes():
-    """Execute and verify `test_beam_search_step_shapes` behavior and invariants."""
+    """Verify beam search step shapes behavior."""
     seq = np.array([[1, 2, 3]])
 
-    def model_apply_fn_2d(s):
-        """Execute and verify `model_apply_fn_2d` behavior and invariants."""
+    def model_apply_fn_2d(s: Any):
+        """Provide model apply fn 2d test helper."""
         logits = np.zeros((3, 5))
         logits[-1, :] = [0.1, 0.2, 0.3, 0.4, 0.5]
         return logits
@@ -64,8 +66,8 @@ def test_beam_search_step_shapes():
     beams_2d = _beam_search_step(seq, 0.0, model_apply_fn_2d, beam_width=1)
     np.testing.assert_array_equal(beams_2d[0][0], [[1, 2, 3, 4]])
 
-    def model_apply_fn_1d(s):
-        """Execute and verify `model_apply_fn_1d` behavior and invariants."""
+    def model_apply_fn_1d(s: Any):
+        """Provide model apply fn 1d test helper."""
         logits = np.array([0.1, 0.2, 0.3, 0.4, 0.5])
         return logits
 
@@ -73,31 +75,31 @@ def test_beam_search_step_shapes():
     np.testing.assert_array_equal(beams_1d[0][0], [[1, 2, 3, 4]])
 
 
-def test_beam_search_step_no_item(mock_dependencies):
-    """Execute and verify `test_beam_search_step_no_item` behavior and invariants."""
+def test_beam_search_step_no_item(mock_dependencies: Any):
+    """Verify beam search step no item behavior."""
     mock_jax, mock_jnp, _mock_gemma4 = mock_dependencies
 
     seq = np.array([[1, 2]])
 
-    def model_apply_fn(s):
-        """Execute and verify `model_apply_fn` behavior and invariants."""
+    def model_apply_fn(s: Any):
+        """Provide model apply fn test helper."""
         return np.array([0.1, 0.2, 0.3])
 
     class NoItemScore:
-        """Execute and verify `NoItemScore` behavior and invariants."""
+        """Test stub for `NoItemScore`."""
 
-        def __init__(self, v):
-            """Execute and verify `__init__` behavior and invariants."""
+        def __init__(self, v: Any):
+            """Initialize test stub instance."""
             self.v = v
 
         def __float__(self):
-            """Execute and verify `__float__` behavior and invariants."""
+            """Provide float   test helper."""
             return float(self.v)
 
         # no .item() method!
 
-    def dummy_argsort(x):
-        """Execute and verify `dummy_argsort` behavior and invariants."""
+    def dummy_argsort(x: Any):
+        """Provide dummy argsort test helper."""
         return np.array([0, 1, 2])
 
     mock_jnp.argsort.side_effect = dummy_argsort
@@ -110,10 +112,10 @@ def test_beam_search_step_no_item(mock_dependencies):
 
 
 def test_maxtext_beam_search():
-    """Execute and verify `test_maxtext_beam_search` behavior and invariants."""
+    """Verify maxtext beam search behavior."""
 
-    def apply_fn(seq):
-        """Execute and verify `apply_fn` behavior and invariants."""
+    def apply_fn(seq: Any):
+        """Provide apply fn test helper."""
         return np.array([0.1, 0.9])  # always predicts 1
 
     input_ids = np.array([[0]])
@@ -130,11 +132,11 @@ def test_maxtext_beam_search():
 
 
 def test_maxtext_beam_search_eos():
-    """Execute and verify `test_maxtext_beam_search_eos` behavior and invariants."""
+    """Verify maxtext beam search eos behavior."""
     call_count = 0
 
-    def apply_fn(seq):
-        """Execute and verify `apply_fn` behavior and invariants."""
+    def apply_fn(seq: Any):
+        """Provide apply fn test helper."""
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -156,11 +158,11 @@ def test_maxtext_beam_search_eos():
 
 
 def test_maxtext_beam_search_eos_continue():
-    """Execute and verify `test_maxtext_beam_search_eos_continue` behavior and invariants."""
+    """Verify maxtext beam search eos continue behavior."""
     call_count = 0
 
-    def apply_fn(seq):
-        """Execute and verify `apply_fn` behavior and invariants."""
+    def apply_fn(seq: Any):
+        """Provide apply fn test helper."""
         nonlocal call_count
         call_count += 1
         # First call (input [2]): return top 2 tokens: 1 and 0 (eos)
@@ -175,8 +177,8 @@ def test_maxtext_beam_search_eos_continue():
     _out_seq, _score = maxtext_beam_search(model_apply_fn=apply_fn, input_ids=input_ids, beam_width=2, max_length=5, eos_token_id=0)
 
 
-def test_execute_generate(mock_dependencies):
-    """Execute and verify `test_execute_generate` behavior and invariants."""
+def test_execute_generate(mock_dependencies: Any):
+    """Verify execute generate behavior."""
     mock_jax, _mock_jnp, _mock_gemma4 = mock_dependencies
 
     tokenizer = MagicMock()
@@ -194,9 +196,16 @@ def test_execute_generate(mock_dependencies):
         assert sql == "SELECT * FROM test"
         assert score == 0.75  # 1.5 / max(1, 4 - 2)
 
+        # Second call hits _MODEL_CACHE, and filling > MAX_MODEL_CACHE_SIZE evicts oldest
+        status2, _, _ = _execute_generate("test-model", [1, 2], 2, 10, 5, tokenizer)
+        assert status2 == "success"
+        for i in range(inference.MAX_MODEL_CACHE_SIZE + 1):
+            inference._get_or_create_maxtext_model(f"extra-model-{i}")
+        assert len(inference._MODEL_CACHE) == inference.MAX_MODEL_CACHE_SIZE
 
-def test_execute_generate_model_apply(mock_dependencies):
-    """Execute and verify `test_execute_generate_model_apply` behavior and invariants."""
+
+def test_execute_generate_model_apply(mock_dependencies: Any):
+    """Verify execute generate model apply behavior."""
     mock_jax, _mock_jnp, mock_gemma4 = mock_dependencies
 
     mock_model = MagicMock()
@@ -222,8 +231,8 @@ def test_execute_generate_model_apply(mock_dependencies):
         assert score == 0.75
 
 
-def test_generate_sql(mock_dependencies):
-    """Execute and verify `test_generate_sql` behavior and invariants."""
+def test_generate_sql(mock_dependencies: Any):
+    """Verify generate sql behavior."""
     with patch("gemma_4_sql.backends.maxtext.inference._execute_generate") as mock_exec:
         mock_exec.return_value = ("success", "SELECT 1", 0.9)
 
@@ -233,16 +242,16 @@ def test_generate_sql(mock_dependencies):
         assert result["confidence_score"] == 0.9
 
 
-def test_generate_sql_missing_deps(monkeypatch):
-    """Execute and verify `test_generate_sql_missing_deps` behavior and invariants."""
+def test_generate_sql_missing_deps(monkeypatch: pytest.MonkeyPatch):
+    """Verify generate sql missing deps behavior."""
     monkeypatch.setattr(inference, "jax", None)
 
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing"):
         generate_sql("test-model", "test prompt")
 
 
-def test_generate_sql_error(mock_dependencies):
-    """Execute and verify `test_generate_sql_error` behavior and invariants."""
+def test_generate_sql_error(mock_dependencies: Any):
+    """Verify generate sql error behavior."""
     with patch("gemma_4_sql.backends.maxtext.inference._execute_generate") as mock_exec:
         mock_exec.side_effect = RuntimeError("Generation failed")
 
@@ -257,7 +266,7 @@ def test_beam_search_non_eos_completion():
 
     import gemma_4_sql.backends.maxtext.inference as inf
 
-    def apply_fn(_seq):
+    def apply_fn(_seq: Any):
         """Return uniform logits."""
         return np.array([0.5, 0.5])
 

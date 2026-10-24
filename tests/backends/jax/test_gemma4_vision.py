@@ -1,5 +1,7 @@
 """Unit and behavioral tests for gemma4 vision."""
 
+from typing import Any
+
 import jax.numpy as jnp
 import pytest
 from flax import nnx
@@ -21,7 +23,7 @@ from gemma_4_sql.backends.jax.gemma4.vision import (
 
 
 class DummyVisionConfig:
-    """Execute and verify `DummyVisionConfig` behavior and invariants."""
+    """Test stub for `DummyVisionConfig`."""
 
     image_size = 32
     patch_size = 16
@@ -33,13 +35,13 @@ class DummyVisionConfig:
     num_hidden_layers = 1
 
     class shd_cfg:
-        """Execute and verify `shd_cfg` behavior and invariants."""
+        """Test stub for `shd_cfg`."""
 
         layer_norm = None
 
 
 class DummyAudioConfig:
-    """Execute and verify `DummyAudioConfig` behavior and invariants."""
+    """Test stub for `DummyAudioConfig`."""
 
     hidden_size = 16
     output_proj_dims = 16
@@ -47,19 +49,19 @@ class DummyAudioConfig:
 
 
 class DummyConfig:
-    """Execute and verify `DummyConfig` behavior and invariants."""
+    """Test stub for `DummyConfig`."""
 
     hidden_size = 16
     dtype = jnp.float32
-    vision_config = DummyVisionConfig()
-    audio_config = DummyAudioConfig()
+    vision_config: Any = DummyVisionConfig()
+    audio_config: Any = DummyAudioConfig()
     mm_tokens_per_image = 4
 
 
 def test_siglip_vision_embeddings():
-    """Execute and verify `test_siglip_vision_embeddings` behavior and invariants."""
+    """Verify siglip vision embeddings behavior."""
     rngs = nnx.Rngs(0)
-    config = DummyVisionConfig()
+    config: Any = DummyVisionConfig()
     model = SiglipVisionEmbeddings(config, rngs=rngs)
 
     # 32x32 image with 16x16 patch = 2x2 = 4 patches
@@ -69,9 +71,9 @@ def test_siglip_vision_embeddings():
 
 
 def test_siglip_attention():
-    """Execute and verify `test_siglip_attention` behavior and invariants."""
+    """Verify siglip attention behavior."""
     rngs = nnx.Rngs(0)
-    config = DummyVisionConfig()
+    config: Any = DummyVisionConfig()
     model = SiglipAttention(config, rngs=rngs)
 
     x = jnp.ones((2, 4, 16))
@@ -80,9 +82,9 @@ def test_siglip_attention():
 
 
 def test_siglip_mlp():
-    """Execute and verify `test_siglip_mlp` behavior and invariants."""
+    """Verify siglip mlp behavior."""
     rngs = nnx.Rngs(0)
-    config = DummyVisionConfig()
+    config: Any = DummyVisionConfig()
     model = SiglipMLP(config, rngs=rngs)
 
     x = jnp.ones((2, 4, 16))
@@ -91,9 +93,9 @@ def test_siglip_mlp():
 
 
 def test_siglip_encoder_layer():
-    """Execute and verify `test_siglip_encoder_layer` behavior and invariants."""
+    """Verify siglip encoder layer behavior."""
     rngs = nnx.Rngs(0)
-    config = DummyVisionConfig()
+    config: Any = DummyVisionConfig()
     model = SiglipEncoderLayer(config, rngs=rngs)
 
     x = jnp.ones((2, 4, 16))
@@ -102,17 +104,17 @@ def test_siglip_encoder_layer():
 
 
 def test_gemma4_multimodal_embedder():
-    """Execute and verify `test_gemma4_multimodal_embedder` behavior and invariants."""
+    """Verify gemma4 multimodal embedder behavior."""
     rngs = nnx.Rngs(0)
 
-    config = DummyConfig()
+    config: Any = DummyConfig()
     model = Gemma4MultimodalEmbedder(config, rngs=rngs)
 
     x = jnp.ones((2, 4, 16))
     out = model(x)
     assert out.shape == (2, 4, 16)
 
-    config2 = DummyConfig()
+    config2: Any = DummyConfig()
     config2.audio_config = None
     model2 = Gemma4MultimodalEmbedder(config2, rngs=rngs)
     out2 = model2(x)
@@ -120,9 +122,9 @@ def test_gemma4_multimodal_embedder():
 
 
 def test_siglip_vision_transformer():
-    """Execute and verify `test_siglip_vision_transformer` behavior and invariants."""
+    """Verify siglip vision transformer behavior."""
     rngs = nnx.Rngs(0)
-    config = DummyVisionConfig()
+    config: Any = DummyVisionConfig()
     model = SiglipVisionTransformer(config, rngs=rngs)
 
     pixel_values = jnp.ones((2, 32, 32, 3))
@@ -131,8 +133,8 @@ def test_siglip_vision_transformer():
 
 
 def test_avg_pool_vision_outputs():
-    """Execute and verify `test_avg_pool_vision_outputs` behavior and invariants."""
-    config = DummyVisionConfig()
+    """Verify avg pool vision outputs behavior."""
+    config: Any = DummyVisionConfig()
     # 4 patches. image_size=32, patch_size=16 -> 2 patches per side.
     # tokens_per_side = sqrt(num_output_tokens). Let's use 1 output token.
     x = jnp.ones((2, 4, 16))
@@ -143,9 +145,9 @@ def test_avg_pool_vision_outputs():
 
 
 def test_gemma4_multi_modal_projector():
-    """Execute and verify `test_gemma4_multi_modal_projector` behavior and invariants."""
+    """Verify gemma4 multi modal projector behavior."""
     rngs = nnx.Rngs(0)
-    config = DummyConfig()
+    config: Any = DummyConfig()
     config.mm_tokens_per_image = 1
 
     model = Gemma4MultiModalProjector(config, rngs=rngs)
@@ -153,7 +155,7 @@ def test_gemma4_multi_modal_projector():
     out = model(x)
     assert out.shape == (2, 1, 16)
 
-    config_no_vision = DummyConfig()
+    config_no_vision: Any = DummyConfig()
     config_no_vision.vision_config = None
     with pytest.raises(ValueError, match="Vision config is required"):
         Gemma4MultiModalProjector(config_no_vision, rngs=rngs)

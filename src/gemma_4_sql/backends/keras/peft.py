@@ -7,7 +7,7 @@ import math
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import ModelType, TensorType
 
 if TYPE_CHECKING:
@@ -254,11 +254,11 @@ def inject_lora(
         if has_tracker:
             curr._tracker.unlock()
 
-        curr_any = curr
+        curr_any: Any = curr
         try:
-            attrs: list[str] = list(cast(dict[str, Any], vars(curr_any)).keys()) if hasattr(curr_any, "__dict__") else []
+            attrs: list[str] = list(vars(curr_any).keys()) if hasattr(curr_any, "__dict__") else []
             if hasattr(curr_any, "_modules") and isinstance(curr_any._modules, dict):
-                attrs.extend(cast(dict[str, Any], curr_any._modules).keys())
+                attrs.extend(curr_any._modules.keys())
             for attr_name in set(attrs):
                 if attr_name.startswith("_"):
                     continue
@@ -266,7 +266,8 @@ def inject_lora(
                 if val is None:
                     continue
 
-                if keras is not None and isinstance(val, getattr(getattr(keras, "layers", None), "Dense", type(None))) and id(val) not in adapted_ids:
+                dense_cls: Any = getattr(getattr(keras, "layers", None), "Dense", type(None))
+                if keras is not None and isinstance(val, dense_cls) and id(val) not in adapted_ids:
                     if any(attr_name == t or t in attr_name or getattr(val, "name", "") == t for t in target_modules):
                         lora_layer = KerasLoRADense(
                             dense=val,
@@ -278,11 +279,11 @@ def inject_lora(
                         adapted_ids.add(id(val))
                         injected_count += 1
                     else:
-                        cast(Any, val).trainable = False
+                        val.trainable = False
                 elif isinstance(val, list):
                     list_modified = False
                     for idx, item in enumerate(val):
-                        if keras is not None and isinstance(item, getattr(getattr(keras, "layers", None), "Dense", type(None))) and id(item) not in adapted_ids:
+                        if keras is not None and isinstance(item, dense_cls) and id(item) not in adapted_ids:
                             if any(f"{attr_name}_{idx}" == t or getattr(item, "name", "") == t for t in target_modules):
                                 lora_layer = KerasLoRADense(
                                     dense=item,
@@ -295,7 +296,7 @@ def inject_lora(
                                 injected_count += 1
                                 list_modified = True
                             else:
-                                cast(Any, item).trainable = False
+                                item.trainable = False
                         else:
                             _traverse(item)
                     if list_modified:
@@ -338,11 +339,11 @@ def merge_lora_weights(model: ModelType) -> Any:
         if has_tracker:
             curr._tracker.unlock()
 
-        curr_any = curr
+        curr_any: Any = curr
         try:
-            attrs: list[str] = list(cast(dict[str, Any], vars(curr_any)).keys()) if hasattr(curr_any, "__dict__") else []
+            attrs: list[str] = list(vars(curr_any).keys()) if hasattr(curr_any, "__dict__") else []
             if hasattr(curr_any, "_modules") and isinstance(curr_any._modules, dict):
-                attrs.extend(cast(dict[str, Any], curr_any._modules).keys())
+                attrs.extend(curr_any._modules.keys())
             for attr_name in set(attrs):
                 if attr_name.startswith("_"):
                     continue
@@ -450,6 +451,14 @@ def apply_lora(
 
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, ImportError) as e:
         logger.exception("Keras LoRA error: ")
+        if kwargs.get("raise_on_error"):
+            raise TrainingError(
+                f"Keras PEFT failed: {e!s}",
+                backend="keras",
+                model_name=model_name,
+                operation="apply_lora",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
 
     return {

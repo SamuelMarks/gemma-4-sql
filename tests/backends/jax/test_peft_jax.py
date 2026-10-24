@@ -23,7 +23,7 @@ from gemma_4_sql.backends.jax.peft import (
     inject_lora,
     inject_lora_to_layer,
 )
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 
 
 class MockOptax:
@@ -101,6 +101,8 @@ def test_apply_lora_jax_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(MockNNX, "split", mock_split)
     res = pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05)
     assert "failed" in str(res["status"])
+    with pytest.raises(TrainingError, match="split error"):
+        pt.apply_lora("test-model", ["q_proj"], 8, 16, 0.05, raise_on_error=True)
 
 
 def test_nnx_lora_linear_init_and_properties() -> None:
@@ -276,7 +278,7 @@ def test_inject_lora_full_model_and_counting() -> None:
     config = Gemma4Config.gemma4_e2b()
     config.num_hidden_layers = 2
     rngs = nnx.Rngs(0)
-    model = Gemma4ForCausalLM(config, rngs=rngs)
+    model: Any = Gemma4ForCausalLM(config, rngs=rngs)
 
     targets = ["q_proj", "v_proj"]
     adapted_model, count = inject_lora(model, targets, lora_r=4, rngs=rngs)
@@ -293,7 +295,8 @@ def test_inject_lora_full_model_and_counting() -> None:
     assert m is model
 
     # Test inject_lora on object without __dict__
-    _m2, c2 = inject_lora(123, ["q_proj"])
+    prim_obj: Any = 123
+    _m2, c2 = inject_lora(prim_obj, ["q_proj"])
     assert c2 == 0
 
 
@@ -340,7 +343,7 @@ def test_inject_lora_model_layers_attribute() -> None:
             """Initialize with layer list."""
             self.layers = [l]
 
-    model = DirectLayersModel(layer)
+    model: Any = DirectLayersModel(layer)
     adapted, count = inject_lora(model, ["q_proj"], lora_r=2, rngs=rngs)
     assert count == 1
     assert isinstance(adapted.layers[0].self_attention.q_proj, pt.NNXLoRALinear)
@@ -370,7 +373,7 @@ def test_inject_lora_generic_recursive_traversal() -> None:
             self.raw_dict = {"item": CustomBlock(rngs), "other": 456}
 
     rngs = nnx.Rngs(0)
-    container = PlainContainer(rngs)
+    container: Any = PlainContainer(rngs)
     adapted, count = inject_lora(container, ["q_proj"], lora_r=2, rngs=rngs)
     assert count == 3
     assert isinstance(adapted.child_module.q_proj, pt.NNXLoRALinear)
@@ -432,7 +435,7 @@ def test_lora_optimizer_gradient_flow_and_freeze_state() -> None:
             return self.proj(x)
 
     rngs = nnx.Rngs(0)
-    model = SimpleModel(rngs)
+    model: Any = SimpleModel(rngs)
     optimizer = create_lora_optimizer(model, optax.adam(1e-1))
 
     # Ensure optimizer state tracks LoRAParam and NOT base kernel
@@ -444,10 +447,11 @@ def test_lora_optimizer_gradient_flow_and_freeze_state() -> None:
         pred = m(x)
         return jnp.sum((pred - target) ** 2)
 
+    v_ag_fn: Any = nnx.value_and_grad
     if hasattr(nnx, "DiffState"):
-        grad_fn = nnx.value_and_grad(loss_fn, argnums=nnx.DiffState(0, pt.LoRAParam))  # type: ignore[attr-defined]
+        grad_fn = v_ag_fn(loss_fn, argnums=nnx.DiffState(0, pt.LoRAParam))
     else:
-        grad_fn = nnx.value_and_grad(loss_fn, wrt=pt.LoRAParam)
+        grad_fn = v_ag_fn(loss_fn, wrt=pt.LoRAParam)
 
     x = jnp.ones((1, 4))
     target = jnp.zeros((1, 4))
@@ -486,7 +490,7 @@ def test_apply_lora_end_to_end() -> None:
     )
     assert res["status"] == "completed"
     assert res["backend"] == "jax"
-    assert res["injected_modules"] == 2
+    assert res.get("injected_modules") == 2
     assert isinstance(model.model.layers[0].self_attention.q_proj, pt.NNXLoRALinear)
     assert isinstance(model.model.layers[0].self_attention.v_proj, pt.NNXLoRALinear)
 
@@ -494,28 +498,29 @@ def test_apply_lora_end_to_end() -> None:
 def test_missing_dependencies_exceptions(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test functions raise DependencyMissingError when JAX/Flax dependencies are absent."""
     monkeypatch.setattr(pt, "nnx", None)
+    dummy_obj: Any = object()
 
     with pytest.raises(DependencyMissingError, match="JAX PEFT dependencies are missing"):
         pt.NNXLoRALinear(4, 4)
 
     with pytest.raises(DependencyMissingError, match="JAX PEFT dependencies are missing"):
-        pt.inject_lora(object(), ["q_proj"])
+        pt.inject_lora(dummy_obj, ["q_proj"])
 
     with pytest.raises(DependencyMissingError, match="JAX PEFT dependencies are missing"):
-        pt.create_lora_optimizer(object())
+        pt.create_lora_optimizer(dummy_obj)
 
     with pytest.raises(DependencyMissingError, match="JAX PEFT dependencies are missing"):
-        pt.count_parameters(object())
+        pt.count_parameters(dummy_obj)
 
     monkeypatch.setattr(pt, "nnx", nnx)
     monkeypatch.setattr(pt, "optax", None)
     with pytest.raises(DependencyMissingError, match="JAX PEFT dependencies are missing"):
-        pt.create_lora_optimizer(object())
+        pt.create_lora_optimizer(dummy_obj)
 
     monkeypatch.setattr(pt, "optax", optax)
     monkeypatch.setattr(pt, "jax", None)
     with pytest.raises(DependencyMissingError, match="JAX PEFT dependencies are missing"):
-        pt.count_parameters(object())
+        pt.count_parameters(dummy_obj)
 
 
 def test_lora_linear_no_dropout() -> None:

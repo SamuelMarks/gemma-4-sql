@@ -8,7 +8,7 @@ pytestmark = requires_torch
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +90,8 @@ def test_apply_lora():
     peft_module.get_peft_model.side_effect = RuntimeError("error")
     res = peft_module.apply_lora("m", ["l"])
     assert "failed: error" in res["status"]
+    with pytest.raises(TrainingError, match="error"):
+        peft_module.apply_lora("m", ["l"], raise_on_error=True)
 
     # Test missing dependencies
     peft_module.peft = None

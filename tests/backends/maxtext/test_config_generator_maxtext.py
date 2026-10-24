@@ -19,7 +19,7 @@ from gemma_4_sql.backends.maxtext.config_generator import (
 
 
 def test_maxtext_hyperparameters_defaults():
-    """Execute and verify `test_maxtext_hyperparameters_defaults` behavior and invariants."""
+    """Verify maxtext hyperparameters defaults behavior."""
     hp = MaxTextHyperparameters()
     assert hp.model_architecture == "gemma4_2b"
     assert hp.per_device_batch_size == 2.0
@@ -37,7 +37,7 @@ def test_maxtext_hyperparameters_defaults():
 
 
 def test_to_float():
-    """Execute and verify `test_to_float` behavior and invariants."""
+    """Verify to float behavior."""
     assert _to_float(None, 1.5) == 1.5
     assert _to_float(2, 1.5) == 2.0
     assert _to_float(2.5, 1.5) == 2.5
@@ -47,7 +47,7 @@ def test_to_float():
 
 
 def test_to_int():
-    """Execute and verify `test_to_int` behavior and invariants."""
+    """Verify to int behavior."""
     assert _to_int(None, 5) == 5
     assert _to_int(2, 5) == 2
     assert _to_int(2.5, 5) == 2
@@ -57,7 +57,7 @@ def test_to_int():
 
 
 def test_normalize_model_architecture():
-    """Execute and verify `test_normalize_model_architecture` behavior and invariants."""
+    """Verify normalize model architecture behavior."""
     assert normalize_model_architecture("gemma-4") == "gemma4_2b"
     assert normalize_model_architecture("gemma-4-7b") == "gemma4_7b"
     assert normalize_model_architecture("  7b  ") == "gemma4_7b"
@@ -66,12 +66,15 @@ def test_normalize_model_architecture():
     with pytest.raises(ValueError, match="model_name must be a non-empty string"):
         normalize_model_architecture("")
 
+    from typing import Any
+
+    none_val: Any = None
     with pytest.raises(ValueError, match="model_name must be a non-empty string"):
-        normalize_model_architecture(None)
+        normalize_model_architecture(none_val)
 
 
 def test_build_maxtext_hyperparameters_defaults():
-    """Execute and verify `test_build_maxtext_hyperparameters_defaults` behavior and invariants."""
+    """Verify build maxtext hyperparameters defaults behavior."""
     config = MagicMock()
     config.extra_kwargs = None
     config.model_name = "gemma4_2b"
@@ -97,7 +100,7 @@ def test_build_maxtext_hyperparameters_defaults():
 
 
 def test_build_maxtext_hyperparameters_overrides():
-    """Execute and verify `test_build_maxtext_hyperparameters_overrides` behavior and invariants."""
+    """Verify build maxtext hyperparameters overrides behavior."""
     config = MagicMock()
     config.extra_kwargs = {"run_name": "custom_run", "warmup_steps_fraction": 0.2}
     config.model_name = "gemma-4-7b"
@@ -128,7 +131,7 @@ def test_build_maxtext_hyperparameters_overrides():
 
 
 def test_build_maxtext_hyperparameters_validation_errors():
-    """Execute and verify `test_build_maxtext_hyperparameters_validation_errors` behavior and invariants."""
+    """Verify build maxtext hyperparameters validation errors behavior."""
     config = MagicMock()
     config.extra_kwargs = {}
 
@@ -176,7 +179,7 @@ def test_build_maxtext_hyperparameters_validation_errors():
 
 
 def test_generate_maxtext_gin_config():
-    """Execute and verify `test_generate_maxtext_gin_config` behavior and invariants."""
+    """Verify generate maxtext gin config behavior."""
     config = MagicMock()
     config.extra_kwargs = {}
     config.model_name = "gemma4_2b"
@@ -200,8 +203,8 @@ def test_generate_maxtext_gin_config():
     assert "checkpoint_period = 500" in gin_str
 
 
-def test_save_maxtext_gin_config_with_path(tmp_path):
-    """Execute and verify `test_save_maxtext_gin_config_with_path` behavior and invariants."""
+def test_save_maxtext_gin_config_with_path(tmp_path: Path):
+    """Verify save maxtext gin config with path behavior."""
     output_path = tmp_path / "custom" / "test.gin"
     gin_content = "some_config = 1\n"
 
@@ -213,7 +216,7 @@ def test_save_maxtext_gin_config_with_path(tmp_path):
 
 
 def test_save_maxtext_gin_config_without_path():
-    """Execute and verify `test_save_maxtext_gin_config_without_path` behavior and invariants."""
+    """Verify save maxtext gin config without path behavior."""
     gin_content = "some_config = 1\n"
     result_path = save_maxtext_gin_config(gin_content)
 
@@ -225,7 +228,7 @@ def test_save_maxtext_gin_config_without_path():
 
 
 def test_save_maxtext_gin_config_empty_content():
-    """Execute and verify `test_save_maxtext_gin_config_empty_content` behavior and invariants."""
+    """Verify save maxtext gin config empty content behavior."""
     with pytest.raises(ValueError, match="gin_content cannot be empty"):
         save_maxtext_gin_config("")
 
@@ -234,7 +237,7 @@ def test_save_maxtext_gin_config_empty_content():
 
 
 def test_build_maxtext_cli_args_without_gin_path():
-    """Execute and verify `test_build_maxtext_cli_args_without_gin_path` behavior and invariants."""
+    """Verify build maxtext cli args without gin path behavior."""
     config = MagicMock()
     config.extra_kwargs = {}
     config.model_name = "gemma4_2b"
@@ -253,8 +256,8 @@ def test_build_maxtext_cli_args_without_gin_path():
     os.remove(path)
 
 
-def test_build_maxtext_cli_args_with_gin_path(tmp_path):
-    """Execute and verify `test_build_maxtext_cli_args_with_gin_path` behavior and invariants."""
+def test_build_maxtext_cli_args_with_gin_path(tmp_path: Path):
+    """Verify build maxtext cli args with gin path behavior."""
     config = MagicMock()
     gin_path = tmp_path / "my_config.gin"
     gin_path.write_text("test = 1")

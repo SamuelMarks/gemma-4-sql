@@ -2,6 +2,7 @@
 
 import json
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_mlx
@@ -21,7 +22,7 @@ def test_mlx_export_imports():
         assert export_module.mx is None
 
 
-def test_export_model(tmp_path, monkeypatch: pytest.MonkeyPatch):
+def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Test export_model."""
     import gemma_4_sql.backends.mlx.export as export_module
     from gemma_4_sql.exceptions import DependencyMissingError, ExportError

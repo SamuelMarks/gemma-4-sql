@@ -97,7 +97,7 @@ def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res["model"] == "foo"
     assert res["port"] == 8000
     assert res["max_batch_size"] == 16
-    assert res["mode"] == "continuous_batching"
+    assert res.get("mode") == "continuous_batching"
     assert res["status"] == "running_jax_serve"
 
 

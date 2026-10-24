@@ -10,7 +10,7 @@ from gemma_4_sql.backends.jax.gemma4.multimodal import MultimodalInputs, batched
 
 
 def test_batched_merge_modalities():
-    """Execute and verify `test_batched_merge_modalities` behavior and invariants."""
+    """Verify batched merge modalities behavior."""
     img_emb = jnp.array([[[1.0, 1.0], [2.0, 2.0]], [[3.0, 3.0], [4.0, 4.0]]])
     text_emb = jnp.array([[[10.0, 10.0], [20.0, 20.0], [30.0, 30.0]], [[40.0, 40.0], [50.0, 50.0], [60.0, 60.0]]])
     token_mask = jnp.array([[True, False, True], [False, True, False]])
@@ -23,9 +23,9 @@ def test_batched_merge_modalities():
 
 
 def test_multimodal_inputs():
-    """Execute and verify `test_multimodal_inputs` behavior and invariants."""
+    """Verify multimodal inputs behavior."""
     inputs = MultimodalInputs(input_ids=jnp.array([1, 2, 3]), pixel_values=jnp.array([1.0]), image_token_mask=jnp.array([True]), input_features=None, input_features_mask=None, audio_token_mask=None, attention_mask=None)
     assert inputs.input_ids.shape == (3,)
-    assert inputs.pixel_values.shape == (1,)
-    assert inputs.image_token_mask[0]
+    assert inputs.pixel_values is not None and inputs.pixel_values.shape == (1,)
+    assert inputs.image_token_mask is not None and inputs.image_token_mask[0]
     assert inputs.input_features is None

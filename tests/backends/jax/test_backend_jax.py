@@ -7,11 +7,11 @@ pytestmark = requires_jax
 
 
 def test_get_trainer():
-    """Execute and verify `test_get_trainer` behavior and invariants."""
+    """Verify get trainer behavior."""
     assert get_trainer() == "jax_trainer"
 
 
 def test_all_exports():
-    """Execute and verify `test_all_exports` behavior and invariants."""
+    """Verify all exports behavior."""
     expected_exports = ["apply_lora", "benchmark_model", "build_dataloader", "export_model", "generate_sql", "get_trainer", "log_metrics", "quantize_model", "run_dpo", "serve_model", "train_model"]
     assert __all__ == expected_exports

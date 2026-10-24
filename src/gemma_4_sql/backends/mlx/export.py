@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError
@@ -55,7 +55,8 @@ def export_model(model_name: str, export_path: str, **_kwargs: object) -> Export
     config_path = export_dir / "config.json"
     cfg_dict: dict[str, Any]
     if hasattr(model, "config"):
-        cfg_dict = cast(dict[str, Any], model.config if isinstance(model.config, dict) else getattr(model.config, "__dict__", {}))
+        raw_cfg: Any = model.config if isinstance(model.config, dict) else getattr(model.config, "__dict__", {})
+        cfg_dict = dict(raw_cfg)
     else:
         cfg_dict = {"model_type": "gemma4", "model_name": model_name}
     with open(config_path, "w", encoding="utf-8") as f:

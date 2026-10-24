@@ -26,7 +26,7 @@ _pad_batch = pad_token_batch
 class MLXDataLoader:
     """Iterable batch dataloader for MLX token sequence training."""
 
-    def __init__(self, ds: object, tok: SQLTokenizer, bs: int) -> None:
+    def __init__(self, ds: typing.Iterable[JSONDict] | object, tok: SQLTokenizer, bs: int) -> None:
         """Initialize the MLXDataLoader.
 
         Args:
@@ -35,7 +35,7 @@ class MLXDataLoader:
             bs: Number of records per padded batch.
 
         """
-        self.ds = ds
+        self.ds: typing.Any = ds
         self.tok = tok
         self.bs = bs
 
@@ -48,7 +48,7 @@ class MLXDataLoader:
         """
         batch_inputs: list[list[int]] = []
         batch_targets: list[list[int]] = []
-        for item in typing.cast("typing.Iterable[JSONDict]", self.ds):
+        for item in self.ds:
             prompt = str(item.get("sql_prompt", item.get("question", "")))
             target = str(item.get("sql", item.get("query", "")))
             batch_inputs.append(self.tok.encode(prompt))
@@ -118,15 +118,12 @@ def build_dataloader(config: ETLConfig, **kwargs: object) -> DataloaderResultDic
     hf_dataset = _load_hf_or_duckdb(dataset_name, split, duckdb_path, duckdb_table)
     tokenizer = SQLTokenizer(model_name=tokenizer_name)
     dataloader = MLXDataLoader(hf_dataset, tokenizer, batch_size)
-    return typing.cast(
-        "DataloaderResultDict",
-        {
-            "dataset": dataset_name,
-            "split": split,
-            "status": "loaded",
-            "batch_size": batch_size,
-            "backend": "mlx",
-            "distributed": distributed,
-            "loader": dataloader,
-        },
-    )
+    return {
+        "dataset": dataset_name,
+        "split": split,
+        "status": "loaded",
+        "batch_size": batch_size,
+        "backend": "mlx",
+        "distributed": distributed,
+        "loader": dataloader,
+    }

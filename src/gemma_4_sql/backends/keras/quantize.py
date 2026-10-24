@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.type_hints import ModelType
@@ -77,24 +78,30 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
 
     """
     if keras is None:
-        raise DependencyMissingError("Keras dependencies are missing.")
+        raise DependencyMissingError("Keras dependencies are missing.", backend="keras")
 
     if method not in {"int8", "int4"}:
-        raise UnsupportedQuantizationMethodError(f"Unsupported quantization method '{method}' for Keras backend. Supported methods are 'int8' and 'int4'.")
+        raise UnsupportedQuantizationMethodError(
+            f"Unsupported quantization method '{method}' for Keras backend. Supported methods are 'int8' and 'int4'.",
+            method=method,
+            supported_methods=("int8", "int4"),
+            backend="keras",
+        )
 
     memory_reduction = 0.5 if method == "int8" else 0.75
     policy_name = f"{method}_from_float32"
     quantized_layers_count = 0
     export_file: Path | None = None
 
-    try:
+    def _apply() -> tuple[float, str]:
+        """Configure Keras dtype policy, quantize layer weights, and optionally save artifact."""
+        nonlocal quantized_layers_count, export_file
         logger.info("Setting Keras model dtype policy to %s", policy_name)
         if hasattr(keras, "dtype_policies") and hasattr(keras.dtype_policies, "set_dtype_policy"):
             keras.dtype_policies.set_dtype_policy(policy_name)
         elif hasattr(keras, "config") and hasattr(keras.config, "set_dtype_policy"):
             keras.config.set_dtype_policy(policy_name)
 
-        # Retrieve or load model instance if provided
         model: ModelType | None = cast("ModelType | None", kwargs.get("model"))
         if model is None:
             try:
@@ -118,19 +125,17 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> J
                     model.save(str(export_file))
                     logger.info("Saved quantized Keras model artifact to %s", export_file)
 
-        status = f"quantized_{method}"
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-        logger.exception("Failed to apply Keras quantization: ")
-        status = f"failed: {e!s}"
-        memory_reduction = 0.0
+        return (memory_reduction, f"quantized_{method}")
 
-    result: JSONDict = {
-        "backend": "keras",
-        "model": model_name,
-        "method": method,
-        "status": status,
-        "memory_reduction_factor": float(memory_reduction),
-    }
+    wrapped = quantize_model_wrapper(
+        backend_name="keras",
+        model_name=model_name,
+        method=method,
+        missing_deps=False,
+        apply_fn=_apply,
+        raise_on_error=bool(kwargs.get("raise_on_error")),
+    )
+    result: JSONDict = dict(wrapped)
     if export_file is not None:
         result["export_path"] = str(export_file)
     if quantized_layers_count > 0:

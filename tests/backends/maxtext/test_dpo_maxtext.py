@@ -16,7 +16,7 @@ from gemma_4_sql.backends.maxtext.dpo import (
     dpo_loss,
     run_dpo,
 )
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, TrainerState
 from tests.conftest import requires_jax
 
@@ -52,7 +52,7 @@ def test_real_maxtext_dpo_logps_loss_and_train_step() -> None:
         "rejected_labels": jnp.array([[4, 5, 0]], dtype=jnp.int32),
     }
 
-    logps = _compute_logps(model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore[arg-type]
+    logps: Any = _compute_logps(model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])  # type: ignore[arg-type]
     assert logps.shape == (1,)
     assert float(logps[0]) < 0.0
 
@@ -175,6 +175,8 @@ def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
     with patch("gemma_4_sql.backends.maxtext.dpo._execute_dpo", side_effect=RuntimeError("exec fail")):
         res_err = run_dpo(config)
         assert res_err["status"] == "failed: exec fail"
+        with pytest.raises(TrainingError, match="exec fail"):
+            run_dpo(config, raise_on_error=True)
 
     monkeypatch.setattr(mt_dpo, "jax", None)
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):

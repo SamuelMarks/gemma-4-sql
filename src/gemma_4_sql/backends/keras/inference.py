@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
@@ -31,11 +31,11 @@ def _extract_flat_scores(scores: object) -> list[float]:
 
     """
     flat: list[float] = []
-    stack = [scores]
+    stack: list[Any] = [scores]
     while stack:
         curr = stack.pop(0)
         if isinstance(curr, (list, tuple)):
-            stack.extend(cast(list[Any], curr))
+            stack.extend(curr)
         elif isinstance(curr, (int, float)):
             flat.append(float(curr))
     return flat
@@ -65,7 +65,7 @@ def compute_keras_confidence(scores: Any, num_tokens: int) -> float:
         scores = scores.tolist()
 
     if isinstance(scores, (list, tuple)):
-        flat_scores = _extract_flat_scores(cast(list[Any], scores))
+        flat_scores = _extract_flat_scores(scores)
         if not flat_scores:
             return 0.5
         avg = sum(flat_scores) / max(1, len(flat_scores))
@@ -106,10 +106,11 @@ def configure_beam_sampler(model: ModelType, beam_width: int) -> Any:
         logger.warning("KerasNLP BeamSampler could not be imported: %s", e)
 
     if sampler is not None:
-        if hasattr(model, "compile"):
-            model.compile(sampler=sampler)
-        elif hasattr(model, "sampler"):
-            cast(Any, model).sampler = sampler
+        model_any: Any = model
+        if hasattr(model_any, "compile"):
+            model_any.compile(sampler=sampler)
+        elif hasattr(model_any, "sampler"):
+            model_any.sampler = sampler
 
     return sampler
 
@@ -156,21 +157,20 @@ def generate_sql(
         configure_beam_sampler(model, beam_width)
 
         # Execute generation
-        output = model.generate(prompt, max_length=max_length)
+        output: Any = model.generate(prompt, max_length=max_length)
 
         scores = None
         if isinstance(output, dict):
-            output_dict = cast(dict[str, Any], output)
-            raw_text = str(output_dict.get("text", ""))
-            scores = output_dict.get("scores") or output_dict.get("token_probabilities")
-        elif isinstance(output, (tuple, list)) and len(cast(list[Any], output)) >= 2:
-            raw_text = str(cast(list[Any], output)[0])
-            scores = cast(list[Any], output)[1]
+            raw_text = str(output.get("text", ""))
+            scores = output.get("scores") or output.get("token_probabilities")
+        elif isinstance(output, (tuple, list)) and len(output) >= 2:
+            raw_text = str(output[0])
+            scores = output[1]
         elif isinstance(output, str):
             raw_text = output
             scores = getattr(output, "scores", None) or getattr(model, "last_scores", None)
         else:
-            raw_text = str(cast(Any, output))
+            raw_text = str(output)
 
         sql = raw_text.replace(prompt, "").strip()
         if not sql:

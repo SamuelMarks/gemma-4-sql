@@ -13,7 +13,7 @@ import logging
 import math
 import struct
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 
@@ -82,8 +82,8 @@ def load_image_bytes(image_input: ImageInput) -> bytes:
                 logger.debug("Failed to import PIL: %s", err)
         if pil_image is not None:
             buf = io.BytesIO()
-            save_fn = cast(Any, image_input).save
-            save_fn(buf, format="PNG")
+            img_any: Any = image_input
+            img_any.save(buf, format="PNG")
             return buf.getvalue()
 
     msg = f"Unsupported image input type: {type(image_input)}"
@@ -286,7 +286,7 @@ def process_audio(
         samples = [float(x) for x in audio_any.flatten().astype(np.float32).tolist()]
         orig_rate = sample_rate
     elif isinstance(audio_input, (list, tuple)):
-        samples = [float(x) for x in cast(Any, audio_input)]
+        samples = [float(x) for x in audio_any]
         orig_rate = sample_rate
     else:
         if np is None:

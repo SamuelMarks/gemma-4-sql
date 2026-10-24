@@ -19,7 +19,7 @@ from gemma_4_sql.backends.jax.gemma4.audio_layers import (
 
 
 def get_mock_audio_config():
-    """Execute and verify `get_mock_audio_config` behavior and invariants."""
+    """Provide get mock audio config test helper."""
     config = MagicMock()
     config.hidden_size = 16
     config.subsampling_conv_channels = (4, 4)
@@ -32,7 +32,7 @@ def get_mock_audio_config():
 
 
 def test_subsample_conv_projection_layer():
-    """Execute and verify `test_subsample_conv_projection_layer` behavior and invariants."""
+    """Verify subsample conv projection layer behavior."""
     rngs = nnx.Rngs(0)
     layer = Gemma4AudioSubSampleConvProjectionLayer(1, 4, 1e-6, rngs=rngs)
 
@@ -42,11 +42,11 @@ def test_subsample_conv_projection_layer():
 
     mask_in = jnp.ones((2, 8))
     _out2, mask2 = layer(x, mask_in)
-    assert mask2.shape == (2, 4)
+    assert mask2 is not None and mask2.shape == (2, 4)
 
 
 def test_subsample_conv_projection():
-    """Execute and verify `test_subsample_conv_projection` behavior and invariants."""
+    """Verify subsample conv projection behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     proj = Gemma4AudioSubSampleConvProjection(config, rngs=rngs)
@@ -57,11 +57,11 @@ def test_subsample_conv_projection():
 
     mask_in = jnp.ones((2, 8))
     _out2, mask2 = proj(x, mask_in)
-    assert mask2.shape == (2, 2)
+    assert mask2 is not None and mask2.shape == (2, 2)
 
 
 def test_feed_forward():
-    """Execute and verify `test_feed_forward` behavior and invariants."""
+    """Verify feed forward behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     ffw = Gemma4AudioFeedForward(config, rngs=rngs)
@@ -72,7 +72,7 @@ def test_feed_forward():
 
 
 def test_causal_conv1d():
-    """Execute and verify `test_causal_conv1d` behavior and invariants."""
+    """Verify causal conv1d behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     conv = Gemma4AudioCausalConv1d(config, rngs=rngs)
@@ -83,7 +83,7 @@ def test_causal_conv1d():
 
 
 def test_light_conv1d():
-    """Execute and verify `test_light_conv1d` behavior and invariants."""
+    """Verify light conv1d behavior."""
     config = get_mock_audio_config()
     rngs = nnx.Rngs(0)
     lconv = Gemma4AudioLightConv1d(config, rngs=rngs)

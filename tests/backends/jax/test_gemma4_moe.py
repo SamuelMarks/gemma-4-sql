@@ -13,7 +13,7 @@ from gemma_4_sql.backends.jax.gemma4.moe import Gemma4MoE, Gemma4RoutedExperts
 
 
 def test_gemma4_routed_experts():
-    """Execute and verify `test_gemma4_routed_experts` behavior and invariants."""
+    """Verify gemma4 routed experts behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -31,7 +31,7 @@ def test_gemma4_routed_experts():
 
 
 def test_gemma4_routed_experts_moe_intermediate():
-    """Execute and verify `test_gemma4_routed_experts_moe_intermediate` behavior and invariants."""
+    """Verify gemma4 routed experts moe intermediate behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -50,7 +50,7 @@ def test_gemma4_routed_experts_moe_intermediate():
 
 
 def test_gemma4_moe():
-    """Execute and verify `test_gemma4_moe` behavior and invariants."""
+    """Verify gemma4 moe behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -67,7 +67,7 @@ def test_gemma4_moe():
 
 
 def test_gemma4_moe_no_gate_logits():
-    """Execute and verify `test_gemma4_moe_no_gate_logits` behavior and invariants."""
+    """Verify gemma4 moe no gate logits behavior."""
     rngs = nnx.Rngs(0)
     config = ModelConfig(
         hidden_size=64,
@@ -85,7 +85,7 @@ def test_gemma4_moe_no_gate_logits():
 
 
 def test_gemma4_moe_no_gate_attr():
-    """Execute and verify `test_gemma4_moe_no_gate_attr` behavior and invariants."""
+    """Verify gemma4 moe no gate attr behavior."""
     # Simulate if gate is somehow missing or None
     rngs = nnx.Rngs(0)
     config = ModelConfig(

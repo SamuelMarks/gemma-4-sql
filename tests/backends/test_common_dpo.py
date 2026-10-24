@@ -1,43 +1,45 @@
 """Unit and behavioral tests for common dpo."""
 
+from typing import Any
+
 import pytest
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss, generic_run_training_epochs
 
 
 class DummyTensor:
-    """Execute and verify `DummyTensor` behavior and invariants."""
+    """Test stub for `DummyTensor`."""
 
-    def __init__(self, value, has_detach=True, has_mean=True):
-        """Execute and verify `__init__` behavior and invariants."""
+    def __init__(self, value: Any, has_detach: Any = True, has_mean: Any = True):
+        """Initialize test stub instance."""
         self.value = value
         self.has_detach = has_detach
         self.has_mean = has_mean
 
-    def __sub__(self, other):
-        """Execute and verify `__sub__` behavior and invariants."""
+    def __sub__(self, other: Any):
+        """Provide sub   test helper."""
         return DummyTensor(self.value - other.value, self.has_detach, self.has_mean)
 
-    def __mul__(self, other):
-        """Execute and verify `__mul__` behavior and invariants."""
+    def __mul__(self, other: Any):
+        """Provide mul   test helper."""
         if isinstance(other, DummyTensor):
             return DummyTensor(self.value * other.value, self.has_detach, self.has_mean)
         return DummyTensor(self.value * other, self.has_detach, self.has_mean)
 
-    def __rmul__(self, other):
-        """Execute and verify `__rmul__` behavior and invariants."""
+    def __rmul__(self, other: Any):
+        """Provide rmul   test helper."""
         return self.__mul__(other)
 
     def __neg__(self):
-        """Execute and verify `__neg__` behavior and invariants."""
+        """Provide neg   test helper."""
         return DummyTensor(-self.value, self.has_detach, self.has_mean)
 
     def item(self):
-        """Execute and verify `item` behavior and invariants."""
+        """Provide item test helper."""
         return self.value
 
-    def __getattr__(self, name):
-        """Execute and verify `__getattr__` behavior and invariants."""
+    def __getattr__(self, name: Any):
+        """Provide getattr   test helper."""
         if name == "detach":
             if not self.has_detach:
                 raise AttributeError("no detach")
@@ -50,10 +52,10 @@ class DummyTensor:
 
 
 class TrainerState:
-    """Execute and verify `TrainerState` behavior and invariants."""
+    """Test stub for `TrainerState`."""
 
-    def __init__(self, dataloader, epochs, policy_model, ref_model, optimizer, beta):
-        """Execute and verify `__init__` behavior and invariants."""
+    def __init__(self, dataloader: Any, epochs: Any, policy_model: Any, ref_model: Any, optimizer: Any, beta: Any):
+        """Initialize test stub instance."""
         self.dataloader = dataloader
         self.epochs = epochs
         self.policy_model = policy_model
@@ -63,60 +65,62 @@ class TrainerState:
 
 
 def test_generic_dpo_loss_with_methods():
-    """Execute and verify `test_generic_dpo_loss_with_methods` behavior and invariants."""
-    policy_chosen = DummyTensor(1.0)
-    policy_rejected = DummyTensor(0.5)
-    ref_chosen = DummyTensor(0.8)
-    ref_rejected = DummyTensor(0.4)
+    """Verify generic dpo loss with methods behavior."""
+    policy_chosen: Any = DummyTensor(1.0)
+    policy_rejected: Any = DummyTensor(0.5)
+    ref_chosen: Any = DummyTensor(0.8)
+    ref_rejected: Any = DummyTensor(0.4)
     beta = 0.1
 
-    def log_sigmoid(x):
-        """Execute and verify `log_sigmoid` behavior and invariants."""
+    def log_sigmoid(x: Any) -> Any:
+        """Provide log sigmoid test helper."""
         return DummyTensor(x.value * 2)
 
     loss, chosen_rewards, rejected_rewards = generic_dpo_loss(policy_chosen, policy_rejected, ref_chosen, ref_rejected, beta, log_sigmoid)
+    cr_any: Any = chosen_rewards
+    rr_any: Any = rejected_rewards
 
     assert loss == pytest.approx(-0.02)
-    assert chosen_rewards.value == pytest.approx(0.1 * (1.0 - 0.8))
-    assert rejected_rewards.value == pytest.approx(0.1 * (0.5 - 0.4))
+    assert cr_any.value == pytest.approx(0.1 * (1.0 - 0.8))
+    assert rr_any.value == pytest.approx(0.1 * (0.5 - 0.4))
 
 
 def test_generic_dpo_loss_without_methods():
-    """Execute and verify `test_generic_dpo_loss_without_methods` behavior and invariants."""
+    """Verify generic dpo loss without methods behavior."""
 
     class SimpleTensor:
-        """Execute and verify `SimpleTensor` behavior and invariants."""
+        """Test stub for `SimpleTensor`."""
 
-        def __init__(self, val):
-            """Execute and verify `__init__` behavior and invariants."""
+        def __init__(self, val: Any):
+            """Initialize test stub instance."""
             self.val = val
 
-        def __sub__(self, other):
-            """Execute and verify `__sub__` behavior and invariants."""
+        def __sub__(self, other: Any):
+            """Provide sub   test helper."""
             return SimpleTensor(self.val - other.val)
 
-        def __mul__(self, other):
-            """Execute and verify `__mul__` behavior and invariants."""
+        def __mul__(self, other: Any):
+            """Provide mul   test helper."""
             if isinstance(other, SimpleTensor):
                 return SimpleTensor(self.val * other.val)
             return SimpleTensor(self.val * other)
 
-        def __rmul__(self, other):
-            """Execute and verify `__rmul__` behavior and invariants."""
+        def __rmul__(self, other: Any):
+            """Provide rmul   test helper."""
             return self.__mul__(other)
 
         def __neg__(self):
-            """Execute and verify `__neg__` behavior and invariants."""
+            """Provide neg   test helper."""
             return SimpleTensor(-self.val)
 
-    policy_chosen = SimpleTensor(1.0)
-    policy_rejected = SimpleTensor(0.5)
-    ref_chosen = SimpleTensor(0.8)
-    ref_rejected = SimpleTensor(0.4)
+    policy_chosen: Any = SimpleTensor(1.0)
+    policy_rejected: Any = SimpleTensor(0.5)
+    ref_chosen: Any = SimpleTensor(0.8)
+    ref_rejected: Any = SimpleTensor(0.4)
     beta = 0.1
 
-    def log_sigmoid(x):
-        """Execute and verify `log_sigmoid` behavior and invariants."""
+    def log_sigmoid(x: Any) -> Any:
+        """Provide log sigmoid test helper."""
         return SimpleTensor(x.val * 2)
 
     # Test SimpleTensor * SimpleTensor (line 109)
@@ -126,28 +130,31 @@ def test_generic_dpo_loss_without_methods():
     assert t3.val == 6.0
 
     loss, chosen_rewards, rejected_rewards = generic_dpo_loss(policy_chosen, policy_rejected, ref_chosen, ref_rejected, beta, log_sigmoid)
+    loss_any: Any = loss
+    cr_any: Any = chosen_rewards
+    rr_any: Any = rejected_rewards
 
-    assert loss.val == pytest.approx(-0.02)
-    assert chosen_rewards.val == pytest.approx(0.02)
-    assert rejected_rewards.val == pytest.approx(0.01)
+    assert loss_any.val == pytest.approx(-0.02)
+    assert cr_any.val == pytest.approx(0.02)
+    assert rr_any.val == pytest.approx(0.01)
 
 
 def test_generic_run_training_epochs_none_dataloader():
-    """Execute and verify `test_generic_run_training_epochs_none_dataloader` behavior and invariants."""
-    state = TrainerState(None, 2, None, None, None, 0.1)
+    """Verify generic run training epochs none dataloader behavior."""
+    state: Any = TrainerState(None, 2, None, None, None, 0.1)
 
-    def step_fn(*args):
-        """Execute and verify `step_fn` behavior and invariants."""
+    def step_fn(*args: Any):
+        """Provide step fn test helper."""
 
     assert generic_run_training_epochs(state, step_fn) == 0.0
 
 
 def test_generic_run_training_epochs_normal():
-    """Execute and verify `test_generic_run_training_epochs_normal` behavior and invariants."""
-    state = TrainerState([{"data": 1}, {"data": 2}], 2, None, None, None, 0.1)
+    """Verify generic run training epochs normal behavior."""
+    state: Any = TrainerState([{"data": 1}, {"data": 2}], 2, None, None, None, 0.1)
 
-    def step_fn(policy, ref, opt, batch, beta):
-        """Execute and verify `step_fn` behavior and invariants."""
+    def step_fn(policy: Any, ref: Any, opt: Any, batch: Any, beta: Any):
+        """Provide step fn test helper."""
         return DummyTensor(batch["data"] * 0.5)
 
     final_loss = generic_run_training_epochs(state, step_fn)
@@ -155,11 +162,11 @@ def test_generic_run_training_epochs_normal():
 
 
 def test_generic_run_training_epochs_no_item():
-    """Execute and verify `test_generic_run_training_epochs_no_item` behavior and invariants."""
-    state = TrainerState([{"data": 1}, {"data": 2}], 1, None, None, None, 0.1)
+    """Verify generic run training epochs no item behavior."""
+    state: Any = TrainerState([{"data": 1}, {"data": 2}], 1, None, None, None, 0.1)
 
-    def step_fn(policy, ref, opt, batch, beta):
-        """Execute and verify `step_fn` behavior and invariants."""
+    def step_fn(policy: Any, ref: Any, opt: Any, batch: Any, beta: Any):
+        """Provide step fn test helper."""
         return batch["data"] * 0.5
 
     final_loss = generic_run_training_epochs(state, step_fn)
@@ -167,20 +174,20 @@ def test_generic_run_training_epochs_no_item():
 
 
 def test_generic_run_training_epochs_no_len_dataloader():
-    """Execute and verify `test_generic_run_training_epochs_no_len_dataloader` behavior and invariants."""
+    """Verify generic run training epochs no len dataloader behavior."""
 
     class GeneratorMock:
-        """Execute and verify `GeneratorMock` behavior and invariants."""
+        """Test stub for `GeneratorMock`."""
 
         def __iter__(self):
-            """Execute and verify `__iter__` behavior and invariants."""
+            """Provide iter   test helper."""
             yield {"data": 1}
             yield {"data": 2}
 
-    state = TrainerState(GeneratorMock(), 1, None, None, None, 0.1)
+    state: Any = TrainerState(GeneratorMock(), 1, None, None, None, 0.1)
 
-    def step_fn(policy, ref, opt, batch, beta):
-        """Execute and verify `step_fn` behavior and invariants."""
+    def step_fn(policy: Any, ref: Any, opt: Any, batch: Any, beta: Any):
+        """Provide step fn test helper."""
         return batch["data"] * 0.5
 
     final_loss = generic_run_training_epochs(state, step_fn)

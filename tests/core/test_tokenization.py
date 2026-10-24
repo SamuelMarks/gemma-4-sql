@@ -133,10 +133,10 @@ def test_sql_tokenizer_get_vocab() -> None:
     assert vocab["a"] == ord("a")
 
     class MockVocabHFTokenizer(MockHFTokenizer):
-        """Execute and verify `MockVocabHFTokenizer` behavior and invariants."""
+        """Test stub for `MockVocabHFTokenizer`."""
 
         def get_vocab(self) -> dict[str, int]:
-            """Execute and verify `get_vocab` behavior and invariants."""
+            """Provide get vocab test helper."""
             return {"<pad>": 0, "select": 1}
 
     tok_hf = SQLTokenizer()
@@ -203,8 +203,13 @@ def test_sql_tokenizer_custom_vocab_bounds() -> None:
     assert isinstance(decoded, str)
 
 
-def test_tokenizer_decode_invalid_type() -> None:
+def test_tokenizer_decode_ignores_non_integer_tokens() -> None:
     """Verify SQLTokenizer.decode ignores non-integer elements in token sequence."""
     tokenizer = SQLTokenizer(vocab_size=256)
     res = tokenizer.decode([65, "bad", 66])  # type: ignore[list-item]
     assert res == "AB"
+
+    from gemma_4_sql.exceptions import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="vocab_size must be positive"):
+        SQLTokenizer(vocab_size=0, strict_vocab=True)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DependencyMissingError
@@ -71,7 +71,7 @@ def embed_in_duckdb(
         msg = "duckdb is required. Install with `pip install duckdb`."
         raise DependencyMissingError(msg, dependency_name="duckdb", backend="duckdb")
 
-    duck_conn = cast(Any, conn)
+    duck_conn: Any = conn
     cached_ddl: str | None = ddl
 
     def ask_gemma(prompt: str) -> str:

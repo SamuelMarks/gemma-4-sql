@@ -12,7 +12,7 @@ from gemma_4_sql.backends.common_serve import GenerateRequest, create_common_app
 
 
 def test_generate_request_validation():
-    """Execute and verify `test_generate_request_validation` behavior and invariants."""
+    """Verify generate request validation behavior."""
     with pytest.raises(ValueError, match="Field 'prompt' must be a valid string"):
         GenerateRequest.from_dict({"not_prompt": "test"})
     with pytest.raises(ValueError, match="Field 'prompt' must be a valid string"):
@@ -20,13 +20,13 @@ def test_generate_request_validation():
 
 
 def test_require_handlers():
-    """Execute and verify `test_require_handlers` behavior and invariants."""
+    """Verify require handlers behavior."""
     with pytest.raises(ValueError, match="At least one generation logic callback must be provided"):
         create_common_app("pytorch", "test", require_handlers=True)
 
 
 def test_common_serve_endpoints():
-    """Execute and verify `test_common_serve_endpoints` behavior and invariants."""
+    """Verify common serve endpoints behavior."""
     app = create_common_app("pytorch", "test", generate_logic=lambda p: "SELECT 1;")
     client = TestClient(app)
 
@@ -36,7 +36,7 @@ def test_common_serve_endpoints():
         original_get = asyncio.get_running_loop
 
         def fake_get():
-            """Execute and verify `fake_get` behavior and invariants."""
+            """Provide fake get test helper."""
             import inspect
 
             f = inspect.currentframe()
@@ -56,11 +56,11 @@ def test_common_serve_endpoints():
 
 @pytest.mark.asyncio
 async def test_worker_async():
-    """Execute and verify `test_worker_async` behavior and invariants."""
+    """Verify worker async behavior."""
     import httpx
 
-    def b_gen(prompts):
-        """Execute and verify `b_gen` behavior and invariants."""
+    def b_gen(prompts: list[str]) -> list[str]:
+        """Provide b gen test helper."""
         if prompts[0] == "mismatch":
             return []
         return ["R" * len(p) for p in prompts]
@@ -79,7 +79,7 @@ async def test_worker_async():
 
 @pytest.mark.asyncio
 async def test_worker_async_generate_fallback():
-    """Execute and verify `test_worker_async_generate_fallback` behavior and invariants."""
+    """Verify worker async generate fallback behavior."""
     import httpx
 
     app = create_common_app("pytorch", "test", generate_logic=lambda p: "F", max_batch_size=2)
@@ -90,7 +90,7 @@ async def test_worker_async_generate_fallback():
 
 @pytest.mark.asyncio
 async def test_worker_async_both_none():
-    """Execute and verify `test_worker_async_both_none` behavior and invariants."""
+    """Verify worker async both none behavior."""
     import httpx
 
     app = create_common_app("pytorch", "test", max_batch_size=2)
@@ -101,7 +101,7 @@ async def test_worker_async_both_none():
 
 @pytest.mark.asyncio
 async def test_multimodal_request():
-    """Execute and verify `test_multimodal_request` behavior and invariants."""
+    """Verify multimodal request behavior."""
     import httpx
 
     app = create_common_app("pytorch", "test", generate_logic=lambda p: p)
@@ -111,25 +111,25 @@ async def test_multimodal_request():
 
 
 def test_serve_model_wrapper():
-    """Execute and verify `test_serve_model_wrapper` behavior and invariants."""
-    res = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=None, app_factory=lambda: create_common_app("pytorch", "test"), run_server=False, port=8000)
+    """Verify serve model wrapper behavior."""
+    res = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=False, app_factory=lambda: create_common_app("pytorch", "test"), run_server=False, port=8000)
     assert res["status"] == "running_pytorch_serve"
 
-    def fail_factory():
-        """Execute and verify `fail_factory` behavior and invariants."""
+    def fail_factory() -> Any:
+        """Provide fail factory test helper."""
         raise RuntimeError("failed factory")
 
-    res2 = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=None, app_factory=fail_factory, run_server=False, port=8000)
+    res2 = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=False, app_factory=fail_factory, run_server=False, port=8000)
     assert "failed:" in res2["status"]
 
     from gemma_4_sql.exceptions import DependencyMissingError
 
     with pytest.raises(DependencyMissingError, match="Dependencies missing for backend: pytorch"):
-        serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=RuntimeError("deps"), app_factory=fail_factory, run_server=False, port=8000)
+        serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=True, app_factory=fail_factory, run_server=False, port=8000)
 
 
 def test_json_response_fallback():
-    """Execute and verify `test_json_response_fallback` behavior and invariants."""
+    """Verify json response fallback behavior."""
     import gemma_4_sql.backends.common_serve as mod
 
     with pytest.MonkeyPatch.context() as mp:
@@ -141,7 +141,7 @@ def test_json_response_fallback():
         original_get = asyncio.get_running_loop
 
         def fake_get():
-            """Execute and verify `fake_get` behavior and invariants."""
+            """Provide fake get test helper."""
             import inspect
 
             f = inspect.currentframe()
@@ -161,14 +161,14 @@ def test_json_response_fallback():
 
 
 def test_sync_fallback_branches():
-    """Execute and verify `test_sync_fallback_branches` behavior and invariants."""
+    """Verify sync fallback branches behavior."""
     import asyncio
 
     with pytest.MonkeyPatch.context() as mp:
         original_get = asyncio.get_running_loop
 
         def fake_get():
-            """Execute and verify `fake_get` behavior and invariants."""
+            """Provide fake get test helper."""
             import inspect
 
             f = inspect.currentframe()
@@ -192,13 +192,13 @@ def test_sync_fallback_branches():
 
 @pytest.mark.asyncio
 async def test_common_serve_cancel_request():
-    """Execute and verify `test_common_serve_cancel_request` behavior and invariants."""
+    """Verify common serve cancel request behavior."""
     import asyncio
 
     import httpx
 
-    def slow_batch(p):
-        """Execute and verify `slow_batch` behavior and invariants."""
+    def slow_batch(p: Any):
+        """Provide slow batch test helper."""
         import time
 
         time.sleep(0.1)
@@ -223,15 +223,15 @@ async def test_common_serve_cancel_request():
 
 @pytest.mark.asyncio
 async def test_common_serve_cancel_request_exception():
-    """Execute and verify `test_common_serve_cancel_request_exception` behavior and invariants."""
+    """Verify common serve cancel request exception behavior."""
     import asyncio
 
     import httpx
 
     from gemma_4_sql.backends.common_serve import create_common_app
 
-    def error_batch(p):
-        """Execute and verify `error_batch` behavior and invariants."""
+    def error_batch(p: Any):
+        """Provide error batch test helper."""
         import time
 
         time.sleep(0.1)
@@ -255,8 +255,9 @@ def test_fastapi_missing_and_run_server(monkeypatch: pytest.MonkeyPatch) -> None
     from gemma_4_sql.exceptions import DependencyMissingError
 
     monkeypatch.setattr(mod, "FastAPI", None)
+    mock_app_none: Any = None
     with pytest.raises(DependencyMissingError):
-        mod.serve_model_wrapper(backend_name="pytorch", model_name="test", max_batch_size=32, missing_deps=None, app_factory=lambda: None, port=8000)
+        mod.serve_model_wrapper(backend_name="pytorch", model_name="test", max_batch_size=32, missing_deps=False, app_factory=lambda: mock_app_none, port=8000)
 
     monkeypatch.undo()
     called: list[bool] = []
@@ -269,12 +270,13 @@ def test_fastapi_missing_and_run_server(monkeypatch: pytest.MonkeyPatch) -> None
             called.append(True)
 
     monkeypatch.setattr(mod, "uvicorn", MockUvicorn())
+    fake_app: Any = "fake_app"
     mod.serve_model_wrapper(
         backend_name="pytorch",
         model_name="test",
         max_batch_size=32,
-        missing_deps=None,
-        app_factory=lambda: "fake_app",
+        missing_deps=False,
+        app_factory=lambda: fake_app,
         run_server=True,
         port=8000,
     )

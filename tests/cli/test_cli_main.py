@@ -297,21 +297,10 @@ def test_dependency_missing_error() -> None:
     assert str(DependencyMissingError("test")) == "test"
 
 
-def test_cli_if_main(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify running src/gemma_4_sql/cli.py as __main__ exits with code 0."""
-    import gemma_4_sql.cli
-
-    monkeypatch.setattr(gemma_4_sql.cli, "cli", lambda _args=None: 0)
-    monkeypatch.setattr(sys, "argv", ["gemma_4_sql", "--help"])
-
-    def mock_parse_args(*_args: Any, **_kwargs: Any) -> argparse.Namespace:
-        """Return Namespace with no-op func."""
-        ns = argparse.Namespace()
-        ns.func = lambda _x: 0
-        return ns
-
-    monkeypatch.setattr(argparse.ArgumentParser, "parse_args", mock_parse_args)
-    try:
+def test_cli_if_main(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify running src/gemma_4_sql/cli.py as __main__ with real CLI arguments exits with code 0."""
+    monkeypatch.setattr(sys, "argv", ["gemma-4-sql", "tokenize", "--encode", "SELECT 1"])
+    with pytest.raises(SystemExit) as excinfo:
         runpy.run_path("src/gemma_4_sql/cli.py", run_name="__main__")
-    except SystemExit as excinfo:
-        assert excinfo.code == 0
+    assert excinfo.value.code == 0
+    assert "[" in capsys.readouterr().out

@@ -31,7 +31,7 @@ def test_registry_fallback() -> None:
         get_backend("nonexistent")
 
 
-def test_registry_missing_adapter_module(monkeypatch) -> None:
+def test_registry_missing_adapter_module(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test registry missing adapter module behavior."""
     mod.ENTRY_POINTS.clear()
     mod._BACKEND_CACHE.clear()
@@ -47,7 +47,7 @@ def test_registry_missing_adapter_module(monkeypatch) -> None:
 
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name, *args, **kwargs):
+    def mock_import_module(name: Any, *args: Any, **kwargs: Any):
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             raise ImportError("Mock missing adapter")
@@ -60,7 +60,7 @@ def test_registry_missing_adapter_module(monkeypatch) -> None:
             get_backend("mock_backend")
 
 
-def test_registry_missing_adapter_class(monkeypatch) -> None:
+def test_registry_missing_adapter_class(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test registry missing adapter class behavior."""
     mod.ENTRY_POINTS.clear()
     mod._BACKEND_CACHE.clear()
@@ -78,7 +78,7 @@ def test_registry_missing_adapter_class(monkeypatch) -> None:
 
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name, *args, **kwargs):
+    def mock_import_module(name: Any, *args: Any, **kwargs: Any):
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
@@ -91,7 +91,7 @@ def test_registry_missing_adapter_class(monkeypatch) -> None:
             get_backend("mock_backend")
 
 
-def test_registry_dict_entry_points(monkeypatch) -> None:
+def test_registry_dict_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test get_backend when importlib.metadata.entry_points returns a dict."""
     mod.ENTRY_POINTS.clear()
     mod._BACKEND_CACHE.clear()
@@ -112,7 +112,7 @@ def test_registry_dict_entry_points(monkeypatch) -> None:
 
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name, *args, **kwargs):
+    def mock_import_module(name: Any, *args: Any, **kwargs: Any):
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
@@ -126,7 +126,7 @@ def test_registry_dict_entry_points(monkeypatch) -> None:
         fake_ep.load.assert_called_once()
 
 
-def test_registry_select_entry_points(monkeypatch) -> None:
+def test_registry_select_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test get_backend when importlib.metadata.entry_points has a .select() method."""
     mod.ENTRY_POINTS.clear()
     mod._BACKEND_CACHE.clear()
@@ -144,7 +144,7 @@ def test_registry_select_entry_points(monkeypatch) -> None:
 
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name, *args, **kwargs):
+    def mock_import_module(name: Any, *args: Any, **kwargs: Any):
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
@@ -161,7 +161,7 @@ def test_registry_select_entry_points(monkeypatch) -> None:
         mock_eps.select.assert_called_once_with(group="gemma_4_sql.backends")
 
 
-def test_registry_caching(monkeypatch) -> None:
+def test_registry_caching(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test that entry points are cached after the first lookup."""
     mod.ENTRY_POINTS.clear()
     mod._BACKEND_CACHE.clear()
@@ -179,7 +179,7 @@ def test_registry_caching(monkeypatch) -> None:
 
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name, *args, **kwargs):
+    def mock_import_module(name: Any, *args: Any, **kwargs: Any):
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter

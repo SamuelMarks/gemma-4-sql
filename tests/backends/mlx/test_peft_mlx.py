@@ -1,6 +1,7 @@
 """Tests for mlx peft."""
 
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_mlx
@@ -9,7 +10,7 @@ pytestmark = requires_mlx
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 
 
 def test_mlx_peft_imports():
@@ -33,7 +34,9 @@ def test_mlx_lora_linear_init():
     with pytest.raises(ValueError, match="LoRA rank r must be positive"):
         peft_module.MLXLoRALinear(10, 10, r=0)
 
-    layer = peft_module.MLXLoRALinear(10, 20, bias=True)
+    from typing import Any
+
+    layer: Any = peft_module.MLXLoRALinear(10, 20, bias=True)
     assert layer.in_features == 10
     assert layer.out_features == 20
     assert layer.bias is not None
@@ -97,7 +100,7 @@ def test_mlx_lora_linear_call():
     layer(x)
 
 
-def test_mlx_lora_linear_save_load(tmp_path):
+def test_mlx_lora_linear_save_load(tmp_path: Path):
     """Test save/load adapters."""
     import gemma_4_sql.backends.mlx.peft as peft_module
 
@@ -133,8 +136,12 @@ def test_inject_lora():
     peft_module.nn = MagicMock()
     peft_module.mx = MagicMock()
 
+    from typing import Any
+
     class MockLinear:
-        """Execute and verify `MockLinear` behavior and invariants."""
+        """Test stub for `MockLinear`."""
+
+        named_modules: Any = None
 
     peft_module.nn.Linear = MockLinear
 
@@ -147,7 +154,7 @@ def test_inject_lora():
 
     with patch.object(peft_module, "MLXLoRALinear") as mock_lora:
         mock_lora.from_linear.return_value = MagicMock()
-        model_out, count = peft_module.inject_lora(model, ["q_proj"])
+        _model_out, count = peft_module.inject_lora(model, ["q_proj"])
         assert count == 2
 
         # list index part
@@ -161,15 +168,15 @@ def test_inject_lora():
         # next, part '1' is last. last='1'. isdigit and curr (now model2[0]) is NOT list -> setattr.
         # Wait, to hit 324 `curr[int(last)] = lora_module`, `last` must be digit and `curr` must be list.
         # So name = '1', curr = [0, MockLinear()].
-        class ListModel(list):
-            """Execute and verify `ListModel` behavior and invariants."""
+        class ListModel(list[Any]):
+            """Test stub for `ListModel`."""
 
-            def named_modules(self):
-                """Execute and verify `named_modules` behavior and invariants."""
+            def named_modules(self) -> Any:
+                """Provide named modules test helper."""
                 return [("0.q_proj", MockLinear()), ("1", MockLinear())]
 
-        model_list = ListModel([MagicMock(), MockLinear()])
-        model_out, count = peft_module.inject_lora(model_list, ["q_proj", "1"])
+        model_list: Any = ListModel([MagicMock(), MockLinear()])
+        _model_out, count = peft_module.inject_lora(model_list, ["q_proj", "1"])
         assert count == 2
 
     peft_module.nn = None
@@ -177,7 +184,7 @@ def test_inject_lora():
         peft_module.inject_lora(model, ["q_proj"])
 
 
-def test_save_load_adapter_weights(tmp_path):
+def test_save_load_adapter_weights(tmp_path: Path):
     """Test save/load adapter weights."""
     import gemma_4_sql.backends.mlx.peft as peft_module
 
@@ -234,6 +241,8 @@ def test_apply_lora():
             mock_inject.side_effect = RuntimeError("error")
             res3 = peft_module.apply_lora("model", ["q_proj"])
             assert "failed: error" in res3["status"]
+            with pytest.raises(TrainingError, match="error"):
+                peft_module.apply_lora("model", ["q_proj"], raise_on_error=True)
 
     peft_module.nn = None
     with pytest.raises(DependencyMissingError):
@@ -253,19 +262,19 @@ def test_inject_lora_coverage():
     model.freeze = MagicMock()
 
     # Empty target_modules
-    out, count = peft_module.inject_lora(model, [])
+    _out, count = peft_module.inject_lora(model, [])
     assert count == 0
     model.freeze.assert_called_once()
 
     # Missing named_modules
     model2 = MagicMock()
     del model2.named_modules
-    out2, count2 = peft_module.inject_lora(model2, ["q"])
+    _out2, count2 = peft_module.inject_lora(model2, ["q"])
     assert count2 == 0
 
 
-def test_mlx_lm_import_success_real(monkeypatch):
-    """Execute and verify `test_mlx_lm_import_success_real` behavior and invariants."""
+def test_mlx_lm_import_success_real(monkeypatch: pytest.MonkeyPatch):
+    """Verify mlx lm import success real behavior."""
     import sys
     from unittest.mock import MagicMock
 

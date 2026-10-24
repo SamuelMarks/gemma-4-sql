@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_import
 
@@ -45,7 +45,7 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
 
             from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
 
-            cfg = kwargs.get("config")
+            cfg: Any = kwargs.get("config")
             if cfg is None:
                 if model_name.startswith(("test", "model")):
                     cfg = Gemma4Config(
@@ -59,7 +59,7 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
                     )
                 else:
                     cfg = Gemma4Config.gemma4_e2b()
-            model = Gemma4ForCausalLM(cast(Any, cfg), rngs=nnx.Rngs(0))
+            model = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0))
             weights = nnx.state(model)
         except ImportError as e:
             raise DependencyMissingError(f"Flax NNX dependency missing: {e}") from e

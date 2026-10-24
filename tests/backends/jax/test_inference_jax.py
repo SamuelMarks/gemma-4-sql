@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import gemma_4_sql.backends.jax.inference as inf
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
@@ -148,11 +148,25 @@ def test_generate_sql_checkpoint_restore_branches(monkeypatch: pytest.MonkeyPatc
     res2 = inf.generate_sql(str(ckpt_dir), "SELECT 1", beam_width=1, max_length=1)
     assert res2["status"] == "success"
 
-    # 3. Restore raises RuntimeError (gracefully ignored)
+    # 3. Restore raises RuntimeError (gracefully ignored unless strict_checkpoint=True)
     mock_ocp.PyTreeCheckpointer.return_value.restore.side_effect = RuntimeError("corrupt ckpt")
     inf._MODEL_CACHE.pop(str(ckpt_dir), None)
     res3 = inf.generate_sql(str(ckpt_dir), "SELECT 1", beam_width=1, max_length=1)
     assert res3["status"] == "success"
+
+    inf._MODEL_CACHE.pop(str(ckpt_dir), None)
+    with pytest.raises(InferenceError, match="corrupt ckpt"):
+        inf.generate_sql(str(ckpt_dir), "SELECT 1", beam_width=1, max_length=1, strict_checkpoint=True)
+
+    # 4. Verify _BoundedModelCache LRU eviction and update
+    small_cache = inf._BoundedModelCache(maxsize=2)
+    small_cache.put_model("a", 1)
+    small_cache.put_model("a", 10)
+    small_cache.put_model("b", 2)
+    assert small_cache.get_model("a") == 10
+    small_cache.put_model("c", 3)
+    assert small_cache.get_model("b") is None
+    assert small_cache.get_model("c") == 3
 
 
 def test_generate_sql_multimodal_and_typeerror_fallback(monkeypatch: pytest.MonkeyPatch) -> None:

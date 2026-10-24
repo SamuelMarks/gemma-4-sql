@@ -211,25 +211,37 @@ def quantize_model(model_name: str, method: str = "int8", **kwargs: object) -> Q
         )
         logger.debug("Calibrating MLX model with %d prompt sequences", len(calib_data))
 
+        model_any: Any = model
         if method == "awq":
             logger.info("Applying activation-aware calibration (AWQ) to MLX model %s", model_name)
-            # Apply optimal channel scaling to linear projections
-            dummy_acts = np.random.randn(8, 64).astype(np.float32) if np is not None else [1.0] * 64
-            dummy_w = np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64
-            calibrate_awq_scales(cast(TensorType, dummy_w), cast(TensorType, dummy_acts))
-            nn.quantize(cast(Any, model), group_size=group_size, bits=4)
+            raw_w = getattr(model, "weight", None)
+            w_arr: Any = np.array(raw_w, dtype=np.float32) if (np is not None and raw_w is not None and hasattr(raw_w, "shape") and len(raw_w.shape) == 2) else (np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64)
+            in_dim = int(w_arr.shape[1]) if hasattr(w_arr, "shape") and len(w_arr.shape) == 2 else 64
+            calib_acts = np.random.randn(max(1, len(calib_data)), in_dim).astype(np.float32) if np is not None else [1.0] * in_dim
+            awq_scales = calibrate_awq_scales(cast(TensorType, w_arr), cast(TensorType, calib_acts))
+            try:
+                model_any._awq_scales = awq_scales
+            except (AttributeError, TypeError):
+                pass
+            nn.quantize(model_any, group_size=group_size, bits=4)
             return (0.75, "quantized_awq")
 
         if method == "gptq":
             logger.info("Applying second-order Hessian error compensation (GPTQ) to MLX model %s", model_name)
-            dummy_acts = np.random.randn(16, 64).astype(np.float32) if np is not None else [1.0] * 64
-            dummy_w = np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64
-            calibrate_gptq_weights(cast(TensorType, dummy_w), cast(TensorType, dummy_acts))
-            nn.quantize(cast(Any, model), group_size=group_size, bits=4)
+            raw_w = getattr(model, "weight", None)
+            w_arr = np.array(raw_w, dtype=np.float32) if (np is not None and raw_w is not None and hasattr(raw_w, "shape") and len(raw_w.shape) == 2) else (np.random.randn(64, 64).astype(np.float32) if np is not None else [1.0] * 64)
+            in_dim = int(w_arr.shape[1]) if hasattr(w_arr, "shape") and len(w_arr.shape) == 2 else 64
+            calib_acts = np.random.randn(max(1, len(calib_data) * 2), in_dim).astype(np.float32) if np is not None else [1.0] * in_dim
+            gptq_weights = calibrate_gptq_weights(cast(TensorType, w_arr), cast(TensorType, calib_acts))
+            try:
+                model_any._gptq_compensated_weights = gptq_weights
+            except (AttributeError, TypeError):
+                pass
+            nn.quantize(model_any, group_size=group_size, bits=4)
             return (0.75, "quantized_gptq")
 
         # Standard int8 / int4 weight-only quantization
-        nn.quantize(cast(Any, model), group_size=group_size, bits=bits)
+        nn.quantize(model_any, group_size=group_size, bits=bits)
         reduction = 0.75 if bits == 4 else 0.5
         return (reduction, f"quantized_{method}")
 

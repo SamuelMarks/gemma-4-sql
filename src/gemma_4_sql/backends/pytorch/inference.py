@@ -10,7 +10,7 @@ from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, JSONValue
+    from gemma_4_sql.type_hints import JSONDict
 logger = logging.getLogger(__name__)
 
 torch = optional_import("torch")
@@ -68,11 +68,13 @@ def _run_generation(
             prompt = str(formatted.get("prompt", prompt))
 
             if image_path is not None and pixel_values is None:
-                img_res = process_image(cast(Any, image_path))
+                img_in: Any = image_path
+                img_res = process_image(img_in)
                 pixel_values = torch.tensor(img_res["pixel_values"], dtype=torch.float32).unsqueeze(0)
 
             if audio_path is not None and audio_values is None:
-                aud_res = process_audio(cast(Any, audio_path))
+                aud_in: Any = audio_path
+                aud_res = process_audio(aud_in)
                 audio_values = torch.tensor(aud_res["audio_values"], dtype=torch.float32).unsqueeze(0)
 
         tokenizer = None
@@ -90,7 +92,8 @@ def _run_generation(
             tokens = sql_tok.encode(prompt)
             input_ids = torch.tensor([tokens], dtype=torch.long)
 
-        model = NativeGemma4.from_pretrained(model_name, config=cast(Any, kwargs.get("config")))
+        cfg_in: Any = kwargs.get("config")
+        model = NativeGemma4.from_pretrained(model_name, config=cfg_in)
         model.eval()
         gen_kwargs: dict[str, Any] = {"max_new_tokens": max_length}
         if pixel_values is not None:
@@ -136,11 +139,13 @@ def _run_generation(
         prompt = str(formatted.get("prompt", prompt))
 
         if image_path is not None and pixel_values is None:
-            img_res = process_image(cast(Any, image_path))
+            img_in_hf: Any = image_path
+            img_res = process_image(img_in_hf)
             pixel_values = torch.tensor(img_res["pixel_values"], dtype=torch.float32).unsqueeze(0)
 
         if audio_path is not None and audio_values is None:
-            aud_res = process_audio(cast(Any, audio_path))
+            aud_in_hf: Any = audio_path
+            aud_res = process_audio(aud_in_hf)
             audio_values = torch.tensor(aud_res["audio_values"], dtype=torch.float32).unsqueeze(0)
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -201,7 +206,7 @@ def generate_sql(
     prompt: str,
     beam_width: int = 3,
     max_length: int = 50,
-    **kwargs: JSONValue,
+    **kwargs: object,
 ) -> JSONDict:
     """Generate a SQL query from a natural language prompt using PyTorch.
 

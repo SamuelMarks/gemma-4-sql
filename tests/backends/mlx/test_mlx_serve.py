@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from tests.conftest import requires_mlx
 
 pytestmark = requires_mlx
@@ -20,7 +22,7 @@ from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
 def test_mlx_serve_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_mlx_serve_model` behavior and invariants."""
+    """Verify mlx serve model behavior."""
     monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda name: (object(), object()))
     res = serve_model("dummy_mlx_model", port=8080, max_batch_size=128)
     assert res["status"] == "running_mlx_serve"
@@ -31,14 +33,14 @@ def test_mlx_serve_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_mlx_serve_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_mlx_serve_missing_deps` behavior and invariants."""
+    """Verify mlx serve missing deps behavior."""
     monkeypatch.setattr(mlx_serve, "mx", None)
     with pytest.raises(DependencyMissingError, match="MLX dependencies are missing for serve"):
         serve_model("model")
 
 
 def test_load_mlx_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_load_mlx_model_missing_deps` behavior and invariants."""
+    """Verify load mlx model missing deps behavior."""
     monkeypatch.setattr(mlx_serve, "mx", None)
     # We simulate what happens if mlx_lm is missing
     # mlx_lm is required for load
@@ -47,8 +49,8 @@ def test_load_mlx_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
     real_import = builtins.__import__
 
-    def mock_import(name, globals=None, locals=None, fromlist=(), level=0):
-        """Execute and verify `mock_import` behavior and invariants."""
+    def mock_import(name: Any, globals: Any = None, locals: Any = None, fromlist: Any = (), level: Any = 0):
+        """Provide mock import test helper."""
         if name == "mlx_lm":
             raise ImportError("No module named mlx_lm")
         return real_import(name, globals, locals, fromlist, level)
@@ -60,16 +62,16 @@ def test_load_mlx_model_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_generate_query_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_generate_query_error` behavior and invariants."""
+    """Verify generate query error behavior."""
     with pytest.raises(InferenceError):
         _generate_query("SELECT 1", model_name="dummy")
 
 
 def test_batch_generate_queries(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_batch_generate_queries` behavior and invariants."""
+    """Verify batch generate queries behavior."""
 
-    def dummy_generate(*args, **kwargs):
-        """Execute and verify `dummy_generate` behavior and invariants."""
+    def dummy_generate(*args: Any, **kwargs: Any):
+        """Provide dummy generate test helper."""
         return "SELECT 1"
 
     monkeypatch.setattr(mlx_serve, "_generate_query", dummy_generate)
@@ -78,14 +80,14 @@ def test_batch_generate_queries(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_app_factory(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Execute and verify `test_app_factory` behavior and invariants."""
+    """Verify app factory behavior."""
     monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda name: (object(), object()))
     app = _app_factory("dummy_model")
     assert app is not None
 
 
-def test_load_mlx_model_cache_and_branches(monkeypatch):
-    """Execute and verify `test_load_mlx_model_cache_and_branches` behavior and invariants."""
+def test_load_mlx_model_cache_and_branches(monkeypatch: pytest.MonkeyPatch):
+    """Verify load mlx model cache and branches behavior."""
     import builtins
     from unittest.mock import MagicMock
 
@@ -96,8 +98,8 @@ def test_load_mlx_model_cache_and_branches(monkeypatch):
 
     orig_import = builtins.__import__
 
-    def mock_import(name, *args, **kwargs):
-        """Execute and verify `mock_import` behavior and invariants."""
+    def mock_import(name: Any, *args: Any, **kwargs: Any):
+        """Provide mock import test helper."""
         if name == "mlx_lm":
             mock_mlxlm = MagicMock()
             # return tuple
@@ -113,11 +115,11 @@ def test_load_mlx_model_cache_and_branches(monkeypatch):
     assert t == "tokenizer_obj"
 
     # Load again (cache hit, line 40)
-    m2, t2 = mlx_serve._load_mlx_model("test_tuple")
+    m2, _t2 = mlx_serve._load_mlx_model("test_tuple")
     assert m2 == "model_obj"
 
-    def mock_import_single(name, *args, **kwargs):
-        """Execute and verify `mock_import_single` behavior and invariants."""
+    def mock_import_single(name: Any, *args: Any, **kwargs: Any):
+        """Provide mock import single test helper."""
         if name == "mlx_lm":
             mock_mlxlm = MagicMock()
             # return single object
@@ -139,19 +141,19 @@ def test_load_mlx_model_cache_and_branches(monkeypatch):
     assert len(mlx_serve._mlx_model_cache) == 0
 
 
-def test_app_factory_startup_error(monkeypatch):
-    """Execute and verify `test_app_factory_startup_error` behavior and invariants."""
+def test_app_factory_startup_error(monkeypatch: pytest.MonkeyPatch):
+    """Verify app factory startup error behavior."""
     import gemma_4_sql.backends.mlx.serve as mlx_serve
 
-    def mock_load_mlx_model(name):
-        """Execute and verify `mock_load_mlx_model` behavior and invariants."""
+    def mock_load_mlx_model(name: Any):
+        """Provide mock load mlx model test helper."""
         raise OSError("simulated OS error")
 
     monkeypatch.setattr(mlx_serve, "_load_mlx_model", mock_load_mlx_model)
     monkeypatch.setattr(mlx_serve, "mx", "mock_mx")
 
-    def mock_create_common_app(backend_name, model_name, startup_callback, **kwargs):
-        """Execute and verify `mock_create_common_app` behavior and invariants."""
+    def mock_create_common_app(backend_name: Any, model_name: Any, startup_callback: Any, **kwargs: Any):
+        """Provide mock create common app test helper."""
         startup_callback()  # invoke it!
         return "app"
 
@@ -162,8 +164,8 @@ def test_app_factory_startup_error(monkeypatch):
     assert app == "app"
 
 
-def test_generate_query_success_and_errors(monkeypatch):
-    """Execute and verify `test_generate_query_success_and_errors` behavior and invariants."""
+def test_generate_query_success_and_errors(monkeypatch: pytest.MonkeyPatch):
+    """Verify generate query success and errors behavior."""
     import builtins
     from unittest.mock import MagicMock
 
@@ -176,7 +178,7 @@ def test_generate_query_success_and_errors(monkeypatch):
 
     orig_import = builtins.__import__
 
-    def mock_import(name, *args, **kwargs):
+    def mock_import(name: Any, *args: Any, **kwargs: Any):
         """Intercept mlx inference module import."""
         if name == "gemma_4_sql.backends.mlx.inference":
             return mock_inf

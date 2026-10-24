@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
@@ -10,7 +12,7 @@ from gemma_4_sql.backends.jax.logging import log_metrics
 
 
 def test_log_metrics():
-    """Execute and verify `test_log_metrics` behavior and invariants."""
+    """Verify log metrics behavior."""
     with patch("gemma_4_sql.backends.jax.logging.log_metrics_wrapper") as mock_wrapper:
         mock_wrapper.return_value = {"status": "success"}
 
@@ -26,8 +28,8 @@ def test_log_metrics():
         assert kwargs["extra_fields"] == {"action": "log_metrics"}
 
 
-def test_log_metrics_success_import(monkeypatch):
-    """Execute and verify `test_log_metrics_success_import` behavior and invariants."""
+def test_log_metrics_success_import(monkeypatch: pytest.MonkeyPatch):
+    """Verify log metrics success import behavior."""
     mock_tbx = MagicMock()
     mock_tbx.SummaryWriter = "MockWriter"
     import sys

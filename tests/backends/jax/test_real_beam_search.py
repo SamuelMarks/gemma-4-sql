@@ -20,7 +20,7 @@ orig_jit = jax.jit
 
 @pytest.fixture(autouse=True)
 def disable_jit():
-    """Execute and verify `disable_jit` behavior and invariants."""
+    """Provide disable jit test helper."""
     jax.jit = lambda f, *args, **kwargs: f
     yield
     jax.jit = orig_jit

@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Any, SupportsInt
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
+from gemma_4_sql.exceptions import ConfigurationError
 
 _transformers_mod: Any = LazyLoader("transformers").get_module()
 AutoTokenizer: Any = getattr(_transformers_mod, "AutoTokenizer", None) if _transformers_mod is not None else None
@@ -19,14 +20,20 @@ class SQLTokenizer:
     reversible UTF-8 byte-level encoding scheme.
     """
 
-    def __init__(self, vocab_size: int = 256, model_name: str | None = None) -> None:
+    def __init__(self, vocab_size: int = 256, model_name: str | None = None, *, strict_vocab: bool = False) -> None:
         """Initialize the tokenizer.
 
         Args:
             vocab_size: Vocabulary size for the byte-level fallback tokenizer.
             model_name: Optional model identifier or path to a Hugging Face tokenizer.
+            strict_vocab: If True, raise `ConfigurationError` when `vocab_size <= 0`.
+
+        Raises:
+            ConfigurationError: If `strict_vocab=True` and `vocab_size <= 0`.
 
         """
+        if strict_vocab and int(vocab_size) <= 0:
+            raise ConfigurationError(f"vocab_size must be positive, got {vocab_size}")
         self.vocab_size = max(1, int(vocab_size))
         self.model_name = model_name
         self.hf_tokenizer: Any = self._try_load_hf_tokenizer()

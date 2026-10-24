@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import ETLConfig, ModelType, TrainerState, TrainingConfig
 
 if TYPE_CHECKING:
@@ -48,7 +48,7 @@ def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object,
     return (is_distributed, dist_mod, device, device_id)
 
 
-def _run_training_epochs(state: TrainerState) -> float:
+def _run_training_epochs(state: TrainerState[Any, Any, Any, Any]) -> float:
     """Run PyTorch supervised training epochs over the dataloader.
 
     Args:
@@ -58,11 +58,11 @@ def _run_training_epochs(state: TrainerState) -> float:
         Mean batch loss from the final epoch.
 
     """
-    dataloader = state.dataloader
+    dataloader: Any = state.dataloader or ()
     epochs = state.epochs
-    model = state.policy_model
-    optimizer = state.optimizer
-    criterion = state.criterion
+    model: Any = state.policy_model
+    optimizer: Any = state.optimizer
+    criterion: Any = state.criterion
     device = state.device
     final_loss = 0.0
     for _epoch in range(epochs):
@@ -73,7 +73,7 @@ def _run_training_epochs(state: TrainerState) -> float:
             optimizer.zero_grad()
             outputs = model(inputs)
             if isinstance(outputs, tuple):
-                logits_any = cast(Any, outputs)[0]
+                logits_any = outputs[0]
             else:
                 logits_any = getattr(outputs, "logits", outputs)
             loss = criterion(logits_any.view(-1, logits_any.size(-1)), targets.view(-1))
@@ -154,12 +154,14 @@ def _execute_train(
     dist_module = None
     try:
         (is_distributed, dist_module, device, device_id) = _setup_distributed(distributed_strategy)
+        dev_any: Any = device
         if backend_alias == "pytorch_native":
             from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
 
-            raw_model = NativeGemma4.from_pretrained(model_name, config=cast(Any, kwargs.get("model_config") or kwargs.get("config"))).to(cast(Any, device))
+            cfg_in: Any = kwargs.get("model_config") or kwargs.get("config")
+            raw_model = NativeGemma4.from_pretrained(model_name, config=cfg_in).to(dev_any)
         else:
-            raw_model = Gemma4ForCausalLM.from_pretrained(model_name).to(cast(Any, device))
+            raw_model = Gemma4ForCausalLM.from_pretrained(model_name).to(dev_any)
         model: ModelType = cast(ModelType, _wrap_model_distributed(cast(ModelType, raw_model), distributed_strategy, device_id))
         optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
@@ -169,11 +171,9 @@ def _execute_train(
             raise ValueError(f"Invalid dataloader for dataset: {dataset}")
         model.train()
         final_loss = _run_training_epochs(TrainerState(policy_model=model, dataloader=dataloader, epochs=epochs, optimizer=optimizer, criterion=criterion, device=device))
-        _cleanup_distributed(dist=dist_module)
         return "completed", float(final_loss)
-    except Exception:
+    finally:
         _cleanup_distributed(dist=dist_module)
-        raise
 
 
 def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
@@ -181,13 +181,14 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
 
     Args:
         config: Training configuration object.
-        **kwargs: Extra runtime options such as 'distributed_strategy'.
+        **kwargs: Extra runtime options such as `'distributed_strategy'` or `'raise_on_error'`.
 
     Returns:
         A dictionary containing PyTorch training status and metrics.
 
     Raises:
         DependencyMissingError: If PyTorch dependencies are missing.
+        TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
     action = getattr(config, "action", "sft")
@@ -195,18 +196,21 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
     dataset = getattr(config, "dataset", "dummy")
     epochs = getattr(config, "epochs", 1)
     learning_rate = getattr(config, "learning_rate", 1e-05)
+    extra = getattr(config, "extra_kwargs", {}) or {}
+    raise_on_error = bool(kwargs.get("raise_on_error", extra.get("raise_on_error", False)))
     distributed_strategy = str(kwargs.get("distributed_strategy") or getattr(config, "distributed_strategy", "none"))
     backend_alias = str(kwargs.get("backend_alias") or kwargs.get("backend") or ("pytorch_native" if getattr(config, "backend", None) == "pytorch_native" else "pytorch"))
 
     final_loss = 0.0
     status = "completed"
     if torch is None or optim is None or (nn is None) or (backend_alias != "pytorch_native" and Gemma4ForCausalLM is None):
-        raise DependencyMissingError("PyTorch dependencies are missing.")
+        raise DependencyMissingError("PyTorch dependencies are missing.", backend=backend_alias)
     try:
         batch_size = getattr(config, "batch_size", 2)
         train_kwargs = dict(kwargs)
         train_kwargs.pop("backend_alias", None)
         train_kwargs.pop("backend", None)
+        train_kwargs.pop("raise_on_error", None)
         status, final_loss = _execute_train(
             model_name,
             dataset,
@@ -218,6 +222,14 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
             **train_kwargs,
         )
     except (ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError) as e:
+        if raise_on_error:
+            raise TrainingError(
+                f"PyTorch training failed: {e!s}",
+                backend=backend_alias,
+                model_name=model_name,
+                operation=action,
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
     return {
         "backend": backend_alias,

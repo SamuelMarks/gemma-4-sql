@@ -11,47 +11,32 @@ has_tf = importlib.util.find_spec("tensorflow") is not None
 
 
 def test_log_metrics_jax() -> None:
-    """Test logging with jax.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify log metrics jax behavior."""
     res = log_metrics({"loss": 0.5}, 10, backend="jax")
     assert res["backend"] == "jax"
 
-    assert res["action"] == "log_metrics"
+    assert res.get("action") == "log_metrics"
 
-    assert res["step"] == 10
+    assert res.get("step") == 10
 
-    assert res["metrics"] == {"loss": 0.5}
+    assert res.get("metrics") == {"loss": 0.5}
 
 
 def test_log_metrics_pytorch() -> None:
-    """Test logging with pytorch.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify log metrics pytorch behavior."""
     res = log_metrics({"loss": 0.5}, 10, backend="pytorch")
     assert res["backend"] == "pytorch"
 
-    assert res["metrics"] == {"loss": 0.5}
+    assert res.get("metrics") == {"loss": 0.5}
 
 
 @pytest.mark.skipif(not has_tf, reason="TensorFlow is not installed")
 def test_log_metrics_keras() -> None:
-    """Test logging with keras.
-
-    Raises:
-        AssertionError: Description.
-
-    """
+    """Verify log metrics keras behavior."""
     res = log_metrics({"loss": 0.5}, 10, backend="keras")
     assert res["backend"] == "keras"
 
-    assert res["metrics"] == {"loss": 0.5}
+    assert res.get("metrics") == {"loss": 0.5}
 
 
 def test_log_metrics_maxtext() -> None:

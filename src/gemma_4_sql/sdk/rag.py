@@ -8,19 +8,21 @@ import math
 import operator
 import re
 import threading
+from collections import OrderedDict
 from typing import Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr
 from gemma_4_sql.type_hints import ModelType
 
 MIN_SIMILARITY = 0.1
+MAX_SCHEMA_CACHE_SIZE = 128
 logger = logging.getLogger(__name__)
 
 SentenceTransformer: Any = optional_attr("sentence_transformers", "SentenceTransformer")
 cosine_similarity: Any = optional_attr("sklearn.metrics.pairwise", "cosine_similarity")
 
 _RAG_LOCK = threading.Lock()
-_SCHEMA_EMBEDDING_CACHE: dict[str, Any] = {}
+_SCHEMA_EMBEDDING_CACHE: OrderedDict[str, Any] = OrderedDict()
 _SENTENCE_TRANSFORMER_CACHE: dict[tuple[Any, str], ModelType] = {}
 
 
@@ -272,12 +274,17 @@ def _semantic_search(
         schema_key = hashlib.md5(";;".join(table_docs).encode()).hexdigest()
         with _RAG_LOCK:
             cached_embeddings = _SCHEMA_EMBEDDING_CACHE.get(schema_key)
+            if cached_embeddings is not None:
+                _SCHEMA_EMBEDDING_CACHE.move_to_end(schema_key)
         if cached_embeddings is not None:
             table_embeddings = cached_embeddings
         else:
             table_embeddings = model.encode(table_docs)
             with _RAG_LOCK:
                 _SCHEMA_EMBEDDING_CACHE[schema_key] = table_embeddings
+                _SCHEMA_EMBEDDING_CACHE.move_to_end(schema_key)
+                if len(_SCHEMA_EMBEDDING_CACHE) > MAX_SCHEMA_CACHE_SIZE:
+                    _SCHEMA_EMBEDDING_CACHE.popitem(last=False)
 
         prompt_embedding: Any = model.encode([prompt])
         similarities: Any = cosine_similarity(prompt_embedding, table_embeddings)[0]

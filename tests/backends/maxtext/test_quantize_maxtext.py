@@ -6,7 +6,11 @@ import numpy as np
 import pytest
 
 import gemma_4_sql.backends.maxtext.quantize as quantize_mod
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import (
+    ConfigurationError,
+    DependencyMissingError,
+    UnsupportedQuantizationMethodError,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -27,7 +31,7 @@ def test_quantize_tensor_aqt_missing_jax() -> None:
 
 
 def test_quantize_tensor_aqt_negative_bits():
-    """Execute and verify `test_quantize_tensor_aqt_negative_bits` behavior and invariants."""
+    """Verify quantize tensor aqt negative bits behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = MagicMock()
     with pytest.raises(ValueError, match="Quantization bits must be positive, got 0"):
@@ -37,7 +41,7 @@ def test_quantize_tensor_aqt_negative_bits():
 
 
 def test_quantize_tensor_aqt_int8():
-    """Execute and verify `test_quantize_tensor_aqt_int8` behavior and invariants."""
+    """Verify quantize tensor aqt int8 behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -54,7 +58,7 @@ def test_quantize_tensor_aqt_int8():
 
 
 def test_quantize_tensor_aqt_int16():
-    """Execute and verify `test_quantize_tensor_aqt_int16` behavior and invariants."""
+    """Verify quantize tensor aqt int16 behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -65,7 +69,7 @@ def test_quantize_tensor_aqt_int16():
 
 
 def test_apply_aqt_quantization_missing_jax():
-    """Execute and verify `test_apply_aqt_quantization_missing_jax` behavior and invariants."""
+    """Verify apply aqt quantization missing jax behavior."""
     quantize_mod.jax = None
     quantize_mod.jnp = None
     with pytest.raises(DependencyMissingError, match="JAX dependencies are missing."):
@@ -73,7 +77,7 @@ def test_apply_aqt_quantization_missing_jax():
 
 
 def test_apply_aqt_quantization_methods():
-    """Execute and verify `test_apply_aqt_quantization_methods` behavior and invariants."""
+    """Verify apply aqt quantization methods behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -96,7 +100,7 @@ def test_apply_aqt_quantization_methods():
 
 
 def test_apply_aqt_quantization_targets_and_traverse():
-    """Execute and verify `test_apply_aqt_quantization_targets_and_traverse` behavior and invariants."""
+    """Verify apply aqt quantization targets and traverse behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
     quantize_mod.aqt = MagicMock()
@@ -122,7 +126,7 @@ def test_apply_aqt_quantization_targets_and_traverse():
 
 
 def test_quantize_model_missing_maxtext_deps():
-    """Execute and verify `test_quantize_model_missing_maxtext_deps` behavior and invariants."""
+    """Verify quantize model missing maxtext deps behavior."""
     quantize_mod.jax = None
     with pytest.raises(DependencyMissingError, match="MaxText dependencies are missing."):
         quantize_mod.quantize_model("model")
@@ -149,7 +153,7 @@ def test_quantize_model_missing_maxtext_deps():
 
 
 def test_quantize_model_with_gemma4_init():
-    """Execute and verify `test_quantize_model_with_gemma4_init` behavior and invariants."""
+    """Verify quantize model with gemma4 init behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
     quantize_mod.Gemma4Model = MagicMock()
@@ -170,7 +174,7 @@ def test_quantize_model_with_gemma4_init():
 
 
 def test_quantize_model_with_params_kwargs_dict():
-    """Execute and verify `test_quantize_model_with_params_kwargs_dict` behavior and invariants."""
+    """Verify quantize model with params kwargs dict behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -184,16 +188,19 @@ def test_quantize_model_with_params_kwargs_dict():
 
 
 def test_apply_aqt_quantization_non_dict_param():
-    """Execute and verify `test_apply_aqt_quantization_non_dict_param` behavior and invariants."""
+    """Verify apply aqt quantization non dict param behavior."""
+    from typing import Any
+
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
-    res = quantize_mod.apply_aqt_quantization("not_a_dict")
+    non_dict: Any = "not_a_dict"
+    res = quantize_mod.apply_aqt_quantization(non_dict)
     assert res[0] == "not_a_dict"
 
 
 def test_quantize_model_with_params_non_dict():
-    """Execute and verify `test_quantize_model_with_params_non_dict` behavior and invariants."""
+    """Verify quantize model with params non dict behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -207,7 +214,7 @@ def test_quantize_model_with_params_non_dict():
 
 
 def test_quantize_model_exception_handling():
-    """Execute and verify `test_quantize_model_exception_handling` behavior and invariants."""
+    """Verify quantize model exception handling behavior."""
     quantize_mod.jax = MagicMock()
     quantize_mod.jnp = np
 
@@ -222,3 +229,9 @@ def test_quantize_model_exception_handling():
 
     assert res["status"] == "failed: mock error"
     assert "metadata" not in res  # metadata was empty when error raised
+
+    with pytest.raises(UnsupportedQuantizationMethodError):
+        quantize_mod.quantize_model("my_model", method="fp4", params=params, strict_method=True)
+
+    with patch.object(quantize_mod, "quantize_model_wrapper", side_effect=ConfigurationError("cfg err")), pytest.raises(ConfigurationError, match="cfg err"):
+        quantize_mod.quantize_model("my_model", params=params)

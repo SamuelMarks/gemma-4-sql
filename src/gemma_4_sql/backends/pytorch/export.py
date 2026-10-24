@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError
@@ -58,7 +58,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
             from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4Config
             from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
 
-            cfg = kwargs.get("config")
+            cfg: Any = kwargs.get("config")
             if cfg is None:
                 if model_name.startswith(("test", "model")):
                     cfg = Gemma4Config(
@@ -72,7 +72,7 @@ def _save_real_model(model_name: str, export_path: str, *, is_rank_zero: bool = 
                     )
                 else:
                     cfg = Gemma4Config()
-            model = NativeGemma4(cast(Any, cfg))
+            model = NativeGemma4(cfg)
             tensors = {k: v.clone() if k == "lm_head.weight" else v for k, v in model.state_dict().items()}
         else:
             from transformers.models.gemma4 import Gemma4ForCausalLM

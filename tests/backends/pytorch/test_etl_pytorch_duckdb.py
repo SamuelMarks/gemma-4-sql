@@ -16,18 +16,8 @@ class MockDatasets:
     """Initialize class MockDatasets."""
 
     @staticmethod
-    def load_dataset(*_args: Any, **_kwargs: Any) -> list[dict]:
-        """Initialize function load_dataset.
-
-        Args:
-        ----
-        name: Description of name.
-        split: Description of split.
-
-
-        Returns: Any: Description of return.
-
-        """
+    def load_dataset(*_args: Any, **_kwargs: Any) -> list[dict[str, str]]:
+        """Return mock dataset records."""
         return [{"question": "Q1", "query": "A1"}]
 
 
@@ -43,25 +33,13 @@ class MockTorch:
     """Initialize class MockTorch."""
 
 
-def test_pytorch_etl_duckdb_missing() -> Any:
-    """Initialize function test_pytorch_etl_duckdb_missing."""
-    original_duckdb = getattr(etl_pytorch, "duckdb", None)
-    original_datasets = getattr(etl_pytorch, "datasets", None)
-    original_dl = getattr(etl_pytorch, "DataLoader", None)
-    original_ds = getattr(etl_pytorch, "Dataset", None)
-    original_torch = getattr(etl_pytorch, "torch", None)
-    try:
-        etl_pytorch.duckdb = None
-        etl_pytorch.datasets = MockDatasets()
-        _ = MockDatasets.load_dataset()
-        etl_pytorch.DataLoader = MockDataLoader()
-        etl_pytorch.Dataset = MockDataset()
-        etl_pytorch.torch = MockTorch()
-        with pytest.raises(Exception, match=r".*"):
-            etl_pytorch.build_dataloader(ETLConfig(dataset_name="dummy", split="train", batch_size=10, duckdb_path=":memory:", duckdb_table="tbl"))
-    finally:
-        etl_pytorch.duckdb = original_duckdb
-        etl_pytorch.datasets = original_datasets
-        etl_pytorch.DataLoader = original_dl
-        etl_pytorch.Dataset = original_ds
-        etl_pytorch.torch = original_torch
+def test_pytorch_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Verify build_dataloader raises when duckdb is unavailable."""
+    monkeypatch.setattr(etl_pytorch, "duckdb", None, raising=False)
+    monkeypatch.setattr(etl_pytorch, "datasets", MockDatasets())
+    _ = MockDatasets.load_dataset()
+    monkeypatch.setattr(etl_pytorch, "DataLoader", MockDataLoader())
+    monkeypatch.setattr(etl_pytorch, "Dataset", MockDataset())
+    monkeypatch.setattr(etl_pytorch, "torch", MockTorch())
+    with pytest.raises(Exception, match=r".*"):
+        etl_pytorch.build_dataloader(ETLConfig(dataset_name="dummy", split="train", batch_size=10, duckdb_path=":memory:", duckdb_table="tbl"))

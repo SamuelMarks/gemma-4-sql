@@ -1,6 +1,8 @@
 """Unit and behavioral tests for export jax."""
 
 import sys
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_jax
@@ -67,8 +69,8 @@ def reload_module():
     return jax_export
 
 
-def test_export_model_with_weights(tmp_path):
-    """Execute and verify `test_export_model_with_weights` behavior and invariants."""
+def test_export_model_with_weights(tmp_path: Path):
+    """Verify export model with weights behavior."""
     jax_export = reload_module()
 
     export_path = str(tmp_path / "export")
@@ -80,8 +82,8 @@ def test_export_model_with_weights(tmp_path):
     assert res["format"] == "orbax/saved_model"
 
 
-def test_export_model_extract_weights(tmp_path):
-    """Execute and verify `test_export_model_extract_weights` behavior and invariants."""
+def test_export_model_extract_weights(tmp_path: Path):
+    """Verify export model extract weights behavior."""
     jax_export = reload_module()
 
     export_path = str(tmp_path / "export")
@@ -99,8 +101,8 @@ def test_export_model_extract_weights(tmp_path):
     assert res3["status"] == "exported_with_orbax"
 
 
-def test_export_model_extract_weights_missing_flax(tmp_path):
-    """Execute and verify `test_export_model_extract_weights_missing_flax` behavior and invariants."""
+def test_export_model_extract_weights_missing_flax(tmp_path: Path):
+    """Verify export model extract weights missing flax behavior."""
     jax_export = reload_module()
 
     with patch.dict(sys.modules, {"flax": None}), pytest.raises(Exception, match="Flax NNX dependency missing:"):
@@ -108,8 +110,8 @@ def test_export_model_extract_weights_missing_flax(tmp_path):
         jax_export.export_model("test_model", str(tmp_path / "export"))
 
 
-def test_export_model_extract_weights_error(tmp_path, mock_dependencies):
-    """Execute and verify `test_export_model_extract_weights_error` behavior and invariants."""
+def test_export_model_extract_weights_error(tmp_path: Path, mock_dependencies: Any):
+    """Verify export model extract weights error behavior."""
     jax_export = reload_module()
 
     # Make extraction fail
@@ -120,8 +122,8 @@ def test_export_model_extract_weights_error(tmp_path, mock_dependencies):
         jax_export.export_model("test_model", str(tmp_path / "export"))
 
 
-def test_export_model_save_error(tmp_path, mock_dependencies):
-    """Execute and verify `test_export_model_save_error` behavior and invariants."""
+def test_export_model_save_error(tmp_path: Path, mock_dependencies: Any):
+    """Verify export model save error behavior."""
     jax_export = reload_module()
 
     _, _, _, _, _, _, mock_checkpointer = mock_dependencies

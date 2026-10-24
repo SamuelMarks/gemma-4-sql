@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
+from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError, TrainingError
 
 if TYPE_CHECKING:
     from gemma_4_sql.type_hints import JSONDict
@@ -74,7 +74,7 @@ def transform_params_to_lora(
         for k, v in curr.items():
             sub_path = f"{current_path}.{k}" if current_path else k
             if isinstance(v, dict):
-                v_dict = cast(dict[str, Any], v)
+                v_dict: dict[str, Any] = v
                 # Check if this leaf dictionary represents a target projection module containing 'kernel'
                 if "kernel" in v_dict and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in target_modules):
                     kernel = v_dict["kernel"]
@@ -126,7 +126,7 @@ def segregate_adapter_params(params: dict[str, Any]) -> tuple[dict[str, Any], di
             return
         for k, v in src.items():
             if isinstance(v, dict):
-                v_dict = cast(dict[str, Any], v)
+                v_dict: dict[str, Any] = v
                 sub_t: dict[str, Any] = {}
                 sub_f: dict[str, Any] = {}
                 _split(v_dict, sub_t, sub_f)
@@ -204,7 +204,7 @@ def merge_lora_weights(params: Any) -> dict[str, Any]:
         return params
     for k, v in params.items():
         if isinstance(v, dict):
-            v_dict = cast(dict[str, Any], v)
+            v_dict: dict[str, Any] = v
             if "kernel" in v_dict and "lora_a" in v_dict and "lora_b" in v_dict:
                 scale = float(v_dict.get("lora_scale", 1.0))
                 delta_w = scale * (v_dict["lora_a"] @ v_dict["lora_b"])
@@ -249,7 +249,7 @@ def save_maxtext_adapters(params: dict[str, Any], save_path: str | Path) -> None
         for k, v in curr.items():
             sub_path = f"{current_path}.{k}" if current_path else k
             if isinstance(v, dict):
-                _collect(cast(dict[str, Any], v), sub_path)
+                _collect(v, sub_path)
             elif k in ("lora_a", "lora_b", "lora_scale"):
                 adapters[sub_path] = np.asarray(v)
 
@@ -322,7 +322,7 @@ def count_maxtext_parameters(params: dict[str, Any]) -> tuple[int, int]:
             return
         for k, v in curr.items():
             if isinstance(v, dict):
-                _count(cast(dict[str, Any], v))
+                _count(v)
             elif hasattr(v, "size"):
                 size = int(v.size)
                 total_count += size
@@ -366,16 +366,17 @@ def apply_lora(
     injected_count = 0
     try:
         params: dict[str, Any]
-        if "params" in kwargs and kwargs["params"] is not None and isinstance(kwargs["params"], dict):
-            params = cast(dict[str, Any], kwargs["params"])
+        raw_params: Any = kwargs.get("params")
+        if raw_params is not None and isinstance(raw_params, dict):
+            params = raw_params
         else:
             if Gemma4Model is None:
                 raise DependencyMissingError("MaxText dependency missing.")
             model = Gemma4Model(model_name)
             rng = jax.random.PRNGKey(0)
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-            params_any = model.init(rng, dummy_input)
-            params = cast(dict[str, Any], params_any) if isinstance(params_any, dict) else {}
+            params_any: Any = model.init(rng, dummy_input)
+            params = dict(params_any) if isinstance(params_any, dict) else {}
 
         params, injected_count = transform_params_to_lora(
             params=params,
@@ -396,6 +397,14 @@ def apply_lora(
         raise
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to apply LoRA: ")
+        if kwargs.get("raise_on_error"):
+            raise TrainingError(
+                f"MaxText PEFT failed: {e!s}",
+                backend="maxtext",
+                model_name=model_name,
+                operation="apply_lora",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
 
     return {

@@ -6,6 +6,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk.export import export_model
 from gemma_4_sql.sdk.logging import log_metrics
 from gemma_4_sql.sdk.quantize import quantize_model
@@ -37,26 +38,34 @@ def tokenize_cmd(args: argparse.Namespace) -> None:
         print(json.dumps(encoded))
 
 
-def quantize_cmd(args: argparse.Namespace) -> None:
+def quantize_cmd(args: argparse.Namespace) -> int:
     """Run quantization.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
 
+    Returns:
+        Exit code `0` on success, or `1` if quantization fails.
+
     """
     res = quantize_model(args.model, args.method, args.backend)
     print(json.dumps(res, indent=2))
+    return 1 if is_failed_status(res) else 0
 
 
-def export_cmd(args: argparse.Namespace) -> None:
+def export_cmd(args: argparse.Namespace) -> int:
     """Run model export.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
 
+    Returns:
+        Exit code `0` on success, or `1` if export fails.
+
     """
     res = export_model(args.model, args.path, args.backend)
     print(json.dumps(res, indent=2))
+    return 1 if is_failed_status(res) else 0
 
 
 def rag_cmd(args: argparse.Namespace) -> None:
@@ -89,11 +98,14 @@ def rag_cmd(args: argparse.Namespace) -> None:
         print(str(rag_prompt))
 
 
-def log_metrics_cmd(args: argparse.Namespace) -> None:
+def log_metrics_cmd(args: argparse.Namespace) -> int:
     """Log training metrics.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code `0` on success, or `1` if logging fails.
 
     """
     metrics_dict: dict[str, float] = {}
@@ -109,3 +121,4 @@ def log_metrics_cmd(args: argparse.Namespace) -> None:
             metrics_dict[k.strip()] = float(v.strip())
     res = log_metrics(metrics=metrics_dict, step=args.step, log_dir=args.log_dir, backend=args.backend)
     print(json.dumps(res, indent=2))
+    return 1 if is_failed_status(res) else 0

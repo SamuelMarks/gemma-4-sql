@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import operator
+import threading
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -18,6 +20,33 @@ logger = logging.getLogger(__name__)
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
 Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+
+MAX_MODEL_CACHE_SIZE = 4
+_MODEL_CACHE: OrderedDict[str, object] = OrderedDict()
+_MODEL_CACHE_LOCK = threading.Lock()
+
+
+def _get_or_create_maxtext_model(model_name: str) -> Any:
+    """Retrieve a cached MaxText model instance or initialize and cache a new one.
+
+    Args:
+        model_name: Target model name.
+
+    Returns:
+        Instantiated MaxText model.
+
+    """
+    with _MODEL_CACHE_LOCK:
+        if model_name in _MODEL_CACHE:
+            _MODEL_CACHE.move_to_end(model_name)
+            return _MODEL_CACHE[model_name]
+    model = Gemma4Model(model_name)
+    with _MODEL_CACHE_LOCK:
+        _MODEL_CACHE[model_name] = model
+        _MODEL_CACHE.move_to_end(model_name)
+        if len(_MODEL_CACHE) > MAX_MODEL_CACHE_SIZE:
+            _MODEL_CACHE.popitem(last=False)
+    return model
 
 
 def _beam_search_step(seq: TensorType, score: float, model_apply_fn: Any, beam_width: int) -> list[tuple[Any, float]]:
@@ -103,7 +132,7 @@ def _execute_generate(model_name: str, input_tokens: list[int], beam_width: int,
     """
     logger.info("Generating with MaxText: %s", model_name)
     input_ids = jnp.array([input_tokens], dtype=jnp.int32)
-    model = Gemma4Model(model_name)
+    model = _get_or_create_maxtext_model(model_name)
     apply_fn = model.apply if hasattr(model, "apply") else model
     jitted_beam_search = jax.jit(maxtext_beam_search, static_argnums=(2, 3, 4))
     (output_ids, logprob_sum) = jitted_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)

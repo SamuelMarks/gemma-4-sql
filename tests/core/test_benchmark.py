@@ -120,11 +120,12 @@ def test_run_benchmark_wrapper_paths() -> None:
     assert res_succ["latency_ms"] == 15.0
     assert res_succ["memory_mb"] == 256.0
     assert "rss_memory_mb" in res_succ
-    assert res_succ["latency_stats"]["mean_ms"] == 15.0
+    stats_succ = res_succ.get("latency_stats")
+    assert stats_succ is not None and stats_succ["mean_ms"] == 15.0
 
     # 2. Execution failure branch
     def _fail() -> tuple[float, float, float]:
-        """Execute and verify `_fail` behavior and invariants."""
+        """Provide fail test helper."""
         raise RuntimeError("Benchmark execution crashed")
 
     res_fail = run_benchmark_wrapper(
@@ -164,20 +165,20 @@ def test_run_benchmark_wrapper_paths() -> None:
 
 
 def test_sdk_benchmark(monkeypatch: Any) -> None:
-    """Execute and verify `test_sdk_benchmark` behavior and invariants."""
+    """Verify sdk benchmark behavior."""
     import sys
 
     from gemma_4_sql.sdk.benchmark import benchmark
 
     class FakeBackend:
-        """Execute and verify `FakeBackend` behavior and invariants."""
+        """Test stub for `FakeBackend`."""
 
-        def benchmark_model(self, *args, **kwargs):
-            """Execute and verify `benchmark_model` behavior and invariants."""
+        def benchmark_model(self, *args: Any, **kwargs: Any):
+            """Provide benchmark model test helper."""
             return {"status": "success"}
 
-    def mock_get_backend(x):
-        """Execute and verify `mock_get_backend` behavior and invariants."""
+    def mock_get_backend(x: Any):
+        """Provide mock get backend test helper."""
         return FakeBackend()
 
     bench_mod = sys.modules["gemma_4_sql.sdk.benchmark"]

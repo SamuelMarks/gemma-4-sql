@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, cast
+from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -135,7 +135,7 @@ def _get_vision_mappings(transform_cls: Any) -> dict[str, tuple[str, object]]:
     }
 
 
-def _get_key_and_transform_mapping() -> object:
+def _get_key_and_transform_mapping() -> dict[str, tuple[str, Any]]:
     """Return the mapping from safetensors keys to JAX model keys and their transforms.
 
     Returns
@@ -235,7 +235,7 @@ def _fix_jax_state_embeddings(jax_state: Any, gemma4: Any, cfg: model_lib.ModelC
             jax_state["vision_tower"]["embeddings"]["position_ids"] = jnp.expand_dims(jnp.arange(getattr(cfg.vision_config, "num_patches", 256)), 0)
 
 
-def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> object:
+def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> Any:
     """Load safetensor weights from a directory and merge them into a `Gemma4ForCausalLM` model.
 
     Args:
@@ -285,4 +285,5 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
     _fix_jax_state_embeddings(jax_state, gemma4, cfg)
     if hasattr(nnx, "State"):
         return nnx.merge(graph_def, abs_state)
-    return nnx.merge(graph_def, cast(Any, jax_state))
+    state_fallback: Any = jax_state
+    return nnx.merge(graph_def, state_fallback)

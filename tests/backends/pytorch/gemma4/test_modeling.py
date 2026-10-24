@@ -1,7 +1,9 @@
 """Tests for native PyTorch Gemma 4 modeling."""
 
 from pathlib import Path
+from typing import Any
 
+import pytest
 import torch
 
 from gemma_4_sql.backends.pytorch.gemma4 import (
@@ -184,7 +186,7 @@ def test_gemma4_for_causal_lm():
     assert dyn_cache.get_seq_length(0) == 4
 
 
-def test_attention_edge_cases(monkeypatch):
+def test_attention_edge_cases(monkeypatch: pytest.MonkeyPatch):
     """Test attention edge cases functionality."""
     import torch
 
@@ -203,7 +205,7 @@ def test_attention_edge_cases(monkeypatch):
         is_global = True
         global_attn_layers = (0,)
 
-    config = MockConfig()
+    config: Any = MockConfig()
     attention = attn.Gemma4Attention(config, layer_idx=0)
 
     hidden_states = torch.randn(1, 2, 32)
@@ -215,14 +217,14 @@ def test_attention_edge_cases(monkeypatch):
     assert res is not None
 
 
-def test_attention_edge_cases2(monkeypatch):
+def test_attention_edge_cases2(monkeypatch: pytest.MonkeyPatch):
     """Test manual attention fallback with sliding_window=None."""
     import torch
 
     import gemma_4_sql.backends.pytorch.gemma4.attention as attn
 
     class MockConfig:
-        """Execute and verify `MockConfig` behavior and invariants."""
+        """Test stub for `MockConfig`."""
 
         hidden_size = 32
         num_attention_heads = 4
@@ -234,7 +236,7 @@ def test_attention_edge_cases2(monkeypatch):
         is_global = False
         global_attn_layers = (1,)
 
-    config = MockConfig()
+    config: Any = MockConfig()
     attention = attn.Gemma4Attention(config, layer_idx=0)
 
     hidden_states = torch.randn(1, 2, 32)
@@ -243,7 +245,7 @@ def test_attention_edge_cases2(monkeypatch):
     assert res is not None
 
 
-def test_audio_layers_edge_cases(monkeypatch):
+def test_audio_layers_edge_cases(monkeypatch: pytest.MonkeyPatch):
     """Test audio layers edge cases functionality."""
     import torch
 
@@ -255,7 +257,7 @@ def test_audio_layers_edge_cases(monkeypatch):
         audio_hidden_size = 32
         hidden_size = 32
 
-    config = MockConfig()
+    config: Any = MockConfig()
 
     # 23->26: in AudioEncoderLayer forward, attention_mask is None
     layer = al.Gemma4AudioFeatureExtractor(config)
@@ -264,7 +266,7 @@ def test_audio_layers_edge_cases(monkeypatch):
     assert res is not None
 
 
-def test_gemma4_native_save_load_and_generate(tmp_path, monkeypatch):
+def test_gemma4_native_save_load_and_generate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Test save_pretrained, from_pretrained, and generate with DynamicCache."""
     config = Gemma4Config(
         vocab_size=128,
@@ -301,8 +303,8 @@ def test_gemma4_native_save_load_and_generate(tmp_path, monkeypatch):
     assert model_empty is not None
 
     # Test Exception in load_file
-    def mock_load_file_exc(*args, **kwargs):
-        """Execute and verify `mock_load_file_exc` behavior and invariants."""
+    def mock_load_file_exc(*args: Any, **kwargs: Any):
+        """Provide mock load file exc test helper."""
         raise RuntimeError("Custom exception")
 
     monkeypatch.setattr("safetensors.torch.load_file", mock_load_file_exc, raising=False)
@@ -311,7 +313,7 @@ def test_gemma4_native_save_load_and_generate(tmp_path, monkeypatch):
     assert model_exc is not None
 
 
-def test_pytorch_native_pipeline_integration(tmp_path, monkeypatch):
+def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Test pytorch_native backend integration for train, inference, and export."""
     from gemma_4_sql.backends.pytorch.export import export_model
     from gemma_4_sql.backends.pytorch.inference import generate_sql

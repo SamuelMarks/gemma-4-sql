@@ -8,11 +8,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import ModelType
 
 if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+    from gemma_4_sql.type_hints import PEFTResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -341,7 +341,8 @@ def save_adapter_weights(model: ModelType, save_path: str | Path) -> None:
         path = path / "adapter.safetensors"
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    trainable_dict: dict[str, Any] = dict(tree_flatten(cast(Any, model).trainable_parameters()))
+    model_any: Any = model
+    trainable_dict: dict[str, Any] = dict(tree_flatten(model_any.trainable_parameters()))
     mx.save_safetensors(str(path), trainable_dict)
 
 
@@ -373,7 +374,7 @@ def apply_lora(
     lora_alpha: int = 16,
     lora_dropout: float = 0.05,
     **kwargs: object,
-) -> JSONDict:
+) -> PEFTResultDict:
     """Apply LoRA to a model using the MLX backend.
 
     Args:
@@ -382,25 +383,27 @@ def apply_lora(
         lora_r: The rank of the LoRA update matrices.
         lora_alpha: The scaling factor for LoRA.
         lora_dropout: The dropout probability for LoRA layers.
-        **kwargs: Optional keyword arguments, including 'output_dir' and 'model'.
+        **kwargs: Optional keyword arguments, including `'output_dir'`, `'model'`, and `'raise_on_error'`.
 
     Returns:
         A dictionary containing the results.
 
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
+        TrainingError: If LoRA injection fails and `raise_on_error` is enabled.
 
     """
     if nn is None or load is None or mx is None:
-        raise DependencyMissingError("MLX dependencies are missing.")
+        raise DependencyMissingError("MLX dependencies are missing.", backend="mlx")
     status = "completed"
+    injected_count = 0
     try:
         if "model" in kwargs and kwargs["model"] is not None:
             model = kwargs["model"]
         else:
             (model, _) = load(model_name)
 
-        model, _ = inject_lora(
+        model, injected_count = inject_lora(
             model=cast(ModelType, model),
             target_modules=target_modules,
             lora_r=lora_r,
@@ -412,6 +415,14 @@ def apply_lora(
             save_adapter_weights(model, str(kwargs["output_dir"]))
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to apply LoRA: ")
+        if kwargs.get("raise_on_error"):
+            raise TrainingError(
+                f"MLX PEFT failed: {e!s}",
+                backend="mlx",
+                model_name=model_name,
+                operation="apply_lora",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
     return {
         "backend": "mlx",
@@ -422,4 +433,5 @@ def apply_lora(
         "lora_alpha": lora_alpha,
         "lora_dropout": lora_dropout,
         "status": status,
+        "injected_modules": injected_count,
     }

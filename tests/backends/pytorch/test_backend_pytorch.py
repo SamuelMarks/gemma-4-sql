@@ -7,12 +7,12 @@ pytestmark = requires_torch
 
 
 def test_get_trainer():
-    """Execute and verify `test_get_trainer` behavior and invariants."""
+    """Verify get trainer behavior."""
     assert get_trainer() == "pytorch_trainer"
 
 
 def test_all_exports():
-    """Execute and verify `test_all_exports` behavior and invariants."""
+    """Verify all exports behavior."""
     expected = [
         "apply_lora",
         "benchmark_model",

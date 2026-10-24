@@ -213,7 +213,7 @@ def test_assert_tensors_close() -> None:
     class DummyTensor:
         """Dummy tensor for testing assert_tensors_close."""
 
-        def __init__(self, data):
+        def __init__(self, data: Any):
             """Initialize DummyTensor."""
             self.data = data
             self.shape = (len(data),)
@@ -242,7 +242,7 @@ def test_assert_tensors_close_jax():
     class MockTensor:
         """Mock tensor with __array__ protocol."""
 
-        def __init__(self, data):
+        def __init__(self, data: Any):
             """Initialize MockTensor."""
             self.data = data
 

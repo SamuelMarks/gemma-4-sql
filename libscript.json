@@ -1,0 +1,197 @@
+{
+  "$schema": "../libscript/libscript.schema.json",
+  "name": "gemma-4-sql",
+  "version": "0.0.1",
+  "description": "Natural text to SQL with Gemma 4 across JAX, MaxText, PyTorch, Keras, and MLX with DuckDB support",
+  "deps": {
+    "python": "3.12",
+    "duckdb": "latest",
+    "sqlite": "latest",
+    "postgres": "latest",
+    "huggingface-cli": "latest",
+    "xpk": "latest",
+    "tensorboard": "latest"
+  },
+  "dependencies": {
+    "runtime": [
+      { "name": "python", "version": "3.12" },
+      { "name": "duckdb", "version": "latest" },
+      { "name": "sqlite", "version": "latest" },
+      { "name": "postgres", "version": "latest" }
+    ],
+    "build": [
+      { "name": "python", "version": "3.12" },
+      { "name": "huggingface-cli", "version": "latest" }
+    ],
+    "optional": [
+      { "name": "xpk", "version": "latest" },
+      { "name": "tensorboard", "version": "latest" }
+    ],
+    "required": {
+      "toolchains": [
+        { "name": "python", "version": "3.12" },
+        { "name": "huggingface-cli", "version": "latest" },
+        { "name": "xpk", "version": "latest" }
+      ],
+      "databases": [
+        { "name": "duckdb", "version": "latest" },
+        { "name": "sqlite", "version": "latest" },
+        { "name": "postgres", "version": "latest", "ports": [5432] }
+      ]
+    }
+  },
+  "install": {
+    "dependencies": {
+      "required": {
+        "toolchains": [
+          { "name": "python", "version": "3.12" },
+          { "name": "huggingface-cli", "version": "latest" },
+          { "name": "xpk", "version": "latest" }
+        ],
+        "databases": [
+          { "name": "duckdb", "version": "latest" },
+          { "name": "sqlite", "version": "latest" },
+          { "name": "postgres", "version": "latest", "ports": [5432] }
+        ]
+      }
+    }
+  },
+  "databases": [
+    {
+      "engine": "postgres",
+      "name": "gemma_4_sql",
+      "user": "postgres",
+      "password_env": "POSTGRES_PASSWORD",
+      "host": "127.0.0.1",
+      "port": 5432
+    },
+    {
+      "engine": "duckdb",
+      "name": "analytics",
+      "path": "./analytics.duckdb"
+    },
+    {
+      "engine": "sqlite",
+      "name": "gemma_4_sql",
+      "path": "./gemma_4_sql.sqlite3"
+    }
+  ],
+  "ml": {
+    "backend": "jax",
+    "target": "local",
+    "model": "google/gemma-4",
+    "etl_command": "gemma-4-sql etl sft --dataset my-custom-sft-dataset --batch-size 16 --backend jax",
+    "train_command": "gemma-4-sql sft --model google/gemma-4 --dataset my-custom-sft-dataset --backend jax",
+    "infer_command": "gemma-4-sql serve --model google/gemma-4 --port 8000 --max-batch-size 256 --backend jax",
+    "tpu_name": "gemma-train-node",
+    "tpu_zone": "us-central2-b",
+    "tpu_type": "v4-8",
+    "num_slices": 1,
+    "bucket": "gs://gemma-4-sql-artifacts",
+    "docker_image": "gcr.io/cloud-tpu-v2-images/jax-ai-image:latest"
+  },
+  "ingress": {
+    "provider": "nginx",
+    "domain": "gemma-4-sql.local",
+    "listen": 80,
+    "routes": {
+      "/api": "http://127.0.0.1:8000",
+      "/v1": "http://127.0.0.1:8000",
+      "/tensorboard": "http://127.0.0.1:6006"
+    }
+  },
+  "vars": {
+    "TPU_ZONE": "us-central2-b",
+    "TPU_ACCELERATOR_TYPE": "v4-8",
+    "TPU_SCHEDULING_TYPE": "on-demand",
+    "TPU_SLICE_COUNT": 1,
+    "TPU_TENSOR_PARALLEL_SIZE": 1,
+    "DISK_SIZE_GB": 500,
+    "TPU_DATA_DISK_SIZE": 500,
+    "GCS_BUCKET": "gs://gemma-4-sql-artifacts",
+    "BUCKET_NAME": "gs://gemma-4-sql-artifacts",
+    "MODEL_NAME": "google/gemma-4",
+    "TRAIN_CMD": "gemma-4-sql sft --model google/gemma-4 --dataset my-custom-sft-dataset --backend maxtext",
+    "TRAIN_SCRIPT": "gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend maxtext",
+    "POSTGRES_PORT": 5432
+  },
+  "infrastructure": {
+    "node": {
+      "os": "ubuntu-2204",
+      "size": "v4-8",
+      "disk_gb": 500
+    },
+    "network": {
+      "ports": [22, 6006, 8000]
+    }
+  },
+  "state": {
+    "bucket": "gs://gemma-4-sql-artifacts",
+    "paths": [
+      "./exported",
+      "./logs"
+    ]
+  },
+  "hooks": {
+    "pre_install": [
+      {
+        "name": "verify-python-env",
+        "command": "python3 --version"
+      }
+    ],
+    "post_install": [
+      {
+        "name": "verify-editable-package",
+        "command": "pip install -e ."
+      }
+    ],
+    "build": [
+      {
+        "name": "install-gemma-4-sql",
+        "command": "pip install -e ."
+      }
+    ],
+    "db_migrate": [
+      {
+        "name": "verify-cli-schema",
+        "command": "gemma-4-sql --help"
+      }
+    ],
+    "pre_start": [
+      {
+        "name": "ensure-logs-dir",
+        "command": "python3 -c \"import pathlib; pathlib.Path('logs').mkdir(exist_ok=True)\""
+      }
+    ],
+    "post_start": [
+      {
+        "name": "verify-cli",
+        "command": "gemma-4-sql --help"
+      }
+    ]
+  },
+  "services": {
+    "gemma-4-sql-serve": {
+      "command": "gemma-4-sql serve --model google/gemma-4 --port 8000 --max-batch-size 256 --backend jax",
+      "working_dir": ".",
+      "port": 8000,
+      "env": {
+        "PORT": "8000"
+      },
+      "env_files": [
+        ".env.libscript"
+      ]
+    },
+    "tensorboard": {
+      "command": "tensorboard --logdir=./logs --port=6006 --host=0.0.0.0",
+      "working_dir": ".",
+      "port": 6006,
+      "env": {
+        "PORT": "6006"
+      },
+      "env_files": [
+        ".env.libscript"
+      ]
+    }
+  }
+}

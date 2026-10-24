@@ -5,6 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from gemma_4_sql.backends.common_gemma4_config import (
+    GEMMA4_26B_A4B_SPEC,
+    GEMMA4_31B_SPEC,
+    GEMMA4_E2B_SPEC,
+    GEMMA4_E4B_SPEC,
+    resolve_gemma4_preset_name,
+)
+
 
 @dataclass
 class Gemma4VisionConfig:
@@ -226,17 +234,7 @@ class Gemma4Config:
             Configured `Gemma4Config` for E2B.
 
         """
-        return cls(
-            num_hidden_layers=35,
-            hidden_size=1024,
-            intermediate_size=4096,
-            num_attention_heads=8,
-            num_key_value_heads=4,
-            head_dim=256,
-            global_head_dim=512,
-            num_experts=1,
-            vocab_size=262144,
-        )
+        return cls(**GEMMA4_E2B_SPEC)
 
     @classmethod
     def gemma4_e4b(cls) -> Gemma4Config:
@@ -246,17 +244,7 @@ class Gemma4Config:
             Configured `Gemma4Config` for E4B.
 
         """
-        return cls(
-            num_hidden_layers=42,
-            hidden_size=2560,
-            intermediate_size=10240,
-            num_attention_heads=10,
-            num_key_value_heads=1,
-            head_dim=256,
-            global_head_dim=512,
-            num_experts=1,
-            vocab_size=262144,
-        )
+        return cls(**GEMMA4_E4B_SPEC)
 
     @classmethod
     def gemma4_26b_a4b(cls) -> Gemma4Config:
@@ -266,19 +254,7 @@ class Gemma4Config:
             Configured `Gemma4Config` for 26B-A4B.
 
         """
-        return cls(
-            num_hidden_layers=30,
-            hidden_size=2816,
-            intermediate_size=2112,
-            moe_intermediate_size=704,
-            num_attention_heads=8,
-            num_key_value_heads=4,
-            head_dim=256,
-            global_head_dim=512,
-            num_experts=128,
-            num_experts_per_tok=2,
-            vocab_size=262144,
-        )
+        return cls(**GEMMA4_26B_A4B_SPEC)
 
     @classmethod
     def gemma4_31b(cls) -> Gemma4Config:
@@ -288,17 +264,7 @@ class Gemma4Config:
             Configured `Gemma4Config` for 31B.
 
         """
-        return cls(
-            num_hidden_layers=60,
-            hidden_size=5376,
-            intermediate_size=21504,
-            num_attention_heads=32,
-            num_key_value_heads=16,
-            head_dim=256,
-            global_head_dim=512,
-            num_experts=1,
-            vocab_size=262144,
-        )
+        return cls(**GEMMA4_31B_SPEC)
 
     @classmethod
     def from_preset(cls, model_name: str) -> Gemma4Config:
@@ -311,11 +277,11 @@ class Gemma4Config:
             Matching `Gemma4Config` preset instance.
 
         """
-        lowered = model_name.lower()
-        if "31b" in lowered:
+        key = resolve_gemma4_preset_name(model_name)
+        if key == "31b":
             return cls.gemma4_31b()
-        if "26b" in lowered or "a4b" in lowered:
+        if key == "26b_a4b":
             return cls.gemma4_26b_a4b()
-        if "e4b" in lowered:
+        if key == "e4b":
             return cls.gemma4_e4b()
         return cls.gemma4_e2b()

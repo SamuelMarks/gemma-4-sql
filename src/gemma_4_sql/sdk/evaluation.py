@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-import typing
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import GemmaSQLError
@@ -140,23 +139,22 @@ def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
     min_batch_tuple_length = 2
     input_ids: Any = []
     target_ids: Any = []
+    batch_any: Any = batch
 
-    if isinstance(batch, (tuple, list)) and len(cast(list[Any], batch)) >= min_batch_tuple_length:
-        batch_list = cast(list[Any], batch)
-        input_ids = batch_list[0][0].tolist() if hasattr(batch_list[0][0], "tolist") else batch_list[0][0]
-        target_ids = batch_list[1][0].tolist() if hasattr(batch_list[1][0], "tolist") else batch_list[1][0]
-    elif isinstance(batch, dict):
-        batch_dict = cast(dict[str, Any], batch)
-        if "inputs" in batch_dict and "targets" in batch_dict:
-            inputs = batch_dict["inputs"]
-            targets = batch_dict["targets"]
+    if isinstance(batch_any, (tuple, list)) and len(batch_any) >= min_batch_tuple_length:
+        input_ids = batch_any[0][0].tolist() if hasattr(batch_any[0][0], "tolist") else batch_any[0][0]
+        target_ids = batch_any[1][0].tolist() if hasattr(batch_any[1][0], "tolist") else batch_any[1][0]
+    elif isinstance(batch_any, dict):
+        if "inputs" in batch_any and "targets" in batch_any:
+            inputs = batch_any["inputs"]
+            targets = batch_any["targets"]
             if hasattr(inputs, "__getitem__") and hasattr(targets, "__getitem__"):
                 in0 = inputs[0]
                 tgt0 = targets[0]
                 input_ids = in0.tolist() if hasattr(in0, "tolist") else in0
                 target_ids = tgt0.tolist() if hasattr(tgt0, "tolist") else tgt0
 
-    return list(cast(list[int], input_ids)), list(cast(list[int], target_ids))
+    return ([int(x) for x in input_ids], [int(x) for x in target_ids])
 
 
 def _run_evaluation_inference(
@@ -199,7 +197,8 @@ def _run_evaluation_inference(
         raise ValueError(msg)
 
     limit = MAX_BATCHES if max_batches is None else int(max_batches)
-    for i, batch in enumerate(cast(typing.Iterable[Any], dataloader)):
+    loader_iter: Any = dataloader
+    for i, batch in enumerate(loader_iter):
         if i >= limit:
             break
 

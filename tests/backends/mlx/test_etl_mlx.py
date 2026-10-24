@@ -99,8 +99,8 @@ def test_build_dataloader():
             assert res["status"] == "loaded"
             assert res["batch_size"] == 2
             assert res["backend"] == "mlx"
-            assert res["distributed"] is False
-            assert isinstance(res["loader"], etl_module.MLXDataLoader)
+            assert res.get("distributed") is False
+            assert isinstance(res.get("loader"), etl_module.MLXDataLoader)
 
     etl_module.datasets = None
     with pytest.raises(DependencyMissingError, match="Missing datasets"):

@@ -53,6 +53,9 @@ def test_db_engine_safety() -> None:
     assert res_lit == []
     assert err_lit is None
 
+    # Dollar-quoted string literals containing semicolons and keywords are allowed in _validate_safety
+    engine._validate_safety("SELECT $$DROP TABLE t; SELECT 1$$, $tag$DELETE FROM t$tag$ FROM t")
+
     unsafe_queries = [
         "DROP TABLE t",
         "TRUNCATE t",
@@ -77,10 +80,15 @@ def test_db_engine_safety() -> None:
 
 @pytest.mark.asyncio
 async def test_db_engine_async() -> None:
-    """Test asynchronous connection, query execution, feedback, and comparison methods."""
-    engine = LiveDatabaseEngine(db_type="sqlite", db_path=":memory:", read_only=False)
+    """Test asynchronous connection, deferred DDL, query execution, feedback, and comparison methods."""
+    engine = LiveDatabaseEngine(
+        db_type="sqlite",
+        db_path=":memory:",
+        ddl="CREATE TABLE t (a INT);",
+        read_only=False,
+        defer_ddl=True,
+    )
     await engine.connect_async()
-    engine.setup_schema("CREATE TABLE t (a INT)")
 
     await engine.execute_query_async("INSERT INTO t VALUES (1)")
 

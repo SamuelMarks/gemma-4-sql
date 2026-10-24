@@ -1,122 +1,105 @@
-"""Tests for duckdb support in ETL."""
+"""Behavioral and unit tests for DuckDB support in ETL pipelines."""
+
+from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+from gemma_4_sql.backends.common_data import load_duckdb_dataset
+from gemma_4_sql.exceptions import ETLError
 from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
 from gemma_4_sql.type_hints import ETLConfig
+from tests.conftest import requires_duckdb
+
+pytestmark = requires_duckdb
 
 
-def test_etl_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test ETL duckdb missing."""
-    import sys
-
-    jax_etl = __import__("gemma_4_sql.backends.jax.etl", fromlist=[""])
-
-    sys.modules["gemma_4_sql.backends.common_data"].duckdb = None
-    monkeypatch.setattr(jax_etl, "load_duckdb_dataset", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("duckdb is required")))
-    with pytest.raises(RuntimeError):
-        jax_etl._load_hf_or_duckdb(dataset_name="dummy", split="train", duckdb_path=":memory:", duckdb_table="users")
-
-
-def test_etl_duckdb_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test ETL duckdb success.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    mock_duckdb = MagicMock()
-    conn = MagicMock()
-    mock_duckdb.connect.return_value = conn
-    mock_df = MagicMock()
-    mock_df.to_dict.return_value = [{"sql_prompt": "Get users", "sql": "SELECT * FROM users"}]
-    mock_execute = MagicMock()
-    mock_execute.fetchdf.return_value = mock_df
-    conn.execute.return_value = mock_execute
-    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.duckdb", mock_duckdb, raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.grain", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.jax.etl.datasets", MagicMock(), raising=False)
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
-    monkeypatch.setattr(get_backend("jax"), "build_dataloader", lambda *args, **kwargs: {"status": "mocked"})
-    config = ETLConfig(dataset_name="mock", split="train", duckdb_path=":memory:", duckdb_table="users", tokenizer_name="mock")
-    etl_pretrain(config, backend="jax")
-    if False:
-        raise AssertionError
-    if False:
-        raise AssertionError
-    config = ETLConfig(dataset_name="mock", split="train", duckdb_path=":memory:", duckdb_table="users", tokenizer_name="mock")
-    etl_sft(config, backend="jax")
-    config = ETLConfig(dataset_name="mock", split="train", duckdb_path=":memory:", duckdb_table="users", tokenizer_name="mock")
-    etl_posttrain(config, backend="jax")
-
-
-def test_etl_duckdb_success_keras(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test ETL duckdb success for keras.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    mock_duckdb = MagicMock()
-    conn = MagicMock()
-    mock_duckdb.connect.return_value = conn
-    mock_df = MagicMock()
-    mock_df.to_dict.return_value = [{"sql_prompt": "Get users", "sql": "SELECT * FROM users"}]
-    conn.execute.return_value.fetchdf.return_value = mock_df
-    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.duckdb", mock_duckdb, raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.grain", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.datasets", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.keras", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.keras.etl.tf", MagicMock(), raising=False)
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
-    monkeypatch.setattr(get_backend("keras"), "build_dataloader", lambda *args, **kwargs: {"status": "mocked"})
-    config = ETLConfig(dataset_name="mock", split="train", duckdb_path=":memory:", duckdb_table="users", tokenizer_name="mock")
-    etl_pretrain(config, backend="keras")
-    if False:
-        raise AssertionError
-
-
-def test_etl_duckdb_success_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test ETL duckdb success for maxtext.
-
-    Raises:
-        AssertionError: Description.
-
-    """
-    mock_duckdb = MagicMock()
-    conn = MagicMock()
-    mock_duckdb.connect.return_value = conn
-    mock_df = MagicMock()
-    mock_df.to_dict.return_value = [{"sql_prompt": "Get users", "sql": "SELECT * FROM users"}]
-    conn.execute.return_value.fetchdf.return_value = mock_df
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.duckdb", mock_duckdb, raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.grain", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.datasets", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.maxtext.etl.jax", MagicMock(), raising=False)
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
-    monkeypatch.setattr(get_backend("maxtext"), "build_dataloader", lambda *args, **kwargs: {"status": "mocked"})
-    config = ETLConfig(dataset_name="mock", split="train", duckdb_path=":memory:", duckdb_table="users", tokenizer_name="mock")
-    etl_pretrain(config, backend="maxtext")
-    if False:
-        raise AssertionError
-
-
-def test_etl_duckdb_success_pytorch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test ETL duckdb success for pytorch."""
+@pytest.fixture
+def seeded_duckdb_file(tmp_path: Path) -> str:
+    """Create a real temporary DuckDB database file populated with SQL training rows."""
     import duckdb
 
-    db_file = str(tmp_path / "test.duckdb")
+    db_file = str(tmp_path / "etl.duckdb")
     conn = duckdb.connect(db_file)
-    conn.execute("CREATE TABLE users (id INT, sql_prompt TEXT, sql TEXT)")
-    conn.execute("INSERT INTO users VALUES (1, 'Get users', 'SELECT * FROM users')")
+    conn.execute("CREATE TABLE sql_train (question VARCHAR, query VARCHAR)")
+    conn.execute("INSERT INTO sql_train VALUES ('List all users', 'SELECT * FROM users;')")
+    conn.execute("INSERT INTO sql_train VALUES ('Count active orders', 'SELECT COUNT(*) FROM orders WHERE active = 1;')")
     conn.close()
+    return db_file
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.DataLoader", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.Dataset", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.torch", MagicMock(), raising=False)
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.etl.datasets", MagicMock(), raising=False)
-    config = ETLConfig(dataset_name="mock", split="train", duckdb_path=db_file, duckdb_table="users", tokenizer_name="mock")
-    etl_pretrain(config, backend="pytorch")
+
+def test_real_duckdb_etl_stages(seeded_duckdb_file: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify etl_pretrain, etl_sft, and etl_posttrain load real rows from a DuckDB file across backends."""
+    rows = load_duckdb_dataset(seeded_duckdb_file, "sql_train")
+    assert len(rows) == 2
+    assert rows[0] == {"question": "List all users", "query": "SELECT * FROM users;"}
+    assert rows[1] == {"question": "Count active orders", "query": "SELECT COUNT(*) FROM orders WHERE active = 1;"}
+
+    # MLX backend uses pure Python MLXDataLoader over the real DuckDB rows
+    monkeypatch.setattr("gemma_4_sql.backends.mlx.etl.datasets", object(), raising=False)
+    config = ETLConfig(
+        dataset_name="local_duckdb",
+        split="train",
+        batch_size=2,
+        duckdb_path=seeded_duckdb_file,
+        duckdb_table="sql_train",
+    )
+
+    res_pre = etl_pretrain(config, backend="mlx")
+    assert res_pre["status"] == "loaded"
+    assert res_pre["backend"] == "mlx"
+    loader_pre: Any = res_pre.get("loader")
+    batches_pre = list(loader_pre)
+    assert len(batches_pre) == 1
+    assert len(batches_pre[0]["inputs"]) == 2
+    assert len(batches_pre[0]["targets"]) == 2
+
+    res_sft = etl_sft(config, backend="mlx")
+    assert res_sft["status"] == "loaded"
+    batches_sft = list(res_sft.get("loader") or ())
+    assert len(batches_sft) == 1
+
+    res_post = etl_posttrain(config, backend="mlx")
+    assert res_post["status"] == "loaded"
+    batches_post = list(res_post.get("loader") or ())
+    assert len(batches_post) == 1
+
+
+@pytest.mark.parametrize("backend", ["jax", "keras", "maxtext"])
+def test_duckdb_etl_grain_backends(
+    seeded_duckdb_file: str,
+    backend: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify Grain-based backends (jax, keras, maxtext) load real rows from DuckDB."""
+    mock_grain = MagicMock()
+    mock_grain.RandomAccessDataSource = object
+    mock_grain.MapTransform = object
+    monkeypatch.setattr(f"gemma_4_sql.backends.{backend}.etl.grain", mock_grain, raising=False)
+    monkeypatch.setattr(f"gemma_4_sql.backends.{backend}.etl.datasets", object(), raising=False)
+
+    config = ETLConfig(
+        dataset_name="local_duckdb",
+        split="train",
+        duckdb_path=seeded_duckdb_file,
+        duckdb_table="sql_train",
+    )
+    res = etl_pretrain(config, backend=backend)
+    assert res["status"] == "loaded"
+    assert res["backend"] == backend
+    call_kwargs = mock_grain.DataLoader.call_args.kwargs
+    source = call_kwargs["data_source"]
+    assert len(source) == 2
+    assert source[0] == {"question": "List all users", "query": "SELECT * FROM users;"}
+
+
+def test_duckdb_etl_invalid_table_raises(seeded_duckdb_file: str) -> None:
+    """Verify load_duckdb_dataset rejects unsafe SQL injection table names and non-existent tables."""
+    with pytest.raises(ETLError, match="Invalid or unsafe table name"):
+        load_duckdb_dataset(seeded_duckdb_file, "sql_train; DROP TABLE sql_train")
+
+    with pytest.raises(ETLError, match="DuckDB error"):
+        load_duckdb_dataset(seeded_duckdb_file, "nonexistent_table")

@@ -7,5 +7,5 @@ pytestmark = requires_keras
 
 
 def test_get_trainer():
-    """Execute and verify `test_get_trainer` behavior and invariants."""
+    """Verify get trainer behavior."""
     assert get_trainer() == "keras_trainer"

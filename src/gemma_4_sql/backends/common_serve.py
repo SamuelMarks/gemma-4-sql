@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
@@ -15,7 +15,7 @@ from gemma_4_sql.type_hints import JSONDict
 if TYPE_CHECKING:
     from fastapi import Request
 
-    from gemma_4_sql.type_hints import ServeResultDict
+    from gemma_4_sql.type_hints import FastAPIAppProtocol, ServeResultDict
 else:
     Request = optional_attr("fastapi", "Request")
 
@@ -98,7 +98,7 @@ def create_common_app(
     max_batch_size: int = 32,
     max_wait_ms: float = 10.0,
     require_handlers: bool = False,
-) -> object:
+) -> FastAPIAppProtocol:
     """Create a common FastAPI application for model serving with continuous batching.
 
     Args:
@@ -195,8 +195,8 @@ def create_common_app(
                 worker_task = None
 
         req_any: Any = request
-        data = await req_any.json()
-        validated_req = GenerateRequest.from_dict(cast(dict[str, Any], data))
+        data: Any = await req_any.json()
+        validated_req = GenerateRequest.from_dict(data)
         prompt = validated_req.prompt
         if validated_req.image_base64 or validated_req.audio_base64 or validated_req.image_path or validated_req.audio_path:
             from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
@@ -303,7 +303,7 @@ def create_backend_serve_app(
     startup_callback: Callable[[], None] | None = None,
     batch_generate_logic: Callable[[list[str]], list[str]] | None = None,
     max_batch_size: int = 32,
-) -> object:
+) -> FastAPIAppProtocol:
     """Create a FastAPI continuous batching application wrapping a backend's `generate_sql` function.
 
     Args:
@@ -350,7 +350,7 @@ def serve_model_wrapper(
     port: int,
     max_batch_size: int,
     missing_deps: bool,
-    app_factory: Callable[[], object],
+    app_factory: Callable[[], FastAPIAppProtocol],
     run_server: bool = False,
     host: str = "0.0.0.0",
 ) -> ServeResultDict:

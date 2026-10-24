@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import collections.abc
 import logging
 import math
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.exceptions import ConfigurationError, SQLSafetyViolationError
 from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
@@ -16,6 +17,8 @@ from gemma_4_sql.sdk.adapters.snowflake_adapter import SnowflakeAdapter
 from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from typing_extensions import Self
 
     from gemma_4_sql.type_hints import JSONPrimitive
@@ -54,13 +57,13 @@ _DANGEROUS_KEYWORDS = frozenset({
 
 _SQL_TOKEN_PATTERN = re.compile(
     r"""
-    ('(?:''|[^'])*')            | # Single-quoted string literal
-    ("(?:""|[^"])*")            | # Double-quoted identifier/literal
-    (`[^`]*`)                   | # Backtick-quoted identifier
+    (\$(?P<dtag>[A-Za-z0-9_]*)\$[\s\S]*?\$(?P=dtag)\$) | # PostgreSQL dollar-quoted string literal
+    ('(?:''|\\.|[^'\\])*')      | # Single-quoted string literal (SQL & backslash escapes)
+    ("(?:""|\\.|[^"\\])*")      | # Double-quoted identifier/literal
+    (`(?:``|[^`])*`)            | # Backtick-quoted identifier
     (\[[^\]]*\])                | # Bracket-quoted identifier
     (/\*[\s\S]*?\*/)            | # Block comment
-    (--[^
-]*)                  # Single-line comment
+    (--[^\n]*)                    # Single-line comment
     """,
     re.VERBOSE,
 )
@@ -111,7 +114,8 @@ class LiveDatabaseEngine:
         """
         self.db_path = db_path
         self.db_type = db_type.lower()
-        self.db_kwargs: dict[str, object] = cast(dict[str, object], kwargs.get("db_kwargs", {}))
+        raw_db_kwargs = kwargs.get("db_kwargs")
+        self.db_kwargs: dict[str, object] = dict(raw_db_kwargs) if isinstance(raw_db_kwargs, collections.abc.Mapping) else {}
         self.read_only: bool = bool(kwargs.get("read_only", True))
         adapter_cls = _ADAPTERS.get(self.db_type)
         if adapter_cls is None:
@@ -119,7 +123,8 @@ class LiveDatabaseEngine:
             raise ConfigurationError(msg)
         self.adapter = adapter_cls(self.db_path, self.db_kwargs, read_only=self.read_only)
         self.conn = self.adapter.conn
-        if ddl:
+        self._pending_ddl: str | None = ddl if kwargs.get("defer_ddl") else None
+        if ddl and not kwargs.get("defer_ddl"):
             self.setup_schema(ddl)
 
     def connect(self) -> object:
@@ -132,13 +137,18 @@ class LiveDatabaseEngine:
         return self.adapter.connect()
 
     async def connect_async(self) -> object:
-        """Asynchronously connect to the underlying database.
+        """Asynchronously connect to the underlying database and apply any deferred DDL.
 
         Returns:
             The active asynchronous database connection object.
 
         """
-        return await self.adapter.connect_async()
+        conn = await self.adapter.connect_async()
+        if self._pending_ddl:
+            ddl_to_run = self._pending_ddl
+            self._pending_ddl = None
+            await self.setup_schema_async(ddl_to_run)
+        return conn
 
     def _validate_safety(self, query: str) -> None:
         """Ensure the query is safe to execute when `read_only` is True.
@@ -180,6 +190,15 @@ class LiveDatabaseEngine:
         finally:
             self.read_only = old_ro
             self.adapter.read_only = old_ro
+
+    async def setup_schema_async(self, ddl: str) -> None:
+        """Asynchronously execute DDL statements to construct the database schema without blocking the event loop.
+
+        Args:
+            ddl: The Data Definition Language (DDL) string.
+
+        """
+        await asyncio.to_thread(self.setup_schema, ddl)
 
     def execute_with_feedback(
         self,
@@ -316,8 +335,8 @@ class LiveDatabaseEngine:
 
     def _compare_results(
         self,
-        pred_results: list[tuple[JSONPrimitive, ...]],
-        truth_results: list[tuple[JSONPrimitive, ...]],
+        pred_results: Sequence[tuple[JSONPrimitive, ...]],
+        truth_results: Sequence[tuple[JSONPrimitive, ...]],
         strict_order: bool,
     ) -> bool:
         """Compare two sets of database result rows.
@@ -387,8 +406,8 @@ class LiveDatabaseEngine:
         """Asynchronously close the underlying database connection."""
         close_async_fn = getattr(self.adapter, "close_async", None)
         if callable(close_async_fn):
-            res = close_async_fn()
-            await cast(Any, res)
+            res: Any = close_async_fn()
+            await res
         self.adapter.close()
 
     def close(self) -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
@@ -37,6 +37,7 @@ class PostgresAdapter(DatabaseAdapter):
 
         """
         self._async_conn: Any = None
+        self._closing_tasks: set[Any] = set()
         super().__init__(db_path, db_kwargs or {}, read_only=read_only)
 
     @property
@@ -157,23 +158,30 @@ class PostgresAdapter(DatabaseAdapter):
 
         """
         try:
-            async_conn = cast(Any, await self.connect_async())
+            async_conn: Any = await self.connect_async()
             query_params = params or ()
             records = await async_conn.fetch(query, *query_params)
             return [tuple(r.values()) for r in records]
         except self.error_classes as e:
+            self._async_conn = None
             logger.debug("Async Query execution failed: %s", e)
             raise DatabaseExecutionError(str(e), cause=e) from e
 
     async def close_async(self) -> None:
-        """Close the cached asynchronous `asyncpg` connection if open."""
+        """Close the cached asynchronous `asyncpg` connection and await any pending close tasks."""
+        if self._closing_tasks:
+            import asyncio
+
+            pending = list(self._closing_tasks)
+            self._closing_tasks.clear()
+            await asyncio.gather(*pending, return_exceptions=True)
         cached = getattr(self, "_async_conn", None)
+        self._async_conn = None
         if cached is not None:
             await cached.close()
-        self._async_conn = None
 
     def close(self) -> None:
-        """Close the synchronous database connection and close or schedule closure of cached async state."""
+        """Close the synchronous database connection and safely track or close cached async state."""
         cached = getattr(self, "_async_conn", None)
         self._async_conn = None
         if cached is not None and hasattr(cached, "close"):
@@ -182,5 +190,7 @@ class PostgresAdapter(DatabaseAdapter):
 
             with suppress(RuntimeError):
                 loop = asyncio.get_running_loop()
-                loop.create_task(cached.close())
+                task = loop.create_task(cached.close())
+                self._closing_tasks.add(task)
+                task.add_done_callback(self._closing_tasks.discard)
         super().close()

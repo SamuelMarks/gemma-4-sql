@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import threading
-from typing import Any, cast
+from typing import Any
 
 from gemma_4_sql.exceptions import ConfigurationError
 
@@ -35,9 +35,9 @@ def get_backend(name: str) -> BackendProtocol:
             return _BACKEND_CACHE[name]
 
         if not ENTRY_POINTS:
-            eps_all = importlib.metadata.entry_points()
-            eps_list: Any = cast(dict[str, Any], eps_all).get("gemma_4_sql.backends", []) if isinstance(eps_all, dict) else eps_all.select(group="gemma_4_sql.backends")
-            for ep in cast(list[Any], eps_list):
+            eps_all: Any = importlib.metadata.entry_points()
+            eps_list: Any = eps_all.get("gemma_4_sql.backends", []) if isinstance(eps_all, dict) else eps_all.select(group="gemma_4_sql.backends")
+            for ep in eps_list:
                 ENTRY_POINTS[ep.name] = ep
 
         if name not in ENTRY_POINTS:

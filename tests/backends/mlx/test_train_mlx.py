@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from gemma_4_sql.type_hints import TrainerState, TrainingConfig
 from tests.conftest import requires_mlx
 
@@ -17,18 +17,18 @@ pytestmark = requires_mlx
 def test_real_mlx_training_epochs_and_execute_train(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_training_epochs and _execute_train run real MLX forward/backward updates on a tiny nn.Module."""
     import mlx.core as mx
-    from mlx import nn
+    import mlx.nn as mlx_nn
 
     import gemma_4_sql.backends.mlx.train as train_module
 
-    class TinyMLXModel(nn.Module):
+    class TinyMLXModel(mlx_nn.Module):
         """Minimal MLX language model for supervised fine-tuning tests."""
 
         def __init__(self) -> None:
             """Initialize TinyMLXModel with embedding and output projection."""
             super().__init__()
-            self.embed = nn.Embedding(32, 8)
-            self.head = nn.Linear(8, 32)
+            self.embed = mlx_nn.Embedding(32, 8)
+            self.head = mlx_nn.Linear(8, 32)
 
         def __call__(self, x: Any) -> Any:
             """Compute logits from input token IDs."""
@@ -97,6 +97,8 @@ def test_train_model_lifecycle(monkeypatch: pytest.MonkeyPatch) -> None:
         mock_exec.side_effect = RuntimeError("err")
         res4 = train_module.train_model(config)
         assert "failed: err" in res4["status"]
+        with pytest.raises(TrainingError, match="err"):
+            train_module.train_model(config, raise_on_error=True)
 
     monkeypatch.setattr(train_module, "mx", None)
     with pytest.raises(DependencyMissingError):
