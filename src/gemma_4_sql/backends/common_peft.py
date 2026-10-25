@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError, TrainingError, resolve_raise_on_error
+from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError, PEFTError, resolve_raise_on_error
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -82,7 +82,7 @@ def apply_lora_wrapper(
     Raises:
         DependencyMissingError: Re-raised if raised by `inject_fn`.
         ConfigurationError: Re-raised if raised by `inject_fn`.
-        TrainingError: If `inject_fn` fails and `raise_on_error` is enabled.
+        PEFTError: If `inject_fn` fails and `raise_on_error` is enabled.
 
     """
     status = "completed"
@@ -94,7 +94,7 @@ def apply_lora_wrapper(
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, ImportError) as e:
         logger.exception("%s PEFT failed: ", backend_name)
         if resolve_raise_on_error(kwargs=dict(kwargs)):
-            raise TrainingError(
+            raise PEFTError(
                 f"{backend_name} PEFT failed: {e!s}",
                 backend=backend_name,
                 model_name=model_name,

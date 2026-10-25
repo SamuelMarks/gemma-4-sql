@@ -120,14 +120,7 @@ class LiveDatabaseEngine:
             ddl: The Data Definition Language (DDL) string.
 
         """
-        old_ro = self.read_only
-        self.read_only = False
-        self.adapter.read_only = False
-        try:
-            self.adapter.setup_schema(ddl)
-        finally:
-            self.read_only = old_ro
-            self.adapter.read_only = old_ro
+        self.adapter.setup_schema(ddl)
 
     async def setup_schema_async(self, ddl: str) -> None:
         """Asynchronously execute DDL statements to construct the database schema without blocking the event loop.
@@ -224,7 +217,7 @@ class LiveDatabaseEngine:
         self._validate_safety(query)
         return await self.adapter.execute_query_async(query, params)
 
-    def _has_top_level_order_by(self, query: str) -> bool:
+    def has_top_level_order_by(self, query: str) -> bool:
         """Detect presence of a top-level `ORDER BY` clause outside parentheses.
 
         Args:
@@ -248,7 +241,9 @@ class LiveDatabaseEngine:
                 return True
         return False
 
-    def _normalize_row(self, row: tuple[JSONPrimitive, ...]) -> tuple[JSONPrimitive, ...]:
+    _has_top_level_order_by = has_top_level_order_by
+
+    def normalize_row(self, row: tuple[JSONPrimitive, ...]) -> tuple[JSONPrimitive, ...]:
         """Normalize row values to handle float tolerance and `NULL`/`NaN` equivalents.
 
         Args:
@@ -271,7 +266,9 @@ class LiveDatabaseEngine:
                 normalized.append(val)
         return tuple(normalized)
 
-    def _compare_results(
+    _normalize_row = normalize_row
+
+    def compare_results(
         self,
         pred_results: Sequence[tuple[JSONPrimitive, ...]],
         truth_results: Sequence[tuple[JSONPrimitive, ...]],
@@ -291,7 +288,7 @@ class LiveDatabaseEngine:
 
         def _tag_row(row: tuple[JSONPrimitive, ...]) -> tuple[tuple[str, JSONPrimitive], ...]:
             """Tag each normalized cell with its canonical type category to prevent cross-type collisions."""
-            norm = self._normalize_row(row)
+            norm = self.normalize_row(row)
             tagged: list[tuple[str, JSONPrimitive]] = []
             for cell in norm:
                 if cell is None:
@@ -312,6 +309,8 @@ class LiveDatabaseEngine:
 
         return collections.Counter(norm_pred) == collections.Counter(norm_truth)
 
+    _compare_results = compare_results
+
     def compare_queries(self, predicted_sql: str, ground_truth_sql: str) -> bool:
         """Compare the execution results of two SQL queries synchronously.
 
@@ -330,8 +329,8 @@ class LiveDatabaseEngine:
         truth_ok, truth_results, _ = self.execute_with_feedback(ground_truth_sql)
         if not pred_ok or not truth_ok:
             return False
-        strict_order = self._has_top_level_order_by(ground_truth_sql)
-        return self._compare_results(pred_results, truth_results, strict_order)
+        strict_order = self.has_top_level_order_by(ground_truth_sql)
+        return self.compare_results(pred_results, truth_results, strict_order)
 
     async def compare_queries_async(self, predicted_sql: str, ground_truth_sql: str) -> bool:
         """Asynchronously compare the execution results of two SQL queries.
@@ -353,8 +352,8 @@ class LiveDatabaseEngine:
         )
         if not pred_ok or not truth_ok:
             return False
-        strict_order = self._has_top_level_order_by(ground_truth_sql)
-        return self._compare_results(pred_results, truth_results, strict_order)
+        strict_order = self.has_top_level_order_by(ground_truth_sql)
+        return self.compare_results(pred_results, truth_results, strict_order)
 
     async def close_async(self) -> None:
         """Asynchronously close the underlying database connection."""

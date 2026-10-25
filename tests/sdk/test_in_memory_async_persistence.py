@@ -44,6 +44,9 @@ async def test_sqlite_in_memory_async_persistence() -> None:
     res1, res2 = await asyncio.gather(q1, q2)
     assert res1 == [("Alice",)]
     assert res2 == [("Bob",)]
+    assert getattr(engine.adapter, "_async_conn", None) is not None
+    await engine.close_async()
+    assert getattr(engine.adapter, "_async_conn", None) is None
 
 
 @pytest.mark.asyncio
@@ -79,6 +82,7 @@ async def test_duckdb_in_memory_async_persistence(monkeypatch: pytest.MonkeyPatc
     res1, res2 = await asyncio.gather(t1, t2)
     assert res1 == [("Laptop",)]
     assert res2 == [("Phone",)]
+    await engine.close_async()
 
 
 @pytest.mark.asyncio
@@ -104,6 +108,7 @@ async def test_sqlite_async_rollback_on_error() -> None:
     # Verify state remains consistent
     res = await engine.execute_query_async("SELECT balance FROM accounts WHERE id = 1")
     assert res == [(100,)]
+    await engine.close_async()
 
 
 @pytest.mark.asyncio
@@ -124,3 +129,4 @@ async def test_sqlite_async_schema_migration() -> None:
 
     rows = await engine.execute_query_async("SELECT name, price FROM items WHERE id = 1")
     assert rows == [("hammer", 25)]
+    await engine.close_async()

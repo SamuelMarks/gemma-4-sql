@@ -18,15 +18,29 @@ duckdb = LazyLoader("duckdb").get_module()
 
 
 def _extract_duckdb_ddl(cur: Any) -> str:
-    """Extract CREATE TABLE DDL statements from DuckDB information_schema.
+    """Extract CREATE TABLE DDL statements from DuckDB metadata or information_schema.
+
+    Queries `duckdb_tables()` first to preserve full `CREATE TABLE` DDL including
+    constraints, primary keys, and defaults, falling back to `information_schema`
+    when `duckdb_tables()` is unavailable or empty.
 
     Args:
         cur: Active DuckDB connection or cursor.
 
     Returns:
-        Concatenated DDL string for all tables in the `'main'` schema.
+        Concatenated DDL string for all user tables in the `'main'` schema.
 
     """
+    try:
+        rows = cur.execute(
+            "SELECT sql FROM duckdb_tables() WHERE schema_name = 'main' AND internal = false AND sql IS NOT NULL",
+        ).fetchall()
+        sql_defs = [str(r[0]).strip() for r in rows if r and r[0]]
+        if sql_defs:
+            return chr(10).join(s if s.endswith(";") else f"{s};" for s in sql_defs)
+    except (RuntimeError, ValueError, TypeError, AttributeError, OSError):
+        pass
+
     tables = cur.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='main'",
     ).fetchall()

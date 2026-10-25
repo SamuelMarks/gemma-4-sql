@@ -11,6 +11,7 @@ from typing import Any
 
 from gemma_4_sql.backends.common_inference import BoundedLRUCache
 from gemma_4_sql.backends.lazy_loader import optional_attr
+from gemma_4_sql.sdk.adapters.base import strip_sql_comments
 from gemma_4_sql.type_hints import EmbedderModelProtocol
 
 MIN_SIMILARITY = 0.1
@@ -75,8 +76,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
         A dictionary mapping table names to lists of column names.
 
     """
-    cleaned_ddl = re.sub(r"/\*[\s\S]*?\*/", " ", ddl)
-    cleaned_ddl = re.sub(r"--[^\n]*", " ", cleaned_ddl)
+    cleaned_ddl = strip_sql_comments(ddl)
     schema: dict[str, list[str]] = {}
     pattern = re.compile(
         r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\.)?("[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\s*\(',
@@ -271,7 +271,7 @@ def _semantic_search(
         model: EmbedderModelProtocol = _get_sentence_transformer("all-MiniLM-L6-v2")
         table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]
 
-        schema_key = hashlib.md5(";;".join(table_docs).encode()).hexdigest()
+        schema_key = hashlib.sha256(";;".join(table_docs).encode()).hexdigest()
         _SCHEMA_EMBEDDING_CACHE.maxsize = MAX_SCHEMA_CACHE_SIZE
         cached_embeddings = _SCHEMA_EMBEDDING_CACHE.get_model(schema_key)
         if cached_embeddings is not None:
@@ -319,33 +319,57 @@ def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_ta
     return chr(10).join(context_lines)
 
 
-def build_rag_prompt(prompt: str, ddl: str | None = None, *, sql_prefix: str = "SELECT") -> str:
+def build_rag_prompt(
+    prompt: str,
+    ddl: str | None = None,
+    *,
+    sql_prefix: str = "SELECT",
+    top_k_tables: int = 2,
+    image_path: str | None = None,
+    audio_path: str | None = None,
+) -> str:
     """Build a prompt augmented with relevant schema information retrieved via RAG.
 
     Args:
         prompt: The original natural language prompt.
         ddl: Optional DDL string to extract schema context from.
         sql_prefix: Optional trailing SQL continuation prefix (defaults to `'SELECT'`; pass `''` to omit).
+        top_k_tables: Maximum number of relevant tables to include in the context.
+        image_path: Optional path to a schema diagram or ERD image for multimodal formatting.
+        audio_path: Optional path to a recorded query audio file for multimodal formatting.
 
     Returns:
         The augmented prompt string.
 
     """
     if not ddl:
-        return prompt
-    schema = extract_schema_entities(ddl)
-    context = retrieve_relevant_schema(prompt, schema)
-    if sql_prefix:
-        return f"""{context}
+        base_prompt = prompt
+    else:
+        schema = extract_schema_entities(ddl)
+        context = retrieve_relevant_schema(prompt, schema, top_k_tables=top_k_tables)
+        if sql_prefix:
+            base_prompt = f"""{context}
 
 -- Request:
 -- {prompt}
 
 {sql_prefix}"""
-    return f"""{context}
+        else:
+            base_prompt = f"""{context}
 
 -- Request:
 -- {prompt}"""
+
+    if image_path is not None or audio_path is not None:
+        from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
+
+        formatted = format_multimodal_prompt(
+            base_prompt,
+            has_image=image_path is not None,
+            has_audio=audio_path is not None,
+        )
+        return str(formatted.get("prompt", base_prompt))
+    return base_prompt
 
 
 __all__ = [

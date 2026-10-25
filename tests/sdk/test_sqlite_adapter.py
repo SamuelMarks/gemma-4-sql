@@ -127,7 +127,10 @@ async def test_sqlite_adapter_extra_coverage() -> None:
         assert ok_fb is True and rows_fb == [] and err_fb is None
         assert await adapter.execute_query_async("INSERT") == []
         assert sync_conn.committed == 2
-        assert sync_conn.closed == 2
+        assert sync_conn.closed == 0
+    adapter._async_conn = sync_conn
+    await adapter.close_async()
+    assert sync_conn.closed == 1
 
     class EmptyMockConn:
         """Mock connection without commit, rollback, or close attributes."""
@@ -160,7 +163,9 @@ async def test_sqlite_adapter_extra_coverage() -> None:
         with pytest.raises(RuntimeError, match="Mock error"):
             await adapter.execute_query_async("INSERT")
         assert err_sync_conn.rolled_back == 2
-        assert err_sync_conn.closed == 2
+    adapter._async_conn = err_sync_conn
+    adapter.close()
+    assert err_sync_conn.closed == 1
 
     class ErrorEmptyMockConn(EmptyMockConn):
         """Mock connection whose execute raises RuntimeError without rollback attribute."""
@@ -223,3 +228,7 @@ async def test_sqlite_adapter_extra_coverage() -> None:
     suc, _, err_msg = await adapter.execute_with_feedback_async("INSERT")
     assert suc is False
     assert err_msg == "err"
+
+    adapter._async_conn = mock_conn
+    adapter.close()
+    await adapter.close_async()

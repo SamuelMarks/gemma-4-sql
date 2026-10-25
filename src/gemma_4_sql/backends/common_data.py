@@ -303,8 +303,10 @@ def build_grain_dataloader(
     batch_size = config.batch_size
     distributed = config.distributed
     tokenizer_name = config.tokenizer_name
-    duckdb_path = str(config.duckdb_path or kwargs.get("duckdb_path") or "")
-    duckdb_table = str(config.duckdb_table or kwargs.get("duckdb_table") or "")
+    raw_dp = config.duckdb_path or kwargs.get("duckdb_path")
+    raw_dt = config.duckdb_table or kwargs.get("duckdb_table")
+    duckdb_path: str | None = str(raw_dp) if raw_dp else None
+    duckdb_table: str | None = str(raw_dt) if raw_dt else None
 
     if datasets_module is None or grain_module is None:
         raise DependencyMissingError(
@@ -393,9 +395,14 @@ def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
             msg = f"Invalid or unsafe table name: {table!r}"
             raise ValueError(msg)
         conn = duckdb_module.connect(db_path, read_only=True)
-        results: list[tuple[Any, ...]] = conn.execute(f'SELECT * FROM "{table}"').fetchall()
-        default_cols = [("col" + str(i),) for i in range(len(results[0]))] if results else []
-        desc_list: list[tuple[str, ...]] = getattr(conn, "description", default_cols)
+        cur = conn.execute(f'SELECT * FROM "{table}"')
+        results: list[tuple[Any, ...]] = cur.fetchall()
+        default_cols: list[tuple[str, ...]] = [("col" + str(i),) for i in range(len(results[0]))] if results else []
+        raw_desc = next(
+            (d for d in (getattr(conn, "description", None), getattr(cur, "description", None)) if isinstance(d, (list, tuple)) and d),
+            None,
+        )
+        desc_list: list[tuple[str, ...]] = list(raw_desc) if raw_desc is not None else default_cols
         columns = [desc[0] for desc in desc_list]
         return [dict(zip(columns, row)) for row in results]
     except (duckdb_error, ValueError, TypeError, OSError, RuntimeError, AttributeError) as e:

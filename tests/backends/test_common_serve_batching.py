@@ -26,32 +26,39 @@ def test_require_handlers() -> None:
 
 
 def test_common_serve_endpoints() -> None:
-    """Verify common serve endpoints behavior."""
-    app = create_common_app("pytorch", "test", generate_logic=lambda p: "SELECT 1;")
-    client = TestClient(app)
+    """Verify common serve endpoints behavior and lifespan worker cleanup."""
+    app = create_common_app("pytorch", "test", generate_logic=lambda _p: "SELECT 1;")
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+        assert client.get("/ready").status_code == 200
+        assert client.get("/v1/models").status_code == 200
 
-    with pytest.MonkeyPatch.context() as mp:
-        import asyncio
+    with TestClient(app) as client:
+        resp_async = client.post("/generate", json={"prompt": "async"})
+        assert resp_async.json()["sql"] == "SELECT 1;"
 
-        original_get = asyncio.get_running_loop
+        with pytest.MonkeyPatch.context() as mp:
+            import asyncio
 
-        def fake_get() -> Any:
-            """Provide fake get test helper."""
-            import inspect
+            original_get = asyncio.get_running_loop
+            first_call = True
 
-            f = inspect.currentframe()
-            if f and f.f_back and "common_serve.py" in f.f_back.f_code.co_filename:
-                raise RuntimeError("no loop")
-            return original_get()
+            def fake_get() -> Any:
+                """Raise RuntimeError on the first get_running_loop check inside generate()."""
+                nonlocal first_call
+                if first_call:
+                    import inspect
 
-        mp.setattr(asyncio, "get_running_loop", fake_get)
+                    f = inspect.currentframe()
+                    if f and f.f_back and f.f_back.f_code.co_name == "generate":
+                        first_call = False
+                        raise RuntimeError("no loop")
+                return original_get()
 
-        resp = client.post("/generate", json={"prompt": "sync"})
-        assert resp.json()["sql"] == "SELECT 1;"
+            mp.setattr(asyncio, "get_running_loop", fake_get)
 
-    assert client.get("/health").status_code == 200
-    assert client.get("/ready").status_code == 200
-    assert client.get("/v1/models").status_code == 200
+            resp = client.post("/generate", json={"prompt": "sync"})
+            assert resp.json()["sql"] == "SELECT 1;"
 
 
 @pytest.mark.asyncio
@@ -122,7 +129,10 @@ def test_serve_model_wrapper() -> None:
     res2 = serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=False, app_factory=fail_factory, run_server=False, port=8000)
     assert "failed:" in res2["status"]
 
-    from gemma_4_sql.exceptions import DependencyMissingError
+    from gemma_4_sql.exceptions import DependencyMissingError, ServingError
+
+    with pytest.raises(ServingError, match="failed factory"):
+        serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=False, app_factory=fail_factory, run_server=False, port=8000, raise_on_error=True)
 
     with pytest.raises(DependencyMissingError, match="Dependencies missing for backend: pytorch"):
         serve_model_wrapper("pytorch", "test", max_batch_size=32, missing_deps=True, app_factory=fail_factory, run_server=False, port=8000)

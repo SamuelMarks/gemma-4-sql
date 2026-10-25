@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError, ServingError, resolve_raise_on_error
 from gemma_4_sql.type_hints import JSONDict
 
 if TYPE_CHECKING:
@@ -122,12 +123,32 @@ def create_common_app(
         msg = f"At least one generation logic callback must be provided for backend '{backend_name}'."
         raise ValueError(msg)
 
-    app = FastAPI(title=f"{backend_name.title()} Serve: {model_name}")
     request_queue: asyncio.Queue[dict[str, Any]] | None = None
     worker_task: asyncio.Task[None] | None = None
 
+    @contextlib.asynccontextmanager
+    async def _lifespan(_app: Any) -> AsyncGenerator[None, None]:
+        """Manage continuous batching background worker lifecycle on FastAPI startup and shutdown."""
+        nonlocal request_queue, worker_task
+        try:
+            yield
+        finally:
+            task = worker_task
+            worker_task = None
+            request_queue = None
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+    app = FastAPI(title=f"{backend_name.title()} Serve: {model_name}", lifespan=_lifespan)
+
     if startup_callback is not None:
         startup_callback()
+
+    def _run_seq(fn: Callable[[str], str], ps: list[str]) -> list[str]:
+        """Run single-prompt generation sequentially across a batch of prompts."""
+        return [fn(p) for p in ps]
 
     async def _batching_worker() -> None:
         """Background worker that bundles incoming requests and invokes batched inference."""
@@ -149,12 +170,12 @@ def create_common_app(
             prompts = [item["prompt"] for item in batch]
             try:
                 if batch_generate_logic is not None:
-                    sql_responses = batch_generate_logic(prompts)
+                    sql_responses = await asyncio.to_thread(batch_generate_logic, prompts)
                     if len(sql_responses) != len(prompts):
                         msg = f"Batch generation returned {len(sql_responses)} results for {len(prompts)} prompts."
                         raise ValueError(msg)
                 elif generate_logic is not None:
-                    sql_responses = [generate_logic(p) for p in prompts]
+                    sql_responses = await asyncio.to_thread(_run_seq, generate_logic, prompts)
                 else:
                     msg = f"No generation logic registered for backend '{backend_name}'."
                     raise NotImplementedError(msg)
@@ -185,13 +206,18 @@ def create_common_app(
 
         """
         nonlocal request_queue, worker_task
-        if request_queue is None:
+        try:
+            loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if request_queue is None or (worker_task is not None and loop is not None and worker_task.get_loop() is not loop):
             request_queue = asyncio.Queue()
+            worker_task = None
         if worker_task is None or worker_task.done():
-            try:
-                loop = asyncio.get_running_loop()
+            if loop is not None:
                 worker_task = loop.create_task(_batching_worker())
-            except RuntimeError:
+            else:
                 worker_task = None
 
         req_any: Any = request
@@ -333,7 +359,7 @@ def create_backend_serve_app(
                 return str(sql)
             msg = f"{display_name} inference returned empty SQL for prompt '{prompt}'"
             raise InferenceError(msg, backend=backend_name)
-        except Exception as e:
+        except (InferenceError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
             if isinstance(e, InferenceError):
                 raise
             msg = f"{display_name} generation failed: {e}"
@@ -362,6 +388,9 @@ def serve_model_wrapper(
     app_factory: Callable[[], FastAPIAppProtocol],
     run_server: bool = False,
     host: str = "0.0.0.0",
+    *,
+    raise_on_error: bool | None = None,
+    **kwargs: object,
 ) -> ServeResultDict:
     """Wrap serving logic to unify exception handling and result formatting.
 
@@ -374,16 +403,17 @@ def serve_model_wrapper(
         app_factory: Factory callback to create the FastAPI application.
         run_server: Whether to run the uvicorn HTTP server.
         host: Network host binding interface.
+        raise_on_error: Whether to raise `ServingError` when `app_factory` or server startup fails.
+        **kwargs: Additional keyword options inspected by `resolve_raise_on_error`.
 
     Returns:
         The execution status dictionary.
 
     Raises:
         DependencyMissingError: If FastAPI, uvicorn, or backend dependencies are missing.
+        ServingError: If `raise_on_error` is enabled and server initialization fails.
 
     """
-    from gemma_4_sql.exceptions import DependencyMissingError
-
     if missing_deps:
         raise DependencyMissingError(f"Dependencies missing for backend: {backend_name}")
 
@@ -391,6 +421,7 @@ def serve_model_wrapper(
         msg = "FastAPI and uvicorn are required for serving."
         raise DependencyMissingError(msg)
 
+    should_raise = resolve_raise_on_error(raise_on_error=raise_on_error, kwargs=dict(kwargs))
     app = None
     try:
         app = app_factory()
@@ -398,8 +429,16 @@ def serve_model_wrapper(
         logger.info("Starting %s server on port %d", backend_name.title(), port)
         if run_server:
             uvicorn.run(app, host=host, port=port)
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to start %s serve: ", backend_name)
+        if should_raise:
+            raise ServingError(
+                f"Failed to start {backend_name} serve: {e!s}",
+                backend=backend_name,
+                model_name=model_name,
+                operation="serve",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
         app = None
 

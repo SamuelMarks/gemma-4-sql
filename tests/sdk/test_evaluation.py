@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, EvaluationError
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.evaluation import (
     _process_batch_inputs,
@@ -126,24 +126,70 @@ def test_compute_metrics_with_live_sqlite() -> None:
         engine.close()
 
 
-def test_evaluate_mock_predictions() -> None:
-    """Verify evaluate aggregates confidence scores and metrics."""
-    with (
-        patch("gemma_4_sql.sdk.evaluation.compute_metrics", return_value={"exact_match": 1.0, "valid_sql": 1.0, "execution_accuracy": 1.0}),
-        patch("gemma_4_sql.sdk.registry.get_backend"),
-        patch("gemma_4_sql.sdk.evaluation._run_evaluation_inference", return_value=(["s1"], ["s1"], [1.0])),
-    ):
-        res = evaluate("model", "dataset")
-        assert res["metrics"]["exact_match"] == pytest.approx(1.0)
-        assert res["metrics"].get("mean_confidence") == pytest.approx(1.0)
+def test_evaluate_end_to_end_and_engine_close_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify evaluate runs end-to-end with real compute_metrics and closes LiveDatabaseEngine if inference raises."""
+    tokenizer = SQLTokenizer(model_name=None)
+    encoded_prompt = tokenizer.encode("Count users")
+    encoded_truth = tokenizer.encode("SELECT COUNT(*) FROM users")
+
+    jax_agent = get_backend("jax")
+    monkeypatch.setattr(
+        jax_agent,
+        "build_dataloader",
+        lambda *_a, **_k: {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_truth]}]},
+    )
+    monkeypatch.setattr(
+        jax_agent,
+        "generate_sql",
+        lambda *_a, **_k: {"sql": "SELECT COUNT(*) FROM users", "confidence_score": 0.99, "status": "success"},
+    )
+    res = evaluate(
+        "model",
+        "dataset",
+        backend="jax",
+        ddl="CREATE TABLE users (id INT); INSERT INTO users VALUES (1), (2);",
+    )
+    assert res["metrics"]["exact_match"] == pytest.approx(1.0)
+    assert res["metrics"]["execution_accuracy"] == pytest.approx(1.0)
+    assert res["metrics"].get("mean_confidence") == pytest.approx(0.99)
+
+    closed = False
+    orig_close = LiveDatabaseEngine.close
+
+    def tracking_close(self: LiveDatabaseEngine) -> None:
+        """Track engine close on exception."""
+        nonlocal closed
+        closed = True
+        orig_close(self)
+
+    monkeypatch.setattr(LiveDatabaseEngine, "close", tracking_close)
+    monkeypatch.setattr(jax_agent, "build_dataloader", lambda *_a, **_k: {"loader": None})
+    with pytest.raises(EvaluationError, match="Valid iterable dataloader is required"):
+        evaluate("model", "dataset", backend="jax")
+    assert closed is True
+
+
+@pytest.mark.asyncio
+async def test_compute_metrics_inside_running_event_loop() -> None:
+    """Verify synchronous compute_metrics succeeds when invoked inside an active asyncio event loop."""
+    with LiveDatabaseEngine(":memory:", ddl="CREATE TABLE t (x INT); INSERT INTO t VALUES (7);") as engine:
+        metrics = compute_metrics(engine, ["SELECT x FROM t"], ["SELECT x FROM t"])
+        assert metrics["exact_match"] == pytest.approx(1.0)
+        assert metrics["execution_accuracy"] == pytest.approx(1.0)
 
 
 def test_run_evaluation_inference_no_dataloader() -> None:
-    """Verify _run_evaluation_inference raises ValueError when dataloader is None."""
+    """Verify _run_evaluation_inference raises EvaluationError when dataloader is None or backend fails."""
     backend_impl = MagicMock()
     backend_impl.build_dataloader.return_value = {"loader": None}
-    with pytest.raises(ValueError, match="Valid iterable dataloader is required for evaluation"):
+    with pytest.raises(EvaluationError, match="Valid iterable dataloader is required for evaluation"):
         _run_evaluation_inference("model", "dataset", backend_impl)
+
+    backend_impl.build_dataloader.return_value = {"loader": [{"inputs": [[65]], "targets": [[65]]}]}
+    backend_impl.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 0.9, "status": "failed: boom"}
+    preds, _truths, scores = _run_evaluation_inference("model", "dataset", backend_impl)
+    assert preds == [""]
+    assert scores == [0.0]
 
 
 @pytest.mark.asyncio

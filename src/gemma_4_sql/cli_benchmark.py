@@ -10,9 +10,25 @@ from gemma_4_sql.sdk import benchmark
 
 if TYPE_CHECKING:
     import argparse
+    from typing import Protocol
+
+    class BenchmarkArgsProtocol(Protocol):
+        """Protocol for parsed `benchmark` CLI arguments."""
+
+        model: str
+        hardware: str
+        batch_size: int
+        backend: str
+        dtype: str
+        mode: str
+        max_new_tokens: int
+        warmup_steps: int
+        image_path: str | None
+        audio_path: str | None
+        modality: str
 
 
-def benchmark_cmd(args: argparse.Namespace) -> int:
+def benchmark_cmd(args: argparse.Namespace | BenchmarkArgsProtocol) -> int:
     """Benchmark a model on target hardware.
 
     Args:
@@ -31,9 +47,9 @@ def benchmark_cmd(args: argparse.Namespace) -> int:
         mode=args.mode,
         max_new_tokens=args.max_new_tokens,
         warmup_steps=args.warmup_steps,
-        image_path=getattr(args, "image_path", None),
-        audio_path=getattr(args, "audio_path", None),
-        modality=getattr(args, "modality", "text"),
+        image_path=args.image_path,
+        audio_path=args.audio_path,
+        modality=args.modality,
     )
     print(json.dumps(res, indent=2))
     return 1 if is_failed_status(res) else 0

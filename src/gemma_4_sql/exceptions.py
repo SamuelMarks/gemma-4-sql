@@ -237,6 +237,30 @@ class TrainingError(GemmaSQLError, RuntimeError, ValueError):
         )
 
 
+class ChatError(InferenceError):
+    """Raised when a multi-turn conversational SQL chat turn fails."""
+
+
+class EvaluationError(GemmaSQLError, ValueError):
+    """Raised when model evaluation or metric computation fails."""
+
+
+class ServingError(GemmaSQLError, RuntimeError):
+    """Raised when continuous batching or model serving initialization fails."""
+
+
+class BenchmarkError(GemmaSQLError, RuntimeError):
+    """Raised when hardware benchmarking execution fails."""
+
+
+class PEFTError(TrainingError):
+    """Raised when Parameter-Efficient Fine-Tuning (PEFT / LoRA) injection fails."""
+
+
+class QuantizationError(GemmaSQLError, RuntimeError, ValueError):
+    """Raised when model quantization execution fails."""
+
+
 class ETLError(GemmaSQLError, RuntimeError):
     """Raised when dataset loading, DuckDB ingestion, or DataLoader construction fails."""
 
@@ -317,16 +341,22 @@ def is_failed_status(result: object) -> bool:
 
 
 __all__ = [
+    "BenchmarkError",
+    "ChatError",
     "ConfigurationError",
     "DatabaseExecutionError",
     "DependencyMissingError",
     "ETLError",
+    "EvaluationError",
     "ExecutionStatus",
     "ExportError",
     "GemmaSQLError",
     "InferenceError",
+    "PEFTError",
+    "QuantizationError",
     "SQLSafetyViolationError",
     "SchemaExtractionError",
+    "ServingError",
     "TrainingError",
     "UnsupportedQuantizationMethodError",
     "is_failed_status",

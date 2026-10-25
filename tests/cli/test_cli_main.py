@@ -169,12 +169,36 @@ def test_cli_evaluate_and_agent(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
     assert cli(["agent", "--model", "test-model", "--prompt", "Find users", "--backend", "jax", "--db-kwargs", '{"timeout": 10}']) == 0
     capsys.readouterr()
 
-    eval_args = argparse.Namespace(model="d", dataset="d", backend="d", db_path="d", ddl="d", db_type="d", db_kwargs=json.dumps({"key": "value"}))
+    eval_args = argparse.Namespace(
+        model="d",
+        dataset="d",
+        backend="d",
+        db_path="d",
+        ddl="d",
+        db_type="d",
+        max_batches=10,
+        image_path=None,
+        audio_path=None,
+        modality="text",
+        db_kwargs=json.dumps({"key": "value"}),
+    )
     monkeypatch.setattr("gemma_4_sql.cli_serve.evaluate", lambda **kw: {"status": "evaluated"} if kw.get("db_kwargs") == {"key": "value"} else {})
     evaluate_cmd(eval_args)
     assert "evaluated" in capsys.readouterr().out
 
-    eval_args_empty = argparse.Namespace(model="d", dataset="d", backend="d", db_path="d", ddl="d", db_type="d", db_kwargs="")
+    eval_args_empty = argparse.Namespace(
+        model="d",
+        dataset="d",
+        backend="d",
+        db_path="d",
+        ddl="d",
+        db_type="d",
+        max_batches=10,
+        image_path=None,
+        audio_path=None,
+        modality="text",
+        db_kwargs="",
+    )
     monkeypatch.setattr("gemma_4_sql.cli_serve.evaluate", lambda **_k: {})
     evaluate_cmd(eval_args_empty)
     assert capsys.readouterr().out.strip() == "{}"
@@ -187,13 +211,30 @@ def test_cli_evaluate_and_agent(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
         ddl="d",
         db_type="d",
         max_retries=1,
+        min_confidence=0.0,
+        image_path=None,
+        audio_path=None,
+        modality="text",
         db_kwargs=json.dumps({"key": "value"}),
     )
     monkeypatch.setattr("gemma_4_sql.cli_serve.run_agentic_loop", lambda **kw: {"status": "agent_run"} if kw.get("db_kwargs") == {"key": "value"} else {})
     agent_cmd(agent_args)
     assert "agent_run" in capsys.readouterr().out
 
-    agent_args_empty = argparse.Namespace(model="d", prompt="d", backend="d", db_path="d", ddl="d", db_type="d", max_retries=1, db_kwargs="")
+    agent_args_empty = argparse.Namespace(
+        model="d",
+        prompt="d",
+        backend="d",
+        db_path="d",
+        ddl="d",
+        db_type="d",
+        max_retries=1,
+        min_confidence=0.0,
+        image_path=None,
+        audio_path=None,
+        modality="text",
+        db_kwargs="",
+    )
     monkeypatch.setattr("gemma_4_sql.cli_serve.run_agentic_loop", lambda **_k: {})
     agent_cmd(agent_args_empty)
     assert capsys.readouterr().out.strip() == "{}"
@@ -220,19 +261,32 @@ def test_cli_generate_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.C
     )
     capsys.readouterr()
 
+    gen_base = {
+        "model": "d",
+        "prompt": "d",
+        "backend": "d",
+        "beam_width": 3,
+        "max_length": 50,
+        "temperature": 1.0,
+        "top_p": 1.0,
+        "seed": 42,
+        "image_path": None,
+        "audio_path": None,
+        "modality": "text",
+    }
     monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "SELECT 1;", "confidence_score": 0.95})
-    generate_cmd(argparse.Namespace(model="d", prompt="d", backend="d", beam_width=3, max_length=50, show_confidence=True))
+    generate_cmd(argparse.Namespace(**gen_base, show_confidence=True))
     out_conf = capsys.readouterr().out
     assert "SELECT 1;" in out_conf
     assert "Confidence: 0.9500" in out_conf
 
-    generate_cmd(argparse.Namespace(model="d", prompt="d", backend="d", beam_width=3, max_length=50, show_confidence=False))
+    generate_cmd(argparse.Namespace(**gen_base, show_confidence=False))
     out_no_conf = capsys.readouterr().out
     assert "SELECT 1;" in out_no_conf
     assert "Confidence" not in out_no_conf
 
     monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": ""})
-    generate_cmd(argparse.Namespace(model="d", prompt="d", backend="d", beam_width=3, max_length=50, show_confidence=False))
+    generate_cmd(argparse.Namespace(**gen_base, show_confidence=False))
     assert capsys.readouterr().out == ""
 
 
@@ -302,7 +356,7 @@ def test_cli_execute_and_embed_duckdb(capsys: pytest.CaptureFixture[str]) -> Non
         capsys.readouterr()
 
     with patch.dict("sys.modules", {"duckdb": None}):
-        cli(["embed-duckdb"])
+        assert cli(["embed-duckdb"]) == 1
         capsys.readouterr()
 
 

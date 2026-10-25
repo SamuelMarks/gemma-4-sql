@@ -53,6 +53,31 @@ _SQL_TOKEN_PATTERN = re.compile(
 )
 
 
+_SQL_COMMENT_PATTERN = re.compile(
+    r"""
+    ('(?:''|\\.|[^'\\])*')      | # Single-quoted string literal
+    ("(?:""|\\.|[^"\\])*")      | # Double-quoted identifier/literal
+    (`(?:``|[^`])*`)            | # Backtick-quoted identifier
+    (\[[^\]]*\])                | # Bracket-quoted identifier
+    (?P<comment>/\*[\s\S]*?\*/|--[^\n]*) # Block or single-line comment
+    """,
+    re.VERBOSE,
+)
+
+
+def strip_sql_comments(query: str) -> str:
+    """Strip SQL block and single-line comments while preserving quoted literals and identifiers.
+
+    Args:
+        query: Raw SQL query or DDL string.
+
+    Returns:
+        SQL string with comments replaced by spaces and literals preserved intact.
+
+    """
+    return _SQL_COMMENT_PATTERN.sub(lambda m: " " if m.group("comment") is not None else m.group(0), query)
+
+
 def strip_comments_and_literals(query: str) -> str:
     """Replace SQL comments and quoted literals with spaces in a single lexical pass.
 

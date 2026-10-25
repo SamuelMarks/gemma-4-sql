@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import re
 from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
-from gemma_4_sql.exceptions import GemmaSQLError
+from gemma_4_sql.exceptions import EvaluationError, GemmaSQLError, is_failed_status
+from gemma_4_sql.sdk.adapters.base import strip_sql_comments
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.tokenization import SQLTokenizer
@@ -31,8 +33,7 @@ def normalize_sql(sql: str) -> str:
         The normalized SQL query string.
 
     """
-    cleaned = re.sub(r"/\*.*?\*/", " ", sql, flags=re.DOTALL)
-    cleaned = re.sub(r"--.*$", " ", cleaned, flags=re.MULTILINE)
+    cleaned = strip_sql_comments(sql)
 
     parts = re.split(r"""('[^']*'|"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\])""", cleaned)
     for i in range(0, len(parts), 2):
@@ -82,8 +83,8 @@ async def compute_metrics_async(
             (t_success, t_results, _) = await engine.execute_with_feedback_async(t)
 
             if p_success and t_success:
-                strict_order = engine._has_top_level_order_by(t)
-                ex = 1 if engine._compare_results(p_results, t_results, strict_order) else 0
+                strict_order = engine.has_top_level_order_by(t)
+                ex = 1 if engine.compare_results(p_results, t_results, strict_order) else 0
             else:
                 ex = 0
         except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, KeyError, AttributeError) as exc:
@@ -123,6 +124,17 @@ def compute_metrics(
         Dictionary containing `exact_match`, `valid_sql`, and `execution_accuracy` metrics.
 
     """
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is not None and running_loop.is_running():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(
+                asyncio.run,
+                compute_metrics_async(engine, preds, truths),
+            ).result()
     return asyncio.run(compute_metrics_async(engine, preds, truths))
 
 
@@ -183,18 +195,28 @@ def _run_evaluation_inference(
         Tuple of `(predictions, truths, confidence_scores)`.
 
     Raises:
-        ValueError: If valid iterable dataloader is missing.
+        EvaluationError: If valid iterable dataloader is missing.
 
     """
     preds: list[str] = []
     truths: list[str] = []
     confidence_scores: list[float] = []
-    data_dict = backend_impl.build_dataloader(ETLConfig(dataset_name=dataset_name, split="test", batch_size=1, modality=modality))
+    raw_tok_name = kwargs.get("tokenizer_name")
+    tokenizer_name = str(raw_tok_name) if isinstance(raw_tok_name, str) and raw_tok_name else None
+    data_dict = backend_impl.build_dataloader(
+        ETLConfig(
+            dataset_name=dataset_name,
+            split="test",
+            batch_size=1,
+            modality=modality,
+            tokenizer_name=tokenizer_name,
+        ),
+    )
     dataloader = data_dict.get("loader", None)
-    tokenizer = SQLTokenizer(model_name=None)
+    tokenizer = SQLTokenizer(model_name=tokenizer_name)
     if dataloader is None or not hasattr(dataloader, "__iter__"):
         msg = "Valid iterable dataloader is required for evaluation; dataset could not be constructed."
-        raise ValueError(msg)
+        raise EvaluationError(msg, model_name=model_name, operation="evaluate")
 
     limit = MAX_BATCHES if max_batches is None else int(max_batches)
     loader_iter: Any = dataloader
@@ -219,8 +241,10 @@ def _run_evaluation_inference(
             gen_kwargs["audio_values"] = batch["audio_values"]
 
         gen_res = backend_impl.generate_sql(model_name, prompt_text, **gen_kwargs)
-        preds.append(str(gen_res.get("sql", "")))
-        confidence_scores.append(float(str(gen_res.get("confidence_score", 0.0))))
+        sql_pred = "" if is_failed_status(gen_res) else str(gen_res.get("sql", ""))
+        conf_score = 0.0 if is_failed_status(gen_res) else float(str(gen_res.get("confidence_score", 0.0)))
+        preds.append(sql_pred)
+        confidence_scores.append(conf_score)
         truths.append(truth_text)
     return (preds, truths, confidence_scores)
 
@@ -256,32 +280,30 @@ def evaluate(
     audio_path = kwargs.get("audio_path")
     modality = str(kwargs.get("modality", "text"))
 
-    engine = LiveDatabaseEngine(db_path=db_path, ddl=ddl, db_type=str(db_type), db_kwargs=db_kwargs_dict)
+    with LiveDatabaseEngine(db_path=db_path, ddl=ddl, db_type=str(db_type), db_kwargs=db_kwargs_dict) as engine:
+        backend_impl = get_backend(backend)
 
-    backend_impl = get_backend(backend)
+        eval_kwargs = dict(kwargs)
+        eval_kwargs.pop("image_path", None)
+        eval_kwargs.pop("audio_path", None)
+        eval_kwargs.pop("modality", None)
+        raw_max_batches = eval_kwargs.pop("max_batches", max_batches)
+        resolved_max_batches = int(raw_max_batches) if isinstance(raw_max_batches, (int, float, str)) else max_batches
 
-    eval_kwargs = dict(kwargs)
-    eval_kwargs.pop("image_path", None)
-    eval_kwargs.pop("audio_path", None)
-    eval_kwargs.pop("modality", None)
-    raw_max_batches = eval_kwargs.pop("max_batches", max_batches)
-    resolved_max_batches = int(raw_max_batches) if isinstance(raw_max_batches, (int, float, str)) else max_batches
+        (preds, truths, confidence_scores) = _run_evaluation_inference(
+            model_name,
+            dataset_name,
+            backend_impl,
+            image_path=str(image_path) if image_path else None,
+            audio_path=str(audio_path) if audio_path else None,
+            modality=modality,
+            max_batches=resolved_max_batches,
+            **eval_kwargs,
+        )
 
-    (preds, truths, confidence_scores) = _run_evaluation_inference(
-        model_name,
-        dataset_name,
-        backend_impl,
-        image_path=str(image_path) if image_path else None,
-        audio_path=str(audio_path) if audio_path else None,
-        modality=modality,
-        max_batches=resolved_max_batches,
-        **eval_kwargs,
-    )
-
-    metrics = compute_metrics(engine, preds, truths)
-    if confidence_scores:
-        metrics["mean_confidence"] = sum(confidence_scores) / len(confidence_scores)
-    engine.close()
+        metrics = compute_metrics(engine, preds, truths)
+        if confidence_scores:
+            metrics["mean_confidence"] = sum(confidence_scores) / len(confidence_scores)
     res: EvaluationResultDict = {
         "backend": backend,
         "model": model_name,

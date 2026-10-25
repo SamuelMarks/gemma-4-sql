@@ -8,7 +8,7 @@ import pytest
 from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization, quantize_model_wrapper
 from gemma_4_sql.exceptions import (
     DependencyMissingError,
-    GemmaSQLError,
+    QuantizationError,
     UnsupportedQuantizationMethodError,
 )
 from gemma_4_sql.type_hints import get_quantized_artifact
@@ -47,8 +47,8 @@ def test_apply_bits_and_bytes_quantization_int4() -> None:
 def test_apply_bits_and_bytes_quantization_unsupported() -> None:
     """Verify apply bits and bytes quantization unsupported behavior."""
     mock_cls = MagicMock()
-    _reduction, status = apply_bits_and_bytes_quantization("unknown", mock_cls)
-    assert status == "unsupported_method_unknown"
+    with pytest.raises(UnsupportedQuantizationMethodError, match="Unsupported quantization method for BitsAndBytes: unknown"):
+        apply_bits_and_bytes_quantization("unknown", mock_cls)
 
 
 def test_apply_bits_and_bytes_quantization_with_model() -> None:
@@ -87,7 +87,7 @@ def test_quantize_model_wrapper() -> None:
     res = quantize_model_wrapper("b", "m", "int8", False, fail_fn)
     assert res["status"] == "failed: oops"
 
-    with pytest.raises(GemmaSQLError, match="oops"):
+    with pytest.raises(QuantizationError, match="oops"):
         quantize_model_wrapper("b", "m", "int8", False, fail_fn, raise_on_error=True)
 
     def unsupported_fn() -> Never:

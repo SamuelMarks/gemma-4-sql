@@ -351,3 +351,12 @@ def test_rag_successful_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     rag._semantic_search("third query", {"table3": ["c"]}, ["table3"], top_k_tables=1)
     assert len(rag._SCHEMA_EMBEDDING_CACHE) == 1
     rag.clear_rag_model_cache()
+
+    mm_prompt = rag.build_rag_prompt(
+        "Find users",
+        "CREATE TABLE users (id INT, name TEXT);",
+        image_path="schema.png",
+        audio_path="query.wav",
+    )
+    assert "<image>" in mm_prompt
+    assert "<audio>" in mm_prompt

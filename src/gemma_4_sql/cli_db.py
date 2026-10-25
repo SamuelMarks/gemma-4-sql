@@ -26,7 +26,7 @@ def db_execute_cmd(args: argparse.Namespace) -> int:
 
     """
     db_kwargs: dict[str, object] = {}
-    if getattr(args, "db_kwargs", ""):
+    if args.db_kwargs:
         db_kwargs = json.loads(args.db_kwargs)
     engine = LiveDatabaseEngine(db_path=args.db_path, ddl=args.ddl, db_type=args.db_type, db_kwargs=db_kwargs)
     (success, results, error) = engine.execute_with_feedback(args.query)
@@ -40,16 +40,19 @@ def db_execute_cmd(args: argparse.Namespace) -> int:
     return 0 if success else 3
 
 
-def embed_duckdb_cmd(args: argparse.Namespace) -> None:
+def embed_duckdb_cmd(args: argparse.Namespace) -> int:
     """Embed Gemma as a UDF in DuckDB and execute a prompt.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
 
+    Returns:
+        Exit code `0` on success, or `1` if DuckDB is unavailable.
+
     """
     duckdb = LazyLoader("duckdb").get_module()
     if duckdb is None:
-        return
+        return 1
     conn = duckdb.connect(args.db_path)
     if args.ddl:
         conn.execute(args.ddl)
@@ -65,3 +68,4 @@ def embed_duckdb_cmd(args: argparse.Namespace) -> None:
         for row in rows:
             print(str(row[0]))
     conn.close()
+    return 0

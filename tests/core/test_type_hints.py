@@ -35,6 +35,7 @@ from gemma_4_sql.type_hints import (
     TrainerState,
     TrainingConfig,
     TrainingLoopState,
+    clear_quantized_artifact_registry,
     get_quantized_artifact,
     register_quantized_artifact,
 )
@@ -119,7 +120,27 @@ def test_type_hints_dataclasses_and_defaults() -> None:
     assert artifact.is_quantized is True
     assert artifact.method == "awq"
     assert artifact.scales == {"w": 0.5}
-    assert get_quantized_artifact(dummy_model) is artifact
+    fetched = get_quantized_artifact(dummy_model)
+    assert fetched is not None
+    assert fetched.model is dummy_model
+    assert fetched.method == "awq"
+    assert fetched.scales == {"w": 0.5}
+
+    class _SlottedModel:
+        """Model without __weakref__ slot to exercise fallback registry."""
+
+        __slots__ = ("weight",)
+
+        def __init__(self) -> None:
+            """Initialize slotted model."""
+            self.weight = 1.0
+
+    slotted = _SlottedModel()
+    slotted_art = register_quantized_artifact(slotted, method="int4")
+    assert get_quantized_artifact(slotted) is slotted_art
+    clear_quantized_artifact_registry()
+    assert get_quantized_artifact(dummy_model) is None
+    assert get_quantized_artifact(slotted) is None
 
 
 def test_runtime_checkable_protocols() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +38,7 @@ class PostgresAdapter(DatabaseAdapter):
 
         """
         self._async_conn: Any = None
+        self._async_lock = asyncio.Lock()
         self._closing_tasks: set[Any] = set()
         super().__init__(db_path, db_kwargs or {}, read_only=read_only)
 
@@ -91,15 +93,16 @@ class PostgresAdapter(DatabaseAdapter):
         if asyncpg is None:
             msg = "asyncpg is required."
             raise DependencyMissingError(msg, dependency_name="asyncpg", backend="postgresql")
-        cached = getattr(self, "_async_conn", None)
-        if cached is not None:
-            return cached
-        if self.db_path and self.db_path != ":memory:":
-            conn = await asyncpg.connect(self.db_path, **self.db_kwargs)
-        else:
-            conn = await asyncpg.connect(**self.db_kwargs)
-        self._async_conn = conn
-        return conn
+        async with self._async_lock:
+            cached = getattr(self, "_async_conn", None)
+            if cached is not None:
+                return cached
+            if self.db_path and self.db_path != ":memory:":
+                conn = await asyncpg.connect(self.db_path, **self.db_kwargs)
+            else:
+                conn = await asyncpg.connect(**self.db_kwargs)
+            self._async_conn = conn
+            return conn
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL statements to initialize the PostgreSQL schema.

@@ -381,7 +381,7 @@ def test_common_multimodal_pure_python_fallbacks(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(cm, "Image", orig_image)
 
 
-def test_multimodal_edge_cases() -> None:
+def test_multimodal_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test edge cases in loading bytes and corrupted WAV headers."""
     import gemma_4_sql.backends.common_multimodal as cm
 
@@ -413,27 +413,22 @@ def test_multimodal_edge_cases() -> None:
     assert len(samples_j) > 0
 
     # Image available with MockPILImage and numpy None vs available
-    from tests.conftest import MockOpenedImage, MockPILImage
+    from tests.conftest import MockPILImage
 
-    assert MockOpenedImage().getpixel((0, 0)) == (255, 0, 0)
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(cm, "Image", MockPILImage)
-    res_img_with_pil = cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
-    assert res_img_with_pil["num_patches"] == 1
-    monkeypatch.setattr(cm, "np", None)
-    try:
+    with monkeypatch.context() as mp:
+        mp.setattr(cm, "Image", MockPILImage)
+        res_img_with_pil = cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
+        assert res_img_with_pil["num_patches"] == 1
+        mp.setattr(cm, "np", None)
         with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
             cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
-    finally:
-        monkeypatch.undo()
 
     # Corrupted WAV header triggering struct.error
     corrupt_wav = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 40
-    monkeypatch_unpack = pytest.MonkeyPatch()
-    monkeypatch_unpack.setattr("struct.unpack", lambda *a, **k: (_ for _ in ()).throw(struct.error("Corrupted WAV unpack")))
-    samples2, _rate2 = cm._parse_wav_samples(corrupt_wav)
-    assert len(samples2) > 0
-    monkeypatch_unpack.undo()
+    with monkeypatch.context() as mp:
+        mp.setattr("struct.unpack", lambda *_a, **_k: (_ for _ in ()).throw(struct.error("Corrupted WAV unpack")))
+        samples2, _rate2 = cm._parse_wav_samples(corrupt_wav)
+        assert len(samples2) > 0
 
     # PIL open raising OSError handled gracefully
     class _MockFailingPIL:
@@ -444,13 +439,10 @@ def test_multimodal_edge_cases() -> None:
             """Raise OSError to simulate corrupted image open."""
             raise OSError("Corrupted image")
 
-    monkeypatch_pil = pytest.MonkeyPatch()
-    monkeypatch_pil.setattr(cm, "Image", _MockFailingPIL)
-    try:
+    with monkeypatch.context() as mp:
+        mp.setattr(cm, "Image", _MockFailingPIL)
         with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
             cm.process_image(b"corrupted", target_size=(14, 14), patch_size=14)
-    finally:
-        monkeypatch_pil.undo()
 
     # Audio file not found
     with pytest.raises(FileNotFoundError, match="Audio file not found"):
@@ -490,13 +482,10 @@ def test_multimodal_edge_cases() -> None:
         cm.process_image(b"NOT_A_VALID_IMAGE_BYTES_PAYLOAD", target_size=(14, 14), patch_size=14)
 
     # Synthetic image fallback when numpy is None
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(cm, "np", None)
-    try:
+    with monkeypatch.context() as mp:
+        mp.setattr(cm, "np", None)
         with pytest.raises(ValueError):
             cm.process_image(b"NOT_A_VALID_IMAGE", target_size=(14, 14), patch_size=14)
-    finally:
-        monkeypatch.undo()
 
     # Truncated WAV header triggering struct.error in WAV parser
     truncated_wav = b"RIFF\x20\x00\x00\x00WAVEfmt "

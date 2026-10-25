@@ -393,8 +393,9 @@ def test_lora_optimizer_gradient_flow_and_freeze_state() -> None:
         pred = m(x)
         return jnp.sum((pred - target) ** 2)
 
-    v_ag_fn: Any = nnx.value_and_grad
-    grad_fn = v_ag_fn(loss_fn, argnums=nnx.DiffState(0, pt.LoRAParam))
+    nnx_any: Any = nnx
+    v_ag_fn: Any = nnx_any.value_and_grad
+    grad_fn = v_ag_fn(loss_fn, argnums=nnx_any.DiffState(0, pt.LoRAParam))
 
     x = jnp.ones((1, 4))
     target = jnp.zeros((1, 4))

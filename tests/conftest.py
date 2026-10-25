@@ -134,10 +134,6 @@ class MockOpenedImage:
         self._size = (int(size[0]), int(size[1]))
         return self
 
-    def getpixel(self, _coords: Any) -> tuple[int, int, int]:
-        """Return red RGB pixel tuple."""
-        return (255, 0, 0)
-
     def __array__(self, *_args: Any, **_kwargs: Any) -> Any:
         """Return (H, W, 3) float32 numpy array matching resized dimensions."""
         import numpy as np

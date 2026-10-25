@@ -30,16 +30,14 @@ def train_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if the training status indicates failure.
 
     """
-    batch_size = getattr(args, "batch_size", 2)
-    distributed_strategy = getattr(args, "distributed_strategy", "none")
     config = TrainingConfig(
         model_name=args.model,
         dataset=args.dataset,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
-        batch_size=batch_size,
+        batch_size=args.batch_size,
         backend=args.backend,
-        distributed_strategy=distributed_strategy,
+        distributed_strategy=args.distributed_strategy,
     )
     res = train_from_scratch(config)
     print(json.dumps(res, indent=2))
@@ -56,16 +54,14 @@ def pretrain_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if the pretraining status indicates failure.
 
     """
-    batch_size = getattr(args, "batch_size", 2)
-    distributed_strategy = getattr(args, "distributed_strategy", "none")
     config = TrainingConfig(
         model_name=args.model,
         dataset=args.dataset,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
-        batch_size=batch_size,
+        batch_size=args.batch_size,
         backend=args.backend,
-        distributed_strategy=distributed_strategy,
+        distributed_strategy=args.distributed_strategy,
     )
     res = pretrain_model(config)
     print(json.dumps(res, indent=2))
@@ -82,16 +78,14 @@ def sft_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if the SFT status indicates failure.
 
     """
-    batch_size = getattr(args, "batch_size", 2)
-    distributed_strategy = getattr(args, "distributed_strategy", "none")
     config = TrainingConfig(
         model_name=args.model,
         dataset=args.dataset,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
-        batch_size=batch_size,
+        batch_size=args.batch_size,
         backend=args.backend,
-        distributed_strategy=distributed_strategy,
+        distributed_strategy=args.distributed_strategy,
     )
     res = sft_model(config)
     print(json.dumps(res, indent=2))
@@ -108,16 +102,14 @@ def posttrain_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if the post-training status indicates failure.
 
     """
-    batch_size = getattr(args, "batch_size", 2)
-    distributed_strategy = getattr(args, "distributed_strategy", "none")
     config = TrainingConfig(
         model_name=args.model,
         dataset=args.dataset,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
-        batch_size=batch_size,
+        batch_size=args.batch_size,
         backend=args.backend,
-        distributed_strategy=distributed_strategy,
+        distributed_strategy=args.distributed_strategy,
     )
     res = posttrain_model(config)
     print(json.dumps(res, indent=2))
@@ -134,17 +126,14 @@ def dpo_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if the DPO status indicates failure.
 
     """
-    batch_size = getattr(args, "batch_size", 2)
-    epochs = getattr(args, "epochs", 1)
-    learning_rate = getattr(args, "learning_rate", 1e-05)
     res = run_dpo(
         model_name=args.model,
         dataset=args.dataset,
         backend=args.backend,
         beta=args.beta,
-        epochs=epochs,
-        learning_rate=learning_rate,
-        batch_size=batch_size,
+        epochs=args.epochs,
+        learning_rate=args.learning_rate,
+        batch_size=args.batch_size,
     )
     print(json.dumps(res, indent=2))
     return 1 if is_failed_status(res) else 0

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import types
+import weakref
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +65,7 @@ __all__ = [
     "PEFTResultDict",
     "PEFTSubmoduleProtocol",
     "QuantizableModelProtocol",
+    "QuantizableModelType",
     "QuantizeResultDict",
     "QuantizeSubmoduleProtocol",
     "QuantizedModelArtifact",
@@ -79,9 +81,11 @@ __all__ = [
     "TrainResultDict",
     "TrainSubmoduleProtocol",
     "TrainableModelProtocol",
+    "TrainableModelType",
     "TrainerState",
     "TrainingConfig",
     "TrainingLoopState",
+    "clear_quantized_artifact_registry",
     "get_quantized_artifact",
     "ndarray",
     "register_quantized_artifact",
@@ -566,7 +570,23 @@ class QuantizedModelArtifact(Generic[TQuantModel]):
     scales: dict[str, float] = field(default_factory=_empty_scales_dict)
 
 
-_QUANTIZED_ARTIFACT_REGISTRY: dict[int, QuantizedModelArtifact[Any]] = {}
+@dataclass
+class _QuantizedMetadata:
+    """Internal metadata record stored in `_QUANTIZED_ARTIFACT_WEAK_REGISTRY` without a strong model cycle."""
+
+    method: str
+    is_quantized: bool
+    scales: dict[str, float]
+
+
+_QUANTIZED_ARTIFACT_WEAK_REGISTRY: weakref.WeakKeyDictionary[Any, _QuantizedMetadata] = weakref.WeakKeyDictionary()
+_QUANTIZED_ARTIFACT_FALLBACK_REGISTRY: dict[int, QuantizedModelArtifact[Any]] = {}
+
+
+def clear_quantized_artifact_registry() -> None:
+    """Clear all cached entries from the quantized model artifact registry."""
+    _QUANTIZED_ARTIFACT_WEAK_REGISTRY.clear()
+    _QUANTIZED_ARTIFACT_FALLBACK_REGISTRY.clear()
 
 
 def register_quantized_artifact(
@@ -574,7 +594,7 @@ def register_quantized_artifact(
     method: str,
     scales: dict[str, float] | None = None,
 ) -> QuantizedModelArtifact[TQuantModel]:
-    """Register quantization metadata for a model in the typed artifact registry.
+    """Register quantization metadata for a model in the memory-safe artifact registry.
 
     Args:
         model: Target model instance.
@@ -585,13 +605,21 @@ def register_quantized_artifact(
         Registered `QuantizedModelArtifact` wrapping `model`.
 
     """
+    resolved_scales = dict(scales) if scales is not None else {}
     artifact = QuantizedModelArtifact(
         model=model,
         method=method,
         is_quantized=True,
-        scales=dict(scales) if scales is not None else {},
+        scales=resolved_scales,
     )
-    _QUANTIZED_ARTIFACT_REGISTRY[id(model)] = artifact
+    try:
+        _QUANTIZED_ARTIFACT_WEAK_REGISTRY[model] = _QuantizedMetadata(
+            method=method,
+            is_quantized=True,
+            scales=resolved_scales,
+        )
+    except TypeError:
+        _QUANTIZED_ARTIFACT_FALLBACK_REGISTRY[id(model)] = artifact
     return artifact
 
 
@@ -605,15 +633,40 @@ def get_quantized_artifact(model: TQuantModel) -> QuantizedModelArtifact[TQuantM
         Registered `QuantizedModelArtifact` if the model was quantized, or `None`.
 
     """
-    return _QUANTIZED_ARTIFACT_REGISTRY.get(id(model))
+    try:
+        meta = _QUANTIZED_ARTIFACT_WEAK_REGISTRY.get(model)
+        if meta is not None:
+            return QuantizedModelArtifact(
+                model=model,
+                method=meta.method,
+                is_quantized=meta.is_quantized,
+                scales=dict(meta.scales),
+            )
+    except TypeError:
+        pass
+    return _QUANTIZED_ARTIFACT_FALLBACK_REGISTRY.get(id(model))
 
 
-ModelType = Union[
+TrainableModelType = Union[
     JaxCausalLMProtocol,
     TorchCausalLMProtocol,
     KerasCausalLMProtocol,
     MaxTextCausalLMProtocol,
     MlxCausalLMProtocol,
+    TrainableModelProtocol,
+]
+
+QuantizableModelType = Union[
+    JaxCausalLMProtocol,
+    TorchCausalLMProtocol,
+    KerasCausalLMProtocol,
+    MaxTextCausalLMProtocol,
+    MlxCausalLMProtocol,
+    QuantizableModelProtocol,
+]
+
+ModelType = Union[
+    TrainableModelType,
     EmbedderModelProtocol,
     QuantizableModelProtocol,
 ]

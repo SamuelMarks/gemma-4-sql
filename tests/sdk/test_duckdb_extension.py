@@ -54,3 +54,23 @@ def test_embed_in_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(de, "duckdb", None)
     with pytest.raises(DependencyMissingError, match="duckdb is required"):
         de.embed_in_duckdb(MagicMock(), "model", "jax")
+
+    mock_cur = MagicMock()
+
+    def _exec_side_effect(query: str, _params: list[str] | None = None) -> MagicMock:
+        """Simulate duckdb_tables() raising RuntimeError and information_schema succeeding."""
+        res_mock = MagicMock()
+        if "duckdb_tables()" in query:
+            raise RuntimeError("duckdb_tables not supported")
+        if "information_schema.tables" in query:
+            res_mock.fetchall.return_value = [("users",)]
+        else:
+            res_mock.fetchall.return_value = [("id", "INTEGER"), ("name", "VARCHAR")]
+        return res_mock
+
+    mock_cur.execute.side_effect = _exec_side_effect
+    assert de._extract_duckdb_ddl(mock_cur) == "CREATE TABLE users (id INTEGER, name VARCHAR);"
+
+    mock_cur_empty = MagicMock()
+    mock_cur_empty.execute.return_value.fetchall.return_value = []
+    assert de._extract_duckdb_ddl(mock_cur_empty) == ""

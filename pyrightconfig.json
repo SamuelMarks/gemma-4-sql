@@ -1,7 +1,7 @@
 {
   "typeCheckingMode": "strict",
-  "venvPath": ".tox",
-  "venv": "jax",
+  "venvPath": ".",
+  "venv": ".venv",
   "extraPaths": ["src", "."],
   "include": ["src/gemma_4_sql", "tests"],
   "reportMissingImports": "none",
@@ -19,9 +19,16 @@
   "reportUntypedFunctionDecorator": "none",
   "executionEnvironments": [
     {
+      "root": "src/gemma_4_sql/cli_parsers",
+      "reportUnknownLambdaType": "error",
+      "reportUntypedBaseClass": "error",
+      "reportPrivateUsage": "none"
+    },
+    {
       "root": "src/gemma_4_sql",
       "reportUnknownLambdaType": "error",
-      "reportUntypedBaseClass": "error"
+      "reportUntypedBaseClass": "error",
+      "reportPrivateUsage": "error"
     },
     {
       "root": "tests",

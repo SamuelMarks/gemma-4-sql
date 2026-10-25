@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
@@ -37,11 +38,11 @@ def select_relevant_examples(
     if not example_pool:
         return []
 
-    prompt_words = set(prompt.lower().split())
+    prompt_words = set(re.findall(r"\b\w+\b", prompt.lower()))
 
     def _score(ex: dict[str, str]) -> float:
         """Compute keyword overlap fraction between example input and prompt."""
-        ex_words = set(ex.get("input", "").lower().split())
+        ex_words = set(re.findall(r"\b\w+\b", ex.get("input", "").lower()))
         overlap = len(prompt_words.intersection(ex_words))
         return float(overlap) / max(1.0, float(len(ex_words)))
 

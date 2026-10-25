@@ -38,6 +38,9 @@ class SQLiteAdapter(DatabaseAdapter):
 
         """
         self._actual_path = f"file:mem_{id(self)}?mode=memory&cache=shared" if db_path == ":memory:" else db_path
+        self._async_conn: Any = None
+        self._async_lock = asyncio.Lock()
+        self._closing_tasks: set[Any] = set()
         clean_kwargs = dict(db_kwargs) if db_kwargs else {}
         clean_kwargs.pop("defer_ddl", None)
         super().__init__(db_path, clean_kwargs, read_only=read_only)
@@ -69,7 +72,7 @@ class SQLiteAdapter(DatabaseAdapter):
         return conn_file
 
     async def connect_async(self) -> object:
-        """Connect asynchronously to SQLite via `aiosqlite`.
+        """Connect asynchronously to SQLite via `aiosqlite`, reusing any cached connection.
 
         Returns:
             The active `aiosqlite` connection instance.
@@ -81,11 +84,16 @@ class SQLiteAdapter(DatabaseAdapter):
         if aiosqlite is None:
             msg = "aiosqlite is required."
             raise DependencyMissingError(msg, dependency_name="aiosqlite", backend="sqlite")
-        kwargs = dict(self.db_kwargs)
-        if self.db_path == ":memory:":
-            kwargs["uri"] = True
-            return await aiosqlite.connect(self._actual_path, **kwargs)
-        return await aiosqlite.connect(self.db_path, **self.db_kwargs)
+        async with self._async_lock:
+            if self._async_conn is not None:
+                return self._async_conn
+            kwargs = dict(self.db_kwargs)
+            if self.db_path == ":memory:":
+                kwargs["uri"] = True
+                self._async_conn = await aiosqlite.connect(self._actual_path, **kwargs)
+            else:
+                self._async_conn = await aiosqlite.connect(self.db_path, **self.db_kwargs)
+            return self._async_conn
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL statements to set up the SQLite schema.
@@ -157,17 +165,45 @@ class SQLiteAdapter(DatabaseAdapter):
                         res = cursor.close()
                         if asyncio.iscoroutine(res):
                             await res
-            except Exception:
+            except (sqlite3.Error, RuntimeError, ValueError, TypeError, OSError):
                 if hasattr(async_conn, "rollback"):
                     res_r = async_conn.rollback()
                     if asyncio.iscoroutine(res_r):
                         await res_r
                 raise
-            finally:
-                if hasattr(async_conn, "close"):
-                    res = async_conn.close()
-                    if asyncio.iscoroutine(res):
-                        await res
         except self.error_classes as e:
             logger.debug("Async Query execution failed: %s", e)
             raise DatabaseExecutionError(str(e), cause=e) from e
+
+    async def close_async(self) -> None:
+        """Close the cached asynchronous `aiosqlite` connection and await any pending close tasks."""
+        if self._closing_tasks:
+            pending = list(self._closing_tasks)
+            self._closing_tasks.clear()
+            await asyncio.gather(*pending, return_exceptions=True)
+        cached = self._async_conn
+        self._async_conn = None
+        if cached is not None and hasattr(cached, "close"):
+            res = cached.close()
+            if asyncio.iscoroutine(res):
+                await res
+        super().close()
+
+    def close(self) -> None:
+        """Close the synchronous database connection and safely close any cached async connection."""
+        cached = self._async_conn
+        self._async_conn = None
+        if cached is not None and hasattr(cached, "close"):
+            from contextlib import suppress
+
+            res = cached.close()
+            if asyncio.iscoroutine(res):
+                try:
+                    loop = asyncio.get_running_loop()
+                    task = loop.create_task(res)
+                    self._closing_tasks.add(task)
+                    task.add_done_callback(self._closing_tasks.discard)
+                except RuntimeError:
+                    with suppress(RuntimeError, OSError):
+                        asyncio.run(res)
+        super().close()

@@ -11,20 +11,39 @@ from gemma_4_sql.sdk.benchmark import benchmark
 
 
 def test_benchmark_jax(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify benchmark executes or propagates expected status for JAX backend."""
+    """Verify benchmark executes and computes LatencyStatsDict for JAX backend."""
     from unittest.mock import MagicMock
 
     import gemma_4_sql.backends.jax.benchmark as jbm
+    from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 
     monkeypatch.setattr(jbm, "jax", MagicMock())
     monkeypatch.setattr(jbm, "jnp", MagicMock())
     monkeypatch.setattr(jbm, "Gemma4Config", MagicMock())
     monkeypatch.setattr(jbm, "Gemma4ForCausalLM", MagicMock())
-    monkeypatch.setattr(jbm, "_run_benchmark_pass", lambda *_a, **_k: (100.0, 10.0, 64.0))
+    monkeypatch.setattr(
+        jbm,
+        "benchmark_model",
+        lambda model_name, hardware="cpu", batch_size=1, **_kw: run_benchmark_wrapper(
+            "jax",
+            model_name,
+            hardware,
+            batch_size,
+            missing_deps=False,
+            benchmark_fn=lambda: (100.0, 10.0, 64.0),
+            latency_samples=[9.0, 10.0, 11.0],
+        ),
+    )
 
     res = benchmark("gemma-4", "cpu", 1, "jax", warmup_steps=1)
     assert res["backend"] == "jax"
     assert res["tokens_per_sec"] == 100.0
+    stats = res.get("latency_stats")
+    assert stats is not None
+    assert stats["mean_ms"] == pytest.approx(10.0)
+    assert stats["p50_ms"] == pytest.approx(10.0)
+    assert stats["p90_ms"] >= 10.0
+    assert stats["p99_ms"] >= 10.0
 
 
 def test_benchmark_keras_routing_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,7 +120,6 @@ def test_benchmark_pytorch_routing_and_missing(monkeypatch: pytest.MonkeyPatch) 
     assert captured["model_name"] == "gemma-4"
     assert captured["hardware"] == "cpu"
 
-    monkeypatch.setattr(bm, "torch", None)
     monkeypatch.undo()
     monkeypatch.setattr(bm, "torch", None)
     with pytest.raises(DependencyMissingError):

@@ -145,17 +145,9 @@ def process_image(
     num_patches = num_patches_h * num_patches_w
     patch_dim = 3 * patch_size * patch_size
 
-    patches = np_mod.zeros((num_patches, patch_dim), dtype=np_mod.float32)
-    idx = 0
-    for i in range(num_patches_h):
-        for j in range(num_patches_w):
-            h_start = i * patch_size
-            h_end = h_start + patch_size
-            w_start = j * patch_size
-            w_end = w_start + patch_size
-            patch = pixel_values[:, h_start:h_end, w_start:w_end]
-            patches[idx] = patch.reshape(-1)
-            idx += 1
+    reshaped = pixel_values.reshape(3, num_patches_h, patch_size, num_patches_w, patch_size)
+    transposed = np_mod.transpose(reshaped, (1, 3, 0, 2, 4))
+    patches = transposed.reshape((num_patches, patch_dim)).astype(np_mod.float32)
 
     return {
         "pixel_values": pixel_values,
@@ -280,23 +272,23 @@ def process_audio(
         raise ValueError(msg)
 
     samples: list[float]
-    global np
+    np_mod: Any = np
     audio_any: Any = audio_input
-    if np is not None and hasattr(audio_any, "flatten"):
-        samples = [float(x) for x in audio_any.flatten().astype(np.float32).tolist()]
+    if np_mod is not None and hasattr(audio_any, "flatten"):
+        samples = [float(x) for x in audio_any.flatten().astype(np_mod.float32).tolist()]
         orig_rate = sample_rate
     elif isinstance(audio_input, (list, tuple)):
         samples = [float(x) for x in audio_any]
         orig_rate = sample_rate
     else:
-        if np is None:
+        if np_mod is None:
             try:
-                import numpy
+                import numpy as _numpy
 
-                np = numpy
+                np_mod = _numpy
             except ImportError as err:
                 logger.debug("Failed to import numpy: %s", err)
-        if np is not None and isinstance(audio_any, np.ndarray):
+        if np_mod is not None and isinstance(audio_any, np_mod.ndarray):
             samples = [float(x) for x in audio_any.flatten().tolist()]
             orig_rate = sample_rate
         else:
@@ -320,20 +312,20 @@ def process_audio(
 
     num_frames = max(1, (len(samples) - frame_length) // frame_shift + 1) if len(samples) >= frame_length else 1
 
-    if np is not None:
-        audio_array = np.array(samples, dtype=np.float32)
-        spectrogram = np.zeros((num_frames, n_mels), dtype=np.float32)
-        hann_window = 0.5 - 0.5 * np.cos(2.0 * math.pi * np.arange(frame_length) / max(1, frame_length - 1))
+    if np_mod is not None:
+        audio_array = np_mod.array(samples, dtype=np_mod.float32)
+        spectrogram = np_mod.zeros((num_frames, n_mels), dtype=np_mod.float32)
+        hann_window = 0.5 - 0.5 * np_mod.cos(2.0 * math.pi * np_mod.arange(frame_length) / max(1, frame_length - 1))
 
         for f in range(num_frames):
             start = f * frame_shift
             end = start + frame_length
             if end <= len(audio_array):
                 frame = audio_array[start:end] * hann_window
-                fft_mag = np.abs(np.fft.rfft(frame, n=n_mels * 2))[:n_mels]
-                spectrogram[f] = np.log(fft_mag + 1e-6)
+                fft_mag = np_mod.abs(np_mod.fft.rfft(frame, n=n_mels * 2))[:n_mels]
+                spectrogram[f] = np_mod.log(fft_mag + 1e-6)
             else:
-                spectrogram[f] = np.full(n_mels, -6.0, dtype=np.float32)
+                spectrogram[f] = np_mod.full(n_mels, -6.0, dtype=np_mod.float32)
 
         return {
             "audio_values": audio_array,

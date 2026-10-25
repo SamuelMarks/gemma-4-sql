@@ -82,7 +82,7 @@ class SnowflakeAdapter(DatabaseAdapter):
             cursor.execute(ddl)
             if hasattr(conn_obj, "commit"):
                 conn_obj.commit()
-        except Exception:
+        except self.error_classes + (RuntimeError, ValueError, TypeError, OSError):
             if hasattr(conn_obj, "rollback"):
                 conn_obj.rollback()
             raise

@@ -37,12 +37,12 @@ def evaluate_cmd(args: argparse.Namespace) -> int:
         backend=args.backend,
         db_path=args.db_path,
         ddl=args.ddl,
-        max_batches=getattr(args, "max_batches", 10),
+        max_batches=args.max_batches,
         db_type=args.db_type,
         db_kwargs=db_kwargs,
-        image_path=getattr(args, "image_path", None),
-        audio_path=getattr(args, "audio_path", None),
-        modality=getattr(args, "modality", "text"),
+        image_path=args.image_path,
+        audio_path=args.audio_path,
+        modality=args.modality,
     )
     print(json.dumps(res, indent=2))
     return 1 if is_failed_status(res) else 0
@@ -64,18 +64,18 @@ def generate_cmd(args: argparse.Namespace) -> int:
         backend=args.backend,
         beam_width=args.beam_width,
         max_length=args.max_length,
-        show_confidence=getattr(args, "show_confidence", False),
-        temperature=getattr(args, "temperature", 1.0),
-        top_p=getattr(args, "top_p", 1.0),
-        seed=getattr(args, "seed", 42),
-        image_path=getattr(args, "image_path", None),
-        audio_path=getattr(args, "audio_path", None),
-        modality=getattr(args, "modality", "text"),
+        show_confidence=args.show_confidence,
+        temperature=args.temperature,
+        top_p=args.top_p,
+        seed=args.seed,
+        image_path=args.image_path,
+        audio_path=args.audio_path,
+        modality=args.modality,
     )
     sql_output = (res or {}).get("sql", "")
     if sql_output:
         print(str(sql_output))
-    if getattr(args, "show_confidence", False) and res and "confidence_score" in res:
+    if args.show_confidence and res and "confidence_score" in res:
         print(f"Confidence: {float(str(res['confidence_score'])):.4f}")
     return 1 if is_failed_status(res) else 0
 
@@ -98,10 +98,10 @@ def agent_cmd(args: argparse.Namespace) -> int:
         ddl=args.ddl,
         db_type=args.db_type,
         max_retries=args.max_retries,
-        min_confidence=getattr(args, "min_confidence", 0.0),
-        image_path=getattr(args, "image_path", None),
-        audio_path=getattr(args, "audio_path", None),
-        modality=getattr(args, "modality", "text"),
+        min_confidence=args.min_confidence,
+        image_path=args.image_path,
+        audio_path=args.audio_path,
+        modality=args.modality,
     )
     res = run_agentic_loop(
         model_name=args.model,
@@ -129,7 +129,7 @@ def serve_cmd(args: argparse.Namespace) -> int:
         port=args.port,
         max_batch_size=args.max_batch_size,
         backend=args.backend,
-        run_server=getattr(args, "run_server", False),
+        run_server=args.run_server,
     )
     status = (res or {}).get("status", "unknown")
     print(f"Serving model {args.model} on port {args.port} (status: {status})")
@@ -147,7 +147,7 @@ def chat_cmd(args: argparse.Namespace) -> int:
 
     """
     history: list[dict[str, str]] = []
-    if getattr(args, "history", ""):
+    if args.history:
         try:
             history = json.loads(args.history)
         except json.JSONDecodeError as exc:
@@ -176,7 +176,7 @@ def few_shot_cmd(args: argparse.Namespace) -> int:
 
     """
     examples: list[dict[str, str]] = []
-    if getattr(args, "examples", ""):
+    if args.examples:
         try:
             examples = json.loads(args.examples)
         except json.JSONDecodeError as exc:

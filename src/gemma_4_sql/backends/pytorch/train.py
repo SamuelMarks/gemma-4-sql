@@ -108,7 +108,7 @@ def _wrap_model_distributed(model: TorchCausalLMProtocol, distributed_strategy: 
     return model
 
 
-def _cleanup_distributed(dist: Any) -> None:
+def cleanup_distributed(dist: Any) -> None:
     """Cleanup distributed environment.
 
     Args:
@@ -117,6 +117,9 @@ def _cleanup_distributed(dist: Any) -> None:
     """
     if dist is not None and getattr(dist, "is_initialized", lambda: False)():
         dist.destroy_process_group()
+
+
+_cleanup_distributed = cleanup_distributed
 
 
 def _execute_train(

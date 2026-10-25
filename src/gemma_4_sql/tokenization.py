@@ -52,6 +52,7 @@ class SQLTokenizer:
         self.model_name = model_name
         self.allow_fallback = allow_fallback
         self.hf_tokenizer: HFTokenizerProtocol | None = self._try_load_hf_tokenizer()
+        self.is_fallback: bool = self.hf_tokenizer is None
         if self.model_name and self.hf_tokenizer is None:
             if not self.allow_fallback:
                 raise DependencyMissingError(

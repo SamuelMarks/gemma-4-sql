@@ -83,6 +83,8 @@ def run_benchmark_wrapper(
     *,
     raise_if_missing: bool = False,
     latency_samples: list[float] | None = None,
+    raise_on_error: bool | None = None,
+    **kwargs: object,
 ) -> BenchmarkResultDict:
     """Wrap benchmarking logic to unify exception handling and result formatting.
 
@@ -95,18 +97,21 @@ def run_benchmark_wrapper(
         benchmark_fn: A callable that executes the benchmark and returns (tokens_per_sec, latency_ms, memory_mb).
         raise_if_missing: If True, raises DependencyMissingError when missing_deps is True.
         latency_samples: Optional sequence of individual request latency samples for percentile stats.
+        raise_on_error: If True, raises `BenchmarkError` when `benchmark_fn` fails.
+        **kwargs: Additional keyword arguments inspected by `resolve_raise_on_error`.
 
     Returns:
         A dictionary containing the benchmark results.
 
     Raises:
         DependencyMissingError: If raise_if_missing is True and missing_deps is True.
+        BenchmarkError: If `raise_on_error` is enabled and `benchmark_fn` raises an exception.
 
     """
+    from gemma_4_sql.exceptions import BenchmarkError, DependencyMissingError, resolve_raise_on_error
+
     if missing_deps:
         if raise_if_missing:
-            from gemma_4_sql.exceptions import DependencyMissingError
-
             msg = f"Dependencies for {backend_name} benchmarking on {hardware} are missing."
             raise DependencyMissingError(msg)
 
@@ -123,12 +128,21 @@ def run_benchmark_wrapper(
 
     logger.info("Starting %s benchmark for %s on %s (batch size %d)", backend_name.upper(), model_name, hardware, batch_size)
 
+    should_raise = resolve_raise_on_error(raise_on_error=raise_on_error, kwargs=dict(kwargs))
     rss_start = get_current_rss_mb()
     try:
         (tokens_per_sec, latency_ms, memory_mb) = benchmark_fn()
         status = "success"
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Benchmark failed: ")
+        if should_raise:
+            raise BenchmarkError(
+                f"{backend_name} benchmark failed: {e!s}",
+                backend=backend_name,
+                model_name=model_name,
+                operation="benchmark",
+                cause=e,
+            ) from e
         status = f"failed: {e!s}"
         latency_ms = 0.0
         tokens_per_sec = 0.0

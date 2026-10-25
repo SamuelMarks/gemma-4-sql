@@ -374,7 +374,8 @@ class Gemma4ForCausalLM(nnx.Module):
         if self.config.final_logit_softcapping is not None:
             logits /= self.config.final_logit_softcapping
             logits = jnp.tanh(logits) * self.config.final_logit_softcapping
-        return logits.astype(jnp.float32)
+        res_logits: Array = logits.astype(jnp.float32)
+        return res_logits
 
 
 def _default_jit(x: Any) -> Any:

@@ -13,6 +13,7 @@ from gemma_4_sql.backends.common_gemma4_config import (
 )
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
+    clear_all_model_caches,
     compute_jax_step_probs,
     expand_jax_beams,
     normalize_logprob_confidence,
@@ -20,7 +21,7 @@ from gemma_4_sql.backends.common_inference import (
     run_inference_wrapper,
 )
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper
-from gemma_4_sql.exceptions import ConfigurationError, InferenceError, TrainingError
+from gemma_4_sql.exceptions import ConfigurationError, InferenceError, PEFTError
 
 
 def test_common_gemma4_config_presets() -> None:
@@ -49,6 +50,8 @@ def test_common_inference_and_peft_utilities() -> None:
     cache.put_model("c", 3)
     assert cache.get_model("b") is None
     assert cache.get_model("c") == 3
+    clear_all_model_caches()
+    assert len(cache) == 0
 
     assert normalize_logprob_confidence([-0.1, -0.2], 0) == 0.0
     assert 0.0 < normalize_logprob_confidence([-0.1, -0.2], 2) <= 1.0
@@ -84,7 +87,7 @@ def test_common_inference_and_peft_utilities() -> None:
     res_fail = apply_lora_wrapper("jax", "m", ["q_proj"], 8, 16, 0.05, _fail)
     assert res_fail["status"] == "failed: lora boom"
 
-    with pytest.raises(TrainingError, match="lora boom"):
+    with pytest.raises(PEFTError, match="lora boom"):
         apply_lora_wrapper("jax", "m", ["q_proj"], 8, 16, 0.05, _fail, raise_on_error=True)
 
     def _cfg_err() -> int:

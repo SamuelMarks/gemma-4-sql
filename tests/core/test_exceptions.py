@@ -5,19 +5,26 @@ from __future__ import annotations
 import pytest
 
 from gemma_4_sql.exceptions import (
+    BenchmarkError,
+    ChatError,
     ConfigurationError,
     DatabaseExecutionError,
     DependencyMissingError,
     ETLError,
+    EvaluationError,
     ExecutionStatus,
     ExportError,
     GemmaSQLError,
     InferenceError,
+    PEFTError,
+    QuantizationError,
     SchemaExtractionError,
+    ServingError,
     SQLSafetyViolationError,
     TrainingError,
     UnsupportedQuantizationMethodError,
     is_failed_status,
+    resolve_raise_on_error,
 )
 
 
@@ -74,9 +81,15 @@ def test_unsupported_quantization_method_error() -> None:
     ("exc_cls", "std_parent"),
     [
         (InferenceError, RuntimeError),
+        (ChatError, InferenceError),
         (ExportError, RuntimeError),
         (TrainingError, RuntimeError),
+        (PEFTError, TrainingError),
         (ETLError, RuntimeError),
+        (EvaluationError, ValueError),
+        (ServingError, RuntimeError),
+        (BenchmarkError, RuntimeError),
+        (QuantizationError, RuntimeError),
         (DatabaseExecutionError, RuntimeError),
         (SQLSafetyViolationError, PermissionError),
         (SchemaExtractionError, ValueError),
@@ -134,7 +147,6 @@ def test_is_failed_status() -> None:
 
 def test_resolve_raise_on_error() -> None:
     """Verify resolve_raise_on_error priority across explicit flag, kwargs, config field, and extra_kwargs."""
-    from gemma_4_sql.exceptions import resolve_raise_on_error
     from gemma_4_sql.type_hints import TrainingConfig
 
     assert resolve_raise_on_error() is False

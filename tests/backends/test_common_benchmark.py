@@ -10,7 +10,7 @@ from gemma_4_sql.backends.common_benchmark import (
     get_current_rss_mb,
     run_benchmark_wrapper,
 )
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import BenchmarkError, DependencyMissingError
 
 
 def test_get_current_rss_mb_psutil() -> None:
@@ -117,3 +117,9 @@ def test_run_benchmark_wrapper_failure() -> None:
     assert res["tokens_per_sec"] == 0.0
     assert res["latency_ms"] == 0.0
     assert res["memory_mb"] == 0.0
+
+    with (
+        patch("gemma_4_sql.backends.common_benchmark.get_current_rss_mb", return_value=10.0),
+        pytest.raises(BenchmarkError, match="Benchmark error"),
+    ):
+        run_benchmark_wrapper("test_backend", "model", "cpu", 1, False, mock_benchmark, raise_on_error=True)

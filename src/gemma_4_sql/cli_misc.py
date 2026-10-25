@@ -75,26 +75,20 @@ def rag_cmd(args: argparse.Namespace) -> None:
         args: Parsed command-line arguments containing command-specific options.
 
     """
-    if getattr(args, "action", "build") == "extract":
+    if args.action == "extract":
         schema = extract_schema_entities(args.ddl)
         print(json.dumps(schema, indent=2))
-    elif getattr(args, "action", "build") == "retrieve":
+    elif args.action == "retrieve":
         schema = extract_schema_entities(args.ddl)
         retrieved = retrieve_relevant_schema(args.prompt, schema)
         print(str(retrieved))
     else:
-        rag_prompt = build_rag_prompt(prompt=args.prompt, ddl=args.ddl)
-        image_path = getattr(args, "image_path", None)
-        audio_path = getattr(args, "audio_path", None)
-        if image_path is not None or audio_path is not None:
-            from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
-
-            formatted = format_multimodal_prompt(
-                rag_prompt,
-                has_image=image_path is not None,
-                has_audio=audio_path is not None,
-            )
-            rag_prompt = str(formatted.get("prompt", rag_prompt))
+        rag_prompt = build_rag_prompt(
+            prompt=args.prompt,
+            ddl=args.ddl,
+            image_path=args.image_path,
+            audio_path=args.audio_path,
+        )
         print(str(rag_prompt))
 
 

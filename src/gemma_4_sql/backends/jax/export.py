@@ -52,14 +52,14 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> JSONDic
             weights = nnx.state(model)
         except ImportError as e:
             raise DependencyMissingError(f"Flax NNX dependency missing: {e}") from e
-        except Exception as e:
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
             raise ExportError(f"Failed to extract state for model '{model_name}': {e}") from e
 
     file_path = Path(export_path) / "orbax_ckpt"
     try:
         checkpointer = ocp.PyTreeCheckpointer()
         checkpointer.save(file_path, weights)
-    except Exception as e:
+    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         raise ExportError(f"Failed to save Orbax checkpoint at '{file_path}': {e}") from e
 
     status = "exported_with_orbax"

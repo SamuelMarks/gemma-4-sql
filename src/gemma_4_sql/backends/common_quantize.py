@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from gemma_4_sql.exceptions import (
     DependencyMissingError,
-    GemmaSQLError,
+    QuantizationError,
     UnsupportedQuantizationMethodError,
+    resolve_raise_on_error,
 )
 from gemma_4_sql.type_hints import ModelType, register_quantized_artifact
 
@@ -77,7 +78,12 @@ def apply_bits_and_bytes_quantization(
         memory_reduction = 0.75
     else:
         logger.warning("Unsupported quantization method for BitsAndBytes: %s", method)
-        return (0.0, f"unsupported_method_{method}")
+        raise UnsupportedQuantizationMethodError(
+            f"Unsupported quantization method for BitsAndBytes: {method}",
+            method=method,
+            supported_methods=("int8", "int4"),
+            backend="pytorch",
+        )
 
     if model is not None:
         model_any: Any = model
@@ -95,7 +101,8 @@ def quantize_model_wrapper(
     missing_deps: bool,
     apply_fn: Callable[..., tuple[float, str]],
     *,
-    raise_on_error: bool = False,
+    raise_on_error: bool | None = None,
+    **kwargs: object,
 ) -> QuantizeResultDict:
     """Wrap and standardize execution and error handling for quantization.
 
@@ -105,7 +112,8 @@ def quantize_model_wrapper(
         method: The quantization method.
         missing_deps: Whether dependencies are missing.
         apply_fn: Function that applies quantization and returns `(memory_reduction, status)`.
-        raise_on_error: Whether to raise `GemmaSQLError` on runtime failure.
+        raise_on_error: Whether to raise `QuantizationError` on runtime failure.
+        **kwargs: Additional keyword options inspected by `resolve_raise_on_error`.
 
     Returns:
         A dictionary containing the quantization results.
@@ -113,7 +121,7 @@ def quantize_model_wrapper(
     Raises:
         DependencyMissingError: If `missing_deps` is True or raised by `apply_fn`.
         UnsupportedQuantizationMethodError: If raised by `apply_fn`.
-        GemmaSQLError: If `raise_on_error` is True and `apply_fn` fails.
+        QuantizationError: If `raise_on_error` is True and `apply_fn` fails.
 
     """
     if missing_deps:
@@ -122,6 +130,7 @@ def quantize_model_wrapper(
             backend=backend_name,
         )
 
+    should_raise = resolve_raise_on_error(raise_on_error=raise_on_error, kwargs=dict(kwargs))
     try:
         (memory_reduction, status) = apply_fn()
         if not status.startswith("unsupported"):
@@ -130,8 +139,8 @@ def quantize_model_wrapper(
         raise
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("Failed to quantize: ")
-        if raise_on_error:
-            raise GemmaSQLError(
+        if should_raise:
+            raise QuantizationError(
                 f"Quantization failed on {backend_name}: {e!s}",
                 backend=backend_name,
                 model_name=model_name,

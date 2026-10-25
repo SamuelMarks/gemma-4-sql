@@ -279,7 +279,8 @@ def create_model_from_safe_tensors(
     _populate_state_from_files(file_dir, state, key_mapping)
 
     try:
-        nnx.update(model, state)
+        state_any: Any = state
+        nnx.update(model, state_any)
     except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as e:
         logger.exception("Failed to update model with loaded state")
         if strict:

@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
-from gemma_4_sql.exceptions import InferenceError, is_failed_status
+from gemma_4_sql.exceptions import ChatError, InferenceError, is_failed_status
 from gemma_4_sql.sdk.registry import get_backend
 
 if TYPE_CHECKING:
@@ -37,8 +37,7 @@ def chat_turn(
         A structured `ChatTurnResultDict` containing the response and updated history.
 
     Raises:
-        ValueError: If backend does not return SQL.
-        InferenceError: If chat turn execution fails.
+        ChatError: If backend does not return SQL or chat turn execution fails.
 
     """
     backend_impl = get_backend(backend)
@@ -53,13 +52,13 @@ def chat_turn(
         ml = int(ml_raw) if isinstance(ml_raw, (int, float, str)) else 50
         result = backend_impl.generate_sql(model_name, full_prompt, beam_width=bw, max_length=ml, **call_kwargs)
         if "sql" not in result or is_failed_status(result):
-            raise InferenceError(f"Backend {backend} did not return SQL.", backend=backend, model_name=model_name)
+            raise ChatError(f"Backend {backend} did not return SQL.", backend=backend, model_name=model_name)
         response = str(result["sql"])
         status = f"success_{backend}_chat"
-    except (InferenceError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+    except (ChatError, InferenceError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("%s chat error", backend.capitalize())
         status = f"failed: {e!s}"
-        raise InferenceError(f"Chat turn failed: {e!s}", backend=backend, model_name=model_name, cause=e) from e
+        raise ChatError(f"Chat turn failed: {e!s}", backend=backend, model_name=model_name, cause=e) from e
     updated_history: list[ChatMessageDict] = [{"role": str(turn["role"]), "content": str(turn["content"])} for turn in history]
     updated_history.extend(({"role": "user", "content": new_prompt}, {"role": "assistant", "content": response}))
     return {

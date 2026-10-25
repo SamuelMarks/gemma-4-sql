@@ -6,6 +6,7 @@ import logging
 import math
 import operator
 import threading
+import weakref
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -18,6 +19,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 TModel = TypeVar("TModel")
+
+_ACTIVE_LRU_CACHES: list[weakref.ref[BoundedLRUCache[Any]]] = []
+_CACHE_REGISTRY_LOCK = threading.Lock()
 
 
 class BoundedLRUCache(OrderedDict[str, TModel]):
@@ -33,6 +37,9 @@ class BoundedLRUCache(OrderedDict[str, TModel]):
         super().__init__()
         self.maxsize = maxsize
         self._lock = threading.Lock()
+        with _CACHE_REGISTRY_LOCK:
+            _ACTIVE_LRU_CACHES[:] = [r for r in _ACTIVE_LRU_CACHES if r() is not None]
+            _ACTIVE_LRU_CACHES.append(weakref.ref(self))
 
     def get_model(self, key: str) -> TModel | None:
         """Retrieve a cached item and mark it as recently used.
@@ -51,7 +58,7 @@ class BoundedLRUCache(OrderedDict[str, TModel]):
             return self[key]
 
     def put_model(self, key: str, value: TModel) -> None:
-        """Insert or update a cached item, evicting the oldest entry if full.
+        """Insert or update a cached item, evicting oldest entries while size exceeds `maxsize`.
 
         Args:
             key: Cache identifier key.
@@ -62,8 +69,22 @@ class BoundedLRUCache(OrderedDict[str, TModel]):
             if key in self:
                 self.move_to_end(key)
             super().__setitem__(key, value)
-            if len(self) > self.maxsize:
+            while len(self) > max(0, self.maxsize):
                 self.popitem(last=False)
+
+    def clear_cache(self) -> None:
+        """Thread-safely clear all entries from this LRU cache."""
+        with self._lock:
+            self.clear()
+
+
+def clear_all_model_caches() -> None:
+    """Clear all active `BoundedLRUCache` instances across all backends and SDK modules."""
+    with _CACHE_REGISTRY_LOCK:
+        alive_caches = [inst for ref in _ACTIVE_LRU_CACHES if (inst := ref()) is not None]
+        _ACTIVE_LRU_CACHES[:] = [weakref.ref(c) for c in alive_caches]
+    for cache in alive_caches:
+        cache.clear_cache()
 
 
 def normalize_logprob_confidence(log_probs: list[float] | float, num_tokens: int) -> float:
@@ -234,6 +255,7 @@ def run_inference_wrapper(
 
 __all__ = [
     "BoundedLRUCache",
+    "clear_all_model_caches",
     "compute_jax_step_probs",
     "expand_jax_beams",
     "normalize_logprob_confidence",

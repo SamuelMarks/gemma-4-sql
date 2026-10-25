@@ -9,7 +9,7 @@ from gemma_4_sql.backends.common_dpo import generic_dpo_loss, run_dpo_wrapper
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
-from gemma_4_sql.backends.pytorch.train import _cleanup_distributed
+from gemma_4_sql.backends.pytorch.train import cleanup_distributed
 from gemma_4_sql.exceptions import DependencyMissingError, ExecutionStatus, TrainingError
 from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, ETLConfig, TensorType, TorchCausalLMProtocol, TrainerState
 
@@ -221,7 +221,7 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
             )
             return (ExecutionStatus.COMPLETED.value, float(final_loss))
         finally:
-            _cleanup_distributed(dist_module)
+            cleanup_distributed(dist_module)
 
     return run_dpo_wrapper(
         backend_alias,

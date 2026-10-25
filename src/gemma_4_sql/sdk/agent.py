@@ -49,7 +49,7 @@ class AgentContext:
     multimodal_context: dict[str, Any] | None = None
 
 
-def _extract_sql_from_response(raw_sql: str) -> str:
+def extract_sql_from_response(raw_sql: str) -> str:
     """Extract clean SQL query string from a raw model response or Markdown code fence.
 
     Args:
@@ -66,7 +66,10 @@ def _extract_sql_from_response(raw_sql: str) -> str:
     return text
 
 
-def _classify_error_hint(error_msg: str | None) -> str:
+_extract_sql_from_response = extract_sql_from_response
+
+
+def classify_error_hint(error_msg: str | None) -> str:
     """Classify a database execution error message into an actionable diagnostic hint.
 
     Args:
@@ -83,6 +86,9 @@ def _classify_error_hint(error_msg: str | None) -> str:
     if re.search(r"(?:no such table|relation .* does not exist)", error_msg, re.IGNORECASE):
         return " [Hint: check available table names]"
     return ""
+
+
+_classify_error_hint = classify_error_hint
 
 
 def _prepare_attempt_kwargs(
@@ -357,6 +363,8 @@ __all__ = [
     "AgentContext",
     "_classify_error_hint",
     "_extract_sql_from_response",
+    "classify_error_hint",
+    "extract_sql_from_response",
     "run_agentic_loop",
     "run_agentic_loop_async",
 ]

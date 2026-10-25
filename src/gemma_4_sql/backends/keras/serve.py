@@ -76,7 +76,7 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
                 if not sql:
                     raise InferenceError(f"Keras inference returned empty SQL for prompt '{p}'", backend="keras")
                 results.append(str(sql))
-            except Exception as e:
+            except (InferenceError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
                 if isinstance(e, InferenceError):
                     raise
                 raise InferenceError(f"Keras generation failed: {e}", backend="keras", cause=e) from e
