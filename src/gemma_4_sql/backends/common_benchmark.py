@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import logging
 import resource
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from gemma_4_sql.type_hints import BenchmarkResultDict, LatencyStatsDict
+from gemma_4_sql.type_hints import BenchmarkResultDict, LatencyStatsDict
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +105,14 @@ def run_benchmark_wrapper(
         BenchmarkError: If `raise_on_error` is enabled and `benchmark_fn` raises an exception.
 
     """
-    from gemma_4_sql.exceptions import BenchmarkError, DependencyMissingError, resolve_raise_on_error
+    from gemma_4_sql.exceptions import (
+        BenchmarkError,
+        ConfigurationError,
+        DependencyMissingError,
+        ExecutionStatus,
+        GemmaSQLError,
+        resolve_raise_on_error,
+    )
 
     if missing_deps:
         if raise_if_missing:
@@ -120,7 +124,8 @@ def run_benchmark_wrapper(
             "model": model_name,
             "hardware": hardware,
             "batch_size": batch_size,
-            "status": "backend_unavailable",
+            "status": ExecutionStatus.BACKEND_UNAVAILABLE.value,
+            "status_code": ExecutionStatus.BACKEND_UNAVAILABLE.value,
             "tokens_per_sec": 0.0,
             "latency_ms": 0.0,
             "memory_mb": 0.0,
@@ -130,10 +135,14 @@ def run_benchmark_wrapper(
 
     should_raise = resolve_raise_on_error(raise_on_error=raise_on_error, kwargs=dict(kwargs))
     rss_start = get_current_rss_mb()
+    error_message: str | None = None
     try:
         (tokens_per_sec, latency_ms, memory_mb) = benchmark_fn()
-        status = "success"
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+        status = ExecutionStatus.SUCCESS.value
+        status_code = ExecutionStatus.SUCCESS.value
+    except (DependencyMissingError, ConfigurationError):
+        raise
+    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
         logger.exception("Benchmark failed: ")
         if should_raise:
             raise BenchmarkError(
@@ -143,7 +152,9 @@ def run_benchmark_wrapper(
                 operation="benchmark",
                 cause=e,
             ) from e
-        status = f"failed: {e!s}"
+        error_message = str(e)
+        status = f"failed: {error_message}"
+        status_code = ExecutionStatus.FAILED.value
         latency_ms = 0.0
         tokens_per_sec = 0.0
         memory_mb = 0.0
@@ -161,7 +172,10 @@ def run_benchmark_wrapper(
         "memory_mb": float(memory_mb),
         "rss_memory_mb": float(rss_mb),
         "status": status,
+        "status_code": status_code,
     }
+    if error_message is not None:
+        result["error_message"] = error_message
 
     if latency_samples:
         stats = compute_latency_statistics(latency_samples)

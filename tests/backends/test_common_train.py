@@ -101,3 +101,8 @@ def test_run_train_wrapper() -> None:
 
     with pytest.raises(TrainingError, match="train boom"):
         run_train_wrapper("jax", cfg, _fail, raise_on_error=True)
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    with pytest.raises(DependencyMissingError, match="missing dep"):
+        run_train_wrapper("jax", cfg, lambda: (_ for _ in ()).throw(DependencyMissingError("missing dep")))

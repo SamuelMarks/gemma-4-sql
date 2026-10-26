@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss, run_dpo_wrapper
+from gemma_4_sql.backends.common_inference import call_jax_causal_lm
 from gemma_4_sql.backends.common_train import (
     apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
 )
@@ -14,14 +16,10 @@ from gemma_4_sql.backends.common_train import (
 )
 from gemma_4_sql.backends.jax.etl import build_dataloader
 from gemma_4_sql.backends.jax.gemma4.config import resolve_gemma4_config
+from gemma_4_sql.backends.jax.inference import _MODEL_CACHE
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, ETLConfig, JaxCausalLMProtocol, TensorType, TrainerState
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
-
-    from gemma_4_sql.type_hints import DPOResultDict, JSONDict
+from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, DPOResultDict, ETLConfig, JaxCausalLMProtocol, JSONDict, TensorType, TrainerState
 
 jax = optional_import("jax")
 jnn = optional_import("jax.nn")
@@ -83,12 +81,9 @@ def _compute_logps(model: JaxCausalLMProtocol, inputs: Any, labels: Any) -> Any:
         Summed non-padding token log probabilities per sequence.
 
     """
-    try:
-        seq_len = inputs.shape[1] if hasattr(inputs, "shape") and len(inputs.shape) > 1 else 1
-        positions = jnp.arange(seq_len)[None, :] if hasattr(jnp, "arange") else None
-        logits = model(inputs, positions) if positions is not None else model(inputs)
-    except TypeError:
-        logits = model(inputs)
+    seq_len = inputs.shape[1] if hasattr(inputs, "shape") and len(inputs.shape) > 1 else 1
+    positions = jnp.arange(seq_len)[None, :] if hasattr(jnp, "arange") else None
+    logits = call_jax_causal_lm(model, inputs, positions)
 
     log_probs = jnn.log_softmax(logits, axis=-1)
     labels_expanded = jnp.expand_dims(labels, axis=-1)
@@ -252,6 +247,7 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
             train_step=train_step,
         )
     )
+    _MODEL_CACHE.put_model(model_name, policy_model)
     return "completed", final_loss
 
 

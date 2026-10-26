@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Mapping, Sequence
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import ChatError, InferenceError, is_failed_status
 from gemma_4_sql.sdk.registry import get_backend
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-
-    from gemma_4_sql.type_hints import ChatMessageDict, ChatTurnResultDict, JSONValue
+from gemma_4_sql.type_hints import ChatMessageDict, ChatTurnResultDict, JSONValue
 
 logger = logging.getLogger(__name__)
 

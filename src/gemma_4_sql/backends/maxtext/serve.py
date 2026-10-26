@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
 logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")

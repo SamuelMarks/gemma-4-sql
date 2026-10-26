@@ -4,25 +4,127 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, SupportsInt, overload
+from typing import Any, SupportsInt, overload
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import HFTokenizerProtocol
+from gemma_4_sql.type_hints import HFTokenizerProtocol
 
 logger = logging.getLogger(__name__)
 _transformers_mod: Any = LazyLoader("transformers").get_module()
 AutoTokenizer: Any = getattr(_transformers_mod, "AutoTokenizer", None) if _transformers_mod is not None else None
 
 
+class ByteFallbackTokenizer:
+    """Deterministic, reversible UTF-8 byte-level fallback tokenizer implementing `TokenizerProtocol`.
+
+    When `vocab_size >= 256`, each UTF-8 byte maps 1:1 to its integer byte value in `[0, 255]`.
+    When `2 <= vocab_size < 256`, each UTF-8 byte is reversibly decomposed into fixed-width
+    base-`vocab_size` digits so all token IDs remain strictly within `[0, vocab_size)` without
+    destructive hash collisions.
+    """
+
+    def __init__(self, vocab_size: int = 256) -> None:
+        """Initialize the byte-level fallback tokenizer.
+
+        Args:
+            vocab_size: Maximum token ID bound (`>= 1`).
+
+        """
+        self.vocab_size = max(1, int(vocab_size))
+        self.tokens_per_byte = 1
+        if 2 <= self.vocab_size < 256:
+            count = 1
+            cap = self.vocab_size
+            while cap < 256:
+                cap *= self.vocab_size
+                count += 1
+            self.tokens_per_byte = count
+
+    def get_vocab(self) -> dict[str, int]:
+        """Return the vocabulary mapping tokens or byte labels to integer IDs.
+
+        Returns:
+            Dictionary mapping printable ASCII characters or `<byte_N>` tags to IDs in `[0, vocab_size)`.
+
+        """
+        vocab: dict[str, int] = {}
+        for b in range(self.vocab_size):
+            vocab[chr(b) if 32 <= b <= 126 else f"<byte_{b}>"] = b
+        return vocab
+
+    def encode_str(self, text: str) -> list[int]:
+        """Encode a single UTF-8 string into a list of integer token IDs in `[0, vocab_size)`.
+
+        Args:
+            text: Input string to tokenize.
+
+        Returns:
+            List of integer token IDs.
+
+        """
+        raw_bytes = str(text).encode("utf-8", errors="replace")
+        if self.vocab_size >= 256:
+            return list(raw_bytes)
+        if self.vocab_size == 1:
+            return [0 for _ in raw_bytes]
+
+        tokens: list[int] = []
+        base = self.vocab_size
+        k = self.tokens_per_byte
+        for b in raw_bytes:
+            val = b
+            digits = [0] * k
+            for pos in range(k - 1, -1, -1):
+                digits[pos] = val % base
+                val //= base
+            tokens.extend(digits)
+        return tokens
+
+    def decode_tokens(self, tokens: Sequence[int | object]) -> str:
+        """Decode a sequence of integer token IDs back into a UTF-8 string.
+
+        Args:
+            tokens: Sequence of integer token IDs.
+
+        Returns:
+            Decoded UTF-8 string.
+
+        """
+        parsed_ints: list[int] = []
+        for t in tokens:
+            try:
+                t_int = int(str(t)) if not isinstance(t, (int, bytes, SupportsInt)) else int(t)
+            except (ValueError, TypeError):
+                continue
+            parsed_ints.append(t_int)
+
+        if self.vocab_size >= 256 or self.vocab_size == 1:
+            valid_bytes = [t % 256 for t in parsed_ints]
+            return bytes(valid_bytes).decode("utf-8", errors="replace")
+
+        base = self.vocab_size
+        k = self.tokens_per_byte
+        reconstructed: list[int] = []
+        for idx in range(0, len(parsed_ints), k):
+            chunk = parsed_ints[idx : idx + k]
+            if len(chunk) < k:
+                reconstructed.extend(val % 256 for val in chunk)
+                break
+            byte_val = 0
+            for digit in chunk:
+                byte_val = byte_val * base + (digit % base)
+            reconstructed.append(byte_val % 256)
+
+        return bytes(reconstructed).decode("utf-8", errors="replace")
+
+
 class SQLTokenizer:
     """A tokenizer for SQL datasets.
 
     Wraps a Hugging Face tokenizer (like SentencePiece for Gemma) if available
-    and a `model_name` is provided. Otherwise, falls back to a deterministic,
-    reversible UTF-8 byte-level encoding scheme.
+    and a `model_name` is provided. Otherwise, delegates to `ByteFallbackTokenizer`
+    for a deterministic, reversible UTF-8 byte-level encoding scheme.
     """
 
     def __init__(
@@ -51,6 +153,7 @@ class SQLTokenizer:
         self.vocab_size = max(1, int(vocab_size))
         self.model_name = model_name
         self.allow_fallback = allow_fallback
+        self.byte_fallback = ByteFallbackTokenizer(vocab_size=self.vocab_size)
         self.hf_tokenizer: HFTokenizerProtocol | None = self._try_load_hf_tokenizer()
         self.is_fallback: bool = self.hf_tokenizer is None
         if self.model_name and self.hf_tokenizer is None:
@@ -59,7 +162,7 @@ class SQLTokenizer:
                     f"Failed to load Hugging Face tokenizer for '{self.model_name}' and allow_fallback=False.",
                     dependency_name="transformers",
                 )
-            logger.debug("Falling back to deterministic byte-level SQLTokenizer for '%s'.", self.model_name)
+            logger.warning("Falling back to deterministic byte-level SQLTokenizer for '%s'.", self.model_name)
 
     def _try_load_hf_tokenizer(self) -> HFTokenizerProtocol | None:
         """Attempt to load a Hugging Face `AutoTokenizer` if `model_name` is set.
@@ -88,11 +191,7 @@ class SQLTokenizer:
         """
         if self.hf_tokenizer is not None and hasattr(self.hf_tokenizer, "get_vocab"):
             return dict(self.hf_tokenizer.get_vocab())
-
-        vocab: dict[str, int] = {}
-        for b in range(self.vocab_size):
-            vocab[chr(b) if 32 <= b <= 126 else f"<byte_{b}>"] = b
-        return vocab
+        return self.byte_fallback.get_vocab()
 
     @overload
     def encode(self, text: str) -> list[int]:
@@ -119,8 +218,7 @@ class SQLTokenizer:
             encoded: Sequence[int] = self.hf_tokenizer.encode(str(text), add_special_tokens=False)
             return [int(x) for x in encoded]
 
-        modulus = max(256, self.vocab_size)
-        return [b % modulus if self.vocab_size >= 256 else b % self.vocab_size for b in str(text).encode("utf-8", errors="replace")]
+        return self.byte_fallback.encode_str(text)
 
     def decode(self, tokens: Sequence[int | object]) -> str:
         """Decode a sequence of token IDs back into a UTF-8 string.
@@ -136,13 +234,7 @@ class SQLTokenizer:
             int_tokens = [int(t) for t in tokens if isinstance(t, (int, float, str))]
             return str(self.hf_tokenizer.decode(int_tokens))
 
-        modulus = min(256, self.vocab_size) if self.vocab_size >= 256 else 256
-        valid_bytes: list[int] = []
-        for t in tokens:
-            try:
-                t_int = int(str(t)) if not isinstance(t, (int, bytes, SupportsInt)) else int(t)
-            except (ValueError, TypeError):
-                continue
-            valid_bytes.append(t_int % modulus)
+        return self.byte_fallback.decode_tokens(tokens)
 
-        return bytes(valid_bytes).decode("utf-8", errors="replace")
+
+__all__ = ["ByteFallbackTokenizer", "SQLTokenizer"]

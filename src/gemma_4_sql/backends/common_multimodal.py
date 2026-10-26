@@ -13,12 +13,10 @@ import logging
 import math
 import struct
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import AudioInput, ImageInput, MultimodalInput
+from gemma_4_sql.type_hints import AudioInput, ImageInput, MultimodalInput
 
 logger = logging.getLogger(__name__)
 

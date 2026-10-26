@@ -13,6 +13,7 @@ from gemma_4_sql.backends.common_gemma4_config import (
 )
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
+    call_jax_causal_lm,
     clear_all_model_caches,
     compute_jax_step_probs,
     expand_jax_beams,
@@ -140,3 +141,30 @@ def test_common_inference_and_peft_utilities() -> None:
             lambda: (_ for _ in ()).throw(InferenceError("direct err")),
             raise_on_error=True,
         )
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    with pytest.raises(DependencyMissingError, match="missing inf dep"):
+        run_inference_wrapper(
+            "jax",
+            "m",
+            "p",
+            2,
+            lambda: (_ for _ in ()).throw(DependencyMissingError("missing inf dep")),
+        )
+
+    def _kw_model(tokens: Any, positions: Any = None, *, pixel_values: Any = None, audio_values: Any = None, audio_mask: Any = None) -> tuple[Any, None]:
+        """Accept multimodal keyword arguments and return sum of inputs."""
+        return (tokens, positions, pixel_values, audio_values, audio_mask), None
+
+    def _pos_model(tokens: Any) -> tuple[Any, None]:
+        """Accept only positional tokens."""
+        return tokens, None
+
+    kw_logits, kw_cache = call_jax_causal_lm(_kw_model, [1, 2], positions=[0, 1], pixel_values="px", audio_values="au", audio_mask="am")
+    assert kw_logits == ([1, 2], [0, 1], "px", "au", "am")
+    assert kw_cache is None
+
+    pos_logits, pos_cache = call_jax_causal_lm(_pos_model, [1, 2], pixel_values="px")
+    assert pos_logits == [1, 2]
+    assert pos_cache is None

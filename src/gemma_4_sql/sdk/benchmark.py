@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from gemma_4_sql.sdk.registry import get_backend
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
+from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
 
 
 def benchmark(

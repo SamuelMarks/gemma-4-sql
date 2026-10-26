@@ -5,22 +5,20 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import re
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import EvaluationError, GemmaSQLError, is_failed_status
-from gemma_4_sql.sdk.adapters.base import strip_sql_comments
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
+from gemma_4_sql.sdk.protocols import BackendProtocol
 from gemma_4_sql.sdk.registry import get_backend
+from gemma_4_sql.sdk.sql_lexer import split_preserving_literals, strip_sql_comments
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import ETLConfig
+from gemma_4_sql.type_hints import ETLConfig, EvaluationMetricsDict, EvaluationResultDict, JSONValue
 
 MAX_BATCHES = 10
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from gemma_4_sql.sdk.protocols import BackendProtocol
-    from gemma_4_sql.type_hints import EvaluationMetricsDict, EvaluationResultDict, JSONValue
+_EVAL_SYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="gemma_eval_sync")
 
 
 def normalize_sql(sql: str) -> str:
@@ -35,7 +33,7 @@ def normalize_sql(sql: str) -> str:
     """
     cleaned = strip_sql_comments(sql)
 
-    parts = re.split(r"""('[^']*'|"(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\])""", cleaned)
+    parts = split_preserving_literals(cleaned)
     for i in range(0, len(parts), 2):
         segment = parts[i].lower()
         segment = re.sub(r"\s*,\s*", ", ", segment)
@@ -130,43 +128,89 @@ def compute_metrics(
         running_loop = None
 
     if running_loop is not None and running_loop.is_running():
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(
-                asyncio.run,
-                compute_metrics_async(engine, preds, truths),
-            ).result()
+        return _EVAL_SYNC_EXECUTOR.submit(
+            asyncio.run,
+            compute_metrics_async(engine, preds, truths),
+        ).result()
     return asyncio.run(compute_metrics_async(engine, preds, truths))
 
 
+def _to_int_seq(seq: Any) -> list[int]:
+    """Convert a 1D tensor, array, or sequence of token IDs into a Python `list[int]`.
+
+    Args:
+        seq: 1D tensor, array, or sequence of token IDs.
+
+    Returns:
+        List of integer token IDs.
+
+    """
+    raw = seq.tolist() if hasattr(seq, "tolist") else seq
+    return [raw] if isinstance(raw, int) else [int(x) for x in raw]
+
+
+def _normalize_id_matrix(raw_item: Any) -> list[list[int]]:
+    """Normalize a 1D or 2D tensor/sequence of token IDs into a 2D `list[list[int]]`.
+
+    Args:
+        raw_item: Raw inputs or targets object from a batch.
+
+    Returns:
+        2D list of integer token ID sequences.
+
+    """
+    if not hasattr(raw_item, "tolist") and not hasattr(raw_item, "__iter__"):
+        return [[]]
+    seq_list = raw_item.tolist() if hasattr(raw_item, "tolist") else list(raw_item)
+    if not isinstance(seq_list, list) or not seq_list:
+        return [[]]
+    if isinstance(seq_list[0], int):
+        return [[int(x) for x in seq_list]]
+    return [_to_int_seq(row) for row in seq_list]
+
+
+def _extract_batch_ids(batch: object) -> tuple[list[list[int]], list[list[int]]]:
+    """Extract all input and target token ID sequences from a batch structure.
+
+    Handles NumPy arrays, PyTorch tensors, JAX arrays, MLX arrays, lists, and dicts uniformly.
+
+    Args:
+        batch: Batch tuple, list, or dictionary containing `'inputs'` and `'targets'`.
+
+    Returns:
+        Tuple of `(batch_input_ids, batch_target_ids)` where each is a `list[list[int]]`.
+
+    """
+    min_batch_tuple_length = 2
+    batch_any: Any = batch
+    raw_inputs: Any = None
+    raw_targets: Any = None
+
+    if isinstance(batch_any, (tuple, list)) and len(batch_any) >= min_batch_tuple_length:
+        raw_inputs = batch_any[0]
+        raw_targets = batch_any[1]
+    elif isinstance(batch_any, dict) and "inputs" in batch_any and "targets" in batch_any:
+        raw_inputs = batch_any["inputs"]
+        raw_targets = batch_any["targets"]
+
+    if raw_inputs is None or raw_targets is None:
+        return ([[]], [[]])
+
+    return (_normalize_id_matrix(raw_inputs), _normalize_id_matrix(raw_targets))
+
+
 def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
-    """Extract input and target IDs from a batch.
+    """Extract first-element input and target IDs from a batch.
 
     Args:
         batch: The batch data structure (tuple, list, or mapping).
 
     Returns:
-        Tuple of `(input_ids, target_ids)` lists.
+        Tuple of `(input_ids, target_ids)` lists for the first batch item.
 
     """
-    min_batch_tuple_length = 2
-    input_ids: Any = []
-    target_ids: Any = []
-    batch_any: Any = batch
-
-    if isinstance(batch_any, (tuple, list)) and len(batch_any) >= min_batch_tuple_length:
-        input_ids = batch_any[0][0].tolist() if hasattr(batch_any[0][0], "tolist") else batch_any[0][0]
-        target_ids = batch_any[1][0].tolist() if hasattr(batch_any[1][0], "tolist") else batch_any[1][0]
-    elif isinstance(batch_any, dict):
-        if "inputs" in batch_any and "targets" in batch_any:
-            inputs = batch_any["inputs"]
-            targets = batch_any["targets"]
-            if hasattr(inputs, "__getitem__") and hasattr(targets, "__getitem__"):
-                in0 = inputs[0]
-                tgt0 = targets[0]
-                input_ids = in0.tolist() if hasattr(in0, "tolist") else in0
-                target_ids = tgt0.tolist() if hasattr(tgt0, "tolist") else tgt0
-
-    return ([int(x) for x in input_ids], [int(x) for x in target_ids])
+    in_seqs, tgt_seqs = _extract_batch_ids(batch)
+    return (in_seqs[0] if in_seqs else [], tgt_seqs[0] if tgt_seqs else [])
 
 
 def _run_evaluation_inference(
@@ -224,28 +268,28 @@ def _run_evaluation_inference(
         if limit > 0 and i >= limit:
             break
 
-        (input_ids, target_ids) = _process_batch_inputs(batch)
+        batch_inputs, batch_targets = _extract_batch_ids(batch)
+        for inp_seq, tgt_seq in zip(batch_inputs, batch_targets):
+            prompt_text = tokenizer.decode(inp_seq)
+            truth_text = tokenizer.decode(tgt_seq)
 
-        prompt_text = tokenizer.decode(input_ids)
-        truth_text = tokenizer.decode(target_ids)
+            gen_kwargs: dict[str, Any] = {"modality": modality}
+            if image_path is not None:
+                gen_kwargs["image_path"] = str(image_path)
+            elif isinstance(batch, dict) and "pixel_values" in batch:
+                gen_kwargs["pixel_values"] = batch["pixel_values"]
 
-        gen_kwargs: dict[str, Any] = {"modality": modality}
-        if image_path is not None:
-            gen_kwargs["image_path"] = str(image_path)
-        elif isinstance(batch, dict) and "pixel_values" in batch:
-            gen_kwargs["pixel_values"] = batch["pixel_values"]
+            if audio_path is not None:
+                gen_kwargs["audio_path"] = str(audio_path)
+            elif isinstance(batch, dict) and "audio_values" in batch:
+                gen_kwargs["audio_values"] = batch["audio_values"]
 
-        if audio_path is not None:
-            gen_kwargs["audio_path"] = str(audio_path)
-        elif isinstance(batch, dict) and "audio_values" in batch:
-            gen_kwargs["audio_values"] = batch["audio_values"]
-
-        gen_res = backend_impl.generate_sql(model_name, prompt_text, **gen_kwargs)
-        sql_pred = "" if is_failed_status(gen_res) else str(gen_res.get("sql", ""))
-        conf_score = 0.0 if is_failed_status(gen_res) else float(str(gen_res.get("confidence_score", 0.0)))
-        preds.append(sql_pred)
-        confidence_scores.append(conf_score)
-        truths.append(truth_text)
+            gen_res = backend_impl.generate_sql(model_name, prompt_text, **gen_kwargs)
+            sql_pred = "" if is_failed_status(gen_res) else str(gen_res.get("sql", ""))
+            conf_score = 0.0 if is_failed_status(gen_res) else float(str(gen_res.get("confidence_score", 0.0)))
+            preds.append(sql_pred)
+            confidence_scores.append(conf_score)
+            truths.append(truth_text)
     return (preds, truths, confidence_scores)
 
 

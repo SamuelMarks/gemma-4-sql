@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper
+from gemma_4_sql.backends.jax.inference import _MODEL_CACHE
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ModelType
+from gemma_4_sql.type_hints import ModelType, PEFTResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -21,17 +22,9 @@ Gemma4Config = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4Config")
 Gemma4DecoderLayer = optional_attr("gemma_4_sql.backends.jax.gemma4.decoder_layer", "Gemma4DecoderLayer")
 Gemma4ForCausalLM = optional_attr("gemma_4_sql.backends.jax.gemma4", "Gemma4ForCausalLM")
 
-if TYPE_CHECKING:
-    from flax.nnx import Module as _ModuleBase
-    from flax.nnx import Param
-    from jax import Array
-
-    from gemma_4_sql.type_hints import PEFTResultDict
-
-    _ParamBase = Param[Any]
-else:
-    _ModuleBase = nnx.Module if nnx is not None else object
-    _ParamBase = nnx.Param if nnx is not None else object
+type Array = Any
+_ModuleBase: Any = nnx.Module if nnx is not None else object
+_ParamBase: Any = nnx.Param if nnx is not None else object
 
 
 class NNXParam(_ParamBase):
@@ -572,6 +565,7 @@ def apply_lora(
             rngs=rngs,
         )
         _ = nnx.split(model, LoRAParam, ...)
+        _MODEL_CACHE.put_model(model_name, model)
         logger.info("Injected LoRA into %d targets", injected_count)
         return injected_count
 

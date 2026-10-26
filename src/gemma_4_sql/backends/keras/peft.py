@@ -4,42 +4,19 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ModelType, TensorType
+from gemma_4_sql.type_hints import ModelType, PEFTResultDict, TensorType
 
 logger = logging.getLogger(__name__)
 
 keras = optional_import("keras")
 ops = optional_attr("keras", "ops")
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import PEFTResultDict
-
-    class _LayerBase:
-        """Static base class stub representing `keras.layers.Layer` during type checking."""
-
-        built: bool
-
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            """Initialize layer base."""
-
-        def add_weight(self, *args: object, **kwargs: object) -> Any:
-            """Create a layer weight variable."""
-            return None
-
-        def build(self, input_shape: Any) -> None:
-            """Build layer weights for `input_shape`."""
-
-        def __call__(self, *args: Any, **kwargs: Any) -> Any:
-            """Execute the layer forward pass."""
-            return None
-
-else:
-    _LayerBase = getattr(getattr(keras, "layers", None), "Layer", object) if keras is not None else object
+_LayerBase: Any = getattr(getattr(keras, "layers", None), "Layer", object) if keras is not None else object
 
 
 class KerasLoRADense(_LayerBase):

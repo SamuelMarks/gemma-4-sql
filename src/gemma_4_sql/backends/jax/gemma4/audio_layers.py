@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
+from .config import AudioConfig
 from .layers import Gemma4ClippableLinear, Gemma4RMSNorm
-
-if TYPE_CHECKING:
-    from .config import AudioConfig
 
 
 class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):

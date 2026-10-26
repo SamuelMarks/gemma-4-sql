@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 import operator
 import threading
 import weakref
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
-from gemma_4_sql.exceptions import InferenceError, resolve_raise_on_error
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from gemma_4_sql.type_hints import InferenceResultDict
+from gemma_4_sql.exceptions import (
+    ConfigurationError,
+    DependencyMissingError,
+    ExecutionStatus,
+    GemmaSQLError,
+    InferenceError,
+    resolve_raise_on_error,
+)
+from gemma_4_sql.type_hints import InferenceResultDict
 
 logger = logging.getLogger(__name__)
 TModel = TypeVar("TModel")
@@ -226,10 +231,14 @@ def run_inference_wrapper(
     raise_on_error = resolve_raise_on_error(kwargs=dict(kwargs)) or bool(kwargs.get("strict_checkpoint"))
     sql = ""
     confidence_score = 0.0
+    error_message: str | None = None
     try:
         sql, confidence_score = execute_fn()
-        status = "success"
-    except (InferenceError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, ImportError) as e:
+        status = ExecutionStatus.SUCCESS.value
+        status_code = ExecutionStatus.SUCCESS.value
+    except (DependencyMissingError, ConfigurationError):
+        raise
+    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
         logger.exception("%s Generation Error: ", backend_name)
         if raise_on_error:
             if isinstance(e, InferenceError):
@@ -240,21 +249,63 @@ def run_inference_wrapper(
                 model_name=model_name,
                 cause=e,
             ) from e
-        status = f"failed: {e!s}"
+        error_message = str(e)
+        status = f"failed: {error_message}"
+        status_code = ExecutionStatus.FAILED.value
 
-    return {
+    result: InferenceResultDict = {
         "backend": backend_name,
         "model": model_name,
         "prompt": prompt,
         "sql": sql,
         "status": status,
+        "status_code": status_code,
         "beam_width": beam_width,
         "confidence_score": float(confidence_score),
     }
+    if error_message is not None:
+        result["error_message"] = error_message
+    return result
+
+
+def call_jax_causal_lm(
+    model: Any,
+    inputs: Any,
+    positions: Any = None,
+    **extra_kwargs: Any,
+) -> Any:
+    """Invoke a JAX causal language model with signature-aware positional and keyword argument forwarding.
+
+    Inspects `inspect.signature(model)` instead of catching broad `TypeError` during execution,
+    ensuring internal `TypeError` bugs inside `model.__call__` are never masked.
+
+    Args:
+        model: Callable JAX/Flax NNX model or mock function.
+        inputs: Input token ID array.
+        positions: Optional token position index array.
+        **extra_kwargs: Optional multimodal or forward keyword arguments (e.g., `pixel_values`, `audio_values`).
+
+    Returns:
+        Model output logits array.
+
+    """
+    target = model.__call__ if callable(model) and not inspect.isfunction(model) else model
+    sig = inspect.signature(target)
+    params = list(sig.parameters.values())
+    has_var_pos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
+    has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
+    pos_params = [p for p in params if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+    accepts_positions = has_var_pos or len(pos_params) >= 2 or "positions" in sig.parameters
+    accepted_kwargs = extra_kwargs if has_var_kw else {k: v for k, v in extra_kwargs.items() if k in sig.parameters}
+
+    if positions is not None and accepts_positions:
+        return model(inputs, positions, **accepted_kwargs)
+    return model(inputs, **accepted_kwargs)
 
 
 __all__ = [
     "BoundedLRUCache",
+    "call_jax_causal_lm",
     "clear_all_model_caches",
     "compute_jax_step_probs",
     "expand_jax_beams",

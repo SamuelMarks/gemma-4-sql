@@ -32,3 +32,18 @@ def test_moe_layer() -> None:
     moe.router.gate.weight.data[0, :] = 100.0  # expert 0 gets all
     out_empty, _ = moe(x)
     assert out_empty.shape == (2, 10, 256)
+    assert moe.last_aux_loss is not None
+
+    # Test float32_gate_logits=False and moe_intermediate_size
+    cfg_no_fp32 = Gemma4Config(
+        hidden_size=64,
+        intermediate_size=128,
+        moe_intermediate_size=32,
+        num_experts=3,
+        num_experts_per_tok=1,
+        float32_gate_logits=False,
+    )
+    moe_custom = Gemma4MoE(cfg_no_fp32)
+    out_custom, logits_custom = moe_custom(torch.randn(1, 4, 64))
+    assert out_custom.shape == (1, 4, 64)
+    assert logits_custom.shape == (4, 3)

@@ -4,15 +4,11 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.cli_etl import etl_posttrain_cmd, etl_pretrain_cmd, etl_sft_cmd
 from gemma_4_sql.constants import DEFAULT_POSTTRAIN_DATASET, DEFAULT_PRETRAIN_DATASET, DEFAULT_SFT_DATASET
 
-if TYPE_CHECKING:
-    SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
-else:
-    SubParsersType = argparse._SubParsersAction
+type SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
 
 
 def add_etl_subparser(

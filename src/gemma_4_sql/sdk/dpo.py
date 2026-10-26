@@ -2,13 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from gemma_4_sql.sdk.registry import get_backend
-from gemma_4_sql.type_hints import DPOConfig
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import DPOResultDict, JSONValue
+from gemma_4_sql.type_hints import DPOConfig, DPOResultDict, JSONValue
 
 
 def run_dpo(

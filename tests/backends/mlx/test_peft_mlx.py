@@ -23,16 +23,14 @@ nn: Any = optional_import("mlx.nn")
 
 def test_mlx_peft_imports() -> None:
     """Test MLX PEFT optional import fallback when MLX packages are absent."""
-    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None, "mlx.nn": None, "mlx_lm": None}):
-        sys.modules.pop("gemma_4_sql.backends.mlx.peft", None)
-        import gemma_4_sql.backends.mlx.peft as reloaded_peft
+    import importlib
 
+    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None, "mlx.nn": None, "mlx_lm": None}):
+        reloaded_peft = importlib.reload(peft_module)
         assert reloaded_peft.mx is None
         assert reloaded_peft.nn is None
 
-    sys.modules.pop("gemma_4_sql.backends.mlx.peft", None)
-    import gemma_4_sql.backends.mlx.peft as restored_peft
-
+    restored_peft = importlib.reload(peft_module)
     assert restored_peft.mx is not None
 
 

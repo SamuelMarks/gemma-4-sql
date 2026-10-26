@@ -140,6 +140,8 @@ def test_is_failed_status() -> None:
     assert is_failed_status({"status": "failed: err"}) is True
     assert is_failed_status({"status": ExecutionStatus.ERROR}) is True
     assert is_failed_status({"status": "completed", "error": "boom"}) is True
+    assert is_failed_status({"status": "completed", "status_code": ExecutionStatus.FAILED}) is True
+    assert is_failed_status({"status": "completed", "status_code": "completed", "error_message": "boom"}) is True
     assert is_failed_status({"status": "completed"}) is False
     assert is_failed_status({"status": 123}) is False
     assert is_failed_status(123) is False

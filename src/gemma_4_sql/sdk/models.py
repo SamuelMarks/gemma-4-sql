@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.sdk.registry import get_backend
-from gemma_4_sql.type_hints import TrainingConfig
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import TrainResultDict
+from gemma_4_sql.type_hints import TrainingConfig, TrainResultDict
 
 __all__ = [
     "TrainingConfig",

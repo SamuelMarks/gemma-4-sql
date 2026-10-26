@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
+from gemma_4_sql.backends.jax.inference import _MODEL_CACHE
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
-from gemma_4_sql.type_hints import JaxCausalLMProtocol, TensorType, register_quantized_artifact
+from gemma_4_sql.type_hints import JaxCausalLMProtocol, QuantizeResultDict, TensorType, register_quantized_artifact
 
 MIN_NDIM_FOR_QUANTIZATION = 2
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import QuantizeResultDict
 logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")
@@ -320,6 +319,8 @@ def quantize_model(
             calibration_samples=calibration_samples,
             salient_ratio=salient_ratio,
         )
+        if not status.startswith("unsupported"):
+            _MODEL_CACHE.put_model(model_name, model)
         return (float(memory_reduction), status)
 
     return quantize_model_wrapper(

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from gemma_4_sql.backends.common_export import run_export_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import ExportResultDict
+from gemma_4_sql.type_hints import ExportResultDict
 
 torch = optional_import("torch")
 save_file = optional_attr("safetensors.torch", "save_file")
@@ -99,11 +98,15 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> ExportR
     """
     if torch is None or save_file is None:
         raise DependencyMissingError("PyTorch or safetensors missing, cannot export model.", backend="pytorch")
-    Path(export_path).mkdir(parents=True, exist_ok=True)
     is_rank_0 = _is_rank_zero()
     backend_alias = str(kwargs.get("backend_alias", kwargs.get("backend", "pytorch")))
     save_kwargs = dict(kwargs)
     save_kwargs.pop("backend_alias", None)
     save_kwargs.pop("backend", None)
-    (file_path, status) = _save_real_model(model_name, export_path, is_rank_zero=is_rank_0, backend_alias=backend_alias, **save_kwargs)
-    return {"backend": backend_alias, "model": model_name, "export_path": export_path, "file_path": str(file_path), "status": status, "format": "safetensors"}
+    return run_export_wrapper(
+        backend_alias,
+        model_name,
+        export_path,
+        "safetensors",
+        lambda: _save_real_model(model_name, export_path, is_rank_zero=is_rank_0, backend_alias=backend_alias, **save_kwargs),
+    )

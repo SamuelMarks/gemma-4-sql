@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, TypeVar
+from collections.abc import Callable, Iterable
+from typing import Any, TypeVar
 
-from gemma_4_sql.exceptions import TrainingError, resolve_raise_on_error
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
-
-    from gemma_4_sql.type_hints import TrainingConfig, TrainResultDict
+from gemma_4_sql.exceptions import (
+    ConfigurationError,
+    DependencyMissingError,
+    ExecutionStatus,
+    GemmaSQLError,
+    TrainingError,
+    resolve_raise_on_error,
+)
+from gemma_4_sql.type_hints import TrainingConfig, TrainResultDict
 
 T_Batch = TypeVar("T_Batch")
 logger = logging.getLogger(__name__)
@@ -78,9 +82,13 @@ def run_train_wrapper(
     raise_on_error = resolve_raise_on_error(config, kwargs=dict(kwargs))
 
     final_loss = 0.0
+    error_message: str | None = None
     try:
         status, final_loss = execute_fn()
-    except (TrainingError, ValueError, TypeError, AttributeError, ImportError, RuntimeError, OSError, KeyError) as e:
+        status_code = ExecutionStatus.FAILED.value if status.startswith("failed") else ExecutionStatus.COMPLETED.value
+    except (DependencyMissingError, ConfigurationError):
+        raise
+    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
         logger.exception("%s training failed: ", backend_name)
         if raise_on_error:
             raise TrainingError(
@@ -90,7 +98,9 @@ def run_train_wrapper(
                 operation=action,
                 cause=e,
             ) from e
-        status = f"failed: {e!s}"
+        error_message = str(e)
+        status = f"failed: {error_message}"
+        status_code = ExecutionStatus.FAILED.value
 
     result: TrainResultDict = {
         "backend": backend_name,
@@ -100,8 +110,11 @@ def run_train_wrapper(
         "epochs": epochs,
         "learning_rate": learning_rate,
         "status": status,
+        "status_code": status_code,
         "final_loss": float(final_loss),
     }
+    if error_message is not None:
+        result["error_message"] = error_message
     dist_strat = kwargs.get("distributed_strategy")
     if dist_strat is not None:
         result["distributed_strategy"] = str(dist_strat)

@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import Any
 
 from gemma_4_sql.exceptions import (
+    ConfigurationError,
     DependencyMissingError,
+    ExecutionStatus,
+    GemmaSQLError,
     QuantizationError,
     UnsupportedQuantizationMethodError,
     resolve_raise_on_error,
 )
-from gemma_4_sql.type_hints import ModelType, register_quantized_artifact
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from gemma_4_sql.type_hints import QuantizeResultDict
+from gemma_4_sql.type_hints import ModelType, QuantizeResultDict, register_quantized_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -131,13 +130,17 @@ def quantize_model_wrapper(
         )
 
     should_raise = resolve_raise_on_error(raise_on_error=raise_on_error, kwargs=dict(kwargs))
+    error_message: str | None = None
     try:
         (memory_reduction, status) = apply_fn()
-        if not status.startswith("unsupported"):
+        if status.startswith("unsupported"):
+            status_code = ExecutionStatus.UNSUPPORTED.value
+        else:
+            status_code = ExecutionStatus.COMPLETED.value
             logger.info("Loading model %s with %s quantization...", model_name, method)
-    except (DependencyMissingError, UnsupportedQuantizationMethodError):
+    except (DependencyMissingError, UnsupportedQuantizationMethodError, ConfigurationError):
         raise
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
         logger.exception("Failed to quantize: ")
         if should_raise:
             raise QuantizationError(
@@ -147,13 +150,19 @@ def quantize_model_wrapper(
                 operation="quantize",
                 cause=e,
             ) from e
-        status = f"failed: {e!s}"
+        error_message = str(e)
+        status = f"failed: {error_message}"
+        status_code = ExecutionStatus.FAILED.value
         memory_reduction = 0.0
 
-    return {
+    result: QuantizeResultDict = {
         "backend": backend_name,
         "model": model_name,
         "method": method,
         "status": status,
+        "status_code": status_code,
         "memory_reduction_factor": float(memory_reduction),
     }
+    if error_message is not None:
+        result["error_message"] = error_message
+    return result

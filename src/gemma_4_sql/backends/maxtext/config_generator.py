@@ -9,10 +9,8 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import TrainingConfig
+from gemma_4_sql.type_hints import TrainingConfig
 
 
 @dataclass

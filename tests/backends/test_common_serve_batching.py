@@ -37,29 +37,6 @@ def test_common_serve_endpoints() -> None:
         resp_async = client.post("/generate", json={"prompt": "async"})
         assert resp_async.json()["sql"] == "SELECT 1;"
 
-        with pytest.MonkeyPatch.context() as mp:
-            import asyncio
-
-            original_get = asyncio.get_running_loop
-            first_call = True
-
-            def fake_get() -> Any:
-                """Raise RuntimeError on the first get_running_loop check inside generate()."""
-                nonlocal first_call
-                if first_call:
-                    import inspect
-
-                    f = inspect.currentframe()
-                    if f and f.f_back and f.f_back.f_code.co_name == "generate":
-                        first_call = False
-                        raise RuntimeError("no loop")
-                return original_get()
-
-            mp.setattr(asyncio, "get_running_loop", fake_get)
-
-            resp = client.post("/generate", json={"prompt": "sync"})
-            assert resp.json()["sql"] == "SELECT 1;"
-
 
 @pytest.mark.asyncio
 async def test_worker_async() -> None:
@@ -139,28 +116,12 @@ def test_serve_model_wrapper() -> None:
 
 
 def test_json_response_fallback() -> None:
-    """Verify json response fallback behavior."""
+    """Verify json response fallback behavior when JSONResponse is None."""
     import gemma_4_sql.backends.common_serve as mod
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(mod, "JSONResponse", None)
         app = create_common_app("pytorch", "test", generate_logic=lambda p: "SELECT 1;")
-
-        import asyncio
-
-        original_get = asyncio.get_running_loop
-
-        def fake_get() -> Any:
-            """Provide fake get test helper."""
-            import inspect
-
-            f = inspect.currentframe()
-            if f and f.f_back and "common_serve.py" in f.f_back.f_code.co_filename:
-                raise RuntimeError("no loop")
-            return original_get()
-
-        mp.setattr(asyncio, "get_running_loop", fake_get)
-
         client = TestClient(app)
 
         r1 = client.post("/generate", json={"prompt": "sync"})
@@ -171,92 +132,77 @@ def test_json_response_fallback() -> None:
 
 
 def test_sync_fallback_branches() -> None:
-    """Verify sync fallback branches behavior."""
-    import asyncio
+    """Verify `app.run_direct` synchronous helper for single, batched, and missing handlers."""
+    app0: Any = create_common_app("pytorch", "test", generate_logic=lambda p: f"G:{p}")
+    assert app0.run_direct("q") == "G:q"
 
-    with pytest.MonkeyPatch.context() as mp:
-        original_get = asyncio.get_running_loop
+    app1: Any = create_common_app("pytorch", "test", batch_generate_logic=lambda p: [f"B:{p[0]}"])
+    assert app1.run_direct("q") == "B:q"
 
-        def fake_get() -> Any:
-            """Provide fake get test helper."""
-            import inspect
-
-            f = inspect.currentframe()
-            if f and f.f_back and "common_serve.py" in f.f_back.f_code.co_filename:
-                raise RuntimeError("no loop")
-            return original_get()
-
-        mp.setattr(asyncio, "get_running_loop", fake_get)
-
-        # batch_generate_logic fallback
-        app1 = create_common_app("pytorch", "test", batch_generate_logic=lambda p: ["B1"])
-        c1 = TestClient(app1)
-        assert c1.post("/generate", json={"prompt": "a"}).json()["sql"] == "B1"
-
-        # No logic fallback
-        app2 = create_common_app("pytorch", "test")
-        c2 = TestClient(app2)
-        with pytest.raises(NotImplementedError):
-            c2.post("/generate", json={"prompt": "a"})
+    app2: Any = create_common_app("pytorch", "test")
+    with pytest.raises(NotImplementedError):
+        app2.run_direct("q")
 
 
 @pytest.mark.asyncio
 async def test_common_serve_cancel_request() -> None:
-    """Verify common serve cancel request behavior."""
-    import asyncio
+    """Verify common serve cancel request behavior using deterministic event synchronization."""
+    import threading
 
     import httpx
 
-    def slow_batch(p: Any) -> list[str]:
-        """Provide slow batch test helper."""
-        import time
+    release_worker = threading.Event()
+    worker_started = threading.Event()
 
-        time.sleep(0.1)
+    def slow_batch(_p: Any) -> list[str]:
+        """Signal worker start and wait for release_worker event."""
+        worker_started.set()
+        release_worker.wait(timeout=1.0)
         return ["SUCCESS"]
 
-    app = create_common_app("pytorch", "test", batch_generate_logic=slow_batch)
+    app = create_common_app("pytorch", "test", batch_generate_logic=slow_batch, max_wait_ms=1.0)
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         task = asyncio.create_task(client.post("/generate", json={"prompt": "test"}))
-        await asyncio.sleep(0.01)  # Give it time to hit the endpoint and queue
+        while not worker_started.is_set():
+            await asyncio.sleep(0.001)
         task.cancel()
-        try:
+        with pytest.raises(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
-        await asyncio.sleep(0.2)
+        release_worker.set()
+        await asyncio.sleep(0.01)
 
-    called = []
+    called: list[int] = []
     create_common_app("pytorch", "test", startup_callback=lambda: called.append(1), generate_logic=lambda p: "")
     assert len(called) == 1
 
 
 @pytest.mark.asyncio
 async def test_common_serve_cancel_request_exception() -> None:
-    """Verify common serve cancel request exception behavior."""
-    import asyncio
+    """Verify common serve cancel request exception behavior using deterministic event synchronization."""
+    import threading
 
     import httpx
 
-    from gemma_4_sql.backends.common_serve import create_common_app
+    release_worker = threading.Event()
+    worker_started = threading.Event()
 
-    def error_batch(p: Any) -> Never:
-        """Provide error batch test helper."""
-        import time
-
-        time.sleep(0.1)
+    def error_batch(_p: Any) -> Never:
+        """Signal worker start, wait for release_worker, then raise RuntimeError."""
+        worker_started.set()
+        release_worker.wait(timeout=1.0)
         raise RuntimeError("Fail")
 
-    app = create_common_app("pytorch", "test", batch_generate_logic=error_batch, max_batch_size=2)
+    app = create_common_app("pytorch", "test", batch_generate_logic=error_batch, max_batch_size=2, max_wait_ms=1.0)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         task = asyncio.create_task(client.post("/generate", json={"prompt": "test"}))
-        await asyncio.sleep(0.01)
+        while not worker_started.is_set():
+            await asyncio.sleep(0.001)
         task.cancel()
-        try:
+        with pytest.raises(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
-        await asyncio.sleep(0.2)
+        release_worker.set()
+        await asyncio.sleep(0.01)
 
 
 def test_fastapi_missing_and_run_server(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -311,3 +257,13 @@ def test_fastapi_missing_and_run_server(monkeypatch: pytest.MonkeyPatch) -> None
     client_err = TestClient(app_err, raise_server_exceptions=False)
     assert client_err.post("/generate", json={"prompt": "hi"}).status_code == 500
     assert InferenceError("test").backend is None
+
+    with pytest.raises(DependencyMissingError, match="missing serve dep"):
+        mod.serve_model_wrapper(
+            backend_name="pytorch",
+            model_name="test",
+            max_batch_size=32,
+            missing_deps=False,
+            app_factory=lambda: (_ for _ in ()).throw(DependencyMissingError("missing serve dep")),
+            port=8000,
+        )

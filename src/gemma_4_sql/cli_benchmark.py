@@ -2,30 +2,28 @@
 
 from __future__ import annotations
 
+import argparse
 import json
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk import benchmark
 
-if TYPE_CHECKING:
-    import argparse
-    from typing import Protocol
 
-    class BenchmarkArgsProtocol(Protocol):
-        """Protocol for parsed `benchmark` CLI arguments."""
+class BenchmarkArgsProtocol(Protocol):
+    """Protocol for parsed `benchmark` CLI arguments."""
 
-        model: str
-        hardware: str
-        batch_size: int
-        backend: str
-        dtype: str
-        mode: str
-        max_new_tokens: int
-        warmup_steps: int
-        image_path: str | None
-        audio_path: str | None
-        modality: str
+    model: str
+    hardware: str
+    batch_size: int
+    backend: str
+    dtype: str
+    mode: str
+    max_new_tokens: int
+    warmup_steps: int
+    image_path: str | None
+    audio_path: str | None
+    modality: str
 
 
 def benchmark_cmd(args: argparse.Namespace | BenchmarkArgsProtocol) -> int:

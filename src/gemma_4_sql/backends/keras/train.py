@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_train import run_train_wrapper
 from gemma_4_sql.backends.keras.etl import build_dataloader
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
+from gemma_4_sql.type_hints import ETLConfig, TrainingConfig, TrainResultDict
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import TrainResultDict
 logger = logging.getLogger(__name__)
 
 keras = optional_import("keras")

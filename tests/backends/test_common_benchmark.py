@@ -123,3 +123,13 @@ def test_run_benchmark_wrapper_failure() -> None:
         pytest.raises(BenchmarkError, match="Benchmark error"),
     ):
         run_benchmark_wrapper("test_backend", "model", "cpu", 1, False, mock_benchmark, raise_on_error=True)
+
+    with pytest.raises(DependencyMissingError, match="missing bench dep"):
+        run_benchmark_wrapper(
+            "test_backend",
+            "model",
+            "cpu",
+            1,
+            False,
+            lambda: (_ for _ in ()).throw(DependencyMissingError("missing bench dep")),
+        )

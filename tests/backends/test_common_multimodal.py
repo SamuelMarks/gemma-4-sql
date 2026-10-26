@@ -39,7 +39,7 @@ def test_missing_np_and_pil_fallbacks(
                 mod.load_image_bytes(mock_image_input)
             assert mock_debug.call_args_list[0][0][0] == "Failed to import PIL: %s"
 
-    with patch("gemma_4_sql.backends.common_multimodal.logger.debug"):
+    with patch("gemma_4_sql.backends.common_multimodal.logger.debug"), patch.dict(sys.modules, {"PIL": None}):
         monkeypatch.setattr(mod, "Image", None)
         mock_image_input = MagicMock()
         mock_image_input.save = MagicMock()

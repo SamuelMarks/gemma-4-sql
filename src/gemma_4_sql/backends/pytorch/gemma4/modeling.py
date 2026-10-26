@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
@@ -12,6 +13,7 @@ from .cache import Cache, DynamicCache
 from .config import Gemma4Config
 from .decoder_layer import Gemma4DecoderLayer
 from .layers import Gemma4RMSNorm
+from .moe import calculate_load_balancing_loss
 from .vision import Gemma4VisionModel
 
 __all__ = [
@@ -103,7 +105,12 @@ class Gemma4MultiModalProjector(nn.Module):
 class Gemma4ForCausalLM(nn.Module):
     """Gemma 4 model for causal language modeling."""
 
-    def __init__(self, config: Gemma4Config):
+    embed_tokens_per_layer: nn.Embedding | None
+    per_layer_model_projection: nn.Linear | None
+    per_layer_projection_norm: Gemma4RMSNorm | None
+    last_aux_loss: torch.Tensor | None
+
+    def __init__(self, config: Gemma4Config) -> None:
         """Initialize Gemma4ForCausalLM.
 
         Args:
@@ -113,9 +120,22 @@ class Gemma4ForCausalLM(nn.Module):
         super().__init__()
         self.config = config
         self.vocab_size = config.vocab_size
+        self.embed_scale = float(math.sqrt(config.hidden_size))
+        self.last_aux_loss = None
 
         # Text embeddings
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+
+        ple_dim = getattr(config, "hidden_size_per_layer_input", None)
+        if ple_dim:
+            vocab_ple = getattr(config, "vocab_size_per_layer_input", None) or config.vocab_size
+            self.embed_tokens_per_layer = nn.Embedding(int(vocab_ple), config.num_hidden_layers * int(ple_dim))
+            self.per_layer_model_projection = nn.Linear(config.hidden_size, config.num_hidden_layers * int(ple_dim), bias=False)
+            self.per_layer_projection_norm = Gemma4RMSNorm(int(ple_dim), eps=config.rms_norm_eps)
+        else:
+            self.embed_tokens_per_layer = None
+            self.per_layer_model_projection = None
+            self.per_layer_projection_norm = None
 
         # Multimodal sub-models
         self.vision_model = Gemma4VisionModel(config.vision_config)
@@ -126,6 +146,50 @@ class Gemma4ForCausalLM(nn.Module):
         self.norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.embed_tokens.weight = self.lm_head.weight  # Tie weights
+
+    def get_per_layer_inputs(self, input_ids: torch.Tensor) -> torch.Tensor | None:
+        """Compute token-identity Per-Layer Embeddings (PLE) when enabled.
+
+        Args:
+            input_ids: Input token ID tensor of shape `(batch_size, seq_len)`.
+
+        Returns:
+            Per-layer token embeddings of shape `(batch_size, seq_len, num_layers, ple_dim)` or `None`.
+
+        """
+        ple_dim = getattr(self.config, "hidden_size_per_layer_input", None)
+        if not ple_dim or self.embed_tokens_per_layer is None:
+            return None
+        ple: torch.Tensor = self.embed_tokens_per_layer(input_ids) * math.sqrt(float(ple_dim))
+        batch_size, seq_len, _ = ple.shape
+        res_ple: torch.Tensor = ple.view(batch_size, seq_len, self.config.num_hidden_layers, int(ple_dim))
+        return res_ple
+
+    def project_per_layer_inputs(
+        self,
+        inputs_embeds: torch.Tensor,
+        per_layer_inputs: torch.Tensor | None = None,
+    ) -> torch.Tensor | None:
+        """Project hidden embeddings into per-layer space and combine with token-identity PLE.
+
+        Args:
+            inputs_embeds: Scaled input token embeddings of shape `(batch_size, seq_len, hidden_size)`.
+            per_layer_inputs: Optional token-identity PLE tensor.
+
+        Returns:
+            Combined per-layer embeddings of shape `(batch_size, seq_len, num_layers, ple_dim)` or `None`.
+
+        """
+        ple_dim = getattr(self.config, "hidden_size_per_layer_input", None)
+        if not ple_dim or self.per_layer_model_projection is None or self.per_layer_projection_norm is None:
+            return None
+        batch_size, seq_len, _ = inputs_embeds.shape
+        proj: torch.Tensor = self.per_layer_model_projection(inputs_embeds) * (self.config.hidden_size ** (-0.5))
+        proj = proj.view(batch_size, seq_len, self.config.num_hidden_layers, int(ple_dim))
+        proj = self.per_layer_projection_norm(proj)
+        if per_layer_inputs is not None and per_layer_inputs.shape[1] == seq_len:
+            proj = (proj + per_layer_inputs) * (2.0 ** (-0.5))
+        return proj
 
     def forward(
         self,
@@ -154,7 +218,7 @@ class Gemma4ForCausalLM(nn.Module):
             Tuple containing output logits and updated past key values.
 
         """
-        hidden_states = self.embed_tokens(input_ids) * (self.config.hidden_size**0.5)
+        hidden_states = self.embed_tokens(input_ids) * self.embed_scale
 
         if pixel_values is not None:
             vision_outputs = self.vision_model(pixel_values)
@@ -191,33 +255,58 @@ class Gemma4ForCausalLM(nn.Module):
                 prefix_mask = torch.ones((attention_mask.shape[0], diff), dtype=attention_mask.dtype, device=attention_mask.device)
                 attention_mask = torch.cat([prefix_mask, attention_mask], dim=1)
 
-        next_decoder_cache: tuple[tuple[torch.Tensor, torch.Tensor], ...] = ()
+        ple_tokens = self.get_per_layer_inputs(input_ids)
+        per_layer_inputs = self.project_per_layer_inputs(hidden_states, ple_tokens)
+
+        next_decoder_cache: list[tuple[torch.Tensor, torch.Tensor]] = []
+        aux_losses: list[torch.Tensor] = []
+        num_layers = len(self.layers)
+        kv_shared = int(getattr(self.config, "num_kv_shared_layers", 0) or 0)
+        pivot = max(1, num_layers - kv_shared) if kv_shared > 0 else num_layers
 
         for idx, decoder_layer in enumerate(self.layers):
             layer_past_key_value: tuple[torch.Tensor, torch.Tensor] | Cache | None
             if past_key_values is None:
-                layer_past_key_value = None
+                if kv_shared > 0 and idx >= pivot and len(next_decoder_cache) > (idx % pivot):
+                    layer_past_key_value = next_decoder_cache[idx % pivot]
+                else:
+                    layer_past_key_value = None
             elif isinstance(past_key_values, Cache):
                 layer_past_key_value = past_key_values
             else:
-                layer_past_key_value = past_key_values[idx]
+                cache_idx = (idx % pivot) if (kv_shared > 0 and idx >= pivot) else idx
+                layer_past_key_value = past_key_values[cache_idx]
 
-            hidden_states, present_key_value, _router_logits = decoder_layer(
+            layer_ple = per_layer_inputs[:, :, idx, :] if per_layer_inputs is not None else None
+            hidden_states, present_key_value, router_logits = decoder_layer(
                 hidden_states,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
                 past_key_value=layer_past_key_value,
+                per_layer_input=layer_ple,
             )
+            if router_logits is not None:
+                aux_losses.append(
+                    calculate_load_balancing_loss(
+                        router_logits,
+                        self.config.num_experts,
+                        self.config.num_experts_per_tok,
+                    )
+                )
             if present_key_value is not None and not isinstance(present_key_value, Cache):
-                next_decoder_cache += (present_key_value,)
+                next_decoder_cache.append(present_key_value)
 
+        self.last_aux_loss = torch.stack(aux_losses).mean() if aux_losses else None
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)
+        softcap = getattr(self.config, "final_logit_softcapping", None)
+        if softcap is not None:
+            logits = torch.tanh(logits / float(softcap)) * float(softcap)
 
         if isinstance(past_key_values, Cache):
             return logits, past_key_values
 
-        return logits, next_decoder_cache if len(next_decoder_cache) > 0 else None
+        return logits, tuple(next_decoder_cache) if len(next_decoder_cache) > 0 else None
 
     def generate(
         self,

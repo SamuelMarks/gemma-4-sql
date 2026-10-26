@@ -100,3 +100,16 @@ def test_export_model_custom_backend_mock(monkeypatch: pytest.MonkeyPatch, tmp_p
     res = export_model("mock", str(tmp_path), backend="jax", format="gguf")
     assert res["status"] == "ok"
     mock_export.assert_called_once_with("mock", str(tmp_path), format="gguf")
+
+
+def test_common_export_wrapper_and_build_result(tmp_path: Path) -> None:
+    """Verify `build_export_result` and `run_export_wrapper` handle error_message and unexpected runtime exceptions."""
+    from gemma_4_sql.backends.common_export import build_export_result, run_export_wrapper
+    from gemma_4_sql.exceptions import ExportError
+
+    res_err = build_export_result("jax", "m", str(tmp_path), tmp_path / "f", "failed: err", "orbax", error_message="err")
+    assert res_err["status_code"] == "failed"
+    assert res_err["error_message"] == "err"
+
+    with pytest.raises(ExportError, match="Failed to export model 'm' on jax: boom"):
+        run_export_wrapper("jax", "m", str(tmp_path / "sub"), "orbax", lambda: (_ for _ in ()).throw(RuntimeError("boom")))

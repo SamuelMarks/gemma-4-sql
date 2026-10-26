@@ -8,9 +8,12 @@ from typing import Any
 from gemma_4_sql.backends.common_gemma4_config import (
     GEMMA4_26B_A4B_SPEC,
     GEMMA4_31B_SPEC,
+    GEMMA4_ATTENTION_PATTERN,
     GEMMA4_E2B_SPEC,
     GEMMA4_E4B_SPEC,
     GEMMA4_TINY_SPEC,
+    AttentionType,
+    BaseGemma4ConfigFields,
     resolve_gemma4_preset_name,
 )
 
@@ -102,25 +105,13 @@ class Gemma4AudioConfig:
 
 
 @dataclass
-class Gemma4Config:
+class Gemma4Config(BaseGemma4ConfigFields):
     """Configuration for native PyTorch Gemma 4."""
 
-    vocab_size: int = 256000
-    hidden_size: int = 2048
-    num_hidden_layers: int = 18
-    num_attention_heads: int = 8
-    num_key_value_heads: int = 1
-    intermediate_size: int = 16384
-    moe_intermediate_size: int | None = None
-    rms_norm_eps: float = 1e-6
-    head_dim: int = 256
-    global_head_dim: int | None = 512
     pad_token_id: int = 0
     eos_token_id: int | None = None
     image_token_id: int = 255999
     audio_token_id: int = 255998
-    num_experts: int = 8
-    num_experts_per_tok: int = 2
     router_jitter_noise: float = 0.0
     sliding_window: int | None = 4096
     global_attn_layers: list[int] = field(default_factory=list)
@@ -152,8 +143,23 @@ class Gemma4Config:
         vision_config: dict[str, Any] | Gemma4VisionConfig | None = None,
         audio_config: dict[str, Any] | Gemma4AudioConfig | None = None,
         moe_intermediate_size: int | None = None,
-        global_head_dim: int | None = 512,
+        global_head_dim: int | None = None,
         eos_token_id: int | None = None,
+        num_global_key_value_heads: int | None = None,
+        share_kv_projections: bool = False,
+        num_shared_experts: int = 1,
+        num_kv_shared_layers: int = 0,
+        use_post_norms: bool = False,
+        vocab_size_per_layer_input: int | None = None,
+        hidden_size_per_layer_input: int | None = None,
+        rope_max_timescale: int = 10000,
+        global_rope_max_timescale: int = 1000000,
+        local_rope_max_timescale: int | None = None,
+        local_rope_proportion: float = 1.0,
+        global_rope_proportion: float = 0.25,
+        float32_gate_logits: bool = True,
+        final_logit_softcapping: float | None = None,
+        attn_logits_soft_cap: float | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize the Gemma4Config.
@@ -182,14 +188,32 @@ class Gemma4Config:
             moe_intermediate_size: Optional MoE expert intermediate dimension.
             global_head_dim: Optional global attention head dimension.
             eos_token_id: Optional end-of-sequence token ID.
+            num_global_key_value_heads: Optional KV head count for global attention layers.
+            share_kv_projections: Whether global attention layers share K and V projections.
+            num_shared_experts: Number of always-active shared experts in MoE blocks.
+            num_kv_shared_layers: Number of top decoder layers sharing KV states from earlier layers.
+            use_post_norms: Whether to apply post-attention and post-FFN RMSNorms.
+            vocab_size_per_layer_input: Optional vocabulary size for Per-Layer Embeddings (PLE).
+            hidden_size_per_layer_input: Optional hidden dimension for Per-Layer Embeddings (PLE).
+            rope_max_timescale: Default RoPE max timescale.
+            global_rope_max_timescale: Global attention RoPE max timescale.
+            local_rope_max_timescale: Optional local sliding attention RoPE max timescale.
+            local_rope_proportion: Fraction of head dimension rotated in local layers.
+            global_rope_proportion: Fraction of head dimension rotated in global layers.
+            float32_gate_logits: Whether router gate logits are computed in float32.
+            final_logit_softcapping: Optional soft-cap value for final vocabulary logits.
+            attn_logits_soft_cap: Optional soft-cap value for attention score logits.
             **kwargs: Additional configuration attributes.
 
         """
         self.vocab_size = vocab_size
+        self.vocab_size_per_layer_input = vocab_size_per_layer_input
         self.hidden_size = hidden_size
+        self.hidden_size_per_layer_input = hidden_size_per_layer_input or None
         self.num_hidden_layers = num_hidden_layers
         self.num_attention_heads = num_attention_heads
         self.num_key_value_heads = num_key_value_heads
+        self.num_global_key_value_heads = num_global_key_value_heads
         self.intermediate_size = intermediate_size
         self.moe_intermediate_size = moe_intermediate_size
         self.rms_norm_eps = rms_norm_eps
@@ -202,13 +226,30 @@ class Gemma4Config:
 
         self.num_experts = num_experts
         self.num_experts_per_tok = num_experts_per_tok
+        self.num_shared_experts = num_shared_experts
+        self.num_kv_shared_layers = num_kv_shared_layers
+        self.use_post_norms = use_post_norms
+        self.share_kv_projections = share_kv_projections
         self.router_jitter_noise = router_jitter_noise
 
         self.sliding_window = sliding_window
-        self.global_attn_layers = global_attn_layers or []
+        self.sliding_window_size = sliding_window if sliding_window is not None else 512
+        if global_attn_layers is not None:
+            self.global_attn_layers = list(global_attn_layers)
+        else:
+            self.global_attn_layers = [idx for idx in range(num_hidden_layers) if GEMMA4_ATTENTION_PATTERN[idx % len(GEMMA4_ATTENTION_PATTERN)] == AttentionType.GLOBAL]
 
         self.rope_theta = rope_theta
+        self.rope_max_timescale = rope_max_timescale
+        self.global_rope_max_timescale = global_rope_max_timescale
+        self.local_rope_max_timescale = local_rope_max_timescale
+        self.local_rope_proportion = local_rope_proportion
+        self.global_rope_proportion = global_rope_proportion
         self.partial_rotary_factor = partial_rotary_factor
+        self.float32_gate_logits = float32_gate_logits
+        self.final_logit_softcapping = final_logit_softcapping
+        self.attn_logits_soft_cap = attn_logits_soft_cap
+        self.mm_tokens_per_image = int(kwargs.pop("mm_tokens_per_image", 256))
 
         if vision_config is None:
             self.vision_config = Gemma4VisionConfig()

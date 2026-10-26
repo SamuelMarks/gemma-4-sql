@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_train import generic_run_training_epochs, run_train_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ETLConfig, MaxTextCausalLMProtocol, MaxTextTrainerState, TensorType, TrainerState, TrainingConfig
+from gemma_4_sql.type_hints import ETLConfig, JSONDict, MaxTextCausalLMProtocol, MaxTextTrainerState, TensorType, TrainerState, TrainingConfig, TrainResultDict
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict, TrainResultDict
 logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")

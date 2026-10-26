@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 
+from .cache import LayerCache
+from .config import AttentionType, ModelConfig
 from .layers import Gemma4RMSNorm, make_linear
 from .rope import RoPE, apply_rope
 
 MASK_PENALTY = -10000.0
-
-if TYPE_CHECKING:
-    from .cache import LayerCache
-    from .config import AttentionType, ModelConfig
 
 
 def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Array], attention_mask: jax.Array | None, config_params: tuple[int, float | None, int, int]) -> jax.Array:

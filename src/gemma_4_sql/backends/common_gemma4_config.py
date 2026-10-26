@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
@@ -21,6 +22,43 @@ GEMMA4_ATTENTION_PATTERN: tuple[AttentionType, ...] = (
     AttentionType.LOCAL_SLIDING,
     AttentionType.GLOBAL,
 )
+
+
+@dataclass
+class BaseGemma4ConfigFields:
+    """Shared hardware-agnostic Gemma 4 architectural hyperparameters."""
+
+    vocab_size: int = 256000
+    vocab_size_per_layer_input: int | None = None
+    hidden_size: int = 2048
+    hidden_size_per_layer_input: int | None = None
+    intermediate_size: int = 8192
+    moe_intermediate_size: int | None = None
+    num_hidden_layers: int = 24
+    num_attention_heads: int = 8
+    num_key_value_heads: int = 4
+    num_global_key_value_heads: int | None = None
+    head_dim: int = 256
+    global_head_dim: int | None = None
+    rms_norm_eps: float = 1e-06
+    sliding_window_size: int = 512
+    share_kv_projections: bool = False
+    num_experts: int = 4
+    num_experts_per_tok: int = 2
+    num_shared_experts: int = 1
+    num_kv_shared_layers: int = 0
+    use_post_norms: bool = True
+    rope_max_timescale: int = 10000
+    global_rope_max_timescale: int = 1000000
+    local_rope_max_timescale: int | None = None
+    local_rope_proportion: float = 1.0
+    global_rope_proportion: float = 0.25
+    float32_gate_logits: bool = True
+    final_logit_softcapping: float | None = None
+    attn_logits_soft_cap: float | None = 50.0
+    mm_tokens_per_image: int = 256
+    audio_token_id: int | None = None
+
 
 GEMMA4_E2B_SPEC: dict[str, Any] = {
     "num_hidden_layers": 35,
@@ -136,6 +174,7 @@ __all__ = [
     "GEMMA4_E4B_SPEC",
     "GEMMA4_TINY_SPEC",
     "AttentionType",
+    "BaseGemma4ConfigFields",
     "get_gemma4_preset_spec",
     "resolve_gemma4_preset_name",
 ]

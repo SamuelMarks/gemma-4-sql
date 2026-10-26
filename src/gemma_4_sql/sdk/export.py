@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.sdk.registry import get_backend
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import ExportResultDict
+from gemma_4_sql.type_hints import ExportResultDict
 
 
 def export_model(model_name: str, export_path: str, backend: str = "jax", **kwargs: Any) -> ExportResultDict:

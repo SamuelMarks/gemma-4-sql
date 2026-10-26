@@ -4,20 +4,25 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from gemma_4_sql.backends.common_inference import normalize_logprob_confidence, run_inference_wrapper
+from gemma_4_sql.backends.common_inference import (
+    BoundedLRUCache,
+    normalize_logprob_confidence,
+    run_inference_wrapper,
+)
 from gemma_4_sql.backends.common_multimodal import prepare_multimodal_inputs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
+from gemma_4_sql.type_hints import InferenceResultDict
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import InferenceResultDict
 logger = logging.getLogger(__name__)
 
 torch = optional_import("torch")
 AutoModelForCausalLM = optional_attr("transformers", "AutoModelForCausalLM")
 AutoTokenizer = optional_attr("transformers", "AutoTokenizer")
+
+_MODEL_CACHE: BoundedLRUCache[tuple[Any, Any]] = BoundedLRUCache(maxsize=4)
 
 
 def _run_generation(
@@ -77,8 +82,11 @@ def _run_generation(
             input_ids = torch.tensor([tokens], dtype=torch.long)
 
         cfg_in: Any = kwargs.get("config")
-        model = NativeGemma4.from_pretrained(model_name, config=cfg_in)
+        native_cache_key = f"native:{model_name}:{id(cfg_in)}:{id(getattr(NativeGemma4, 'from_pretrained', None))}"
+        cached_native = _MODEL_CACHE.get_model(native_cache_key)
+        model = cached_native[0] if cached_native is not None else NativeGemma4.from_pretrained(model_name, config=cfg_in)
         model.eval()
+        _MODEL_CACHE.put_model(native_cache_key, (model, tokenizer))
         gen_kwargs: dict[str, Any] = {"max_new_tokens": max_length}
         if pixel_values is not None:
             gen_kwargs["pixel_values"] = pixel_values
@@ -112,17 +120,24 @@ def _run_generation(
         confidence_score = normalize_logprob_confidence(logprob_sum, len(gen_tokens))
         return (sql, confidence_score)
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
-    if "adapter_path" in kwargs or "lora_path" in kwargs:
-        adapter_path = str(kwargs.get("adapter_path") or kwargs.get("lora_path"))
-        try:
-            peft_model_cls = optional_attr("peft", "PeftModel")
-            if peft_model_cls is None:
-                raise ImportError("peft.PeftModel is not available.")
-            model = peft_model_cls.from_pretrained(model, adapter_path)
-        except (ImportError, ValueError, RuntimeError, OSError) as e:
-            logger.warning("Could not load adapter from %s: %s", adapter_path, e)
+    adapter_key = str(kwargs.get("adapter_path") or kwargs.get("lora_path") or "")
+    hf_cache_key = f"hf:{model_name}:{adapter_key}:{id(getattr(AutoTokenizer, 'from_pretrained', None))}:{id(getattr(AutoModelForCausalLM, 'from_pretrained', None))}"
+    cached_hf = _MODEL_CACHE.get_model(hf_cache_key)
+    if cached_hf is not None and not adapter_key:
+        model, tokenizer = cached_hf
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+        if "adapter_path" in kwargs or "lora_path" in kwargs:
+            adapter_path = str(kwargs.get("adapter_path") or kwargs.get("lora_path"))
+            try:
+                peft_model_cls = optional_attr("peft", "PeftModel")
+                if peft_model_cls is None:
+                    raise ImportError("peft.PeftModel is not available.")
+                model = peft_model_cls.from_pretrained(model, adapter_path)
+            except (ImportError, ValueError, RuntimeError, OSError) as e:
+                logger.warning("Could not load adapter from %s: %s", adapter_path, e)
+        _MODEL_CACHE.put_model(hf_cache_key, (model, tokenizer))
 
     inputs = tokenizer(prompt, return_tensors="pt")
     if hasattr(inputs, "to"):

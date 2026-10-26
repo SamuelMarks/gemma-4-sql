@@ -50,14 +50,33 @@ class Gemma4RotaryEmbedding(nn.Module):
     cos_cached: torch.Tensor
     sin_cached: torch.Tensor
 
-    def __init__(self, dim: int, max_position_embeddings: int = 2048, base: float = 10000.0, device: torch.device | None = None):
-        """Initialize Gemma4RotaryEmbedding."""
+    def __init__(
+        self,
+        dim: int,
+        max_position_embeddings: int = 2048,
+        base: float = 10000.0,
+        device: torch.device | None = None,
+        factor: float = 1.0,
+    ) -> None:
+        """Initialize Gemma4RotaryEmbedding.
+
+        Args:
+            dim: Attention head dimension.
+            max_position_embeddings: Initial maximum sequence length to cache.
+            base: Rotary frequency base theta.
+            device: Optional PyTorch device for frequency buffers.
+            factor: Proportional frequency scaling factor.
+
+        """
         super().__init__()
         self.dim = dim
         self.max_position_embeddings = max_position_embeddings
         self.base = base
+        self.factor = factor
 
         inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2, dtype=torch.int64).float().to(device) / self.dim))
+        if self.factor != 1.0:
+            inv_freq = inv_freq / float(self.factor)
         self.register_buffer("inv_freq", inv_freq, persistent=False)
         self._set_cos_sin_cache(seq_len=max_position_embeddings, device=self.inv_freq.device, dtype=torch.get_default_dtype())
 

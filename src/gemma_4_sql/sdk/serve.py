@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from gemma_4_sql.sdk.registry import get_backend
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, ServeResultDict
+from gemma_4_sql.type_hints import JSONValue, ServeResultDict
 
 
 def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, backend: str = "pytorch", **kwargs: JSONValue) -> ServeResultDict:

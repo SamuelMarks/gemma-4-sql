@@ -124,6 +124,30 @@ def test_gemma4_attention() -> None:
     out5, _ = attn_sdpa(x)
     assert out5.shape == (2, 4, 256)
 
+    # Test global attention with share_kv_projections, global_head_dim, num_global_key_value_heads, and attn_logits_soft_cap
+    cfg_global = Gemma4Config(
+        hidden_size=256,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        num_global_key_value_heads=4,
+        head_dim=32,
+        global_head_dim=64,
+        share_kv_projections=True,
+        attn_logits_soft_cap=50.0,
+        global_attn_layers=[0],
+        global_rope_proportion=0.25,
+    )
+    attn_global = Gemma4Attention(cfg_global, layer_idx=0)
+    assert attn_global.v_proj is None
+    assert attn_global.head_dim == 64
+    assert attn_global.num_key_value_heads == 4
+    out_glob, _ = attn_global(x)
+    assert out_glob.shape == (2, 4, 256)
+
+    # Test 2D attention mask with q_len == 1
+    out_2d_single, _ = attn(x[:, :1, :], attention_mask=torch.ones((2, 1), dtype=torch.long))
+    assert out_2d_single.shape == (2, 1, 256)
+
 
 def test_gemma4_decoder_layer() -> None:
     """Test Gemma4DecoderLayer."""
@@ -400,3 +424,49 @@ def test_modeling_position_ids_and_longer_attention_mask() -> None:
     )
     assert logits.shape == (1, 5, 100)
     assert updated_cache is not None
+
+
+def test_gemma4_ple_post_norms_kv_sharing_and_softcapping() -> None:
+    """Verify PyTorch Gemma4ForCausalLM supports PLE, use_post_norms, KV layer sharing, and final_logit_softcapping."""
+    cfg = Gemma4Config(
+        vocab_size=64,
+        vocab_size_per_layer_input=64,
+        hidden_size=32,
+        hidden_size_per_layer_input=16,
+        intermediate_size=64,
+        num_hidden_layers=3,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=16,
+        num_experts=2,
+        num_experts_per_tok=1,
+        num_kv_shared_layers=1,
+        use_post_norms=True,
+        final_logit_softcapping=30.0,
+        attn_logits_soft_cap=50.0,
+    )
+    model = Gemma4ForCausalLM(cfg)
+    input_ids = torch.randint(0, 64, (2, 4))
+    logits, cache = model(input_ids)
+    assert logits.shape == (2, 4, 64)
+    assert torch.all(logits.abs() <= 30.0 + 1e-4)
+    assert cache is not None
+    assert model.last_aux_loss is not None
+    assert float(model.last_aux_loss.item()) >= 0.0
+
+    # Test second step with tuple cache and KV sharing
+    logits2, cache2 = model(input_ids[:, :1], past_key_values=cache)
+    assert logits2.shape == (2, 1, 64)
+    assert cache2 is not None
+
+    # Test project_per_layer_inputs when per_layer_inputs is None
+    embeds = model.embed_tokens(input_ids) * model.embed_scale
+    proj_only = model.project_per_layer_inputs(embeds, per_layer_inputs=None)
+    assert proj_only is not None
+    assert proj_only.shape == (2, 4, 3, 16)
+
+    # Test scale-free RMSNorm directly
+    norm_no_scale = Gemma4RMSNorm(16, with_scale=False)
+    assert norm_no_scale.weight is None
+    x_norm = norm_no_scale(torch.randn(2, 16))
+    assert x_norm.shape == (2, 16)

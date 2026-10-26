@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from gemma_4_sql.backends.common_logging import get_tensorboard_summary_writer, log_metrics_wrapper
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
+from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
 SummaryWriter = get_tensorboard_summary_writer()
 

@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 
 from .attention import Gemma4Attention
+from .cache import LayerCache
+from .config import AttentionType, ModelConfig
 from .layers import Gemma4MLP, Gemma4RMSNorm, make_linear
 from .moe import Gemma4MoE
-
-if TYPE_CHECKING:
-    from .cache import LayerCache
-    from .config import AttentionType, ModelConfig
 
 
 class Gemma4DecoderLayer(nnx.Module):
@@ -66,11 +62,13 @@ class Gemma4DecoderLayer(nnx.Module):
         """
         lnx = self.pre_self_attention_norm(x)
         attn_out = self.self_attention(lnx, positions, layer_cache, attention_mask)
-        attn_out = self.post_self_attention_norm(attn_out)
+        if getattr(self.config, "use_post_norms", True):
+            attn_out = self.post_self_attention_norm(attn_out)
         x += attn_out
         lnx2 = self.pre_ffw_norm(x)
         mlp_out = self.mlp(lnx2, original_x=x)
-        mlp_out = self.post_ffw_norm(mlp_out)
+        if getattr(self.config, "use_post_norms", True):
+            mlp_out = self.post_ffw_norm(mlp_out)
         x += mlp_out
         if self.config.hidden_size_per_layer_input and per_layer_input is not None:
             residual = x
@@ -78,4 +76,5 @@ class Gemma4DecoderLayer(nnx.Module):
             ple_out = jax.nn.sigmoid(x_ple) * per_layer_input
             ple_proj = self.per_layer_projection(ple_out)
             x = residual + self.post_per_layer_input_norm(ple_proj)
+        x = x * jnp.asarray(self.layer_scalar[...], dtype=x.dtype)
         return x

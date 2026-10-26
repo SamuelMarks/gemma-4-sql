@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from gemma_4_sql.backends.common_inference import normalize_logprob_confidence, run_inference_wrapper
+from gemma_4_sql.backends.common_inference import BoundedLRUCache, normalize_logprob_confidence, run_inference_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
-from gemma_4_sql.type_hints import MlxCausalLMProtocol
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import InferenceResultDict, JSONValue
+from gemma_4_sql.type_hints import InferenceResultDict, JSONValue, MlxCausalLMProtocol
 
 logger = logging.getLogger(__name__)
 
 mx = optional_import("mlx.core")
 load = optional_attr("mlx_lm", "load")
 generate = optional_attr("mlx_lm", "generate")
+
+_MODEL_CACHE: BoundedLRUCache[tuple[MlxCausalLMProtocol, Any]] = BoundedLRUCache(maxsize=4)
 
 
 def compute_confidence_score(log_probs: list[float] | float, num_tokens: int) -> float:
@@ -188,11 +187,17 @@ def generate_sql(
         raise DependencyMissingError("MLX dependencies are missing.")
 
     def _execute() -> tuple[str, float]:
-        """Load MLX model and run beam search decoding."""
+        """Load or retrieve cached MLX model and run beam search decoding."""
         logger.info("Generating with MLX %s (beam_width=%d)", model_name, beam_width)
-        loaded: Any = load(model_name)
-        model: MlxCausalLMProtocol = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
-        tokenizer = loaded[1] if isinstance(loaded, (tuple, list)) and len(loaded) > 1 else None
+        cache_key = f"{model_name}:{id(load)}"
+        cached_pair = _MODEL_CACHE.get_model(cache_key)
+        if cached_pair is not None:
+            model, tokenizer = cached_pair
+        else:
+            loaded: Any = load(model_name)
+            model = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
+            tokenizer = loaded[1] if isinstance(loaded, (tuple, list)) and len(loaded) > 1 else None
+            _MODEL_CACHE.put_model(cache_key, (model, tokenizer))
         eos_id_arg = kwargs.get("eos_token_id")
         eos_id = int(eos_id_arg) if isinstance(eos_id_arg, (int, str, float)) else None
         return mlx_beam_search(

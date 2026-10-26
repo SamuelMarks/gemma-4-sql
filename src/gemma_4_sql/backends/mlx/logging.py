@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from gemma_4_sql.backends.common_logging import log_metrics_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
+from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
 SummaryWriter = optional_attr("mlx.utils.tensorboard", "SummaryWriter")
 

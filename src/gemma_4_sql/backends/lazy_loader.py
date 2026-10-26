@@ -5,11 +5,9 @@ from __future__ import annotations
 import importlib
 import logging
 import types
+from collections.abc import Generator
 from contextlib import contextmanager, suppress
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
+from typing import Any, Generic, TypeVar
 
 logger = logging.getLogger(__name__)
 OPTIONAL_IMPORT_ERRORS = (ImportError,)

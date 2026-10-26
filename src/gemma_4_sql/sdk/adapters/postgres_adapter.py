@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
+from gemma_4_sql.type_hints import JSONPrimitive
 
 from .base import DatabaseAdapter
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONPrimitive
 
 logger = logging.getLogger(__name__)
 psycopg2 = LazyLoader("psycopg2").get_module()

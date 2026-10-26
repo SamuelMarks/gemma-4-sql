@@ -201,17 +201,25 @@ def test_sql_tokenizer_unicode_multibyte() -> None:
 
 
 def test_sql_tokenizer_custom_vocab_bounds() -> None:
-    """Test SQLTokenizer with small custom vocab_size and token clamping behavior."""
+    """Test SQLTokenizer with small custom vocab_size, reversible nibble expansion, and vocab_size=1."""
     tok_small = SQLTokenizer(vocab_size=64)
     assert tok_small.vocab_size == 64
     encoded = tok_small.encode("ABCabc123")
     for tid in encoded:
-        assert 0 <= tid < 256
+        assert 0 <= tid < 64
+    assert tok_small.decode(encoded) == "ABCabc123"
 
-    # Test decode with negative and large IDs
+    # Test decode with exact multiple of tokens_per_byte and partial trailing chunk
+    decoded_exact = tok_small.decode([1, 1, 1, 2])
+    assert isinstance(decoded_exact, str)
     out_of_bound_ids = [-5, 0, 65, 255, 300]
     decoded = tok_small.decode(out_of_bound_ids)
     assert isinstance(decoded, str)
+
+    # Test vocab_size=1 edge case
+    tok_one = SQLTokenizer(vocab_size=1)
+    assert tok_one.encode("hi") == [0, 0]
+    assert tok_one.decode([0, 0]) == "\x00\x00"
 
 
 def test_tokenizer_decode_ignores_non_integer_tokens() -> None:

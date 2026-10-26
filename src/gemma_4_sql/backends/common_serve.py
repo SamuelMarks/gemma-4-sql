@@ -7,18 +7,21 @@ import contextlib
 import logging
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+from starlette.requests import Request
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, InferenceError, ServingError, resolve_raise_on_error
-from gemma_4_sql.type_hints import JSONDict
-
-if TYPE_CHECKING:
-    from fastapi import Request
-
-    from gemma_4_sql.type_hints import FastAPIAppProtocol, ServeResultDict
-else:
-    Request = optional_attr("fastapi", "Request")
+from gemma_4_sql.exceptions import (
+    ConfigurationError,
+    DependencyMissingError,
+    ExecutionStatus,
+    GemmaSQLError,
+    InferenceError,
+    ServingError,
+    resolve_raise_on_error,
+)
+from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, ServeResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +102,7 @@ def create_common_app(
     max_batch_size: int = 32,
     max_wait_ms: float = 10.0,
     require_handlers: bool = False,
+    request_timeout_s: float = 30.0,
 ) -> FastAPIAppProtocol:
     """Create a common FastAPI application for model serving with continuous batching.
 
@@ -111,6 +115,7 @@ def create_common_app(
         max_batch_size: The maximum number of requests bundled per batch.
         max_wait_ms: Maximum wait duration in milliseconds before dispatching a partial batch.
         require_handlers: Whether to require at least one generation handler at app construction.
+        request_timeout_s: Maximum timeout in seconds for an individual batched generation request.
 
     Returns:
         A FastAPI application instance.
@@ -149,6 +154,16 @@ def create_common_app(
     def _run_seq(fn: Callable[[str], str], ps: list[str]) -> list[str]:
         """Run single-prompt generation sequentially across a batch of prompts."""
         return [fn(p) for p in ps]
+
+    def _run_direct(prompt_text: str) -> str:
+        """Execute synchronous single-prompt generation directly without queueing."""
+        if generate_logic is not None:
+            return generate_logic(prompt_text)
+        if batch_generate_logic is not None:
+            sql_responses = batch_generate_logic([prompt_text])
+            return sql_responses[0]
+        msg = f"No generation logic registered for backend '{backend_name}'."
+        raise NotImplementedError(msg)
 
     async def _batching_worker() -> None:
         """Background worker that bundles incoming requests and invokes batched inference."""
@@ -202,23 +217,18 @@ def create_common_app(
         Raises:
             CancelledError: If generation is cancelled.
             NotImplementedError: If no generation logic is available.
+            TimeoutError: If batched generation exceeds `request_timeout_s`.
             ValueError: If request payload is invalid.
 
         """
         nonlocal request_queue, worker_task
-        try:
-            loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+        loop = asyncio.get_running_loop()
 
-        if request_queue is None or (worker_task is not None and loop is not None and worker_task.get_loop() is not loop):
+        if request_queue is None or (worker_task is not None and worker_task.get_loop() is not loop):
             request_queue = asyncio.Queue()
             worker_task = None
         if worker_task is None or worker_task.done():
-            if loop is not None:
-                worker_task = loop.create_task(_batching_worker())
-            else:
-                worker_task = None
+            worker_task = loop.create_task(_batching_worker())
 
         req_any: Any = request
         data: Any = await req_any.json()
@@ -234,28 +244,22 @@ def create_common_app(
             )
             prompt = str(formatted.get("prompt", prompt))
 
-        future: asyncio.Future[Any] = asyncio.Future()
+        future: asyncio.Future[Any] = loop.create_future()
         await request_queue.put({"prompt": prompt, "future": future})
 
-        if worker_task is not None and not worker_task.done():
-            try:
-                sql_response = await future
-            except asyncio.CancelledError:
-                future.cancel()
-                raise
-        elif generate_logic is not None:
-            sql_response = generate_logic(prompt)
-        elif batch_generate_logic is not None:
-            sql_responses = batch_generate_logic([prompt])
-            sql_response = sql_responses[0]
-        else:
-            msg = f"No generation logic registered for backend '{backend_name}'."
-            raise NotImplementedError(msg)
+        try:
+            sql_response = await asyncio.wait_for(future, timeout=request_timeout_s)
+        except asyncio.CancelledError:
+            future.cancel()
+            raise
 
         res_payload = {"sql": sql_response, "modality": validated_req.modality}
         if JSONResponse is not None:
             return JSONResponse(content=res_payload)
         return res_payload
+
+    app_any: Any = app
+    app_any.run_direct = _run_direct
 
     @app.get("/health", response_model=None)
     async def health() -> Any:
@@ -423,13 +427,17 @@ def serve_model_wrapper(
 
     should_raise = resolve_raise_on_error(raise_on_error=raise_on_error, kwargs=dict(kwargs))
     app = None
+    error_message: str | None = None
     try:
         app = app_factory()
         status = f"running_{backend_name}_serve"
+        status_code = ExecutionStatus.SUCCESS.value
         logger.info("Starting %s server on port %d", backend_name.title(), port)
         if run_server:
             uvicorn.run(app, host=host, port=port)
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
+    except (DependencyMissingError, ConfigurationError):
+        raise
+    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
         logger.exception("Failed to start %s serve: ", backend_name)
         if should_raise:
             raise ServingError(
@@ -439,15 +447,21 @@ def serve_model_wrapper(
                 operation="serve",
                 cause=e,
             ) from e
-        status = f"failed: {e!s}"
+        error_message = str(e)
+        status = f"failed: {error_message}"
+        status_code = ExecutionStatus.FAILED.value
         app = None
 
-    return {
+    result: ServeResultDict = {
         "backend": backend_name,
         "model": model_name,
         "port": port,
         "max_batch_size": max_batch_size,
         "status": status,
+        "status_code": status_code,
         "mode": "continuous_batching",
         "app": app,
     }
+    if error_message is not None:
+        result["error_message"] = error_message
+    return result

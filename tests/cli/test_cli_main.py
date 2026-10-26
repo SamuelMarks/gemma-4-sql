@@ -12,8 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from gemma_4_sql.cli import cli
-from gemma_4_sql.cli_misc import export_cmd, log_metrics_cmd, quantize_cmd, rag_cmd, tokenize_cmd
-from gemma_4_sql.cli_serve import agent_cmd, chat_cmd, evaluate_cmd, few_shot_cmd, generate_cmd, serve_cmd
+from gemma_4_sql.cli_serve import chat_cmd, few_shot_cmd, serve_cmd
 
 
 @pytest.fixture(autouse=True)
@@ -126,30 +125,25 @@ def test_cli_training_commands(
 
 def test_cli_quantize_and_export(
     mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify CLI quantize and export commands forward arguments and print JSON output."""
     assert cli(["quantize", "--model", "test-model", "--method", "awq", "--backend", "jax"]) == 0
+    assert '"status": "completed"' in capsys.readouterr().out
     assert cli(["export", "--model", "test-model", "--path", "./out", "--backend", "keras"]) == 0
-    capsys.readouterr()
+    assert '"status": "completed"' in capsys.readouterr().out
 
     assert mock_cli_environment[0][0] == "quantize_model"
     assert mock_cli_environment[0][1] == ("test-model", "awq", "jax")
     assert mock_cli_environment[1][0] == "export_model"
     assert mock_cli_environment[1][1] == ("test-model", "./out", "keras")
 
-    monkeypatch.setattr("gemma_4_sql.cli_misc.quantize_model", lambda *_a, **_k: {"status": "q"})
-    quantize_cmd(argparse.Namespace(model="dummy", method="dummy", backend="dummy"))
-    assert '"status": "q"' in capsys.readouterr().out
 
-    monkeypatch.setattr("gemma_4_sql.cli_misc.export_model", lambda *_a, **_k: {"status": "e"})
-    export_cmd(argparse.Namespace(model="dummy", path="dummy", backend="dummy"))
-    assert '"status": "e"' in capsys.readouterr().out
-
-
-def test_cli_evaluate_and_agent(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """Verify evaluate_cmd and agent_cmd handle db_kwargs and empty responses."""
+def test_cli_evaluate_and_agent(
+    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify evaluate_cmd and agent_cmd handle valid, empty, and invalid db_kwargs."""
     assert (
         cli([
             "evaluate",
@@ -166,82 +160,23 @@ def test_cli_evaluate_and_agent(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
         ])
         == 0
     )
+    assert mock_cli_environment[-1][2]["db_kwargs"] == {"timeout": 10}
+    assert cli(["evaluate", "--model", "test-model", "--dataset", "my-data"]) == 0
+    assert mock_cli_environment[-1][2]["db_kwargs"] == {}
+    assert cli(["evaluate", "--model", "test-model", "--db-kwargs", "not_json"]) == 1
+    assert cli(["evaluate", "--model", "test-model", "--db-kwargs", "[1, 2]"]) == 1
+
     assert cli(["agent", "--model", "test-model", "--prompt", "Find users", "--backend", "jax", "--db-kwargs", '{"timeout": 10}']) == 0
+    assert mock_cli_environment[-1][2]["db_kwargs"] == {"timeout": 10}
+    assert cli(["agent", "--model", "test-model", "--prompt", "Find users"]) == 0
+    assert mock_cli_environment[-1][2]["db_kwargs"] == {}
+    assert cli(["agent", "--model", "test-model", "--prompt", "Find users", "--db-kwargs", "bad_json"]) == 1
     capsys.readouterr()
-
-    eval_args = argparse.Namespace(
-        model="d",
-        dataset="d",
-        backend="d",
-        db_path="d",
-        ddl="d",
-        db_type="d",
-        max_batches=10,
-        image_path=None,
-        audio_path=None,
-        modality="text",
-        db_kwargs=json.dumps({"key": "value"}),
-    )
-    monkeypatch.setattr("gemma_4_sql.cli_serve.evaluate", lambda **kw: {"status": "evaluated"} if kw.get("db_kwargs") == {"key": "value"} else {})
-    evaluate_cmd(eval_args)
-    assert "evaluated" in capsys.readouterr().out
-
-    eval_args_empty = argparse.Namespace(
-        model="d",
-        dataset="d",
-        backend="d",
-        db_path="d",
-        ddl="d",
-        db_type="d",
-        max_batches=10,
-        image_path=None,
-        audio_path=None,
-        modality="text",
-        db_kwargs="",
-    )
-    monkeypatch.setattr("gemma_4_sql.cli_serve.evaluate", lambda **_k: {})
-    evaluate_cmd(eval_args_empty)
-    assert capsys.readouterr().out.strip() == "{}"
-
-    agent_args = argparse.Namespace(
-        model="d",
-        prompt="d",
-        backend="d",
-        db_path="d",
-        ddl="d",
-        db_type="d",
-        max_retries=1,
-        min_confidence=0.0,
-        image_path=None,
-        audio_path=None,
-        modality="text",
-        db_kwargs=json.dumps({"key": "value"}),
-    )
-    monkeypatch.setattr("gemma_4_sql.cli_serve.run_agentic_loop", lambda **kw: {"status": "agent_run"} if kw.get("db_kwargs") == {"key": "value"} else {})
-    agent_cmd(agent_args)
-    assert "agent_run" in capsys.readouterr().out
-
-    agent_args_empty = argparse.Namespace(
-        model="d",
-        prompt="d",
-        backend="d",
-        db_path="d",
-        ddl="d",
-        db_type="d",
-        max_retries=1,
-        min_confidence=0.0,
-        image_path=None,
-        audio_path=None,
-        modality="text",
-        db_kwargs="",
-    )
-    monkeypatch.setattr("gemma_4_sql.cli_serve.run_agentic_loop", lambda **_k: {})
-    agent_cmd(agent_args_empty)
-    assert capsys.readouterr().out.strip() == "{}"
 
 
 def test_cli_generate_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Verify generate_cmd handles confidence display, non-confidence display, and empty SQL."""
+    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "SELECT 1;", "confidence_score": 0.95, "status": "success"})
     assert (
         cli([
             "generate",
@@ -259,34 +194,17 @@ def test_cli_generate_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.C
         ])
         == 0
     )
-    capsys.readouterr()
-
-    gen_base = {
-        "model": "d",
-        "prompt": "d",
-        "backend": "d",
-        "beam_width": 3,
-        "max_length": 50,
-        "temperature": 1.0,
-        "top_p": 1.0,
-        "seed": 42,
-        "image_path": None,
-        "audio_path": None,
-        "modality": "text",
-    }
-    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "SELECT 1;", "confidence_score": 0.95})
-    generate_cmd(argparse.Namespace(**gen_base, show_confidence=True))
     out_conf = capsys.readouterr().out
     assert "SELECT 1;" in out_conf
     assert "Confidence: 0.9500" in out_conf
 
-    generate_cmd(argparse.Namespace(**gen_base, show_confidence=False))
+    assert cli(["generate", "--model", "test-model", "--prompt", "Find all users"]) == 0
     out_no_conf = capsys.readouterr().out
     assert "SELECT 1;" in out_no_conf
     assert "Confidence" not in out_no_conf
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": ""})
-    generate_cmd(argparse.Namespace(**gen_base, show_confidence=False))
+    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "", "status": "success"})
+    assert cli(["generate", "--model", "test-model", "--prompt", "Find all users"]) == 0
     assert capsys.readouterr().out == ""
 
 
@@ -298,52 +216,40 @@ def test_cli_rag_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Captur
     capsys.readouterr()
 
     monkeypatch.setattr("gemma_4_sql.cli_misc.build_rag_prompt", lambda prompt, ddl, **_k: f"{prompt} with {ddl}")
-    rag_cmd(argparse.Namespace(action="build", prompt="Test prompt", ddl="Test DDL", image_path="test.jpg", audio_path="test.mp3"))
+    assert cli(["rag", "--prompt", "Test prompt", "--ddl", "Test DDL", "--image-path", "test.jpg", "--audio-path", "test.mp3"]) == 0
     assert "Test prompt with Test DDL" in capsys.readouterr().out
 
-    rag_cmd(argparse.Namespace(action="build", prompt="d", ddl="d", image_path=None, audio_path=None))
-    assert "d with d" in capsys.readouterr().out
 
-
-def test_cli_log_metrics_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """Verify log_metrics_cmd parses key=value pairs and empty metric strings."""
-    assert cli(["log", "--step", "100", "--metrics", "loss=0.5,acc=0.9", "--backend", "jax"]) == 0
+def test_cli_log_metrics_variants(
+    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify log_metrics_cmd parses key=value pairs, skips malformed entries, and returns 1 on invalid float."""
+    assert cli(["log", "--step", "100", "--metrics", "loss=0.5, ,malformed,acc=0.9", "--backend", "jax"]) == 0
+    assert mock_cli_environment[-1][2]["metrics"] == {"loss": 0.5, "acc": 0.9}
+    assert cli(["log", "--step", "100", "--metrics", "", "--backend", "jax"]) == 0
+    assert mock_cli_environment[-1][2]["metrics"] == {}
+    assert cli(["log", "--step", "100", "--metrics", "loss=not_a_float", "--backend", "jax"]) == 1
     capsys.readouterr()
 
-    def mock_log_metrics(**kwargs: Any) -> dict[str, str]:
-        """Return status based on whether metrics dictionary is populated."""
-        return {"status": "logged" if kwargs["metrics"] == {"loss": 1.0, "acc": 0.9} else "logged_empty"}
 
-    monkeypatch.setattr("gemma_4_sql.cli_misc.log_metrics", mock_log_metrics)
-    log_metrics_cmd(argparse.Namespace(metrics="loss=1.0, ,malformed,acc=0.9", step=1, log_dir="logs", backend="dummy"))
-    assert "logged" in capsys.readouterr().out
-
-    log_metrics_cmd(argparse.Namespace(metrics="", step=1, log_dir="logs", backend="dummy"))
-    assert "logged_empty" in capsys.readouterr().out
-
-
-def test_cli_tokenize_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_tokenize_variants(capsys: pytest.CaptureFixture[str]) -> None:
     """Verify tokenize subcommand handles encode, decode, invalid decode, and no-op."""
     assert cli(["tokenize", "--encode", "SELECT *"]) == 0
+    assert "[83, 69, 76, 69, 67, 84, 32, 42]" in capsys.readouterr().out
     assert cli(["tokenize", "--decode", "83, 69, 76, 69, 67, 84, 32, 42"]) == 0
-    assert cli(["tokenize", "--decode", "invalid, data"]) == 0
+    assert "SELECT *" in capsys.readouterr().out
+    assert cli(["tokenize", "--decode", "invalid, data"]) == 1
     assert cli(["tokenize"]) == 0
     capsys.readouterr()
 
-    monkeypatch.setattr("gemma_4_sql.cli_misc.SQLTokenizer.encode", lambda _self, _text: [1, 2, 3])
-    tokenize_cmd(argparse.Namespace(hf_model=None, vocab_size=256, encode="test", decode=None))
-    assert "[1, 2, 3]" in capsys.readouterr().out
-
-    monkeypatch.setattr("gemma_4_sql.cli_misc.SQLTokenizer.decode", lambda _self, _tokens: "test")
-    tokenize_cmd(argparse.Namespace(hf_model=None, vocab_size=256, encode=None, decode="1, 2, 3"))
-    assert "test" in capsys.readouterr().out
-
 
 def test_cli_execute_and_embed_duckdb(capsys: pytest.CaptureFixture[str]) -> None:
-    """Verify execute and embed-duckdb commands handle success, failure, and missing duckdb."""
+    """Verify execute and embed-duckdb commands handle success, failure, invalid JSON, and missing duckdb."""
     assert cli(["execute", "--query", "SELECT 1 as num", "--db-type", "sqlite"]) == 0
     assert cli(["execute", "--query", "SELECT * FROM non_existent_table", "--db-type", "sqlite"]) != 0
     assert cli(["execute", "--query", "SELECT 1 as num", "--db-type", "sqlite", "--db-kwargs", '{"timeout": 10}']) == 0
+    assert cli(["execute", "--query", "SELECT 1 as num", "--db-type", "sqlite", "--db-kwargs", "invalid_json"]) == 1
     capsys.readouterr()
 
     mock_duckdb = MagicMock()
@@ -364,29 +270,53 @@ def test_cli_serve_chat_and_few_shot(monkeypatch: pytest.MonkeyPatch, capsys: py
     """Verify serve, chat, and few-shot commands handle valid, empty, and invalid JSON inputs."""
     assert cli(["serve", "--model", "my-model", "--port", "9000", "--max-batch-size", "128", "--backend", "jax"]) == 0
     assert cli(["chat", "--prompt", "hello", "--history", '[{"role": "user", "content": "hi"}]', "--backend", "jax"]) == 0
-    assert cli(["chat", "--prompt", "hello", "--history", "invalid_json"]) == 0
+    assert cli(["chat", "--prompt", "hello", "--history", "invalid_json"]) == 1
     assert cli(["few-shot", "--prompt", "hello", "--examples", '[{"input": "in", "output": "out"}]', "--backend", "jax"]) == 0
-    assert cli(["few-shot", "--prompt", "hello", "--examples", "invalid_json"]) == 0
+    assert cli(["few-shot", "--prompt", "hello", "--examples", "invalid_json"]) == 1
     capsys.readouterr()
-
-    monkeypatch.setattr("gemma_4_sql.cli_serve.serve_model", lambda **_k: {"status": "serving"})
-    serve_cmd(argparse.Namespace(model="dummy", port=8000, max_batch_size=32, backend="dummy", run_server=False))
-    assert "Serving model dummy on port 8000 (status: serving)" in capsys.readouterr().out
 
     monkeypatch.setattr("gemma_4_sql.cli_serve.serve_model", lambda **_k: None)
     serve_cmd(argparse.Namespace(model="dummy", port=8000, max_batch_size=32, backend="dummy", run_server=False))
     assert "Serving model dummy on port 8000 (status: unknown)" in capsys.readouterr().out
+
+    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", lambda **_k: {"response": "SELECT 1;"})
+    assert cli(["chat", "--prompt", "hello"]) == 0
+    assert "SELECT 1;" in capsys.readouterr().out
 
     monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", lambda **_k: {})
     chat_cmd(argparse.Namespace(model="d", prompt="d", backend="d", history=""))
     assert capsys.readouterr().out == ""
 
     monkeypatch.setattr("gemma_4_sql.cli_serve.build_few_shot_prompt", lambda **kw: {"few_shot_prompt": "prompt with examples" if kw.get("examples") else ""})
-    few_shot_cmd(argparse.Namespace(model="dummy", prompt="dummy", backend="dummy", examples=json.dumps([{"prompt": "q", "sql": "s"}])))
+    assert cli(["few-shot", "--prompt", "dummy", "--examples", '[{"prompt": "q", "sql": "s"}]']) == 0
     assert "prompt with examples" in capsys.readouterr().out
 
     few_shot_cmd(argparse.Namespace(model="dummy", prompt="dummy", backend="dummy", examples=""))
     assert capsys.readouterr().out == ""
+
+
+def test_cli_real_end_to_end_unmocked(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify end-to-end CLI execution for rag, tokenize, and execute with real SDK functions."""
+    from gemma_4_sql.sdk.rag import build_rag_prompt, extract_schema_entities, retrieve_relevant_schema
+
+    monkeypatch.setattr("gemma_4_sql.cli_misc.extract_schema_entities", extract_schema_entities)
+    monkeypatch.setattr("gemma_4_sql.cli_misc.retrieve_relevant_schema", retrieve_relevant_schema)
+    monkeypatch.setattr("gemma_4_sql.cli_misc.build_rag_prompt", build_rag_prompt)
+
+    ddl = "CREATE TABLE users (id INT, email TEXT); CREATE TABLE orders (id INT, total REAL);"
+    assert cli(["rag", "--action", "extract", "--ddl", ddl]) == 0
+    extracted = json.loads(capsys.readouterr().out)
+    assert extracted == {"users": ["id", "email"], "orders": ["id", "total"]}
+
+    assert cli(["rag", "--action", "build", "--prompt", "Find user email", "--ddl", ddl]) == 0
+    built_prompt = capsys.readouterr().out
+    assert "Table: users" in built_prompt
+    assert "SELECT" in built_prompt
+
+    assert cli(["execute", "--ddl", ddl, "--query", "SELECT COUNT(*) FROM users", "--db-type", "sqlite"]) == 0
+    exec_out = json.loads(capsys.readouterr().out)
+    assert exec_out["success"] is True
+    assert exec_out["results"] == [[0]]
 
 
 def test_cli_if_main(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

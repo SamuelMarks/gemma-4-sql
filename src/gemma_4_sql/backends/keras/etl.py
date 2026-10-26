@@ -13,10 +13,7 @@ from gemma_4_sql.backends.common_data import (
 )
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import ETLConfig
-
-if typing.TYPE_CHECKING:
-    from gemma_4_sql.type_hints import ETLResultDict, JSONValue
+from gemma_4_sql.type_hints import ETLConfig, ETLResultDict, JSONValue
 
 datasets: typing.Any = optional_import("datasets")
 grain: typing.Any = optional_import("grain.python")

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import typing
 from typing import Any
 
 from gemma_4_sql.backends.common_data import (
@@ -13,9 +12,7 @@ from gemma_4_sql.backends.common_data import (
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.tokenization import SQLTokenizer
-
-if typing.TYPE_CHECKING:
-    from gemma_4_sql.type_hints import DataloaderResultDict, ETLConfig, JSONDict
+from gemma_4_sql.type_hints import DataloaderResultDict, ETLConfig, JSONDict
 
 datasets = optional_import("datasets")
 torch = optional_import("torch")

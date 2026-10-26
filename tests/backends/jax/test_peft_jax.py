@@ -376,7 +376,7 @@ def test_lora_optimizer_gradient_flow_and_freeze_state() -> None:
             self.proj.lora_a[...] = jnp.ones((4, 2))
             self.proj.lora_b[...] = jnp.ones((2, 4))
 
-        def __call__(self, x: jax.Array) -> jax.Array:
+        def __call__(self, x: jax.Array) -> Any:
             """Forward pass."""
             return self.proj(x)
 

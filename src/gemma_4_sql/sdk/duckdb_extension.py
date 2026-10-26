@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.agent import AgentContext, run_agentic_loop
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import AgentLoopResultDict
+from gemma_4_sql.type_hints import AgentLoopResultDict
 
 logger = logging.getLogger(__name__)
 duckdb = LazyLoader("duckdb").get_module()

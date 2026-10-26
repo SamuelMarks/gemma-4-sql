@@ -187,6 +187,15 @@ source = [
 ]
 
 [tool.coverage.report]
+exclude_lines = [
+    "(?!)",
+]
+partial_branches = [
+    "(?!)",
+]
+partial_branches_always = [
+    "(?!)",
+]
 
 [tool.pytest.ini_options]
 addopts = "--cov-report=term-missing --cov-fail-under=0 --cov-branch"

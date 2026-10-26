@@ -82,6 +82,25 @@ def test_gemma4_model_forward(tiny_config: Any) -> None:
     assert out_cached.shape == (1, 3, 8)
     assert cache[0].cur_ind.value == 3
 
+    # Forward pass with num_kv_shared_layers > 0
+    cfg_kv_shared = ModelConfig(
+        vocab_size=10,
+        hidden_size=8,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=4,
+        intermediate_size=16,
+        num_kv_shared_layers=1,
+    )
+    model_kv = Gemma4Model(cfg_kv_shared, rngs=rngs)
+    cache_kv = init_cache(cfg_kv_shared, batch_size=1, max_seq_len=6)
+    out_kv = model_kv(input_ids, positions, cache=cache_kv)
+    assert out_kv.shape == (1, 3, 8)
+    # Layer 0 and Layer 1 both used cache_kv[0], so cur_ind was incremented twice (3 + 3 = 6)
+    assert cache_kv[0].cur_ind.value == 6
+    assert cache_kv[1].cur_ind.value == 0
+
 
 def test_gemma4_model_ple(tiny_ple_config: Any) -> None:
     """Verify gemma4 model ple behavior."""
@@ -162,6 +181,7 @@ def test_gemma4_multimodal_with_ple(tiny_multimodal_config: Any, tiny_ple_config
     # Combine configs for multimodal + ple
     """Verify gemma4 multimodal with ple behavior."""
     config = tiny_ple_config
+    config.num_kv_shared_layers = 1
     config.vision_config = VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4, image_size=16)
     config.audio_config = AudioConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2)
 
@@ -174,7 +194,8 @@ def test_gemma4_multimodal_with_ple(tiny_multimodal_config: Any, tiny_ple_config
     pixel_values = jnp.ones((1, 16, 16, 3))
     image_token_mask = jnp.array([[False, True, False]])
 
-    logits = model(input_ids, positions, pixel_values=pixel_values, image_token_mask=image_token_mask)
+    cache_mm = init_cache(config, batch_size=1, max_seq_len=6)
+    logits = model(input_ids, positions, cache=cache_mm, pixel_values=pixel_values, image_token_mask=image_token_mask)
     assert logits.shape == (1, 3, 10)
 
 

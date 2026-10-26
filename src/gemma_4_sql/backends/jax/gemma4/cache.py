@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import jax.numpy as jnp
 from flax import nnx
+from jax.sharding import PartitionSpec
 
 from gemma_4_sql.backends.common_gemma4_config import GEMMA4_ATTENTION_PATTERN
 
-from .config import AttentionType
-
-if TYPE_CHECKING:
-    from jax.sharding import PartitionSpec
-
-    from .config import ModelConfig
+from .config import AttentionType, ModelConfig
 
 
 class LayerCache(nnx.Module):

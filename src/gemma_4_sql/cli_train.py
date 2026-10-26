@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
 import json
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk import (
@@ -15,9 +15,6 @@ from gemma_4_sql.sdk import (
     sft_model,
     train_from_scratch,
 )
-
-if TYPE_CHECKING:
-    import argparse
 
 
 def train_cmd(args: argparse.Namespace) -> int:

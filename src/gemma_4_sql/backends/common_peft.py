@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
-from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError, PEFTError, resolve_raise_on_error
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from gemma_4_sql.type_hints import PEFTResultDict
+from gemma_4_sql.exceptions import (
+    ConfigurationError,
+    DependencyMissingError,
+    ExecutionStatus,
+    GemmaSQLError,
+    PEFTError,
+    resolve_raise_on_error,
+)
+from gemma_4_sql.type_hints import PEFTResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,9 @@ def build_peft_result(
     lora_dropout: float,
     status: str,
     injected_count: int,
+    *,
+    status_code: str | None = None,
+    error_message: str | None = None,
 ) -> PEFTResultDict:
     """Construct a standardized `PEFTResultDict`.
 
@@ -36,12 +42,15 @@ def build_peft_result(
         lora_dropout: LoRA dropout probability.
         status: Execution status string.
         injected_count: Number of injected LoRA layers/modules.
+        status_code: Optional canonical `ExecutionStatus` value.
+        error_message: Optional structured error message when `status_code` is `'failed'`.
 
     Returns:
         Populated `PEFTResultDict`.
 
     """
-    return {
+    resolved_code = status_code or (ExecutionStatus.FAILED.value if status.startswith("failed") else ExecutionStatus.COMPLETED.value)
+    res: PEFTResultDict = {
         "backend": backend_name,
         "action": "apply_lora",
         "model": model_name,
@@ -50,8 +59,12 @@ def build_peft_result(
         "lora_alpha": lora_alpha,
         "lora_dropout": lora_dropout,
         "status": status,
+        "status_code": resolved_code,
         "injected_modules": injected_count,
     }
+    if error_message is not None:
+        res["error_message"] = error_message
+    return res
 
 
 def apply_lora_wrapper(
@@ -85,13 +98,15 @@ def apply_lora_wrapper(
         PEFTError: If `inject_fn` fails and `raise_on_error` is enabled.
 
     """
-    status = "completed"
+    status = ExecutionStatus.COMPLETED.value
+    status_code = ExecutionStatus.COMPLETED.value
+    error_message: str | None = None
     injected_count = 0
     try:
         injected_count = inject_fn()
     except (DependencyMissingError, ConfigurationError):
         raise
-    except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, ImportError) as e:
+    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
         logger.exception("%s PEFT failed: ", backend_name)
         if resolve_raise_on_error(kwargs=dict(kwargs)):
             raise PEFTError(
@@ -101,7 +116,9 @@ def apply_lora_wrapper(
                 operation="apply_lora",
                 cause=e,
             ) from e
-        status = f"failed: {e!s}"
+        error_message = str(e)
+        status = f"failed: {error_message}"
+        status_code = ExecutionStatus.FAILED.value
 
     return build_peft_result(
         backend_name=backend_name,
@@ -112,6 +129,8 @@ def apply_lora_wrapper(
         lora_dropout=lora_dropout,
         status=status,
         injected_count=injected_count,
+        status_code=status_code,
+        error_message=error_message,
     )
 
 

@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.cli_benchmark import benchmark_cmd
 from gemma_4_sql.cli_misc import log_metrics_cmd, rag_cmd, tokenize_cmd
 from gemma_4_sql.cli_parsers.db_parser import add_db_parsers
 
-if TYPE_CHECKING:
-    SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
-else:
-    SubParsersType = argparse._SubParsersAction
+type SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
 
 
 def add_tokenize_parser(subparsers: SubParsersType) -> None:

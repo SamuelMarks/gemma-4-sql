@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any
 
 from gemma_4_sql.backends.common_dpo import run_dpo_wrapper
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
@@ -12,12 +12,7 @@ from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, MaxTextCausalLMProtocol, MaxTextTrainerState, TensorType, TrainerState
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
-
-    from gemma_4_sql.type_hints import DPOResultDict
+from gemma_4_sql.type_hints import DPOConfig, DPOResultDict, ETLConfig, MaxTextCausalLMProtocol, MaxTextTrainerState, TensorType, TrainerState
 
 logger = logging.getLogger(__name__)
 

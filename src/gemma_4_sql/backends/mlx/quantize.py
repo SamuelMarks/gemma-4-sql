@@ -10,15 +10,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
-from gemma_4_sql.type_hints import TensorType
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import QuantizeResultDict
+from gemma_4_sql.type_hints import QuantizeResultDict, TensorType
 
 logger = logging.getLogger(__name__)
 

@@ -10,14 +10,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONDict
+from gemma_4_sql.type_hints import JSONDict
 
 logger = logging.getLogger(__name__)
 

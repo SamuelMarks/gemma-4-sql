@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.type_hints import KerasCausalLMProtocol, TensorType
+from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue, KerasCausalLMProtocol, TensorType
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue
 logger = logging.getLogger(__name__)
 
 keras = optional_import("keras")

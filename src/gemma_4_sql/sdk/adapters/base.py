@@ -5,121 +5,12 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
-import re
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from gemma_4_sql.exceptions import DatabaseExecutionError, SQLSafetyViolationError
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONPrimitive
+from gemma_4_sql.exceptions import DatabaseExecutionError
+from gemma_4_sql.type_hints import JSONPrimitive
 
 logger = logging.getLogger(__name__)
-
-_DANGEROUS_KEYWORDS = frozenset({
-    "DROP",
-    "CREATE",
-    "ALTER",
-    "TRUNCATE",
-    "RENAME",
-    "INSERT",
-    "UPDATE",
-    "DELETE",
-    "MERGE",
-    "UPSERT",
-    "ATTACH",
-    "DETACH",
-    "PRAGMA",
-    "COPY",
-    "INSTALL",
-    "LOAD",
-    "VACUUM",
-    "EXECUTE",
-    "CALL",
-    "GRANT",
-    "REVOKE",
-})
-
-_SQL_TOKEN_PATTERN = re.compile(
-    r"""
-    (\$(?P<dtag>[A-Za-z0-9_]*)\$[\s\S]*?\$(?P=dtag)\$) | # PostgreSQL dollar-quoted string literal
-    ('(?:''|\\.|[^'\\])*')      | # Single-quoted string literal (SQL & backslash escapes)
-    ("(?:""|\\.|[^"\\])*")      | # Double-quoted identifier/literal
-    (`(?:``|[^`])*`)            | # Backtick-quoted identifier
-    (\[[^\]]*\])                | # Bracket-quoted identifier
-    (/\*[\s\S]*?\*/)            | # Block comment
-    (--[^\n]*)                    # Single-line comment
-    """,
-    re.VERBOSE,
-)
-
-
-_SQL_COMMENT_PATTERN = re.compile(
-    r"""
-    ('(?:''|\\.|[^'\\])*')      | # Single-quoted string literal
-    ("(?:""|\\.|[^"\\])*")      | # Double-quoted identifier/literal
-    (`(?:``|[^`])*`)            | # Backtick-quoted identifier
-    (\[[^\]]*\])                | # Bracket-quoted identifier
-    (?P<comment>/\*[\s\S]*?\*/|--[^\n]*) # Block or single-line comment
-    """,
-    re.VERBOSE,
-)
-
-
-def strip_sql_comments(query: str) -> str:
-    """Strip SQL block and single-line comments while preserving quoted literals and identifiers.
-
-    Args:
-        query: Raw SQL query or DDL string.
-
-    Returns:
-        SQL string with comments replaced by spaces and literals preserved intact.
-
-    """
-    return _SQL_COMMENT_PATTERN.sub(lambda m: " " if m.group("comment") is not None else m.group(0), query)
-
-
-def strip_comments_and_literals(query: str) -> str:
-    """Replace SQL comments and quoted literals with spaces in a single lexical pass.
-
-    Args:
-        query: Raw SQL query string.
-
-    Returns:
-        SQL string with all comments and quoted segments replaced by a single space.
-
-    """
-    return _SQL_TOKEN_PATTERN.sub(" ", query)
-
-
-def validate_readonly_sql(query: str, *, read_only: bool = True) -> None:
-    """Ensure the SQL query is safe to execute when `read_only` is True.
-
-    Args:
-        query: SQL query string to inspect.
-        read_only: Whether read-only enforcement is active.
-
-    Raises:
-        SQLSafetyViolationError: If mutating statements or stacked queries are attempted in read-only mode.
-
-    """
-    if not read_only:
-        return
-
-    cleaned = strip_comments_and_literals(query)
-    if "/*" in cleaned:
-        msg = "Safety Violation: Unclosed block comment is not allowed in read-only mode."
-        raise SQLSafetyViolationError(msg)
-
-    statements = [stmt.strip() for stmt in cleaned.split(";") if stmt.strip()]
-    if len(statements) > 1 or cleaned.count(";") > 1:
-        msg = "Safety Violation: Multiple stacked SQL statements are not allowed in read-only mode."
-        raise SQLSafetyViolationError(msg)
-
-    words = re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", cleaned.upper())
-    for word in words:
-        if word in _DANGEROUS_KEYWORDS:
-            msg = f"Safety Violation: Mutating statements ({word}) are not allowed in read-only mode."
-            raise SQLSafetyViolationError(msg)
 
 
 class DatabaseAdapter(abc.ABC):

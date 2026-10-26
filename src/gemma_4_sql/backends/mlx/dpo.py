@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import logging
 import types
-from typing import TYPE_CHECKING, Any
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss, run_dpo_wrapper
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.mlx.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, ETLConfig, MlxCausalLMProtocol, TensorType, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, DPOResultDict, ETLConfig, JSONDict, MlxCausalLMProtocol, TensorType, TrainerState
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
-
-    from gemma_4_sql.type_hints import DPOResultDict, JSONDict
 logger = logging.getLogger(__name__)
 
 mlx = optional_import("mlx")

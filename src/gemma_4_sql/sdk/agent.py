@@ -6,19 +6,17 @@ import asyncio
 import concurrent.futures
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, overload
+from pathlib import Path
+from typing import Any, overload
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
+from gemma_4_sql.sdk.protocols import BackendProtocol
 from gemma_4_sql.sdk.registry import get_backend
+from gemma_4_sql.type_hints import AgentAttemptDict, AgentLoopResultDict, JSONPrimitive, JSONValue
 
 MAX_ERR_LEN = 500
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from gemma_4_sql.sdk.protocols import BackendProtocol
-    from gemma_4_sql.type_hints import AgentAttemptDict, AgentLoopResultDict, JSONPrimitive, JSONValue
 
 
 @dataclass

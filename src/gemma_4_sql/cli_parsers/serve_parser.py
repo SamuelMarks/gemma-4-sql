@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.cli_misc import export_cmd
 from gemma_4_sql.cli_serve import agent_cmd, chat_cmd, evaluate_cmd, few_shot_cmd, generate_cmd, serve_cmd
 
-if TYPE_CHECKING:
-    SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
-else:
-    SubParsersType = argparse._SubParsersAction
+type SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
 
 
 def add_evaluate_parsers(subparsers: SubParsersType) -> None:

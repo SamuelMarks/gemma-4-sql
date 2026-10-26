@@ -368,7 +368,7 @@ def test_evaluate_empty_metrics(synthetic_dataset: list[dict[str, str]]) -> None
 
 
 def test_extract_batch_ids_dict_edge_cases() -> None:
-    """Verify _process_batch_inputs handles dicts with missing keys or non-subscriptable values."""
+    """Verify _process_batch_inputs handles dicts with missing keys, non-iterable values, and 1D sequences."""
     inputs, targets = _process_batch_inputs({"foo": "bar"})
     assert inputs == []
     assert targets == []
@@ -376,6 +376,25 @@ def test_extract_batch_ids_dict_edge_cases() -> None:
     inputs2, targets2 = _process_batch_inputs({"inputs": 123, "targets": 456})
     assert inputs2 == []
     assert targets2 == []
+
+    inputs3, targets3 = _process_batch_inputs({"inputs": [1, 2, 3], "targets": [4, 5, 6]})
+    assert inputs3 == [1, 2, 3]
+    assert targets3 == [4, 5, 6]
+
+    class ScalarTensor:
+        """Stub returning a scalar int from .tolist()."""
+
+        def tolist(self) -> int:
+            """Return scalar int."""
+            return 7
+
+    inputs4, targets4 = _process_batch_inputs(([ScalarTensor()], [ScalarTensor()]))
+    assert inputs4 == [7]
+    assert targets4 == [7]
+
+    inputs5, targets5 = _process_batch_inputs(([], []))
+    assert inputs5 == []
+    assert targets5 == []
 
 
 @pytest.mark.asyncio

@@ -161,3 +161,8 @@ def test_run_dpo_wrapper() -> None:
 
     with pytest.raises(TrainingError, match="dpo boom"):
         run_dpo_wrapper("jax", cfg, _fail, raise_on_error=True)
+
+    from gemma_4_sql.exceptions import DependencyMissingError
+
+    with pytest.raises(DependencyMissingError, match="missing dpo dep"):
+        run_dpo_wrapper("jax", cfg, lambda *_a: (_ for _ in ()).throw(DependencyMissingError("missing dpo dep")))

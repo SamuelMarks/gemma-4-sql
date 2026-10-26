@@ -7,27 +7,22 @@ import collections
 import collections.abc
 import logging
 import math
-import re
-from typing import TYPE_CHECKING, Any
+from collections.abc import Sequence
+from typing import Any, Self
 
 from gemma_4_sql.exceptions import ConfigurationError
-from gemma_4_sql.sdk.adapters.base import (
-    DatabaseAdapter,
-    validate_readonly_sql,
-)
-from gemma_4_sql.sdk.adapters.base import (
-    strip_comments_and_literals as _strip_comments_and_literals,
-)
+from gemma_4_sql.sdk.adapters.base import DatabaseAdapter
 from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
 from gemma_4_sql.sdk.adapters.postgres_adapter import PostgresAdapter
 from gemma_4_sql.sdk.adapters.snowflake_adapter import SnowflakeAdapter
 from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from typing import Self
-
-    from gemma_4_sql.type_hints import JSONPrimitive
+from gemma_4_sql.sdk.sql_lexer import (
+    has_top_level_order_by as _has_top_level_order_by_lexer,
+)
+from gemma_4_sql.sdk.sql_lexer import (
+    validate_readonly_sql,
+)
+from gemma_4_sql.type_hints import JSONPrimitive
 
 logger = logging.getLogger(__name__)
 _ADAPTERS: dict[str, type[DatabaseAdapter]] = {
@@ -227,19 +222,7 @@ class LiveDatabaseEngine:
             True if a top-level `ORDER BY` clause is present.
 
         """
-        cleaned = _strip_comments_and_literals(query)
-        cleaned = re.sub(r"\bORDER\s+BY\b", "ORDER_BY", cleaned.upper())
-        tokens = re.finditer(r"\(|\)|ORDER_BY", cleaned)
-        depth = 0
-        for match in tokens:
-            t = match.group(0)
-            if t == "(":
-                depth += 1
-            elif t == ")":
-                depth -= 1
-            elif t == "ORDER_BY" and depth <= 0:
-                return True
-        return False
+        return _has_top_level_order_by_lexer(query)
 
     _has_top_level_order_by = has_top_level_order_by
 

@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
 from gemma_4_sql.type_hints import ETLConfig
 
-if TYPE_CHECKING:
-    import argparse
 logger = logging.getLogger(__name__)
 
 

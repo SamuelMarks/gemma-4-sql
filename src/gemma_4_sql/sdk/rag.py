@@ -11,7 +11,7 @@ from typing import Any
 
 from gemma_4_sql.backends.common_inference import BoundedLRUCache
 from gemma_4_sql.backends.lazy_loader import optional_attr
-from gemma_4_sql.sdk.adapters.base import strip_sql_comments
+from gemma_4_sql.sdk.sql_lexer import strip_sql_comments
 from gemma_4_sql.type_hints import EmbedderModelProtocol
 
 MIN_SIMILARITY = 0.1

@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_inference import BoundedLRUCache
 from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
-from gemma_4_sql.type_hints import MlxCausalLMProtocol
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
+from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, MlxCausalLMProtocol, ServeResultDict
 
 logger = logging.getLogger(__name__)
 

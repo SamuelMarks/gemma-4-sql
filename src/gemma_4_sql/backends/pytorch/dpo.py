@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from gemma_4_sql.backends.common_dpo import generic_dpo_loss, run_dpo_wrapper
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
@@ -11,12 +12,8 @@ from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
 from gemma_4_sql.backends.pytorch.train import cleanup_distributed
 from gemma_4_sql.exceptions import DependencyMissingError, ExecutionStatus, TrainingError
-from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, ETLConfig, TensorType, TorchCausalLMProtocol, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, DPOResultDict, ETLConfig, TensorType, TorchCausalLMProtocol, TrainerState
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
-
-    from gemma_4_sql.type_hints import DPOResultDict
 logger = logging.getLogger(__name__)
 
 torch = optional_import("torch")

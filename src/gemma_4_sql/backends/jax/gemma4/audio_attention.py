@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 
+from .config import AudioConfig
 from .layers import ConstVar, Gemma4ClippableLinear
-
-if TYPE_CHECKING:
-    from .config import AudioConfig
 
 
 class Gemma4AudioRelPositionalEncoding(nnx.Module):

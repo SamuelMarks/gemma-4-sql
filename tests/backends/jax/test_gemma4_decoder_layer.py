@@ -95,3 +95,17 @@ def test_decoder_layer_per_layer_input() -> None:
     # Trigger branch where per_layer_input is None but hidden_size_per_layer_input is truthy
     out2 = layer(x, positions, per_layer_input=None)
     assert out2.shape == (2, 10, 64)
+
+    # Test use_post_norms=False
+    cfg_no_post = ModelConfig(
+        hidden_size=64,
+        intermediate_size=128,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_experts=1,
+        use_post_norms=False,
+    )
+    layer_no_post = Gemma4DecoderLayer(cfg_no_post, AttentionType.GLOBAL, rngs=rngs)
+    out_no_post = layer_no_post(x, positions)
+    assert out_no_post.shape == (2, 10, 64)

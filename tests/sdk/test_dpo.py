@@ -94,36 +94,84 @@ def test_run_dpo_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `run_dpo` with the Keras backend propagates `DependencyMissingError` and returns DPO status."""
-    import gemma_4_sql.backends.keras as kb
+    """Verify `run_dpo` with the Keras backend propagates `DependencyMissingError` and executes `kdpo.run_dpo`."""
     import gemma_4_sql.backends.keras.dpo as kdpo
 
     monkeypatch.setattr(kdpo, "tf", None)
     with pytest.raises(DependencyMissingError):
         run_dpo(model_name="model3", dataset="data3", backend="keras", beta=0.3)
 
-    def mock_dpo(cfg: DPOConfig, **_kwargs: Any) -> dict[str, Any]:
-        """Return simulated Keras DPO dictionary."""
-        return {
-            "backend": "keras",
-            "action": "dpo",
-            "model": cfg.model_name,
-            "dataset": cfg.dataset,
-            "beta": cfg.beta,
-            "status": "completed",
-            "final_loss": 0.15,
-        }
+    class DummyGemmaCausalLM:
+        """Stub for GemmaCausalLM.from_preset."""
 
-    monkeypatch.setattr(kdpo, "keras", object())
+        @staticmethod
+        def from_preset(_name: str) -> Any:
+            """Return a dummy callable model."""
+            return lambda x: x
+
+    class DummyKerasMod:
+        """Stub for keras module with AdamW."""
+
+        class optimizers:
+            """Stub optimizers namespace."""
+
+            @staticmethod
+            def AdamW(**_kw: Any) -> str:
+                """Return optimizer stub."""
+                return "adamw"
+
+    monkeypatch.setattr(kdpo, "keras", DummyKerasMod)
     monkeypatch.setattr(kdpo, "tf", object())
-    monkeypatch.setattr(kdpo, "run_dpo", mock_dpo)
-    monkeypatch.setattr(kb, "run_dpo", mock_dpo)
+    monkeypatch.setattr(kdpo, "GemmaCausalLM", DummyGemmaCausalLM)
+    monkeypatch.setattr(kdpo, "_get_train_step_fn", lambda *_a: lambda _b: 0.15)
+    monkeypatch.setattr(
+        kdpo,
+        "build_dataloader",
+        lambda _cfg: {
+            "loader": [
+                {
+                    "chosen_inputs": [[1, 2]],
+                    "chosen_labels": [[1, 2]],
+                    "rejected_inputs": [[1, 3]],
+                    "rejected_labels": [[1, 3]],
+                }
+            ]
+        },
+    )
 
     res = run_dpo(model_name="model3", dataset="data3", backend="keras", beta=0.3)
     assert res["backend"] == "keras"
     assert res["action"] == "dpo"
     assert res["model"] == "model3"
     assert res["beta"] == 0.3
+    assert res["status"] == "completed"
+    assert res["final_loss"] == pytest.approx(0.15)
+
+
+def test_run_dpo_jax_real_tiny_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `run_dpo` executes a real 1-step JAX DPO preference update on a tiny Gemma 4 model."""
+    import jax.numpy as jnp
+
+    import gemma_4_sql.backends.jax.dpo as jax_dpo
+
+    monkeypatch.setattr(
+        jax_dpo,
+        "build_dataloader",
+        lambda _cfg: {
+            "loader": [
+                {
+                    "chosen_inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
+                    "chosen_labels": jnp.array([[2, 3, 4]], dtype=jnp.int32),
+                    "rejected_inputs": jnp.array([[1, 5, 6]], dtype=jnp.int32),
+                    "rejected_labels": jnp.array([[5, 6, 7]], dtype=jnp.int32),
+                }
+            ]
+        },
+    )
+    res = run_dpo("gemma-4-tiny", "synthetic-dpo", "jax", beta=0.1, epochs=1, learning_rate=1e-4, batch_size=1)
+    assert res["backend"] == "jax"
+    assert res["status"] == "completed"
+    assert res["final_loss"] > 0.0
 
 
 def test_run_dpo_maxtext() -> None:

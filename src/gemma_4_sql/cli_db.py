@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
+from gemma_4_sql.cli_serve import _parse_db_kwargs
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.duckdb_extension import embed_in_duckdb
 
-if TYPE_CHECKING:
-    import argparse
 logger = logging.getLogger(__name__)
 
 
@@ -22,12 +21,13 @@ def db_execute_cmd(args: argparse.Namespace) -> int:
         args: Parsed command-line arguments containing command-specific options.
 
     Returns:
-        Exit code 0 on success, or 3 on database failure.
+        Exit code `0` on success, `1` on invalid `--db-kwargs` JSON, or `3` on database failure.
 
     """
-    db_kwargs: dict[str, object] = {}
-    if args.db_kwargs:
-        db_kwargs = json.loads(args.db_kwargs)
+    parsed_kwargs = _parse_db_kwargs(args.db_kwargs)
+    if parsed_kwargs is None:
+        return 1
+    db_kwargs: dict[str, object] = dict(parsed_kwargs)
     engine = LiveDatabaseEngine(db_path=args.db_path, ddl=args.ddl, db_type=args.db_type, db_kwargs=db_kwargs)
     (success, results, error) = engine.execute_with_feedback(args.query)
     engine.close()

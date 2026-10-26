@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import jax
 import jax.numpy as jnp
 from flax import nnx
@@ -23,6 +21,7 @@ from .audio_layers import (
     Gemma4AudioSubSampleConvProjection,
     Gemma4AudioSubSampleConvProjectionLayer,
 )
+from .config import AudioConfig
 from .layers import Gemma4RMSNorm
 
 __all__ = [
@@ -40,10 +39,6 @@ __all__ = [
     "extract_block_context",
     "rel_shift",
 ]
-
-
-if TYPE_CHECKING:
-    from .config import AudioConfig
 
 
 class Gemma4AudioLayer(nnx.Module):

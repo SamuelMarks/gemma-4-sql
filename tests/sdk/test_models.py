@@ -41,33 +41,90 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="pytorch"))
 
-    import gemma_4_sql.backends.keras as kb
     import gemma_4_sql.backends.keras.train as ktrain
 
     monkeypatch.setattr(ktrain, "tf", None)
     with pytest.raises(DependencyMissingError):
         pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
 
-    def mock_train(cfg: TrainingConfig, **_kwargs: Any) -> dict[str, Any]:
-        """Return simulated Keras training result."""
-        return {
-            "backend": "keras",
-            "action": cfg.action,
-            "model": cfg.model_name,
-            "dataset": cfg.dataset,
-            "epochs": cfg.epochs,
-            "status": "completed",
-            "final_loss": 0.2,
-        }
+    class DummyKerasModel:
+        """Minimal Keras model stub for behavioral routing through ktrain.train_model."""
 
-    monkeypatch.setattr(ktrain, "keras", object())
-    monkeypatch.setattr(ktrain, "tf", object())
-    monkeypatch.setattr(ktrain, "train_model", mock_train)
-    monkeypatch.setattr(kb, "train_model", mock_train)
+        def __init__(self) -> None:
+            """Initialize model stub with preprocessor."""
+
+            class _Prep:
+                """Preprocessor stub."""
+
+                sequence_length = 128
+
+            self.preprocessor = _Prep()
+
+        def compile(self, **_kw: Any) -> None:
+            """No-op compile."""
+
+        def fit(self, _ds: Any, epochs: int = 1) -> Any:
+            """Return history stub with decreasing loss."""
+
+            class _Hist:
+                """Fit history stub."""
+
+                history = {"loss": [0.4 / max(1, epochs)]}
+
+            return _Hist()
+
+    class DummyGemmaCausalLM:
+        """Stub for GemmaCausalLM.from_preset."""
+
+        @staticmethod
+        def from_preset(_name: str) -> DummyKerasModel:
+            """Return a DummyKerasModel instance."""
+            return DummyKerasModel()
+
+    class DummyKerasMod:
+        """Stub for keras module with AdamW and SparseCategoricalCrossentropy."""
+
+        class optimizers:
+            """Stub optimizers namespace."""
+
+            @staticmethod
+            def AdamW(**_kw: Any) -> str:
+                """Return optimizer stub."""
+                return "adamw"
+
+        class losses:
+            """Stub losses namespace."""
+
+            @staticmethod
+            def SparseCategoricalCrossentropy(**_kw: Any) -> str:
+                """Return loss stub."""
+                return "loss"
+
+    class DummyTF:
+        """Stub for tensorflow module with distribute.MirroredStrategy."""
+
+        class distribute:
+            """Stub distribute namespace."""
+
+            class MirroredStrategy:
+                """Context-manager stub for MirroredStrategy."""
+
+                def scope(self) -> Any:
+                    """Return a nullcontext scope."""
+                    from contextlib import nullcontext
+
+                    return nullcontext()
+
+    monkeypatch.setattr(ktrain, "keras", DummyKerasMod)
+    monkeypatch.setattr(ktrain, "tf", DummyTF)
+    monkeypatch.setattr(ktrain, "GemmaCausalLM", DummyGemmaCausalLM)
+    monkeypatch.setattr(ktrain, "build_dataloader", lambda _cfg: {"loader": [{"inputs": [[1, 2]], "targets": [[2, 3]]}]})
 
     res_k = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
     assert res_k["backend"] == "keras"
     assert res_k["action"] == "pretrain"
+    assert res_k["status"] == "completed"
+    assert res_k["final_loss"] == pytest.approx(0.2)
 
     import gemma_4_sql.backends.maxtext.train as mx_train
 
@@ -139,3 +196,53 @@ def test_models_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res3["action"] == "posttrain"
     assert captured[-1].action == "posttrain"
     assert captured[-1].backend == "keras"
+
+
+def test_sft_and_train_from_scratch_real_tiny_jax(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `sft_model` and `train_from_scratch` execute a real 1-step JAX training loop on a tiny Gemma 4 model."""
+    import jax.numpy as jnp
+
+    import gemma_4_sql.backends.jax.train as jax_train
+
+    monkeypatch.setattr(
+        jax_train,
+        "build_dataloader",
+        lambda _cfg: {
+            "loader": [
+                {
+                    "inputs": jnp.array([[1, 2, 3, 4]], dtype=jnp.int32),
+                    "targets": jnp.array([[2, 3, 4, 5]], dtype=jnp.int32),
+                }
+            ]
+        },
+    )
+    res_sft = sft_model(
+        TrainingConfig(
+            action="sft",
+            model_name="gemma-4-tiny",
+            dataset="synthetic",
+            epochs=1,
+            learning_rate=1e-3,
+            batch_size=1,
+            backend="jax",
+        )
+    )
+    assert res_sft["backend"] == "jax"
+    assert res_sft["action"] == "sft"
+    assert res_sft["status"] == "completed"
+    assert res_sft["final_loss"] > 0.0
+
+    res_scratch = train_from_scratch(
+        TrainingConfig(
+            action="train_from_scratch",
+            model_name="gemma-4-tiny",
+            dataset="synthetic",
+            epochs=1,
+            learning_rate=1e-3,
+            batch_size=1,
+            backend="jax",
+        )
+    )
+    assert res_scratch["action"] == "train_from_scratch"
+    assert res_scratch["status"] == "completed"
+    assert res_scratch["final_loss"] > 0.0

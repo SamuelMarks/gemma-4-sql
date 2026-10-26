@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
+    call_jax_causal_lm,
     compute_jax_step_probs,
     expand_jax_beams,
     run_array_beam_search,
@@ -16,10 +17,7 @@ from gemma_4_sql.backends.common_multimodal import prepare_multimodal_inputs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import InferenceError
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import TensorType
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import InferenceResultDict
+from gemma_4_sql.type_hints import InferenceResultDict, TensorType
 
 logger = logging.getLogger(__name__)
 
@@ -183,11 +181,7 @@ def generate_sql(
                 extra_kwargs["pixel_values"] = pixel_values
             if audio_values is not None:
                 extra_kwargs["audio_values"] = audio_values
-            model_fn: Any = model
-            try:
-                return model_fn(seq, pos, **extra_kwargs)
-            except TypeError:
-                return model_fn(seq, pos)
+            return call_jax_causal_lm(model, seq, pos, **extra_kwargs)
 
         (output_ids, logprob_sum) = jax_beam_search(_model_forward, input_ids, beam_width, max_length, eos_token_id)
         sql_out = tokenizer.decode(output_ids[0].tolist())

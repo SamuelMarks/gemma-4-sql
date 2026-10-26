@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import copy
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.constants import DEFAULT_BACKEND, DEFAULT_POSTTRAIN_DATASET, DEFAULT_PRETRAIN_DATASET, DEFAULT_SFT_DATASET
 from gemma_4_sql.sdk.registry import get_backend
-from gemma_4_sql.type_hints import ETLConfig
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import ETLResultDict, JSONValue
+from gemma_4_sql.type_hints import ETLConfig, ETLResultDict, JSONValue
 
 
 def _route_backend(config: ETLConfig, backend: str, **kwargs: JSONValue) -> ETLResultDict:

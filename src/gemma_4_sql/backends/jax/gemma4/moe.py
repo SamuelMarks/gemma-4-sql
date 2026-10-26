@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 
+from .config import ModelConfig
 from .layers import Gemma4MLP, Gemma4RMSNorm, make_linear
-
-if TYPE_CHECKING:
-    from .config import ModelConfig
 
 
 class Gemma4RoutedExperts(nnx.Module):

@@ -291,7 +291,16 @@ _FAILED_STATUS_VALUES: frozenset[str] = frozenset({
 
 
 def resolve_raise_on_error(config: object | None = None, *, raise_on_error: bool | None = None, kwargs: dict[str, object] | None = None) -> bool:
-    """Resolve whether an operation should raise a `GemmaSQLError` on failure.
+    """Resolve whether an operation should raise a `GemmaSQLError` subclass on runtime failure.
+
+    Error Contract:
+        - `DependencyMissingError`, `ConfigurationError`, and `UnsupportedQuantizationMethodError`
+          always raise immediately regardless of `raise_on_error`.
+        - Operational runtime errors (`TrainingError`, `InferenceError`, `PEFTError`,
+          `QuantizationError`, `ServingError`, `BenchmarkError`, `ExportError`) raise when
+          `resolve_raise_on_error(...)` evaluates to `True`, and otherwise populate structured
+          `status_code: ExecutionStatus.FAILED`, `error_message: str`, and `status: f"failed: {e}"`
+          fields in the returned result dictionary.
 
     Args:
         config: Optional configuration object (`TrainingConfig`, `DPOConfig`, `ETLConfig`).
@@ -299,7 +308,7 @@ def resolve_raise_on_error(config: object | None = None, *, raise_on_error: bool
         kwargs: Optional keyword arguments dictionary that may contain `'raise_on_error'`.
 
     Returns:
-        `True` if errors should be raised rather than returned in the status dictionary.
+        `True` if operational errors should be raised rather than returned in the status dictionary.
 
     """
     if raise_on_error is not None:
@@ -318,8 +327,12 @@ def resolve_raise_on_error(config: object | None = None, *, raise_on_error: bool
 def is_failed_status(result: object) -> bool:
     """Return True if a backend result dictionary, status enum, or status string indicates failure.
 
+    Checks structured `ExecutionStatus` enum values (`status_code`, `status`) and `error` /
+    `error_message` keys first, falling back to string prefix matching for backward compatibility.
+
     Args:
-        result: A backend result mapping (containing `'status'` or `'error'`), `ExecutionStatus`, or status string.
+        result: A backend result mapping (containing `'status_code'`, `'error_message'`, `'error'`,
+            or `'status'`), `ExecutionStatus`, or status string.
 
     Returns:
         True if the status represents a failed, unsupported, or missing-dependency outcome.
@@ -331,6 +344,12 @@ def is_failed_status(result: object) -> bool:
         norm = result.strip().lower()
         return norm in _FAILED_STATUS_VALUES or norm.startswith(("failed", "error:", "unsupported_", "missing_", "backend_unavailable"))
     if isinstance(result, dict):
+        status_code = result.get("status_code")
+        if isinstance(status_code, (str, ExecutionStatus)) and is_failed_status(status_code):
+            return True
+        err_msg = result.get("error_message")
+        if isinstance(err_msg, str) and err_msg:
+            return True
         err = result.get("error")
         if isinstance(err, str) and err:
             return True

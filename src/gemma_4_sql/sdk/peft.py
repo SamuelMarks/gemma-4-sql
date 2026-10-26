@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.sdk.registry import get_backend
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, PEFTResultDict
+from gemma_4_sql.type_hints import JSONValue, PEFTResultDict
 
 
 def apply_peft(

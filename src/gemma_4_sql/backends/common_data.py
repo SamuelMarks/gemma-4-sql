@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import logging
-import re
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import Any
 
-from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DependencyMissingError, ETLError
 from gemma_4_sql.tokenization import SQLTokenizer
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from gemma_4_sql.type_hints import ETLConfig, ETLResultDict, JSONDict
+from gemma_4_sql.type_hints import ETLConfig, ETLResultDict, JSONDict
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +363,7 @@ def pad_token_batch(inputs: list[list[int]], targets: list[list[int]]) -> dict[s
 
 
 def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
-    """Load a dataset from a DuckDB database.
+    """Load a dataset from a DuckDB database using `DuckDBAdapter`.
 
     Args:
         db_path: Path to DuckDB database file.
@@ -382,6 +377,11 @@ def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
         ETLError: If the table name is invalid or DuckDB query execution fails.
 
     """
+    from gemma_4_sql.backends.lazy_loader import LazyLoader
+    from gemma_4_sql.exceptions import DatabaseExecutionError
+    from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
+    from gemma_4_sql.sdk.sql_lexer import validate_sql_identifier
+
     duckdb_module: Any = LazyLoader("duckdb").get_module()
     if duckdb_module is None:
         msg = "duckdb is required. Install with `pip install duckdb`."
@@ -389,13 +389,13 @@ def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
 
     raw_err = getattr(duckdb_module, "Error", None)
     duckdb_error: type[Exception] = raw_err if isinstance(raw_err, type) and issubclass(raw_err, Exception) else RuntimeError
-    conn: Any = None
+    raw_conn: Any = None
     try:
-        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table):
-            msg = f"Invalid or unsafe table name: {table!r}"
-            raise ValueError(msg)
-        conn = duckdb_module.connect(db_path, read_only=True)
-        cur = conn.execute(f'SELECT * FROM "{table}"')
+        validated_table = validate_sql_identifier(table)
+        raw_conn = duckdb_module.connect(db_path, read_only=True)
+        adapter = DuckDBAdapter(db_path=db_path, db_kwargs={"existing_conn": raw_conn}, read_only=True)
+        conn: Any = adapter.conn
+        cur = conn.execute(f'SELECT * FROM "{validated_table}"')
         results: list[tuple[Any, ...]] = cur.fetchall()
         default_cols: list[tuple[str, ...]] = [("col" + str(i),) for i in range(len(results[0]))] if results else []
         raw_desc = next(
@@ -405,10 +405,10 @@ def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
         desc_list: list[tuple[str, ...]] = list(raw_desc) if raw_desc is not None else default_cols
         columns = [desc[0] for desc in desc_list]
         return [dict(zip(columns, row)) for row in results]
-    except (duckdb_error, ValueError, TypeError, OSError, RuntimeError, AttributeError) as e:
+    except (duckdb_error, DatabaseExecutionError, ValueError, TypeError, OSError, RuntimeError, AttributeError) as e:
         logger.exception("Failed to load dataset from DuckDB")
         msg = f"DuckDB error: {e}"
         raise ETLError(msg, cause=e) from e
     finally:
-        if conn is not None and hasattr(conn, "close"):
-            conn.close()
+        if raw_conn is not None and hasattr(raw_conn, "close"):
+            raw_conn.close()

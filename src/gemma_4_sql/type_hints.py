@@ -105,36 +105,28 @@ class NDArrayProtocol(Protocol):
     @property
     def shape(self) -> tuple[int, ...]:
         """Provide the shape dimensions of the array."""
-        ...
 
     @property
     def dtype(self) -> Any:
         """Provide the element data type of the array."""
-        ...
 
     def tolist(self) -> Any:
         """Convert the array into nested Python lists."""
-        ...
 
     def reshape(self, *shape: Any, **kwargs: Any) -> Any:
         """Reshape the array without changing its data."""
-        ...
 
     def transpose(self, *axes: Any) -> Any:
         """Permute the dimensions of the array."""
-        ...
 
     def astype(self, dtype: Any, *args: Any, **kwargs: Any) -> Any:
         """Return a copy of the array cast to a specified type."""
-        ...
 
     def flatten(self) -> Any:
         """Return a copy of the array collapsed into one dimension."""
-        ...
 
     def __array__(self, *args: Any, **kwargs: Any) -> Any:
         """Return a NumPy array representation."""
-        ...
 
 
 @runtime_checkable
@@ -144,12 +136,10 @@ class TokenizerProtocol(Protocol):
     @overload
     def encode(self, text: str) -> list[int]:
         """Encode a single string into a list of integer token IDs."""
-        ...
 
     @overload
     def encode(self, text: list[str] | tuple[str, ...]) -> list[list[int]]:
         """Encode a sequence of strings into a list of integer token ID lists."""
-        ...
 
     def encode(self, text: str | Sequence[str]) -> list[int] | list[list[int]]:
         """Encode a text string or sequence of strings into integer token IDs.
@@ -161,7 +151,6 @@ class TokenizerProtocol(Protocol):
             List of integer token IDs or list of token ID lists.
 
         """
-        ...
 
     def decode(self, token_ids: Sequence[int]) -> str:
         """Decode a sequence of integer token IDs back into a string.
@@ -173,7 +162,6 @@ class TokenizerProtocol(Protocol):
             Decoded text string.
 
         """
-        ...
 
 
 @runtime_checkable
@@ -191,7 +179,6 @@ class HFTokenizerProtocol(Protocol):
             Sequence of integer token IDs.
 
         """
-        ...
 
     def decode(self, token_ids: list[int]) -> str:
         """Decode a list of integer token IDs back into a string.
@@ -203,11 +190,9 @@ class HFTokenizerProtocol(Protocol):
             Decoded text string.
 
         """
-        ...
 
     def get_vocab(self) -> Mapping[str, int]:
         """Return the vocabulary mapping token strings to integer IDs."""
-        ...
 
 
 @runtime_checkable
@@ -217,61 +202,47 @@ class TensorProtocol(Protocol):
     @property
     def shape(self) -> tuple[int, ...]:
         """Provide the shape of the tensor."""
-        ...
 
     @property
     def ndim(self) -> int:
         """Provide the number of dimensions of the tensor."""
-        ...
 
     @property
     def dtype(self) -> object:
         """Provide the data type of the tensor."""
-        ...
 
     def reshape(self, *shape: Any, **kwargs: Any) -> Any:
         """Reshape the tensor to the given dimensions."""
-        ...
 
     def transpose(self, *axes: Any, **kwargs: Any) -> Any:
         """Transpose the tensor axes."""
-        ...
 
     def astype(self, dtype: Any, *args: Any, **kwargs: Any) -> Any:
         """Cast the tensor to a different data type."""
-        ...
 
     def mean(self, *args: Any, **kwargs: Any) -> Any:
         """Compute the arithmetic mean of the tensor elements."""
-        ...
 
     def item(self, *args: Any) -> Any:
         """Extract a Python scalar from a single-element tensor."""
-        ...
 
     def __getitem__(self, item: Any, /) -> Self:
         """Slice or index into the tensor."""
-        ...
 
     def __sub__(self, other: Any, /) -> Self:
         """Subtract another tensor or scalar from this tensor."""
-        ...
 
     def __add__(self, other: Any, /) -> Self:
         """Add another tensor or scalar to this tensor."""
-        ...
 
     def __mul__(self, other: Any, /) -> Self:
         """Multiply this tensor by another tensor or scalar."""
-        ...
 
     def __rmul__(self, other: Any, /) -> Self:
         """Right-multiply this tensor by a scalar or tensor."""
-        ...
 
     def __neg__(self) -> Self:
         """Negate the tensor elementwise."""
-        ...
 
 
 TensorType = TensorProtocol
@@ -283,11 +254,9 @@ class CausalLMProtocol(Protocol):
 
     def __call__(self, *args: object, **kwargs: object) -> TensorProtocol | object:
         """Execute the forward pass of the causal language model."""
-        ...
 
     def generate(self, *args: object, **kwargs: object) -> TensorProtocol | Sequence[int] | str | object:
         """Generate token sequences autoregressively."""
-        ...
 
 
 @runtime_checkable
@@ -296,23 +265,18 @@ class TorchModelProtocol(CausalLMProtocol, Protocol):
 
     def parameters(self) -> Iterable[TensorProtocol]:
         """Yield trainable parameter tensors."""
-        ...
 
     def named_modules(self) -> Iterable[tuple[str, Any]]:
         """Yield `(name, module)` pairs across the module hierarchy."""
-        ...
 
     def train(self, mode: bool = True) -> Self:
         """Toggle training mode on the PyTorch model."""
-        ...
 
     def to(self, *args: object, **kwargs: object) -> Self:
         """Move and/or cast the parameters and buffers."""
-        ...
 
     def state_dict(self) -> dict[str, TensorProtocol]:
         """Return a dictionary containing references to the whole state of the module."""
-        ...
 
 
 TorchCausalLMProtocol = TorchModelProtocol
@@ -324,34 +288,27 @@ class KerasModelProtocol(CausalLMProtocol, Protocol):
 
     def compile(self, *args: object, **kwargs: object) -> None:
         """Compile the model with loss and optimizer."""
-        ...
 
     def fit(self, *args: object, **kwargs: object) -> Any:
         """Fit the model on a dataset iterator."""
-        ...
 
     @property
     def layers(self) -> Any:
         """Provide the sequence of Keras layers."""
-        ...
 
     @property
     def sampler(self) -> Any:
         """Provide the model's token sampler."""
-        ...
 
     @property
     def preprocessor(self) -> Any:
         """Provide the model's input preprocessor."""
-        ...
 
     def save(self, *args: object, **kwargs: object) -> Any:
         """Save model weights or checkpoint to disk."""
-        ...
 
     def load_weights(self, *args: object, **kwargs: object) -> Any:
         """Load serialized weights into the model."""
-        ...
 
 
 KerasCausalLMProtocol = KerasModelProtocol
@@ -363,22 +320,18 @@ class FlaxNNXModelProtocol(Protocol):
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Execute the forward pass of the NNX module."""
-        ...
 
     @property
     def config(self) -> Any:
         """Provide the model configuration object."""
-        ...
 
     @property
     def model(self) -> Any:
         """Provide the inner transformer trunk module."""
-        ...
 
     @property
     def lm_head(self) -> Any:
         """Provide the language modeling output head."""
-        ...
 
 
 JaxModelProtocol = FlaxNNXModelProtocol
@@ -391,11 +344,9 @@ class MaxTextModelProtocol(Protocol):
 
     def init(self, *args: object, **kwargs: object) -> dict[str, TensorProtocol]:
         """Initialize stateless model parameters with a PRNGKey and sample input."""
-        ...
 
     def apply(self, *args: object, **kwargs: object) -> Any:
         """Apply a stateless transformation or forward pass."""
-        ...
 
 
 MaxTextCausalLMProtocol = MaxTextModelProtocol
@@ -407,19 +358,15 @@ class MLXModelProtocol(Protocol):
 
     def __call__(self, *args: object, **kwargs: object) -> Any:
         """Execute the forward pass of the MLX model."""
-        ...
 
     def parameters(self) -> Any:
         """Return the parameter tree of the MLX model."""
-        ...
 
     def update(self, parameters: dict[str, Any]) -> Self | None:
         """Update the parameters of the MLX model with a parameter tree."""
-        ...
 
     def freeze(self) -> None:
         """Freeze base model parameters prior to adapter training."""
-        ...
 
 
 MlxModelProtocol = MLXModelProtocol
@@ -432,7 +379,6 @@ class EmbedderModelProtocol(Protocol):
 
     def encode(self, *args: object, **kwargs: object) -> Any:
         """Encode text or features into dense vector embeddings."""
-        ...
 
 
 @runtime_checkable
@@ -441,35 +387,27 @@ class TrainableModelProtocol(CausalLMProtocol, Protocol):
 
     def compile(self, *args: object, **kwargs: object) -> None:
         """Compile the model with loss and optimizer (Keras)."""
-        ...
 
     def fit(self, *args: object, **kwargs: object) -> Any:
         """Fit the model on a dataset iterator (Keras)."""
-        ...
 
     def parameters(self) -> Iterable[Any]:
         """Yield trainable parameter tensors (PyTorch/MLX)."""
-        ...
 
     def train(self, mode: bool = True) -> Any:
         """Toggle training mode on the model (PyTorch)."""
-        ...
 
     def apply(self, *args: object, **kwargs: object) -> Any:
         """Apply a stateless transformation or forward pass (Flax/MaxText)."""
-        ...
 
     def load_weights(self, *args: object, **kwargs: object) -> Any:
         """Load serialized weights into the model."""
-        ...
 
     def save(self, *args: object, **kwargs: object) -> Any:
         """Save model weights or checkpoint to disk (Keras)."""
-        ...
 
     def freeze(self) -> None:
         """Freeze base model parameters prior to adapter training (MLX)."""
-        ...
 
 
 @runtime_checkable
@@ -478,36 +416,29 @@ class QuantizableModelProtocol(TrainableModelProtocol, Protocol):
 
     def named_modules(self) -> Iterable[tuple[str, Any]]:
         """Yield `(name, module)` pairs across the model hierarchy."""
-        ...
 
     @property
     def layers(self) -> Any:
         """Provide the list of model layers."""
-        ...
 
     @property
     def sampler(self) -> Any:
         """Provide the model's token sampler."""
-        ...
 
     @property
     def preprocessor(self) -> Any:
         """Provide the model's input preprocessor."""
-        ...
 
     @property
     def model(self) -> Any:
         """Provide the inner trunk model."""
-        ...
 
     @property
     def config(self) -> Any:
         """Provide the model configuration object."""
-        ...
 
     def encode(self, *args: object, **kwargs: object) -> Any:
         """Encode text or features into embeddings."""
-        ...
 
 
 @runtime_checkable
@@ -516,15 +447,12 @@ class CursorProtocol(Protocol):
 
     def execute(self, query: str, params: Any = ...) -> Any:
         """Execute a SQL query on the cursor."""
-        ...
 
     def fetchall(self) -> list[tuple[JSONPrimitive, ...]]:
         """Fetch all remaining rows of a query result set."""
-        ...
 
     def close(self) -> Any:
         """Close the cursor."""
-        ...
 
 
 @runtime_checkable
@@ -533,23 +461,18 @@ class DatabaseConnectionProtocol(Protocol):
 
     def cursor(self) -> CursorProtocol:
         """Return a new `CursorProtocol` object using the connection."""
-        ...
 
     def execute(self, query: str, params: Any = ...) -> Any:
         """Execute a SQL statement directly on the connection."""
-        ...
 
     def commit(self) -> Any:
         """Commit any pending transaction to the database."""
-        ...
 
     def rollback(self) -> Any:
         """Roll back to the start of any pending transaction."""
-        ...
 
     def close(self) -> Any:
         """Close the database connection immediately."""
-        ...
 
 
 TQuantModel = TypeVar("TQuantModel")
@@ -700,10 +623,12 @@ class TrainResultDict(TypedDict):
     epochs: int
     learning_rate: NotRequired[float]
     status: str
+    status_code: NotRequired[str]
     final_loss: float
     distributed_strategy: NotRequired[str]
     checkpoint_dir: NotRequired[str]
     error: NotRequired[str]
+    error_message: NotRequired[str | None]
 
 
 class DPOResultDict(TypedDict):
@@ -716,8 +641,10 @@ class DPOResultDict(TypedDict):
     beta: float
     epochs: NotRequired[int]
     status: str
+    status_code: NotRequired[str]
     final_loss: float
     error: NotRequired[str]
+    error_message: NotRequired[str | None]
 
 
 class InferenceResultDict(TypedDict):
@@ -728,9 +655,11 @@ class InferenceResultDict(TypedDict):
     prompt: str
     sql: str
     status: str
+    status_code: NotRequired[str]
     beam_width: int
     confidence_score: float
     error: NotRequired[str]
+    error_message: NotRequired[str | None]
 
 
 class EvaluationMetricsDict(TypedDict):
@@ -811,11 +740,13 @@ class QuantizeResultDict(TypedDict):
     model: str
     method: str
     status: str
+    status_code: NotRequired[str]
     memory_reduction_factor: float
     export_path: NotRequired[str]
     quantized_layers_count: NotRequired[int]
     metadata: NotRequired[dict[str, Any]]
     error: NotRequired[str]
+    error_message: NotRequired[str | None]
 
 
 class PEFTResultDict(TypedDict):
@@ -829,8 +760,10 @@ class PEFTResultDict(TypedDict):
     lora_alpha: int
     lora_dropout: float
     status: str
+    status_code: NotRequired[str]
     injected_modules: NotRequired[int]
     error: NotRequired[str]
+    error_message: NotRequired[str | None]
 
 
 class ExportResultDict(TypedDict):
@@ -841,7 +774,10 @@ class ExportResultDict(TypedDict):
     export_path: str
     file_path: str
     status: str
+    status_code: NotRequired[str]
     format: str
+    error: NotRequired[str]
+    error_message: NotRequired[str | None]
 
 
 class LatencyStatsDict(TypedDict):
@@ -869,7 +805,10 @@ class BenchmarkResultDict(TypedDict):
     memory_mb: float
     rss_memory_mb: NotRequired[float]
     status: str
+    status_code: NotRequired[str]
     latency_stats: NotRequired[LatencyStatsDict]
+    error: NotRequired[str]
+    error_message: NotRequired[str | None]
 
 
 @runtime_checkable
@@ -878,15 +817,12 @@ class FastAPIAppProtocol(Protocol):
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         """Handle an ASGI request scope."""
-        ...
 
     def post(self, path: str, *args: object, **kwargs: object) -> Callable[..., Any]:
         """Register a POST route handler."""
-        ...
 
     def get(self, path: str, *args: object, **kwargs: object) -> Callable[..., Any]:
         """Register a GET route handler."""
-        ...
 
 
 TBatchItem_co = TypeVar("TBatchItem_co", covariant=True)
@@ -905,8 +841,11 @@ class ServeResultDict(TypedDict):
     port: int
     max_batch_size: int
     status: str
+    status_code: NotRequired[str]
     mode: NotRequired[str]
     app: NotRequired[FastAPIAppProtocol | None]
+    error: NotRequired[str]
+    error_message: NotRequired[str | None]
 
 
 class ETLResultDict(TypedDict):
@@ -1112,7 +1051,6 @@ class TrainSubmoduleProtocol(Protocol):
 
     def train_model(self, config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
         """Execute backend training pipeline."""
-        ...
 
 
 @runtime_checkable
@@ -1121,7 +1059,6 @@ class DPOSubmoduleProtocol(Protocol):
 
     def run_dpo(self, config: DPOConfig, **kwargs: JSONValue) -> DPOResultDict:
         """Execute backend DPO pipeline."""
-        ...
 
 
 @runtime_checkable
@@ -1130,7 +1067,6 @@ class ETLSubmoduleProtocol(Protocol):
 
     def build_dataloader(self, config: ETLConfig, **kwargs: JSONValue) -> ETLResultDict:
         """Execute backend dataloader construction."""
-        ...
 
 
 @runtime_checkable
@@ -1139,7 +1075,6 @@ class ExportSubmoduleProtocol(Protocol):
 
     def export_model(self, model_name: str, export_path: str, **kwargs: JSONValue) -> ExportResultDict:
         """Execute backend model export."""
-        ...
 
 
 @runtime_checkable
@@ -1148,7 +1083,6 @@ class LoggingSubmoduleProtocol(Protocol):
 
     def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> LogMetricsResultDict:
         """Execute backend metric logging."""
-        ...
 
 
 @runtime_checkable
@@ -1165,7 +1099,6 @@ class PEFTSubmoduleProtocol(Protocol):
         **kwargs: JSONValue,
     ) -> PEFTResultDict:
         """Execute backend LoRA adapter injection."""
-        ...
 
 
 @runtime_checkable
@@ -1174,7 +1107,6 @@ class QuantizeSubmoduleProtocol(Protocol):
 
     def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> QuantizeResultDict:
         """Execute backend model quantization."""
-        ...
 
 
 @runtime_checkable
@@ -1190,7 +1122,6 @@ class InferenceSubmoduleProtocol(Protocol):
         **kwargs: JSONValue,
     ) -> InferenceResultDict:
         """Execute backend SQL generation."""
-        ...
 
 
 @runtime_checkable
@@ -1205,7 +1136,6 @@ class ServeSubmoduleProtocol(Protocol):
         **kwargs: JSONValue,
     ) -> ServeResultDict:
         """Execute backend continuous batching server initialization."""
-        ...
 
 
 @runtime_checkable
@@ -1220,4 +1150,3 @@ class BenchmarkSubmoduleProtocol(Protocol):
         **kwargs: JSONValue,
     ) -> BenchmarkResultDict:
         """Execute backend hardware benchmark."""
-        ...

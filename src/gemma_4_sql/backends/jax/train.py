@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import Any
 
+from gemma_4_sql.backends.common_inference import call_jax_causal_lm
 from gemma_4_sql.backends.common_train import (
     apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
 )
@@ -14,14 +16,10 @@ from gemma_4_sql.backends.common_train import (
 )
 from gemma_4_sql.backends.jax.etl import build_dataloader
 from gemma_4_sql.backends.jax.gemma4.config import resolve_gemma4_config
+from gemma_4_sql.backends.jax.inference import _MODEL_CACHE
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ETLConfig, JaxCausalLMProtocol, TrainerState, TrainingConfig, TrainingLoopState
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from gemma_4_sql.type_hints import JSONDict, TrainResultDict
+from gemma_4_sql.type_hints import ETLConfig, JaxCausalLMProtocol, JSONDict, TrainerState, TrainingConfig, TrainingLoopState, TrainResultDict
 
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
@@ -57,12 +55,9 @@ def _loss_fn(model: JaxCausalLMProtocol, batch: JSONDict) -> Any:
 
     """
     inputs: Any = batch["inputs"]
-    try:
-        seq_len = inputs.shape[1] if hasattr(inputs, "shape") and len(inputs.shape) > 1 else 1
-        positions = jnp.arange(seq_len)[None, :] if jnp is not None and hasattr(jnp, "arange") else None
-        logits = model(inputs, positions) if positions is not None else model(inputs)
-    except TypeError:
-        logits = model(inputs)
+    seq_len = inputs.shape[1] if hasattr(inputs, "shape") and len(inputs.shape) > 1 else 1
+    positions = jnp.arange(seq_len)[None, :] if jnp is not None and hasattr(jnp, "arange") else None
+    logits = call_jax_causal_lm(model, inputs, positions)
     targets = batch["targets"]
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
     return jnp.mean(loss) if jnp is not None else loss
@@ -181,7 +176,8 @@ def _execute_train(
     if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:
         raise DependencyMissingError("JAX dependencies are missing for training.")
 
-    model = Gemma4ForCausalLM(_resolve_gemma4_config(model_name), rngs=nnx.Rngs(0))
+    cached_model = _MODEL_CACHE.get_model(model_name)
+    model = cached_model if cached_model is not None else Gemma4ForCausalLM(_resolve_gemma4_config(model_name), rngs=nnx.Rngs(0))
     mesh = jax.sharding.Mesh(jax.devices(), ("data",))
     sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("data"))
     schedule = optax.warmup_cosine_decay_schedule(init_value=0.0, peak_value=learning_rate, warmup_steps=100, decay_steps=max(1, epochs * 1000), end_value=learning_rate * 0.1)
@@ -207,6 +203,7 @@ def _execute_train(
             sharding=sharding,
         )
     )
+    _MODEL_CACHE.put_model(model_name, model)
     return "completed", final_loss
 
 

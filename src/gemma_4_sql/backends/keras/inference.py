@@ -4,21 +4,20 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from gemma_4_sql.backends.common_inference import run_inference_wrapper
+from gemma_4_sql.backends.common_inference import BoundedLRUCache, run_inference_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
-from gemma_4_sql.type_hints import KerasCausalLMProtocol
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import InferenceResultDict, JSONValue
+from gemma_4_sql.type_hints import InferenceResultDict, JSONValue, KerasCausalLMProtocol
 
 logger = logging.getLogger(__name__)
 
 keras = optional_import("keras")
 tf = optional_import("tensorflow")
 GemmaCausalLM = optional_attr("keras_nlp.models", "GemmaCausalLM")
+
+_MODEL_CACHE: BoundedLRUCache[Any] = BoundedLRUCache(maxsize=4)
 
 
 def _extract_flat_scores(scores: object) -> list[float]:
@@ -151,7 +150,9 @@ def generate_sql(
         gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM")
         if gemma_causal_lm_cls is None:
             raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
-        model = gemma_causal_lm_cls.from_preset(model_name)
+        cache_key = f"{model_name}:{id(gemma_causal_lm_cls)}:{id(getattr(gemma_causal_lm_cls, 'from_preset', None))}"
+        model = _MODEL_CACHE.get_model(cache_key) or gemma_causal_lm_cls.from_preset(model_name)
+        _MODEL_CACHE.put_model(cache_key, model)
 
         configure_beam_sampler(model, beam_width)
         output: Any = model.generate(prompt, max_length=max_length)

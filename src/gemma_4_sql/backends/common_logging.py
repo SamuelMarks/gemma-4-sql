@@ -4,15 +4,12 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from gemma_4_sql.type_hints import LogMetricsResultDict
+from gemma_4_sql.type_hints import LogMetricsResultDict
 
 
 def get_tensorboard_summary_writer() -> type | None:

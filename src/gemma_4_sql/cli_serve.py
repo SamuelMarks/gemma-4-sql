@@ -2,20 +2,39 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk import build_few_shot_prompt, chat_turn, evaluate, generate, run_agentic_loop, serve_model
 from gemma_4_sql.sdk.agent import AgentContext
-
-if TYPE_CHECKING:
-    import argparse
-
-    from gemma_4_sql.type_hints import JSONValue
+from gemma_4_sql.type_hints import JSONValue
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_db_kwargs(raw_db_kwargs: str | None) -> dict[str, JSONValue] | None:
+    """Parse `--db-kwargs` JSON string and validate that it represents a JSON object.
+
+    Args:
+        raw_db_kwargs: Optional raw JSON string supplied via `--db-kwargs`.
+
+    Returns:
+        Parsed dictionary of database keyword arguments, or `None` if parsing fails.
+
+    """
+    if not raw_db_kwargs:
+        return {}
+    try:
+        parsed = json.loads(raw_db_kwargs)
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid JSON provided in --db-kwargs: %s", exc)
+        return None
+    if not isinstance(parsed, dict):
+        logger.warning("Expected a JSON object for --db-kwargs, got %s", type(parsed).__name__)
+        return None
+    return parsed
 
 
 def evaluate_cmd(args: argparse.Namespace) -> int:
@@ -28,9 +47,9 @@ def evaluate_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if evaluation fails.
 
     """
-    db_kwargs: dict[str, JSONValue] = {}
-    if args.db_kwargs:
-        db_kwargs = json.loads(args.db_kwargs)
+    db_kwargs = _parse_db_kwargs(args.db_kwargs)
+    if db_kwargs is None:
+        return 1
     res = evaluate(
         model_name=args.model,
         dataset_name=args.dataset,
@@ -90,9 +109,9 @@ def agent_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if agent loop fails.
 
     """
-    db_kwargs: dict[str, JSONValue] = {}
-    if args.db_kwargs:
-        db_kwargs = json.loads(args.db_kwargs)
+    db_kwargs = _parse_db_kwargs(args.db_kwargs)
+    if db_kwargs is None:
+        return 1
     context = AgentContext(
         db_path=args.db_path,
         ddl=args.ddl,
@@ -152,7 +171,7 @@ def chat_cmd(args: argparse.Namespace) -> int:
             history = json.loads(args.history)
         except json.JSONDecodeError as exc:
             logger.warning("Invalid JSON history provided to chat_cmd: %s", exc)
-            return 0
+            return 1
     res = chat_turn(
         model_name=args.model,
         history=history,
@@ -181,7 +200,7 @@ def few_shot_cmd(args: argparse.Namespace) -> int:
             examples = json.loads(args.examples)
         except json.JSONDecodeError as exc:
             logger.warning("Invalid JSON examples provided to few_shot_cmd: %s", exc)
-            return 0
+            return 1
     res = build_few_shot_prompt(
         model_name=args.model,
         prompt=args.prompt,

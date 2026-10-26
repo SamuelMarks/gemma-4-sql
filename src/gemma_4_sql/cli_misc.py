@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.exceptions import is_failed_status
 from gemma_4_sql.sdk.export import export_model
@@ -13,16 +13,17 @@ from gemma_4_sql.sdk.quantize import quantize_model
 from gemma_4_sql.sdk.rag import build_rag_prompt, extract_schema_entities, retrieve_relevant_schema
 from gemma_4_sql.tokenization import SQLTokenizer
 
-if TYPE_CHECKING:
-    import argparse
 logger = logging.getLogger(__name__)
 
 
-def tokenize_cmd(args: argparse.Namespace) -> None:
+def tokenize_cmd(args: argparse.Namespace) -> int:
     """Run tokenization.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
+
+    Returns:
+        Exit code `0` on success, or `1` if `--decode` receives invalid token IDs.
 
     """
     tokenizer = SQLTokenizer(model_name=args.hf_model, vocab_size=args.vocab_size)
@@ -33,9 +34,11 @@ def tokenize_cmd(args: argparse.Namespace) -> None:
             print(str(decoded))
         except ValueError as e:
             logger.warning("Invalid decode tokens: %s", e)
+            return 1
     elif args.encode:
         encoded = tokenizer.encode(args.encode)
         print(json.dumps(encoded))
+    return 0
 
 
 def quantize_cmd(args: argparse.Namespace) -> int:
@@ -99,7 +102,7 @@ def log_metrics_cmd(args: argparse.Namespace) -> int:
         args: Parsed command-line arguments containing command-specific options.
 
     Returns:
-        Exit code `0` on success, or `1` if logging fails.
+        Exit code `0` on success, or `1` if metric parsing or logging fails.
 
     """
     metrics_dict: dict[str, float] = {}
@@ -112,7 +115,11 @@ def log_metrics_cmd(args: argparse.Namespace) -> int:
                 logger.warning("Skipping malformed metric entry (expected key=value): %s", stripped)
                 continue
             (k, v) = stripped.split("=", 1)
-            metrics_dict[k.strip()] = float(v.strip())
+            try:
+                metrics_dict[k.strip()] = float(v.strip())
+            except ValueError as e:
+                logger.warning("Invalid float value in metric entry '%s': %s", stripped, e)
+                return 1
     res = log_metrics(metrics=metrics_dict, step=args.step, log_dir=args.log_dir, backend=args.backend)
     print(json.dumps(res, indent=2))
     return 1 if is_failed_status(res) else 0

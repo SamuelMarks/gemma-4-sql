@@ -5,12 +5,12 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ModelType
+from gemma_4_sql.type_hints import ModelType, PEFTResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -18,23 +18,7 @@ mx = optional_import("mlx.core")
 nn = optional_import("mlx.nn")
 load = optional_attr("mlx_lm", "load")
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import PEFTResultDict
-
-    class _ModuleBase:
-        """Static base class stub representing `mlx.nn.Module` during type checking."""
-
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            """Initialize module base."""
-
-        def freeze(self, *args: object, **kwargs: object) -> None:
-            """Freeze module parameters."""
-
-        def unfreeze(self, *args: object, **kwargs: object) -> None:
-            """Unfreeze module parameters."""
-
-else:
-    _ModuleBase = nn.Module if nn is not None else object
+_ModuleBase: Any = nn.Module if nn is not None else object
 
 
 class MLXLoRALinear(_ModuleBase):

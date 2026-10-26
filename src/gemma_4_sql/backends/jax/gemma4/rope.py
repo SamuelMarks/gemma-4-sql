@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
-
-if TYPE_CHECKING:
-    from jax import Array
+from jax import Array
 
 
 def segment_ids_to_positions(segment_ids: Array) -> Array:

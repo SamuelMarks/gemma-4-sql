@@ -144,60 +144,21 @@ def test_quantize_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Provide mock jax quantize env test helper."""
+    """Configure `Gemma4Config` presets to return a tiny Gemma 4 model for fast real-model quantization tests."""
+    from gemma_4_sql.backends.jax.gemma4 import Gemma4Config
 
-    # Mock Gemma4Config and Gemma4ForCausalLM to avoid allocating giant models
-    class MockGemma4Config:
-        """Test stub for `MockGemma4Config`."""
-
-        @staticmethod
-        def gemma4_e2b() -> str:
-            """Provide gemma4 e2b test helper."""
-            return "mock_config"
-
-    class MockGemma4ForCausalLM:
-        """Test stub for `MockGemma4ForCausalLM`."""
-
-        def __init__(self, config: Any, rngs: Any) -> None:
-            """Initialize test stub instance."""
-
-    monkeypatch.setattr(qt, "Gemma4Config", MockGemma4Config)
-    monkeypatch.setattr(qt, "Gemma4ForCausalLM", MockGemma4ForCausalLM)
-
-    class MockParam:
-        """Test stub for `MockParam`."""
-
-        def __init__(self, val: Any) -> None:
-            """Initialize test stub instance."""
-            self.value = val
-
-    class MockGraph:
-        """Test stub for `MockGraph`."""
-
-        @staticmethod
-        def iter_graph(model: Any) -> Any:
-            """Provide iter graph test helper."""
-            # Return 3 mock parameters for quantize
-            yield ("path1", MockParam(jnp.array([[1.0, 2.0], [3.0, 4.0]])))
-            yield ("path2", MockParam(jnp.array([[0.1, 0.2], [0.3, 0.4]])))
-            # A 1D parameter which shouldn't be quantized
-            yield ("path3", MockParam(jnp.array([1.0, 2.0])))
-            # Non-param
-            yield ("path4", "not_a_param")
-
-    class MockNNX:
-        """Test stub for `MockNNX`."""
-
-        graph = MockGraph()
-        Param = MockParam
-
-        class Rngs:
-            """Test stub for `Rngs`."""
-
-            def __init__(self, seed: Any) -> None:
-                """Initialize test stub instance."""
-
-    monkeypatch.setattr(qt, "nnx", MockNNX())
+    tiny_cfg = Gemma4Config(
+        vocab_size=32,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=8,
+        num_experts=1,
+    )
+    monkeypatch.setattr(qt.Gemma4Config, "gemma4_e2b", staticmethod(lambda: tiny_cfg))
+    monkeypatch.setattr(qt.Gemma4Config, "from_preset", classmethod(lambda _cls, _name: tiny_cfg))
 
 
 @pytest.mark.usefixtures("_mock_jax_quantize_env")

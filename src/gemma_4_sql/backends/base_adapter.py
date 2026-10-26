@@ -3,37 +3,35 @@
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import Any, TypeVar
 
 from gemma_4_sql.sdk.protocols import BackendProtocol
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import (
-        BenchmarkResultDict,
-        BenchmarkSubmoduleProtocol,
-        DataloaderResultDict,
-        DPOConfig,
-        DPOResultDict,
-        DPOSubmoduleProtocol,
-        ETLConfig,
-        ETLSubmoduleProtocol,
-        ExportResultDict,
-        ExportSubmoduleProtocol,
-        InferenceResultDict,
-        InferenceSubmoduleProtocol,
-        JSONValue,
-        LoggingSubmoduleProtocol,
-        LogMetricsResultDict,
-        PEFTResultDict,
-        PEFTSubmoduleProtocol,
-        QuantizeResultDict,
-        QuantizeSubmoduleProtocol,
-        ServeResultDict,
-        ServeSubmoduleProtocol,
-        TrainingConfig,
-        TrainResultDict,
-        TrainSubmoduleProtocol,
-    )
+from gemma_4_sql.type_hints import (
+    BenchmarkResultDict,
+    BenchmarkSubmoduleProtocol,
+    DataloaderResultDict,
+    DPOConfig,
+    DPOResultDict,
+    DPOSubmoduleProtocol,
+    ETLConfig,
+    ETLSubmoduleProtocol,
+    ExportResultDict,
+    ExportSubmoduleProtocol,
+    InferenceResultDict,
+    InferenceSubmoduleProtocol,
+    JSONValue,
+    LoggingSubmoduleProtocol,
+    LogMetricsResultDict,
+    PEFTResultDict,
+    PEFTSubmoduleProtocol,
+    QuantizeResultDict,
+    QuantizeSubmoduleProtocol,
+    ServeResultDict,
+    ServeSubmoduleProtocol,
+    TrainingConfig,
+    TrainResultDict,
+    TrainSubmoduleProtocol,
+)
 
 TSubmod = TypeVar("TSubmod")
 

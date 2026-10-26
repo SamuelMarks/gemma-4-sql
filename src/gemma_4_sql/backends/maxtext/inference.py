@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
@@ -15,10 +15,8 @@ from gemma_4_sql.backends.common_inference import (
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import TensorType
+from gemma_4_sql.type_hints import InferenceResultDict, JSONValue, TensorType
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import InferenceResultDict, JSONValue
 logger = logging.getLogger(__name__)
 
 jax = optional_import("jax")

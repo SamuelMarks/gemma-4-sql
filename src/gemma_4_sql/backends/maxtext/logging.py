@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_logging import (
     get_tensorboard_summary_writer,
     log_metrics_wrapper,
 )
 from gemma_4_sql.exceptions import DependencyMissingError
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
+from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
 SummaryWriter: Any | None = get_tensorboard_summary_writer()
 

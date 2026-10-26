@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 
+from .config import ModelConfig, VisionConfig
 from .layers import Gemma4RMSNorm, make_embed, make_linear
-
-if TYPE_CHECKING:
-    from .config import ModelConfig, VisionConfig
 
 
 class SiglipVisionEmbeddings(nnx.Module):

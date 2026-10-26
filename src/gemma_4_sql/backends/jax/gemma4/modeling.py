@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
+from typing import Any
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import Array
+
+from gemma_4_sql.type_hints import JSONValue
 
 from .attention import Gemma4Attention
 from .audio import (
@@ -79,10 +82,6 @@ __all__ = [
     "make_linear",
     "rel_shift",
 ]
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from gemma_4_sql.type_hints import JSONValue
 
 
 class Gemma4Model(nnx.Module):
@@ -168,11 +167,15 @@ class Gemma4Model(nnx.Module):
             if per_layer_inputs is None:
                 per_layer_inputs = self.get_per_layer_inputs(input_ids)
             per_layer_inputs = self.project_per_layer_inputs(x, per_layer_inputs)
-        for i in range(len(self.layers)):
+        num_layers = len(self.layers)
+        kv_shared = int(getattr(self.config, "num_kv_shared_layers", 0) or 0)
+        pivot = max(1, num_layers - kv_shared) if kv_shared > 0 else num_layers
+        for i in range(num_layers):
             layer = getattr(self.layers, str(i), None)
             if layer is None:
                 continue
-            layer_cache = cache[i] if cache is not None else None
+            cache_idx = (i % pivot) if (kv_shared > 0 and i >= pivot) else i
+            layer_cache = cache[cache_idx] if cache is not None else None
             layer_ple = per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
             x = layer(x, positions, layer_cache, attention_mask=attention_mask, per_layer_input=layer_ple)
         return self.norm(x)
@@ -335,8 +338,12 @@ class Gemma4ForCausalLM(nnx.Module):
             per_layer_inputs = self.model.project_per_layer_inputs(hidden_states, per_layer_inputs_id)
         else:
             per_layer_inputs = None
+        num_layers = len(self.model.layers)
+        kv_shared = int(getattr(self.config, "num_kv_shared_layers", 0) or 0)
+        pivot = max(1, num_layers - kv_shared) if kv_shared > 0 else num_layers
         for i, layer in enumerate(self.model.layers):
-            layer_cache = cache[i] if cache is not None else None
+            cache_idx = (i % pivot) if (kv_shared > 0 and i >= pivot) else i
+            layer_cache = cache[cache_idx] if cache is not None else None
             layer_ple = per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
             hidden_states = layer(hidden_states, positions, layer_cache, attention_mask=attention_mask, per_layer_input=layer_ple)
         return self.model.norm(hidden_states)

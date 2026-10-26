@@ -5,14 +5,12 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import PEFTResultDict
+from gemma_4_sql.type_hints import PEFTResultDict
 
 logger = logging.getLogger(__name__)
 

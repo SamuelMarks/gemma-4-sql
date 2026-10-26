@@ -2,25 +2,24 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import (
-        BenchmarkResultDict,
-        DataloaderResultDict,
-        DPOConfig,
-        DPOResultDict,
-        ETLConfig,
-        ExportResultDict,
-        InferenceResultDict,
-        JSONValue,
-        LogMetricsResultDict,
-        PEFTResultDict,
-        QuantizeResultDict,
-        ServeResultDict,
-        TrainingConfig,
-        TrainResultDict,
-    )
+from gemma_4_sql.type_hints import (
+    BenchmarkResultDict,
+    DataloaderResultDict,
+    DPOConfig,
+    DPOResultDict,
+    ETLConfig,
+    ExportResultDict,
+    InferenceResultDict,
+    JSONValue,
+    LogMetricsResultDict,
+    PEFTResultDict,
+    QuantizeResultDict,
+    ServeResultDict,
+    TrainingConfig,
+    TrainResultDict,
+)
 
 
 @runtime_checkable
@@ -38,7 +37,6 @@ class TrainingProtocol(Protocol):
             Dictionary containing training status and final metrics.
 
         """
-        ...
 
     def run_dpo(self, config: DPOConfig, **kwargs: JSONValue) -> DPOResultDict:
         """Run Direct Preference Optimization (DPO).
@@ -51,7 +49,6 @@ class TrainingProtocol(Protocol):
             Dictionary containing DPO training status and final metrics.
 
         """
-        ...
 
     def build_dataloader(self, config: ETLConfig, **kwargs: JSONValue) -> DataloaderResultDict:
         """Construct ETL dataloader pipeline.
@@ -64,7 +61,6 @@ class TrainingProtocol(Protocol):
             Dictionary containing dataloader objects and metadata.
 
         """
-        ...
 
     def export_model(self, model_name: str, export_path: str, **kwargs: JSONValue) -> ExportResultDict:
         """Export model weights and architecture definition.
@@ -78,7 +74,6 @@ class TrainingProtocol(Protocol):
             Dictionary containing export status and target path.
 
         """
-        ...
 
     def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> LogMetricsResultDict:
         """Log training and evaluation metrics.
@@ -93,7 +88,6 @@ class TrainingProtocol(Protocol):
             Dictionary containing logging confirmation and status.
 
         """
-        ...
 
     def apply_lora(
         self,
@@ -118,7 +112,6 @@ class TrainingProtocol(Protocol):
             Dictionary containing adapter configuration status.
 
         """
-        ...
 
     def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> QuantizeResultDict:
         """Quantize model weights for reduced memory footprint.
@@ -132,7 +125,6 @@ class TrainingProtocol(Protocol):
             Dictionary containing quantization status and reduction factor.
 
         """
-        ...
 
     def get_trainer(self, **_kwargs: object) -> str:
         """Return the canonical trainer identifier for this backend.
@@ -144,7 +136,6 @@ class TrainingProtocol(Protocol):
             Trainer identifier string (e.g., `'jax_trainer'`).
 
         """
-        ...
 
 
 @runtime_checkable
@@ -172,7 +163,6 @@ class InferenceProtocol(Protocol):
             Dictionary containing generated SQL and confidence metrics.
 
         """
-        ...
 
     def serve_model(
         self,
@@ -193,7 +183,6 @@ class InferenceProtocol(Protocol):
             Dictionary containing server status and instance details.
 
         """
-        ...
 
     def benchmark_model(
         self,
@@ -214,7 +203,6 @@ class InferenceProtocol(Protocol):
             Dictionary containing throughput (tokens/sec), latency (ms), and memory (MB).
 
         """
-        ...
 
 
 @runtime_checkable

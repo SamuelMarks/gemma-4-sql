@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
-
-if TYPE_CHECKING:
-    from gemma_4_sql.type_hints import FewShotPromptResultDict, FewShotResultDict, JSONValue
+from gemma_4_sql.type_hints import FewShotPromptResultDict, FewShotResultDict, JSONValue
 
 logger = logging.getLogger(__name__)
 

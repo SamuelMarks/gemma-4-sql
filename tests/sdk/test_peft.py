@@ -8,7 +8,6 @@ import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.peft import apply_peft
-from gemma_4_sql.sdk.registry import get_backend
 
 
 def test_apply_peft_jax(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -51,56 +50,76 @@ def test_apply_peft_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_apply_peft_keras(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify apply_peft routes default target_modules and hyperparameters to Keras backend."""
-    keras_agent = get_backend("keras")
-    captured: dict[str, Any] = {}
+    """Verify apply_peft executes Keras apply_lora and injects LoRA into target modules."""
+    import gemma_4_sql.backends.keras.peft as kpeft
 
-    def spy_lora(
-        model_name: str,
-        target_modules: list[str],
-        lora_r: int = 8,
-        lora_alpha: int = 16,
-        lora_dropout: float = 0.05,
-        **_kwargs: Any,
-    ) -> dict[str, Any]:
-        """Capture forwarded LoRA arguments."""
-        captured["model_name"] = model_name
-        captured["target_modules"] = target_modules
-        captured["lora_r"] = lora_r
-        captured["lora_alpha"] = lora_alpha
-        captured["lora_dropout"] = lora_dropout
-        return {"backend": "keras", "target_modules": target_modules, "lora_r": lora_r}
+    class FakeBackbone:
+        """Keras backbone stub supporting enable_lora."""
 
-    monkeypatch.setattr(keras_agent, "apply_lora", spy_lora)
-    res = apply_peft(model_name="test-model", backend="keras")
+        def __init__(self) -> None:
+            """Initialize backbone stub."""
+            self.enabled_rank = 0
+            self.layers: list[Any] = []
+
+        def enable_lora(self, rank: int) -> None:
+            """Record enabled LoRA rank."""
+            self.enabled_rank = rank
+
+    class FakeKerasModel:
+        """Keras causal LM stub with backbone."""
+
+        def __init__(self) -> None:
+            """Initialize model stub."""
+            self.backbone = FakeBackbone()
+
+    backbone_holder = FakeKerasModel()
+
+    class FakeGemmaCausalLM:
+        """Stub for GemmaCausalLM.from_preset."""
+
+        @staticmethod
+        def from_preset(_name: str) -> FakeKerasModel:
+            """Return the FakeKerasModel instance."""
+            return backbone_holder
+
+    monkeypatch.setattr(kpeft, "keras", object())
+    monkeypatch.setattr(kpeft, "optional_attr", lambda *_a: FakeGemmaCausalLM)
+    res = apply_peft(model_name="test-model", backend="keras", lora_r=12)
     assert res["backend"] == "keras"
-    assert captured["model_name"] == "test-model"
-    assert captured["target_modules"] == ["q_proj", "v_proj"]
-    assert captured["lora_r"] == 8
-    assert captured["lora_alpha"] == 16
+    assert res["target_modules"] == ["q_proj", "v_proj"]
+    assert res["lora_r"] == 12
+    assert res["injected_modules"] == 2
+    assert backbone_holder.backbone.enabled_rank == 12
 
 
 def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify apply_peft routes custom target_modules to the MLX backend."""
-    mlx_agent = get_backend("mlx")
-    captured: dict[str, Any] = {}
+    """Verify apply_peft routes custom target_modules through MLX apply_lora."""
+    import gemma_4_sql.backends.mlx.peft as mpeft
 
-    def spy_lora(
-        model_name: str,
+    injected_targets: list[str] = []
+
+    def _fake_inject_lora(
+        model: Any,
         target_modules: list[str],
         lora_r: int = 8,
-        lora_alpha: int = 16,
+        lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
-        **_kwargs: Any,
-    ) -> dict[str, Any]:
-        """Capture forwarded MLX LoRA arguments."""
-        captured["target_modules"] = target_modules
-        return {"backend": "mlx", "target_modules": target_modules}
+    ) -> tuple[Any, int]:
+        """Record target modules and return injected count."""
+        _ = (lora_r, lora_alpha, lora_dropout)
+        injected_targets.extend(target_modules)
+        return (model, len(target_modules))
 
-    monkeypatch.setattr(mlx_agent, "apply_lora", spy_lora)
+    monkeypatch.setattr(mpeft, "nn", object())
+    monkeypatch.setattr(mpeft, "mx", object())
+    monkeypatch.setattr(mpeft, "load", lambda _m: (object(), None))
+    monkeypatch.setattr(mpeft, "inject_lora", _fake_inject_lora)
+
     res = apply_peft(model_name="test-model", target_modules=["k_proj"], backend="mlx")
     assert res["backend"] == "mlx"
-    assert captured["target_modules"] == ["k_proj"]
+    assert res["target_modules"] == ["k_proj"]
+    assert res["injected_modules"] == 1
+    assert injected_targets == ["k_proj"]
 
 
 def test_apply_peft_maxtext() -> None:

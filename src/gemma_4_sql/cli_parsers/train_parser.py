@@ -4,15 +4,11 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
-from typing import TYPE_CHECKING
 
 from gemma_4_sql.cli_misc import quantize_cmd
 from gemma_4_sql.cli_train import dpo_cmd, peft_cmd, posttrain_cmd, pretrain_cmd, sft_cmd, train_cmd
 
-if TYPE_CHECKING:
-    SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
-else:
-    SubParsersType = argparse._SubParsersAction
+type SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
 
 
 def add_training_subparser(
