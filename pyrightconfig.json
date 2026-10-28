@@ -3,7 +3,7 @@
   "venvPath": ".",
   "venv": ".venv",
   "extraPaths": ["src", "."],
-  "include": ["src/gemma_4_sql", "tests"],
+  "include": ["src/gemma_4_sql", "tests", "scripts"],
   "reportAny": "error",
   "reportExplicitAny": "error",
   "reportMissingImports": "none",

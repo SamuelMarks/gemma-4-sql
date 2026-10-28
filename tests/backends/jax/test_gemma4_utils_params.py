@@ -177,7 +177,9 @@ def test_load_safetensors_and_populate_state(monkeypatch: pytest.MonkeyPatch, tm
             """Return unit tensor."""
             return jnp.ones((1,))
 
-    assert list(_iter_safe_open_keys(_KeysOnlyFile())) == ["k1"]
+    keys_only = _KeysOnlyFile()
+    assert list(_iter_safe_open_keys(keys_only)) == ["k1"]
+    assert keys_only.get_tensor("k1").shape == (1,)
 
     class MockSafeOpenError:
         """Context manager raising TypeError on enter."""

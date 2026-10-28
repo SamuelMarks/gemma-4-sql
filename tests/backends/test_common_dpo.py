@@ -80,6 +80,7 @@ def test_generic_dpo_loss_with_methods() -> None:
     )
 
     assert float(loss) == pytest.approx(-0.02)
+    assert float(1.0 - policy_chosen) == pytest.approx(0.0)
     assert chosen_rewards.value == pytest.approx(0.1 * (1.0 - 0.8))
     assert rejected_rewards.value == pytest.approx(0.1 * (0.5 - 0.4))
 

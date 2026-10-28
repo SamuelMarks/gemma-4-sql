@@ -203,6 +203,8 @@ def test_apply_lora_backbone_and_custom_model(monkeypatch: pytest.MonkeyPatch) -
             return []
 
     custom_model = CustomModel()
+    assert custom_model.weights == []
+    assert custom_model.trainable_weights == []
     res = apply_lora("custom", ["q_proj"], lora_r=2, model=custom_model, merge=True)
     assert res["status"] == "completed"
     assert res["injected_modules"] == 1

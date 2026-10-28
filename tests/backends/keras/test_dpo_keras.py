@@ -96,6 +96,14 @@ def test_real_keras_dpo_loss_logps_and_train_step(monkeypatch: pytest.MonkeyPatc
             """Negate elementwise."""
             return _ArrayTensor(-self._t)
 
+    t_check = _ArrayTensor([[1.0, 2.0]])
+    assert t_check.ndim == 2
+    assert "float32" in t_check.dtype
+    assert t_check.numpy() is t_check
+    assert int(t_check) == 1
+    assert float((t_check + 1.0) + (1.0 + t_check) + (t_check + t_check)) > 0.0
+    assert float((t_check * 2.0) + (t_check * t_check) + (2.0 - t_check)) > 0.0
+
     class _TFStub:
         """Tensor-backed TensorFlow runtime stub for DPO mathematical verification."""
 

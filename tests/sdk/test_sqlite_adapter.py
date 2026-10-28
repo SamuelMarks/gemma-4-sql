@@ -134,6 +134,7 @@ async def test_sqlite_adapter_extra_coverage(monkeypatch: pytest.MonkeyPatch) ->
             self.closed += 1
 
     sync_conn = SyncMockConn()
+    assert await (await sync_conn.execute("SELECT 1")).fetchall() == []
     with patch.object(adapter, "connect_async", return_value=sync_conn):
         ok_fb, rows_fb, err_fb = await adapter.execute_with_feedback_async("INSERT")
         assert ok_fb is True and rows_fb == [] and err_fb is None
@@ -166,7 +167,9 @@ async def test_sqlite_adapter_extra_coverage(monkeypatch: pytest.MonkeyPatch) ->
         def close(self) -> None:
             """Close connection no-op."""
 
-    with patch.object(adapter, "connect_async", return_value=EmptyMockConn()):
+    empty_conn = EmptyMockConn()
+    assert await (await empty_conn.execute("SELECT 1")).fetchall() == []
+    with patch.object(adapter, "connect_async", return_value=empty_conn):
         ok_em, rows_em, _ = await adapter.execute_with_feedback_async("INSERT")
         assert ok_em is True and rows_em == []
         assert await adapter.execute_query_async("INSERT") == []

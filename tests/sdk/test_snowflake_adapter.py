@@ -169,7 +169,9 @@ def test_snowflake_adapter_schema(
         def close(self) -> None:
             """Close connection no-op."""
 
-    monkeypatch.setattr(adapter, "conn", StatelessCursorConn(should_fail=False))
+    sf_ok = StatelessCursorConn(should_fail=False)
+    assert sf_ok.cursor().fetchall() == []
+    monkeypatch.setattr(adapter, "conn", sf_ok)
     adapter.setup_schema("CREATE TABLE t2 (a INT)")
 
     monkeypatch.setattr(adapter, "conn", StatelessCursorConn(should_fail=True))

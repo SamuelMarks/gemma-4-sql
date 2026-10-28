@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from typing import Self
 from unittest.mock import MagicMock
@@ -213,7 +214,9 @@ def test_postgres_adapter_schema(
         def close(self) -> None:
             """Close connection no-op."""
 
-    monkeypatch.setattr(adapter, "conn", StatelessPgConn(should_fail=False))
+    pg_ok = StatelessPgConn(should_fail=False)
+    assert pg_ok.cursor().fetchall() == []
+    monkeypatch.setattr(adapter, "conn", pg_ok)
     adapter.setup_schema("CREATE TABLE t2 (a INT)")
 
     monkeypatch.setattr(adapter, "conn", StatelessPgConn(should_fail=True))
@@ -234,6 +237,8 @@ def test_postgres_adapter_schema(
             nonlocal closed_outside_loop
             closed_outside_loop = True
 
-    monkeypatch.setattr(adapter, "_async_conn", SyncClosableAsyncConn())
+    sync_closable = SyncClosableAsyncConn()
+    assert asyncio.run(sync_closable.fetch("SELECT 1")) == []
+    monkeypatch.setattr(adapter, "_async_conn", sync_closable)
     adapter.close()
     assert closed_outside_loop is True

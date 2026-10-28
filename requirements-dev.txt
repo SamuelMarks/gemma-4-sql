@@ -3,5 +3,7 @@ pytest-cov
 interrogate
 ruff==0.15.20
 mypy
+pyright
+ty
 pre-commit
 pytest-asyncio

@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-import jax
-import jax.numpy as jnp
+import types
+from collections.abc import Sequence
+
 import pytest
 
 from gemma_4_sql.backends.common_gemma4_config import (
     GEMMA4_E2B_SPEC,
+    BaseGemma4ConfigFields,
     get_gemma4_preset_spec,
     resolve_gemma4_preset_name,
 )
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
+    JaxNNBeamNamespaceProtocol,
     call_jax_causal_lm,
     clear_all_model_caches,
     compute_jax_step_probs,
@@ -47,6 +50,7 @@ def test_common_gemma4_config_presets() -> None:
     assert get_gemma4_preset_spec("26B-A4B")["num_experts"] == 128
     assert get_gemma4_preset_spec("E4B")["num_hidden_layers"] == 42
     assert get_gemma4_preset_spec("E2B") == GEMMA4_E2B_SPEC
+    assert "layers=24" in BaseGemma4ConfigFields().cache_fingerprint()
 
 
 def test_common_inference_and_peft_utilities() -> None:
@@ -86,33 +90,131 @@ def test_common_inference_and_peft_utilities() -> None:
     assert 0.0 < normalize_logprob_confidence([-0.5, -0.5], 2) <= 1.0
     assert 0.0 < normalize_logprob_confidence(-1.0, 2) <= 1.0
 
-    seq0 = jnp.array([[1, 2]], dtype=jnp.int32)
+    class _Seq2D:
+        """Pure-Python 2D sequence stub implementing `BeamSequenceArrayProtocol`."""
+
+        def __init__(self, tokens: list[int], shape_override: tuple[int, ...] | None = None) -> None:
+            """Initialize with 1D token list exposed as shape `(1, len(tokens))`."""
+            self.tokens = tokens
+            self._shape = shape_override if shape_override is not None else (1, len(tokens))
+
+        @property
+        def shape(self) -> tuple[int, ...]:
+            """Provide tensor dimensions."""
+            return self._shape
+
+        def __getitem__(
+            self,
+            idx: int | slice | types.EllipsisType | tuple[int | slice | types.EllipsisType, ...],
+            /,
+        ) -> _Seq2D:
+            """Index into token sequence and return scalar-compatible `_Seq2D`."""
+            if isinstance(idx, tuple) and len(idx) == 2 and isinstance(idx[1], int):
+                return _Seq2D([self.tokens[idx[1]]], shape_override=(1,))
+            if isinstance(idx, int):
+                return _Seq2D([self.tokens[idx]], shape_override=(1,))
+            return _Seq2D(list(self.tokens), shape_override=(len(self.tokens),))
+
+        def reshape(self, *shape: int) -> _Seq2D:
+            """Reshape the array."""
+            return _Seq2D(list(self.tokens), shape_override=shape)
+
+        def __float__(self) -> float:
+            """Convert first element to float."""
+            return float(self.tokens[0])
+
+        def __int__(self) -> int:
+            """Convert first element to int."""
+            return int(self.tokens[0])
+
+    seq0 = _Seq2D([1, 2])
 
     def _expand(
-        seq: jax.Array,
+        seq: _Seq2D,
         score: float,
         bw: int,
-    ) -> list[tuple[jax.Array, float]]:
+    ) -> list[tuple[_Seq2D, float]]:
         """Expand beam with EOS token 9 on first candidate."""
         return [
-            (jnp.concatenate([seq, jnp.array([[9]], dtype=jnp.int32)], axis=-1), score - 0.1),
-            (jnp.concatenate([seq, jnp.array([[3]], dtype=jnp.int32)], axis=-1), score - 0.5),
+            (_Seq2D([*seq.tokens, 9]), score - 0.1),
+            (_Seq2D([*seq.tokens, 3]), score - 0.5),
         ][:bw]
 
     best_seq, best_score = run_array_beam_search(seq0, beam_width=2, max_length=2, eos_token_id=9, step_expand_fn=_expand)
     assert int(best_seq[0, -1]) == 9
     assert best_score < 0.0
 
-    logits_3d = jnp.array([[[0.1, 2.0, 0.5, 4.0]]], dtype=jnp.float32)
-    top_idx, top_p = compute_jax_step_probs(logits_3d, 2, jax, jnp)
-    assert int(top_idx[0]) == 3
-    assert top_idx.shape == (2,)
-    logits_2d = jnp.array([[0.1, 0.9, 0.2]])
-    assert compute_jax_step_probs(logits_2d, 2, jax, jnp)[0].shape == (2,)
-    logits_1d = jnp.array([0.1, 0.9, 0.2])
-    assert compute_jax_step_probs(logits_1d, 2, jax, jnp)[0].shape == (2,)
+    # Also test natural loop exhaustion without early break when no beam hits EOS
+    best_no_eos, _ = run_array_beam_search(seq0, beam_width=2, max_length=1, eos_token_id=99, step_expand_fn=_expand)
+    assert int(best_no_eos[0, -1]) == 9
 
-    expanded = expand_jax_beams(jnp.array([[1]]), 0.0, top_idx, top_p, 2, jnp)
+    def _expand_eos(
+        seq: _Seq2D,
+        score: float,
+        _bw: int,
+    ) -> list[tuple[_Seq2D, float]]:
+        """Expand beam with only EOS token 9."""
+        return [(_Seq2D([*seq.tokens, 9]), score - 0.1)]
+
+    # Also test early termination when all beams hit EOS on step 1
+    best_eos, _ = run_array_beam_search(
+        seq0,
+        beam_width=1,
+        max_length=3,
+        eos_token_id=9,
+        step_expand_fn=_expand_eos,
+    )
+    assert int(best_eos[0, -1]) == 9
+
+    class _FakeJaxNN:
+        """Stub `jax.nn` namespace implementing `JaxNNBeamNamespaceProtocol`."""
+
+        def log_softmax(self, x: _Seq2D, axis: int = -1) -> _Seq2D:
+            """Return input unchanged for deterministic top-k testing."""
+            _ = axis
+            return x
+
+    class _FakeJax:
+        """Pure-Python stub implementing `JaxModuleBeamProtocol`."""
+
+        @property
+        def nn(self) -> JaxNNBeamNamespaceProtocol[_Seq2D]:
+            """Provide the `jax.nn` submodule."""
+            return _FakeJaxNN()
+
+    class _FakeJnp:
+        """Pure-Python stub implementing `JaxNumpyBeamProtocol`."""
+
+        def argsort(self, a: _Seq2D, axis: int = -1) -> _Seq2D:
+            """Return descending sorted indices."""
+            _ = axis
+
+            def _token_at(idx: int) -> int:
+                """Return token value at index `idx`."""
+                return a.tokens[idx]
+
+            ranked = sorted(range(len(a.tokens)), key=_token_at)
+            return _Seq2D(ranked, shape_override=(len(ranked),))
+
+        def concatenate(self, arrays: Sequence[_Seq2D], axis: int = -1) -> _Seq2D:
+            """Concatenate `_Seq2D` instances along last axis."""
+            _ = axis
+            merged: list[int] = []
+            for arr in arrays:
+                merged.extend(arr.tokens)
+            return _Seq2D(merged)
+
+    fake_jax = _FakeJax()
+    fake_jnp = _FakeJnp()
+    logits_3d = _Seq2D([1, 20, 5, 40], shape_override=(1, 1, 4))
+    top_idx, top_p = compute_jax_step_probs(logits_3d, 2, fake_jax, fake_jnp)
+    assert top_idx.shape == (4,)
+    logits_2d = _Seq2D([1, 9, 2], shape_override=(1, 3))
+    assert compute_jax_step_probs(logits_2d, 2, fake_jax, fake_jnp)[0].shape == (3,)
+    logits_1d = _Seq2D([1, 9, 2], shape_override=(3,))
+    assert compute_jax_step_probs(logits_1d, 2, fake_jax, fake_jnp)[0].shape == (3,)
+
+    expanded = expand_jax_beams(_Seq2D([1]), 0.0, top_idx, top_p, 2, fake_jnp)
     assert len(expanded) == 2
 
     res_inf = run_inference_wrapper("jax", "m", "SELECT", 2, lambda: ("SELECT 1", 0.9))

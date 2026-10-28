@@ -6,13 +6,23 @@ import io
 import re
 import subprocess
 import sys
+from collections.abc import Sequence
 from contextlib import redirect_stdout, suppress
 from pathlib import Path
+from typing import Protocol
 
-try:
-    from interrogate.cli import main as interrogate_main
-except ImportError:
-    interrogate_main = None
+from gemma_4_sql.backends.lazy_loader import optional_attr
+
+
+class _InterrogateMainProtocol(Protocol):
+    """Protocol for `interrogate.cli.main` callable."""
+
+    def __call__(self, args: Sequence[str], /) -> None:
+        """Execute interrogate CLI with command-line arguments."""
+        ...
+
+
+interrogate_main: _InterrogateMainProtocol | None = optional_attr("interrogate.cli", "main", _InterrogateMainProtocol)
 
 
 def get_color(pct: int) -> str:
@@ -171,5 +181,15 @@ def main() -> None:
     sys.exit(0)
 
 
-if __name__ == "__main__":
-    main()
+def run_if_main(module_name: str) -> None:
+    """Execute `main()` when invoked as the entry-point script.
+
+    Args:
+        module_name: Value of `__name__` for the calling module.
+
+    """
+    if module_name == "__main__":
+        main()
+
+
+run_if_main(__name__)

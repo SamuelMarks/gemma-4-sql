@@ -90,9 +90,11 @@ def test_process_standard_tensor_errors() -> None:
             """Provide get tensor test helper."""
             return jnp.zeros((1,))
 
+    sf = FakeSF()
+    assert tuple(sf.keys()) == ()
     jax_state: StateNode = {}
-    process_standard_tensor(FakeSF(), "model.embed_tokens.weight", jax_state, mapping)
-    process_standard_tensor(FakeSF(), "unknown.key", jax_state, mapping)
+    process_standard_tensor(sf, "model.embed_tokens.weight", jax_state, mapping)
+    process_standard_tensor(sf, "unknown.key", jax_state, mapping)
 
     with patch("gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape", side_effect=AttributeError("bad")):
         with pytest.raises(AttributeError):

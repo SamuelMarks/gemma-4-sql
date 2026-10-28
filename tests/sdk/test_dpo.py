@@ -89,7 +89,9 @@ def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
         @staticmethod
         def from_preset(_name: str) -> DummyModel:
             """Return a dummy callable model."""
-            return DummyModel()
+            mod = DummyModel()
+            assert mod([[1]]) == [[1]]
+            return mod
 
     class DummyKerasMod:
         """Stub for keras module with AdamW."""

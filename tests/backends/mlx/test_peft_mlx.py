@@ -190,6 +190,7 @@ def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, t
     fb_file = tmp_path / "fb.safetensors"
     mx.save_safetensors(str(fb_file), {"k": mx.ones((1,))})
     fb_model = FallbackLoadModel()
+    assert fb_model.named_modules() == []
     peft_module.load_adapter_weights(fb_model, fb_file)
     assert fb_model.updated_weights is not None
 

@@ -5,7 +5,14 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
+from collections.abc import Sequence
 from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from scripts import update_badges
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 UUID_PATTERN = re.compile(r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$")
@@ -154,3 +161,87 @@ def test_deploy_docs_use_current_libscript_paths() -> None:
     assert "./libscript.sh train" in deploy_doc
     assert "./libscript.sh infer" in deploy_doc
     assert "netctl apply" in deploy_doc
+
+
+def test_update_badges_all_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `scripts/update_badges.py` color thresholds, coverage sources, and badge rewriting."""
+    assert update_badges.get_color(95) == "brightgreen"
+    assert update_badges.get_color(85) == "green"
+    assert update_badges.get_color(75) == "yellow"
+    assert update_badges.get_color(65) == "orange"
+    assert update_badges.get_color(50) == "red"
+
+    monkeypatch.chdir(tmp_path)
+    readme = tmp_path / "README.md"
+    readme.write_text("# Title\n<!-- badges --> old <!-- /badges -->\n", encoding="utf-8")
+
+    # 1. Existing .tox/.coverage branch + interrogate_main present + README changed
+    tox_dir = tmp_path / ".tox"
+    tox_dir.mkdir()
+    (tox_dir / ".coverage").write_text("cov", encoding="utf-8")
+
+    class _FakeCompletedProcess:
+        """Minimal CompletedProcess stub."""
+
+        def __init__(self, stdout: str) -> None:
+            """Initialize with stdout."""
+            self.stdout = stdout
+
+    def _fake_interrogate(_args: Sequence[str]) -> None:
+        """Write interrogate output and raise SystemExit."""
+        print("actual: 100.0%")
+        raise SystemExit(0)
+
+    monkeypatch.setattr(update_badges, "interrogate_main", _FakeCompletedProcess)
+    monkeypatch.setattr(update_badges, "interrogate_main", _fake_interrogate)
+    monkeypatch.setattr(sys, "argv", ["update_badges.py"])
+    with (
+        patch.object(
+            subprocess,
+            "run",
+            return_value=_FakeCompletedProcess("TOTAL      100      0     20      0   100%\n"),
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        update_badges.run_if_main("__main__")
+    assert exc_info.value.code == 0
+    assert "Test%20coverage-100%25-brightgreen" in readme.read_text(encoding="utf-8")
+
+    # 2. Existing .coverage branch + 3-column TOTAL fallback + interrogate_main=None + README unchanged
+    (tox_dir / ".coverage").unlink()
+    (tmp_path / ".coverage").write_text("cov", encoding="utf-8")
+    monkeypatch.setattr(update_badges, "interrogate_main", None)
+
+    def _fake_run_branch_2(cmd: Sequence[str], **_kwargs: bool | str) -> _FakeCompletedProcess:
+        """Return 3-column coverage output or interrogate output."""
+        if "interrogate" in cmd:
+            return _FakeCompletedProcess("actual: 100.0%\n")
+        return _FakeCompletedProcess("TOTAL      100      0   100%\n")
+
+    with (
+        patch.object(subprocess, "run", side_effect=_fake_run_branch_2),
+        pytest.raises(SystemExit),
+    ):
+        update_badges.main()
+
+    # 3. Full batch execution (--force-run) with existing .coverage and .coverage.extra cleanup
+    (tmp_path / ".coverage.extra").write_text("extra", encoding="utf-8")
+    (tmp_path / "tests" / "backends").mkdir(parents=True)
+    (tmp_path / "tests" / "backends" / "test_sample.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["update_badges.py", "--force-run"])
+    with (
+        patch.object(subprocess, "run", return_value=_FakeCompletedProcess("no match\n")),
+        pytest.raises(SystemExit),
+    ):
+        update_badges.main()
+    assert not (tmp_path / ".coverage.extra").exists()
+
+    # 4. Also cover the branch where .coverage does not exist when entering full batch run
+    with (
+        patch.object(subprocess, "run", return_value=_FakeCompletedProcess("no match\n")),
+        pytest.raises(SystemExit),
+    ):
+        update_badges.main()
+
+    # Non-main module guard is a no-op
+    update_badges.run_if_main("scripts.update_badges")

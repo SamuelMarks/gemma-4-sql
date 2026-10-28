@@ -491,6 +491,7 @@ def test_assert_tensors_close_jax_mlx() -> None:
     assert_tensors_close(t1, t2, backend="jax")
     assert_tensors_close(t1, t2, backend="mlx")
     assert_tensors_close(t1, t2, backend="pytorch")
+    assert_tensors_close([1.0, 2.0], [1.0, 2.0], backend="jax")
 
 
 def test_recording_backend_double() -> None:

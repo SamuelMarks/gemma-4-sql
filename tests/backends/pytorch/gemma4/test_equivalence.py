@@ -74,10 +74,8 @@ def test_logit_equivalence() -> None:
             new_key = f"{prefix}.{k}" if prefix else str(k)
             if isinstance(v, Mapping):
                 flat.update(_flatten_state(v, new_key))
-            elif isinstance(v, nnx.Variable):
-                flat[new_key] = v.value
             else:
-                flat[new_key] = v
+                flat[new_key] = v.value if isinstance(v, nnx.Variable) else v
         return flat
 
     jax_params_flat = _flatten_state(jax_state)
