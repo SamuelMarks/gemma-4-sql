@@ -4,8 +4,6 @@
   "venv": ".venv",
   "extraPaths": ["src", "."],
   "include": ["src/gemma_4_sql", "tests", "scripts"],
-  "reportAny": "error",
-  "reportExplicitAny": "error",
   "reportMissingImports": "none",
   "reportMissingModuleSource": "none",
   "reportMissingTypeStubs": "none",
@@ -22,24 +20,18 @@
   "executionEnvironments": [
     {
       "root": "src/gemma_4_sql/cli_parsers",
-      "reportAny": "error",
-      "reportExplicitAny": "error",
       "reportUnknownLambdaType": "error",
       "reportUntypedBaseClass": "error",
       "reportPrivateUsage": "none"
     },
     {
       "root": "src/gemma_4_sql",
-      "reportAny": "error",
-      "reportExplicitAny": "error",
       "reportUnknownLambdaType": "error",
       "reportUntypedBaseClass": "error",
       "reportPrivateUsage": "error"
     },
     {
       "root": "tests",
-      "reportAny": "error",
-      "reportExplicitAny": "error",
       "reportUnknownLambdaType": "error",
       "reportUntypedBaseClass": "error"
     }

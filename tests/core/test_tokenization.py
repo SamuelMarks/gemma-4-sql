@@ -260,3 +260,15 @@ def test_tokenizer_decode_ignores_non_integer_and_float_tokens() -> None:
 
     with pytest.raises(DependencyMissingError, match="allow_fallback=False"):
         SQLTokenizer(model_name="nonexistent/model/path/for/test", allow_byte_fallback=False)
+
+
+@pytest.mark.parametrize("vocab_size", [2, 3, 7, 16, 128, 255, 256, 512])
+def test_byte_fallback_radix_roundtrip_across_vocab_sizes(vocab_size: int) -> None:
+    """Verify `ByteFallbackTokenizer` reversibly encodes and decodes ASCII and UTF-8 across arbitrary radix bases."""
+    bf = ByteFallbackTokenizer(vocab_size=vocab_size)
+    sample = "SELECT id, 'Ω≈ç√' FROM t WHERE x = 42;"
+    tokens = bf.encode_str(sample)
+    assert all(0 <= t < vocab_size for t in tokens)
+    assert bf.decode_tokens(tokens) == sample
+    vocab = bf.get_vocab()
+    assert len(vocab) == vocab_size

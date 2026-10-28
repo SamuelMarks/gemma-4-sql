@@ -9,19 +9,19 @@ repos:
     hooks:
       - id: interrogate
         name: Check 100% docstring coverage
-        entry: bash -c "uv run --extra dev interrogate -v src/gemma_4_sql tests scripts"
+        entry: bash -c "uv run --extra dev --extra mlx interrogate -v src/gemma_4_sql tests scripts"
         language: system
         pass_filenames: false
         always_run: true
       - id: pyright
         name: Run strict pyright type checking
-        entry: bash -c "uv run --extra dev pyright"
+        entry: bash -c "uv run --extra dev --extra mlx pyright"
         language: system
         pass_filenames: false
         always_run: true
       - id: ty
         name: Run ty type checking
-        entry: bash -c "uv run --extra dev ty check"
+        entry: bash -c "uv run --extra dev --extra mlx ty check"
         language: system
         pass_filenames: false
         always_run: true
@@ -33,7 +33,7 @@ repos:
         always_run: true
       - id: update-badges
         name: Update doc and test coverage badges
-        entry: bash -c "uv run --extra dev python scripts/update_badges.py"
+        entry: bash -c "uv run --extra dev --extra mlx python scripts/update_badges.py"
         language: system
         pass_filenames: false
         always_run: true

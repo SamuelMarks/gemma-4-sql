@@ -118,3 +118,18 @@ def test_extract_word_tokens_and_validate_identifier() -> None:
     for invalid_ident in ["", "123table", "users; DROP TABLE users", "users--", "schema.table", "table name"]:
         with pytest.raises(ValueError, match="Invalid or unsafe table name"):
             validate_sql_identifier(invalid_ident)
+
+
+def test_sql_lexer_edge_cases_and_nested_depth() -> None:
+    """Verify `has_top_level_order_by`, `validate_readonly_sql`, and `strip_sql_comments` on deeply nested expressions and trailing semicolons."""
+    assert has_top_level_order_by("SELECT ((1 + 2)) FROM users") is False
+    assert has_top_level_order_by("SELECT * FROM (SELECT * FROM (SELECT 1 ORDER BY 1) a ORDER BY 1) b") is False
+    assert has_top_level_order_by("SELECT * FROM (SELECT 1) a\nORDER   BY\n  1") is True
+
+    # Multiple trailing semicolons without a second statement are still rejected in read-only mode
+    with pytest.raises(SQLSafetyViolationError, match="Multiple stacked SQL statements"):
+        validate_readonly_sql("SELECT 1;;", read_only=True)
+
+    # Dangerous keyword inside a comment or literal is allowed in read-only mode
+    validate_readonly_sql("SELECT 'DROP TABLE users' AS msg /* DELETE FROM t */ FROM dual -- TRUNCATE t", read_only=True)
+    assert strip_sql_comments("SELECT 1") == "SELECT 1"
