@@ -73,7 +73,7 @@ def test_compute_latency_statistics() -> None:
 
 def test_run_benchmark_wrapper_missing_deps() -> None:
     """Test run_benchmark_wrapper with missing dependencies."""
-    res = run_benchmark_wrapper("test_backend", "model", "cpu", 1, True, lambda: (0, 0, 0))
+    res = run_benchmark_wrapper("test_backend", "model", "cpu", 1, lambda: (0, 0, 0), missing_deps=True)
     assert res["status"] == "backend_unavailable"
     assert res["tokens_per_sec"] == 0.0
 
@@ -81,7 +81,7 @@ def test_run_benchmark_wrapper_missing_deps() -> None:
 def test_run_benchmark_wrapper_missing_deps_raise() -> None:
     """Test run_benchmark_wrapper with missing dependencies and raise_if_missing."""
     with pytest.raises(DependencyMissingError, match=r"Dependencies for test_backend benchmarking on cpu are missing\."):
-        run_benchmark_wrapper("test_backend", "model", "cpu", 1, True, lambda: (0, 0, 0), raise_if_missing=True)
+        run_benchmark_wrapper("test_backend", "model", "cpu", 1, lambda: (0, 0, 0), missing_deps=True, raise_if_missing=True)
 
 
 def test_run_benchmark_wrapper_success() -> None:
@@ -92,7 +92,7 @@ def test_run_benchmark_wrapper_success() -> None:
         return (10.0, 50.0, 100.0)
 
     with patch("gemma_4_sql.backends.common_benchmark.get_current_rss_mb", return_value=10.0):
-        res = run_benchmark_wrapper("test_backend", "model", "cpu", 1, False, mock_benchmark, latency_samples=[10.0, 20.0])
+        res = run_benchmark_wrapper("test_backend", "model", "cpu", 1, mock_benchmark, latency_samples=[10.0, 20.0])
 
     assert res["status"] == "success"
     assert res["tokens_per_sec"] == 10.0
@@ -111,7 +111,7 @@ def test_run_benchmark_wrapper_failure() -> None:
         raise RuntimeError("Benchmark error")
 
     with patch("gemma_4_sql.backends.common_benchmark.get_current_rss_mb", return_value=10.0):
-        res = run_benchmark_wrapper("test_backend", "model", "cpu", 1, False, mock_benchmark)
+        res = run_benchmark_wrapper("test_backend", "model", "cpu", 1, mock_benchmark)
 
     assert res["status"] == "failed: Benchmark error"
     assert res["tokens_per_sec"] == 0.0
@@ -122,7 +122,7 @@ def test_run_benchmark_wrapper_failure() -> None:
         patch("gemma_4_sql.backends.common_benchmark.get_current_rss_mb", return_value=10.0),
         pytest.raises(BenchmarkError, match="Benchmark error"),
     ):
-        run_benchmark_wrapper("test_backend", "model", "cpu", 1, False, mock_benchmark, raise_on_error=True)
+        run_benchmark_wrapper("test_backend", "model", "cpu", 1, mock_benchmark, raise_on_error=True)
 
     with pytest.raises(DependencyMissingError, match="missing bench dep"):
         run_benchmark_wrapper(
@@ -130,6 +130,5 @@ def test_run_benchmark_wrapper_failure() -> None:
             "model",
             "cpu",
             1,
-            False,
             lambda: (_ for _ in ()).throw(DependencyMissingError("missing bench dep")),
         )

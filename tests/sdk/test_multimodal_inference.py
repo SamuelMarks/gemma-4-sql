@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import base64
 import struct
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import NoReturn
 
 import pytest
 
@@ -19,6 +20,7 @@ from gemma_4_sql.backends.common_serve import GenerateRequest, create_common_app
 from gemma_4_sql.sdk.agent import AgentContext, run_agentic_loop
 from gemma_4_sql.sdk.evaluation import evaluate
 from gemma_4_sql.sdk.inference import generate_sql
+from gemma_4_sql.type_hints import ETLConfig, InferenceResultDict, JSONDict, JSONValue
 
 
 def _create_synthetic_wav(duration_s: float = 0.1, sample_rate: int = 16000, stereo: bool = False) -> bytes:
@@ -31,6 +33,7 @@ def _create_synthetic_wav(duration_s: float = 0.1, sample_rate: int = 16000, ste
 
     Returns:
         Binary bytes of a valid RIFF WAVE file.
+
     """
     num_samples = int(duration_s * sample_rate)
     num_channels = 2 if stereo else 1
@@ -59,7 +62,7 @@ def _create_synthetic_wav(duration_s: float = 0.1, sample_rate: int = 16000, ste
 
 def test_load_image_bytes(tmp_path: Path) -> None:
     """Test loading image bytes across paths, base64 strings, and raw bytes."""
-    raw = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+    raw = bytes.fromhex("89504e470d0a1a0a0000000d49484452")
     assert load_image_bytes(raw) == raw
 
     # File path
@@ -77,8 +80,6 @@ def test_load_image_bytes(tmp_path: Path) -> None:
     long_b64 = base64.b64encode(raw * 20).decode("utf-8")
     assert len(load_image_bytes(long_b64)) > 0
 
-    # PIL Image if available (or mocked fallback)
-
     # Error conditions
     with pytest.raises(ValueError, match="image_input cannot be None"):
         load_image_bytes(None)
@@ -86,9 +87,9 @@ def test_load_image_bytes(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Image file not found"):
         load_image_bytes(tmp_path / "nonexistent.png")
 
-    bad_img: Any = 12345
+    untyped_load_image: Callable[..., bytes] = load_image_bytes
     with pytest.raises(ValueError, match="Unsupported image input type"):
-        load_image_bytes(bad_img)
+        untyped_load_image(12345)  # ty: ignore[invalid-argument-type]
 
 
 def test_process_image(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -135,9 +136,9 @@ def test_load_audio_bytes(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Audio file not found"):
         load_audio_bytes(tmp_path / "nonexistent.wav")
 
-    bad_aud: Any = 99999
+    untyped_load_audio: Callable[..., bytes] = load_audio_bytes
     with pytest.raises(ValueError, match="Unsupported audio input type"):
-        load_audio_bytes(bad_aud)
+        untyped_load_audio(99999)  # ty: ignore[invalid-argument-type]
 
 
 def test_process_audio() -> None:
@@ -187,51 +188,60 @@ def test_format_multimodal_prompt() -> None:
     assert text_res.get("audio_token_mask") is None
 
     # Vision only
-    vis_res: Any = format_multimodal_prompt("Count departments", has_image=True)
+    vis_res = format_multimodal_prompt("Count departments", has_image=True)
     assert vis_res["prompt"].startswith("<image>")
     assert vis_res["modality"] == "vision"
-    assert vis_res["image_token_mask"] is not None
-    assert vis_res["image_token_mask"][0] is True
-    assert vis_res["image_token_mask"][1] is False
+    vis_mask = vis_res["image_token_mask"]
+    assert vis_mask is not None
+    assert vis_mask[0] is True
+    assert vis_mask[1] is False
 
     # Audio only
-    aud_res: Any = format_multimodal_prompt("Calculate sum", has_audio=True)
+    aud_res = format_multimodal_prompt("Calculate sum", has_audio=True)
     assert aud_res["prompt"].startswith("<audio>")
     assert aud_res["modality"] == "audio"
-    assert aud_res["audio_token_mask"] is not None
-    assert aud_res["audio_token_mask"][0] is True
+    aud_mask = aud_res["audio_token_mask"]
+    assert aud_mask is not None
+    assert aud_mask[0] is True
 
     # Multimodal (vision + audio)
-    mm_res: Any = format_multimodal_prompt("Find customer with id 10", has_image=True, has_audio=True)
+    mm_res = format_multimodal_prompt("Find customer with id 10", has_image=True, has_audio=True)
     assert "<image>" in mm_res["prompt"]
     assert "<audio>" in mm_res["prompt"]
     assert mm_res["modality"] == "multimodal"
 
     # Already has tokens in prompt
-    existing_res: Any = format_multimodal_prompt("<image> Query schema", has_image=True)
+    existing_res = format_multimodal_prompt("<image> Query schema", has_image=True)
     assert existing_res["prompt"].count("<image>") == 1
 
-    bad_prompt: Any = None
     with pytest.raises(ValueError, match=r"prompt cannot be empty\."):
-        format_multimodal_prompt(bad_prompt)
+        format_multimodal_prompt("")
 
 
 def test_sdk_inference_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test SDK generate and generate_sql functions with multimodal arguments."""
-    captured: dict[str, Any] = {}
+    captured: JSONDict = {}
 
     class MockBackend:
         """Mock backend implementation for inference."""
 
         @staticmethod
-        def generate_sql(model_name: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
+        def generate_sql(model_name: str, prompt: str, **kwargs: JSONValue) -> InferenceResultDict:
             """Capture arguments."""
             captured["model_name"] = model_name
             captured["prompt"] = prompt
             captured.update(kwargs)
-            return {"sql": "SELECT 1", "confidence_score": 0.99}
+            return {
+                "backend": "pytorch",
+                "model": model_name,
+                "prompt": prompt,
+                "sql": "SELECT 1",
+                "beam_width": 3,
+                "confidence_score": 0.99,
+                "status": "success",
+            }
 
-    monkeypatch.setattr("gemma_4_sql.sdk.inference.get_backend", lambda _b: MockBackend())
+    monkeypatch.setattr("gemma_4_sql.sdk.inference.get_backend", lambda _b: MockBackend())  # pyright: ignore[reportUnknownLambdaType]
 
     res = generate_sql(
         "test-model",
@@ -255,16 +265,32 @@ def test_sdk_agent_multimodal_preservation(monkeypatch: pytest.MonkeyPatch) -> N
         """Mock backend returning error on first attempt and success on second."""
 
         @staticmethod
-        def generate_sql(model_name: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
+        def generate_sql(model_name: str, prompt: str, **kwargs: JSONValue) -> InferenceResultDict:
             """Record prompt and kwargs."""
             attempts_seen.append(prompt)
             assert kwargs.get("image_path") == "schema.png"
             assert kwargs.get("modality") == "vision"
             if len(attempts_seen) == 1:
-                return {"sql": "SELECT invalid_col FROM users", "confidence_score": 0.9}
-            return {"sql": "SELECT id FROM users", "confidence_score": 0.9}
+                return {
+                    "backend": "jax",
+                    "model": model_name,
+                    "prompt": prompt,
+                    "sql": "SELECT invalid_col FROM users",
+                    "beam_width": 3,
+                    "confidence_score": 0.9,
+                    "status": "success",
+                }
+            return {
+                "backend": "jax",
+                "model": model_name,
+                "prompt": prompt,
+                "sql": "SELECT id FROM users",
+                "beam_width": 3,
+                "confidence_score": 0.9,
+                "status": "success",
+            }
 
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: MockFailingThenSuccessBackend())
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: MockFailingThenSuccessBackend())  # pyright: ignore[reportUnknownLambdaType]
 
     ctx = AgentContext(
         db_path=":memory:",
@@ -273,10 +299,10 @@ def test_sdk_agent_multimodal_preservation(monkeypatch: pytest.MonkeyPatch) -> N
         image_path="schema.png",
         modality="vision",
     )
-    result: Any = run_agentic_loop("test-model", "List users", backend="jax", context=ctx)
+    result = run_agentic_loop("test-model", "List users", backend="jax", context=ctx)
+    assert isinstance(result, dict)
     assert result.get("success") is True
     assert result["attempts"] == 2
-    # Verify that <image> placeholder is retained in retry prompt
     assert "<image>" in attempts_seen[0]
     assert "<image>" in attempts_seen[1]
     assert "Previous attempt failed" in attempts_seen[1]
@@ -289,18 +315,36 @@ def test_sdk_evaluation_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
         """Mock evaluation backend."""
 
         @staticmethod
-        def build_dataloader(config: Any) -> dict[str, Any]:
+        def build_dataloader(
+            config: ETLConfig,
+        ) -> dict[str, JSONValue | list[dict[str, list[list[int]] | list[list[float]]]]]:
             """Return mock dataloader with sample batch."""
-            return {"loader": [{"inputs": [[1, 2]], "targets": [[3, 4]], "pixel_values": [[0.0]]}]}
+            return {
+                "backend": "jax",
+                "dataset": config.dataset_name,
+                "split": config.split,
+                "batch_size": config.batch_size,
+                "distributed": config.distributed,
+                "status": "loaded",
+                "loader": [{"inputs": [[1, 2]], "targets": [[3, 4]], "pixel_values": [[0.0]]}],
+            }
 
         @staticmethod
-        def generate_sql(model_name: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
+        def generate_sql(model_name: str, prompt: str, **kwargs: JSONValue) -> InferenceResultDict:
             """Return mock generation."""
             assert "pixel_values" in kwargs or "image_path" in kwargs
             assert kwargs.get("modality") == "vision"
-            return {"sql": "SELECT * FROM t", "confidence_score": 0.95}
+            return {
+                "backend": "jax",
+                "model": model_name,
+                "prompt": prompt,
+                "sql": "SELECT * FROM t",
+                "beam_width": 3,
+                "confidence_score": 0.95,
+                "status": "success",
+            }
 
-    monkeypatch.setattr("gemma_4_sql.sdk.evaluation.get_backend", lambda _b: MockEvalBackend())
+    monkeypatch.setattr("gemma_4_sql.sdk.evaluation.get_backend", lambda _b: MockEvalBackend())  # pyright: ignore[reportUnknownLambdaType]
 
     res = evaluate(
         "test-model",
@@ -314,16 +358,18 @@ def test_sdk_evaluation_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res.get("image_path") == "/path/to/erd.png"
 
 
-@pytest.mark.asyncio
-async def test_common_serve_multimodal() -> None:
+def test_common_serve_multimodal() -> None:
     """Test FastAPI continuous batching server with multimodal attachments."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
     app = create_common_app(
         backend_name="pytorch",
         model_name="test-model",
-        generate_logic=lambda prompt: f"SELECT * FROM test WHERE p='{prompt}'",
+        generate_logic=lambda prompt: f"SELECT * FROM test WHERE p='{prompt}'",  # pyright: ignore[reportUnknownLambdaType]
     )
 
-    req_payload = {
+    req_payload: JSONDict = {
         "prompt": "Find all records",
         "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
         "modality": "vision",
@@ -332,38 +378,26 @@ async def test_common_serve_multimodal() -> None:
     assert validated.modality == "vision"
     assert validated.image_base64 is not None
 
-    class MockReq:
-        """Mock async request."""
-
-        def __init__(self, data: dict[str, Any]) -> None:
-            """Initialize MockReq."""
-            self._data = data
-
-        async def json(self) -> dict[str, Any]:
-            """Return mock JSON."""
-            return self._data
-
-    app_any: Any = app
-    generate_route = next(r.endpoint for r in app_any.routes if getattr(r, "path", None) == "/generate")
-    res = await generate_route(MockReq(req_payload))
-    body_raw = res.body if hasattr(res, "body") else res
-    import json
-
-    body = json.loads(body_raw.decode("utf-8")) if hasattr(body_raw, "decode") else body_raw
-    assert "sql" in body
-    assert body["modality"] == "vision"
-    assert "<image>" in body["sql"]
+    assert isinstance(app, FastAPI)
+    with TestClient(app) as client:
+        resp = client.post("/generate", json=req_payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "sql" in body
+        assert body["modality"] == "vision"
+        assert "<image>" in body["sql"]
 
 
 def test_common_multimodal_pure_python_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test image and audio processing when numpy and PIL are not available."""
+    """Test image and audio processing when jax.numpy and PIL are not available."""
     import gemma_4_sql.backends.common_multimodal as cm
 
-    orig_np = cm.np
+    orig_jnp = cm.jnp
     orig_image = cm.Image
 
-    monkeypatch.setattr(cm, "np", None)
+    monkeypatch.setattr(cm, "jnp", None)
     monkeypatch.setattr(cm, "Image", None)
+    monkeypatch.setattr(cm, "optional_import", lambda _name: None)  # pyright: ignore[reportUnknownLambdaType]
 
     # Process image with pure python fallback
     raw_img = b"fake_image_bytes"
@@ -377,7 +411,7 @@ def test_common_multimodal_pure_python_fallbacks(monkeypatch: pytest.MonkeyPatch
     assert "spectrogram" in res_audio
     assert len(res_audio["spectrogram"][0]) == 10
 
-    monkeypatch.setattr(cm, "np", orig_np)
+    monkeypatch.setattr(cm, "jnp", orig_jnp)
     monkeypatch.setattr(cm, "Image", orig_image)
 
 
@@ -406,41 +440,42 @@ def test_multimodal_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     samples, _rate = cm._parse_wav_samples(bytes(valid_wav))
     assert len(samples) > 0
 
-    # WAV with intermediate JUNK chunk before data to cover line 257
+    # WAV with intermediate JUNK chunk before data
     junk_chunk = b"JUNK\x04\x00\x00\x001234"
     wav_with_junk = bytes(valid_wav[:36] + junk_chunk + valid_wav[36:])
     samples_j, _ = cm._parse_wav_samples(wav_with_junk)
     assert len(samples_j) > 0
 
-    # Image available with MockPILImage and numpy None vs available
+    # Image available with MockPILImage and jnp None vs available
     from tests.conftest import MockPILImage
 
-    with monkeypatch.context() as mp:
-        mp.setattr(cm, "Image", MockPILImage)
-        res_img_with_pil = cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
+    png_header = bytes.fromhex("89504e470d0a1a0a")
+    with monkeypatch.context() as monkeypatch_ctx:
+        monkeypatch_ctx.setattr(cm, "Image", MockPILImage)
+        res_img_with_pil = cm.process_image(png_header, target_size=(14, 14), patch_size=14)
         assert res_img_with_pil["num_patches"] == 1
-        mp.setattr(cm, "np", None)
+        monkeypatch_ctx.setattr(cm, "jnp", None)
         with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
-            cm.process_image(b"\x89PNG\r\n\x1a\n", target_size=(14, 14), patch_size=14)
+            cm.process_image(png_header, target_size=(14, 14), patch_size=14)
 
     # Corrupted WAV header triggering struct.error
     corrupt_wav = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 40
-    with monkeypatch.context() as mp:
-        mp.setattr("struct.unpack", lambda *_a, **_k: (_ for _ in ()).throw(struct.error("Corrupted WAV unpack")))
-        samples2, _rate2 = cm._parse_wav_samples(corrupt_wav)
-        assert len(samples2) > 0
+    with monkeypatch.context() as monkeypatch_ctx:
+        monkeypatch_ctx.setattr("struct.unpack", lambda *_a, **_k: (_ for _ in ()).throw(struct.error("Corrupted WAV unpack")))  # pyright: ignore[reportUnknownLambdaType]
+        with pytest.raises(ValueError, match="Corrupted WAV fmt chunk header"):
+            cm._parse_wav_samples(corrupt_wav)
 
     # PIL open raising OSError handled gracefully
     class _MockFailingPIL:
         """Mock PIL Image raising OSError on open."""
 
         @staticmethod
-        def open(_buf: Any) -> Any:
+        def open(_buf: bytes | str | Path) -> NoReturn:
             """Raise OSError to simulate corrupted image open."""
             raise OSError("Corrupted image")
 
-    with monkeypatch.context() as mp:
-        mp.setattr(cm, "Image", _MockFailingPIL)
+    with monkeypatch.context() as monkeypatch_ctx:
+        monkeypatch_ctx.setattr(cm, "Image", _MockFailingPIL)
         with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
             cm.process_image(b"corrupted", target_size=(14, 14), patch_size=14)
 
@@ -461,10 +496,10 @@ def test_multimodal_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     samples_s, _ = cm._parse_wav_samples(stereo_direct)
     assert len(samples_s) > 0
 
-    # Audio input as numpy ndarray
-    import numpy as np
+    # Audio input as jax.Array
+    import jax.numpy as jnp
 
-    arr_audio = np.array([0.05, -0.05, 0.1, -0.1], dtype=np.float32)
+    arr_audio = jnp.array([0.05, -0.05, 0.1, -0.1], dtype=jnp.float32)
     res_np = cm.process_audio(arr_audio)
     assert res_np["num_frames"] >= 1
 
@@ -473,22 +508,21 @@ def test_multimodal_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     samples_chunk, _ = cm._parse_wav_samples(chunk_wav)
     assert len(samples_chunk) > 0
 
-    # Empty bytes fallback
-    samples_empty, _ = cm._parse_wav_samples(b"")
-    assert len(samples_empty) == 1600
+    # Empty bytes raises MultimodalProcessingError (a ValueError subclass)
+    with pytest.raises(ValueError, match="Audio byte payload cannot be empty"):
+        cm._parse_wav_samples(b"")
 
-    # Corrupt image bytes triggering PIL exception and synthetic fallback
+    # Corrupt image bytes triggering PIL exception
     with pytest.raises(ValueError):
         cm.process_image(b"NOT_A_VALID_IMAGE_BYTES_PAYLOAD", target_size=(14, 14), patch_size=14)
 
-    # Synthetic image fallback when numpy is None
-    with monkeypatch.context() as mp:
-        mp.setattr(cm, "np", None)
+    # Missing jnp raises MultimodalProcessingError
+    with monkeypatch.context() as monkeypatch_ctx:
+        monkeypatch_ctx.setattr(cm, "jnp", None)
         with pytest.raises(ValueError):
             cm.process_image(b"NOT_A_VALID_IMAGE", target_size=(14, 14), patch_size=14)
 
-    # Truncated WAV header triggering struct.error in WAV parser
+    # Truncated WAV header raises MultimodalProcessingError
     truncated_wav = b"RIFF\x20\x00\x00\x00WAVEfmt "
-    samples_trunc, rate_trunc = cm._parse_wav_samples(truncated_wav)
-    assert len(samples_trunc) > 0
-    assert rate_trunc == 16000
+    with pytest.raises(ValueError, match="Truncated or malformed RIFF/WAVE header"):
+        cm._parse_wav_samples(truncated_wav)

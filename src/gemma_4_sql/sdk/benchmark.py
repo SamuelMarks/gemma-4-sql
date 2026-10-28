@@ -34,7 +34,6 @@ def benchmark(
         Structured `BenchmarkResultDict` containing throughput (`tokens_per_sec`), latency, memory, and status.
 
     """
-
     return get_backend(backend).benchmark_model(
         model_name,
         hardware,

@@ -6,20 +6,24 @@ import argparse
 import json
 import runpy
 import sys
-from typing import Any
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from gemma_4_sql.cli import cli
 from gemma_4_sql.cli_serve import chat_cmd, few_shot_cmd, serve_cmd
+from gemma_4_sql.type_hints import ETLConfig, JSONDict, JSONValue, TrainingConfig
+
+type CLICallArg = str | int | float | bool | ETLConfig | TrainingConfig | list[str] | dict[str, float] | None
+type CLIRecordedCall = tuple[str, tuple[CLICallArg, ...], dict[str, CLICallArg | JSONValue]]
 
 
 @pytest.fixture(autouse=True)
-def mock_cli_environment(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tuple[Any, ...], dict[str, Any]]]:
+def mock_cli_environment(monkeypatch: pytest.MonkeyPatch) -> list[CLIRecordedCall]:
     """Mock CLI backend dispatch targets and record all invocations for verification."""
-    recorded_calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
-    base_res: dict[str, Any] = {
+    recorded_calls: list[CLIRecordedCall] = []
+    base_res: JSONDict = {
         "status": "completed",
         "metrics": {},
         "sql": "SELECT 1",
@@ -27,10 +31,10 @@ def mock_cli_environment(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tup
         "response": "hi",
     }
 
-    def make_recorder(func_name: str) -> Any:
+    def make_recorder(func_name: str) -> Callable[..., JSONDict]:
         """Create a recording mock function for `func_name`."""
 
-        def _mock_fn(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        def _mock_fn(*args: CLICallArg, **kwargs: CLICallArg | JSONValue) -> JSONDict:
             """Record call arguments and return simulated CLI command result."""
             recorded_calls.append((func_name, args, dict(kwargs)))
             return base_res
@@ -61,7 +65,7 @@ def mock_cli_environment(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, tup
 
 
 def test_cli_etl_commands(
-    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    mock_cli_environment: list[CLIRecordedCall],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify CLI ETL subcommands construct and forward ETLConfig with parsed CLI arguments."""
@@ -73,6 +77,7 @@ def test_cli_etl_commands(
     assert [c[0] for c in mock_cli_environment] == ["etl_pretrain", "etl_sft", "etl_posttrain"]
     for _, args, kwargs in mock_cli_environment:
         cfg = args[0]
+        assert isinstance(cfg, ETLConfig)
         assert cfg.dataset_name == "my-data"
         assert cfg.split == "test"
         assert cfg.batch_size == 16
@@ -80,15 +85,15 @@ def test_cli_etl_commands(
 
 
 def test_cli_training_commands(
-    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    mock_cli_environment: list[CLIRecordedCall],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify CLI training subcommands construct and forward TrainingConfig, DPO parameters, and PEFT arguments."""
-    assert cli(["train", "--model", "test-model", "--backend", "jax", "--dataset", "dummy"]) == 0
+    assert cli(["train", "--model", "test-model", "--backend", "jax", "--dataset", "dummy", "--image-path", "img.png", "--audio-path", "aud.wav", "--modality", "multimodal"]) == 0
     assert cli(["pretrain", "--model", "test-model", "--backend", "maxtext", "--dataset", "dummy"]) == 0
     assert cli(["sft", "--model", "test-model", "--backend", "jax", "--dataset", "dummy"]) == 0
     assert cli(["posttrain", "--model", "test-model", "--backend", "keras", "--dataset", "dummy"]) == 0
-    assert cli(["dpo", "--model", "test-model", "--backend", "jax", "--beta", "0.2", "--dataset", "dummy"]) == 0
+    assert cli(["dpo", "--model", "test-model", "--backend", "jax", "--beta", "0.2", "--dataset", "dummy", "--image-path", "img.png"]) == 0
     assert (
         cli([
             "peft",
@@ -111,11 +116,19 @@ def test_cli_training_commands(
 
     names = [c[0] for c in mock_cli_environment]
     assert names == ["train_from_scratch", "pretrain_model", "sft_model", "posttrain_model", "run_dpo", "apply_peft"]
-    assert mock_cli_environment[0][1][0].model_name == "test-model"
-    assert mock_cli_environment[0][1][0].backend == "jax"
-    assert mock_cli_environment[1][1][0].backend == "maxtext"
-    assert mock_cli_environment[3][1][0].backend == "keras"
+    cfg0 = mock_cli_environment[0][1][0]
+    cfg1 = mock_cli_environment[1][1][0]
+    cfg3 = mock_cli_environment[3][1][0]
+    assert isinstance(cfg0, TrainingConfig)
+    assert isinstance(cfg1, TrainingConfig)
+    assert isinstance(cfg3, TrainingConfig)
+    assert cfg0.model_name == "test-model"
+    assert cfg0.backend == "jax"
+    assert cfg0.extra_kwargs == {"image_path": "img.png", "audio_path": "aud.wav", "modality": "multimodal"}
+    assert cfg1.backend == "maxtext"
+    assert cfg3.backend == "keras"
     assert mock_cli_environment[4][2]["beta"] == 0.2
+    assert mock_cli_environment[4][2]["image_path"] == "img.png"
     assert mock_cli_environment[5][2]["target_modules"] == ["q_proj", "v_proj"]
     assert mock_cli_environment[5][2]["lora_r"] == 16
     assert mock_cli_environment[5][2]["lora_alpha"] == 32
@@ -124,7 +137,7 @@ def test_cli_training_commands(
 
 
 def test_cli_quantize_and_export(
-    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    mock_cli_environment: list[CLIRecordedCall],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify CLI quantize and export commands forward arguments and print JSON output."""
@@ -140,7 +153,7 @@ def test_cli_quantize_and_export(
 
 
 def test_cli_evaluate_and_agent(
-    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    mock_cli_environment: list[CLIRecordedCall],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify evaluate_cmd and agent_cmd handle valid, empty, and invalid db_kwargs."""
@@ -176,7 +189,7 @@ def test_cli_evaluate_and_agent(
 
 def test_cli_generate_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Verify generate_cmd handles confidence display, non-confidence display, and empty SQL."""
-    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "SELECT 1;", "confidence_score": 0.95, "status": "success"})
+    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "SELECT 1;", "confidence_score": 0.95, "status": "success"})  # pyright: ignore[reportUnknownLambdaType]
     assert (
         cli([
             "generate",
@@ -203,7 +216,7 @@ def test_cli_generate_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.C
     assert "SELECT 1;" in out_no_conf
     assert "Confidence" not in out_no_conf
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "", "status": "success"})
+    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "", "status": "success"})  # pyright: ignore[reportUnknownLambdaType]
     assert cli(["generate", "--model", "test-model", "--prompt", "Find all users"]) == 0
     assert capsys.readouterr().out == ""
 
@@ -215,13 +228,13 @@ def test_cli_rag_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Captur
     assert cli(["rag", "--action", "retrieve", "--prompt", "test", "--ddl", "CREATE TABLE t (id INT);"]) == 0
     capsys.readouterr()
 
-    monkeypatch.setattr("gemma_4_sql.cli_misc.build_rag_prompt", lambda prompt, ddl, **_k: f"{prompt} with {ddl}")
+    monkeypatch.setattr("gemma_4_sql.cli_misc.build_rag_prompt", lambda prompt, ddl, **_k: f"{prompt} with {ddl}")  # pyright: ignore[reportUnknownLambdaType]
     assert cli(["rag", "--prompt", "Test prompt", "--ddl", "Test DDL", "--image-path", "test.jpg", "--audio-path", "test.mp3"]) == 0
     assert "Test prompt with Test DDL" in capsys.readouterr().out
 
 
 def test_cli_log_metrics_variants(
-    mock_cli_environment: list[tuple[str, tuple[Any, ...], dict[str, Any]]],
+    mock_cli_environment: list[CLIRecordedCall],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Verify log_metrics_cmd parses key=value pairs, skips malformed entries, and returns 1 on invalid float."""
@@ -268,26 +281,26 @@ def test_cli_execute_and_embed_duckdb(capsys: pytest.CaptureFixture[str]) -> Non
 
 def test_cli_serve_chat_and_few_shot(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Verify serve, chat, and few-shot commands handle valid, empty, and invalid JSON inputs."""
-    assert cli(["serve", "--model", "my-model", "--port", "9000", "--max-batch-size", "128", "--backend", "jax"]) == 0
-    assert cli(["chat", "--prompt", "hello", "--history", '[{"role": "user", "content": "hi"}]', "--backend", "jax"]) == 0
+    assert cli(["serve", "--model", "my-model", "--port", "9000", "--max-batch-size", "128", "--backend", "jax", "--modality", "vision"]) == 0
+    assert cli(["chat", "--prompt", "hello", "--history", '[{"role": "user", "content": "hi"}]', "--backend", "jax", "--image-path", "a.png", "--audio-path", "b.wav", "--modality", "multimodal"]) == 0
     assert cli(["chat", "--prompt", "hello", "--history", "invalid_json"]) == 1
     assert cli(["few-shot", "--prompt", "hello", "--examples", '[{"input": "in", "output": "out"}]', "--backend", "jax"]) == 0
     assert cli(["few-shot", "--prompt", "hello", "--examples", "invalid_json"]) == 1
     capsys.readouterr()
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.serve_model", lambda **_k: None)
-    serve_cmd(argparse.Namespace(model="dummy", port=8000, max_batch_size=32, backend="dummy", run_server=False))
+    monkeypatch.setattr("gemma_4_sql.cli_serve.serve_model", lambda **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    serve_cmd(argparse.Namespace(model="dummy", port=8000, max_batch_size=32, backend="dummy", run_server=False, modality="text"))
     assert "Serving model dummy on port 8000 (status: unknown)" in capsys.readouterr().out
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", lambda **_k: {"response": "SELECT 1;"})
+    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", lambda **_k: {"response": "SELECT 1;"})  # pyright: ignore[reportUnknownLambdaType]
     assert cli(["chat", "--prompt", "hello"]) == 0
     assert "SELECT 1;" in capsys.readouterr().out
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", lambda **_k: {})
-    chat_cmd(argparse.Namespace(model="d", prompt="d", backend="d", history=""))
+    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", lambda **_k: {})  # pyright: ignore[reportUnknownLambdaType]
+    chat_cmd(argparse.Namespace(model="d", prompt="d", backend="d", history="", image_path=None, audio_path=None, modality="text"))
     assert capsys.readouterr().out == ""
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.build_few_shot_prompt", lambda **kw: {"few_shot_prompt": "prompt with examples" if kw.get("examples") else ""})
+    monkeypatch.setattr("gemma_4_sql.cli_serve.build_few_shot_prompt", lambda **kw: {"few_shot_prompt": "prompt with examples" if kw.get("examples") else ""})  # pyright: ignore[reportUnknownLambdaType]
     assert cli(["few-shot", "--prompt", "dummy", "--examples", '[{"prompt": "q", "sql": "s"}]']) == 0
     assert "prompt with examples" in capsys.readouterr().out
 
@@ -326,3 +339,71 @@ def test_cli_if_main(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixt
         runpy.run_path("src/gemma_4_sql/cli.py", run_name="__main__")
     assert excinfo.value.code == 0
     assert "[" in capsys.readouterr().out
+
+
+def test_cli_gemma_sql_error_handling(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify CLI subcommands catch GemmaSQLError, print structured JSON error payloads, and return exit code 1."""
+    from gemma_4_sql.exceptions import ConfigurationError, ETLError, ExportError, InferenceError, QuantizationError, TrainingError
+
+    def _raise_train(*_a: CLICallArg, **_k: CLICallArg | JSONValue) -> JSONDict:
+        """Raise TrainingError."""
+        raise TrainingError("train err", backend="jax", model_name="m")
+
+    for fn in ("train_from_scratch", "pretrain_model", "sft_model", "posttrain_model", "run_dpo", "apply_peft"):
+        monkeypatch.setattr(f"gemma_4_sql.cli_train.{fn}", _raise_train)
+
+    assert cli(["train", "--model", "m", "--dataset", "d"]) == 1
+    assert cli(["pretrain", "--model", "m", "--dataset", "d"]) == 1
+    assert cli(["sft", "--model", "m", "--dataset", "d"]) == 1
+    assert cli(["posttrain", "--model", "m", "--dataset", "d"]) == 1
+    assert cli(["dpo", "--model", "m", "--dataset", "d"]) == 1
+    assert cli(["peft", "--model", "m"]) == 1
+
+    def _raise_etl(*_a: CLICallArg, **_k: CLICallArg | JSONValue) -> JSONDict:
+        """Raise ETLError."""
+        raise ETLError("etl err", backend="jax")
+
+    for fn in ("etl_pretrain", "etl_sft", "etl_posttrain"):
+        monkeypatch.setattr(f"gemma_4_sql.cli_etl.{fn}", _raise_etl)
+
+    assert cli(["etl", "pretrain"]) == 1
+    assert cli(["etl", "sft"]) == 1
+    assert cli(["etl", "posttrain"]) == 1
+
+    def _raise_quant(*_a: CLICallArg, **_k: CLICallArg | JSONValue) -> JSONDict:
+        """Raise QuantizationError."""
+        raise QuantizationError("quant err", backend="jax", model_name="m")
+
+    def _raise_export(*_a: CLICallArg, **_k: CLICallArg | JSONValue) -> JSONDict:
+        """Raise ExportError."""
+        raise ExportError("export err", backend="jax", model_name="m")
+
+    monkeypatch.setattr("gemma_4_sql.cli_misc.quantize_model", _raise_quant)
+    monkeypatch.setattr("gemma_4_sql.cli_misc.export_model", _raise_export)
+    monkeypatch.setattr("gemma_4_sql.cli_misc.log_metrics", _raise_train)
+
+    assert cli(["quantize", "--model", "m"]) == 1
+    assert cli(["export", "--model", "m", "--path", "./out"]) == 1
+    assert cli(["log", "--step", "1", "--metrics", "loss=1.0"]) == 1
+
+    def _raise_inf(*_a: CLICallArg, **_k: CLICallArg | JSONValue) -> JSONDict:
+        """Raise InferenceError."""
+        raise InferenceError("inf err", backend="jax", model_name="m")
+
+    for fn in ("evaluate", "generate", "run_agentic_loop", "serve_model", "chat_turn", "build_few_shot_prompt"):
+        monkeypatch.setattr(f"gemma_4_sql.cli_serve.{fn}", _raise_inf)
+
+    assert cli(["evaluate", "--model", "m"]) == 1
+    assert cli(["generate", "--model", "m", "--prompt", "p"]) == 1
+    assert cli(["agent", "--model", "m", "--prompt", "p"]) == 1
+    assert cli(["serve", "--model", "m"]) == 1
+    assert cli(["chat", "--model", "m", "--prompt", "p"]) == 1
+    assert cli(["few-shot", "--model", "m", "--prompt", "p"]) == 1
+
+    def _raise_cfg(*_a: CLICallArg, **_k: CLICallArg | JSONValue) -> None:
+        """Raise ConfigurationError."""
+        raise ConfigurationError("bad db type")
+
+    monkeypatch.setattr("gemma_4_sql.cli_db.LiveDatabaseEngine", _raise_cfg)
+    assert cli(["execute", "--query", "SELECT 1", "--db-type", "unknown"]) == 1
+    capsys.readouterr()

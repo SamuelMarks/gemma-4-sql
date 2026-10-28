@@ -29,7 +29,7 @@ def test_get_device(monkeypatch: pytest.MonkeyPatch) -> None:
     assert dev_cpu is not None
 
     mock_jax = MagicMock()
-    mock_jax.devices.side_effect = lambda hw: [f"mock_{hw}_device"] if hw in ("gpu", "tpu", "cpu") else []
+    mock_jax.devices.side_effect = lambda hw: [f"mock_{hw}_device"] if hw in ("gpu", "tpu", "cpu") else []  # pyright: ignore[reportUnknownLambdaType]
     monkeypatch.setattr(jax_benchmark, "jax", mock_jax)
     assert jax_benchmark._get_device("gpu") == "mock_gpu_device"
     assert jax_benchmark._get_device("tpu") == "mock_tpu_device"
@@ -66,9 +66,15 @@ def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyP
     # Device with explicit peak_bytes_in_use memory_stats and warmup in generate mode
     from contextlib import nullcontext
 
-    mock_device_with_stats = MagicMock()
-    mock_device_with_stats.memory_stats.return_value = {"peak_bytes_in_use": 64 * 1024 * 1024}
-    monkeypatch.setattr(jax_benchmark.jax, "default_device", lambda _d: nullcontext())
+    class _MockJaxDevice:
+        """Concrete device stub implementing `JaxDeviceProtocol`."""
+
+        def memory_stats(self) -> dict[str, int]:
+            """Return deterministic peak_bytes_in_use."""
+            return {"peak_bytes_in_use": 64 * 1024 * 1024}
+
+    mock_device_with_stats = _MockJaxDevice()
+    monkeypatch.setattr(jax_benchmark.jax, "default_device", lambda _d: nullcontext())  # pyright: ignore[reportUnknownLambdaType]
     _, _, mem_stats = jax_benchmark._run_benchmark_pass(
         model=model,
         batch_size=1,
@@ -79,6 +85,24 @@ def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyP
         device=mock_device_with_stats,
     )
     assert mem_stats == 64.0
+
+    class _FailingStatsDevice:
+        """Concrete device stub raising RuntimeError from `memory_stats()`."""
+
+        def memory_stats(self) -> dict[str, int]:
+            """Raise RuntimeError to exercise fallback RSS calculation."""
+            raise RuntimeError("stats unavailable")
+
+    _, _, mem_fallback = jax_benchmark._run_benchmark_pass(
+        model=model,
+        batch_size=1,
+        num_runs=1,
+        warmup_steps=0,
+        mode="prefill",
+        max_new_tokens=1,
+        device=_FailingStatsDevice(),
+    )
+    assert mem_fallback >= 0.0
 
     # Also test when nnx is None and jax lacks block_until_ready
     monkeypatch.setattr(jax_benchmark, "nnx", None)

@@ -2,43 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any
+import sys
 
 import pytest
 
 from gemma_4_sql.sdk.benchmark import benchmark
+from tests.utils.test_utils import RecordingBackendDouble
 
 
 def test_sdk_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify sdk.benchmark forwards all hardware and generation parameters to the resolved backend."""
-    captured_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-
-    class FakeBackend:
-        """Test stub recording benchmark_model arguments."""
-
-        def benchmark_model(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-            """Record call arguments and return structured benchmark metrics."""
-            captured_calls.append((args, kwargs))
-            return {
-                "backend": str(kwargs.get("backend_alias", "pytorch")),
-                "model": args[0],
-                "hardware": args[1],
-                "batch_size": args[2],
-                "tokens_per_sec": 250.0,
-                "latency_ms": 8.0,
-                "memory_mb": 512.0,
-                "rss_memory_mb": 128.0,
-                "status": "success",
-            }
-
+    double = RecordingBackendDouble("pytorch_native")
     requested_backends: list[str] = []
 
-    def mock_get_backend(name: str) -> FakeBackend:
-        """Record backend name and return FakeBackend."""
+    def mock_get_backend(name: str) -> RecordingBackendDouble:
+        """Record backend name and return RecordingBackendDouble."""
         requested_backends.append(name)
-        return FakeBackend()
-
-    import sys
+        return double
 
     monkeypatch.setattr(sys.modules["gemma_4_sql.sdk.benchmark"], "get_backend", mock_get_backend)
     res = benchmark(
@@ -53,15 +33,15 @@ def test_sdk_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
         num_runs=10,
     )
     assert requested_backends == ["pytorch_native"]
-    assert len(captured_calls) == 1
-    args, kwargs = captured_calls[0]
-    assert args == ("google/gemma-4-E2B", "cuda", 16)
+    assert len(double.benchmark_calls) == 1
+    model_name, hardware, batch_size, kwargs = double.benchmark_calls[0]
+    assert (model_name, hardware, batch_size) == ("google/gemma-4-E2B", "cuda", 16)
     assert kwargs["dtype"] == "float16"
     assert kwargs["mode"] == "decode"
     assert kwargs["max_new_tokens"] == 64
     assert kwargs["warmup_steps"] == 3
     assert kwargs["backend_alias"] == "pytorch_native"
     assert kwargs["num_runs"] == 10
-    assert res["status"] == "success"
+    assert res["status"] == "completed"
     assert res["backend"] == "pytorch_native"
-    assert res["tokens_per_sec"] == 250.0
+    assert res["tokens_per_sec"] == 1600.0

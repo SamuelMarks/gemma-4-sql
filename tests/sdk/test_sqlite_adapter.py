@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any
+from typing import NoReturn
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiosqlite
 import pytest
 
 import gemma_4_sql.sdk.adapters.sqlite_adapter as sa
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
 from gemma_4_sql.sdk.adapters.sqlite_adapter import SQLiteAdapter
+from gemma_4_sql.type_hints import JSONPrimitive
 
 
 @pytest.mark.asyncio
@@ -62,7 +66,10 @@ async def test_sqlite_adapter_live(tmp_path: Path) -> None:
     mem_adapter.close()
 
 
-def test_sqlite_adapter_missing_aiosqlite(monkeypatch: pytest.MonkeyPatch, missing_dependency_context: Any) -> None:
+def test_sqlite_adapter_missing_aiosqlite(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_dependency_context: Callable[[list[str]], AbstractContextManager[None]],
+) -> None:
     """Verify SQLiteAdapter raises DependencyMissingError when aiosqlite is missing."""
     with missing_dependency_context(["aiosqlite"]):
         monkeypatch.setattr(sa, "aiosqlite", None)
@@ -72,7 +79,7 @@ def test_sqlite_adapter_missing_aiosqlite(monkeypatch: pytest.MonkeyPatch, missi
 
 
 @pytest.mark.asyncio
-async def test_sqlite_fixture_query(in_memory_sqlite: Any) -> None:
+async def test_sqlite_fixture_query(in_memory_sqlite: aiosqlite.Connection) -> None:
     """Verify the shared in_memory_sqlite async connection fixture executes queries."""
     cursor = await in_memory_sqlite.execute("SELECT 1")
     row = await cursor.fetchone()
@@ -81,13 +88,25 @@ async def test_sqlite_fixture_query(in_memory_sqlite: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sqlite_adapter_extra_coverage() -> None:
+async def test_sqlite_adapter_extra_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify SQLiteAdapter commit, rollback, close coroutine handling, and error raising."""
     adapter = SQLiteAdapter(":memory:", {})
     adapter.setup_schema("CREATE TABLE products (id INTEGER, name TEXT);")
 
     res = await adapter.execute_query_async("INSERT INTO products VALUES (1, 'apple')")
     assert res == []
+
+    class SyncMockCursor:
+        """Mock cursor without description."""
+
+        description: Sequence[Sequence[str | int | None]] | bool | None = None
+
+        async def fetchall(self) -> Sequence[Sequence[JSONPrimitive]]:
+            """Return empty row list."""
+            return []
+
+        def close(self) -> None:
+            """Close cursor."""
 
     class SyncMockConn:
         """Mock connection with synchronous commit, rollback, and close methods."""
@@ -98,15 +117,8 @@ async def test_sqlite_adapter_extra_coverage() -> None:
             self.rolled_back = 0
             self.closed = 0
 
-        async def execute(self, _q: str, _p: tuple[object, ...]) -> Any:
+        async def execute(self, _q: str, _p: Sequence[JSONPrimitive] | None = None) -> SyncMockCursor:
             """Return a cursor with synchronous close."""
-
-            class SyncMockCursor:
-                """Mock cursor without description."""
-
-                def close(self) -> None:
-                    """Close cursor."""
-
             return SyncMockCursor()
 
         def commit(self) -> None:
@@ -128,20 +140,31 @@ async def test_sqlite_adapter_extra_coverage() -> None:
         assert await adapter.execute_query_async("INSERT") == []
         assert sync_conn.committed == 2
         assert sync_conn.closed == 0
-    adapter._async_conn = sync_conn
+    monkeypatch.setattr(adapter, "_async_conn", sync_conn)
     await adapter.close_async()
     assert sync_conn.closed == 1
+
+    class EmptyMockCursor:
+        """Minimal cursor without close or description."""
+
+        description: Sequence[Sequence[str | int | None]] | bool | None = None
+
+        async def fetchall(self) -> Sequence[Sequence[JSONPrimitive]]:
+            """Return empty row list."""
+            return []
+
+        def close(self) -> None:
+            """Close cursor no-op."""
 
     class EmptyMockConn:
         """Mock connection without commit, rollback, or close attributes."""
 
-        async def execute(self, _q: str, _p: tuple[object, ...]) -> Any:
+        async def execute(self, _q: str, _p: Sequence[JSONPrimitive] | None = None) -> EmptyMockCursor:
             """Return a minimal cursor."""
-
-            class EmptyMockCursor:
-                """Minimal cursor without close or description."""
-
             return EmptyMockCursor()
+
+        def close(self) -> None:
+            """Close connection no-op."""
 
     with patch.object(adapter, "connect_async", return_value=EmptyMockConn()):
         ok_em, rows_em, _ = await adapter.execute_with_feedback_async("INSERT")
@@ -151,7 +174,7 @@ async def test_sqlite_adapter_extra_coverage() -> None:
     class ErrorSyncMockConn(SyncMockConn):
         """Mock connection whose execute raises RuntimeError with sync rollback."""
 
-        async def execute(self, _q: str, _p: tuple[object, ...]) -> Any:
+        async def execute(self, _q: str, _p: Sequence[JSONPrimitive] | None = None) -> NoReturn:
             """Raise RuntimeError."""
             msg = "Mock error"
             raise RuntimeError(msg)
@@ -163,14 +186,14 @@ async def test_sqlite_adapter_extra_coverage() -> None:
         with pytest.raises(RuntimeError, match="Mock error"):
             await adapter.execute_query_async("INSERT")
         assert err_sync_conn.rolled_back == 2
-    adapter._async_conn = err_sync_conn
+    monkeypatch.setattr(adapter, "_async_conn", err_sync_conn)
     adapter.close()
     assert err_sync_conn.closed == 1
 
     class ErrorEmptyMockConn(EmptyMockConn):
         """Mock connection whose execute raises RuntimeError without rollback attribute."""
 
-        async def execute(self, q: str, p: tuple[object, ...]) -> Any:
+        async def execute(self, _q: str, _p: Sequence[JSONPrimitive] | None = None) -> NoReturn:
             """Raise RuntimeError."""
             msg = "Mock error"
             raise RuntimeError(msg)
@@ -190,7 +213,7 @@ async def test_sqlite_adapter_extra_coverage() -> None:
     mock_cursor.description = None
     mock_cursor.fetchall.return_value = []
 
-    async def mock_execute(q: str, p: tuple[object, ...]) -> MagicMock:
+    async def mock_execute(_q: str, _p: Sequence[JSONPrimitive] | None = None) -> MagicMock:
         """Return mocked cursor."""
         return mock_cursor
 
@@ -209,7 +232,7 @@ async def test_sqlite_adapter_extra_coverage() -> None:
     mock_conn.close = mock_close
     mock_cursor.close = mock_close
 
-    setattr(adapter, "connect_async", AsyncMock(return_value=mock_conn))
+    monkeypatch.setattr(adapter, "connect_async", AsyncMock(return_value=mock_conn))
 
     suc, rows, _ = await adapter.execute_with_feedback_async("INSERT")
     assert suc is True
@@ -218,7 +241,7 @@ async def test_sqlite_adapter_extra_coverage() -> None:
     res2 = await adapter.execute_query_async("INSERT")
     assert res2 == []
 
-    async def mock_execute_err(q: str, p: tuple[object, ...]) -> MagicMock:
+    async def mock_execute_err(_q: str, _p: Sequence[JSONPrimitive] | None = None) -> MagicMock:
         """Raise sqlite3.Error to exercise async rollback."""
         msg = "err"
         raise sqlite3.Error(msg)

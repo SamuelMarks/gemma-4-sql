@@ -40,6 +40,8 @@ def add_etl_subparser(
     parser.add_argument("--tokenizer", default=None, help="Hugging Face tokenizer model name.")
     parser.add_argument("--duckdb-path", default=None, help="Optional path to DuckDB database.")
     parser.add_argument("--duckdb-table", default=None, help="Optional DuckDB table name.")
+    parser.add_argument("--image-column", default=None, help="Optional dataset column name for images.")
+    parser.add_argument("--audio-column", default=None, help="Optional dataset column name for audio.")
     parser.add_argument("--image-path", default=None, help="Optional path to schema image or directory.")
     parser.add_argument("--audio-path", default=None, help="Optional path to audio query file or directory.")
     parser.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")

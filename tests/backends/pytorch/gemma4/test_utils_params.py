@@ -1,6 +1,7 @@
 """Tests for parameter translation utilities."""
 
-import numpy as np
+import jax
+import jax.numpy as jnp
 import torch
 
 from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_pytorch
@@ -8,11 +9,12 @@ from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_py
 
 def test_translate_jax_to_pytorch() -> None:
     """Test JAX to PyTorch state dict translation."""
-    rng = np.random.default_rng(42)
+    key = jax.random.PRNGKey(42)
     jax_params = {
-        "model.layers.0.mlp.gate_proj.kernel": rng.standard_normal((256, 512)).astype(np.float32),
-        "model.norm.scale": np.zeros((256,), dtype=np.float32),
+        "model.layers.0.mlp.gate_proj.kernel": jax.random.normal(key, (256, 512), dtype=jnp.float32),
+        "model.norm.scale": jnp.zeros((256,), dtype=jnp.float32),
         "some_other_param": torch.tensor([1.0, 2.0]),
+        "scalar_param": [3.0, 4.0],
     }
 
     pytorch_state_dict = translate_jax_to_pytorch(jax_params)
@@ -25,12 +27,13 @@ def test_translate_jax_to_pytorch() -> None:
 
     assert "some_other_param" in pytorch_state_dict
     assert torch.allclose(pytorch_state_dict["some_other_param"].float(), torch.tensor([1.0, 2.0]))
+    assert torch.allclose(pytorch_state_dict["scalar_param"].float(), torch.tensor([3.0, 4.0]))
 
 
 def test_translate_jax_to_pytorch_kernel_dim3() -> None:
     """Verify 3D JAX kernel tensor is flattened and transposed to a 2D PyTorch weight tensor."""
     jax_params = {
-        "some.kernel": np.zeros((2, 3, 4)),
+        "some.kernel": jnp.zeros((2, 3, 4)),
     }
     state = translate_jax_to_pytorch(jax_params)
     assert "some.weight" in state
@@ -40,7 +43,7 @@ def test_translate_jax_to_pytorch_kernel_dim3() -> None:
 def test_translate_jax_to_pytorch_routed_experts() -> None:
     """Verify 3D routed expert JAX kernels are split across individual PyTorch expert weight keys."""
     jax_params = {
-        "routed_experts.kernel": np.zeros((2, 3, 4)),
+        "routed_experts.kernel": jnp.zeros((2, 3, 4)),
     }
     state = translate_jax_to_pytorch(jax_params)
     # The 'kernel' is transposed so (2,3,4) -> (2,4,3)
@@ -50,20 +53,20 @@ def test_translate_jax_to_pytorch_routed_experts() -> None:
 
 
 def test_translated_weights_numerical_parity_rms_norm_and_mlp() -> None:
-    """Verify translated JAX weights loaded into PyTorch Gemma4RMSNorm and Gemma4MLP match numpy reference math."""
+    """Verify translated JAX weights loaded into PyTorch Gemma4RMSNorm and Gemma4MLP match reference math."""
     from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
     from gemma_4_sql.backends.pytorch.gemma4.layers import Gemma4MLP, Gemma4RMSNorm
 
-    rng = np.random.default_rng(7)
     dim = 8
     inter = 16
-    scale_np = rng.uniform(0.5, 1.5, size=(dim,)).astype(np.float32)
-    gate_k = rng.standard_normal((dim, inter)).astype(np.float32) * 0.1
-    up_k = rng.standard_normal((dim, inter)).astype(np.float32) * 0.1
-    down_k = rng.standard_normal((inter, dim)).astype(np.float32) * 0.1
+    k1, k2, k3, k4, k5 = jax.random.split(jax.random.PRNGKey(7), 5)
+    scale_jax = jax.random.uniform(k1, shape=(dim,), minval=0.5, maxval=1.5, dtype=jnp.float32)
+    gate_k = jax.random.normal(k2, shape=(dim, inter), dtype=jnp.float32) * 0.1
+    up_k = jax.random.normal(k3, shape=(dim, inter), dtype=jnp.float32) * 0.1
+    down_k = jax.random.normal(k4, shape=(inter, dim), dtype=jnp.float32) * 0.1
 
     state = translate_jax_to_pytorch({
-        "model.norm.scale": scale_np,
+        "model.norm.scale": scale_jax,
         "model.layers.0.mlp.gate.kernel": gate_k,
         "model.layers.0.mlp.up.kernel": up_k,
         "model.layers.0.mlp.down.kernel": down_k,
@@ -80,15 +83,16 @@ def test_translated_weights_numerical_parity_rms_norm_and_mlp() -> None:
         "down_proj.weight": state["layers.0.mlp.down_proj.weight"],
     })
 
-    x_np = rng.standard_normal((2, dim)).astype(np.float32)
-    x_pt = torch.from_numpy(x_np)
+    x_jax = jax.random.normal(k5, shape=(2, dim), dtype=jnp.float32)
+    x_pt = torch.tensor(x_jax.tolist(), dtype=torch.float32)
+    scale_pt = torch.tensor(scale_jax.tolist(), dtype=torch.float32)
 
     # Reference RMSNorm (translate_jax_to_pytorch adds + 1.0 to JAX scale)
-    rms_ref = x_np * (1.0 / np.sqrt(np.mean(x_np**2, axis=-1, keepdims=True) + 1e-6)) * (scale_np + 1.0)
-    out_norm = norm(x_pt).detach().numpy()
-    assert np.allclose(out_norm, rms_ref, atol=1e-4)
+    rms_ref = x_pt * torch.rsqrt(torch.mean(x_pt**2, dim=-1, keepdim=True) + 1e-6) * (scale_pt + 1.0)
+    out_norm = norm(x_pt).detach()
+    assert torch.allclose(out_norm, rms_ref, atol=1e-4)
 
     # Reference SwiGLU/GELU MLP forward pass
-    out_mlp = mlp(x_pt).detach().numpy()
+    out_mlp = mlp(x_pt).detach()
     assert out_mlp.shape == (2, dim)
-    assert np.all(np.isfinite(out_mlp))
+    assert bool(torch.all(torch.isfinite(out_mlp)))

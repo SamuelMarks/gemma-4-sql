@@ -1,6 +1,7 @@
 """Unit and behavioral tests for gemma4 modeling."""
 
-from typing import Any
+from __future__ import annotations
+
 from unittest.mock import MagicMock, patch
 
 from tests.conftest import requires_jax
@@ -63,7 +64,7 @@ def tiny_multimodal_config() -> ModelConfig:
     )
 
 
-def test_gemma4_model_forward(tiny_config: Any) -> None:
+def test_gemma4_model_forward(tiny_config: ModelConfig) -> None:
     """Verify gemma4 model forward behavior."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_config, rngs=rngs)
@@ -71,18 +72,15 @@ def test_gemma4_model_forward(tiny_config: Any) -> None:
     input_ids = jnp.array([[1, 2, 3]])
     positions = jnp.array([[0, 1, 2]])
 
-    # Forward pass
     output = model(input_ids, positions)
     assert output.shape == (1, 3, 8)
     assert bool(jnp.all(jnp.isfinite(output)))
 
-    # Forward pass with cache
     cache = init_cache(tiny_config, batch_size=1, max_seq_len=3)
     out_cached = model(input_ids, positions, cache=cache)
     assert out_cached.shape == (1, 3, 8)
     assert cache[0].cur_ind.value == 3
 
-    # Forward pass with num_kv_shared_layers > 0
     cfg_kv_shared = ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -97,12 +95,11 @@ def test_gemma4_model_forward(tiny_config: Any) -> None:
     cache_kv = init_cache(cfg_kv_shared, batch_size=1, max_seq_len=6)
     out_kv = model_kv(input_ids, positions, cache=cache_kv)
     assert out_kv.shape == (1, 3, 8)
-    # Layer 0 and Layer 1 both used cache_kv[0], so cur_ind was incremented twice (3 + 3 = 6)
     assert cache_kv[0].cur_ind.value == 6
     assert cache_kv[1].cur_ind.value == 0
 
 
-def test_gemma4_model_ple(tiny_ple_config: Any) -> None:
+def test_gemma4_model_ple(tiny_ple_config: ModelConfig) -> None:
     """Verify gemma4 model ple behavior."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_ple_config, rngs=rngs)
@@ -110,23 +107,20 @@ def test_gemma4_model_ple(tiny_ple_config: Any) -> None:
     input_ids = jnp.array([[1, 2, 3]])
     positions = jnp.array([[0, 1, 2]])
 
-    # Forward pass should use PLE automatically
     output = model(input_ids, positions)
     assert output.shape == (1, 3, 8)
 
-    # Explicitly get and project PLE
     ple = model.get_per_layer_inputs(input_ids)
-    assert ple.shape == (1, 3, 2, 4)  # batch, seq, layers, ple_hidden
+    assert ple.shape == (1, 3, 2, 4)
 
     embeds = model.embed_tokens(input_ids)
     proj = model.project_per_layer_inputs(embeds, ple)
     assert proj.shape == (1, 3, 2, 4)
 
-    # Forward pass with explicit PLE
     model(input_ids, positions, per_layer_inputs=ple)
 
 
-def test_gemma4_causal_lm(tiny_config: Any) -> None:
+def test_gemma4_causal_lm(tiny_config: ModelConfig) -> None:
     """Verify gemma4 causal lm behavior."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_config, rngs=rngs)
@@ -137,20 +131,11 @@ def test_gemma4_causal_lm(tiny_config: Any) -> None:
     logits = model(input_ids, positions)
     assert logits.shape == (1, 3, 10)
 
-    # Test when a layer attribute is None on model.model.layers
-    class SparseLayers:
-        """Stub layers container where attribute '0' is None."""
-
-        def __len__(self) -> int:
-            """Return length 1."""
-            return 1
-
-    setattr(model.model, "layers", SparseLayers())
-    logits_sparse = model(input_ids, positions)
-    assert logits_sparse.shape == (1, 3, 10)
+    logits_no_pos = model(input_ids)
+    assert logits_no_pos.shape == (1, 3, 10)
 
 
-def test_gemma4_multimodal(tiny_multimodal_config: Any) -> None:
+def test_gemma4_multimodal(tiny_multimodal_config: ModelConfig) -> None:
     """Verify gemma4 multimodal behavior."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_multimodal_config, rngs=rngs)
@@ -177,8 +162,7 @@ def test_gemma4_multimodal(tiny_multimodal_config: Any) -> None:
     assert logits.shape == (1, 3, 10)
 
 
-def test_gemma4_multimodal_with_ple(tiny_multimodal_config: Any, tiny_ple_config: Any) -> None:
-    # Combine configs for multimodal + ple
+def test_gemma4_multimodal_with_ple(tiny_ple_config: ModelConfig) -> None:
     """Verify gemma4 multimodal with ple behavior."""
     config = tiny_ple_config
     config.num_kv_shared_layers = 1
@@ -199,7 +183,7 @@ def test_gemma4_multimodal_with_ple(tiny_multimodal_config: Any, tiny_ple_config
     assert logits.shape == (1, 3, 10)
 
 
-def test_gemma4_multimodal_missing_masks(tiny_multimodal_config: Any) -> None:
+def test_gemma4_multimodal_missing_masks(tiny_multimodal_config: ModelConfig) -> None:
     """Verify gemma4 multimodal missing masks behavior."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_multimodal_config, rngs=rngs)
@@ -211,12 +195,11 @@ def test_gemma4_multimodal_missing_masks(tiny_multimodal_config: Any) -> None:
     input_features = jnp.ones((1, 100, 128))
     input_features_mask = jnp.ones((1, 100))
 
-    # Missing masks
     logits = model(input_ids, positions, pixel_values=pixel_values, input_features=input_features, input_features_mask=input_features_mask)
     assert logits.shape == (1, 3, 10)
 
 
-def test_gemma4_model_ple_none(tiny_ple_config: Any) -> None:
+def test_gemma4_model_ple_none(tiny_ple_config: ModelConfig) -> None:
     """Verify gemma4 model ple none behavior."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_ple_config, rngs=rngs)
@@ -224,13 +207,12 @@ def test_gemma4_model_ple_none(tiny_ple_config: Any) -> None:
     input_ids = jnp.array([[1, 2, 3]])
     positions = jnp.array([[0, 1, 2]])
 
-    # Forward pass explicitly without PLE, even if config expects it
     out = model(input_ids, positions, per_layer_inputs=None)
     assert out.shape == (1, 3, 8)
     assert bool(jnp.all(jnp.isfinite(out)))
 
 
-def test_gemma4_model_ple_none_config(tiny_config: Any) -> None:
+def test_gemma4_model_ple_none_config(tiny_config: ModelConfig) -> None:
     """Verify gemma4 model ple none config behavior."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_config, rngs=rngs)
@@ -238,16 +220,14 @@ def test_gemma4_model_ple_none_config(tiny_config: Any) -> None:
     input_ids = jnp.array([[1, 2, 3]])
     embeds = model.embed_tokens(input_ids)
 
-    # get_per_layer_inputs with None hidden_size_per_layer_input
     ple = model.get_per_layer_inputs(input_ids)
     assert jnp.array_equal(ple, input_ids)
 
-    # project_per_layer_inputs with None per_layer_inputs
     with pytest.raises((TypeError, ValueError, AttributeError)):
         model.project_per_layer_inputs(embeds, per_layer_inputs=None)
 
 
-def test_project_ple_none(tiny_ple_config: Any) -> None:
+def test_project_ple_none(tiny_ple_config: ModelConfig) -> None:
     """Verify project ple none behavior."""
     rngs = nnx.Rngs(0)
     model = Gemma4Model(tiny_ple_config, rngs=rngs)
@@ -268,26 +248,23 @@ def test_from_pretrained() -> None:
         with patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained") as mock_create:
             mock_create.return_value = "mocked_model"
 
-            # Use known model name
             res = Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B")
             assert res == "mocked_model"
 
-            # Use unknown model name without config
             with pytest.raises(ValueError, match="Model name 'unknown' is unknown"):
                 Gemma4ForCausalLM.from_pretrained("unknown")
 
-            # Use unknown model with config
             res = Gemma4ForCausalLM.from_pretrained("unknown", config=ModelConfig())
             assert res == "mocked_model"
 
 
 def test_default_jit() -> None:
     """Verify _default_jit returns the wrapped function and executes JAX operations identically."""
-    fn = _default_jit(lambda x: x + 1)
+    fn = _default_jit(lambda x: x + 1)  # pyright: ignore[reportUnknownLambdaType]
     assert int(fn(jnp.array(4))) == 5
 
 
-def test_forward(tiny_config: Any) -> None:
+def test_forward(tiny_config: ModelConfig) -> None:
     """Verify forward behavior."""
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_config, rngs=rngs)
@@ -301,13 +278,8 @@ def test_forward(tiny_config: Any) -> None:
     assert new_cache == cache
 
 
-def test_gemma4_multimodal_audio_only(tiny_multimodal_config: Any) -> None:
+def test_gemma4_multimodal_audio_only(tiny_multimodal_config: ModelConfig) -> None:
     """Verify gemma4 multimodal audio only behavior."""
-    import jax.numpy as jnp
-    from flax import nnx
-
-    from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM
-
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(tiny_multimodal_config, rngs=rngs)
 

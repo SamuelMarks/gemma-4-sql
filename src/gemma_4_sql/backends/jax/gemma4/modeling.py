@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from typing import Any
 
 import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import Array
-
-from gemma_4_sql.type_hints import JSONValue
 
 from .attention import Gemma4Attention
 from .audio import (
@@ -32,7 +29,7 @@ from .audio import (
 from .cache import GEMMA4_ATTENTION_PATTERN, Cache
 from .config import AttentionType, AudioConfig, ModelConfig, ModelConfigPresets, ShardConfig, ShardMode, VisionConfig, VisionShardConfig
 from .decoder_layer import Gemma4DecoderLayer
-from .layers import ConstVar, Gemma4ClippableLinear, Gemma4MLP, Gemma4RMSNorm, StatVar, make_embed, make_linear
+from .layers import ConstVar, Gemma4ClippableLinear, Gemma4MLP, Gemma4RMSNorm, LinearLayerProtocol, StatVar, make_embed, make_linear
 from .moe import Gemma4MoE, Gemma4RoutedExperts
 from .multimodal import MultimodalInputs, batched_merge_modalities
 from .params import create_gemma4_from_pretrained
@@ -62,6 +59,7 @@ __all__ = [
     "Gemma4MultimodalEmbedder",
     "Gemma4RMSNorm",
     "Gemma4RoutedExperts",
+    "LinearLayerProtocol",
     "ModelConfig",
     "ModelConfigPresets",
     "ShardConfig",
@@ -74,10 +72,12 @@ __all__ = [
     "StatVar",
     "VisionConfig",
     "VisionShardConfig",
+    "_default_jit",
     "avg_pool_vision_outputs",
     "compute_audio_attention_outputs",
     "convert_to_block",
     "extract_block_context",
+    "forward",
     "make_embed",
     "make_linear",
     "rel_shift",
@@ -109,6 +109,26 @@ class Gemma4Model(nnx.Module):
         self.layers = nnx.List([Gemma4DecoderLayer(config, GEMMA4_ATTENTION_PATTERN[i % len(GEMMA4_ATTENTION_PATTERN)], rngs=rngs) for i in range(config.num_hidden_layers)])
         self.norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
 
+    def inject_lora_projections(
+        self,
+        target_modules: list[str],
+        adapter_factory: Callable[[nnx.Linear], LinearLayerProtocol],
+    ) -> int:
+        """Wrap matching attention and MLP projections across all decoder layers with LoRA adapters.
+
+        Args:
+            target_modules: List of target projection names to wrap.
+            adapter_factory: Factory callable converting an `nnx.Linear` into a `LinearLayerProtocol` adapter.
+
+        Returns:
+            Total number of projections wrapped across all decoder layers.
+
+        """
+        injected = 0
+        for layer in self.layers:
+            injected += layer.inject_lora_projections(target_modules, adapter_factory)
+        return injected
+
     def get_per_layer_inputs(self, input_ids: Array) -> Array:
         """Compute the token-identity component of Per-Layer Embeddings (PLE).
 
@@ -138,42 +158,46 @@ class Gemma4Model(nnx.Module):
 
         """
         (batch_size, seq_len, _) = inputs_embeds.shape
+        ple_dim = self.config.hidden_size_per_layer_input or 0
         proj = self.per_layer_model_projection(inputs_embeds) * self.per_layer_model_projection_scale
-        proj = proj.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
+        proj = proj.reshape(batch_size, seq_len, self.config.num_hidden_layers, ple_dim)
         proj = self.per_layer_projection_norm(proj)
         if per_layer_inputs is not None:
             proj = (proj + per_layer_inputs) * self.per_layer_input_scale
         return proj
 
     @jax.named_scope("gemma4_model")
-    def __call__(self, input_ids: Array, positions: Array, cache: Cache | None = None, **kwargs: object) -> Array:
+    def __call__(
+        self,
+        input_ids: Array,
+        positions: Array,
+        cache: Cache | None = None,
+        *,
+        attention_mask: Array | None = None,
+        per_layer_inputs: Array | None = None,
+    ) -> Array:
         """Apply embeddings and run the forward pass through all decoder layers.
 
         Args:
             input_ids: Token IDs tensor.
             positions: Sequence positions tensor.
             cache: Optional list of KV caches (one per layer).
-            **kwargs: Optional arguments `attention_mask`, `per_layer_inputs`.
+            attention_mask: Optional additive attention mask.
+            per_layer_inputs: Optional precomputed per-layer input embeddings.
 
         Returns:
             Normalized final hidden states tensor.
 
         """
-        kw_any: dict[str, Any] = dict(kwargs)
-        attention_mask: Array | None = kw_any.get("attention_mask")
-        per_layer_inputs: Any = kw_any.get("per_layer_inputs")
         x = self.embed_tokens(input_ids) * self.embed_scale
         if self.config.hidden_size_per_layer_input:
             if per_layer_inputs is None:
                 per_layer_inputs = self.get_per_layer_inputs(input_ids)
             per_layer_inputs = self.project_per_layer_inputs(x, per_layer_inputs)
         num_layers = len(self.layers)
-        kv_shared = int(getattr(self.config, "num_kv_shared_layers", 0) or 0)
+        kv_shared = int(self.config.num_kv_shared_layers or 0)
         pivot = max(1, num_layers - kv_shared) if kv_shared > 0 else num_layers
-        for i in range(num_layers):
-            layer = getattr(self.layers, str(i), None)
-            if layer is None:
-                continue
+        for i, layer in enumerate(self.layers):
             cache_idx = (i % pivot) if (kv_shared > 0 and i >= pivot) else i
             layer_cache = cache[cache_idx] if cache is not None else None
             layer_ple = per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
@@ -215,9 +239,7 @@ def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = 
     else:
         resolved_config = config
     model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
-    loaded: Any = create_gemma4_from_pretrained(model_ckpt_path, resolved_config)
-    res: Gemma4ForCausalLM = loaded
-    return res
+    return create_gemma4_from_pretrained(model_ckpt_path, resolved_config)
 
 
 class Gemma4ForCausalLM(nnx.Module):
@@ -260,6 +282,23 @@ class Gemma4ForCausalLM(nnx.Module):
             self.embed_audio = Gemma4MultimodalEmbedder(config, rngs=rngs)
         else:
             self.embed_audio = None
+
+    def inject_lora_projections(
+        self,
+        target_modules: list[str],
+        adapter_factory: Callable[[nnx.Linear], LinearLayerProtocol],
+    ) -> int:
+        """Delegate LoRA projection wrapping to the inner `Gemma4Model` trunk.
+
+        Args:
+            target_modules: List of target projection names to wrap.
+            adapter_factory: Factory callable converting an `nnx.Linear` into a `LinearLayerProtocol` adapter.
+
+        Returns:
+            Total number of projections wrapped across the model.
+
+        """
+        return self.model.inject_lora_projections(target_modules, adapter_factory)
 
     @staticmethod
     def _merge_multimodal_features(
@@ -332,14 +371,14 @@ class Gemma4ForCausalLM(nnx.Module):
 
         """
         input_ids = inputs.input_ids
-        attention_mask = inputs.attention_mask if hasattr(inputs, "attention_mask") else None
+        attention_mask = inputs.attention_mask
         if self.config.hidden_size_per_layer_input:
             per_layer_inputs_id = self.model.get_per_layer_inputs(input_ids)
             per_layer_inputs = self.model.project_per_layer_inputs(hidden_states, per_layer_inputs_id)
         else:
             per_layer_inputs = None
         num_layers = len(self.model.layers)
-        kv_shared = int(getattr(self.config, "num_kv_shared_layers", 0) or 0)
+        kv_shared = int(self.config.num_kv_shared_layers or 0)
         pivot = max(1, num_layers - kv_shared) if kv_shared > 0 else num_layers
         for i, layer in enumerate(self.model.layers):
             cache_idx = (i % pivot) if (kv_shared > 0 and i >= pivot) else i
@@ -349,14 +388,31 @@ class Gemma4ForCausalLM(nnx.Module):
         return self.model.norm(hidden_states)
 
     @jax.named_scope("gemma4_causal_lm")
-    def __call__(self, input_ids: Array, positions: Array | None = None, cache: Cache | None = None, **kwargs: object) -> Array:
+    def __call__(
+        self,
+        input_ids: Array,
+        positions: Array | None = None,
+        cache: Cache | None = None,
+        *,
+        attention_mask: Array | None = None,
+        pixel_values: Array | None = None,
+        image_token_mask: Array | None = None,
+        input_features: Array | None = None,
+        input_features_mask: Array | None = None,
+        audio_token_mask: Array | None = None,
+    ) -> Array:
         """Compute logits for the given sequence, optionally applying soft-capping.
 
         Args:
             input_ids: Input sequence token IDs.
             positions: Optional sequence position indices (defaults to `0..seq_len-1`).
             cache: Key-value cache for autoregressive decoding.
-            **kwargs: Optional keyword arguments for multimodal and attention masks.
+            attention_mask: Optional additive attention mask.
+            pixel_values: Optional image pixel values tensor.
+            image_token_mask: Optional boolean mask for image tokens.
+            input_features: Optional audio spectrogram features tensor.
+            input_features_mask: Optional audio frame mask tensor.
+            audio_token_mask: Optional boolean mask for audio tokens.
 
         Returns:
             Logits tensor for the output vocabulary.
@@ -364,15 +420,13 @@ class Gemma4ForCausalLM(nnx.Module):
         """
         if positions is None:
             positions = jnp.arange(input_ids.shape[-1])[None, :]
-        kw_any: dict[str, Any] = dict(kwargs)
-        attention_mask: Array | None = kw_any.get("attention_mask")
         mm_inputs = MultimodalInputs(
             input_ids=input_ids,
-            pixel_values=kw_any.get("pixel_values"),
-            image_token_mask=kw_any.get("image_token_mask"),
-            input_features=kw_any.get("input_features"),
-            input_features_mask=kw_any.get("input_features_mask"),
-            audio_token_mask=kw_any.get("audio_token_mask"),
+            pixel_values=pixel_values,
+            image_token_mask=image_token_mask,
+            input_features=input_features,
+            input_features_mask=input_features_mask,
+            audio_token_mask=audio_token_mask,
             attention_mask=attention_mask,
         )
         (inputs_embeds, is_multimodal) = self._process_multimodal(mm_inputs)
@@ -385,7 +439,7 @@ class Gemma4ForCausalLM(nnx.Module):
         return res_logits
 
 
-def _default_jit(x: Any) -> Any:
+def _default_jit[FnT](x: FnT) -> FnT:
     """Provide identity fallback for jit decorator if `nnx.jit` is unavailable.
 
     Args:
@@ -398,11 +452,19 @@ def _default_jit(x: Any) -> Any:
     return x
 
 
-_jit = getattr(nnx, "jit", _default_jit)
-
-
-@_jit
-def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array, **kwargs: JSONValue) -> tuple[Array, Cache]:
+@nnx.jit
+def forward(
+    model: Gemma4ForCausalLM,
+    cache: Cache,
+    input_ids: Array,
+    positions: Array,
+    *,
+    pixel_values: Array | None = None,
+    image_token_mask: Array | None = None,
+    input_features: Array | None = None,
+    input_features_mask: Array | None = None,
+    audio_token_mask: Array | None = None,
+) -> tuple[Array, Cache]:
     """Execute a standard forward pass returning next-token logits and updated cache.
 
     Args:
@@ -410,19 +472,17 @@ def forward(model: nnx.Module, cache: Cache, input_ids: Array, positions: Array,
         cache: Key-value attention cache.
         input_ids: Input sequence token IDs.
         positions: Sequence position indices.
-        **kwargs: Optional keyword arguments for multimodal inputs.
+        pixel_values: Optional image pixel values tensor.
+        image_token_mask: Optional boolean mask for image tokens.
+        input_features: Optional audio spectrogram features tensor.
+        input_features_mask: Optional audio frame mask tensor.
+        audio_token_mask: Optional boolean mask for audio tokens.
 
     Returns:
         A tuple of `(next_token_logits, updated_cache)`.
 
     """
-    image_token_mask = kwargs.get("image_token_mask")
-    input_features = kwargs.get("input_features")
-    input_features_mask = kwargs.get("input_features_mask")
-    audio_token_mask = kwargs.get("audio_token_mask")
-    pixel_values = kwargs.get("pixel_values")
-    model_fn: Any = model
-    logits = model_fn(
+    logits = model(
         input_ids=input_ids,
         positions=positions,
         cache=cache,

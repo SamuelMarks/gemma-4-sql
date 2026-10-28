@@ -6,7 +6,6 @@ import os
 import sys
 import typing
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 from tests.conftest import requires_torch
@@ -24,35 +23,44 @@ import gemma_4_sql.backends.pytorch.export as ex
 import gemma_4_sql.backends.pytorch.train as tr
 from gemma_4_sql.backends.pytorch import etl
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
+from gemma_4_sql.type_hints import ETLConfig, ETLResultDict, TrainingConfig
 
 
-def mock_build_dataloader(config: ETLConfig, *_args: Any, **_kwargs: Any) -> dict[str, typing.Any]:
+class _DictDataset(torch.utils.data.Dataset[dict[str, torch.Tensor]]):
+    """Dataset yielding input/target tensor dictionaries."""
+
+    def __init__(self, inp: torch.Tensor, tgt: torch.Tensor) -> None:
+        """Store input and target tensors."""
+        self.inputs = inp
+        self.targets = tgt
+
+    def __len__(self) -> int:
+        """Return dataset length."""
+        return len(self.inputs)
+
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        """Return single sample dictionary."""
+        return {"inputs": self.inputs[index], "targets": self.targets[index]}
+
+
+def mock_build_dataloader(config: ETLConfig, *_args: str | int, **_kwargs: str | int) -> ETLResultDict:
     """Build a synthetic PyTorch DataLoader with optional DistributedSampler."""
     inputs = torch.randint(0, 128, (4, 10))
     targets = torch.randint(0, 128, (4, 10))
 
-    class DictDataset(torch.utils.data.Dataset[dict[str, Any]]):
-        """Dataset yielding input/target tensor dictionaries."""
-
-        def __init__(self, inp: Any, tgt: Any) -> None:
-            """Store input and target tensors."""
-            self.inputs = inp
-            self.targets = tgt
-
-        def __len__(self) -> int:
-            """Return dataset length."""
-            return len(self.inputs)
-
-        def __getitem__(self, idx: int) -> dict[str, Any]:
-            """Return single sample dictionary."""
-            return {"inputs": self.inputs[idx], "targets": self.targets[idx]}
-
-    dataset = DictDataset(inputs, targets)
-    sampler: Any = DistributedSampler(dataset)
+    dataset = _DictDataset(inputs, targets)
+    sampler: DistributedSampler[dict[str, torch.Tensor]] = DistributedSampler(dataset)
 
     loader = DataLoader(dataset, batch_size=2, sampler=sampler)
-    return {"loader": loader, "distributed": getattr(config, "distributed", False)}
+    return {
+        "backend": "pytorch",
+        "dataset": config.dataset_name,
+        "split": config.split,
+        "batch_size": config.batch_size,
+        "status": "loaded",
+        "loader": loader,
+        "distributed": config.distributed,
+    }
 
 
 @pytest.fixture
@@ -71,13 +79,13 @@ def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> typing.Iterator[None]:
             super().__init__()
             self.emb = nn.Embedding(128, 128)
 
-        def forward(self, x: Any, *_args: Any, **_kwargs: Any) -> Any:
+        def forward(self, x: torch.Tensor, *_args: torch.Tensor, **_kwargs: torch.Tensor) -> torch.Tensor:
             """Compute token embeddings."""
             return self.emb(x.long())
 
     monkeypatch.setattr(
         "gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM.from_pretrained",
-        lambda *_a, **_k: DummyModel(),
+        lambda *_a, **_k: DummyModel(),  # pyright: ignore[reportUnknownLambdaType]
     )
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
 
@@ -111,14 +119,15 @@ def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
     class DummyFSDP(nn.Module):
         """Lightweight FSDP wrapper for CPU testing."""
 
-        def __init__(self, module: Any) -> None:
+        def __init__(self, module: nn.Module) -> None:
             """Wrap target module."""
             super().__init__()
             self.module = module
 
-        def forward(self, *args: Any, **kwargs: Any) -> Any:
+        def forward(self, *args: torch.Tensor, **kwargs: torch.Tensor) -> torch.Tensor:
             """Forward to wrapped module."""
-            return self.module(*args, **kwargs)
+            out: torch.Tensor = self.module(*args, **kwargs)
+            return out
 
     class MockFSDPModule:
         """Stub for torch.distributed.fsdp."""
@@ -145,7 +154,7 @@ def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify rank-0 process exports safetensors weights in distributed mode."""
     saved_files: list[str] = []
-    monkeypatch.setattr(ex, "save_file", lambda _tensors, filename: saved_files.append(filename))
+    monkeypatch.setattr(ex, "save_file", lambda _tensors, filename: saved_files.append(filename))  # pyright: ignore[reportUnknownLambdaType]
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12356"
@@ -162,7 +171,7 @@ def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path:
 def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify non-rank-0 process skips safetensors export in distributed mode."""
     saved_files: list[str] = []
-    monkeypatch.setattr(ex, "save_file", lambda _tensors, filename: saved_files.append(filename))
+    monkeypatch.setattr(ex, "save_file", lambda _tensors, filename: saved_files.append(filename))  # pyright: ignore[reportUnknownLambdaType]
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12357"
@@ -187,13 +196,14 @@ def test_etl_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             etl,
             "datasets",
-            MagicMock(load_dataset=lambda *_a, **_k: [{"question": "SELECT 1", "query": "SELECT 1;"}]),
+            MagicMock(load_dataset=lambda *_a, **_k: [{"question": "SELECT 1", "query": "SELECT 1;"}]),  # pyright: ignore[reportUnknownLambdaType]
         )
         monkeypatch.setattr(etl, "SQLTokenizer", SQLTokenizer)
 
         res = etl.build_dataloader(ETLConfig(dataset_name="ds", split="train", distributed=True))
         assert res.get("distributed") is True
-        loader: Any = res.get("loader")
+        loader = res.get("loader")
+        assert isinstance(loader, DataLoader)
         assert isinstance(loader.sampler, DistributedSampler)
     finally:
         dist.destroy_process_group()

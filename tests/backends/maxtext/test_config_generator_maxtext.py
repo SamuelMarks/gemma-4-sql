@@ -66,11 +66,11 @@ def test_normalize_model_architecture() -> None:
     with pytest.raises(ValueError, match="model_name must be a non-empty string"):
         normalize_model_architecture("")
 
-    from typing import Any
+    from collections.abc import Callable
 
-    none_val: Any = None
+    untyped_norm: Callable[..., str] = normalize_model_architecture
     with pytest.raises(ValueError, match="model_name must be a non-empty string"):
-        normalize_model_architecture(none_val)
+        untyped_norm(None)  # ty: ignore[invalid-argument-type]
 
 
 def test_build_maxtext_hyperparameters_defaults() -> None:

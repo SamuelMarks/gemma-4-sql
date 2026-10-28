@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import ChatError, InferenceError, is_failed_status
+from gemma_4_sql.sdk.agent import extract_sql_from_response
 from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.type_hints import ChatMessageDict, ChatTurnResultDict, JSONValue
 
@@ -49,14 +50,16 @@ def chat_turn(
         result = backend_impl.generate_sql(model_name, full_prompt, beam_width=bw, max_length=ml, **call_kwargs)
         if "sql" not in result or is_failed_status(result):
             raise ChatError(f"Backend {backend} did not return SQL.", backend=backend, model_name=model_name)
-        response = str(result["sql"])
+        response = extract_sql_from_response(str(result["sql"]))
         status = f"success_{backend}_chat"
     except (ChatError, InferenceError, RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
         logger.exception("%s chat error", backend.capitalize())
         status = f"failed: {e!s}"
         raise ChatError(f"Chat turn failed: {e!s}", backend=backend, model_name=model_name, cause=e) from e
     updated_history: list[ChatMessageDict] = [{"role": str(turn["role"]), "content": str(turn["content"])} for turn in history]
-    updated_history.extend(({"role": "user", "content": new_prompt}, {"role": "assistant", "content": response}))
+    user_msg: ChatMessageDict = {"role": "user", "content": new_prompt}
+    assistant_msg: ChatMessageDict = {"role": "assistant", "content": response}
+    updated_history.extend((user_msg, assistant_msg))
     return {
         "backend": backend,
         "model": model_name,

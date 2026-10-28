@@ -6,7 +6,6 @@ import math
 import struct
 import sys
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,10 +22,9 @@ def test_pytorch_quantize_imports() -> None:
 
     import gemma_4_sql.backends.pytorch.quantize as quantize_module
 
-    with patch.dict(sys.modules, {"torch": None, "numpy": None, "transformers": None}):
+    with patch.dict(sys.modules, {"torch": None, "transformers": None}):
         importlib.reload(quantize_module)
         assert quantize_module.torch is None
-        assert quantize_module.np is None
         assert quantize_module.BitsAndBytesConfig is None
         assert quantize_module.AutoModelForCausalLM is None
         assert quantize_module.AutoTokenizer is None
@@ -34,7 +32,7 @@ def test_pytorch_quantize_imports() -> None:
 
 
 def test_validate_gguf_file(tmp_path: Path) -> None:
-    """Verify validate_gguf_file rejects missing files, corrupt magic bytes, and unsupported GGUF versions."""
+    """Verify validate_gguf_file rejects missing files, corrupt magic bytes, unsupported versions, and bad offsets."""
     import gemma_4_sql.backends.pytorch.quantize as quantize_module
 
     file_path = tmp_path / "test.gguf"
@@ -51,6 +49,21 @@ def test_validate_gguf_file(tmp_path: Path) -> None:
         f.write(b"GGUF")
         f.write(struct.pack("<I", 1))
     with pytest.raises(ValueError, match="Unsupported GGUF version"):
+        quantize_module.validate_gguf_file(file_path)
+
+    # Unaligned tensor offset (not a multiple of 32)
+    with open(file_path, "wb") as f:
+        f.write(b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 1) + struct.pack("<Q", 0))
+        f.write(struct.pack("<Q", 2) + b"t1" + struct.pack("<I", 1) + struct.pack("<Q", 4) + struct.pack("<I", 0) + struct.pack("<Q", 7))
+    with pytest.raises(ValueError, match="Unaligned GGUF tensor offset"):
+        quantize_module.validate_gguf_file(file_path)
+
+    # Tensor offset exceeding file size when payload section is present
+    with open(file_path, "wb") as f:
+        f.write(b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 1) + struct.pack("<Q", 0))
+        f.write(struct.pack("<Q", 2) + b"t1" + struct.pack("<I", 1) + struct.pack("<Q", 4) + struct.pack("<I", 0) + struct.pack("<Q", 6400))
+        f.write(b"\x00" * 64)
+    with pytest.raises(ValueError, match="exceeds file size"):
         quantize_module.validate_gguf_file(file_path)
 
 
@@ -95,7 +108,8 @@ def test_validate_gguf_file_valid(tmp_path: Path) -> None:
     res = quantize_module.validate_gguf_file(file_path)
     assert res["version"] == 3
     assert res["tensor_count"] == 1
-    meta: Any = res["metadata"]
+    meta = res.get("metadata")
+    assert isinstance(meta, dict)
     assert meta["k1"] == "v1"
     assert meta["k2"] is True
     assert meta["k3"] == 42
@@ -206,6 +220,19 @@ def test_quantize_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         layer_types=["sliding_attention"],
         hidden_size_per_layer_input=0,
         num_kv_shared_layers=0,
+        vision_config={
+            "hidden_size": 16,
+            "intermediate_size": 32,
+            "num_hidden_layers": 1,
+            "num_attention_heads": 2,
+            "image_size": 28,
+            "patch_size": 14,
+        },
+        audio_config={
+            "hidden_size": 16,
+            "num_hidden_layers": 1,
+            "num_attention_heads": 2,
+        },
     )
     tiny_model = Gemma4ForCausalLM(cfg)
 
@@ -222,12 +249,12 @@ def test_quantize_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
         assert gguf_file.exists()
         validated = quantize_module.validate_gguf_file(gguf_file)
         assert validated["version"] == 3
-        assert int(validated["tensor_count"]) > 0
+        assert int(str(validated["tensor_count"])) > 0
 
     # 2. End-to-end INT8 and INT4 quantization on tiny PyTorch model
     from gemma_4_sql.type_hints import get_quantized_artifact
 
-    monkeypatch.setattr(quantize_module, "BitsAndBytesConfig", lambda **kw: kw)
+    monkeypatch.setattr(quantize_module, "BitsAndBytesConfig", lambda **kw: kw)  # pyright: ignore[reportUnknownLambdaType]
     res_int8 = quantize_module.quantize_model("tiny-gemma4", "int8", model=tiny_model)
     assert res_int8["status"] == "quantized_int8"
     assert res_int8["memory_reduction_factor"] == 0.5
@@ -245,7 +272,28 @@ def test_quantize_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     assert art_int4.is_quantized is True
     assert art_int4.method == "int4"
 
-    # 3. End-to-end AWQ and GPTQ dispatch through quantize_model
+    # 3. End-to-end native AWQ and GPTQ tensor quantization on in-memory tiny PyTorch model
+    import torch
+
+    tiny_awq_model = Gemma4ForCausalLM(cfg)
+    res_native_awq = quantize_module.quantize_model("tiny-gemma4", "awq", model=tiny_awq_model)
+    assert res_native_awq["status"] == "quantized_awq"
+    assert get_quantized_artifact(tiny_awq_model) is not None
+
+    tiny_gptq_model = Gemma4ForCausalLM(cfg)
+    res_native_gptq = quantize_module.quantize_model("tiny-gemma4", "gptq", model=tiny_gptq_model)
+    assert res_native_gptq["status"] == "quantized_gptq"
+    assert get_quantized_artifact(tiny_gptq_model) is not None
+
+    # Test calibrate_pytorch_awq_scales and calibrate_pytorch_gptq_weights with explicit activations
+    w_test = torch.randn(4, 8, dtype=torch.float32)
+    act_test = torch.randn(6, 8, dtype=torch.float32)
+    awq_scales = quantize_module.calibrate_pytorch_awq_scales(w_test, activations=act_test, n_grid=5)
+    assert awq_scales.shape == (1, 8)
+    gptq_w = quantize_module.calibrate_pytorch_gptq_weights(w_test, activations=act_test, bits=4)
+    assert gptq_w.shape == (4, 8)
+
+    # 4. External AutoAWQ and Optimum GPTQ dispatch through quantize_model
     mock_awq = MagicMock()
     mock_awq.AutoAWQForCausalLM = MagicMock()
     mock_tf = MagicMock()
@@ -271,3 +319,7 @@ def test_quantize_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(quantize_module, "torch", None)
     with pytest.raises(DependencyMissingError):
         quantize_module.quantize_model("m", "int8")
+    with pytest.raises(DependencyMissingError):
+        quantize_module.calibrate_pytorch_awq_scales(w_test)
+    with pytest.raises(DependencyMissingError):
+        quantize_module.calibrate_pytorch_gptq_weights(w_test)

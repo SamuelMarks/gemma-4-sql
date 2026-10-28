@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+import importlib
+import types
+from collections.abc import Generator
 from unittest import mock
 
 import pytest
@@ -13,7 +15,7 @@ from gemma_4_sql.sdk.registry import clear_backend_cache, get_backend
 
 
 @pytest.fixture(autouse=True)
-def _clean_registry_caches() -> object:
+def _clean_registry_caches() -> Generator[None, None, None]:
     """Clear registry caches before and after each test in test_registry.py."""
     clear_backend_cache()
     yield
@@ -41,21 +43,21 @@ def test_registry_missing_adapter_module(monkeypatch: pytest.MonkeyPatch) -> Non
     fake_module.__name__ = "mock_module"
     fake_ep.load.return_value = fake_module
 
-    import importlib
-
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name: Any, *args: Any, **kwargs: Any) -> Any:
+    def mock_import_module(name: str, package: str | None = None) -> types.ModuleType:
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             raise ImportError("Mock missing adapter")
-        return orig_import_module(name, *args, **kwargs)
+        return orig_import_module(name, package)
 
     monkeypatch.setattr(importlib, "import_module", mock_import_module)
 
-    with mock.patch("importlib.metadata.entry_points", return_value={"gemma_4_sql.backends": [fake_ep]}):
-        with pytest.raises(ValueError, match=r"Backend mock_backend is missing the adapter module\."):
-            get_backend("mock_backend")
+    with (
+        mock.patch("importlib.metadata.entry_points", return_value={"gemma_4_sql.backends": [fake_ep]}),
+        pytest.raises(ValueError, match=r"Backend mock_backend is missing the adapter module\."),
+    ):
+        get_backend("mock_backend")
 
 
 def test_registry_missing_adapter_class(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,23 +72,23 @@ def test_registry_missing_adapter_class(monkeypatch: pytest.MonkeyPatch) -> None
     fake_module.__name__ = "mock_module"
     fake_ep.load.return_value = fake_module
 
-    fake_adapter = mock.MagicMock(spec=[])
-
-    import importlib
+    fake_adapter = types.ModuleType("mock_module.adapter")
 
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name: Any, *args: Any, **kwargs: Any) -> Any:
+    def mock_import_module(name: str, package: str | None = None) -> types.ModuleType:
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
-        return orig_import_module(name, *args, **kwargs)
+        return orig_import_module(name, package)
 
     monkeypatch.setattr(importlib, "import_module", mock_import_module)
 
-    with mock.patch("importlib.metadata.entry_points", return_value={"gemma_4_sql.backends": [fake_ep]}):
-        with pytest.raises(ValueError, match=r"Adapter class Mock_backendBackend not found in mock_module\.adapter"):
-            get_backend("mock_backend")
+    with (
+        mock.patch("importlib.metadata.entry_points", return_value={"gemma_4_sql.backends": [fake_ep]}),
+        pytest.raises(ValueError, match=r"Adapter class Mock_backendBackend not found in mock_module\.adapter"),
+    ):
+        get_backend("mock_backend")
 
 
 def test_registry_dict_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,16 +108,13 @@ def test_registry_dict_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_adapter.ADAPTER_CLASS = None
     fake_adapter.Mock_backendBackend = fake_adapter_class
 
-    # fake importlib.import_module
-    import importlib
-
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name: Any, *args: Any, **kwargs: Any) -> Any:
+    def mock_import_module(name: str, package: str | None = None) -> types.ModuleType | mock.MagicMock:
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
-        return orig_import_module(name, *args, **kwargs)
+        return orig_import_module(name, package)
 
     monkeypatch.setattr(importlib, "import_module", mock_import_module)
 
@@ -140,15 +139,13 @@ def test_registry_select_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_adapter.ADAPTER_CLASS = fake_adapter_class
     fake_adapter.Select_backendBackend = fake_adapter_class
 
-    import importlib
-
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name: Any, *args: Any, **kwargs: Any) -> Any:
+    def mock_import_module(name: str, package: str | None = None) -> types.ModuleType | mock.MagicMock:
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
-        return orig_import_module(name, *args, **kwargs)
+        return orig_import_module(name, package)
 
     monkeypatch.setattr(importlib, "import_module", mock_import_module)
 
@@ -176,15 +173,13 @@ def test_registry_caching(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_adapter.ADAPTER_CLASS = fake_adapter_class
     fake_adapter.Cached_backendBackend = fake_adapter_class
 
-    import importlib
-
     orig_import_module = importlib.import_module
 
-    def mock_import_module(name: Any, *args: Any, **kwargs: Any) -> Any:
+    def mock_import_module(name: str, package: str | None = None) -> types.ModuleType | mock.MagicMock:
         """Intercept mock_module.adapter import."""
         if name == "mock_module.adapter":
             return fake_adapter
-        return orig_import_module(name, *args, **kwargs)
+        return orig_import_module(name, package)
 
     monkeypatch.setattr(importlib, "import_module", mock_import_module)
 
@@ -220,15 +215,13 @@ def test_registry_invalid_protocol_instance(monkeypatch: pytest.MonkeyPatch) -> 
     fake_adapter.ADAPTER_CLASS = IncompleteAdapter
     fake_adapter.Invalid_protoBackend = IncompleteAdapter
 
-    import importlib
+    orig_import_module = importlib.import_module
 
-    orig_import_module: Any = importlib.import_module
-
-    def mock_import_module(name: str, *args: Any, **kwargs: Any) -> Any:
+    def mock_import_module(name: str, package: str | None = None) -> types.ModuleType | mock.MagicMock:
         """Return fake_adapter for mock_module.adapter."""
         if name == "mock_module.adapter":
             return fake_adapter
-        return orig_import_module(name, *args, **kwargs)
+        return orig_import_module(name, package)
 
     monkeypatch.setattr(importlib, "import_module", mock_import_module)
 

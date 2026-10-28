@@ -2,39 +2,38 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from gemma_4_sql.sdk.agent import (
     AgentContext,
-    _extract_sql_from_response,
     _process_single_prompt,
+    classify_error_hint,
+    extract_sql_from_response,
     run_agentic_loop,
     run_agentic_loop_async,
 )
+from gemma_4_sql.type_hints import AgentResultDict, InferenceResultDict, JSONValue
 
 
 def test_extract_sql_from_response() -> None:
-    """Verify _extract_sql_from_response strips Markdown SQL fences and preserves raw SQL."""
-    from gemma_4_sql.sdk.agent import _classify_error_hint
-
+    """Verify extract_sql_from_response strips Markdown SQL fences and preserves raw SQL."""
     assert (
-        _extract_sql_from_response("""```sql
+        extract_sql_from_response("""```sql
 SELECT 1
 ```""")
         == "SELECT 1"
     )
     assert (
-        _extract_sql_from_response("""```
+        extract_sql_from_response("""```
 SELECT 1
 ```""")
         == "SELECT 1"
     )
-    assert _extract_sql_from_response("SELECT 1") == "SELECT 1"
-    assert _classify_error_hint(None) == ""
-    assert _classify_error_hint("") == ""
+    assert extract_sql_from_response("SELECT 1") == "SELECT 1"
+    assert classify_error_hint(None) == ""
+    assert classify_error_hint("") == ""
 
 
 @pytest.mark.parametrize("backend", ["jax", "keras", "maxtext", "pytorch", "mlx"])
@@ -47,32 +46,41 @@ def test_agentic_loop_self_correction_against_real_sqlite(backend: str, monkeypa
 
     call_count = 0
 
-    def mock_generate(_model: str, current_prompt: str, **_kwargs: object) -> dict[str, Any]:
+    def mock_generate(model_name: str, current_prompt: str, **_kwargs: JSONValue) -> InferenceResultDict:
         """Simulate an initial invalid column query followed by a corrected valid SQL query."""
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             return {
+                "backend": backend,
+                "model": model_name,
+                "prompt": current_prompt,
                 "sql": "SELECT nonexistent_col FROM users WHERE age > 30;",
+                "beam_width": 3,
                 "status": "success",
                 "confidence_score": 0.9,
             }
         assert "no such column: nonexistent_col" in current_prompt
         assert "[Hint: check valid column names]" in current_prompt
         return {
+            "backend": backend,
+            "model": model_name,
+            "prompt": current_prompt,
             "sql": """```sql
 SELECT name FROM users WHERE age > 30;
 ```""",
+            "beam_width": 3,
             "status": "success",
             "confidence_score": 0.98,
         }
 
     mock_backend = MagicMock()
     mock_backend.generate_sql.side_effect = mock_generate
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=3)
-    res: Any = run_agentic_loop("google/gemma-4-2b", "Find users older than 30", backend=backend, context=ctx)
+    res = run_agentic_loop("google/gemma-4-2b", "Find users older than 30", backend=backend, context=ctx)
+    assert isinstance(res, dict)
     assert res["backend"] == backend
     assert res["success"] is True
     assert res["attempts"] == 2
@@ -94,10 +102,11 @@ def test_agentic_loop_self_correction_exhaustion(monkeypatch: pytest.MonkeyPatch
 
     mock_backend = MagicMock()
     mock_backend.generate_sql.return_value = {"sql": "SELECT invalid_col FROM users;", "status": "success"}
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=2)
-    res: Any = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
+    res = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
+    assert isinstance(res, dict)
     assert res["success"] is False
     assert res["attempts"] == 2
     assert len(res["history"]) == 2
@@ -114,10 +123,11 @@ def test_agentic_loop_confidence_rejection(monkeypatch: pytest.MonkeyPatch) -> N
         "status": "success",
         "confidence_score": 0.4,
     }
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=2, min_confidence=0.8)
-    res: Any = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
+    res = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
+    assert isinstance(res, dict)
     assert res["success"] is False
     assert res["attempts"] == 2
     assert "below threshold" in str(res["history"][0]["error"])
@@ -133,10 +143,11 @@ def test_agentic_loop_confidence_passes(monkeypatch: pytest.MonkeyPatch) -> None
         "status": "success",
         "confidence_score": 0.9,
     }
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=2, min_confidence=0.8)
-    res: Any = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
+    res = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
+    assert isinstance(res, dict)
     assert res["success"] is True
     assert res["attempts"] == 1
 
@@ -152,7 +163,7 @@ async def test_agentic_loop_async_and_batch(monkeypatch: pytest.MonkeyPatch) -> 
         "status": "success",
         "confidence_score": 0.9,
     }
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=1)
     prompts = ["Get users", "Count users"]
@@ -198,7 +209,7 @@ def test_agent_multimodal_and_running_loop(monkeypatch: pytest.MonkeyPatch) -> N
 
     mock_b = MagicMock()
     mock_b.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 0.9, "status": "ok"}
-    monkeypatch.setattr(ag, "get_backend", lambda *_a: mock_b)
+    monkeypatch.setattr(ag, "get_backend", lambda *_a: mock_b)  # pyright: ignore[reportUnknownLambdaType]
 
     context = ag.AgentContext(
         ddl="CREATE TABLE t(id int)",
@@ -207,11 +218,12 @@ def test_agent_multimodal_and_running_loop(monkeypatch: pytest.MonkeyPatch) -> N
         multimodal_context={"emb": [1.0]},
     )
 
-    async def _inside_running_loop() -> Any:
+    async def _inside_running_loop() -> AgentResultDict | list[AgentResultDict]:
         """Call synchronous run_agentic_loop from inside an active asyncio event loop."""
         return ag.run_agentic_loop(prompt="test", context=context, model_name="m", backend="pytorch")
 
     res = asyncio.run(_inside_running_loop())
+    assert isinstance(res, dict)
     assert res["status"] == "completed"
     call_kwargs = mock_b.generate_sql.call_args.kwargs
     assert call_kwargs["image_path"] == "fake.png"

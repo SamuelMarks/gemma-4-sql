@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pathlib
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,7 +15,7 @@ import gemma_4_sql.backends.keras.export as mod
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 
 
-def test_keras_export_missing_dependency(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+def test_keras_export_missing_dependency(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
     """Verify `export_model` raises `DependencyMissingError` when `keras` is `None`."""
     monkeypatch.setattr(mod, "keras", None)
     with pytest.raises(DependencyMissingError, match="Keras dependencies are missing for export"):
@@ -43,6 +42,6 @@ def test_export_model_keras_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
         # Missing GemmaCausalLM class raises ExportError
         monkeypatch.setattr(mod, "GemmaCausalLM", None)
-        monkeypatch.setattr(mod, "optional_attr", lambda *_a, **_k: None)
+        monkeypatch.setattr(mod, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
         with pytest.raises(ExportError, match="Failed to load model my_model"):
             mod.export_model("my_model", "path")

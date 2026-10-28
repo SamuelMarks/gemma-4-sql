@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import math
 import sys
-from typing import Any
 
 import pytest
 
-from gemma_4_sql.tokenization import SQLTokenizer
+from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
+from gemma_4_sql.tokenization import ByteFallbackTokenizer, SQLTokenizer
 
 
 class MockHFTokenizer:
     """Mock Hugging Face tokenizer implementation for testing."""
 
-    def encode(self, text: str, **kwargs: Any) -> list[int]:
+    pad_token_id: int | None = 0
+    eos_token_id: int | None = 2
+    bos_token_id: int | None = 1
+
+    def encode(self, text: str, **kwargs: bool | int | str | None) -> list[int]:
         """Encode text using mock token IDs.
 
         Args:
@@ -22,6 +27,7 @@ class MockHFTokenizer:
 
         Returns:
             List of mock token IDs.
+
         """
         _ = (text, kwargs)
         return [99, 100]
@@ -34,9 +40,9 @@ class MockHFTokenizer:
 
         Returns:
             Decoded mock string.
+
         """
-        _ = token_ids
-        return "hf_decoded"
+        return f"hf_decoded:{token_ids}"
 
     def get_vocab(self) -> dict[str, int]:
         """Return mock vocabulary mapping."""
@@ -55,6 +61,7 @@ class MockAutoTokenizer:
 
         Returns:
             A new MockHFTokenizer instance.
+
         """
         return MockHFTokenizer()
 
@@ -71,6 +78,7 @@ class FailingAutoTokenizer:
 
         Raises:
             OSError: Simulating model not found error.
+
         """
         msg = "Model not found"
         raise OSError(msg)
@@ -82,16 +90,21 @@ def _mock_transformers(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
+
     """
+    import gemma_4_sql.tokenization as tok_mod
+
     mock_transformers_module = type("transformers", (), {"AutoTokenizer": MockAutoTokenizer})
     monkeypatch.setitem(sys.modules, "transformers", mock_transformers_module)
-    gemma_4_sql = __import__("gemma_4_sql.tokenization")
-    monkeypatch.setattr(gemma_4_sql.tokenization, "AutoTokenizer", MockAutoTokenizer)
+    monkeypatch.setattr(tok_mod, "AutoTokenizer", MockAutoTokenizer)
 
 
 def test_sql_tokenizer_fallback() -> None:
-    """Test fallback byte/character-level encoding with ASCII and Unicode."""
-    tok = SQLTokenizer()
+    """Test fallback byte/character-level encoding with ASCII, Unicode, and token ID properties."""
+    tok = SQLTokenizer(pad_token_id=3, eos_token_id=4, bos_token_id=5)
+    assert tok.pad_token_id == 3
+    assert tok.eos_token_id == 4
+    assert tok.bos_token_id == 5
     encoded = tok.encode("abc")
     assert encoded == [ord("a"), ord("b"), ord("c")]
     decoded = tok.decode(encoded)
@@ -111,27 +124,43 @@ def test_sql_tokenizer_fallback() -> None:
 
 @pytest.mark.usefixtures("_mock_transformers")
 def test_sql_tokenizer_hf() -> None:
-    """Test Hugging Face tokenizer wrapping."""
+    """Test Hugging Face tokenizer wrapping, special token properties, and float rejection."""
     tok = SQLTokenizer(model_name="dummy/model")
     assert tok.hf_tokenizer is not None
+    assert tok.pad_token_id == 0
+    assert tok.eos_token_id == 2
+    assert tok.bos_token_id == 1
     assert tok.get_vocab() == {"<pad>": 0, "select": 1}
     encoded = tok.encode("abc")
     assert encoded == [99, 100]
-    decoded = tok.decode(encoded)
-    assert decoded == "hf_decoded"
+    decoded = tok.decode([99, 1.5, "100", "bad"])
+    assert decoded == "hf_decoded:[99, 100]"
+
+    # Test when HF tokenizer special token IDs are None (falls back to byte_fallback properties)
+    hf_tok = MockHFTokenizer()
+    hf_tok.pad_token_id = None
+    hf_tok.eos_token_id = None
+    hf_tok.bos_token_id = None
+    tok.hf_tokenizer = hf_tok
+    assert tok.pad_token_id == 0
+    assert tok.eos_token_id == 1
+    assert tok.bos_token_id == 2
 
 
-def test_sql_tokenizer_hf_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test tokenizer initialization when from_pretrained raises an exception.
+def test_sql_tokenizer_hf_failure(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """Test tokenizer initialization when from_pretrained raises an exception and logs a warning.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
+        caplog: Pytest log capture fixture.
+
     """
-    gemma_4_sql = __import__("gemma_4_sql.tokenization")
-    monkeypatch.setattr(gemma_4_sql.tokenization, "AutoTokenizer", FailingAutoTokenizer)
+    import gemma_4_sql.tokenization as tok_mod
+
+    monkeypatch.setattr(tok_mod, "AutoTokenizer", FailingAutoTokenizer)
     tok = SQLTokenizer(model_name="nonexistent/model")
     assert tok.hf_tokenizer is None
-    # Verifies fallback works when HF tokenizer fails to load
+    assert "Falling back to deterministic byte-level SQLTokenizer" in caplog.text
     assert tok.encode("abc") == [ord("a"), ord("b"), ord("c")]
 
 
@@ -143,15 +172,8 @@ def test_sql_tokenizer_get_vocab() -> None:
     assert len(vocab) == 128
     assert vocab["a"] == ord("a")
 
-    class MockVocabHFTokenizer(MockHFTokenizer):
-        """Test stub for `MockVocabHFTokenizer`."""
-
-        def get_vocab(self) -> dict[str, int]:
-            """Provide get vocab test helper."""
-            return {"<pad>": 0, "select": 1}
-
     tok_hf = SQLTokenizer()
-    tok_hf.hf_tokenizer = MockVocabHFTokenizer()
+    tok_hf.hf_tokenizer = MockHFTokenizer()
     hf_vocab = tok_hf.get_vocab()
     assert hf_vocab == {"<pad>": 0, "select": 1}
 
@@ -161,6 +183,7 @@ def test_sql_tokenizer_lazy_getattr(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
+
     """
     import gemma_4_sql.tokenization as tok_mod
 
@@ -173,17 +196,14 @@ def test_sql_tokenizer_lazy_getattr(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_sql_tokenizer_empty_and_special_sql_chars() -> None:
     """Test SQLTokenizer with empty list, special SQL characters, and long text."""
     tok = SQLTokenizer()
-    # Empty list
     assert tok.decode([]) == ""
 
-    # Special SQL characters
-    special_sql = "SELECT * FROM \"my_table\" WHERE name = 'O\\'Reilly' AND x >= 10; -- comment\n/* block */"
+    special_sql = """SELECT * FROM "my_table" WHERE name = 'O''Reilly' AND x >= 10; -- comment\n/* block */"""
     encoded = tok.encode(special_sql)
     assert len(encoded) > 0
     decoded = tok.decode(encoded)
     assert decoded == special_sql
 
-    # Long text exceeding vocabulary size / boundaries
     long_query = "SELECT " + ", ".join(f"col_{i}" for i in range(500)) + " FROM very_large_table;"
     enc_long = tok.encode(long_query)
     assert len(enc_long) > 0
@@ -209,30 +229,34 @@ def test_sql_tokenizer_custom_vocab_bounds() -> None:
         assert 0 <= tid < 64
     assert tok_small.decode(encoded) == "ABCabc123"
 
-    # Test decode with exact multiple of tokens_per_byte and partial trailing chunk
     decoded_exact = tok_small.decode([1, 1, 1, 2])
     assert isinstance(decoded_exact, str)
     out_of_bound_ids = [-5, 0, 65, 255, 300]
     decoded = tok_small.decode(out_of_bound_ids)
     assert isinstance(decoded, str)
 
-    # Test vocab_size=1 edge case
     tok_one = SQLTokenizer(vocab_size=1)
     assert tok_one.encode("hi") == [0, 0]
     assert tok_one.decode([0, 0]) == "\x00\x00"
 
 
-def test_tokenizer_decode_ignores_non_integer_tokens() -> None:
-    """Verify SQLTokenizer.decode ignores non-integer elements in token sequence."""
+def test_tokenizer_decode_ignores_non_integer_and_float_tokens() -> None:
+    """Verify SQLTokenizer.decode ignores float and non-integer elements in token sequence."""
     tokenizer = SQLTokenizer(vocab_size=256)
-    mixed_tokens: list[int | object] = [65, "bad", 66]
+    mixed_tokens: list[int | str | float] = [65, math.pi, "bad", 66]
     res = tokenizer.decode(mixed_tokens)
     assert res == "AB"
 
-    from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
+    bf = ByteFallbackTokenizer(vocab_size=256, pad_token_id=7, eos_token_id=8, bos_token_id=9)
+    assert bf.pad_token_id == 7
+    assert bf.eos_token_id == 8
+    assert bf.bos_token_id == 9
 
     with pytest.raises(ConfigurationError, match="vocab_size must be positive"):
         SQLTokenizer(vocab_size=0, strict_vocab=True)
 
     with pytest.raises(DependencyMissingError, match="allow_fallback=False"):
         SQLTokenizer(model_name="nonexistent/model/path/for/test", allow_fallback=False)
+
+    with pytest.raises(DependencyMissingError, match="allow_fallback=False"):
+        SQLTokenizer(model_name="nonexistent/model/path/for/test", allow_byte_fallback=False)

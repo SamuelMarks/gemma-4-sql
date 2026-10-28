@@ -1,6 +1,9 @@
 """Real Keras serve tests."""
 
-from typing import Any, Never
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Never
 
 import pytest
 
@@ -55,23 +58,41 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockApp:
         """Test stub for `MockApp`."""
 
-        startup: Any = None
-        generate: Any = None
-        batch_generate: Any = None
+        def __init__(
+            self,
+            startup_callback: Callable[[], None],
+            generate_logic: Callable[[str], str],
+            batch_generate_logic: Callable[[list[str]], list[str]],
+        ) -> None:
+            """Initialize MockApp with callbacks."""
+            self.startup = startup_callback
+            self.generate = generate_logic
+            self.batch_generate = batch_generate_logic
 
-    def mock_create_common_app(**kwargs: Any) -> Any:
+    created_apps: list[MockApp] = []
+
+    def mock_create_common_app(
+        *,
+        backend_name: str,
+        model_name: str,
+        startup_callback: Callable[[], None],
+        generate_logic: Callable[[str], str],
+        batch_generate_logic: Callable[[list[str]], list[str]],
+        max_batch_size: int = 32,
+        max_wait_ms: float = 10.0,
+    ) -> MockApp:
         """Provide mock create common app test helper."""
-        app = MockApp()
-        app.startup = kwargs["startup_callback"]
-        app.generate = kwargs["generate_logic"]
-        app.batch_generate = kwargs["batch_generate_logic"]
+        _ = (backend_name, model_name, max_batch_size, max_wait_ms)
+        app = MockApp(startup_callback, generate_logic, batch_generate_logic)
+        created_apps.append(app)
         return app
 
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.create_common_app", mock_create_common_app)
 
     monkeypatch.setattr(srv, "GemmaCausalLM", None)
-    monkeypatch.setattr(srv, "optional_attr", lambda *_a, **_k: None)
-    app: Any = srv.create_app("test_model")
+    monkeypatch.setattr(srv, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    srv.create_app("test_model")
+    app = created_apps[-1]
 
     # Test startup failure path (keras_nlp missing)
     app.startup()
@@ -80,7 +101,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockModel:
         """Test stub for `MockModel`."""
 
-        def generate(self, prompt: Any, **_kwargs: Any) -> Any:
+        def generate(self, prompt: str | list[str], **_kwargs: int) -> str | list[str]:
             """Provide generate test helper."""
             if isinstance(prompt, list):
                 return [f"BATCH_{p}" for p in prompt]
@@ -90,7 +111,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `DummyPreset`."""
 
         @classmethod
-        def from_preset(cls, model_name: Any) -> MockModel:
+        def from_preset(cls, _model_name: str) -> MockModel:
             """Provide from preset test helper."""
             return MockModel()
 
@@ -107,7 +128,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockModelFail:
         """Test stub for `MockModelFail`."""
 
-        def generate(self, prompt: Any, **kwargs: Any) -> Never:
+        def generate(self, _prompt: str | list[str], **_kwargs: int) -> Never:
             """Provide generate test helper."""
             raise ValueError("fail")
 
@@ -115,7 +136,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `DummyPresetFail`."""
 
         @classmethod
-        def from_preset(cls, model_name: Any) -> MockModelFail:
+        def from_preset(cls, _model_name: str) -> MockModelFail:
             """Provide from preset test helper."""
             return MockModelFail()
 
@@ -124,7 +145,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "GemmaCausalLM", DummyPresetFail)
     app.startup()
 
-    monkeypatch.setattr(real_inf, "generate_sql", lambda **_kwargs: {"sql": "FALLBACK_SQL"})
+    monkeypatch.setattr(real_inf, "generate_sql", lambda **_kwargs: {"sql": "FALLBACK_SQL"})  # pyright: ignore[reportUnknownLambdaType]
 
     assert app.generate("prompt") == "FALLBACK_SQL"
     assert app.batch_generate(["p1", "p2"]) == ["FALLBACK_SQL", "FALLBACK_SQL"]
@@ -133,7 +154,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockBatchModelFail:
         """Test stub for `MockBatchModelFail`."""
 
-        def generate(self, prompt: Any, **kwargs: Any) -> str:
+        def generate(self, prompt: str | list[str], **_kwargs: int) -> str:
             """Provide generate test helper."""
             if isinstance(prompt, list):
                 raise TypeError("batch fail")
@@ -143,7 +164,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `DummyPresetBatchFail`."""
 
         @classmethod
-        def from_preset(cls, model_name: Any) -> MockBatchModelFail:
+        def from_preset(cls, _model_name: str) -> MockBatchModelFail:
             """Provide from preset test helper."""
             return MockBatchModelFail()
 
@@ -156,7 +177,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     app.startup()
 
     # Test empty fallback output
-    monkeypatch.setattr(real_inf, "generate_sql", lambda **_kwargs: {"sql": ""})
+    monkeypatch.setattr(real_inf, "generate_sql", lambda **_kwargs: {"sql": ""})  # pyright: ignore[reportUnknownLambdaType]
 
     with pytest.raises(InferenceError, match="empty SQL"):
         app.generate("prompt")
@@ -164,15 +185,16 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         app.batch_generate(["prompt"])
 
     # Test generic fallback output error
-    def gen_err(**kwargs: Any) -> Never:
+    def gen_err(**_kwargs: str | int) -> Never:
         """Provide gen err test helper."""
         raise OSError("other err")
 
     monkeypatch.setattr(real_inf, "generate_sql", gen_err)
     monkeypatch.setattr(srv, "GemmaCausalLM", None)
-    monkeypatch.setattr(srv, "optional_attr", lambda *_a, **_k: None)
+    monkeypatch.setattr(srv, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
 
-    app_none: Any = srv.create_app("test_model")
+    srv.create_app("test_model")
+    app_none = created_apps[-1]
     app_none.startup()
 
     with pytest.raises(InferenceError, match="Keras generation failed"):

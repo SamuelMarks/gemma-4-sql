@@ -7,25 +7,125 @@ import logging
 import math
 import operator
 import threading
+import types
 import weakref
 from collections import OrderedDict
-from collections.abc import Callable
-from typing import Any, TypeVar
+from collections.abc import Callable, Mapping, Sequence
+from typing import Protocol, Self, SupportsFloat, TypeVar, runtime_checkable
 
 from gemma_4_sql.exceptions import (
+    OPERATIONAL_EXCEPTIONS,
     ConfigurationError,
     DependencyMissingError,
     ExecutionStatus,
-    GemmaSQLError,
     InferenceError,
+    StatusValue,
     resolve_raise_on_error,
 )
-from gemma_4_sql.type_hints import InferenceResultDict
+from gemma_4_sql.type_hints import (
+    ForwardArg,
+    InferenceResultDict,
+    JSONValue,
+    ModelConfigProtocol,
+)
 
 logger = logging.getLogger(__name__)
 TModel = TypeVar("TModel")
 
-_ACTIVE_LRU_CACHES: list[weakref.ref[BoundedLRUCache[Any]]] = []
+
+@runtime_checkable
+class CacheableRoutineProtocol(Protocol):
+    """Protocol for an active `BoundedLRUCache` supporting `clear_cache()`."""
+
+    def clear_cache(self) -> None:
+        """Clear all entries in the cache."""
+        ...
+
+
+@runtime_checkable
+class CacheFingerprintProtocol(Protocol):
+    """Protocol for configuration objects providing an explicit `cache_fingerprint()` method."""
+
+    def cache_fingerprint(self) -> str:
+        """Return a deterministic string fingerprint for model caching."""
+        ...
+
+
+@runtime_checkable
+class IndexableSequence2DProtocol(Protocol):
+    """Protocol for a 2D sequence array supporting `seq[row, col]` indexing."""
+
+    def __getitem__(self, item: tuple[int, int], /) -> SupportsFloat:
+        """Return element at `(row, col)`."""
+        ...
+
+
+@runtime_checkable
+class BeamSequenceArrayProtocol(SupportsFloat, Protocol):
+    """Protocol for 2D token ID sequence arrays indexed by `(row, col)`."""
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Provide the array dimensions."""
+        ...
+
+    def __getitem__(
+        self,
+        item: int | slice | types.EllipsisType | tuple[int | slice | types.EllipsisType, ...],
+        /,
+    ) -> Self:
+        """Index into the sequence array."""
+        ...
+
+    def reshape(self, *shape: int) -> Self:
+        """Reshape the array."""
+        ...
+
+
+@runtime_checkable
+class ScalarItemExtractorProtocol(Protocol):
+    """Protocol for a scalar tensor element supporting `.item()`."""
+
+    def item(self) -> float | int | bool:
+        """Extract a Python float/int scalar."""
+        ...
+
+
+@runtime_checkable
+class JaxNNBeamNamespaceProtocol[ArrayT](Protocol):
+    """Protocol for `jax.nn` providing `log_softmax`."""
+
+    def log_softmax(self, x: ArrayT, axis: int = -1) -> ArrayT:
+        """Compute log-softmax along `axis`."""
+        ...
+
+
+@runtime_checkable
+class JaxModuleBeamProtocol[ArrayT](Protocol):
+    """Protocol for the `jax` module exposing `.nn.log_softmax`."""
+
+    @property
+    def nn(self) -> JaxNNBeamNamespaceProtocol[ArrayT]:
+        """Provide the `jax.nn` submodule."""
+        ...
+
+
+@runtime_checkable
+class JaxNumpyBeamProtocol[ArrayT](Protocol):
+    """Protocol for `jax.numpy` providing `argsort` and `concatenate`."""
+
+    def argsort(self, a: ArrayT, axis: int = -1) -> ArrayT:
+        """Return the indices that would sort an array."""
+        ...
+
+    def concatenate(self, arrays: Sequence[ArrayT], axis: int = -1) -> ArrayT:
+        """Join a sequence of arrays along an existing axis."""
+        ...
+
+
+type CacheConfigInput = Mapping[str, JSONValue] | CacheFingerprintProtocol | ModelConfigProtocol | str | int | float | bool | None
+
+_ACTIVE_LRU_CACHES: list[weakref.ref[CacheableRoutineProtocol]] = []
 _CACHE_REGISTRY_LOCK = threading.Lock()
 
 
@@ -92,6 +192,65 @@ def clear_all_model_caches() -> None:
         cache.clear_cache()
 
 
+def _fingerprint_config(config: CacheConfigInput) -> str:
+    """Compute a deterministic fingerprint string for a model configuration object.
+
+    Args:
+        config: Configuration dataclass, mapping, or protocol instance.
+
+    Returns:
+        Deterministic string fingerprint.
+
+    """
+    if isinstance(config, CacheFingerprintProtocol):
+        return config.cache_fingerprint()
+    if isinstance(config, Mapping):
+        items = sorted((str(k), repr(v)) for k, v in config.items())
+        return ",".join(f"{k}={v}" for k, v in items)
+    return repr(config)
+
+
+@runtime_checkable
+class _CacheFactoryItemProtocol(Protocol):
+    """Protocol satisfied by any factory callable, class, or object passed to `make_model_cache_key`."""
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        ...
+
+
+def make_model_cache_key(
+    model_name: str,
+    *,
+    backend_name: str = "",
+    dtype: str = "",
+    quant_method: str = "",
+    adapter_path: str = "",
+    config: CacheConfigInput = None,
+    factories: tuple[_CacheFactoryItemProtocol | str | int | None, ...] = (),
+) -> str:
+    """Build a canonical cache key scoped by backend, model name, dtype, quantization method, adapter, and factories.
+
+    Args:
+        model_name: Target model name or path.
+        backend_name: Optional backend identifier.
+        dtype: Optional dtype string.
+        quant_method: Optional quantization method string.
+        adapter_path: Optional LoRA or PEFT adapter path.
+        config: Optional configuration instance.
+        factories: Optional tuple of factory callables or classes to scope cache across test overrides.
+
+    Returns:
+        Canonical string cache key.
+
+    """
+    parts = [p for p in (backend_name, model_name, dtype, quant_method, adapter_path) if p]
+    if config is not None:
+        parts.append(_fingerprint_config(config))
+    parts.extend(str(id(item)) for item in factories if item is not None)
+    return ":".join(parts) if len(parts) > 1 else model_name
+
+
 def normalize_logprob_confidence(log_probs: list[float] | float, num_tokens: int) -> float:
     """Compute length-normalized sequence confidence score from log probabilities in [0.0, 1.0].
 
@@ -110,13 +269,13 @@ def normalize_logprob_confidence(log_probs: list[float] | float, num_tokens: int
     return max(0.0, min(1.0, math.exp(normalized_log_prob)))
 
 
-def run_array_beam_search(
-    input_ids: Any,
+def run_array_beam_search[SeqT: IndexableSequence2DProtocol](
+    input_ids: SeqT,
     beam_width: int,
     max_length: int,
     eos_token_id: int,
-    step_expand_fn: Callable[[Any, float, int], list[tuple[Any, float]]],
-) -> tuple[Any, float]:
+    step_expand_fn: Callable[[SeqT, float, int], list[tuple[SeqT, float]]],
+) -> tuple[SeqT, float]:
     """Run autoregressive beam search over 2D `(1, seq_len)` array sequences.
 
     Args:
@@ -130,23 +289,28 @@ def run_array_beam_search(
         Tuple of `(best_sequence, cumulative_log_prob_score)`.
 
     """
-    beams: list[tuple[Any, float]] = [(input_ids, 0.0)]
+    beams: list[tuple[SeqT, float]] = [(input_ids, 0.0)]
     for _ in range(max_length):
-        new_beams: list[tuple[Any, float]] = []
+        new_beams: list[tuple[SeqT, float]] = []
         for seq, score in beams:
-            if seq[0, -1] == eos_token_id:
+            if int(float(seq[0, -1])) == eos_token_id:
                 new_beams.append((seq, score))
                 continue
             new_beams.extend(step_expand_fn(seq, score, beam_width))
 
         new_beams.sort(key=operator.itemgetter(1), reverse=True)
         beams = new_beams[:beam_width]
-        if all(s[0, -1] == eos_token_id for (s, _) in beams):
+        if all(int(float(s[0, -1])) == eos_token_id for (s, _) in beams):
             break
     return (beams[0][0], beams[0][1])
 
 
-def compute_jax_step_probs(logits: Any, beam_width: int, jax_mod: Any, jnp_mod: Any) -> tuple[Any, Any]:
+def compute_jax_step_probs[ArrayT: BeamSequenceArrayProtocol](
+    logits: ArrayT,
+    beam_width: int,
+    jax_mod: JaxModuleBeamProtocol[ArrayT],
+    jnp_mod: JaxNumpyBeamProtocol[ArrayT],
+) -> tuple[ArrayT, ArrayT]:
     """Compute top-k token indices and log probabilities from a JAX logits array.
 
     Args:
@@ -159,26 +323,28 @@ def compute_jax_step_probs(logits: Any, beam_width: int, jax_mod: Any, jnp_mod: 
         Tuple of `(top_indices, top_probs)` arrays.
 
     """
-    if hasattr(logits, "shape") and len(logits.shape) == 3:
-        last_logits = logits[0, -1, :]
-    elif hasattr(logits, "shape") and len(logits.shape) == 2:
+    if len(logits.shape) == 3:
+        last_logits: ArrayT = logits[0, -1, :]
+    elif len(logits.shape) == 2:
         last_logits = logits[-1, :]
     else:
         last_logits = logits
     log_probs = jax_mod.nn.log_softmax(last_logits, axis=-1)
-    top_indices = jnp_mod.argsort(log_probs)[-beam_width:][::-1]
-    top_probs = log_probs[top_indices]
+    sorted_indices: ArrayT = jnp_mod.argsort(log_probs)
+    top_tail: ArrayT = sorted_indices[-beam_width:]
+    top_indices: ArrayT = top_tail[::-1]
+    top_probs: ArrayT = log_probs[top_indices]  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
     return (top_indices, top_probs)
 
 
-def expand_jax_beams(
-    seq: Any,
+def expand_jax_beams[ArrayT: BeamSequenceArrayProtocol](
+    seq: ArrayT,
     score: float,
-    top_indices: Any,
-    top_probs: Any,
+    top_indices: ArrayT,
+    top_probs: ArrayT,
     beam_width: int,
-    jnp_mod: Any,
-) -> list[tuple[Any, float]]:
+    jnp_mod: JaxNumpyBeamProtocol[ArrayT],
+) -> list[tuple[ArrayT, float]]:
     """Expand a sequence into `beam_width` candidate beams from top-k indices and log-probs.
 
     Args:
@@ -193,11 +359,13 @@ def expand_jax_beams(
         List of `(expanded_sequence, new_score)` tuples.
 
     """
-    new_beams: list[tuple[Any, float]] = []
+    new_beams: list[tuple[ArrayT, float]] = []
     for i in range(beam_width):
-        token = top_indices[i].reshape(1, 1)
+        tok_elem: ArrayT = top_indices[i]
+        token = tok_elem.reshape(1, 1)
         new_seq = jnp_mod.concatenate([seq, token], axis=-1)
-        prob_val = top_probs[i].item() if hasattr(top_probs[i], "item") else float(top_probs[i])
+        raw_prob = top_probs[i]
+        prob_val = float(raw_prob.item()) if isinstance(raw_prob, ScalarItemExtractorProtocol) else float(raw_prob)
         new_score = score + prob_val
         new_beams.append((new_seq, new_score))
     return new_beams
@@ -209,7 +377,7 @@ def run_inference_wrapper(
     prompt: str,
     beam_width: int,
     execute_fn: Callable[[], tuple[str, float]],
-    **kwargs: object,
+    **kwargs: StatusValue,
 ) -> InferenceResultDict:
     """Execute a backend inference pipeline with standardized error handling and result formatting.
 
@@ -238,7 +406,7 @@ def run_inference_wrapper(
         status_code = ExecutionStatus.SUCCESS.value
     except (DependencyMissingError, ConfigurationError):
         raise
-    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
+    except OPERATIONAL_EXCEPTIONS as e:
         logger.exception("%s Generation Error: ", backend_name)
         if raise_on_error:
             if isinstance(e, InferenceError):
@@ -268,19 +436,19 @@ def run_inference_wrapper(
     return result
 
 
-def call_jax_causal_lm(
-    model: Any,
-    inputs: Any,
-    positions: Any = None,
-    **extra_kwargs: Any,
-) -> Any:
+def call_jax_causal_lm[OutT](
+    model: Callable[..., OutT],
+    inputs: ForwardArg,
+    positions: ForwardArg = None,
+    **extra_kwargs: ForwardArg,
+) -> OutT:
     """Invoke a JAX causal language model with signature-aware positional and keyword argument forwarding.
 
     Inspects `inspect.signature(model)` instead of catching broad `TypeError` during execution,
     ensuring internal `TypeError` bugs inside `model.__call__` are never masked.
 
     Args:
-        model: Callable JAX/Flax NNX model or mock function.
+        model: Callable JAX/Flax NNX model or function.
         inputs: Input token ID array.
         positions: Optional token position index array.
         **extra_kwargs: Optional multimodal or forward keyword arguments (e.g., `pixel_values`, `audio_values`).
@@ -289,8 +457,7 @@ def call_jax_causal_lm(
         Model output logits array.
 
     """
-    target = model.__call__ if callable(model) and not inspect.isfunction(model) else model
-    sig = inspect.signature(target)
+    sig = inspect.signature(model)
     params = list(sig.parameters.values())
     has_var_pos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
     has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
@@ -304,11 +471,20 @@ def call_jax_causal_lm(
 
 
 __all__ = [
+    "BeamSequenceArrayProtocol",
     "BoundedLRUCache",
+    "CacheConfigInput",
+    "CacheFingerprintProtocol",
+    "CacheableRoutineProtocol",
+    "JaxModuleBeamProtocol",
+    "JaxNNBeamNamespaceProtocol",
+    "JaxNumpyBeamProtocol",
+    "ScalarItemExtractorProtocol",
     "call_jax_causal_lm",
     "clear_all_model_caches",
     "compute_jax_step_probs",
     "expand_jax_beams",
+    "make_model_cache_key",
     "normalize_logprob_confidence",
     "run_array_beam_search",
     "run_inference_wrapper",

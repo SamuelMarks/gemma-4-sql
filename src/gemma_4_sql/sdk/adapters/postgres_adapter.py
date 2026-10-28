@@ -2,28 +2,81 @@
 
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import logging
-from typing import Any
+from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
-from gemma_4_sql.type_hints import JSONPrimitive
+from gemma_4_sql.type_hints import (
+    AsyncDatabaseConnectionProtocol,
+    DatabaseConnectionProtocol,
+    JSONPrimitive,
+)
 
-from .base import DatabaseAdapter
+from .base import DatabaseAdapter, DBKwargValue
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _AsyncpgRecordProtocol(Protocol):
+    """Protocol for an `asyncpg.Record` exposing `.values()`."""
+
+    def values(self) -> Sequence[JSONPrimitive]:
+        """Return record column values."""
+        ...
+
+
+@runtime_checkable
+class _AsyncpgConnectionProtocol(AsyncDatabaseConnectionProtocol, Protocol):
+    """Protocol for an `asyncpg.Connection` supporting `.fetch(...)` and `.close()`."""
+
+    async def fetch(self, query: str, *args: JSONPrimitive) -> Sequence[_AsyncpgRecordProtocol]:
+        """Execute a SQL query and return fetched records."""
+        ...
+
+
+@runtime_checkable
+class Psycopg2ModuleProtocol(Protocol):
+    """Protocol for the `psycopg2` Python driver module."""
+
+    @property
+    def Error(self) -> type[Exception]:
+        """Provide `psycopg2.Error` exception class."""
+        ...
+
+    def connect(self, dsn: str = "", **kwargs: DBKwargValue) -> DatabaseConnectionProtocol:
+        """Open a synchronous `psycopg2` connection."""
+        ...
+
+
+@runtime_checkable
+class AsyncpgModuleProtocol(Protocol):
+    """Protocol for the `asyncpg` Python driver module."""
+
+    @property
+    def PostgresError(self) -> type[Exception]:
+        """Provide `asyncpg.PostgresError` exception class."""
+        ...
+
+    async def connect(self, dsn: str = "", **kwargs: DBKwargValue) -> _AsyncpgConnectionProtocol:
+        """Open an asynchronous `asyncpg` connection."""
+        ...
+
+
 psycopg2 = LazyLoader("psycopg2").get_module()
 asyncpg = LazyLoader("asyncpg").get_module()
 
 
-class PostgresAdapter(DatabaseAdapter):
+class PostgresAdapter(DatabaseAdapter[DatabaseConnectionProtocol, _AsyncpgConnectionProtocol]):
     """Adapter for PostgreSQL databases using `psycopg2` and `asyncpg`."""
 
     def __init__(
         self,
         db_path: str = "",
-        db_kwargs: dict[str, object] | None = None,
+        db_kwargs: dict[str, DBKwargValue] | None = None,
         *,
         read_only: bool = True,
     ) -> None:
@@ -35,9 +88,6 @@ class PostgresAdapter(DatabaseAdapter):
             read_only: Whether to enforce read-only query execution.
 
         """
-        self._async_conn: Any = None
-        self._async_lock = asyncio.Lock()
-        self._closing_tasks: set[Any] = set()
         super().__init__(db_path, db_kwargs or {}, read_only=read_only)
 
     @property
@@ -50,18 +100,20 @@ class PostgresAdapter(DatabaseAdapter):
         """
         classes: list[type[Exception]] = []
         if psycopg2 is not None:
-            err = getattr(psycopg2, "Error", None)
-            if isinstance(err, type) and issubclass(err, Exception):
-                classes.append(err)
+            with contextlib.suppress(AttributeError):
+                err = psycopg2.Error
+                if isinstance(err, type) and issubclass(err, Exception):
+                    classes.append(err)
         if asyncpg is not None:
-            err = getattr(asyncpg, "PostgresError", None)
-            if isinstance(err, type) and issubclass(err, Exception):
-                classes.append(err)
+            with contextlib.suppress(AttributeError):
+                err = asyncpg.PostgresError
+                if isinstance(err, type) and issubclass(err, Exception):
+                    classes.append(err)
         if not classes:
-            classes.append(Exception)
+            return (RuntimeError, OSError, DatabaseExecutionError)
         return tuple(classes)
 
-    def connect(self) -> object:
+    def connect(self) -> DatabaseConnectionProtocol:
         """Connect synchronously to PostgreSQL via `psycopg2`.
 
         Returns:
@@ -75,10 +127,12 @@ class PostgresAdapter(DatabaseAdapter):
             msg = "psycopg2 is required. Install with `pip install psycopg2-binary`."
             raise DependencyMissingError(msg, dependency_name="psycopg2", backend="postgresql")
         if self.db_path and self.db_path != ":memory:":
-            return psycopg2.connect(self.db_path, **self.db_kwargs)
-        return psycopg2.connect(**self.db_kwargs)
+            conn: DatabaseConnectionProtocol = psycopg2.connect(self.db_path, **self.db_kwargs)
+            return conn
+        conn_default: DatabaseConnectionProtocol = psycopg2.connect(**self.db_kwargs)
+        return conn_default
 
-    async def connect_async(self) -> object:
+    async def connect_async(self) -> _AsyncpgConnectionProtocol:
         """Connect asynchronously to PostgreSQL via `asyncpg`, reusing any cached connection.
 
         Returns:
@@ -92,11 +146,10 @@ class PostgresAdapter(DatabaseAdapter):
             msg = "asyncpg is required."
             raise DependencyMissingError(msg, dependency_name="asyncpg", backend="postgresql")
         async with self._async_lock:
-            cached = getattr(self, "_async_conn", None)
-            if cached is not None:
-                return cached
+            if self._async_conn is not None:
+                return self._async_conn
             if self.db_path and self.db_path != ":memory:":
-                conn = await asyncpg.connect(self.db_path, **self.db_kwargs)
+                conn: _AsyncpgConnectionProtocol = await asyncpg.connect(self.db_path, **self.db_kwargs)
             else:
                 conn = await asyncpg.connect(**self.db_kwargs)
             self._async_conn = conn
@@ -113,37 +166,19 @@ class PostgresAdapter(DatabaseAdapter):
         cursor = conn_obj.cursor()
         try:
             cursor.execute(ddl)
-            conn_obj.commit()
+            with contextlib.suppress(AttributeError):
+                conn_obj.commit()
+        except self.error_classes + (RuntimeError, ValueError, TypeError, OSError):
+            with contextlib.suppress(AttributeError):
+                conn_obj.rollback()
+            raise
         finally:
             cursor.close()
-
-    async def execute_with_feedback_async(
-        self,
-        query: str,
-        params: tuple[object, ...] | None = None,
-    ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Execute a PostgreSQL query asynchronously and return status, rows, and error feedback.
-
-        Args:
-            query: The SQL query string.
-            params: Optional query parameters.
-
-        Returns:
-            A tuple of `(success, rows, error_message)`.
-
-        """
-        try:
-            rows = await self.execute_query_async(query, params)
-        except self.error_classes + (DatabaseExecutionError,) as e:
-            cause = e.cause if isinstance(e, DatabaseExecutionError) and e.cause is not None else e
-            return (False, [], str(cause))
-        else:
-            return (True, rows, None)
 
     async def execute_query_async(
         self,
         query: str,
-        params: tuple[object, ...] | None = None,
+        params: Sequence[JSONPrimitive] | None = None,
     ) -> list[tuple[JSONPrimitive, ...]]:
         """Execute a PostgreSQL query asynchronously via `asyncpg`.
 
@@ -159,7 +194,7 @@ class PostgresAdapter(DatabaseAdapter):
 
         """
         try:
-            async_conn: Any = await self.connect_async()
+            async_conn = await self.connect_async()
             query_params = params or ()
             records = await async_conn.fetch(query, *query_params)
             return [tuple(r.values()) for r in records]
@@ -168,33 +203,5 @@ class PostgresAdapter(DatabaseAdapter):
             logger.debug("Async Query execution failed: %s", e)
             raise DatabaseExecutionError(str(e), cause=e) from e
 
-    async def close_async(self) -> None:
-        """Close the cached asynchronous `asyncpg` connection and await any pending close tasks."""
-        if self._closing_tasks:
-            import asyncio
 
-            pending = list(self._closing_tasks)
-            self._closing_tasks.clear()
-            await asyncio.gather(*pending, return_exceptions=True)
-        cached = getattr(self, "_async_conn", None)
-        self._async_conn = None
-        if cached is not None:
-            await cached.close()
-
-    def close(self) -> None:
-        """Close the synchronous database connection and safely track or close cached async state."""
-        cached = getattr(self, "_async_conn", None)
-        self._async_conn = None
-        if cached is not None and hasattr(cached, "close"):
-            import asyncio
-            from contextlib import suppress
-
-            try:
-                loop = asyncio.get_running_loop()
-                task = loop.create_task(cached.close())
-                self._closing_tasks.add(task)
-                task.add_done_callback(self._closing_tasks.discard)
-            except RuntimeError:
-                with suppress(RuntimeError, OSError):
-                    asyncio.run(cached.close())
-        super().close()
+__all__ = ["AsyncpgModuleProtocol", "PostgresAdapter", "Psycopg2ModuleProtocol"]

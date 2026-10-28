@@ -1,5 +1,7 @@
 """Unit and behavioral tests for gemma4 config."""
 
+from __future__ import annotations
+
 from jax.sharding import PartitionSpec
 
 from tests.conftest import requires_jax
@@ -16,6 +18,7 @@ from gemma_4_sql.backends.jax.gemma4.config import (
     VisionConfig,
     VisionShardConfig,
     _make_spec,
+    resolve_gemma4_config,
 )
 
 
@@ -96,10 +99,26 @@ def test_model_config_presets() -> None:
     assert ModelConfigPresets.gemma4_31b(use_fsdp=True, use_tp=True).num_hidden_layers == 60
 
     assert ModelConfigPresets.from_preset("gemma-4-tiny").num_hidden_layers == 1
+    assert ModelConfigPresets.from_preset("gemma-4-tiny", use_fsdp=True, use_tp=True).num_hidden_layers == 1
     assert ModelConfigPresets.from_preset("google/gemma-4-31B").num_hidden_layers == 60
     assert ModelConfigPresets.from_preset("google/gemma-4-26B-A4B").num_hidden_layers == 30
     assert ModelConfigPresets.from_preset("google/gemma-4-E4B").num_hidden_layers == 42
     assert ModelConfigPresets.from_preset("google/gemma-4-E2B").num_hidden_layers == 35
+
+
+def test_resolve_gemma4_config() -> None:
+    """Verify resolve_gemma4_config handles both from_preset and gemma4_e2b fallback."""
+    assert resolve_gemma4_config(ModelConfig, "google/gemma-4-E4B").num_hidden_layers == 42
+
+    class _OnlyE2B:
+        """Stub factory supporting only gemma4_e2b."""
+
+        @classmethod
+        def gemma4_e2b(cls) -> ModelConfig:
+            """Return E2B ModelConfig."""
+            return ModelConfig.gemma4_e2b()
+
+    assert resolve_gemma4_config(_OnlyE2B, "google/gemma-4-E4B").num_hidden_layers == 35
 
 
 def test_model_config() -> None:

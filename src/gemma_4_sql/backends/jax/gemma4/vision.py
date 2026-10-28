@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import Array
+from jax.sharding import PartitionSpec
 
 from .config import ModelConfig, VisionConfig
 from .layers import Gemma4RMSNorm, make_embed, make_linear
@@ -66,8 +67,8 @@ class SiglipAttention(nnx.Module):
         self.num_heads = config.num_attention_heads
         self.head_dim = config.hidden_size // config.num_attention_heads
         (hs, _shd) = (config.hidden_size, config.shd_cfg)
-        km: dict[str, object] = {}
-        bm: dict[str, object] = {}
+        km: dict[str, PartitionSpec | str | None] = {}
+        bm: dict[str, PartitionSpec | str | None] = {}
         self.q_proj = make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
         self.k_proj = make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
         self.v_proj = make_linear(hs, hs, kernel_metadata=km, bias_metadata=bm, rngs=rngs)
@@ -184,7 +185,7 @@ class Gemma4MultimodalEmbedder(nnx.Module):
 
         """
         if config.audio_config:
-            multimodal_hidden_size = getattr(config.audio_config, "output_proj_dims", config.audio_config.hidden_size)
+            multimodal_hidden_size = config.audio_config.output_proj_dims
             eps = config.audio_config.rms_norm_eps
         else:
             multimodal_hidden_size = config.hidden_size
@@ -280,8 +281,7 @@ class Gemma4MultiModalProjector(nnx.Module):
     Pools patch tokens using position-based weighted averaging (matching the
     HuggingFace reference), then projects into the text model's hidden space.
 
-    Attributes
-    ----------
+    Attributes:
         mm_input_projection_weight: Weight matrix (vision_hidden, text_hidden).
         mm_soft_emb_norm: RMSNorm applied to pooled patch embeddings.
         patches_per_img: Number of patches along one spatial dimension.
@@ -316,14 +316,12 @@ class Gemma4MultiModalProjector(nnx.Module):
         self.mm_soft_emb_norm = Gemma4RMSNorm(vhs, eps=config.vision_config.layer_norm_eps, dtype=config.dtype, rngs=rngs)
 
     def __call__(self, vision_outputs: Array) -> Array:
-        """Projects and pools the vision outputs.
+        """Project and pool the vision outputs.
 
         Args:
-        ----
             vision_outputs: Patch embeddings from the vision encoder (B, num_patches, hidden_size).
 
         Returns:
-        -------
             Projected image tokens (B, num_output_tokens, text_hidden_size).
 
         """

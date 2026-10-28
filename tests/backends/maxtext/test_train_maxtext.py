@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
+import jax
+import jax.numpy as jnp
+import optax
 import pytest
 
 import gemma_4_sql.backends.maxtext.train as train_module
@@ -22,54 +25,45 @@ class TinyStatelessModel:
     def __init__(self, _model_name: str = "tiny") -> None:
         """Initialize stateless model stub."""
 
-    def init(self, _rng: Any, _inputs: Any) -> dict[str, Any]:
+    def init(self, _rng: jax.Array | None, _inputs: jax.Array | None) -> dict[str, jax.Array]:
         """Initialize embedding and output head arrays."""
-        import jax.numpy as jnp
-
         return {
             "embed": jnp.ones((16, 4), dtype=jnp.float32) * 0.1,
             "head": jnp.ones((4, 16), dtype=jnp.float32) * 0.1,
         }
 
-    def apply(self, params: dict[str, Any], inputs: Any) -> Any:
+    def apply(self, params: Mapping[str, jax.Array], inputs: jax.Array) -> jax.Array:
         """Project token embeddings to vocabulary logits."""
-        import jax.numpy as jnp
-
         emb = jnp.take(params["embed"], inputs, axis=0)
         return jnp.dot(emb, params["head"])
 
 
 def test_real_maxtext_loss_and_train_step() -> None:
     """Verify _loss_fn, _get_train_step_fn, and _run_training_epochs execute real JAX/Optax gradient updates."""
-    import jax.numpy as jnp
-    import optax
-
     model = TinyStatelessModel()
     params = model.init(None, None)
-    batch: dict[str, Any] = {
+    batch: dict[str, jax.Array] = {
         "inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
         "targets": jnp.array([[2, 3, 4]], dtype=jnp.int32),
     }
 
-    model_any: Any = model
-    params_any: Any = params
-    loss = train_module._loss_fn(model_any, params_any, batch)
+    loss = train_module._loss_fn(model, params, batch)
     assert float(loss) > 0.0
 
     optimizer = optax.adamw(1e-2)
     opt_state = optimizer.init(params)
-    step_fn = train_module._get_train_step_fn(model_any, optimizer)
+    step_fn = train_module._get_train_step_fn(model, optimizer)
 
-    state: Any = TrainerState(
+    state: TrainerState[TinyStatelessModel, dict[str, jax.Array], optax.OptState, dict[str, jax.Array]] = TrainerState(
         dataloader=[batch],
         epochs=1,
         train_step=step_fn,
         params=params,
         opt_state=opt_state,
     )
-    new_params: Any
     new_params, _new_opt_state, final_loss = train_module._run_training_epochs(state)
     assert final_loss > 0.0
+    assert new_params is not None
     assert not jnp.allclose(new_params["head"], params["head"])
 
 
@@ -77,7 +71,7 @@ def test_get_train_step_fn_without_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _get_train_step_fn returns un-jitted train_step when jax is None."""
     monkeypatch.setattr(train_module, "jax", None)
     step_fn = train_module._get_train_step_fn(MagicMock(), MagicMock())
-    assert getattr(step_fn, "__name__", "") == "train_step"
+    assert step_fn.__name__ == "train_step"  # ty: ignore[unresolved-attribute]
 
 
 def test_initialize_jax_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,8 +96,8 @@ def test_save_maxtext_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(train_module, "ocp", mock_ocp)
 
     ckpt_dir = tmp_path / "ckpt"
-    p_stub: Any = {"p": 1}
-    s_stub: Any = {"s": 1}
+    p_stub: dict[str, int] = {"p": 1}
+    s_stub: dict[str, int] = {"s": 1}
     res = train_module.save_maxtext_checkpoint(ckpt_dir, 1, p_stub, s_stub)
     assert res == ckpt_dir.resolve()
     mock_ocp.CheckpointManager.assert_called_once()
@@ -119,13 +113,11 @@ def test_save_maxtext_checkpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
 def test_execute_train_local_and_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _execute_train runs real JAX/Optax updates with TinyStatelessModel in local mode and supports distributed Gin mode."""
-    import jax.numpy as jnp
-
     monkeypatch.setattr(train_module, "Gemma4Model", TinyStatelessModel)
     monkeypatch.setattr(train_module, "maxtext_train", MagicMock(main=MagicMock(return_value=0.0)))
     monkeypatch.setattr(train_module, "ocp", MagicMock())
 
-    batch: dict[str, Any] = {
+    batch: dict[str, jax.Array] = {
         "inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
         "targets": jnp.array([[2, 3, 4]], dtype=jnp.int32),
     }

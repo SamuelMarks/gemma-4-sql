@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import NoReturn
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,9 +22,13 @@ from tests.conftest import requires_mlx
 pytestmark = requires_mlx
 
 
+class _DummySentinel:
+    """Sentinel stub for loaded MLX model and tokenizer."""
+
+
 def test_mlx_serve_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify mlx serve model behavior."""
-    monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda name: (object(), object()))
+    monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda _name: (_DummySentinel(), _DummySentinel()))  # pyright: ignore[reportUnknownLambdaType]
     res = serve_model("dummy_mlx_model", port=8080, max_batch_size=128)
     assert res["status"] == "running_mlx_serve"
     assert res["backend"] == "mlx"
@@ -77,14 +82,14 @@ def test_generate_query_error() -> None:
 
 def test_batch_generate_queries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify batch generate queries behavior."""
-    monkeypatch.setattr(mlx_serve, "_generate_query", lambda *_a, **_k: "SELECT 1")
+    monkeypatch.setattr(mlx_serve, "_generate_query", lambda *_a, **_k: "SELECT 1")  # pyright: ignore[reportUnknownLambdaType]
     res = _batch_generate_queries(["query1", "query2"])
     assert res == ["SELECT 1", "SELECT 1"]
 
 
 def test_app_factory(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify app factory behavior."""
-    monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda name: (object(), object()))
+    monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda _name: (_DummySentinel(), _DummySentinel()))  # pyright: ignore[reportUnknownLambdaType]
     app = _app_factory("dummy_model")
     assert app is not None
 
@@ -120,15 +125,21 @@ def test_load_mlx_model_cache_and_branches(monkeypatch: pytest.MonkeyPatch) -> N
 def test_app_factory_startup_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify app factory startup error behavior."""
 
-    def mock_load_mlx_model(name: Any) -> Any:
+    def mock_load_mlx_model(_name: str) -> NoReturn:
         """Provide mock load mlx model test helper."""
         raise OSError("simulated OS error")
 
     monkeypatch.setattr(mlx_serve, "_load_mlx_model", mock_load_mlx_model)
     monkeypatch.setattr(mlx_serve, "mx", "mock_mx")
 
-    def mock_create_common_app(backend_name: Any, model_name: Any, startup_callback: Any, **kwargs: Any) -> str:
+    def mock_create_common_app(
+        backend_name: str,
+        model_name: str,
+        startup_callback: Callable[[], None],
+        **_kwargs: Callable[..., str | list[str]] | float,
+    ) -> str:
         """Provide mock create common app test helper."""
+        _ = (backend_name, model_name)
         startup_callback()
         return "app"
 

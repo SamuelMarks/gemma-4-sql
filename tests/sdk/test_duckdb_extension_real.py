@@ -3,39 +3,55 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import NoReturn
 
+import duckdb
 import pytest
 
 from gemma_4_sql.sdk.duckdb_extension import embed_in_duckdb
+from gemma_4_sql.type_hints import InferenceResultDict, JSONValue
 from tests.conftest import requires_duckdb
 
 pytestmark = requires_duckdb
 
 
 class MockBackendForDuckDB:
-    """Mock backend that returns a query matching the prompt."""
+    """Mock backend that verifies schema DDL introspection and returns a count query against `test`."""
 
-    def generate_sql(self, _model_name: str, _prompt: str, **_kwargs: Any) -> dict[str, Any]:
-        """Generate SQL query.
+    def generate_sql(self, model_name: str, prompt: str, **_kwargs: JSONValue) -> InferenceResultDict:
+        """Generate SQL query against the introspected `test` table.
 
         Args:
-            _model_name: Target model name.
-            _prompt: Input prompt.
+            model_name: Target model name.
+            prompt: Input prompt containing RAG schema context.
             **_kwargs: Optional kwargs.
 
         Returns:
             Dictionary with generated SQL.
+
         """
-        return {"sql": "SELECT 1;", "confidence_score": 0.95}
+        assert "Table: test" in prompt
+        return {
+            "backend": "test-backend",
+            "model": model_name,
+            "prompt": prompt,
+            "sql": "SELECT COUNT(*) FROM test;",
+            "beam_width": 3,
+            "confidence_score": 0.95,
+            "status": "success",
+        }
 
 
-def test_duckdb_real_integration(monkeypatch: pytest.MonkeyPatch, in_memory_duckdb: Any) -> None:
+def test_duckdb_real_integration(
+    monkeypatch: pytest.MonkeyPatch,
+    in_memory_duckdb: duckdb.DuckDBPyConnection,
+) -> None:
     """Test real DuckDB in-memory database integration with ask_gemma UDF.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
         in_memory_duckdb: Shared in-memory DuckDB connection fixture.
+
     """
     import duckdb as real_duckdb
 
@@ -43,7 +59,7 @@ def test_duckdb_real_integration(monkeypatch: pytest.MonkeyPatch, in_memory_duck
 
     monkeypatch.setattr("gemma_4_sql.sdk.duckdb_extension.duckdb", real_duckdb)
     monkeypatch.setattr("gemma_4_sql.sdk.adapters.duckdb_adapter.duckdb", real_duckdb)
-    monkeypatch.setattr(ag, "get_backend", lambda _name: MockBackendForDuckDB())
+    monkeypatch.setattr(ag, "get_backend", lambda _name: MockBackendForDuckDB())  # pyright: ignore[reportUnknownLambdaType]
 
     in_memory_duckdb.execute("CREATE TABLE test (a INT);")
     in_memory_duckdb.execute("INSERT INTO test VALUES (1), (2), (3);")
@@ -55,16 +71,21 @@ def test_duckdb_real_integration(monkeypatch: pytest.MonkeyPatch, in_memory_duck
     val = str(res[0][0])
     parsed = json.loads(val)
 
-    assert "success" in parsed
-    assert "1" in parsed["generated_sql"]
+    assert parsed["success"] is True
+    assert parsed["generated_sql"] == "SELECT COUNT(*) FROM test;"
+    assert parsed["results"] == [[3]]
 
 
-def test_duckdb_udf_error_handling(monkeypatch: pytest.MonkeyPatch, in_memory_duckdb: Any) -> None:
+def test_duckdb_udf_error_handling(
+    monkeypatch: pytest.MonkeyPatch,
+    in_memory_duckdb: duckdb.DuckDBPyConnection,
+) -> None:
     """Test ask_gemma error handling when query execution fails.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
         in_memory_duckdb: Shared in-memory DuckDB connection fixture.
+
     """
     import duckdb as real_duckdb
 
@@ -73,7 +94,7 @@ def test_duckdb_udf_error_handling(monkeypatch: pytest.MonkeyPatch, in_memory_du
     class BadBackend:
         """Backend that raises an error."""
 
-        def generate_sql(self, _model_name: str, _prompt: str, **_kwargs: Any) -> dict[str, Any]:
+        def generate_sql(self, _model_name: str, _prompt: str, **_kwargs: JSONValue) -> NoReturn:
             """Raise RuntimeError.
 
             Args:
@@ -83,12 +104,13 @@ def test_duckdb_udf_error_handling(monkeypatch: pytest.MonkeyPatch, in_memory_du
 
             Raises:
                 RuntimeError: Backend failure.
+
             """
             raise RuntimeError("Model generation failed")
 
     monkeypatch.setattr("gemma_4_sql.sdk.duckdb_extension.duckdb", real_duckdb)
     monkeypatch.setattr("gemma_4_sql.sdk.adapters.duckdb_adapter.duckdb", real_duckdb)
-    monkeypatch.setattr(ag, "get_backend", lambda _name: BadBackend())
+    monkeypatch.setattr(ag, "get_backend", lambda _name: BadBackend())  # pyright: ignore[reportUnknownLambdaType]
 
     embed_in_duckdb(in_memory_duckdb, model_name="bad-model", backend="test-backend")
 

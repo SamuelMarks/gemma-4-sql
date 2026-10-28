@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import logging
-import re
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
-from gemma_4_sql.type_hints import FewShotPromptResultDict, FewShotResultDict, JSONValue
+from gemma_4_sql.sdk.sql_lexer import extract_word_tokens
+from gemma_4_sql.type_hints import (
+    FewShotPromptResultDict,
+    FewShotResultDict,
+    JSONValue,
+    extract_float_kwarg,
+    extract_int_kwarg,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +41,11 @@ def select_relevant_examples(
     if not example_pool:
         return []
 
-    prompt_words = set(re.findall(r"\b\w+\b", prompt.lower()))
+    prompt_words = set(extract_word_tokens(prompt))
 
     def _score(ex: dict[str, str]) -> float:
         """Compute keyword overlap fraction between example input and prompt."""
-        ex_words = set(re.findall(r"\b\w+\b", ex.get("input", "").lower()))
+        ex_words = set(extract_word_tokens(ex.get("input", "")))
         overlap = len(prompt_words.intersection(ex_words))
         return float(overlap) / max(1.0, float(len(ex_words)))
 
@@ -63,6 +69,7 @@ def build_few_shot_prompt(
     prompt: str,
     examples: list[dict[str, str]],
     backend: str = DEFAULT_BACKEND,
+    *,
     top_k: int | None = None,
     max_tokens: int = 2048,
     **_kwargs: JSONValue,
@@ -82,10 +89,22 @@ def build_few_shot_prompt(
         A structured `FewShotPromptResultDict` containing the formatted prompt.
 
     """
+    from gemma_4_sql.sdk.registry import get_backend
+
+    get_backend(backend)
     if top_k is not None and top_k > 0:
         active_examples = select_relevant_examples(prompt, examples, top_k=top_k, max_tokens=max_tokens)
+    elif examples:
+        char_budget = max_tokens * 4
+        active_examples = []
+        current_chars = 0
+        for ex in examples:
+            ex_chars = len(ex.get("input", "")) + len(ex.get("output", "")) + 20
+            if current_chars + ex_chars <= char_budget:
+                active_examples.append(ex)
+                current_chars += ex_chars
     else:
-        active_examples = examples
+        active_examples = []
 
     status = f"success_{backend}_few_shot"
     nl = chr(10)
@@ -142,8 +161,10 @@ def generate_few_shot_sql(
 
     backend_impl = get_backend(backend)
     call_kwargs = dict(kwargs)
-    beam_width = int(str(call_kwargs.pop("beam_width", 3))) if "beam_width" in call_kwargs else 3
-    max_length = int(str(call_kwargs.pop("max_length", 50))) if "max_length" in call_kwargs else 50
+    beam_width = extract_int_kwarg(call_kwargs, "beam_width", 3)
+    max_length = extract_int_kwarg(call_kwargs, "max_length", 50)
+    call_kwargs.pop("beam_width", None)
+    call_kwargs.pop("max_length", None)
     gen_res = backend_impl.generate_sql(
         model_name,
         few_shot_prompt,
@@ -158,9 +179,9 @@ def generate_few_shot_sql(
         "prompt": prompt,
         "few_shot_prompt": few_shot_prompt,
         "sql": str(gen_res.get("sql", "")),
-        "confidence_score": float(gen_res.get("confidence_score", 0.0)),
+        "confidence_score": extract_float_kwarg(gen_res, "confidence_score", 0.0),
         "status": str(gen_res.get("status", "success")),
-        "num_examples": int(prompt_res.get("num_examples", 0)),
+        "num_examples": extract_int_kwarg(prompt_res, "num_examples", 0),
     }
 
 

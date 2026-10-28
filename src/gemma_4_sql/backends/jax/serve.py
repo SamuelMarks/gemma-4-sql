@@ -52,7 +52,8 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
             """Delegate single-prompt generation to `jax.inference.generate_sql`."""
             from gemma_4_sql.backends.jax.inference import generate_sql
 
-            return dict(generate_sql(model_name=model_name, prompt=prompt))
+            res = generate_sql(model_name=model_name, prompt=prompt)
+            return {k: v for k, v in res.items() if isinstance(v, (str, int, float, bool)) or v is None}
 
         return create_backend_serve_app(
             backend_name="jax",
@@ -70,7 +71,6 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
-        missing_deps=False,
         app_factory=_app_factory,
     )
 

@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import collections
 import collections.abc
+import decimal
 import logging
 import math
-from collections.abc import Sequence
-from typing import Any, Self
+import sqlite3
+import types
+from collections.abc import Mapping, Sequence
+from typing import Self
 
-from gemma_4_sql.exceptions import ConfigurationError
-from gemma_4_sql.sdk.adapters.base import DatabaseAdapter
+from gemma_4_sql.exceptions import ConfigurationError, SQLSafetyViolationError
+from gemma_4_sql.sdk.adapters.base import DatabaseAdapter, DBKwargValue
 from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
 from gemma_4_sql.sdk.adapters.postgres_adapter import PostgresAdapter
 from gemma_4_sql.sdk.adapters.snowflake_adapter import SnowflakeAdapter
@@ -22,10 +25,17 @@ from gemma_4_sql.sdk.sql_lexer import (
 from gemma_4_sql.sdk.sql_lexer import (
     validate_readonly_sql,
 )
-from gemma_4_sql.type_hints import JSONPrimitive
+from gemma_4_sql.type_hints import (
+    AsyncDatabaseConnectionProtocol,
+    DatabaseConnectionProtocol,
+    JSONPrimitive,
+    JSONValue,
+)
 
 logger = logging.getLogger(__name__)
-_ADAPTERS: dict[str, type[DatabaseAdapter]] = {
+type _DialectAdapterType = type[SQLiteAdapter | PostgresAdapter | SnowflakeAdapter | DuckDBAdapter | DatabaseAdapter[DatabaseConnectionProtocol, AsyncDatabaseConnectionProtocol]]
+
+_ADAPTERS: dict[str, _DialectAdapterType] = {
     "sqlite": SQLiteAdapter,
     "postgresql": PostgresAdapter,
     "snowflake": SnowflakeAdapter,
@@ -45,15 +55,15 @@ class LiveDatabaseEngine:
         db_path: str = ":memory:",
         ddl: str | None = None,
         db_type: str = "sqlite",
-        **kwargs: object,
+        **kwargs: JSONValue | Mapping[str, DBKwargValue] | DatabaseConnectionProtocol | AsyncDatabaseConnectionProtocol,
     ) -> None:
         """Initialize the LiveDatabaseEngine.
 
         Args:
             db_path: The file path or URI to the database.
             ddl: Optional Data Definition Language (DDL) string to initialize schema.
-            db_type: The database dialect ('sqlite', 'postgresql', 'snowflake', 'duckdb').
-            **kwargs: Optional keyword arguments (`db_kwargs`, `read_only`).
+            db_type: The database dialect (`'sqlite'`, `'postgresql'`, `'snowflake'`, `'duckdb'`).
+            **kwargs: Optional keyword arguments (`db_kwargs`, `read_only`, `defer_ddl`).
 
         Raises:
             ConfigurationError: If an unsupported `db_type` is provided.
@@ -62,19 +72,19 @@ class LiveDatabaseEngine:
         self.db_path = db_path
         self.db_type = db_type.lower()
         raw_db_kwargs = kwargs.get("db_kwargs")
-        self.db_kwargs: dict[str, object] = dict(raw_db_kwargs) if isinstance(raw_db_kwargs, collections.abc.Mapping) else {}
+        self.db_kwargs: dict[str, DBKwargValue] = dict(raw_db_kwargs) if isinstance(raw_db_kwargs, collections.abc.Mapping) else {}
         self.read_only: bool = bool(kwargs.get("read_only", True))
         adapter_cls = _ADAPTERS.get(self.db_type)
         if adapter_cls is None:
             msg = f"Unsupported db_type: {self.db_type}"
             raise ConfigurationError(msg)
-        self.adapter: DatabaseAdapter = adapter_cls(self.db_path, self.db_kwargs, read_only=self.read_only)
+        self.adapter = adapter_cls(self.db_path, self.db_kwargs, read_only=self.read_only)
         self.conn = self.adapter.conn
         self._pending_ddl: str | None = ddl if kwargs.get("defer_ddl") else None
         if ddl and not kwargs.get("defer_ddl"):
             self.setup_schema(ddl)
 
-    def connect(self) -> object:
+    def connect(self) -> DatabaseConnectionProtocol | sqlite3.Connection:
         """Connect to the underlying database synchronously.
 
         Returns:
@@ -83,7 +93,7 @@ class LiveDatabaseEngine:
         """
         return self.adapter.connect()
 
-    async def connect_async(self) -> object:
+    async def connect_async(self) -> AsyncDatabaseConnectionProtocol | DatabaseConnectionProtocol:
         """Asynchronously connect to the underlying database and apply any deferred DDL.
 
         Returns:
@@ -129,13 +139,13 @@ class LiveDatabaseEngine:
     def execute_with_feedback(
         self,
         query: str,
-        params: tuple[object, ...] | None = None,
+        params: Sequence[JSONPrimitive] | None = None,
     ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Execute a query and return execution success status, results, and error message.
 
         Args:
             query: SQL query string to execute.
-            params: Optional tuple of query parameters.
+            params: Optional sequence of query parameters.
 
         Returns:
             Tuple of `(success, fetched_rows, optional_error_message)`.
@@ -144,19 +154,19 @@ class LiveDatabaseEngine:
         try:
             self._validate_safety(query)
             return self.adapter.execute_with_feedback(query, params)
-        except PermissionError as e:
+        except SQLSafetyViolationError as e:
             return (False, [], str(e))
 
     async def execute_with_feedback_async(
         self,
         query: str,
-        params: tuple[object, ...] | None = None,
+        params: Sequence[JSONPrimitive] | None = None,
     ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
         """Asynchronously execute a query and return execution success status, results, and error message.
 
         Args:
             query: SQL query string to execute.
-            params: Optional tuple of query parameters.
+            params: Optional sequence of query parameters.
 
         Returns:
             Tuple of `(success, fetched_rows, optional_error_message)`.
@@ -165,19 +175,19 @@ class LiveDatabaseEngine:
         try:
             self._validate_safety(query)
             return await self.adapter.execute_with_feedback_async(query, params)
-        except PermissionError as e:
+        except SQLSafetyViolationError as e:
             return (False, [], str(e))
 
     def execute_query(
         self,
         query: str,
-        params: tuple[object, ...] | None = None,
+        params: Sequence[JSONPrimitive] | None = None,
     ) -> list[tuple[JSONPrimitive, ...]]:
         """Execute a query synchronously and return the fetched results.
 
         Args:
             query: SQL query string to execute.
-            params: Optional tuple of query parameters.
+            params: Optional sequence of query parameters.
 
         Returns:
             List of fetched result tuples.
@@ -193,13 +203,13 @@ class LiveDatabaseEngine:
     async def execute_query_async(
         self,
         query: str,
-        params: tuple[object, ...] | None = None,
+        params: Sequence[JSONPrimitive] | None = None,
     ) -> list[tuple[JSONPrimitive, ...]]:
         """Asynchronously execute a query and return the fetched results.
 
         Args:
             query: SQL query string to execute.
-            params: Optional tuple of query parameters.
+            params: Optional sequence of query parameters.
 
         Returns:
             List of fetched result tuples.
@@ -224,10 +234,8 @@ class LiveDatabaseEngine:
         """
         return _has_top_level_order_by_lexer(query)
 
-    _has_top_level_order_by = has_top_level_order_by
-
-    def normalize_row(self, row: tuple[JSONPrimitive, ...]) -> tuple[JSONPrimitive, ...]:
-        """Normalize row values to handle float tolerance and `NULL`/`NaN` equivalents.
+    def normalize_row(self, row: tuple[JSONPrimitive | decimal.Decimal, ...]) -> tuple[JSONPrimitive, ...]:
+        """Normalize row values to handle float/Decimal tolerance and `NULL`/`NaN` equivalents.
 
         Args:
             row: A tuple of raw database column values.
@@ -237,19 +245,20 @@ class LiveDatabaseEngine:
 
         """
         normalized: list[JSONPrimitive] = []
-        for val in row:
+        for raw_val in row:
+            val: JSONPrimitive = float(raw_val) if isinstance(raw_val, decimal.Decimal) else raw_val
             if val is None or (isinstance(val, float) and math.isnan(val)):
                 normalized.append(None)
             elif isinstance(val, float):
                 if val == 0.0:
                     normalized.append(0.0)
+                elif math.isinf(val):
+                    normalized.append(val)
                 else:
                     normalized.append(round(val, -math.floor(math.log10(abs(val))) + 4))
             else:
                 normalized.append(val)
         return tuple(normalized)
-
-    _normalize_row = normalize_row
 
     def compare_results(
         self,
@@ -291,8 +300,6 @@ class LiveDatabaseEngine:
             return norm_pred == norm_truth
 
         return collections.Counter(norm_pred) == collections.Counter(norm_truth)
-
-    _compare_results = compare_results
 
     def compare_queries(self, predicted_sql: str, ground_truth_sql: str) -> bool:
         """Compare the execution results of two SQL queries synchronously.
@@ -340,11 +347,7 @@ class LiveDatabaseEngine:
 
     async def close_async(self) -> None:
         """Asynchronously close the underlying database connection."""
-        close_async_fn = getattr(self.adapter, "close_async", None)
-        if callable(close_async_fn):
-            res: Any = close_async_fn()
-            await res
-        self.adapter.close()
+        await self.adapter.close_async()
 
     def close(self) -> None:
         """Close the underlying database connection."""
@@ -354,7 +357,12 @@ class LiveDatabaseEngine:
         """Enter synchronous context manager."""
         return self
 
-    def __exit__(self, _exc_type: object, _exc_val: object, _exc_tb: object) -> None:
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: types.TracebackType | None,
+    ) -> None:
         """Exit synchronous context manager and close database connection."""
         self.close()
 
@@ -362,7 +370,12 @@ class LiveDatabaseEngine:
         """Enter asynchronous context manager."""
         return self
 
-    async def __aexit__(self, _exc_type: object, _exc_val: object, _exc_tb: object) -> None:
+    async def __aexit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: types.TracebackType | None,
+    ) -> None:
         """Exit asynchronous context manager and close database connection."""
         await self.close_async()
 

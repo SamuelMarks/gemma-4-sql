@@ -2,34 +2,99 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any
+from typing import Protocol, SupportsFloat, runtime_checkable
 
-from gemma_4_sql.backends.common_dpo import run_dpo_wrapper
+from gemma_4_sql.backends.common_dpo import (
+    ArithmeticTensorProtocol,
+    gather_jax_sequence_logps,
+    run_dpo_wrapper,
+)
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import DPOConfig, DPOResultDict, ETLConfig, MaxTextCausalLMProtocol, MaxTextTrainerState, TensorType, TrainerState
+from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
+from gemma_4_sql.type_hints import (
+    DPOConfig,
+    DPOResultDict,
+    ETLConfig,
+    JaxArrayProtocol,
+    MaxTextCausalLMProtocol,
+    MaxTextTrainerState,
+    PyTreeNode,
+    TensorProtocol,
+    TensorType,
+    TrainerState,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _StatelessApplyModelProtocol[ValT](Protocol):
+    """Protocol for a stateless Flax/MaxText model exposing `.apply(params, inputs)`."""
+
+    def apply(
+        self,
+        params: Mapping[str, ValT],
+        inputs: ValT,
+        /,
+    ) -> ValT:
+        """Apply model parameters to `inputs`."""
+        ...
+
+
+type MaxTextDPOModel[ValT] = _StatelessApplyModelProtocol[ValT] | MaxTextCausalLMProtocol | str
+
+
+@runtime_checkable
+class _OptaxOptimizerProtocol[OptInputT, OptStateT](Protocol):
+    """Protocol for an Optax `GradientTransformation` supporting `.init(...)` and `.update(...)`."""
+
+    def init(self, params: OptInputT, /) -> OptStateT:
+        """Initialize optimizer state from parameters."""
+        ...
+
+    def update(
+        self,
+        updates: OptInputT,
+        state: OptStateT,
+        params: OptInputT | None = None,
+        /,
+    ) -> tuple[OptInputT, OptStateT]:
+        """Compute parameter updates and next optimizer state."""
+        ...
+
+
+type MaxTextDPOStepCallable[ParamsT, OptStateT, BatchT] = Callable[
+    [
+        ParamsT,
+        ParamsT,
+        OptStateT,
+        BatchT,
+    ],
+    tuple[ParamsT, OptStateT, SupportsFloat | float],
+]
+
 
 jax = optional_import("jax")
 jnn = optional_import("jax.nn")
 jnp = optional_import("jax.numpy")
 optax = optional_import("optax")
-Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
 
 
-def dpo_loss(
-    policy_chosen_logps: TensorType,
-    policy_rejected_logps: TensorType,
-    ref_chosen_logps: TensorType,
-    ref_rejected_logps: TensorType,
+def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
+    policy_chosen_logps: TensorT,
+    policy_rejected_logps: TensorT,
+    ref_chosen_logps: TensorT,
+    ref_rejected_logps: TensorT,
     beta: float = 0.1,
-) -> tuple[object, object, object]:
+) -> tuple[TensorT | ArithmeticTensorProtocol | float, TensorT, TensorT]:
     """Compute the DPO loss for MaxText using JAX under the hood.
 
     Args:
@@ -46,12 +111,12 @@ def dpo_loss(
     return jax_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta)
 
 
-def _compute_logps(
-    model: MaxTextCausalLMProtocol,
-    params: dict[str, TensorType],
-    inputs: TensorType,
-    labels: TensorType,
-) -> TensorType:
+def _compute_logps[ValT: TensorType | SupportsFloat](
+    model: MaxTextDPOModel[ValT],
+    params: Mapping[str, ValT],
+    inputs: ValT,
+    labels: ValT,
+) -> ValT:
     """Compute sequence log probabilities from logits and target labels.
 
     Applies `jax.nn.log_softmax` over the vocabulary dimension, gathers log-probabilities
@@ -68,28 +133,23 @@ def _compute_logps(
         Summed non-padding log probability per sequence.
 
     """
-    logits: Any = model.apply(params, inputs)
-    ndim = getattr(logits, "ndim", 0)
-    if jnn is not None and jnp is not None and isinstance(ndim, int) and ndim >= 2 and hasattr(jnn, "log_softmax") and hasattr(jnp, "take_along_axis"):
-        log_probs = jnn.log_softmax(logits, axis=-1)
-        labels_expanded = jnp.expand_dims(labels, axis=-1)
-        selected_log_probs = jnp.squeeze(jnp.take_along_axis(log_probs, labels_expanded, axis=-1), axis=-1)
-        labels_any: Any = labels
-        mask = labels_any != 0
-        summed: TensorType = jnp.sum(selected_log_probs * mask, axis=-1)
-        return summed
-    fallback: TensorType = jnp.sum(logits * labels, axis=-1) if jnp is not None else logits
+    logits = model.apply(params, inputs)  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[unresolved-attribute, invalid-argument-type]
+    if jnn is not None and jnp is not None and isinstance(logits, JaxArrayProtocol) and logits.ndim >= 2:
+        with contextlib.suppress(AttributeError, TypeError):
+            summed: ValT = gather_jax_sequence_logps(jnn, jnp, logits, labels)  # pyright: ignore[reportArgumentType,reportAssignmentType]  # ty: ignore[invalid-assignment, invalid-argument-type]
+            return summed
+    fallback: ValT = jnp.sum(logits * labels, axis=-1) if jnp is not None else logits  # pyright: ignore[reportOperatorIssue,reportAssignmentType]  # ty: ignore[invalid-assignment, unsupported-operator]
     return fallback
 
 
-def _dpo_step_loss(
-    policy_model: MaxTextCausalLMProtocol,
-    policy_params: dict[str, TensorType],
-    ref_model: MaxTextCausalLMProtocol,
-    ref_params: dict[str, TensorType],
-    batch: Mapping[str, TensorType],
+def _dpo_step_loss[ValT: ArithmeticTensorProtocol](
+    policy_model: MaxTextDPOModel[ValT],
+    policy_params: Mapping[str, ValT],
+    ref_model: MaxTextDPOModel[ValT],
+    ref_params: Mapping[str, ValT],
+    batch: Mapping[str, ValT],
     beta: float,
-) -> object:
+) -> ValT | ArithmeticTensorProtocol | float:
     """Calculate single-step DPO loss.
 
     Args:
@@ -112,12 +172,12 @@ def _dpo_step_loss(
     return loss
 
 
-def _get_train_step_fn(
-    policy_model: MaxTextCausalLMProtocol,
-    ref_model: MaxTextCausalLMProtocol,
-    optimizer: object,
+def _get_train_step_fn[ValT: ArithmeticTensorProtocol, ParamsT, OptInputT, OptStateT, BatchT](
+    policy_model: MaxTextDPOModel[ValT],
+    ref_model: MaxTextDPOModel[ValT],
+    optimizer: _OptaxOptimizerProtocol[OptInputT, OptStateT],
     beta: float,
-) -> Callable[..., tuple[Any, Any, Any]]:
+) -> MaxTextDPOStepCallable[ParamsT, OptStateT, BatchT]:
     """Create a JIT-compiled train step function.
 
     Args:
@@ -132,11 +192,15 @@ def _get_train_step_fn(
     """
 
     def train_step(
-        policy_params: dict[str, TensorType],
-        ref_params: dict[str, TensorType],
-        opt_state: dict[str, TensorType],
-        batch: Mapping[str, TensorType],
-    ) -> tuple[Any, Any, Any]:
+        policy_params: ParamsT,
+        ref_params: ParamsT,
+        opt_state: OptStateT,
+        batch: BatchT,
+    ) -> tuple[
+        ParamsT,
+        OptStateT,
+        SupportsFloat | float,
+    ]:
         """Execute one optimization step.
 
         Args:
@@ -151,30 +215,33 @@ def _get_train_step_fn(
         """
 
         def _wrapper(
-            p: dict[str, TensorType],
-            r: dict[str, TensorType],
-            b: Mapping[str, TensorType],
-        ) -> object:
+            p: ParamsT,
+            r: ParamsT,
+            b: BatchT,
+        ) -> TensorType | ArithmeticTensorProtocol | float:
             """Compute DPO step loss for gradient differentiation."""
-            return _dpo_step_loss(policy_model, p, ref_model, r, b, beta)
+            return _dpo_step_loss(policy_model, p, ref_model, r, b, beta)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
-        opt_obj: Any = optimizer
+        assert jax is not None
+        assert optax is not None
         (loss, grads) = jax.value_and_grad(_wrapper)(policy_params, ref_params, batch)
-        (updates, new_opt_state) = opt_obj.update(grads, opt_state, policy_params)
-        updated_params = optax.apply_updates(policy_params, updates)
+        (updates, new_opt_state) = optimizer.update(grads, opt_state, policy_params)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        updated_params: ParamsT = optax.apply_updates(policy_params, updates)  # pyright: ignore[reportAssignmentType]
         return (updated_params, new_opt_state, loss)
 
-    if jax is not None and hasattr(jax, "jit"):
-        jit_fn: Callable[..., tuple[Any, Any, Any]] = jax.jit(train_step)
+    with contextlib.suppress(AttributeError, TypeError):
+        jit_fn: MaxTextDPOStepCallable[ParamsT, OptStateT, BatchT] = jax.jit(train_step)  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
         return jit_fn
     return train_step
 
 
-def _run_training_epochs(state: MaxTextTrainerState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> tuple[Any, Any, float]:
+def _run_training_epochs[ModelT, ParamsT, OptT, BatchT](
+    state: MaxTextTrainerState[ParamsT, OptT, BatchT] | TrainerState[ModelT, ParamsT, OptT, BatchT],
+) -> tuple[ParamsT | None, OptT | None, float]:
     """Run DPO training epochs for MaxText.
 
     Args:
-        state: MaxTextTrainerState containing dataloader and parameters.
+        state: `MaxTextTrainerState` containing dataloader and parameters.
 
     Returns:
         A 3-tuple of `(policy_params, opt_state, final_loss)`.
@@ -183,9 +250,9 @@ def _run_training_epochs(state: MaxTextTrainerState[Any, Any, Any] | TrainerStat
     policy_params = state.policy_params
     opt_state = state.opt_state
     step_fn = state.train_step
-    dataloader: Iterable[dict[str, TensorType]] = state.dataloader or ()
+    dataloader: Iterable[BatchT] = state.dataloader or ()
 
-    def process_batch(batch: dict[str, TensorType]) -> float:
+    def process_batch(batch: BatchT) -> float:
         """Process a single training batch.
 
         Args:
@@ -197,8 +264,17 @@ def _run_training_epochs(state: MaxTextTrainerState[Any, Any, Any] | TrainerStat
         """
         nonlocal policy_params, opt_state
         assert step_fn is not None
-        (policy_params, opt_state, loss) = step_fn(policy_params, state.ref_params, opt_state, batch)
-        return float(loss.item() if hasattr(loss, "item") else loss)
+        step_out: tuple[ParamsT | None, OptT | None, SupportsFloat | float] = step_fn(  # ty: ignore[invalid-assignment]
+            policy_params,
+            state.ref_params,
+            opt_state,
+            batch,
+        )  # pyright: ignore[reportAssignmentType]
+        policy_params, opt_state, loss = step_out
+        try:
+            return float(loss.item())  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        except (AttributeError, TypeError, ValueError):
+            return float(loss)
 
     final_loss = generic_run_training_epochs(state.epochs, dataloader, process_batch)
     return (policy_params, opt_state, final_loss)
@@ -229,6 +305,10 @@ def _execute_dpo(
         ValueError: If dataloader could not be constructed.
 
     """
+    assert jax is not None
+    assert jnp is not None
+    assert optax is not None
+    assert Gemma4Model is not None
     try:
         jax.distributed.initialize()
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:
@@ -239,13 +319,17 @@ def _execute_dpo(
     dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
     policy_params = policy_model.init(rng, dummy_input)
     ref_params = ref_model.init(rng, dummy_input)
-    optimizer = optax.adamw(learning_rate)
+    optimizer: _OptaxOptimizerProtocol[
+        Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]],
+        Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]],
+    ] = optax.adamw(learning_rate)
     opt_state = optimizer.init(policy_params)
     train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
-    dataloader: Any = data_dict.get("loader", None)
+    dataloader = data_dict.get("loader", None)
+    has_loader = isinstance(dataloader, Iterable)
 
-    if dataloader is None or not hasattr(dataloader, "__iter__"):
+    if not has_loader:
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
     (policy_params, opt_state, final_loss) = _run_training_epochs(
@@ -261,7 +345,7 @@ def _execute_dpo(
     return "completed", final_loss
 
 
-def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
+def run_dpo(config: DPOConfig, **kwargs: StatusValue) -> DPOResultDict:
     """Run DPO training loop for MaxText.
 
     Args:
@@ -284,3 +368,11 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
         lambda m, d, b, ep, lr, bs: _execute_dpo(m, d, b, ep, lr, batch_size=bs),
         **kwargs,
     )
+
+
+__all__ = [
+    "Gemma4Model",
+    "PyTreeNode",
+    "dpo_loss",
+    "run_dpo",
+]

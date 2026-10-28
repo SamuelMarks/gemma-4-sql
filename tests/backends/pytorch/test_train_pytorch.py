@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config, Gemma4ForCausalLM
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import TrainerState, TrainingConfig
+from gemma_4_sql.type_hints import TorchTrainerState, TrainingConfig
 from tests.conftest import requires_torch
 
 pytestmark = requires_torch
@@ -25,10 +25,8 @@ def _restore_train_mod(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(train_module, "Gemma4ForCausalLM", train_module.Gemma4ForCausalLM)
 
 
-def _make_tiny_native_model() -> Any:
+def _make_tiny_native_model() -> Gemma4ForCausalLM:
     """Create a minimal native Gemma4ForCausalLM instance for fast CPU training tests."""
-    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config, Gemma4ForCausalLM
-
     cfg = Gemma4Config(
         vocab_size=64,
         hidden_size=16,
@@ -60,13 +58,13 @@ def test_real_tiny_pytorch_training_step() -> None:
         "inputs": torch.tensor([[1, 2, 3, 4]], dtype=torch.long),
         "targets": torch.tensor([[2, 3, 4, 5]], dtype=torch.long),
     }
-    state: Any = TrainerState(
-        policy_model=model,
+    state = TorchTrainerState(
+        model=model,
         optimizer=optimizer,
         criterion=criterion,
         dataloader=[batch],
         epochs=2,
-        device=torch.device("cpu"),
+        device="cpu",
     )
     loss_val = train_module._run_training_epochs(state)
     assert isinstance(loss_val, float)
@@ -160,13 +158,13 @@ def test_run_training_epochs() -> None:
     tuple_model = TupleTinyLM()
     w_before = tuple_model.head.weight.detach().clone()
     opt1 = torch.optim.SGD(tuple_model.parameters(), lr=0.1)
-    state1: Any = TrainerState(
-        policy_model=tuple_model,
+    state1 = TorchTrainerState(
+        model=tuple_model,
         optimizer=opt1,
         criterion=torch.nn.CrossEntropyLoss(),
         dataloader=[batch],
         epochs=2,
-        device=torch.device("cpu"),
+        device="cpu",
     )
     loss1 = train_module._run_training_epochs(state1)
     assert loss1 > 0.0
@@ -175,13 +173,13 @@ def test_run_training_epochs() -> None:
     obj_model = ObjectTinyLM()
     w2_before = obj_model.head.weight.detach().clone()
     opt2 = torch.optim.SGD(obj_model.parameters(), lr=0.1)
-    state2: Any = TrainerState(
-        policy_model=obj_model,
+    state2 = TorchTrainerState(
+        model=obj_model,
         optimizer=opt2,
         criterion=torch.nn.CrossEntropyLoss(),
         dataloader=[batch],
         epochs=2,
-        device=torch.device("cpu"),
+        device="cpu",
     )
     loss2 = train_module._run_training_epochs(state2)
     assert loss2 > 0.0
@@ -190,35 +188,31 @@ def test_run_training_epochs() -> None:
 
 def test_wrap_model_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _wrap_model_distributed wraps models with DDP, FSDP, or returns unwrapped model."""
+    import gemma_4_sql.backends.pytorch.distributed as dist_mod
     import gemma_4_sql.backends.pytorch.train as train_module
 
-    with patch("importlib.import_module") as mock_import:
-        mock_ddp = MagicMock()
-        mock_import.return_value.DistributedDataParallel = mock_ddp
-        mock_torch = MagicMock()
-        mock_torch.cuda.is_available.return_value = True
-        monkeypatch.setattr(train_module, "torch", mock_torch)
-        m_stub: Any = "m"
-        train_module._wrap_model_distributed(m_stub, "ddp", 0)
-
-        mock_fsdp = MagicMock()
-        mock_import.return_value.FullyShardedDataParallel = mock_fsdp
-        train_module._wrap_model_distributed(m_stub, "fsdp", 0)
-
-        res = train_module._wrap_model_distributed(m_stub, "none", 0)
-        assert res == "m"
+    mock_mod = MagicMock()
+    monkeypatch.setattr(dist_mod, "optional_import", lambda _name: mock_mod)  # pyright: ignore[reportUnknownLambdaType]
+    mock_torch = MagicMock()
+    mock_torch.cuda.is_available.return_value = True
+    monkeypatch.setattr(train_module, "torch", mock_torch)
+    m_stub = "m"
+    train_module._wrap_model_distributed(m_stub, "ddp", 0)
+    train_module._wrap_model_distributed(m_stub, "fsdp", 0)
+    res = train_module._wrap_model_distributed(m_stub, "none", 0)
+    assert res == "m"
 
 
 def test_cleanup_distributed() -> None:
-    """Verify _cleanup_distributed destroys initialized process groups and ignores None."""
+    """Verify cleanup_distributed destroys initialized process groups and ignores None."""
     import gemma_4_sql.backends.pytorch.train as train_module
 
     mock_dist = MagicMock()
     mock_dist.is_initialized.return_value = True
-    train_module._cleanup_distributed(mock_dist)
+    train_module.cleanup_distributed(mock_dist)
     mock_dist.destroy_process_group.assert_called_once()
 
-    train_module._cleanup_distributed(None)
+    train_module.cleanup_distributed(None)
 
 
 def test_execute_train(monkeypatch: pytest.MonkeyPatch) -> None:

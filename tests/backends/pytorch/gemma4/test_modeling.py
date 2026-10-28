@@ -1,7 +1,10 @@
 """Tests for native PyTorch Gemma 4 modeling."""
 
+from __future__ import annotations
+
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Never
+from typing import Never
 
 import pytest
 import torch
@@ -18,6 +21,7 @@ from gemma_4_sql.backends.pytorch.gemma4 import (
     Gemma4RotaryEmbedding2D,
     apply_rotary_pos_emb,
 )
+from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4AudioConfig, Gemma4VisionConfig
 
 
 def test_gemma4_config() -> None:
@@ -25,15 +29,16 @@ def test_gemma4_config() -> None:
     config = Gemma4Config(hidden_size=512, test_kwarg=True, vision_config={"hidden_size": 128, "extra": 1}, audio_config={"hidden_size": 128, "extra": 1})
     assert config.hidden_size == 512
     assert config.vocab_size == 256000
-    assert hasattr(config, "test_kwarg")
+    assert config.extra_attributes["test_kwarg"] is True
     assert config.vision_config.hidden_size == 128
-    assert hasattr(config.vision_config, "extra")
+    assert config.vision_config.extra_attributes["extra"] == 1
     assert config.audio_config.hidden_size == 128
-    assert hasattr(config.audio_config, "extra")
+    assert config.audio_config.extra_attributes["extra"] == 1
 
-    config_defaults = Gemma4Config()
+    config_defaults = Gemma4Config(mm_tokens_per_image=[1, 2])
     assert config_defaults.vision_config.hidden_size == 1152
-    assert config_defaults.audio_config.hidden_size == 768
+    assert config_defaults.audio_config.hidden_size == 1024
+    assert config_defaults.mm_tokens_per_image == 256
 
     config_with_instances = Gemma4Config(
         vision_config=config_defaults.vision_config,
@@ -42,10 +47,15 @@ def test_gemma4_config() -> None:
     assert config_with_instances.vision_config is config_defaults.vision_config
     assert config_with_instances.audio_config is config_defaults.audio_config
 
+    assert Gemma4VisionConfig(extra_v=11).extra_attributes["extra_v"] == 11
+    assert Gemma4AudioConfig(extra_a=22).extra_attributes["extra_a"] == 22
+
+    assert Gemma4Config.gemma4_tiny().num_hidden_layers == 1
     assert Gemma4Config.gemma4_e2b().num_hidden_layers == 35
     assert Gemma4Config.gemma4_e4b().num_hidden_layers == 42
     assert Gemma4Config.gemma4_26b_a4b().num_experts == 128
     assert Gemma4Config.gemma4_31b().num_hidden_layers == 60
+    assert Gemma4Config.from_preset("gemma-4-tiny").num_hidden_layers == 1
     assert Gemma4Config.from_preset("google/gemma-4-31B").num_hidden_layers == 60
     assert Gemma4Config.from_preset("google/gemma-4-26B-A4B").num_experts == 128
     assert Gemma4Config.from_preset("google/gemma-4-E4B").num_hidden_layers == 42
@@ -178,6 +188,7 @@ def test_gemma4_for_causal_lm() -> None:
         num_key_value_heads=2,
         intermediate_size=512,
         head_dim=64,
+        num_experts=1,
     )
     model = Gemma4ForCausalLM(config)
     input_ids = torch.randint(0, 1000, (2, 4))
@@ -215,26 +226,22 @@ def test_gemma4_for_causal_lm() -> None:
     assert dyn_cache.get_seq_length(0) == 4
 
 
-def test_attention_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_attention_edge_cases() -> None:
     """Test attention edge cases functionality."""
-    import torch
-
     import gemma_4_sql.backends.pytorch.gemma4.attention as attn
 
-    class MockConfig:
-        """Test class for MockConfig."""
-
-        hidden_size = 32
-        num_attention_heads = 4
-        num_key_value_heads = 2
-        head_dim = 8
-        rope_theta = 10000.0
-        max_position_embeddings = 128
-        sliding_window = 10
-        is_global = True
-        global_attn_layers = (0,)
-
-    config: Any = MockConfig()
+    config = Gemma4Config(
+        hidden_size=32,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=8,
+        rope_theta=10000.0,
+        max_position_embeddings=128,
+        sliding_window=10,
+        is_global=True,
+        global_attn_layers=(0,),
+        global_rope_max_timescale=None,
+    )
     attention = attn.Gemma4Attention(config, layer_idx=0)
 
     hidden_states = torch.randn(1, 2, 32)
@@ -248,26 +255,22 @@ def test_attention_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     assert past is not None
 
 
-def test_attention_edge_cases2(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test manual attention fallback with sliding_window=None."""
-    import torch
-
+def test_attention_edge_cases2() -> None:
+    """Test manual attention fallback with sliding_window=None and local_rope_max_timescale."""
     import gemma_4_sql.backends.pytorch.gemma4.attention as attn
 
-    class MockConfig:
-        """Test stub for `MockConfig`."""
-
-        hidden_size = 32
-        num_attention_heads = 4
-        num_key_value_heads = 2
-        head_dim = 8
-        rope_theta = 10000.0
-        max_position_embeddings = 128
-        sliding_window = None
-        is_global = False
-        global_attn_layers = (1,)
-
-    config: Any = MockConfig()
+    config = Gemma4Config(
+        hidden_size=32,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=8,
+        rope_theta=10000.0,
+        max_position_embeddings=128,
+        sliding_window=None,
+        is_global=False,
+        global_attn_layers=(1,),
+        local_rope_max_timescale=5000,
+    )
     attention = attn.Gemma4Attention(config, layer_idx=0)
 
     hidden_states = torch.randn(1, 2, 32)
@@ -278,21 +281,12 @@ def test_attention_edge_cases2(monkeypatch: pytest.MonkeyPatch) -> None:
     assert past is not None
 
 
-def test_audio_layers_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_audio_layers_edge_cases() -> None:
     """Test audio layers edge cases functionality."""
-    import torch
-
     import gemma_4_sql.backends.pytorch.gemma4.audio_layers as al
 
-    class MockConfig:
-        """Test class for MockConfig."""
+    config = Gemma4AudioConfig(hidden_size=32)
 
-        audio_hidden_size = 32
-        hidden_size = 32
-
-    config: Any = MockConfig()
-
-    # 23->26: in AudioEncoderLayer forward, attention_mask is None
     layer = al.Gemma4AudioFeatureExtractor(config)
     hidden_states = torch.randn(1, 1, 32)
     res = layer(hidden_states)
@@ -330,6 +324,10 @@ def test_gemma4_native_save_load_and_generate(tmp_path: Path, monkeypatch: pytes
     corrupt_file.write_bytes(b"not_valid_safetensors")
     model_corrupt = Gemma4ForCausalLM.from_pretrained(str(corrupt_file), config=config)
     assert model_corrupt is not None
+    from gemma_4_sql.exceptions import ExportError
+
+    with pytest.raises(ExportError, match="Failed to load safetensors"):
+        Gemma4ForCausalLM.from_pretrained(str(corrupt_file), config=config, strict=True)
 
     # Test empty dir where st_path is not a file
     empty_dir = tmp_path / "empty_dir"
@@ -338,7 +336,7 @@ def test_gemma4_native_save_load_and_generate(tmp_path: Path, monkeypatch: pytes
     assert model_empty is not None
 
     # Test Exception in load_file
-    def mock_load_file_exc(*args: Any, **kwargs: Any) -> Never:
+    def mock_load_file_exc(*_args: str, **_kwargs: str) -> Never:
         """Provide mock load file exc test helper."""
         raise RuntimeError("Custom exception")
 
@@ -365,8 +363,8 @@ def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest
         intermediate_size=128,
     )
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr("safetensors.torch.save_file", lambda *_args, **_kwargs: None, raising=False)
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("safetensors.torch.save_file", lambda *_args, **_kwargs: None, raising=False)  # pyright: ignore[reportUnknownLambdaType]
     exp_res = export_model("test_model", str(tmp_path), backend_alias="pytorch_native", config=tiny_cfg)
     assert exp_res["status"] == "exported_with_safetensors"
     assert exp_res["backend"] == "pytorch_native"
@@ -380,7 +378,7 @@ def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest
     class MockLoader:
         """Test class for MockLoader."""
 
-        def __iter__(self) -> Any:
+        def __iter__(self) -> Iterator[dict[str, torch.Tensor]]:
             """Initialize __iter__."""
             yield {"inputs": torch.tensor([[1, 2]], dtype=torch.long), "targets": torch.tensor([[2, 3]], dtype=torch.long)}
 
@@ -388,7 +386,7 @@ def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest
             """Initialize __len__."""
             return 1
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.train.build_dataloader", lambda c: {"loader": MockLoader()})
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.train.build_dataloader", lambda c: {"loader": MockLoader()})  # pyright: ignore[reportUnknownLambdaType]
     train_res = train_model(
         TrainingConfig(action="sft", model_name="test_model", dataset="dummy", epochs=1, backend="pytorch_native"),
         backend_alias="pytorch_native",

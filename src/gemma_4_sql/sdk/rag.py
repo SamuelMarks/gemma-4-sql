@@ -7,22 +7,108 @@ import logging
 import math
 import operator
 import re
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.backends.common_inference import BoundedLRUCache
+from gemma_4_sql.backends.common_inference import BoundedLRUCache, make_model_cache_key
 from gemma_4_sql.backends.lazy_loader import optional_attr
-from gemma_4_sql.sdk.sql_lexer import strip_sql_comments
-from gemma_4_sql.type_hints import EmbedderModelProtocol
+from gemma_4_sql.exceptions import SchemaExtractionError
+from gemma_4_sql.sdk.sql_lexer import extract_word_tokens, strip_sql_comments
+from gemma_4_sql.type_hints import EmbedderModelProtocol, NDArrayProtocol
 
 MIN_SIMILARITY = 0.1
 MAX_SCHEMA_CACHE_SIZE = 128
+EMBEDDING_DIM = 64
 logger = logging.getLogger(__name__)
 
-SentenceTransformer: Any = optional_attr("sentence_transformers", "SentenceTransformer")
-cosine_similarity: Any = optional_attr("sklearn.metrics.pairwise", "cosine_similarity")
 
-_SCHEMA_EMBEDDING_CACHE: BoundedLRUCache[Any] = BoundedLRUCache(maxsize=MAX_SCHEMA_CACHE_SIZE)
+class SimilarityRowProtocol(Protocol):
+    """Protocol for a single row of pairwise cosine similarity scores."""
+
+    def argsort(self) -> Sequence[int]:
+        """Return indices that would sort the similarity row in ascending order."""
+        ...
+
+    def __getitem__(self, index: int) -> float:
+        """Return similarity score at `index`."""
+        ...
+
+
+type EmbeddingMatrix = NDArrayProtocol | Sequence[Sequence[float]] | Sequence[float]
+
+
+@runtime_checkable
+class SentenceTransformerConstructorProtocol(Protocol):
+    """Protocol for the `SentenceTransformer` class constructor."""
+
+    def __call__(self, model_name_or_path: str) -> EmbedderModelProtocol:
+        """Instantiate a `SentenceTransformer` embedder model."""
+        ...
+
+
+@runtime_checkable
+class CosineSimilarityCallableProtocol(Protocol):
+    """Protocol for `sklearn.metrics.pairwise.cosine_similarity`."""
+
+    def __call__(
+        self,
+        x: EmbeddingMatrix,
+        y: EmbeddingMatrix,
+    ) -> Sequence[SimilarityRowProtocol]:
+        """Compute pairwise cosine similarity between two embedding matrices."""
+        ...
+
+
+SentenceTransformer: Callable[[str], EmbedderModelProtocol] | None = optional_attr(
+    "sentence_transformers",
+    "SentenceTransformer",
+    SentenceTransformerConstructorProtocol,
+)
+cosine_similarity: Callable[[EmbeddingMatrix, EmbeddingMatrix], Sequence[SimilarityRowProtocol]] | None = optional_attr(
+    "sklearn.metrics.pairwise",
+    "cosine_similarity",
+    CosineSimilarityCallableProtocol,
+)
+
+_SCHEMA_EMBEDDING_CACHE: BoundedLRUCache[EmbeddingMatrix] = BoundedLRUCache(maxsize=MAX_SCHEMA_CACHE_SIZE)
 _SENTENCE_TRANSFORMER_CACHE: BoundedLRUCache[EmbedderModelProtocol] = BoundedLRUCache(maxsize=8)
+
+
+def _compute_embedding(text: str, dim: int = EMBEDDING_DIM) -> list[float]:
+    """Compute a deterministic L2-normalized 64-D projection vector over word tokens and character 3-grams.
+
+    Args:
+        text: Input text or schema table description.
+        dim: Output embedding vector dimensionality (defaults to 64).
+
+    Returns:
+        L2-normalized list of floats of length `dim`.
+
+    """
+    vec = [0.0] * dim
+    words = extract_word_tokens(text)
+    features: list[tuple[str, float]] = []
+    for w in words:
+        features.append((f"w:{w}", 2.0))
+        for part in _expand_identifier_tokens(w):
+            features.append((f"p:{part}", 1.5))
+        padded = f"<{w}>"
+        for i in range(max(0, len(padded) - 2)):
+            features.append((f"g:{padded[i : i + 3]}", 0.5))
+
+    if not features:
+        return vec
+
+    for feat, weight in features:
+        digest = hashlib.sha256(feat.encode("utf-8")).digest()
+        for idx in range(min(dim, len(digest) * 2)):
+            byte_val = digest[idx % len(digest)]
+            bit = (byte_val >> (idx % 8)) & 1
+            sign = 1.0 if bit else -1.0
+            vec[idx] += sign * weight
+
+    norm = max(1e-12, math.sqrt(sum(v * v for v in vec)))
+    return [v / norm for v in vec]
 
 
 def clear_rag_model_cache() -> None:
@@ -41,11 +127,14 @@ def _get_sentence_transformer(model_id: str = "all-MiniLM-L6-v2") -> EmbedderMod
         Instantiated or cached `SentenceTransformer` model.
 
     """
-    cache_key = f"{id(SentenceTransformer)}:{model_id}"
+    cache_key = make_model_cache_key(model_id, backend_name="rag", factories=(SentenceTransformer,))
     cached = _SENTENCE_TRANSFORMER_CACHE.get_model(cache_key)
-    if cached is None:
+    if cached is None and SentenceTransformer is not None:
         cached = SentenceTransformer(model_id)
         _SENTENCE_TRANSFORMER_CACHE.put_model(cache_key, cached)
+    if cached is None:
+        msg = "SentenceTransformer is unavailable"
+        raise RuntimeError(msg)
     return cached
 
 
@@ -62,24 +151,29 @@ def _clean_identifier(identifier: str) -> str:
     return identifier.strip("\"`'[]")
 
 
-def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
+def extract_schema_entities(ddl: str, *, strict: bool = False) -> dict[str, list[str]]:
     """Extract table names and their corresponding column names from a DDL string.
 
     Uses a balanced-parenthesis scanner and supports standard unquoted identifiers
     as well as double-quoted, backtick-quoted, and bracket-quoted identifiers with
-    schema prefixes.
+    optional catalog/schema prefixes and `TEMPORARY`/`TEMP` modifiers.
 
     Args:
         ddl: The Data Definition Language (DDL) string.
+        strict: If True, raises `SchemaExtractionError` when a `CREATE TABLE` block has unbalanced parentheses.
 
     Returns:
         A dictionary mapping table names to lists of column names.
 
+    Raises:
+        SchemaExtractionError: If `strict=True` and unbalanced parentheses are encountered.
+
     """
     cleaned_ddl = strip_sql_comments(ddl)
     schema: dict[str, list[str]] = {}
+    ident_pat = r'(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)'
     pattern = re.compile(
-        r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\.)?("[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)\s*\(',
+        rf"CREATE\s+(?:(?:OR\s+REPLACE|TEMPORARY|TEMP|MATERIALIZED)\s+)*(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:{ident_pat}\.)*({ident_pat})\s*\(",
         re.IGNORECASE,
     )
     pos = 0
@@ -99,6 +193,8 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
             elif cleaned_ddl[i] == ")":
                 depth -= 1
             i += 1
+        if depth > 0 and strict:
+            raise SchemaExtractionError(f"Unbalanced parentheses in CREATE TABLE '{table_name}'")
         columns_block = cleaned_ddl[start_idx : i - 1]
         pos = i
 
@@ -127,7 +223,7 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
             c = col_def.strip()
             if not c:
                 continue
-            c_upper = c.upper()
+            c_upper = " ".join(c.upper().split())
             if any(c_upper.startswith(kw) for kw in ignored_keywords):
                 continue
             col_match = col_pattern.match(c)
@@ -136,6 +232,21 @@ def extract_schema_entities(ddl: str) -> dict[str, list[str]]:
                 schema[table_name].append(col_name)
 
     return schema
+
+
+def _expand_identifier_tokens(ident: str) -> list[str]:
+    """Expand an identifier into its lowercased form plus snake_case sub-tokens.
+
+    Args:
+        ident: Table or column identifier string.
+
+    Returns:
+        List of lowercased tokens including full identifier and underscore-split parts.
+
+    """
+    low = ident.lower()
+    parts = [p for p in low.split("_") if p and p != low]
+    return [low, *parts]
 
 
 def _score_table(table: str, columns: list[str], prompt_words: set[str]) -> int:
@@ -151,10 +262,10 @@ def _score_table(table: str, columns: list[str], prompt_words: set[str]) -> int:
 
     """
     score = 0
-    if table.lower() in prompt_words:
+    if any(tok in prompt_words for tok in _expand_identifier_tokens(table)):
         score += 5
     for col in columns:
-        if col.lower() in prompt_words:
+        if any(tok in prompt_words for tok in _expand_identifier_tokens(col)):
             score += 1
     return score
 
@@ -179,14 +290,16 @@ def _bm25_search(
         List of prioritized table names.
 
     """
-    prompt_tokens = [w.lower() for w in re.findall(r"\b\w+\b", prompt)]
+    prompt_tokens = extract_word_tokens(prompt)
     if not prompt_tokens or not schema:
         return list(schema.keys())[:top_k_tables]
 
     doc_tokens: dict[str, list[str]] = {}
     total_len = 0
     for t, cols in schema.items():
-        tokens = [t.lower()] * 3 + [c.lower() for c in cols]
+        t_expanded = _expand_identifier_tokens(t)
+        c_expanded = [tok for c in cols for tok in _expand_identifier_tokens(c)]
+        tokens = t_expanded * 3 + c_expanded
         doc_tokens[t] = tokens
         total_len += len(tokens)
 
@@ -216,6 +329,15 @@ def _bm25_search(
     sorted_tables = sorted(scores.items(), key=operator.itemgetter(1), reverse=True)
     selected = [t[0] for t in sorted_tables[:top_k_tables] if t[1] > 0.0]
     if not selected:
+        p_vec = _compute_embedding(prompt)
+        proj_scores: list[tuple[str, float]] = []
+        for t, cols in schema.items():
+            t_vec = _compute_embedding(f"{t} {' '.join(cols)}")
+            dot = sum(a * b for a, b in zip(p_vec, t_vec, strict=False))
+            proj_scores.append((t, dot))
+        proj_scores.sort(key=operator.itemgetter(1), reverse=True)
+        selected = [t[0] for t in proj_scores[:top_k_tables] if t[1] > 0.35]
+    if not selected:
         selected = list(schema.keys())[:top_k_tables]
     return selected
 
@@ -232,7 +354,7 @@ def _keyword_search(prompt: str, schema: dict[str, list[str]], top_k_tables: int
         A list of table names sorted by relevance score.
 
     """
-    prompt_words = set(re.findall(r"\b\w+\b", prompt.lower()))
+    prompt_words = set(extract_word_tokens(prompt))
     table_scores: dict[str, float] = {}
     for table, columns in schema.items():
         table_scores[table] = _score_table(table, columns, prompt_words)
@@ -280,10 +402,10 @@ def _semantic_search(
             table_embeddings = model.encode(table_docs)
             _SCHEMA_EMBEDDING_CACHE.put_model(schema_key, table_embeddings)
 
-        prompt_embedding: Any = model.encode([prompt])
-        similarities: Any = cosine_similarity(prompt_embedding, table_embeddings)[0]
-        top_indices: Any = similarities.argsort()[-top_k_tables:][::-1]
-        relevant_tables: list[str] = [table_names[i] for i in top_indices if similarities[i] > min_similarity]
+        prompt_embedding = model.encode([prompt])
+        similarities = cosine_similarity(prompt_embedding, table_embeddings)[0]
+        top_indices = list(similarities.argsort())[-top_k_tables:][::-1]
+        relevant_tables: list[str] = [table_names[int(i)] for i in top_indices if float(similarities[int(i)]) > min_similarity]
         if not relevant_tables:
             relevant_tables = table_names[:top_k_tables]
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
@@ -373,7 +495,9 @@ def build_rag_prompt(
 
 
 __all__ = [
+    "EMBEDDING_DIM",
     "MIN_SIMILARITY",
+    "_compute_embedding",
     "build_rag_prompt",
     "clear_rag_model_cache",
     "extract_schema_entities",

@@ -3,19 +3,96 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
 
 from gemma_4_sql.exceptions import (
+    OPERATIONAL_EXCEPTIONS,
     ConfigurationError,
     DependencyMissingError,
     ExecutionStatus,
-    GemmaSQLError,
     PEFTError,
+    StatusValue,
+    is_failed_status,
     resolve_raise_on_error,
 )
 from gemma_4_sql.type_hints import PEFTResultDict
 
 logger = logging.getLogger(__name__)
+
+
+def matches_target_module(name: str, target_modules: list[str]) -> bool:
+    """Return whether `name` matches any target module pattern by suffix or substring.
+
+    Args:
+        name: Module or parameter path name.
+        target_modules: List of target module patterns.
+
+    Returns:
+        `True` if `name` matches any entry in `target_modules`.
+
+    """
+    return any(name == target or name.endswith(f".{target}") or target in name for target in target_modules)
+
+
+def compute_lora_scale(lora_alpha: float, lora_r: int) -> float:
+    """Compute the LoRA scaling factor `lora_alpha / lora_r`.
+
+    Args:
+        lora_alpha: LoRA scaling parameter `alpha`.
+        lora_r: LoRA rank `r` (must be positive).
+
+    Returns:
+        Floating-point scale factor `float(lora_alpha) / float(lora_r)`.
+
+    Raises:
+        ValueError: If `lora_r <= 0`.
+
+    """
+    if lora_r <= 0:
+        raise ValueError(f"LoRA rank r must be positive, got {lora_r}")
+    return float(lora_alpha) / float(lora_r)
+
+
+def compute_lora_matrices(
+    in_features: int,
+    out_features: int,
+    lora_r: int,
+    seed: int = 0,
+) -> tuple[list[list[float]], list[list[float]]]:
+    """Compute Kaiming-initialized `lora_a` `(in_features, lora_r)` and zero-initialized `lora_b` `(lora_r, out_features)`.
+
+    Mathematical Formulation (Hu et al., 2021):
+        - `A ~ Uniform(-bound, bound)` where `bound = 1 / sqrt(in_features)`
+        - `B = 0` so `Delta W = B @ A = 0` at initialization (`t = 0`).
+
+    Args:
+        in_features: Input dimension of the linear projection.
+        out_features: Output dimension of the linear projection.
+        lora_r: Rank `r` of the low-rank decomposition.
+        seed: Deterministic integer seed offset for reproducible initialization.
+
+    Returns:
+        A 2-tuple of `(lora_a, lora_b)` nested float lists of shapes `(in_features, lora_r)` and `(lora_r, out_features)`.
+
+    Raises:
+        ValueError: If `in_features <= 0`, `out_features <= 0`, or `lora_r <= 0`.
+
+    """
+    if in_features <= 0 or out_features <= 0 or lora_r <= 0:
+        msg = f"Invalid LoRA dimensions: in_features={in_features}, out_features={out_features}, lora_r={lora_r}"
+        raise ValueError(msg)
+    bound = 1.0 / math.sqrt(float(in_features))
+    lora_a: list[list[float]] = []
+    for i in range(in_features):
+        row: list[float] = []
+        for j in range(lora_r):
+            phase = float((i * 131 + j * 17 + seed * 31) % 1009) / 1009.0
+            val = (2.0 * phase - 1.0) * bound
+            row.append(val)
+        lora_a.append(row)
+    lora_b: list[list[float]] = [[0.0 for _ in range(out_features)] for _ in range(lora_r)]
+    return (lora_a, lora_b)
 
 
 def build_peft_result(
@@ -49,7 +126,7 @@ def build_peft_result(
         Populated `PEFTResultDict`.
 
     """
-    resolved_code = status_code or (ExecutionStatus.FAILED.value if status.startswith("failed") else ExecutionStatus.COMPLETED.value)
+    resolved_code = status_code or (ExecutionStatus.FAILED.value if is_failed_status(status) else ExecutionStatus.COMPLETED.value)
     res: PEFTResultDict = {
         "backend": backend_name,
         "action": "apply_lora",
@@ -75,7 +152,7 @@ def apply_lora_wrapper(
     lora_alpha: int,
     lora_dropout: float,
     inject_fn: Callable[[], int],
-    **kwargs: object,
+    **kwargs: StatusValue,
 ) -> PEFTResultDict:
     """Execute a backend LoRA injection pass with standardized error handling and result formatting.
 
@@ -94,10 +171,19 @@ def apply_lora_wrapper(
 
     Raises:
         DependencyMissingError: Re-raised if raised by `inject_fn`.
-        ConfigurationError: Re-raised if raised by `inject_fn`.
+        ConfigurationError: If `lora_r <= 0` or `lora_dropout` is outside `[0.0, 1.0)`, or if raised by `inject_fn`.
         PEFTError: If `inject_fn` fails and `raise_on_error` is enabled.
 
     """
+    if lora_r <= 0:
+        raise ConfigurationError(f"lora_r must be > 0, got {lora_r}", backend=backend_name, model_name=model_name, operation="apply_lora")
+    if not (0.0 <= lora_dropout < 1.0):
+        raise ConfigurationError(
+            f"lora_dropout must be in [0.0, 1.0), got {lora_dropout}",
+            backend=backend_name,
+            model_name=model_name,
+            operation="apply_lora",
+        )
     status = ExecutionStatus.COMPLETED.value
     status_code = ExecutionStatus.COMPLETED.value
     error_message: str | None = None
@@ -106,7 +192,7 @@ def apply_lora_wrapper(
         injected_count = inject_fn()
     except (DependencyMissingError, ConfigurationError):
         raise
-    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
+    except OPERATIONAL_EXCEPTIONS as e:
         logger.exception("%s PEFT failed: ", backend_name)
         if resolve_raise_on_error(kwargs=dict(kwargs)):
             raise PEFTError(
@@ -134,4 +220,10 @@ def apply_lora_wrapper(
     )
 
 
-__all__ = ["apply_lora_wrapper", "build_peft_result"]
+__all__ = [
+    "apply_lora_wrapper",
+    "build_peft_result",
+    "compute_lora_matrices",
+    "compute_lora_scale",
+    "matches_target_module",
+]

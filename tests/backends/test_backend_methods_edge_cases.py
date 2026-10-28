@@ -15,15 +15,15 @@ has_tf = importlib.util.find_spec("tensorflow") is not None
 
 
 def test_jax_dpo_missing_jnn(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify JAX `dpo_loss` returns zero tuple when `jnn` is missing."""
-    from typing import Any
+    """Verify JAX `dpo_loss` raises `DependencyMissingError` when `jnn` is missing."""
+    import jax.numpy as jnp
 
     import gemma_4_sql.backends.jax.dpo as jdpo
 
     monkeypatch.setattr(jdpo, "jnn", None)
-    empty_arg: Any = {}
-    res = jdpo.dpo_loss(empty_arg, empty_arg, empty_arg, empty_arg)
-    assert res == (0.0, 0.0, 0.0)
+    empty_arg = jnp.zeros((1, 2), dtype=jnp.float32)
+    with pytest.raises(DependencyMissingError, match=r"JAX DPO dependencies are missing\."):
+        jdpo.dpo_loss(empty_arg, empty_arg, empty_arg, empty_arg)
 
 
 def test_jax_export_missing_ocp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

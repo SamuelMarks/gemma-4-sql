@@ -2,25 +2,32 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from gemma_4_sql.backends.common_export import run_export_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.type_hints import ExportResultDict
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError, StatusValue
+from gemma_4_sql.type_hints import ExportResultDict, JSONValue, MaxTextCausalLMProtocol, PyTreeNode, TensorType
 
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
 ocp = optional_import("orbax.checkpoint")
-Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
 
 
-def export_model(model_name: str, export_path: str, **kwargs: object) -> ExportResultDict:
+def export_model(
+    model_name: str,
+    export_path: str,
+    **kwargs: StatusValue | JSONValue | Mapping[str, TensorType | PyTreeNode],
+) -> ExportResultDict:
     """Export a Text-to-SQL model using the MaxText backend.
 
     Args:
         model_name: The name or identifier of the target model.
         export_path: Destination directory where the Orbax checkpoint will be saved.
-        **kwargs: Optional keyword arguments, including 'params' or 'weights'.
+        **kwargs: Optional keyword arguments, including `'params'` or `'weights'`.
 
     Returns:
         Dictionary containing backend, model name, export path, file path, status, and format.
@@ -30,13 +37,14 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> ExportR
         ExportError: If model weight initialization or Orbax checkpoint persistence fails.
 
     """
-    from gemma_4_sql.exceptions import DependencyMissingError, ExportError
-
     if jax is None or jnp is None or ocp is None:
         raise DependencyMissingError("MaxText export dependencies (jax, orbax.checkpoint) are missing.")
 
     def _execute() -> tuple[Path, str]:
         """Initialize or resolve MaxText model weights and save an Orbax checkpoint."""
+        assert jax is not None
+        assert jnp is not None
+        assert ocp is not None
         weights = kwargs.get("params", kwargs.get("weights"))
         if weights is None:
             if Gemma4Model is None:
@@ -47,7 +55,12 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> ExportR
                 dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
                 weights = model.init(rng, dummy_input)
             except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-                raise ExportError(f"Failed to initialize MaxText model '{model_name}': {e}", backend="maxtext", model_name=model_name, cause=e) from e
+                raise ExportError(
+                    f"Failed to initialize MaxText model '{model_name}': {e}",
+                    backend="maxtext",
+                    model_name=model_name,
+                    cause=e,
+                ) from e
 
         file_path = Path(export_path) / "maxtext_orbax_ckpt"
         try:
@@ -55,7 +68,12 @@ def export_model(model_name: str, export_path: str, **kwargs: object) -> ExportR
             with ocp.CheckpointManager(file_path, ocp.PyTreeCheckpointer(), options) as mngr:
                 mngr.save(0, weights)
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-            raise ExportError(f"Failed to save MaxText Orbax checkpoint at '{file_path}': {e}", backend="maxtext", model_name=model_name, cause=e) from e
+            raise ExportError(
+                f"Failed to save MaxText Orbax checkpoint at '{file_path}': {e}",
+                backend="maxtext",
+                model_name=model_name,
+                cause=e,
+            ) from e
 
         return (file_path, "exported_with_maxtext_orbax")
 

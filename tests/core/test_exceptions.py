@@ -16,8 +16,10 @@ from gemma_4_sql.exceptions import (
     ExportError,
     GemmaSQLError,
     InferenceError,
+    MultimodalProcessingError,
     PEFTError,
     QuantizationError,
+    ResultStatus,
     SchemaExtractionError,
     ServingError,
     SQLSafetyViolationError,
@@ -45,6 +47,7 @@ def test_gemma_sql_error_base() -> None:
     assert err.operation == "custom_op"
     assert err.cause is cause
     assert isinstance(err, Exception)
+    assert ResultStatus is ExecutionStatus
 
 
 def test_dependency_missing_error() -> None:
@@ -53,10 +56,14 @@ def test_dependency_missing_error() -> None:
         "torch is required",
         dependency_name="torch",
         backend="pytorch",
+        model_name="gemma-4-E2B",
+        operation="train",
     )
     assert str(err) == "torch is required"
     assert err.dependency_name == "torch"
     assert err.backend == "pytorch"
+    assert err.model_name == "gemma-4-E2B"
+    assert err.operation == "train"
     assert isinstance(err, GemmaSQLError)
     assert isinstance(err, ImportError)
 
@@ -68,11 +75,14 @@ def test_unsupported_quantization_method_error() -> None:
         method="fp4",
         supported_methods=("int8", "int4", "awq"),
         backend="mlx",
+        model_name="gemma-4-E2B",
     )
     assert str(err) == "fp4 not supported"
     assert err.method == "fp4"
     assert err.supported_methods == ("int8", "int4", "awq")
     assert err.backend == "mlx"
+    assert err.model_name == "gemma-4-E2B"
+    assert err.operation == "quantize"
     assert isinstance(err, GemmaSQLError)
     assert isinstance(err, ValueError)
 
@@ -94,6 +104,7 @@ def test_unsupported_quantization_method_error() -> None:
         (SQLSafetyViolationError, PermissionError),
         (SchemaExtractionError, ValueError),
         (ConfigurationError, ValueError),
+        (MultimodalProcessingError, ValueError),
     ],
 )
 def test_domain_exception_inheritance(
@@ -101,9 +112,10 @@ def test_domain_exception_inheritance(
     std_parent: type[Exception],
 ) -> None:
     """Verify domain exceptions inherit from both GemmaSQLError and standard exception types."""
-    err = exc_cls("domain error", backend="keras")
+    err = exc_cls("domain error", backend="keras", model_name="gemma-4-E2B")
     assert str(err) == "domain error"
     assert err.backend == "keras"
+    assert err.model_name == "gemma-4-E2B"
     assert isinstance(err, GemmaSQLError)
     assert isinstance(err, std_parent)
     if exc_cls is SQLSafetyViolationError:
@@ -111,7 +123,7 @@ def test_domain_exception_inheritance(
 
 
 def test_structured_operation_exceptions() -> None:
-    """Verify TrainingError, InferenceError, and ExportError store default and custom attributes."""
+    """Verify operational exceptions store default and custom backend, model_name, and operation attributes."""
     t_err = TrainingError("sft boom", backend="jax", model_name="gemma-4-E2B")
     assert t_err.backend == "jax"
     assert t_err.model_name == "gemma-4-E2B"
@@ -127,6 +139,27 @@ def test_structured_operation_exceptions() -> None:
     assert e_err.model_name == "gemma-4-31B"
     assert e_err.operation == "export"
 
+    q_err = QuantizationError("quant boom", backend="mlx", model_name="gemma-4-E2B")
+    assert q_err.operation == "quantize"
+
+    s_err = ServingError("serve boom", backend="pytorch", model_name="gemma-4-E2B")
+    assert s_err.operation == "serve"
+
+    b_err = BenchmarkError("bench boom", backend="jax", model_name="gemma-4-E2B")
+    assert b_err.operation == "benchmark"
+
+    etl_err = ETLError("etl boom", backend="jax", model_name="spider")
+    assert etl_err.operation == "etl"
+
+    chat_err = ChatError("chat boom", backend="keras", model_name="gemma-4-E2B")
+    assert chat_err.operation == "chat"
+
+    eval_err = EvaluationError("eval boom", backend="jax", model_name="gemma-4-E2B")
+    assert eval_err.operation == "evaluate"
+
+    peft_err = PEFTError("peft boom", backend="jax", model_name="gemma-4-E2B")
+    assert peft_err.operation == "peft"
+
 
 def test_is_failed_status() -> None:
     """Verify is_failed_status detects ExecutionStatus, failed status strings, and error dictionaries."""
@@ -138,6 +171,7 @@ def test_is_failed_status() -> None:
     assert is_failed_status("missing_tensorboard") is True
     assert is_failed_status("completed") is False
     assert is_failed_status({"status": "failed: err"}) is True
+    assert is_failed_status({"status": "failed: err", "status_code": "completed"}) is True
     assert is_failed_status({"status": ExecutionStatus.ERROR}) is True
     assert is_failed_status({"status": "completed", "error": "boom"}) is True
     assert is_failed_status({"status": "completed", "status_code": ExecutionStatus.FAILED}) is True
@@ -155,6 +189,7 @@ def test_resolve_raise_on_error() -> None:
     assert resolve_raise_on_error(raise_on_error=True) is True
     assert resolve_raise_on_error(raise_on_error=False, kwargs={"raise_on_error": True}) is False
     assert resolve_raise_on_error(kwargs={"raise_on_error": True}) is True
+    assert resolve_raise_on_error(kwargs={"other": True}) is False
 
     cfg_true = TrainingConfig(raise_on_error=True)
     assert resolve_raise_on_error(cfg_true) is True
@@ -162,7 +197,15 @@ def test_resolve_raise_on_error() -> None:
     cfg_extra = TrainingConfig(extra_kwargs={"raise_on_error": True})
     assert resolve_raise_on_error(cfg_extra) is True
 
-    classBareObj: object = object()
-    assert resolve_raise_on_error(classBareObj) is False
+    cfg_false = TrainingConfig(raise_on_error=False, extra_kwargs={"other": 1})
+    assert resolve_raise_on_error(cfg_false) is False
+
+    class _OnlyExtraConfig:
+        """Config carrying only extra_kwargs without raise_on_error property."""
+
+        extra_kwargs: dict[str, str | int | float | bool | None] | None = None
+
+    assert resolve_raise_on_error(_OnlyExtraConfig()) is False
+    assert resolve_raise_on_error("plain_string") is False
     assert is_failed_status(ExecutionStatus.BACKEND_UNAVAILABLE) is True
     assert is_failed_status(ExecutionStatus.LOADED) is False

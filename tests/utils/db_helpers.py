@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Sequence
-from typing import Any
+
+from gemma_4_sql.type_hints import DatabaseConnectionProtocol, JSONPrimitive
 
 
 def get_sample_ddl(dialect: str = "sqlite") -> str:
@@ -15,6 +16,7 @@ def get_sample_ddl(dialect: str = "sqlite") -> str:
 
     Returns:
         SQL DDL string creating 'users' and 'orders' tables.
+
     """
     if dialect == "postgres":
         return """CREATE TABLE users (id SERIAL PRIMARY KEY, name VARCHAR(255), email VARCHAR(255), active BOOLEAN);
@@ -37,6 +39,7 @@ def create_in_memory_sqlite(ddl: str = "") -> sqlite3.Connection:
 
     Returns:
         An open sqlite3.Connection instance with initialized tables.
+
     """
     conn = sqlite3.connect(":memory:")
     conn.executescript(ddl)
@@ -49,6 +52,7 @@ def insert_sample_users(conn: sqlite3.Connection, users: Sequence[tuple[int, str
     Args:
         conn: Open SQLite database connection.
         users: Sequence of (id, name, email) tuples.
+
     """
     cur = conn.cursor()
     cur.executemany("INSERT INTO users (id, name, email) VALUES (?, ?, ?);", users)
@@ -56,7 +60,12 @@ def insert_sample_users(conn: sqlite3.Connection, users: Sequence[tuple[int, str
     cur.close()
 
 
-def seed_table(conn: Any, table_name: str, columns: Sequence[str], data: Sequence[Sequence[Any]]) -> None:
+def seed_table(
+    conn: sqlite3.Connection | DatabaseConnectionProtocol,
+    table_name: str,
+    columns: Sequence[str],
+    data: Sequence[Sequence[JSONPrimitive]],
+) -> None:
     """Insert parameterized rows into a table.
 
     Args:
@@ -64,11 +73,13 @@ def seed_table(conn: Any, table_name: str, columns: Sequence[str], data: Sequenc
         table_name: The name of the table to insert into.
         columns: Sequence of column names.
         data: Sequence of row tuples/lists with parameterized data values.
+
     """
     cur = conn.cursor()
     cols = ", ".join(columns)
     placeholders = ", ".join(["?"] * len(columns))
     query = f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders});"
-    cur.executemany(query, data)
+    for row in data:
+        cur.execute(query, list(row))
     conn.commit()
     cur.close()

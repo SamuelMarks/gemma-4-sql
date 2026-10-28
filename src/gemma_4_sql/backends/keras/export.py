@@ -3,18 +3,32 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_export import run_export_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, ExportError
-from gemma_4_sql.type_hints import ExportResultDict
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError, StatusValue
+from gemma_4_sql.type_hints import ExportResultDict, KerasCausalLMProtocol
+
+
+@runtime_checkable
+class _GemmaCausalLMLoaderProtocol(Protocol):
+    """Protocol for `keras_nlp.models.GemmaCausalLM` exposing `.from_preset(model_name)`."""
+
+    def from_preset(self, model_name: str, /) -> KerasCausalLMProtocol:
+        """Load a `GemmaCausalLM` model from a preset identifier."""
+        ...
+
 
 keras = optional_import("keras")
-GemmaCausalLM: Any = optional_attr("keras_nlp.models", "GemmaCausalLM")
+GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = optional_attr(
+    "keras_nlp.models",
+    "GemmaCausalLM",
+    _GemmaCausalLMLoaderProtocol,
+)
 
 
-def export_model(model_name: str, export_path: str, **_kwargs: object) -> ExportResultDict:
+def export_model(model_name: str, export_path: str, **_kwargs: StatusValue) -> ExportResultDict:
     """Export a Text-to-SQL model using the Keras backend.
 
     Args:
@@ -38,7 +52,11 @@ def export_model(model_name: str, export_path: str, **_kwargs: object) -> Export
         try:
             gemma_causal_lm_cls = GemmaCausalLM
             if gemma_causal_lm_cls is None:
-                gemma_causal_lm_cls = optional_attr("keras_nlp.models", "GemmaCausalLM")
+                gemma_causal_lm_cls = optional_attr(
+                    "keras_nlp.models",
+                    "GemmaCausalLM",
+                    _GemmaCausalLMLoaderProtocol,
+                )
             if gemma_causal_lm_cls is None:
                 raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
             model = gemma_causal_lm_cls.from_preset(model_name)

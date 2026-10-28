@@ -2,54 +2,99 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.backends.common_train import run_train_wrapper
+from gemma_4_sql.backends.common_train import generic_run_training_epochs, run_train_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.mlx.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ETLConfig, MlxCausalLMProtocol, TensorType, TrainerState, TrainingConfig, TrainingLoopState, TrainResultDict
+from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
+from gemma_4_sql.type_hints import (
+    ETLConfig,
+    MlxArrayProtocol,
+    MlxCausalLMProtocol,
+    TensorType,
+    TokenizerProtocol,
+    TrainingConfig,
+    TrainingLoopState,
+    TrainResultDict,
+)
+
+
+@runtime_checkable
+class _MlxOptimizerProtocol(Protocol):
+    """Protocol for an `mlx.optimizers` optimizer supporting `.update(model, grads)` and `.state`."""
+
+    @property
+    def state(self) -> Mapping[str, MlxArrayProtocol]:
+        """Provide the optimizer state dictionary."""
+        ...
+
+    def update(
+        self,
+        model: MlxCausalLMProtocol,
+        grads: Mapping[str, MlxArrayProtocol],
+        /,
+    ) -> None:
+        """Apply gradients to `model` parameters."""
+        ...
+
+
+type MlxTrainBatch = Mapping[str, TensorType | Sequence[int] | Sequence[Sequence[int]] | MlxArrayProtocol]
+
 
 mx = optional_import("mlx.core")
 nn = optional_import("mlx.nn")
 optim = optional_import("mlx.optimizers")
-load = optional_attr("mlx_lm", "load")
+_raw_load = optional_attr("mlx_lm", "load")
+load: Callable[[str], tuple[MlxCausalLMProtocol, TokenizerProtocol | str | None] | MlxCausalLMProtocol] | None = (  # ty: ignore[invalid-assignment]
+    _raw_load if callable(_raw_load) else None
+)
 
 
-def _run_training_epochs(state: TrainingLoopState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> float:
+def _run_training_epochs[ModelT, OptT, BatchT: MlxTrainBatch](
+    state: TrainingLoopState[ModelT, OptT, BatchT],
+) -> float:
     """Run MLX supervised training epochs over the dataloader.
 
     Args:
-        state: `TrainingLoopState` holding model, optimizer, dataloader, and value_and_grad function.
+        state: `TrainingLoopState` holding model, optimizer, dataloader, and `value_and_grad` function.
 
     Returns:
         Mean batch loss from the final epoch.
 
     """
-    dataloader: Any = state.dataloader or ()
-    epochs = state.epochs
-    model: Any = state.model if isinstance(state, TrainingLoopState) else state.policy_model
-    optimizer: Any = state.optimizer
+    dataloader: Iterable[BatchT] = state.dataloader or ()
+    model = state.model
+    optimizer = state.optimizer
     loss_and_grad_fn = state.train_step
-    assert loss_and_grad_fn is not None
-    # Run training epochs.
-    final_loss = 0.0
-    for _epoch in range(epochs):
-        epoch_loss = 0.0
-        batch_count = 0
-        for batch in dataloader:
-            inputs = mx.array(batch["inputs"])
-            targets = mx.array(batch["targets"])
-            (loss, grads) = loss_and_grad_fn(model, inputs, targets)
-            optimizer.update(model, grads)
-            mx.eval(model.parameters(), optimizer.state)
-            epoch_loss += float(loss.item() if hasattr(loss, "item") else loss)
-            batch_count += 1
-        final_loss = epoch_loss / max(1, batch_count)
-    return final_loss
+
+    def _step(batch: BatchT) -> float:
+        """Execute a single MLX supervised training step and return scalar float loss."""
+        assert mx is not None
+        assert model is not None
+        assert optimizer is not None
+        assert loss_and_grad_fn is not None
+        inputs = mx.array(batch["inputs"])
+        targets = mx.array(batch["targets"])
+        (loss, grads) = loss_and_grad_fn(model, inputs, targets)  # pyright: ignore[reportGeneralTypeIssues]  # ty: ignore[not-iterable]
+        optimizer.update(model, grads)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        mx.eval(model.parameters(), optimizer.state)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        try:
+            return float(loss.item())  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        except (AttributeError, TypeError, ValueError):
+            return float(loss)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+
+    return generic_run_training_epochs(state.epochs, dataloader, _step)
 
 
-def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
+def _execute_train(
+    model_name: str,
+    dataset: str,
+    epochs: int,
+    learning_rate: float,
+    batch_size: int = 2,
+) -> tuple[str, float]:
     """Execute the core training loop for MLX.
 
     Args:
@@ -60,7 +105,7 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
         batch_size: Batch size for dataloader.
 
     Returns:
-        A tuple containing the results.
+        A tuple containing `(status, final_loss)`.
 
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
@@ -70,11 +115,15 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
     if mx is None or nn is None or optim is None or load is None:
         raise DependencyMissingError("MLX dependencies are missing.")
 
-    loaded: Any = load(model_name)
+    loaded = load(model_name)
     model: MlxCausalLMProtocol = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
 
-    def loss_fn(model_t: Any, inputs: TensorType, targets: TensorType) -> Any:
-        """Compute training loss.
+    def loss_fn(
+        model_t: MlxCausalLMProtocol,
+        inputs: MlxArrayProtocol,
+        targets: MlxArrayProtocol,
+    ) -> MlxArrayProtocol:
+        """Compute cross-entropy training loss.
 
         Args:
             model_t: Target model.
@@ -82,27 +131,44 @@ def _execute_train(model_name: str, dataset: str, epochs: int, learning_rate: fl
             targets: Targets array.
 
         Returns:
-            Cross entropy loss.
+            Mean cross-entropy loss.
 
         """
-        logits = model_t(inputs)
-        return nn.losses.cross_entropy(logits, targets, reduction="mean")
+        assert nn is not None
+        raw_logits = model_t(inputs)
+        assert isinstance(raw_logits, MlxArrayProtocol)
+        logits: MlxArrayProtocol = raw_logits
+        if logits.ndim >= 2 and targets.ndim >= 2 and int(logits.shape[1]) != int(targets.shape[1]):
+            min_len = min(int(logits.shape[1]), int(targets.shape[1]))
+            logits = logits[:, :min_len]
+            targets = targets[:, :min_len]
+        res: MlxArrayProtocol = nn.losses.cross_entropy(logits, targets, reduction="mean")
+        return res
 
-    optimizer = optim.AdamW(learning_rate=learning_rate)
+    optimizer: _MlxOptimizerProtocol = optim.AdamW(learning_rate=learning_rate)
     loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
-    if dataloader is None or not hasattr(dataloader, "__iter__"):
+    has_loader = isinstance(dataloader, Iterable)
+    if not has_loader:
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
-    final_loss = _run_training_epochs(TrainingLoopState(dataloader=dataloader, epochs=epochs, model=model, optimizer=optimizer, train_step=loss_and_grad_fn))
+    final_loss = _run_training_epochs(
+        TrainingLoopState(
+            dataloader=dataloader,
+            epochs=epochs,
+            model=model,
+            optimizer=optimizer,
+            train_step=loss_and_grad_fn,
+        )
+    )
     return "completed", float(final_loss)
 
 
-def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
+def train_model(config: TrainingConfig, **kwargs: StatusValue) -> TrainResultDict:
     """Train a Text-to-SQL model using the MLX backend.
 
     Args:
-        config: The TrainingConfig.
+        config: The `TrainingConfig`.
         **kwargs: Extra parameters like `distributed_strategy` or `raise_on_error`.
 
     Returns:
@@ -115,13 +181,13 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
     """
     if mx is None or nn is None or optim is None or load is None:
         raise DependencyMissingError("MLX dependencies are missing.", backend="mlx")
-    model_name = getattr(config, "model_name", "gemma-4")
-    dataset = getattr(config, "dataset", "dummy")
-    epochs = getattr(config, "epochs", 1)
-    learning_rate = getattr(config, "learning_rate", 1e-05)
-    batch_size = getattr(config, "batch_size", 2)
+    model_name = config.model_name
+    dataset = config.dataset
+    epochs = config.epochs
+    learning_rate = config.learning_rate
+    batch_size = config.batch_size
     distributed_strategy = str(kwargs.get("distributed_strategy", "none"))
-    call_kwargs = dict(kwargs)
+    call_kwargs: dict[str, StatusValue] = dict(kwargs)
     call_kwargs["distributed_strategy"] = distributed_strategy
     return run_train_wrapper(
         "mlx",

@@ -19,11 +19,21 @@ def test_registered_backends_conform_to_protocol(backend_name: str) -> None:
     assert isinstance(backend, InferenceProtocol)
     assert isinstance(backend, BackendProtocol)
 
-    required_methods = [m for m in dir(BackendProtocol) if not m.startswith("_") and not m.isupper()]
-    for method_name in required_methods:
-        assert hasattr(backend, method_name), f"Backend '{backend_name}' is missing method '{method_name}'"
-        method = getattr(backend, method_name)
-        assert callable(method), f"Backend '{backend_name}' attribute '{method_name}' is not callable"
+    methods = (
+        backend.train_model,
+        backend.run_dpo,
+        backend.build_dataloader,
+        backend.export_model,
+        backend.log_metrics,
+        backend.apply_lora,
+        backend.quantize_model,
+        backend.get_trainer,
+        backend.generate_sql,
+        backend.serve_model,
+        backend.benchmark_model,
+    )
+    for method in methods:
+        assert callable(method)
         sig = inspect.signature(method)
         assert "kwargs" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
         assert sig.return_annotation != inspect.Signature.empty

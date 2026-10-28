@@ -2,17 +2,46 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from collections.abc import Sequence
-from typing import Any, SupportsInt, overload
+import types
+from collections.abc import Callable, Sequence
+from typing import Protocol, SupportsInt, overload, runtime_checkable
 
-from gemma_4_sql.backends.lazy_loader import LazyLoader
+from gemma_4_sql.backends.lazy_loader import LazyLoader, optional_attr
 from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
 from gemma_4_sql.type_hints import HFTokenizerProtocol
 
 logger = logging.getLogger(__name__)
-_transformers_mod: Any = LazyLoader("transformers").get_module()
-AutoTokenizer: Any = getattr(_transformers_mod, "AutoTokenizer", None) if _transformers_mod is not None else None
+_TRANSFORMERS_LOADER: LazyLoader[types.ModuleType] = LazyLoader("transformers")
+
+PreTrainedTokenizerProtocol = HFTokenizerProtocol
+
+
+@runtime_checkable
+class AutoTokenizerClassProtocol(Protocol):
+    """Protocol representing Hugging Face `AutoTokenizer` class with `from_pretrained`."""
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path: str) -> HFTokenizerProtocol:
+        """Instantiate a tokenizer from a pretrained model identifier or path.
+
+        Args:
+            pretrained_model_name_or_path: Model identifier or directory path.
+
+        Returns:
+            Loaded `HFTokenizerProtocol` instance.
+
+        """
+        ...
+
+
+_transformers_mod: types.ModuleType | None = _TRANSFORMERS_LOADER.get_module()
+AutoTokenizer: AutoTokenizerClassProtocol | Callable[..., HFTokenizerProtocol] | None = optional_attr(
+    "transformers",
+    "AutoTokenizer",
+    AutoTokenizerClassProtocol,
+)
 
 
 class ByteFallbackTokenizer:
@@ -24,14 +53,27 @@ class ByteFallbackTokenizer:
     destructive hash collisions.
     """
 
-    def __init__(self, vocab_size: int = 256) -> None:
+    def __init__(
+        self,
+        vocab_size: int = 256,
+        *,
+        pad_token_id: int = 0,
+        eos_token_id: int = 1,
+        bos_token_id: int = 2,
+    ) -> None:
         """Initialize the byte-level fallback tokenizer.
 
         Args:
             vocab_size: Maximum token ID bound (`>= 1`).
+            pad_token_id: Padding token ID.
+            eos_token_id: End-of-sequence token ID.
+            bos_token_id: Beginning-of-sequence token ID.
 
         """
         self.vocab_size = max(1, int(vocab_size))
+        self.pad_token_id = int(pad_token_id)
+        self.eos_token_id = int(eos_token_id)
+        self.bos_token_id = int(bos_token_id)
         self.tokens_per_byte = 1
         if 2 <= self.vocab_size < 256:
             count = 1
@@ -81,7 +123,7 @@ class ByteFallbackTokenizer:
             tokens.extend(digits)
         return tokens
 
-    def decode_tokens(self, tokens: Sequence[int | object]) -> str:
+    def decode_tokens(self, tokens: Sequence[int | str | bytes | SupportsInt]) -> str:
         """Decode a sequence of integer token IDs back into a UTF-8 string.
 
         Args:
@@ -93,8 +135,10 @@ class ByteFallbackTokenizer:
         """
         parsed_ints: list[int] = []
         for t in tokens:
+            if isinstance(t, float):
+                continue
             try:
-                t_int = int(str(t)) if not isinstance(t, (int, bytes, SupportsInt)) else int(t)
+                t_int = int(t)
             except (ValueError, TypeError):
                 continue
             parsed_ints.append(t_int)
@@ -134,6 +178,10 @@ class SQLTokenizer:
         *,
         strict_vocab: bool = False,
         allow_fallback: bool = True,
+        allow_byte_fallback: bool | None = None,
+        pad_token_id: int = 0,
+        eos_token_id: int = 1,
+        bos_token_id: int = 2,
     ) -> None:
         """Initialize the tokenizer.
 
@@ -142,20 +190,32 @@ class SQLTokenizer:
             model_name: Optional model identifier or path to a Hugging Face tokenizer.
             strict_vocab: If True, raise `ConfigurationError` when `vocab_size <= 0`.
             allow_fallback: If False and `model_name` is set, raise `DependencyMissingError` when HF tokenizer fails to load.
+            allow_byte_fallback: Alias for `allow_fallback`; if provided, overrides `allow_fallback`.
+            pad_token_id: Padding token ID for fallback tokenization.
+            eos_token_id: End-of-sequence token ID for fallback tokenization.
+            bos_token_id: Beginning-of-sequence token ID for fallback tokenization.
 
         Raises:
             ConfigurationError: If `strict_vocab=True` and `vocab_size <= 0`.
-            DependencyMissingError: If `allow_fallback=False` and the Hugging Face tokenizer cannot be loaded.
+            DependencyMissingError: If fallback is disabled and the Hugging Face tokenizer cannot be loaded.
 
         """
         if strict_vocab and int(vocab_size) <= 0:
             raise ConfigurationError(f"vocab_size must be positive, got {vocab_size}")
         self.vocab_size = max(1, int(vocab_size))
         self.model_name = model_name
-        self.allow_fallback = allow_fallback
-        self.byte_fallback = ByteFallbackTokenizer(vocab_size=self.vocab_size)
+        resolved_fallback = allow_byte_fallback if allow_byte_fallback is not None else allow_fallback
+        self.allow_fallback = resolved_fallback
+        self.allow_byte_fallback = resolved_fallback
+        self.byte_fallback = ByteFallbackTokenizer(
+            vocab_size=self.vocab_size,
+            pad_token_id=pad_token_id,
+            eos_token_id=eos_token_id,
+            bos_token_id=bos_token_id,
+        )
         self.hf_tokenizer: HFTokenizerProtocol | None = self._try_load_hf_tokenizer()
         self.is_fallback: bool = self.hf_tokenizer is None
+        self.is_byte_fallback: bool = self.hf_tokenizer is None
         if self.model_name and self.hf_tokenizer is None:
             if not self.allow_fallback:
                 raise DependencyMissingError(
@@ -163,6 +223,36 @@ class SQLTokenizer:
                     dependency_name="transformers",
                 )
             logger.warning("Falling back to deterministic byte-level SQLTokenizer for '%s'.", self.model_name)
+
+    @property
+    def pad_token_id(self) -> int:
+        """Provide the padding token ID."""
+        if self.hf_tokenizer is not None:
+            with contextlib.suppress(AttributeError):
+                hf_pad = self.hf_tokenizer.pad_token_id
+                if isinstance(hf_pad, int):
+                    return hf_pad
+        return self.byte_fallback.pad_token_id
+
+    @property
+    def eos_token_id(self) -> int:
+        """Provide the end-of-sequence token ID."""
+        if self.hf_tokenizer is not None:
+            with contextlib.suppress(AttributeError):
+                hf_eos = self.hf_tokenizer.eos_token_id
+                if isinstance(hf_eos, int):
+                    return hf_eos
+        return self.byte_fallback.eos_token_id
+
+    @property
+    def bos_token_id(self) -> int:
+        """Provide the beginning-of-sequence token ID."""
+        if self.hf_tokenizer is not None:
+            with contextlib.suppress(AttributeError):
+                hf_bos = self.hf_tokenizer.bos_token_id
+                if isinstance(hf_bos, int):
+                    return hf_bos
+        return self.byte_fallback.bos_token_id
 
     def _try_load_hf_tokenizer(self) -> HFTokenizerProtocol | None:
         """Attempt to load a Hugging Face `AutoTokenizer` if `model_name` is set.
@@ -173,8 +263,9 @@ class SQLTokenizer:
         """
         tok_cls = AutoTokenizer
         if tok_cls is None and _transformers_mod is not None:
-            tok_cls = getattr(_transformers_mod, "AutoTokenizer", None)
-        if not self.model_name or tok_cls is None or not hasattr(tok_cls, "from_pretrained"):
+            with contextlib.suppress(AttributeError):
+                tok_cls = _transformers_mod.AutoTokenizer
+        if not self.model_name or tok_cls is None or not isinstance(tok_cls, AutoTokenizerClassProtocol):
             return None
         try:
             loaded: HFTokenizerProtocol = tok_cls.from_pretrained(self.model_name)
@@ -189,16 +280,17 @@ class SQLTokenizer:
             A dictionary mapping token strings or byte representations to integer IDs.
 
         """
-        if self.hf_tokenizer is not None and hasattr(self.hf_tokenizer, "get_vocab"):
-            return dict(self.hf_tokenizer.get_vocab())
+        if self.hf_tokenizer is not None:
+            with contextlib.suppress(AttributeError, TypeError):
+                return dict(self.hf_tokenizer.get_vocab())
         return self.byte_fallback.get_vocab()
 
     @overload
-    def encode(self, text: str) -> list[int]:
+    def encode(self, text: str) -> list[int]:  # noqa: D418
         """Encode a single string into a list of integer token IDs."""
 
     @overload
-    def encode(self, text: list[str] | tuple[str, ...]) -> list[list[int]]:
+    def encode(self, text: list[str] | tuple[str, ...]) -> list[list[int]]:  # noqa: D418
         """Encode a sequence of strings into a list of integer token ID lists."""
 
     def encode(self, text: str | Sequence[str]) -> list[int] | list[list[int]]:
@@ -220,7 +312,7 @@ class SQLTokenizer:
 
         return self.byte_fallback.encode_str(text)
 
-    def decode(self, tokens: Sequence[int | object]) -> str:
+    def decode(self, tokens: Sequence[int | str | bytes | SupportsInt]) -> str:
         """Decode a sequence of token IDs back into a UTF-8 string.
 
         Args:
@@ -231,10 +323,17 @@ class SQLTokenizer:
 
         """
         if self.hf_tokenizer is not None:
-            int_tokens = [int(t) for t in tokens if isinstance(t, (int, float, str))]
+            int_tokens: list[int] = []
+            for t in tokens:
+                if isinstance(t, float):
+                    continue
+                try:
+                    int_tokens.append(int(t))
+                except (ValueError, TypeError):
+                    continue
             return str(self.hf_tokenizer.decode(int_tokens))
 
         return self.byte_fallback.decode_tokens(tokens)
 
 
-__all__ = ["ByteFallbackTokenizer", "SQLTokenizer"]
+__all__ = ["AutoTokenizerClassProtocol", "ByteFallbackTokenizer", "SQLTokenizer"]

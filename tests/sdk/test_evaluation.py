@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import NoReturn
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,14 +20,15 @@ from gemma_4_sql.sdk.evaluation import (
 )
 from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.tokenization import SQLTokenizer
+from gemma_4_sql.type_hints import ETLConfig, InferenceResultDict, JSONPrimitive, JSONValue
 
 
 def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify evaluate propagates DependencyMissingError when JAX dataloader dependencies are missing."""
     jax_agent = get_backend("jax")
-    monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+    monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})  # pyright: ignore[reportUnknownLambdaType]
 
-    def raise_err(*_a: Any, **_k: Any) -> None:
+    def raise_err(*_a: ETLConfig, **_k: JSONValue) -> NoReturn:
         """Raise DependencyMissingError when building dataloader."""
         raise DependencyMissingError("Mocked missing JAX", backend="jax")
 
@@ -38,21 +40,22 @@ def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_evaluate_keras_with_live_sqlite(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify end-to-end evaluation with Keras backend against a seeded in-memory SQLite database."""
     tokenizer = SQLTokenizer(model_name=None)
+    prompt_str = "Get user 1 id and name"
     target_sql = "SELECT id, name FROM users WHERE id = 1"
-    encoded_target = tokenizer.encode(target_sql)
-    encoded_prompt = tokenizer.encode("Get user 1 id and name")
+    encoded_target = tokenizer.encode(f"{prompt_str} {target_sql}")
+    encoded_prompt = tokenizer.encode(prompt_str)
 
     keras_agent = get_backend("keras")
     monkeypatch.setattr(
         keras_agent,
         "build_dataloader",
-        lambda *_args, **_kwargs: {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_target]}]},
+        lambda *_args, **_kwargs: {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_target]}]},  # pyright: ignore[reportUnknownLambdaType]
     )
     # Semantically and structurally equivalent query with extra whitespace, comma spacing, and trailing semicolon
     monkeypatch.setattr(
         keras_agent,
         "generate_sql",
-        lambda *_args, **_kwargs: {"sql": "  select  id , name  FROM users  where  id = 1 ; ", "confidence_score": 0.92},
+        lambda *_args, **_kwargs: {"sql": "  select  id , name  FROM users  where  id = 1 ; ", "confidence_score": 0.92},  # pyright: ignore[reportUnknownLambdaType]
     )
     ddl = "CREATE TABLE users (id INT, name TEXT); INSERT INTO users VALUES (1, 'Alice'); INSERT INTO users VALUES (2, 'Bob');"
     res = evaluate("model1", "data1", "keras", ddl=ddl)
@@ -68,11 +71,11 @@ def test_evaluate_keras_with_live_sqlite(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify evaluate with MaxText backend computes exact match and execution accuracy."""
     maxtext_agent = get_backend("maxtext")
-    monkeypatch.setattr(maxtext_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+    monkeypatch.setattr(maxtext_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})  # pyright: ignore[reportUnknownLambdaType]
     monkeypatch.setattr(
         maxtext_agent,
         "build_dataloader",
-        lambda *_args, **_kwargs: {"loader": [{"inputs": [[1]], "targets": [[2]]}]},
+        lambda *_args, **_kwargs: {"loader": [{"inputs": [[1]], "targets": [[2]]}]},  # pyright: ignore[reportUnknownLambdaType]
     )
     res = evaluate("model1", "data1", "maxtext")
     assert res["backend"] == "maxtext"
@@ -84,11 +87,11 @@ def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_evaluate_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify evaluate with PyTorch backend handles tuple batches from DataLoader."""
     pytorch_agent = get_backend("pytorch")
-    monkeypatch.setattr(pytorch_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+    monkeypatch.setattr(pytorch_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})  # pyright: ignore[reportUnknownLambdaType]
     monkeypatch.setattr(
         pytorch_agent,
         "build_dataloader",
-        lambda *_args, **_kwargs: {"loader": [([[1]], [[2]])]},
+        lambda *_args, **_kwargs: {"loader": [([[1]], [[2]])]},  # pyright: ignore[reportUnknownLambdaType]
     )
     res = evaluate("model1", "data1", "pytorch")
     assert res["backend"] == "pytorch"
@@ -136,12 +139,12 @@ def test_evaluate_end_to_end_and_engine_close_on_error(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         jax_agent,
         "build_dataloader",
-        lambda *_a, **_k: {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_truth]}]},
+        lambda *_a, **_k: {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_truth]}]},  # pyright: ignore[reportUnknownLambdaType]
     )
     monkeypatch.setattr(
         jax_agent,
         "generate_sql",
-        lambda *_a, **_k: {"sql": "SELECT COUNT(*) FROM users", "confidence_score": 0.99, "status": "success"},
+        lambda *_a, **_k: {"sql": "SELECT COUNT(*) FROM users", "confidence_score": 0.99, "status": "success"},  # pyright: ignore[reportUnknownLambdaType]
     )
     res = evaluate(
         "model",
@@ -163,7 +166,7 @@ def test_evaluate_end_to_end_and_engine_close_on_error(monkeypatch: pytest.Monke
         orig_close(self)
 
     monkeypatch.setattr(LiveDatabaseEngine, "close", tracking_close)
-    monkeypatch.setattr(jax_agent, "build_dataloader", lambda *_a, **_k: {"loader": None})
+    monkeypatch.setattr(jax_agent, "build_dataloader", lambda *_a, **_k: {"loader": None})  # pyright: ignore[reportUnknownLambdaType]
     with pytest.raises(EvaluationError, match="Valid iterable dataloader is required"):
         evaluate("model", "dataset", backend="jax")
     assert closed is True
@@ -316,9 +319,17 @@ def test_collect_predictions_batch_multimodal() -> None:
     """Verify _run_evaluation_inference forwards pixel_values and audio_values from batches."""
     backend_impl = MagicMock()
 
-    def mock_generate_sql(model_name: str, prompt: str, **kwargs: Any) -> dict[str, Any]:
+    def mock_generate_sql(model_name: str, prompt: str, **_kwargs: JSONValue) -> InferenceResultDict:
         """Return simulated SQL and confidence score."""
-        return {"sql": "SELECT 1", "confidence_score": 0.85}
+        return {
+            "backend": "jax",
+            "model": model_name,
+            "prompt": prompt,
+            "sql": "SELECT 1",
+            "beam_width": 3,
+            "confidence_score": 0.85,
+            "status": "success",
+        }
 
     backend_impl.generate_sql.side_effect = mock_generate_sql
 
@@ -351,11 +362,12 @@ def test_collect_predictions_batch_multimodal() -> None:
 
 
 def test_evaluate_syntax_variations() -> None:
-    """Verify normalize_sql handles case, comma spacing, parenthesis spacing, and comments."""
-    sql1 = """  SELECT   id,name  FROM users WHERE ( id = 1 ) -- trailing comment
+    """Verify normalize_sql handles case, comma spacing, operator spacing, parenthesis spacing, and comments."""
+    sql1 = """  SELECT   id,name  FROM users WHERE ( id=1 AND age>=18 AND role!='admin' ) -- trailing comment
 ;  """
-    sql2 = "select id, name from users where (id = 1);"
+    sql2 = "select id, name from users where (id = 1 and age >= 18 and role != 'admin');"
     assert normalize_sql(sql1) == normalize_sql(sql2)
+    assert normalize_sql("SELECT 'A=B' FROM t WHERE x<>2") == "select 'A=B' from t where x <> 2"
 
 
 def test_evaluate_empty_metrics(synthetic_dataset: list[dict[str, str]]) -> None:
@@ -369,15 +381,16 @@ def test_evaluate_empty_metrics(synthetic_dataset: list[dict[str, str]]) -> None
 
 def test_extract_batch_ids_dict_edge_cases() -> None:
     """Verify _process_batch_inputs handles dicts with missing keys, non-iterable values, and 1D sequences."""
-    inputs, targets = _process_batch_inputs({"foo": "bar"})
+    untyped_proc: Callable[..., tuple[list[int], list[int]]] = _process_batch_inputs
+    inputs, targets = untyped_proc({"foo": "bar"})  # ty: ignore[invalid-argument-type]
     assert inputs == []
     assert targets == []
 
-    inputs2, targets2 = _process_batch_inputs({"inputs": 123, "targets": 456})
+    inputs2, targets2 = untyped_proc({"inputs": 123, "targets": 456})  # ty: ignore[invalid-argument-type]
     assert inputs2 == []
     assert targets2 == []
 
-    inputs3, targets3 = _process_batch_inputs({"inputs": [1, 2, 3], "targets": [4, 5, 6]})
+    inputs3, targets3 = untyped_proc({"inputs": [1, 2, 3], "targets": [4, 5, 6]})  # ty: ignore[invalid-argument-type]
     assert inputs3 == [1, 2, 3]
     assert targets3 == [4, 5, 6]
 
@@ -388,11 +401,11 @@ def test_extract_batch_ids_dict_edge_cases() -> None:
             """Return scalar int."""
             return 7
 
-    inputs4, targets4 = _process_batch_inputs(([ScalarTensor()], [ScalarTensor()]))
+    inputs4, targets4 = untyped_proc(([ScalarTensor()], [ScalarTensor()]))  # ty: ignore[invalid-argument-type]
     assert inputs4 == [7]
     assert targets4 == [7]
 
-    inputs5, targets5 = _process_batch_inputs(([], []))
+    inputs5, targets5 = untyped_proc(([], []))
     assert inputs5 == []
     assert targets5 == []
 
@@ -405,7 +418,7 @@ async def test_compute_metrics_async_mismatch_and_exception(monkeypatch: pytest.
         with pytest.raises(ValueError, match="Length mismatch"):
             await compute_metrics_async(engine, ["a", "b"], ["a"])
 
-        async def mock_exec(_query: str) -> tuple[bool, list[Any], str | None]:
+        async def mock_exec(_query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
             """Raise RuntimeError during execution."""
             raise RuntimeError("Mock error")
 

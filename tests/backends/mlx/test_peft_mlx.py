@@ -2,289 +2,240 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
-import gemma_4_sql.backends.mlx.peft as peft_module
-from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from tests.conftest import requires_mlx
 
 pytestmark = requires_mlx
 
-mx: Any = optional_import("mlx.core")
-nn: Any = optional_import("mlx.nn")
 
+def test_mlx_lora_linear_forward_and_validation() -> None:
+    """Test MLXLoRALinear initialization, forward pass with/without bias and dropout, and rank validation."""
+    import mlx.core as mx
 
-def test_mlx_peft_imports() -> None:
-    """Test MLX PEFT optional import fallback when MLX packages are absent."""
-    import importlib
+    from gemma_4_sql.backends.mlx.peft import MLXLoRALinear
 
-    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None, "mlx.nn": None, "mlx_lm": None}):
-        reloaded_peft = importlib.reload(peft_module)
-        assert reloaded_peft.mx is None
-        assert reloaded_peft.nn is None
-
-    restored_peft = importlib.reload(peft_module)
-    assert restored_peft.mx is not None
-
-
-def test_mlx_lora_linear_init_and_math(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify MLXLoRALinear initializes real MLX arrays and computes low-rank updates."""
     with pytest.raises(ValueError, match="LoRA rank r must be positive"):
-        peft_module.MLXLoRALinear(4, 4, r=0)
+        MLXLoRALinear(in_features=4, out_features=4, r=0)
 
-    layer: Any = peft_module.MLXLoRALinear(4, 6, r=2, lora_alpha=4.0, lora_dropout=0.1, bias=True)
-    assert layer.in_features == 4
-    assert layer.out_features == 6
+    layer = MLXLoRALinear(in_features=4, out_features=3, r=2, lora_alpha=4.0, lora_dropout=0.0, bias=True)
+    assert layer.scale == 2.0
+    assert layer.W.shape == (3, 4)
+    assert layer.A.shape == (4, 2)
+    assert layer.B.shape == (2, 3)
     assert layer.bias is not None
-    assert tuple(layer.W.shape) == (6, 4)
-    assert tuple(layer.A.shape) == (4, 2)
-    assert tuple(layer.B.shape) == (2, 6)
-
-    w_new = mx.ones((6, 4))
-    a_new = mx.full((4, 2), 0.5)
-    b_new = mx.full((2, 6), 0.25)
-    layer.W = w_new
-    assert mx.array_equal(layer.weight, w_new)
-    layer.A = a_new
-    assert mx.array_equal(layer.lora_a, a_new)
-    layer.B = b_new
-    assert mx.array_equal(layer.lora_b, b_new)
-    layer.other = "custom_attr"
-    assert layer.other == "custom_attr"
-
-    layer_no_drop: Any = peft_module.MLXLoRALinear(4, 6, r=2, lora_alpha=4.0, lora_dropout=0.0, bias=False)
-    layer_no_drop.W = w_new
-    layer_no_drop.A = a_new
-    layer_no_drop.B = b_new
-    x = mx.ones((2, 4))
-    out = layer_no_drop(x)
-    # y = x @ W.T + (4/2) * ((x @ A) @ B) = 4.0 + 2.0 * (2.0 * 0.5) = 6.0
-    assert tuple(out.shape) == (2, 6)
-    assert np.allclose(np.array(out), np.full((2, 6), 6.0), atol=1e-5)
-
-    # Also test forward pass with bias and dropout
-    out_bias = layer(x)
-    assert tuple(out_bias.shape) == (2, 6)
-
-    monkeypatch.setattr(peft_module, "nn", None)
-    with pytest.raises(DependencyMissingError):
-        peft_module.MLXLoRALinear(4, 4)
-
-
-def test_mlx_lora_linear_from_linear() -> None:
-    """Verify MLXLoRALinear.from_linear wraps real mlx.nn.Linear layers with and without bias."""
-    base_lin = nn.Linear(4, 6, bias=True)
-    lora_lin = peft_module.MLXLoRALinear.from_linear(base_lin, r=2, lora_alpha=8.0, lora_dropout=0.0)
-    assert mx.array_equal(lora_lin.weight, base_lin.weight)
-    assert lora_lin.bias is not None
 
     x = mx.ones((2, 4))
-    # Initially lora_b is zeros, so output equals base_lin(x)
-    assert np.allclose(np.array(lora_lin(x)), np.array(base_lin(x)), atol=1e-5)
+    out_zero = layer(x)
+    assert out_zero.shape == (2, 3)
+    assert bool(mx.allclose(out_zero, mx.zeros((2, 3)), atol=1e-6).item())
 
-    base_no_bias = nn.Linear(4, 6, bias=False)
-    lora_no_bias = peft_module.MLXLoRALinear.from_linear(base_no_bias, r=2)
-    assert lora_no_bias.bias is None
+    layer.lora_a = mx.ones((4, 2)) * 0.5
+    layer.lora_b = mx.ones((2, 3)) * 0.5
+    out_nonzero = layer(x)
+    # x @ A = (2, 4) @ (4, 2) -> all 2.0; (x @ A) @ B = (2, 2) @ (2, 3) -> all 2.0; scaled by 2.0 -> all 4.0
+    assert bool(mx.allclose(out_nonzero, mx.full((2, 3), 4.0), atol=1e-5).item())
+
+    layer_drop = MLXLoRALinear(in_features=4, out_features=3, r=2, lora_alpha=4.0, lora_dropout=0.1, bias=False)
+    assert layer_drop.bias is None
+    out_drop = layer_drop(x)
+    assert out_drop.shape == (2, 3)
 
 
-def test_mlx_lora_linear_save_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify MLXLoRALinear saves and loads real safetensors adapter weights."""
-    layer: Any = peft_module.MLXLoRALinear(4, 6, r=2)
-    layer.A = mx.full((4, 2), 1.5)
-    layer.B = mx.full((2, 6), -0.5)
+def test_mlx_lora_linear_from_linear_and_safetensors(tmp_path: Path) -> None:
+    """Test MLXLoRALinear.from_linear conversion and adapter safetensors save/load."""
+    import mlx.core as mx
+    from mlx import nn
 
-    path = tmp_path / "adapters.safetensors"
-    layer.save_adapters(path)
-    assert path.exists()
+    from gemma_4_sql.backends.mlx.peft import MLXLoRALinear
 
-    layer2 = peft_module.MLXLoRALinear(4, 6, r=2)
-    layer2.load_adapters(path)
-    assert np.allclose(np.array(layer2.lora_a), 1.5)
-    assert np.allclose(np.array(layer2.lora_b), -0.5)
+    base_lin = nn.Linear(4, 3, bias=True)
+    x = mx.ones((1, 4))
+    expected_base = base_lin(x)
 
-    bad_path = tmp_path / "incomplete.safetensors"
-    mx.save_safetensors(str(bad_path), {"lora_a": mx.zeros((4, 2))})
+    lora_lin = MLXLoRALinear.from_linear(base_lin, r=2, lora_alpha=4.0, lora_dropout=0.0)
+    assert bool(mx.allclose(lora_lin(x), expected_base, rtol=1e-5, atol=1e-5).item())
+
+    lora_lin.lora_b = mx.ones((2, 3)) * 0.25
+    expected_adapted = lora_lin(x)
+
+    adapter_file = tmp_path / "sub" / "layer_adapter.safetensors"
+    lora_lin.save_adapters(adapter_file)
+    assert adapter_file.exists()
+
+    lora_lin2 = MLXLoRALinear.from_linear(base_lin, r=2, lora_alpha=4.0, lora_dropout=0.0)
+    lora_lin2.load_adapters(adapter_file)
+    assert bool(mx.allclose(lora_lin2(x), expected_adapted, rtol=1e-5, atol=1e-5).item())
+
+    # Test missing keys error on load_adapters
+    bad_file = tmp_path / "bad.safetensors"
+    mx.save_safetensors(str(bad_file), {"wrong_key": mx.zeros((1,))})
     with pytest.raises(KeyError, match="missing 'lora_a' or 'lora_b'"):
-        layer2.load_adapters(bad_path)
-
-    monkeypatch.setattr(peft_module, "mx", None)
-    with pytest.raises(DependencyMissingError):
-        layer.save_adapters(path)
-    with pytest.raises(DependencyMissingError):
-        layer.load_adapters(path)
+        lora_lin2.load_adapters(bad_file)
 
 
-def test_inject_lora(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify inject_lora replaces matching nn.Linear modules in nested MLX models and lists."""
+def test_inject_lora_and_model_adapter_persistence(tmp_path: Path) -> None:
+    """Test inject_lora on an MLX model hierarchy, forward-pass behavior, and save/load_adapter_weights."""
+    import mlx.core as mx
+    from mlx import nn
 
-    class SubBlock(nn.Module):
-        """Inner MLX module with q_proj and k_proj linear layers."""
+    from gemma_4_sql.backends.mlx.peft import (
+        MLXLoRALinear,
+        apply_lora,
+        inject_lora,
+        load_adapter_weights,
+        save_adapter_weights,
+    )
+
+    class ToyAttention(nn.Module):
+        """Toy attention block with q_proj, k_proj, and v_proj."""
 
         def __init__(self) -> None:
-            """Initialize SubBlock."""
+            """Initialize ToyAttention."""
             super().__init__()
-            self.q_proj = nn.Linear(4, 4)
-            self.k_proj = nn.Linear(4, 4)
+            self.q_proj: nn.Linear | MLXLoRALinear = nn.Linear(4, 4, bias=False)
+            self.k_proj: nn.Linear | MLXLoRALinear = nn.Linear(4, 4, bias=False)
+            self.v_proj: nn.Linear | MLXLoRALinear = nn.Linear(4, 4, bias=False)
+
+        def __call__(self, x: mx.array) -> mx.array:
+            """Compute sum of q, k, and v projections."""
+            return self.q_proj(x) + self.k_proj(x) + self.v_proj(x)
 
     class ToyMLXModel(nn.Module):
-        """Toy MLX model with nested blocks and a direct q_proj layer."""
+        """Toy MLX model with nested attention block and list of blocks."""
 
         def __init__(self) -> None:
             """Initialize ToyMLXModel."""
             super().__init__()
-            self.layers = [SubBlock()]
-            self.q_proj = nn.Linear(4, 4)
+            self.attn = ToyAttention()
+            self.layers = [nn.Linear(4, 4, bias=False)]
 
-    model: Any = ToyMLXModel()
-    adapted, count = peft_module.inject_lora(model, ["q_proj"], lora_r=2)
-    assert count == 2
-    assert isinstance(adapted.q_proj, peft_module.MLXLoRALinear)
-    assert isinstance(adapted.layers[0].q_proj, peft_module.MLXLoRALinear)
-    assert isinstance(adapted.layers[0].k_proj, nn.Linear)
+        def __call__(self, x: mx.array) -> mx.array:
+            """Run forward pass through attention and first layer."""
+            return self.attn(x) + self.layers[0](x)
 
-    # List container with top-level numeric index
-    class ListModel(list[Any]):
-        """List model exposing named_modules with numeric root index."""
+    model = ToyMLXModel()
+    x = mx.ones((2, 4))
+    out_before = model(x)
 
-        def named_modules(self) -> list[tuple[str, Any]]:
-            """Yield indexed modules."""
-            return [("0.q_proj", self[0].q_proj), ("1", self[1])]
+    _, zero_count = inject_lora(model, target_modules=[])
+    assert zero_count == 0
 
-    holder = SubBlock()
-    model_list: Any = ListModel([holder, nn.Linear(4, 4)])
-    _, count_list = peft_module.inject_lora(model_list, ["q_proj", "1"], lora_r=2)
-    assert count_list == 2
-    assert isinstance(model_list[1], peft_module.MLXLoRALinear)
+    model, injected_count = inject_lora(model, target_modules=["q_proj", "v_proj", "layers.0"], lora_r=2, lora_alpha=4.0, lora_dropout=0.0)
+    assert injected_count == 3
+    assert isinstance(model.attn.q_proj, MLXLoRALinear)
+    assert isinstance(model.attn.v_proj, MLXLoRALinear)
+    assert isinstance(model.layers[0], MLXLoRALinear)
+    assert not isinstance(model.attn.k_proj, MLXLoRALinear)
 
-    # Empty target_modules and missing named_modules
-    _, count_empty = peft_module.inject_lora(model, [])
-    assert count_empty == 0
+    # Verify forward-pass output matches base model exactly when lora_b is initialized to zero
+    out_zero_b = model(x)
+    assert bool(mx.allclose(out_zero_b, out_before, rtol=1e-5, atol=1e-5).item())
 
-    class NoNamedModules:
-        """Object without named_modules."""
+    # Modify lora_b to non-zero and verify forward-pass output changes
+    model.attn.q_proj.lora_b = mx.ones((2, 4)) * 0.5
+    out_nonzero_b = model(x)
+    assert not bool(mx.allclose(out_nonzero_b, out_before).item())
 
-    no_nm: Any = NoNamedModules()
-    _, count_no_nm = peft_module.inject_lora(no_nm, ["q_proj"])
-    assert count_no_nm == 0
+    # Save and load model-level adapter weights
+    save_dir = tmp_path / "adapters_out"
+    save_adapter_weights(model, save_dir)
+    expected_file = save_dir / "adapter.safetensors"
+    assert expected_file.exists()
 
-    monkeypatch.setattr(peft_module, "nn", None)
-    with pytest.raises(DependencyMissingError):
-        peft_module.inject_lora(model, ["q_proj"])
-
-
-def test_save_load_adapter_weights(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify save_adapter_weights and load_adapter_weights persist and restore safetensors."""
-
-    class SimpleMLP(nn.Module):
-        """Single-layer MLX module."""
-
-        def __init__(self) -> None:
-            """Initialize SimpleMLP."""
-            super().__init__()
-            self.q_proj = nn.Linear(4, 4)
-
-    model: Any = SimpleMLP()
-    peft_module.inject_lora(model, ["q_proj"], lora_r=2)
-    model.q_proj.lora_b = mx.ones((2, 4))
-
-    peft_module.save_adapter_weights(model, tmp_path)
-    assert (tmp_path / "adapter.safetensors").exists()
-
-    explicit_file = tmp_path / "custom.safetensors"
-    peft_module.save_adapter_weights(model, explicit_file)
-    assert explicit_file.exists()
-
-    txt_file = tmp_path / "custom.txt"
-    peft_module.save_adapter_weights(model, txt_file)
-    assert (tmp_path / "custom.txt" / "adapter.safetensors").exists()
-
-    model2: Any = SimpleMLP()
-    peft_module.inject_lora(model2, ["q_proj"], lora_r=2)
-    peft_module.load_adapter_weights(model2, explicit_file)
-    assert np.allclose(np.array(model2.q_proj.lora_b), 1.0)
-
-    class DictLoadModel:
-        """Model without load_weights but with update()."""
-
-        def __init__(self) -> None:
-            """Initialize DictLoadModel."""
-            self.updated = False
-
-        def update(self, _weights: Any) -> None:
-            """Mark updated."""
-            self.updated = True
-
-    dm: Any = DictLoadModel()
-    peft_module.load_adapter_weights(dm, explicit_file)
-    assert dm.updated is True
+    model.attn.q_proj.lora_b = mx.zeros((2, 4))
+    load_adapter_weights(model, expected_file)
+    assert bool(mx.allclose(model.attn.q_proj.lora_b, mx.ones((2, 4)) * 0.5).item())
 
     with pytest.raises(FileNotFoundError):
-        peft_module.load_adapter_weights(model2, tmp_path / "not_found.safetensors")
+        load_adapter_weights(model, tmp_path / "nonexistent.safetensors")
 
-    monkeypatch.setattr(peft_module, "mx", None)
-    with pytest.raises(DependencyMissingError):
-        peft_module.save_adapter_weights(model, tmp_path)
-    with pytest.raises(DependencyMissingError):
-        peft_module.load_adapter_weights(model, explicit_file)
+    # Test apply_lora with pre-instantiated model and output_dir
+    model2 = ToyMLXModel()
+    out_dir2 = tmp_path / "apply_out"
+    with patch("gemma_4_sql.backends.mlx.peft.load", return_value=(model2, None)):
+        res = apply_lora("test-mlx", ["q_proj"], lora_r=2, model=model2, output_dir=str(out_dir2))
+        assert res["status"] == "completed"
+        assert res["injected_modules"] == 1
+        assert (out_dir2 / "adapter.safetensors").exists()
 
 
-def test_apply_lora(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify apply_lora end-to-end execution, output_dir saving, and error handling."""
-    import gemma_4_sql.backends.mlx as mlx_pkg
-    from gemma_4_sql.backends.mlx.adapter import MLXBackend
+def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Test fallback paths in inject_lora, load_adapter_weights, and missing dependency errors."""
+    import mlx.core as mx
+    from mlx import nn
 
-    assert mlx_pkg.get_trainer() == "mlx_trainer"
-    assert isinstance(MLXBackend(), MLXBackend)
+    import gemma_4_sql.backends.mlx.peft as peft_module
 
-    class SimpleMLP(nn.Module):
-        """Single-layer MLX module."""
+    # Test load_adapter_weights fallback when load_weights raises AttributeError
+    class FallbackLoadModel:
+        """Model stub without load_weights method."""
 
         def __init__(self) -> None:
-            """Initialize SimpleMLP."""
-            super().__init__()
-            self.q_proj = nn.Linear(4, 4)
+            """Initialize FallbackLoadModel."""
+            self.updated_weights: dict[str, mx.array] | None = None
 
-    monkeypatch.setattr(peft_module, "load", lambda _name: (SimpleMLP(), None))
-    res = peft_module.apply_lora("model", ["q_proj"], lora_r=2, output_dir=str(tmp_path))
+        def named_modules(self) -> list[tuple[str, nn.Linear]]:
+            """Return empty modules list."""
+            return []
+
+        def update(self, weights: dict[str, mx.array]) -> None:
+            """Record updated weights."""
+            self.updated_weights = weights
+
+    fb_file = tmp_path / "fb.safetensors"
+    mx.save_safetensors(str(fb_file), {"k": mx.ones((1,))})
+    fb_model = FallbackLoadModel()
+    peft_module.load_adapter_weights(fb_model, fb_file)
+    assert fb_model.updated_weights is not None
+
+    # Test list container replacement in inject_lora
+    lin = nn.Linear(4, 4, bias=False)
+
+    class ListModel(list[nn.Module]):
+        """List-based model container supporting named_modules."""
+
+        def named_modules(self) -> list[tuple[str, nn.Linear]]:
+            """Return top-level and dotted module names."""
+            return [("0", lin), ("1.child", lin)]
+
+    sub_container = MagicMock()
+    list_model = ListModel([lin, sub_container])
+    _, cnt = peft_module.inject_lora(list_model, ["0", "child"], lora_r=2)
+    assert cnt == 2
+    sub_container.update_modules.assert_called_once()
+
+    # Test apply_lora loading from mlx_lm.load and error handling
+    toy_mod = nn.Linear(4, 4)
+    monkeypatch.setattr(peft_module, "load", lambda _name: (toy_mod, None))  # pyright: ignore[reportUnknownLambdaType]
+    res = peft_module.apply_lora("model", ["weight"], lora_r=2)
     assert res["status"] == "completed"
-    assert res["injected_modules"] == 1
-    assert (tmp_path / "adapter.safetensors").exists()
 
-    res2 = peft_module.apply_lora("model", ["q_proj"], lora_r=2, model=SimpleMLP())
-    assert res2["status"] == "completed"
-
-    # Model without freeze() method
-    class NoFreezeContainer:
-        """Container with named_modules but no freeze method."""
-
-        def __init__(self) -> None:
-            """Initialize NoFreezeContainer."""
-            self.q_proj = nn.Linear(4, 4)
-
-        def named_modules(self) -> list[tuple[str, Any]]:
-            """Yield q_proj."""
-            return [("q_proj", self.q_proj)]
-
-    nf_model: Any = NoFreezeContainer()
-    _, count_nf = peft_module.inject_lora(nf_model, ["q_proj"], lora_r=2)
-    assert count_nf == 1
-
-    # Model without load_weights or update in load_adapter_weights
-    peft_module.load_adapter_weights(nf_model, tmp_path / "adapter.safetensors")
-
-    monkeypatch.setattr(peft_module, "inject_lora", MagicMock(side_effect=RuntimeError("error")))
-    res3 = peft_module.apply_lora("model", ["q_proj"])
-    assert "failed: error" in res3["status"]
-    with pytest.raises(TrainingError, match="error"):
+    monkeypatch.setattr(peft_module, "load", MagicMock(side_effect=RuntimeError("load error")))
+    res_err = peft_module.apply_lora("model", ["q_proj"])
+    assert "failed: load error" in res_err["status"]
+    with pytest.raises(TrainingError, match="load error"):
         peft_module.apply_lora("model", ["q_proj"], raise_on_error=True)
 
+    lora_inst = peft_module.MLXLoRALinear(2, 2, r=1)
+    monkeypatch.setattr(peft_module, "mx", None)
+    with pytest.raises(DependencyMissingError):
+        lora_inst.save_adapters(tmp_path / "x.safetensors")
+    with pytest.raises(DependencyMissingError):
+        lora_inst.load_adapters(tmp_path / "x.safetensors")
+    with pytest.raises(DependencyMissingError):
+        peft_module.save_adapter_weights(fb_model, tmp_path / "x.safetensors")
+    with pytest.raises(DependencyMissingError):
+        peft_module.load_adapter_weights(fb_model, tmp_path / "x.safetensors")
+
     monkeypatch.setattr(peft_module, "nn", None)
+    with pytest.raises(DependencyMissingError):
+        peft_module.MLXLoRALinear(2, 2, r=1)
+    with pytest.raises(DependencyMissingError):
+        peft_module.inject_lora(toy_mod, ["q_proj"])
     with pytest.raises(DependencyMissingError):
         peft_module.apply_lora("model", ["q_proj"])

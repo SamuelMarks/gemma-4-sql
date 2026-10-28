@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import NoReturn
 
 import pytest
 
@@ -12,7 +13,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk import etl
 from gemma_4_sql.sdk.etl import _route_backend, etl_posttrain, etl_pretrain, etl_sft
 from gemma_4_sql.sdk.registry import get_backend
-from gemma_4_sql.type_hints import ETLConfig
+from gemma_4_sql.type_hints import DataloaderResultDict, ETLConfig, JSONValue
 from tests.conftest import requires_duckdb
 
 
@@ -47,29 +48,38 @@ def test_etl_real_duckdb_execution_mlx(tmp_path: Path) -> None:
     assert res["dataset"] == "local_duckdb"
     assert res["batch_size"] == 2
     assert res["status"] == "loaded"
-    loader: Any = res.get("loader")
+    loader = res.get("loader")
+    assert isinstance(loader, Iterable)
     batches = list(loader)
     assert len(batches) == 1
-    assert "inputs" in batches[0]
-    assert "targets" in batches[0]
+    first_batch = batches[0]
+    assert isinstance(first_batch, Mapping)
+    assert "inputs" in first_batch
+    assert "targets" in first_batch
 
 
 def test_route_backend_pytorch_forwarding(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _route_backend forwards exact ETLConfig fields to the PyTorch backend."""
     pytorch_agent = get_backend("pytorch")
-    captured: dict[str, Any] = {}
+    captured_configs: list[ETLConfig] = []
 
-    def spy_build(config: ETLConfig, **kwargs: Any) -> dict[str, Any]:
+    def spy_build(config: ETLConfig, **_kwargs: JSONValue) -> DataloaderResultDict:
         """Record forwarded ETLConfig."""
-        captured["config"] = config
-        captured["kwargs"] = kwargs
-        return {"backend": "pytorch", "dataset": config.dataset_name, "batch_size": config.batch_size}
+        captured_configs.append(config)
+        return {
+            "backend": "pytorch",
+            "dataset": config.dataset_name,
+            "split": config.split,
+            "batch_size": config.batch_size,
+            "distributed": config.distributed,
+            "status": "loaded",
+        }
 
     monkeypatch.setattr(pytorch_agent, "build_dataloader", spy_build)
     cfg = ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False)
     res = _route_backend(cfg, "pytorch")
     assert res["backend"] == "pytorch"
-    assert captured["config"] == cfg
+    assert captured_configs == [cfg]
 
 
 def test_etl_pretrain_propagates_missing_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,7 +87,7 @@ def test_etl_pretrain_propagates_missing_dependency(monkeypatch: pytest.MonkeyPa
     config = ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False)
     jax_agent = get_backend("jax")
 
-    def raise_err(*_a: Any, **_k: Any) -> None:
+    def raise_err(*_a: ETLConfig, **_k: JSONValue) -> NoReturn:
         """Raise DependencyMissingError."""
         raise DependencyMissingError("Mocked missing JAX")
 
@@ -93,7 +103,7 @@ def test_etl_sft_and_posttrain_forwarding(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(
         keras_agent,
         "build_dataloader",
-        lambda cfg, **_k: {"backend": "keras", "dataset": cfg.dataset_name, "batch_size": cfg.batch_size},
+        lambda cfg, **_k: {"backend": "keras", "dataset": cfg.dataset_name, "batch_size": cfg.batch_size},  # pyright: ignore[reportUnknownLambdaType]
     )
     res_sft = etl_sft(config, backend="keras")
     assert res_sft["dataset"] == "dummy/data"
@@ -103,7 +113,7 @@ def test_etl_sft_and_posttrain_forwarding(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(
         maxtext_agent,
         "build_dataloader",
-        lambda cfg, **_k: {"backend": "maxtext", "dataset": cfg.dataset_name, "batch_size": cfg.batch_size},
+        lambda cfg, **_k: {"backend": "maxtext", "dataset": cfg.dataset_name, "batch_size": cfg.batch_size},  # pyright: ignore[reportUnknownLambdaType]
     )
     res_post = etl_posttrain(config, backend="maxtext")
     assert res_post["dataset"] == "dummy/data"
@@ -114,10 +124,17 @@ def test_etl_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify etl_pretrain, etl_sft, and etl_posttrain populate default ETLConfig when None is passed."""
     captured: list[tuple[ETLConfig, str]] = []
 
-    def spy_route(c: ETLConfig, b: str) -> dict[str, Any]:
+    def spy_route(c: ETLConfig, b: str) -> DataloaderResultDict:
         """Record routed config and backend."""
         captured.append((c, b))
-        return {"dataset": c.dataset_name, "backend": b}
+        return {
+            "backend": b,
+            "dataset": c.dataset_name,
+            "split": c.split,
+            "batch_size": c.batch_size,
+            "distributed": c.distributed,
+            "status": "loaded",
+        }
 
     monkeypatch.setattr(etl, "_route_backend", spy_route)
 

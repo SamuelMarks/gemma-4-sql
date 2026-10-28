@@ -24,44 +24,40 @@ DANGEROUS_KEYWORDS = frozenset({
     "INSTALL",
     "LOAD",
     "VACUUM",
+    "REINDEX",
+    "ANALYZE",
+    "EXPORT",
+    "IMPORT",
     "EXECUTE",
     "CALL",
     "GRANT",
     "REVOKE",
+    "PG_SLEEP",
+    "LO_IMPORT",
+    "LO_EXPORT",
+    "DBLINK",
 })
 
-_SQL_TOKEN_PATTERN = re.compile(
-    r"""
-    (\$(?P<dtag>[A-Za-z0-9_]*)\$[\s\S]*?\$(?P=dtag)\$) | # PostgreSQL dollar-quoted string literal
-    ('(?:''|\.|[^'\])*')      | # Single-quoted string literal (SQL & backslash escapes)
-    ("(?:""|\.|[^"\])*")      | # Double-quoted identifier/literal
-    (`(?:``|[^`])*`)            | # Backtick-quoted identifier
-    (\[[^\]]*\])                | # Bracket-quoted identifier
-    (/\*[\s\S]*?\*/)            | # Block comment
-    (--[^
-]*)                    # Single-line comment
-    """,
-    re.VERBOSE,
-)
+_WORD_TOKEN_PATTERN = re.compile(r"\b\w+\b")
+_BS = chr(92)
+_NL = chr(10)
+_SINGLE_QUOTE_PAT = f"'(?:''|{_BS}{_BS}.|[^{_BS}{_BS}'])*'"
+_DOUBLE_QUOTE_PAT = f'"(?:""|{_BS}{_BS}.|[^{_BS}{_BS}"])*"'
+_DOLLAR_PAT = f"{_BS}$(?P<dtag>[A-Za-z0-9_]*){_BS}$[{_BS}s{_BS}S]*?{_BS}$(?P=dtag){_BS}$"
+_DOLLAR_SPLIT_PAT = f"{_BS}$(?:[A-Za-z0-9_]*){_BS}$[{_BS}s{_BS}S]*?{_BS}$(?:[A-Za-z0-9_]*){_BS}$"
+_BRACKET_PAT = f"{_BS}[[^{_BS}]]*{_BS}]"
+_BLOCK_COMMENT_PAT = f"/{_BS}*(?:(?!/\\*|\\*/)[{_BS}s{_BS}S])*?{_BS}*/"
+_LINE_COMMENT_PAT = f"--[^{_NL}]*"
 
-_SQL_COMMENT_PATTERN = re.compile(
-    r"""
-    (\$(?P<dtag>[A-Za-z0-9_]*)\$[\s\S]*?\$(?P=dtag)\$) | # PostgreSQL dollar-quoted string literal
-    ('(?:''|\.|[^'\])*')      | # Single-quoted string literal
-    ("(?:""|\.|[^"\])*")      | # Double-quoted identifier/literal
-    (`(?:``|[^`])*`)            | # Backtick-quoted identifier
-    (\[[^\]]*\])                | # Bracket-quoted identifier
-    (?P<comment>/\*[\s\S]*?\*/|--[^
-]*) # Block or single-line comment
-    """,
-    re.VERBOSE,
-)
+_SQL_TOKEN_PATTERN = re.compile(f"({_DOLLAR_PAT})|({_SINGLE_QUOTE_PAT})|({_DOUBLE_QUOTE_PAT})|(`(?:``|[^`])*`)|({_BRACKET_PAT})|({_BLOCK_COMMENT_PAT})|({_LINE_COMMENT_PAT})")
 
-_SQL_LITERAL_SPLIT_PATTERN = re.compile(r"""(\$(?:[A-Za-z0-9_]*)\$[\s\S]*?\$(?:[A-Za-z0-9_]*)\$|'(?:''|\.|[^'\])*'|"(?:""|\.|[^"\])*"|`(?:``|[^`])*`|\[[^\]]*\])""")
+_SQL_COMMENT_PATTERN = re.compile(f"({_DOLLAR_PAT})|({_SINGLE_QUOTE_PAT})|({_DOUBLE_QUOTE_PAT})|(`(?:``|[^`])*`)|({_BRACKET_PAT})|(?P<comment>{_BLOCK_COMMENT_PAT}|{_LINE_COMMENT_PAT})")
+
+_SQL_LITERAL_SPLIT_PATTERN = re.compile(f"({_DOLLAR_SPLIT_PAT}|{_SINGLE_QUOTE_PAT}|{_DOUBLE_QUOTE_PAT}|`(?:``|[^`])*`|{_BRACKET_PAT})")
 
 
 def strip_sql_comments(query: str) -> str:
-    """Strip SQL block and single-line comments while preserving quoted literals and identifiers.
+    """Strip SQL block (including nested `/* /* ... */ */`) and single-line comments while preserving quoted literals.
 
     Args:
         query: Raw SQL query or DDL string.
@@ -70,20 +66,26 @@ def strip_sql_comments(query: str) -> str:
         SQL string with comments replaced by spaces and literals preserved intact.
 
     """
-    return _SQL_COMMENT_PATTERN.sub(lambda m: " " if m.group("comment") is not None else m.group(0), query)
+    prev = query
+    while True:
+        curr = _SQL_COMMENT_PATTERN.sub(lambda m: " " if m.group("comment") is not None else m.group(0), prev)
+        if curr == prev:
+            return curr
+        prev = curr
 
 
 def strip_comments_and_literals(query: str) -> str:
-    """Replace SQL comments and quoted literals with spaces in a single lexical pass.
+    """Replace SQL comments (including nested block comments) and quoted literals with spaces.
 
     Args:
         query: Raw SQL query string.
 
     Returns:
-        SQL string with all comments and quoted segments replaced by a single space.
+        SQL string with all comments and quoted segments replaced by spaces.
 
     """
-    return _SQL_TOKEN_PATTERN.sub(" ", query)
+    no_comments = strip_sql_comments(query)
+    return _SQL_TOKEN_PATTERN.sub(" ", no_comments)
 
 
 def split_preserving_literals(query: str) -> list[str]:
@@ -145,6 +147,9 @@ def validate_readonly_sql(query: str, *, read_only: bool = True) -> None:
     if "/*" in cleaned:
         msg = "Safety Violation: Unclosed block comment is not allowed in read-only mode."
         raise SQLSafetyViolationError(msg)
+    if "'" in cleaned or '"' in cleaned or "`" in cleaned or re.search(r"\$[A-Za-z0-9_]*\$", cleaned):
+        msg = "Safety Violation: Unclosed string literal or quoted identifier is not allowed in read-only mode."
+        raise SQLSafetyViolationError(msg)
 
     statements = [stmt.strip() for stmt in cleaned.split(";") if stmt.strip()]
     if len(statements) > 1 or cleaned.count(";") > 1:
@@ -156,6 +161,19 @@ def validate_readonly_sql(query: str, *, read_only: bool = True) -> None:
         if word in DANGEROUS_KEYWORDS:
             msg = f"Safety Violation: Mutating statements ({word}) are not allowed in read-only mode."
             raise SQLSafetyViolationError(msg)
+
+
+def extract_word_tokens(text: str) -> list[str]:
+    """Extract lowercased alphanumeric word tokens from a prompt or SQL fragment.
+
+    Args:
+        text: Input string to tokenize into words.
+
+    Returns:
+        List of lowercased word tokens.
+
+    """
+    return [w.lower() for w in _WORD_TOKEN_PATTERN.findall(text)]
 
 
 def validate_sql_identifier(identifier: str) -> str:
@@ -179,6 +197,7 @@ def validate_sql_identifier(identifier: str) -> str:
 
 __all__ = [
     "DANGEROUS_KEYWORDS",
+    "extract_word_tokens",
     "has_top_level_order_by",
     "split_preserving_literals",
     "strip_comments_and_literals",

@@ -42,7 +42,7 @@ def test_mlx_data_loader() -> None:
     ds = [{"sql_prompt": "p1", "sql": "s1"}, {"question": "p2", "query": "s2"}, {"sql_prompt": "p3", "sql": "s3"}]
 
     mock_tok = MagicMock()
-    mock_tok.encode.side_effect = lambda x: [len(x)]
+    mock_tok.encode.side_effect = lambda x: [len(x)]  # pyright: ignore[reportUnknownLambdaType]
 
     loader = etl_module.MLXDataLoader(ds, mock_tok, bs=2)
 
@@ -54,6 +54,24 @@ def test_mlx_data_loader() -> None:
     # Test empty ds
     empty_loader = etl_module.MLXDataLoader([], mock_tok, bs=2)
     assert list(empty_loader) == []
+
+    # Test multimodal and preference batching in MLXDataLoader
+    ds_mm_pref = [
+        {"sql_prompt": "p1", "chosen": "SELECT 1", "rejected": "SELECT 2", "image": "img1", "audio": "aud1"},
+        {"sql_prompt": "p2", "chosen": "SELECT 3", "rejected": "SELECT 4", "image": "img2", "audio": "aud2"},
+    ]
+    with (
+        patch("gemma_4_sql.backends.common_multimodal.format_multimodal_prompt", return_value={"prompt": "fmt"}),
+        patch("gemma_4_sql.backends.common_multimodal.process_image", return_value={"pixel_values": [1.0]}),
+        patch("gemma_4_sql.backends.common_multimodal.process_audio", return_value={"audio_values": [0.5]}),
+    ):
+        mm_loader = etl_module.MLXDataLoader(ds_mm_pref, mock_tok, bs=2)
+        mm_batches = list(mm_loader)
+        assert len(mm_batches) == 1
+        assert "chosen_inputs" in mm_batches[0]
+        assert "rejected_inputs" in mm_batches[0]
+        assert mm_batches[0]["pixel_values"] == [[1.0], [1.0]]
+        assert mm_batches[0]["audio_values"] == [[0.5], [0.5]]
 
 
 def test_load_hf_or_duckdb() -> None:

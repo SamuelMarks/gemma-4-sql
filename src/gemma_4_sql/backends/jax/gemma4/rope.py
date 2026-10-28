@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import partial
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -45,10 +45,10 @@ def default_rope_params(_positions: Array, head_dim: int, rope_theta: int = 1000
     return (rotational_frequency, attention_factor)
 
 
-rope_functions: dict[str, Any] = {"default": default_rope_params}
+rope_functions: dict[str, Callable[..., tuple[Array, float]]] = {"default": default_rope_params}
 
 
-def apply_rope(x: Any, sin: Any, cos: Any) -> Any:
+def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
     """Apply rotary position embeddings to query or key projections.
 
     Args:
@@ -60,11 +60,12 @@ def apply_rope(x: Any, sin: Any, cos: Any) -> Any:
         Rotated query or key tensor preserving `x.dtype`.
 
     Raises:
-        AssertionError: If input tensor ranks do not match `(4, 3, 3)`.
+        ValueError: If input tensor ranks do not match `(4, 3, 3)`.
 
     """
-    if not (x.ndim == int("4") and sin.ndim == int("3") and (cos.ndim == int("3"))):
-        raise AssertionError
+    if not (x.ndim == 4 and sin.ndim == 3 and cos.ndim == 3):
+        msg = f"Expected (x.ndim, sin.ndim, cos.ndim) == (4, 3, 3), got ({x.ndim}, {sin.ndim}, {cos.ndim})"
+        raise ValueError(msg)
     (x1, x2) = (x[..., : x.shape[-1] // 2], x[..., x.shape[-1] // 2 :])
     (sin, cos) = (sin[:, :, None, :], cos[:, :, None, :])
     return jnp.concatenate([x1 * cos - x2 * sin, x2 * cos + x1 * sin], axis=-1).astype(x.dtype)
@@ -73,7 +74,7 @@ def apply_rope(x: Any, sin: Any, cos: Any) -> Any:
 class RoPE(nnx.Module):
     """Implementation of RoPE."""
 
-    def __init__(self, *, rope_type: str, **rope_kwargs: Any) -> None:
+    def __init__(self, *, rope_type: str, **rope_kwargs: float) -> None:
         """Initialize the instance parameters.
 
         Args:
@@ -95,6 +96,6 @@ class RoPE(nnx.Module):
 
         """
         (rotational_frequency, attention_factor) = self.rope_fn(positions)
-        sinusoid_inp = jnp.einsum("BT,k->BTk", positions, rotational_frequency, precision=getattr(jax.lax.Precision, "HIGHEST", None))
+        sinusoid_inp = jnp.einsum("BT,k->BTk", positions, rotational_frequency, precision=jax.lax.Precision.HIGHEST)
         (sin, cos) = (jnp.sin(sinusoid_inp) * attention_factor, jnp.cos(sinusoid_inp) * attention_factor)
         return (sin, cos)

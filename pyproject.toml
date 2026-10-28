@@ -87,6 +87,11 @@ line-length = 320
 target-version = "py312"
 
 [tool.ruff.lint]
+extend-select = [
+    "ANN401",
+    "D",
+    "TID251",
+]
 extend-safe-fixes = [
     "ALL",
 ]
@@ -150,6 +155,9 @@ ignore = [
     "mutable-class-default",
 ]
 
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 [tool.ruff.lint.pylint]
 max-args = 8
 
@@ -160,6 +168,12 @@ fixture-parentheses = false
 known-first-party = [
     "gemma_4_sql",
 ]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"typing.Any".msg = "Do not use typing.Any; use explicit Protocols, TypedDicts, or TypeVars instead."
+"typing.cast".msg = "Do not use typing.cast; use runtime-checkable Protocols or type guards instead."
+"builtins.__import__".msg = "Do not use __import__; use LazyLoader / optional_import / optional_attr or standard imports instead."
+"numpy".msg = "Do not use numpy directly; use the backend-specific library (jax.numpy, torch, keras.ops, mlx.core) instead."
 
 [tool.mypy]
 python_version = "3.12"
@@ -188,7 +202,7 @@ source = [
 
 [tool.coverage.report]
 exclude_lines = [
-    "(?!)",
+    "^\\s*\\.\\.\\.\\s*$",
 ]
 partial_branches = [
     "(?!)",
@@ -227,3 +241,10 @@ ignore-nested-functions = false
 fail-under = 100
 verbose = 2
 color = false
+
+[tool.ty.environment]
+python = ".venv"
+
+[tool.ty.rules]
+unresolved-import = "ignore"
+invalid-mutable-override = "ignore"

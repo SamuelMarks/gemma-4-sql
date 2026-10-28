@@ -2,23 +2,64 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue, MaxTextCausalLMProtocol, TensorType
+from gemma_4_sql.type_hints import (
+    BenchmarkResultDict,
+    DTypeProtocol,
+    ForwardOutput,
+    JaxArrayProtocol,
+    JSONValue,
+    MaxTextCausalLMProtocol,
+    TensorProtocol,
+    TensorType,
+)
 
 logger = logging.getLogger(__name__)
 
+
+@runtime_checkable
+class _MemoryStatsDeviceProtocol(Protocol):
+    """Protocol for a JAX device exposing `.memory_stats()`."""
+
+    def memory_stats(self) -> Mapping[str, int] | None:
+        """Return memory usage statistics for the device."""
+        ...
+
+
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
-Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
 
 
-def _get_device(hardware: str) -> Any:
-    """Provide the jax device for the hardware.
+def _resolve_jnp_dtype(dtype_str: str) -> DTypeProtocol | str | None:
+    """Resolve a string dtype identifier on `jax.numpy`.
+
+    Args:
+        dtype_str: Dtype name such as `'bfloat16'`, `'float16'`, or `'float32'`.
+
+    Returns:
+        Resolved `jax.numpy` dtype or `None`.
+
+    """
+    assert jnp is not None
+    dtype_map: dict[str, DTypeProtocol | str | None] = {
+        "bfloat16": jnp.bfloat16,
+        "float16": jnp.float16,
+        "float32": jnp.float32,
+    }
+    return dtype_map.get(dtype_str)
+
+
+def _get_device(hardware: str) -> _MemoryStatsDeviceProtocol | str | None:
+    """Provide the JAX device for the requested hardware.
 
     Args:
         hardware: Target hardware string.
@@ -37,7 +78,19 @@ def _get_device(hardware: str) -> Any:
     return jax.devices("cpu")[0] if jax is not None else None
 
 
-def _run_benchmark_pass(model: MaxTextCausalLMProtocol, params: dict[str, TensorType], batch_size: int, num_runs: int, warmup_steps: int, mode: str, max_new_tokens: int, device: str | object) -> tuple[float, float, float]:
+type _MaxTextBenchmarkParams = Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]] | dict[str, TensorType]
+
+
+def _run_benchmark_pass(
+    model: MaxTextCausalLMProtocol,
+    params: _MaxTextBenchmarkParams,
+    batch_size: int,
+    num_runs: int,
+    warmup_steps: int,
+    mode: str,
+    max_new_tokens: int,
+    device: _MemoryStatsDeviceProtocol | str | None,
+) -> tuple[float, float, float]:
     """Execute the forward pass benchmark loop.
 
     Args:
@@ -51,11 +104,13 @@ def _run_benchmark_pass(model: MaxTextCausalLMProtocol, params: dict[str, Tensor
         device: JAX device.
 
     Returns:
-        A tuple containing the results.
+        A tuple containing `(tokens_per_sec, latency_ms, memory_mb)`.
 
     """
+    assert jax is not None
+    assert jnp is not None
 
-    def forward_pass(params: dict[str, TensorType], inputs: TensorType) -> Any:
+    def forward_pass(params: _MaxTextBenchmarkParams, inputs: TensorType) -> ForwardOutput:
         """Execute model forward pass.
 
         Args:
@@ -66,9 +121,9 @@ def _run_benchmark_pass(model: MaxTextCausalLMProtocol, params: dict[str, Tensor
             Forward pass model output.
 
         """
-        return model.apply(params, inputs)
+        return model.apply(params, inputs)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
-    def generate_pass(params: dict[str, TensorType], inputs: TensorType) -> Any:
+    def generate_pass(params: _MaxTextBenchmarkParams, inputs: TensorType) -> TensorType:
         """Execute simple generation pass.
 
         Args:
@@ -79,14 +134,15 @@ def _run_benchmark_pass(model: MaxTextCausalLMProtocol, params: dict[str, Tensor
             Generated sequence array.
 
         """
+        assert jnp is not None
         seq = inputs
         for _ in range(max_new_tokens):
-            logits = model.apply(params, seq)
+            logits: JaxArrayProtocol = model.apply(params, seq)  # pyright: ignore[reportArgumentType,reportAssignmentType]  # ty: ignore[invalid-assignment, invalid-argument-type]
             token = jnp.argmax(logits[..., -1, :], axis=-1, keepdims=True)
             seq = jnp.concatenate([seq, token], axis=-1)
         return seq
 
-    if hasattr(jax, "jit"):
+    with contextlib.suppress(AttributeError, TypeError):
         forward_pass = jax.jit(forward_pass)
         generate_pass = jax.jit(generate_pass)
 
@@ -94,20 +150,14 @@ def _run_benchmark_pass(model: MaxTextCausalLMProtocol, params: dict[str, Tensor
         dummy_inputs = jax.random.randint(jax.random.PRNGKey(42), (batch_size, 32), 1, 256000, dtype=jnp.int32)
 
         for _ in range(warmup_steps):
-            if mode == "prefill":
-                out = forward_pass(params, dummy_inputs)
-            else:
-                out = generate_pass(params, dummy_inputs)
-            if hasattr(jax, "block_until_ready"):
+            out = forward_pass(params, dummy_inputs) if mode == "prefill" else generate_pass(params, dummy_inputs)
+            with contextlib.suppress(AttributeError, TypeError):
                 jax.block_until_ready(out)
 
         start_time = time.time()
         for _ in range(num_runs):
-            if mode == "prefill":
-                out = forward_pass(params, dummy_inputs)
-            else:
-                out = generate_pass(params, dummy_inputs)
-            if hasattr(jax, "block_until_ready"):
+            out = forward_pass(params, dummy_inputs) if mode == "prefill" else generate_pass(params, dummy_inputs)
+            with contextlib.suppress(AttributeError, TypeError):
                 jax.block_until_ready(out)
         end_time = time.time()
 
@@ -120,21 +170,25 @@ def _run_benchmark_pass(model: MaxTextCausalLMProtocol, params: dict[str, Tensor
             tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
 
         try:
-            dev_any: Any = device
-            stats = dev_any.memory_stats()
-            memory_mb = stats.get("peak_bytes_in_use", get_current_rss_mb() * 1024 * 1024) / (1024 * 1024)
+            stats = device.memory_stats()  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            memory_mb = float(stats.get("peak_bytes_in_use", get_current_rss_mb() * 1024 * 1024)) / (1024 * 1024)  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
         except (AttributeError, KeyError, RuntimeError, TypeError):
             memory_mb = get_current_rss_mb()
 
     return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 
 
-def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int = 32, **kwargs: JSONValue) -> BenchmarkResultDict:
+def benchmark_model(
+    model_name: str,
+    hardware: str = "tpu-v5p",
+    batch_size: int = 32,
+    **kwargs: JSONValue,
+) -> BenchmarkResultDict:
     """Benchmark a model using the MaxText backend.
 
     Args:
         model_name: The name of the model to benchmark.
-        hardware: Target hardware for the benchmark (e.g., 'tpu-v5p', 'gpu').
+        hardware: Target hardware for the benchmark (e.g., `'tpu-v5p'`, `'gpu'`).
         batch_size: Batch size to use during benchmarking.
         **kwargs: Additional args like `num_runs`.
 
@@ -150,6 +204,9 @@ def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int 
             Tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
 
         """
+        assert jax is not None
+        assert jnp is not None
+        assert Gemma4Model is not None
         dtype_str = str(kwargs.get("dtype", "bfloat16"))
         mode = str(kwargs.get("mode", "prefill"))
         max_new_tokens = int(str(kwargs.get("max_new_tokens", 128)))
@@ -162,7 +219,7 @@ def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int 
             logger.warning("jax.distributed.initialize() failed: %s", e)
 
         try:
-            model = Gemma4Model(model_name, dtype=getattr(jnp, dtype_str, None))
+            model = Gemma4Model(model_name, dtype=_resolve_jnp_dtype(dtype_str))
         except TypeError:
             model = Gemma4Model(model_name)
 

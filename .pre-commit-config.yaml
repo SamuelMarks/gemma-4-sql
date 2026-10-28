@@ -9,19 +9,25 @@ repos:
     hooks:
       - id: interrogate
         name: Check 100% docstring coverage
-        entry: bash -c "uv run --extra dev interrogate -q src tests scripts"
+        entry: bash -c "uv run --extra dev interrogate -v src/gemma_4_sql tests scripts"
         language: system
         pass_filenames: false
         always_run: true
-      - id: mypy
-        name: Run strict mypy type checking
-        entry: bash -c "uv run --extra dev mypy src tests scripts"
+      - id: pyright
+        name: Run strict pyright type checking
+        entry: bash -c "uv run --extra dev pyright"
         language: system
         pass_filenames: false
         always_run: true
-      - id: tests-multi-env
-        name: Run multi-env tests & aggregated coverage
-        entry: bash -c "if [ -f .tox/.coverage.core ] && [ -f .tox/.coverage.pytorch ] && [ -f .tox/.coverage.jax ] && [ -f .tox/.coverage.keras ] && [ -f .tox/.coverage.maxtext ] && [ -f .tox/.coverage.mlx ] && [ -z \"$(find src tests -name '*.py' -newer .tox/.coverage.core 2>/dev/null)\" ]; then uvx --with tox-uv tox run --skip-pkg-install -e coverage-report; else uvx --with tox-uv tox run-parallel --skip-pkg-install -e core,pytorch,jax,keras,maxtext,mlx && uvx --with tox-uv tox run --skip-pkg-install -e coverage-report; fi"
+      - id: ty
+        name: Run ty type checking
+        entry: bash -c "uv run --extra dev ty check"
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: pytest-cov
+        name: Run pytest with 100% line and branch coverage
+        entry: bash -c "uv run --extra dev pytest --cov=src/gemma_4_sql --cov-branch --cov-report=term-missing --cov-fail-under=100"
         language: system
         pass_filenames: false
         always_run: true

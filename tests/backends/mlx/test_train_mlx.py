@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import TrainerState, TrainingConfig
+from gemma_4_sql.type_hints import TrainingConfig, TrainingLoopState
 from tests.conftest import requires_mlx
 
 pytestmark = requires_mlx
@@ -30,7 +29,7 @@ def test_real_mlx_training_epochs_and_execute_train(monkeypatch: pytest.MonkeyPa
             self.embed = mlx_nn.Embedding(32, 8)
             self.head = mlx_nn.Linear(8, 32)
 
-        def __call__(self, x: Any) -> Any:
+        def __call__(self, x: mx.array) -> mx.array:
             """Compute logits from input token IDs."""
             return self.head(self.embed(x))
 
@@ -39,9 +38,10 @@ def test_real_mlx_training_epochs_and_execute_train(monkeypatch: pytest.MonkeyPa
     old_weight = mx.array(tiny_model.head.weight)
     mx.eval(old_weight)
 
-    monkeypatch.setattr(train_module, "load", lambda _m: (tiny_model, "tok"))
+    monkeypatch.setattr(train_module, "load", lambda _m: (tiny_model, "tok"))  # pyright: ignore[reportUnknownLambdaType]
     batch = {"inputs": [[1, 2, 3]], "targets": [[2, 3, 4]]}
-    monkeypatch.setattr(train_module, "build_dataloader", lambda *_a, **_k: {"loader": [batch]})
+    batch_mismatched = {"inputs": [[1, 2, 3, 4]], "targets": [[2, 3]]}
+    monkeypatch.setattr(train_module, "build_dataloader", lambda *_a, **_k: {"loader": [batch, batch_mismatched]})  # pyright: ignore[reportUnknownLambdaType]
 
     status, final_loss = train_module._execute_train("tiny", "ds", epochs=1, learning_rate=1e-2, batch_size=1)
     assert status == "completed"
@@ -53,10 +53,10 @@ def test_run_training_epochs_scalar_loss() -> None:
     """Verify _run_training_epochs handles plain float loss returns without .item()."""
     import gemma_4_sql.backends.mlx.train as train_module
 
-    state: Any = TrainerState(
+    state: TrainingLoopState[MagicMock, MagicMock, dict[str, list[list[int]]]] = TrainingLoopState(
         dataloader=[{"inputs": [[1, 2]], "targets": [[2, 3]]}],
         epochs=1,
-        policy_model=MagicMock(),
+        model=MagicMock(),
         optimizer=MagicMock(),
         train_step=lambda *_a: (0.25, "grads"),
     )
@@ -68,8 +68,8 @@ def test_execute_train_invalid_dataloader_and_missing(monkeypatch: pytest.Monkey
     """Verify _execute_train validates the dataloader and raises DependencyMissingError when MLX is missing."""
     import gemma_4_sql.backends.mlx.train as train_module
 
-    monkeypatch.setattr(train_module, "load", lambda _m: MagicMock())
-    monkeypatch.setattr(train_module, "build_dataloader", lambda *_a, **_k: {})
+    monkeypatch.setattr(train_module, "load", lambda _m: MagicMock())  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(train_module, "build_dataloader", lambda *_a, **_k: {})  # pyright: ignore[reportUnknownLambdaType]
     with pytest.raises(ValueError, match="Invalid dataloader"):
         train_module._execute_train("m", "d", 1, 0.1)
 

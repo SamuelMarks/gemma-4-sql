@@ -2,51 +2,133 @@
 
 from __future__ import annotations
 
-import importlib
-from typing import Any
+from collections.abc import Iterable, Mapping
+from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.backends.common_train import run_train_wrapper
+from gemma_4_sql.backends.common_train import generic_run_training_epochs, run_train_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.pytorch.distributed import (
+    TorchDistModuleProtocol,
+    cleanup_distributed,
+    setup_distributed,
+    wrap_model_distributed,
+)
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ETLConfig, TorchCausalLMProtocol, TorchTrainerState, TrainerState, TrainingConfig, TrainResultDict
+from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
+from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
+from gemma_4_sql.type_hints import (
+    ETLConfig,
+    ForwardOutput,
+    TorchCausalLMProtocol,
+    TorchOptimizerProtocol,
+    TorchTensorProtocol,
+    TorchTrainerState,
+    TrainingConfig,
+    TrainResultDict,
+)
+
+
+@runtime_checkable
+class _PretrainedModelInstanceProtocol(TorchCausalLMProtocol, Protocol):
+    """Protocol for a loaded PyTorch model supporting `.to(device)`."""
+
+    def to(self, device: str, /) -> TorchCausalLMProtocol:
+        """Move model to `device`."""
+        ...
+
+
+@runtime_checkable
+class _PretrainedCausalLMLoaderProtocol(Protocol):
+    """Protocol for a Hugging Face or native model class exposing `.from_pretrained(...)`."""
+
+    def from_pretrained(self, model_name: str, /) -> _PretrainedModelInstanceProtocol:
+        """Load a causal language model from a pretrained identifier or path."""
+        ...
+
+
+@runtime_checkable
+class _LogitsContainerProtocol(Protocol):
+    """Protocol for model output objects exposing a `.logits` tensor attribute."""
+
+    @property
+    def logits(self) -> TorchTensorProtocol:
+        """Provide the prediction logits tensor."""
+        ...
+
+
+@runtime_checkable
+class _ReshapableLogitsProtocol(TorchTensorProtocol, Protocol):
+    """Protocol for a PyTorch tensor supporting `.view(...)`, `.size(...)`, and `.backward()`."""
+
+    def view(self, *shape: int) -> _ReshapableLogitsProtocol:
+        """Return a reshaped view of the tensor."""
+        ...
+
+    def size(self, dim: int, /) -> int:
+        """Return the dimension size at `dim`."""
+        ...
+
+    def backward(self) -> None:
+        """Compute gradients of the scalar tensor with respect to graph leaves."""
+        ...
+
+    def to(self, device: str | None, /) -> _ReshapableLogitsProtocol:
+        """Move tensor to target device."""
+        ...
+
 
 torch = optional_import("torch")
 nn = optional_import("torch.nn")
 optim = optional_import("torch.optim")
-Gemma4ForCausalLM = optional_attr("transformers.models.gemma4", "Gemma4ForCausalLM")
+Gemma4ForCausalLM: _PretrainedCausalLMLoaderProtocol | None = optional_attr(
+    "transformers.models.gemma4",
+    "Gemma4ForCausalLM",
+    _PretrainedCausalLMLoaderProtocol,
+)
 
 
-def _setup_distributed(distributed_strategy: str) -> tuple[bool, object, object, int]:
+def _setup_distributed(
+    distributed_strategy: str,
+) -> tuple[bool, TorchDistModuleProtocol | None, str, int]:
     """Set up distributed environment.
 
     Args:
         distributed_strategy: The string representing the distributed strategy.
 
     Returns:
-        A tuple containing the results.
+        A 4-tuple of `(is_distributed, dist_module, device_str, device_id)`.
 
     """
-    is_distributed = distributed_strategy in {"ddp", "fsdp"}
-    dist_mod: Any = None
-    device_id = 0
-    if is_distributed:
-        import torch.distributed as dist
-
-        dist_mod = dist
-        if not dist_mod.is_initialized():
-            dist_mod.init_process_group("nccl" if torch.cuda.is_available() else "gloo")
-        rank = dist_mod.get_rank()
-        device_id = rank % max(1, torch.cuda.device_count())
-        device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")
-        if torch.cuda.is_available():
-            torch.cuda.set_device(device)
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return (is_distributed, dist_mod, device, device_id)
+    return setup_distributed(distributed_strategy, torch)
 
 
-def _run_training_epochs(state: TorchTrainerState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> float:
+def _extract_logits_tensor(
+    outputs: ForwardOutput | _LogitsContainerProtocol,
+) -> _ReshapableLogitsProtocol:
+    """Extract the 3D logits tensor from tuple, `.logits` object, or raw tensor output.
+
+    Args:
+        outputs: Model forward output.
+
+    Returns:
+        Extracted logits tensor supporting `.view` and `.size`.
+
+    """
+    if isinstance(outputs, tuple):
+        first = outputs[0]
+        assert isinstance(first, _ReshapableLogitsProtocol)
+        return first
+    if isinstance(outputs, _LogitsContainerProtocol):
+        inner = outputs.logits
+        assert isinstance(inner, _ReshapableLogitsProtocol)
+        return inner
+    assert isinstance(outputs, _ReshapableLogitsProtocol)
+    return outputs
+
+
+def _run_training_epochs[ModelT, OptT, BatchValT](
+    state: TorchTrainerState[ModelT, OptT, Mapping[str, BatchValT]] | TorchTrainerState[ModelT, OptT, dict[str, BatchValT]],
+) -> float:
     """Run PyTorch supervised training epochs over the dataloader.
 
     Args:
@@ -56,33 +138,36 @@ def _run_training_epochs(state: TorchTrainerState[Any, Any, Any] | TrainerState[
         Mean batch loss from the final epoch.
 
     """
-    dataloader: Any = state.dataloader or ()
-    epochs = state.epochs
-    model: Any = state.model if isinstance(state, TorchTrainerState) else state.policy_model
-    optimizer: Any = state.optimizer
-    criterion: Any = state.criterion
+    dataloader: Iterable[Mapping[str, BatchValT]] = state.dataloader or ()
+    model = state.model
+    optimizer = state.optimizer
+    criterion = state.criterion
     device = state.device
-    final_loss = 0.0
-    for _epoch in range(epochs):
-        epoch_loss = 0.0
-        for batch in dataloader:
-            inputs = batch["inputs"].to(device)
-            targets = batch["targets"].to(device)
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            if isinstance(outputs, tuple):
-                logits_any = outputs[0]
-            else:
-                logits_any = getattr(outputs, "logits", outputs)
-            loss = criterion(logits_any.view(-1, logits_any.size(-1)), targets.view(-1))
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item()
-        final_loss = epoch_loss / max(1, len(dataloader))
-    return final_loss
+
+    def _step(batch: Mapping[str, BatchValT]) -> float:
+        """Execute a single PyTorch supervised training step and return scalar float loss."""
+        assert model is not None
+        assert optimizer is not None
+        assert criterion is not None
+        inputs = batch["inputs"].to(device)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        targets = batch["targets"].to(device)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        optimizer.zero_grad()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        raw_outputs = model(inputs)  # pyright: ignore[reportCallIssue]  # ty: ignore[call-non-callable]
+        logits = _extract_logits_tensor(raw_outputs)
+        loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))  # pyright: ignore[reportAttributeAccessIssue]
+        assert isinstance(loss, _ReshapableLogitsProtocol)
+        loss.backward()
+        optimizer.step()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        return float(loss.item())
+
+    return generic_run_training_epochs(state.epochs, dataloader, _step)
 
 
-def _wrap_model_distributed(model: TorchCausalLMProtocol, distributed_strategy: str, device_id: int) -> object:
+def _wrap_model_distributed[ModelT](
+    model: ModelT,
+    distributed_strategy: str,
+    device_id: int,
+) -> ModelT:
     """Wrap model for distributed training.
 
     Args:
@@ -91,32 +176,10 @@ def _wrap_model_distributed(model: TorchCausalLMProtocol, distributed_strategy: 
         device_id: The integer value for device id.
 
     Returns:
-        The execution result.
+        Wrapped distributed model or original `model`.
 
     """
-    if distributed_strategy == "ddp":
-        ddp_module = importlib.import_module("torch.nn.parallel")
-        ddp_class = ddp_module.DistributedDataParallel
-        return ddp_class(model, device_ids=[device_id] if getattr(torch, "cuda", None) and getattr(torch.cuda, "is_available", lambda: False)() else None)
-    if distributed_strategy == "fsdp":
-        fsdp_module = importlib.import_module("torch.distributed.fsdp")
-        fsdp_class = fsdp_module.FullyShardedDataParallel
-        return fsdp_class(model)
-    return model
-
-
-def cleanup_distributed(dist: Any) -> None:
-    """Cleanup distributed environment.
-
-    Args:
-        dist: Distributed module object.
-
-    """
-    if dist is not None and getattr(dist, "is_initialized", lambda: False)():
-        dist.destroy_process_group()
-
-
-_cleanup_distributed = cleanup_distributed
+    return wrap_model_distributed(model, distributed_strategy, device_id, torch)
 
 
 def _execute_train(
@@ -127,7 +190,8 @@ def _execute_train(
     distributed_strategy: str,
     batch_size: int = 2,
     backend_alias: str = "pytorch",
-    **kwargs: object,
+    *,
+    model_config: Gemma4Config | None = None,
 ) -> tuple[str, float]:
     """Execute the core PyTorch training loop.
 
@@ -139,10 +203,10 @@ def _execute_train(
         distributed_strategy: Distributed training strategy.
         batch_size: Training batch size.
         backend_alias: PyTorch backend variant.
-        **kwargs: Additional model and trainer options.
+        model_config: Optional explicit `Gemma4Config` for native initialization.
 
     Returns:
-        A tuple of (status, final_loss).
+        A tuple of `(status, final_loss)`.
 
     Raises:
         DependencyMissingError: If PyTorch dependencies are missing.
@@ -152,38 +216,49 @@ def _execute_train(
     if torch is None or nn is None or optim is None:
         raise DependencyMissingError("PyTorch dependencies are missing.")
 
-    dist_module = None
+    dist_module: TorchDistModuleProtocol | None = None
     try:
         (is_distributed, dist_module, device, device_id) = _setup_distributed(distributed_strategy)
-        dev_any: Any = device
         if backend_alias == "pytorch_native":
             from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
 
-            cfg_in: Any = kwargs.get("model_config") or kwargs.get("config")
-            raw_model = NativeGemma4.from_pretrained(model_name, config=cfg_in).to(dev_any)
+            raw_model: TorchCausalLMProtocol = NativeGemma4.from_pretrained(model_name, config=model_config).to(device)
         else:
-            raw_model = Gemma4ForCausalLM.from_pretrained(model_name).to(dev_any)
-        raw_model_any: Any = raw_model
-        model: Any = _wrap_model_distributed(raw_model_any, distributed_strategy, device_id)
-        optimizer = optim.AdamW(model.parameters(), lr=learning_rate)
+            assert Gemma4ForCausalLM is not None
+            raw_model = Gemma4ForCausalLM.from_pretrained(model_name).to(device)
+        model: TorchCausalLMProtocol = _wrap_model_distributed(raw_model, distributed_strategy, device_id)
+        optimizer: TorchOptimizerProtocol = optim.AdamW(model.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
         data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size, distributed=is_distributed))
         dataloader = data_dict.get("loader", None)
-        if dataloader is None or not hasattr(dataloader, "__iter__"):
+        has_loader = isinstance(dataloader, Iterable)
+        if not has_loader:
             raise ValueError(f"Invalid dataloader for dataset: {dataset}")
         model.train()
-        final_loss = _run_training_epochs(TorchTrainerState(model=model, dataloader=dataloader, epochs=epochs, optimizer=optimizer, criterion=criterion, device=device))
+        final_loss = _run_training_epochs(
+            TorchTrainerState(
+                model=model,
+                dataloader=dataloader,
+                epochs=epochs,
+                optimizer=optimizer,
+                criterion=criterion,
+                device=device,
+            )
+        )
         return "completed", float(final_loss)
     finally:
-        _cleanup_distributed(dist=dist_module)
+        cleanup_distributed(dist=dist_module)
 
 
-def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
+def train_model(
+    config: TrainingConfig,
+    **kwargs: StatusValue | Gemma4Config,
+) -> TrainResultDict:
     """Train a Text-to-SQL model using the PyTorch backend.
 
     Args:
         config: Training configuration object.
-        **kwargs: Extra runtime options such as `'distributed_strategy'` or `'raise_on_error'`.
+        **kwargs: Extra runtime options such as `'distributed_strategy'`, `'model_config'`, or `'raise_on_error'`.
 
     Returns:
         A dictionary containing PyTorch training status and metrics.
@@ -193,22 +268,22 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
         TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
-    model_name = getattr(config, "model_name", "gemma-4")
-    dataset = getattr(config, "dataset", "dummy")
-    epochs = getattr(config, "epochs", 1)
-    learning_rate = getattr(config, "learning_rate", 1e-05)
-    batch_size = getattr(config, "batch_size", 2)
-    distributed_strategy = str(kwargs.get("distributed_strategy") or getattr(config, "distributed_strategy", "none"))
-    backend_alias = str(kwargs.get("backend_alias") or kwargs.get("backend") or ("pytorch_native" if getattr(config, "backend", None) == "pytorch_native" else "pytorch"))
+    model_name = config.model_name
+    dataset = config.dataset
+    epochs = config.epochs
+    learning_rate = config.learning_rate
+    batch_size = config.batch_size
+    raw_dist = kwargs.get("distributed_strategy")
+    distributed_strategy = str(raw_dist) if isinstance(raw_dist, str) and raw_dist else config.distributed_strategy
+    raw_alias = kwargs.get("backend_alias") or kwargs.get("backend") or ("pytorch_native" if config.backend == "pytorch_native" else "pytorch")
+    backend_alias = str(raw_alias)
 
-    if torch is None or optim is None or (nn is None) or (backend_alias != "pytorch_native" and Gemma4ForCausalLM is None):
+    if torch is None or optim is None or nn is None or (backend_alias != "pytorch_native" and Gemma4ForCausalLM is None):
         raise DependencyMissingError("PyTorch dependencies are missing.", backend=backend_alias)
 
-    train_kwargs = dict(kwargs)
-    train_kwargs.pop("backend_alias", None)
-    train_kwargs.pop("backend", None)
-    train_kwargs.pop("raise_on_error", None)
-    wrapper_kwargs = dict(kwargs)
+    raw_cfg = kwargs.get("model_config") or kwargs.get("config")
+    resolved_model_cfg = raw_cfg if isinstance(raw_cfg, Gemma4Config) else None
+    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
     wrapper_kwargs["distributed_strategy"] = distributed_strategy
     return run_train_wrapper(
         backend_alias,
@@ -218,10 +293,17 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
             dataset,
             epochs,
             learning_rate,
-            str(distributed_strategy),
+            distributed_strategy,
             batch_size=batch_size,
             backend_alias=backend_alias,
-            **train_kwargs,
+            model_config=resolved_model_cfg,
         ),
         **wrapper_kwargs,
     )
+
+
+__all__ = [
+    "Gemma4ForCausalLM",
+    "cleanup_distributed",
+    "train_model",
+]

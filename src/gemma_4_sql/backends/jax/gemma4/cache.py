@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import jax.numpy as jnp
 from flax import nnx
@@ -11,14 +10,13 @@ from jax.sharding import PartitionSpec
 
 from gemma_4_sql.backends.common_gemma4_config import GEMMA4_ATTENTION_PATTERN
 
-from .config import AttentionType, ModelConfig
+from .config import AttentionType, JaxDTypeLike, ModelConfig
 
 
 class LayerCache(nnx.Module):
     """KV Cache for a single decoder layer.
 
-    Attributes
-    ----------
+    Attributes:
         k_cache: The key cache tensor.
         v_cache: The value cache tensor.
         cur_ind: The current sequence index being written to.
@@ -26,7 +24,7 @@ class LayerCache(nnx.Module):
 
     """
 
-    def __init__(self, cache_shape: tuple[int, int, int, int], dtype: jnp.dtype[Any], _shd: PartitionSpec | None = None) -> None:
+    def __init__(self, cache_shape: tuple[int, int, int, int], dtype: JaxDTypeLike, _shd: PartitionSpec | None = None) -> None:
         """Initialize zero-filled key/value cache buffers for a single decoder layer.
 
         Args:

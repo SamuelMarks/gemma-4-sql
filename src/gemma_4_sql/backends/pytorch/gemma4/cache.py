@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import abc
-from typing import Any
 
 import torch
+
+from .config import Gemma4Config
 
 
 class Cache(abc.ABC):
@@ -171,7 +172,7 @@ class StaticCache(Cache):
 
     def __init__(
         self,
-        config: Any,
+        config: Gemma4Config,
         max_batch_size: int,
         max_cache_len: int,
         device: torch.device,

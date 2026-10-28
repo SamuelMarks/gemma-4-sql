@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import pathlib
 import sys
-from typing import Any
 from unittest.mock import MagicMock
 
+import jax
 import pytest
 
 import gemma_4_sql.backends.jax.inference as inf
+from gemma_4_sql.backends.common_inference import BoundedLRUCache
+from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from tests.conftest import requires_jax
 
@@ -19,10 +21,10 @@ pytestmark = requires_jax
 @pytest.fixture(autouse=True)
 def _bypass_jax_jit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Bypass XLA jit compilation during unit tests for fast, deterministic execution."""
-    monkeypatch.setattr(inf.jax, "jit", lambda fn, *_args, **_kwargs: fn)
+    monkeypatch.setattr(inf.jax, "jit", lambda fn, *_args, **_kwargs: fn)  # pyright: ignore[reportUnknownLambdaType]
 
 
-def _make_tiny_jax_model() -> Any:
+def _make_tiny_jax_model() -> Gemma4ForCausalLM:
     """Instantiate a real tiny JAX Gemma4ForCausalLM model for behavioral testing.
 
     Returns:
@@ -30,8 +32,6 @@ def _make_tiny_jax_model() -> Any:
 
     """
     from flax import nnx
-
-    from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
 
     cfg = Gemma4Config(
         vocab_size=320,
@@ -101,7 +101,7 @@ def test_generate_sql_real_tiny_model_and_caching(monkeypatch: pytest.MonkeyPatc
     """Verify generate_sql initializes a tiny model, caches it, and decodes SQL output."""
     tiny_model = _make_tiny_jax_model()
     monkeypatch.setattr(inf.Gemma4Config, "gemma4_e2b", staticmethod(lambda: tiny_model.config))
-    monkeypatch.setattr(inf, "Gemma4ForCausalLM", lambda _cfg, rngs=None: tiny_model)
+    monkeypatch.setattr(inf, "Gemma4ForCausalLM", lambda _cfg, rngs=None: tiny_model)  # pyright: ignore[reportUnknownLambdaType]
 
     model_key = str(tmp_path / "nonexistent_checkpoint")
     inf._MODEL_CACHE.pop(model_key, None)
@@ -124,8 +124,8 @@ def test_generate_sql_checkpoint_restore_branches(monkeypatch: pytest.MonkeyPatc
     """Verify generate_sql handles Orbax checkpoint restoration success, None return, no nnx.update, and errors."""
     tiny_model = _make_tiny_jax_model()
     monkeypatch.setattr(inf.Gemma4Config, "gemma4_e2b", staticmethod(lambda: tiny_model.config))
-    monkeypatch.setattr(inf, "Gemma4ForCausalLM", lambda _cfg, rngs=None: tiny_model)
-    monkeypatch.setattr(inf, "jax_beam_search", lambda _fn, ids, _bw, _ml, _eos: (ids, -0.5))
+    monkeypatch.setattr(inf, "Gemma4ForCausalLM", lambda _cfg, rngs=None: tiny_model)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(inf, "jax_beam_search", lambda _fn, ids, _bw, _ml, _eos: (ids, -0.5))  # pyright: ignore[reportUnknownLambdaType]
 
     ckpt_dir = tmp_path / "ckpt"
     ckpt_dir.mkdir()
@@ -159,8 +159,8 @@ def test_generate_sql_checkpoint_restore_branches(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(InferenceError, match="corrupt ckpt"):
         inf.generate_sql(str(ckpt_dir), "SELECT 1", beam_width=1, max_length=1, strict_checkpoint=True)
 
-    # 4. Verify _BoundedModelCache LRU eviction and update
-    small_cache: Any = inf._BoundedModelCache(maxsize=2)
+    # 4. Verify BoundedLRUCache LRU eviction and update
+    small_cache: BoundedLRUCache[int] = inf.BoundedLRUCache(maxsize=2)
     small_cache.put_model("a", 1)
     small_cache.put_model("a", 10)
     small_cache.put_model("b", 2)
@@ -176,14 +176,14 @@ def test_generate_sql_multimodal_and_typeerror_fallback(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(
         "gemma_4_sql.backends.common_multimodal.process_image",
-        lambda _p: {"pixel_values": [[1.0, 2.0]]},
+        lambda _p: {"pixel_values": [[1.0, 2.0]]},  # pyright: ignore[reportUnknownLambdaType]
     )
     monkeypatch.setattr(
         "gemma_4_sql.backends.common_multimodal.process_audio",
-        lambda _p: {"audio_values": [[0.5, -0.5]]},
+        lambda _p: {"audio_values": [[0.5, -0.5]]},  # pyright: ignore[reportUnknownLambdaType]
     )
 
-    def strict_PosOnlyModel(seq: Any, _pos: Any) -> Any:
+    def strict_PosOnlyModel(seq: jax.Array, _pos: jax.Array | None = None) -> jax.Array:
         """Model callable that rejects keyword arguments, triggering TypeError fallback."""
         return jnp.ones((1, seq.shape[1], 320), dtype=jnp.float32)
 
@@ -201,29 +201,7 @@ def test_generate_sql_multimodal_and_typeerror_fallback(monkeypatch: pytest.Monk
     assert "<image>" in str(res["prompt"])
     assert "<audio>" in str(res["prompt"])
 
-    # Also test when pixel_values and audio_values are pre-supplied and output_ids[0] has no __len__
-    class RowWithoutLen:
-        """Stub sequence row without __len__ to exercise output_ids.shape[1] fallback."""
-
-        def tolist(self) -> list[int]:
-            """Return token list."""
-            return [10, 11]
-
-    class OutputArrayStub:
-        """Stub 2D output array."""
-
-        shape = (1, 2)
-
-        def __getitem__(self, _idx: int) -> RowWithoutLen:
-            """Return RowWithoutLen."""
-            return RowWithoutLen()
-
-    def _mock_beam_search(fn: Any, ids: Any, _bw: int, _ml: int, _eos: int) -> tuple[OutputArrayStub, float]:
-        """Invoke forward pass and return OutputArrayStub."""
-        _ = fn(ids, ids)
-        return (OutputArrayStub(), -0.2)
-
-    monkeypatch.setattr(inf, "jax_beam_search", _mock_beam_search)
+    # Also test when pixel_values and audio_values are pre-supplied as JAX arrays
     res2 = inf.generate_sql(
         "strict_pos_model",
         "SELECT 1",

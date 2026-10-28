@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections import UserDict
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 import pytest
 import torch
@@ -68,7 +68,7 @@ def test_pytorch_collate_multimodal() -> None:
     """Test _collate_fn stacking pixel and audio tensors when present in batch."""
     from gemma_4_sql.backends.pytorch.etl import _collate_fn
 
-    batch: list[dict[str, Any]] = [
+    batch: list[dict[str, torch.Tensor]] = [
         {
             "inputs": torch.tensor([1, 2, 3], dtype=torch.long),
             "targets": torch.tensor([4, 5], dtype=torch.long),
@@ -104,7 +104,7 @@ def test_pytorch_inference_multimodal_native(
     dummy_wav = tmp_path / "voice.wav"
     dummy_wav.write_bytes(synthetic_wav_bytes)
 
-    passed_kwargs: dict[str, Any] = {}
+    passed_kwargs: dict[str, torch.Tensor | int | bool | None] = {}
 
     class MockNativeModel:
         """Mock native Gemma4 causal model."""
@@ -113,11 +113,11 @@ def test_pytorch_inference_multimodal_native(
             """Set eval mode."""
 
         @classmethod
-        def from_pretrained(cls, *_args: Any, **_kwargs: Any) -> MockNativeModel:
+        def from_pretrained(cls, *_args: str | None, **_kwargs: str | None) -> MockNativeModel:
             """Instantiate mock model."""
             return cls()
 
-        def generate(self, input_ids: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+        def generate(self, input_ids: torch.Tensor, **kwargs: torch.Tensor | int | bool | None) -> torch.Tensor:
             """Simulate generation and capture kwargs."""
             passed_kwargs.update(kwargs)
             gen = torch.tensor([[65, 66, 67]], dtype=torch.long)
@@ -158,7 +158,7 @@ def test_pytorch_inference_multimodal_hf(
     dummy_wav = tmp_path / "voice.wav"
     dummy_wav.write_bytes(synthetic_wav_bytes)
 
-    class MockTokOut(UserDict[str, Any]):
+    class MockTokOut(UserDict[str, torch.Tensor]):
         """Mock tokenizer output supporting .to() and .input_ids."""
 
         def __init__(self) -> None:
@@ -166,7 +166,7 @@ def test_pytorch_inference_multimodal_hf(
             super().__init__({"input_ids": torch.tensor([[1, 2, 3]], dtype=torch.long)})
             self.input_ids = self["input_ids"]
 
-        def to(self, _device: Any) -> MockTokOut:
+        def to(self, _device: torch.device | str) -> MockTokOut:
             """Return self."""
             return self
 
@@ -183,12 +183,18 @@ def test_pytorch_inference_multimodal_hf(
             _ = return_tensors
             return MockTokOut()
 
-        def decode(self, _ids: Any, skip_special_tokens: bool = True) -> str:
+        def decode(self, _ids: torch.Tensor | Sequence[int], skip_special_tokens: bool = True) -> str:
             """Decode token IDs."""
             _ = skip_special_tokens
             return "SELECT * FROM customers;"
 
-    captured_gen_kwargs: dict[str, Any] = {}
+    captured_gen_kwargs: dict[str, torch.Tensor | int | bool | None] = {}
+
+    class GenOut:
+        """Mock generation output."""
+
+        sequences = torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long)
+        scores = (torch.ones((1, 10)), torch.ones((1, 10)))
 
     class MockHFModel:
         """Mock HuggingFace AutoModelForCausalLM."""
@@ -196,20 +202,13 @@ def test_pytorch_inference_multimodal_hf(
         device = "cpu"
 
         @classmethod
-        def from_pretrained(cls, _name: str, **_kwargs: Any) -> MockHFModel:
+        def from_pretrained(cls, _name: str, **_kwargs: str | torch.dtype | None) -> MockHFModel:
             """Return MockHFModel."""
             return cls()
 
-        def generate(self, **kwargs: Any) -> Any:
+        def generate(self, **kwargs: torch.Tensor | int | bool | None) -> GenOut:
             """Record kwargs and return sequences and scores."""
             captured_gen_kwargs.update(kwargs)
-
-            class GenOut:
-                """Mock generation output."""
-
-                sequences = torch.tensor([[1, 2, 3, 4, 5]], dtype=torch.long)
-                scores = (torch.ones((1, 10)), torch.ones((1, 10)))
-
             return GenOut()
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.inference.AutoTokenizer", MockTokenizer)

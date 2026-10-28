@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping, Sequence
 
-import numpy as np
 import torch
 
+from gemma_4_sql.type_hints import TensorType, ToListArrayProtocol
 
-def translate_jax_to_pytorch(jax_params: dict[str, Any]) -> dict[str, torch.Tensor]:
+
+def translate_jax_to_pytorch(
+    jax_params: Mapping[str, TensorType | torch.Tensor | ToListArrayProtocol | Sequence[float]],
+) -> dict[str, torch.Tensor]:
     """Translate JAX parameters to a PyTorch `state_dict`.
 
-    Handles zero-copy NumPy buffer conversion, kernel transposition for linear layers,
+    Handles tensor conversion, kernel transposition for linear layers,
     RMSNorm scale offset adjustment (`+ 1.0`), and routed MoE expert weight splitting.
 
     Args:
@@ -24,7 +27,12 @@ def translate_jax_to_pytorch(jax_params: dict[str, Any]) -> dict[str, torch.Tens
     pytorch_state_dict: dict[str, torch.Tensor] = {}
 
     for key, value in jax_params.items():
-        tensor = value.clone() if isinstance(value, torch.Tensor) else torch.from_numpy(np.asarray(value).copy())
+        if isinstance(value, torch.Tensor):
+            tensor = value.clone()
+        elif isinstance(value, ToListArrayProtocol):
+            tensor = torch.tensor(value.tolist(), dtype=torch.float32)
+        else:
+            tensor = torch.as_tensor(value, dtype=torch.float32).clone()
 
         key = key.replace("model.embed_tokens.embedding", "embed_tokens.weight")
         key = key.replace("model.layers.", "layers.")

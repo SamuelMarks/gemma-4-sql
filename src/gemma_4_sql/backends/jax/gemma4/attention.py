@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp
@@ -12,7 +12,7 @@ from jax import Array
 
 from .cache import LayerCache
 from .config import AttentionType, ModelConfig
-from .layers import Gemma4RMSNorm, make_linear
+from .layers import Gemma4RMSNorm, LinearLayerProtocol, make_linear
 from .rope import RoPE, apply_rope
 
 MASK_PENALTY = -10000.0
@@ -48,7 +48,7 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
     return out.reshape((out.shape[0], out.shape[1], -1))
 
 
-def _prepare_qkv_for_attention(qkv: tuple[jax.Array, jax.Array, jax.Array], positions: Array, rope: Any, cache: LayerCache | None) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+def _prepare_qkv_for_attention(qkv: tuple[jax.Array, jax.Array, jax.Array], positions: Array, rope: RoPE, cache: LayerCache | None) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """Apply Rotary Position Embeddings (RoPE), update the KV cache, and construct causal/window masks.
 
     Args:
@@ -80,10 +80,32 @@ def _prepare_qkv_for_attention(qkv: tuple[jax.Array, jax.Array, jax.Array], posi
     return (q, k, v, mask, window)
 
 
+def _is_global_attention(attention_type: AttentionType | str) -> bool:
+    """Return True if `attention_type` represents global attention."""
+    if isinstance(attention_type, AttentionType):
+        return attention_type == AttentionType.GLOBAL
+    return str(attention_type).upper() in ("GLOBAL", "ATTENTIONTYPE.GLOBAL")
+
+
+def _is_local_sliding_attention(attention_type: AttentionType | str) -> bool:
+    """Return True if `attention_type` represents local sliding-window attention."""
+    if isinstance(attention_type, AttentionType):
+        return attention_type == AttentionType.LOCAL_SLIDING
+    return str(attention_type).upper() in ("LOCAL_SLIDING", "ATTENTIONTYPE.LOCAL_SLIDING")
+
+
 class Gemma4Attention(nnx.Module):
     """Multi-Head / Grouped-Query Attention for Gemma 4."""
 
-    def _setup_heads(self, config: ModelConfig, attention_type: AttentionType) -> None:
+    q_proj: LinearLayerProtocol
+    k_proj: LinearLayerProtocol
+    v_proj: LinearLayerProtocol | None
+    o_proj: LinearLayerProtocol
+    q_norm: Gemma4RMSNorm
+    k_norm: Gemma4RMSNorm
+    v_norm: Gemma4RMSNorm
+
+    def _setup_heads(self, config: ModelConfig, attention_type: AttentionType | str) -> None:
         """Configure attention head counts, head dimensions, and KV sharing flags.
 
         Args:
@@ -92,7 +114,7 @@ class Gemma4Attention(nnx.Module):
 
         """
         self.num_heads = config.num_attention_heads
-        if getattr(attention_type, "name", str(attention_type).upper()) == "GLOBAL":
+        if _is_global_attention(attention_type):
             self.num_kv_heads = config.num_global_key_value_heads if config.num_global_key_value_heads is not None else config.num_key_value_heads
             self.head_dim = config.global_head_dim if config.global_head_dim is not None else config.head_dim
             self.share_kv = config.share_kv_projections
@@ -101,7 +123,7 @@ class Gemma4Attention(nnx.Module):
             self.head_dim = config.head_dim
             self.share_kv = False
 
-    def _setup_rope(self, config: ModelConfig, attention_type: AttentionType) -> None:
+    def _setup_rope(self, config: ModelConfig, attention_type: AttentionType | str) -> None:
         """Configure Rotary Position Embedding (RoPE) frequencies for the layer.
 
         Args:
@@ -109,15 +131,16 @@ class Gemma4Attention(nnx.Module):
             attention_type: Whether this layer uses global or local sliding attention.
 
         """
-        if getattr(attention_type, "name", str(attention_type).upper()) == "GLOBAL":
-            rope_factor = config.global_rope_proportion
-            rope_theta = getattr(config, "global_rope_max_timescale", None) if getattr(config, "global_rope_max_timescale", None) is not None else config.rope_max_timescale
+        if _is_global_attention(attention_type):
+            rope_factor = float(config.global_rope_proportion)
+            raw_theta = config.global_rope_max_timescale
         else:
-            rope_factor = config.local_rope_proportion
-            rope_theta = getattr(config, "local_rope_max_timescale", None) if getattr(config, "local_rope_max_timescale", None) is not None else config.rope_max_timescale
-        self.rope = RoPE(rope_type="default", head_dim=self.head_dim, rope_theta=rope_theta, factor=rope_factor)
+            rope_factor = float(config.local_rope_proportion)
+            raw_theta = config.local_rope_max_timescale
+        rope_theta = float(raw_theta if raw_theta is not None else config.rope_max_timescale)
+        self.rope = RoPE(rope_type="default", head_dim=self.head_dim, rope_theta=int(rope_theta), factor=rope_factor)
 
-    def __init__(self, config: ModelConfig, attention_type: AttentionType, *, rngs: nnx.Rngs) -> None:
+    def __init__(self, config: ModelConfig, attention_type: AttentionType | str, *, rngs: nnx.Rngs) -> None:
         """Initialize Multi-Head / Grouped-Query Attention module.
 
         Args:
@@ -144,6 +167,36 @@ class Gemma4Attention(nnx.Module):
         self.v_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         self._setup_rope(config, attention_type)
 
+    def inject_lora_projections(
+        self,
+        target_modules: list[str],
+        adapter_factory: Callable[[nnx.Linear], LinearLayerProtocol],
+    ) -> int:
+        """Wrap matching attention projections (`q_proj`, `k_proj`, `v_proj`, `o_proj`) with LoRA adapters.
+
+        Args:
+            target_modules: List of target projection names to wrap.
+            adapter_factory: Factory callable converting an `nnx.Linear` into a `LinearLayerProtocol` adapter.
+
+        Returns:
+            Number of projections wrapped in this attention block.
+
+        """
+        injected = 0
+        if "q_proj" in target_modules and isinstance(self.q_proj, nnx.Linear):
+            self.q_proj = adapter_factory(self.q_proj)
+            injected += 1
+        if "k_proj" in target_modules and isinstance(self.k_proj, nnx.Linear):
+            self.k_proj = adapter_factory(self.k_proj)
+            injected += 1
+        if "v_proj" in target_modules and isinstance(self.v_proj, nnx.Linear):
+            self.v_proj = adapter_factory(self.v_proj)
+            injected += 1
+        if "o_proj" in target_modules and isinstance(self.o_proj, nnx.Linear):
+            self.o_proj = adapter_factory(self.o_proj)
+            injected += 1
+        return injected
+
     @jax.named_scope("gemma4_attention")
     def __call__(self, x: Array, positions: Array, cache: LayerCache | None = None, attention_mask: Array | None = None) -> Array:
         """Apply attention over the input sequences.
@@ -161,12 +214,12 @@ class Gemma4Attention(nnx.Module):
         (batch_size, seq_len, _) = x.shape
         q = self.q_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
         k = self.k_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
-        v = k if self.share_kv else self.v_proj.__call__(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim)) if self.v_proj is not None else k
-        q = self.q_norm.__call__(q) if hasattr(self, "q_norm") and getattr(self, "q_norm", None) is not None else q
-        k = self.k_norm.__call__(k) if hasattr(self, "k_norm") and getattr(self, "k_norm", None) is not None else k
-        v = self.v_norm.__call__(v) if hasattr(self, "v_norm") and getattr(self, "v_norm", None) is not None else v
+        v = k if (self.share_kv or self.v_proj is None) else self.v_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
+        q = self.q_norm(q)
+        k = self.k_norm(k)
+        v = self.v_norm(v)
         (q, k, v, mask, window) = _prepare_qkv_for_attention((q, k, v), positions, self.rope, cache)
-        if getattr(self.attention_type, "name", str(self.attention_type).upper()) == "LOCAL_SLIDING":
+        if _is_local_sliding_attention(self.attention_type):
             mask &= window < self.config.sliding_window_size
         structural_mask = jnp.where(mask, 0.0, MASK_PENALTY).astype(q.dtype)[:, None, :, :]
         attention_mask = structural_mask if attention_mask is None else attention_mask + structural_mask

@@ -3,57 +3,36 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
 from gemma_4_sql.sdk.export import export_model
+from gemma_4_sql.type_hints import ExportResultDict, JSONDict, JSONValue, TensorProtocol
+from tests.utils.test_utils import RecordingBackendDouble
 
 
 def test_export_model_jax_unified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify export_model routes to the JAX backend and forwards model_name, export_path, and kwargs."""
     import gemma_4_sql.sdk.export as sdk_exp
 
-    captured: list[tuple[str, str, dict[str, Any]]] = []
-
-    class FakeJaxBackend:
-        """Backend stub writing an export artifact to disk."""
-
-        def export_model(self, model_name: str, export_path: str, **kwargs: Any) -> dict[str, Any]:
-            """Write artifact file and return ExportResultDict."""
-            captured.append((model_name, export_path, dict(kwargs)))
-            out_dir = Path(export_path)
-            out_dir.mkdir(parents=True, exist_ok=True)
-            artifact = out_dir / "checkpoint"
-            artifact.write_text("orbax_ckpt", encoding="utf-8")
-            return {
-                "backend": "jax",
-                "model": model_name,
-                "export_path": export_path,
-                "file_path": str(artifact),
-                "format": "orbax/saved_model",
-                "status": "exported_with_orbax",
-            }
-
-    monkeypatch.setattr(sdk_exp, "get_backend", lambda name: FakeJaxBackend() if name == "jax" else None)
+    jax_double = RecordingBackendDouble("jax")
+    monkeypatch.setattr(sdk_exp, "get_backend", lambda _name: jax_double)  # pyright: ignore[reportUnknownLambdaType]
 
     export_dir = tmp_path / "jax_unified_export"
     res = export_model("test_model", str(export_dir), backend="jax", step=5)
-    assert len(captured) == 1
-    assert captured[0] == ("test_model", str(export_dir), {"step": 5})
+    assert len(jax_double.export_calls) == 1
+    assert jax_double.export_calls[0] == ("test_model", str(export_dir), {"step": 5})
     assert res["backend"] == "jax"
-    assert res["format"] == "orbax/saved_model"
-    assert Path(res["file_path"]).read_text(encoding="utf-8") == "orbax_ckpt"
+    assert res["format"] == "safetensors"
 
 
 def test_export_model_pytorch_unified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Test unified model export using PyTorch native backend."""
     import gemma_4_sql.backends.pytorch.export as pt_export
 
-    saved_tensors: dict[str, Any] = {}
+    saved_tensors: dict[str, TensorProtocol] = {}
 
-    def _capture_save(tensors: dict[str, Any], filename: str) -> None:
+    def _capture_save(tensors: dict[str, TensorProtocol], filename: str) -> None:
         """Capture saved state_dict and write placeholder file."""
         saved_tensors.update(tensors)
         Path(filename).write_bytes(b"safetensors")
@@ -89,27 +68,63 @@ def test_export_model_invalid_backend(tmp_path: Path) -> None:
 
 
 def test_export_model_custom_backend_mock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test unified export dispatch forwarding extra kwargs to backend adapter."""
-    import gemma_4_sql.sdk.export as sdk_exp
+    """Test unified export dispatch through real JaxBackend adapter to jax.export.export_model."""
+    import gemma_4_sql.backends.jax.export as jax_exp
 
-    mock_be = MagicMock()
-    mock_export = MagicMock(return_value={"backend": "jax", "model": "mock", "status": "ok"})
-    mock_be.export_model = mock_export
-    monkeypatch.setattr(sdk_exp, "get_backend", lambda _: mock_be)
+    captured_calls: list[tuple[str, str, JSONDict]] = []
+
+    def _spy_jax_export(model_name: str, export_path: str, **kwargs: JSONValue) -> ExportResultDict:
+        """Record forwarded export arguments and return structured ExportResultDict."""
+        captured_calls.append((model_name, export_path, dict(kwargs)))
+        return {
+            "backend": "jax",
+            "model": model_name,
+            "export_path": export_path,
+            "file_path": str(Path(export_path) / "checkpoint"),
+            "format": str(kwargs.get("format", "orbax/saved_model")),
+            "status": "exported_with_orbax",
+        }
+
+    monkeypatch.setattr(jax_exp, "export_model", _spy_jax_export)
 
     res = export_model("mock", str(tmp_path), backend="jax", format="gguf")
-    assert res["status"] == "ok"
-    mock_export.assert_called_once_with("mock", str(tmp_path), format="gguf")
+    assert res["status"] == "exported_with_orbax"
+    assert res["format"] == "gguf"
+    assert captured_calls == [("mock", str(tmp_path), {"format": "gguf"})]
 
 
 def test_common_export_wrapper_and_build_result(tmp_path: Path) -> None:
-    """Verify `build_export_result` and `run_export_wrapper` handle error_message and unexpected runtime exceptions."""
+    """Verify `build_export_result` and `run_export_wrapper` handle error_message, raise_on_error=False, and exception passthrough."""
     from gemma_4_sql.backends.common_export import build_export_result, run_export_wrapper
-    from gemma_4_sql.exceptions import ExportError
+    from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 
     res_err = build_export_result("jax", "m", str(tmp_path), tmp_path / "f", "failed: err", "orbax", error_message="err")
     assert res_err["status_code"] == "failed"
     assert res_err["error_message"] == "err"
 
+    res_no_raise = run_export_wrapper(
+        "jax",
+        "m",
+        str(tmp_path / "sub_no_raise"),
+        "orbax",
+        lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+        raise_on_error=False,
+    )
+    assert res_no_raise["status"] == "failed: boom"
+    assert res_no_raise["status_code"] == "failed"
+    assert res_no_raise["error_message"] == "boom"
+
     with pytest.raises(ExportError, match="Failed to export model 'm' on jax: boom"):
         run_export_wrapper("jax", "m", str(tmp_path / "sub"), "orbax", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    with pytest.raises(ExportError, match="direct export err"):
+        run_export_wrapper("jax", "m", str(tmp_path / "sub2"), "orbax", lambda: (_ for _ in ()).throw(ExportError("direct export err")))
+
+    with pytest.raises(DependencyMissingError, match="missing export dep"):
+        run_export_wrapper(
+            "jax",
+            "m",
+            str(tmp_path / "sub3"),
+            "orbax",
+            lambda: (_ for _ in ()).throw(DependencyMissingError("missing export dep")),
+        )

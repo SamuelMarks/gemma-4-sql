@@ -2,25 +2,29 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Protocol, runtime_checkable
 
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec
 
 from gemma_4_sql.backends.common_gemma4_config import (
+    DEFAULT_GRADIENT_CLIPPING,
     GEMMA4_26B_A4B_SPEC,
     GEMMA4_31B_SPEC,
     GEMMA4_E2B_SPEC,
     GEMMA4_E4B_SPEC,
     GEMMA4_TINY_SPEC,
     AttentionType,
+    BaseAudioConfigFields,
     BaseGemma4ConfigFields,
+    BaseVisionConfigFields,
     resolve_gemma4_preset_name,
 )
 
-DEFAULT_GRADIENT_CLIPPING = 10000000000.0
+type JaxDTypeLike = jnp.dtype | type[jnp.generic] | str
 
 
 @dataclass(frozen=True)
@@ -53,18 +57,11 @@ class VisionShardConfig:
         return VisionShardConfig()
 
 
-@dataclass(frozen=True)
-class VisionConfig:
+@dataclass
+class VisionConfig(BaseVisionConfigFields):
     """Configuration for the Vision Transformer in Gemma 4."""
 
-    hidden_size: int = 1152
-    image_size: int = 896
-    intermediate_size: int = 4304
-    layer_norm_eps: float = 1e-06
-    num_attention_heads: int = 16
-    num_channels: int = 3
-    num_hidden_layers: int = 27
-    patch_size: int = 14
+    pooling_kernel_size: int = 1
     shd_cfg: VisionShardConfig = field(default_factory=VisionShardConfig.no_sharding)
 
 
@@ -148,30 +145,50 @@ class ShardConfig:
         )
 
 
-@dataclass(frozen=True)
-class AudioConfig:
+@dataclass
+class AudioConfig(BaseAudioConfigFields):
     """Configuration for the Conformer Audio Encoder in Gemma 4."""
-
-    hidden_size: int = 1024
-    num_hidden_layers: int = 12
-    num_attention_heads: int = 8
-    hidden_act: str = "silu"
-    subsampling_conv_channels: tuple[int, int] = (128, 32)
-    conv_kernel_size: int = 5
-    residual_weight: float = 0.5
-    attention_chunk_size: int = 12
-    attention_context_left: int = 13
-    attention_context_right: int = 0
-    attention_logit_cap: float = 50.0
-    attention_invalid_logits_value: float = 1e-09
-    use_clipped_linears: bool = True
-    gradient_clipping: float = DEFAULT_GRADIENT_CLIPPING
-    output_proj_dims: int = 1536
-    rms_norm_eps: float = 1e-06
 
 
 class ModelConfigPresets:
     """Preset configurations for Gemma 4 variants."""
+
+    @classmethod
+    def _build_from_spec(
+        cls,
+        spec: Mapping[str, int] | None = None,
+        *,
+        use_fsdp: bool = False,
+        use_tp: bool = False,
+    ) -> ModelConfig:
+        """Construct a `ModelConfig` from a preset specification and sharding flags.
+
+        Args:
+            spec: Optional mapping of integer architectural hyperparameters.
+            use_fsdp: Whether to enable FSDP sharding.
+            use_tp: Whether to enable tensor-parallel sharding.
+
+        Returns:
+            Constructed `ModelConfig` instance.
+
+        """
+        shd = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else ShardConfig.no_sharding()
+        if spec is None:
+            return ModelConfig(shd_cfg=shd)
+        return ModelConfig(
+            vocab_size=spec.get("vocab_size", 262144),
+            hidden_size=spec.get("hidden_size", 2048),
+            intermediate_size=spec.get("intermediate_size", 8192),
+            moe_intermediate_size=spec.get("moe_intermediate_size"),
+            num_hidden_layers=spec.get("num_hidden_layers", 24),
+            num_attention_heads=spec.get("num_attention_heads", 8),
+            num_key_value_heads=spec.get("num_key_value_heads", 4),
+            head_dim=spec.get("head_dim", 256),
+            global_head_dim=spec.get("global_head_dim"),
+            num_experts=spec.get("num_experts", 1),
+            num_experts_per_tok=spec.get("num_experts_per_tok", 2),
+            shd_cfg=shd,
+        )
 
     @classmethod
     def gemma4_base(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -185,10 +202,7 @@ class ModelConfigPresets:
             Base `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = {}
-        if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(**kwargs)
+        return cls._build_from_spec(None, use_fsdp=use_fsdp, use_tp=use_tp)
 
     @classmethod
     def gemma4_e2b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -202,10 +216,7 @@ class ModelConfigPresets:
             Gemma 4 E2B `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = dict(GEMMA4_E2B_SPEC)
-        if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(**kwargs)
+        return cls._build_from_spec(GEMMA4_E2B_SPEC, use_fsdp=use_fsdp, use_tp=use_tp)
 
     @classmethod
     def gemma4_e4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -219,10 +230,7 @@ class ModelConfigPresets:
             Gemma 4 E4B `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = dict(GEMMA4_E4B_SPEC)
-        if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(**kwargs)
+        return cls._build_from_spec(GEMMA4_E4B_SPEC, use_fsdp=use_fsdp, use_tp=use_tp)
 
     @classmethod
     def gemma4_26b_a4b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -236,10 +244,7 @@ class ModelConfigPresets:
             Gemma 4 26B-A4B `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = dict(GEMMA4_26B_A4B_SPEC)
-        if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(**kwargs)
+        return cls._build_from_spec(GEMMA4_26B_A4B_SPEC, use_fsdp=use_fsdp, use_tp=use_tp)
 
     @classmethod
     def gemma4_31b(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -253,10 +258,7 @@ class ModelConfigPresets:
             Gemma 4 31B `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = dict(GEMMA4_31B_SPEC)
-        if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(**kwargs)
+        return cls._build_from_spec(GEMMA4_31B_SPEC, use_fsdp=use_fsdp, use_tp=use_tp)
 
     @classmethod
     def gemma4_tiny(cls, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -270,10 +272,7 @@ class ModelConfigPresets:
             Gemma 4 Tiny `ModelConfig` instance.
 
         """
-        kwargs: dict[str, Any] = dict(GEMMA4_TINY_SPEC)
-        if use_fsdp or use_tp:
-            kwargs["shd_cfg"] = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp)
-        return ModelConfig(**kwargs)
+        return cls._build_from_spec(GEMMA4_TINY_SPEC, use_fsdp=use_fsdp, use_tp=use_tp)
 
     @classmethod
     def from_preset(cls, model_name: str, *, use_fsdp: bool = False, use_tp: bool = False) -> ModelConfig:
@@ -288,39 +287,68 @@ class ModelConfigPresets:
             Matching `ModelConfig` preset instance.
 
         """
-        preset_kw = {"use_fsdp": use_fsdp, "use_tp": use_tp} if (use_fsdp or use_tp) else {}
         key = resolve_gemma4_preset_name(model_name)
+        kwargs: dict[str, bool] = {}
+        if use_fsdp:
+            kwargs["use_fsdp"] = use_fsdp
+        if use_tp:
+            kwargs["use_tp"] = use_tp
         if key == "tiny":
-            return cls.gemma4_tiny(**preset_kw)
+            return cls.gemma4_tiny(**kwargs)
         if key == "31b":
-            return cls.gemma4_31b(**preset_kw)
+            return cls.gemma4_31b(**kwargs)
         if key == "26b_a4b":
-            return cls.gemma4_26b_a4b(**preset_kw)
+            return cls.gemma4_26b_a4b(**kwargs)
         if key == "e4b":
-            return cls.gemma4_e4b(**preset_kw)
-        return cls.gemma4_e2b(**preset_kw)
+            return cls.gemma4_e4b(**kwargs)
+        return cls.gemma4_e2b(**kwargs)
 
 
-def resolve_gemma4_config(config_cls: Any, model_name: str) -> Any:
+@runtime_checkable
+class _PresetFactoryProtocol(Protocol):
+    """Protocol for config classes supporting `from_preset`."""
+
+    @classmethod
+    def from_preset(cls, model_name: str) -> ModelConfig:
+        """Resolve preset by model name."""
+        ...
+
+
+@runtime_checkable
+class _E2BFactoryProtocol(Protocol):
+    """Protocol for config classes supporting `gemma4_e2b`."""
+
+    @classmethod
+    def gemma4_e2b(cls) -> ModelConfig:
+        """Return E2B preset."""
+        ...
+
+
+def resolve_gemma4_config(
+    config_cls: type[ModelConfig] | _PresetFactoryProtocol | _E2BFactoryProtocol,
+    model_name: str,
+) -> ModelConfig:
     """Resolve a `Gemma4Config` preset using `from_preset` or `gemma4_e2b` fallback.
 
     Args:
-        config_cls: `Gemma4Config` class or mock equivalent.
+        config_cls: `Gemma4Config` class or preset factory.
         model_name: Target model name or preset identifier.
 
     Returns:
         Resolved configuration instance.
 
     """
-    return config_cls.from_preset(model_name) if hasattr(config_cls, "from_preset") else config_cls.gemma4_e2b()
+    if isinstance(config_cls, _PresetFactoryProtocol):
+        return config_cls.from_preset(model_name)
+    return config_cls.gemma4_e2b()
 
 
 @dataclass
 class ModelConfig(BaseGemma4ConfigFields, ModelConfigPresets):
     """Architectural configuration for Gemma 4 in JAX/Flax NNX."""
 
-    dtype: jnp.dtype[Any] = jnp.float32
-    weight_dtype: jnp.dtype[Any] = jnp.float32
+    dtype: JaxDTypeLike = jnp.float32
+    weight_dtype: JaxDTypeLike = jnp.float32
     shd_cfg: ShardConfig = field(default_factory=ShardConfig.no_sharding)
     vision_config: VisionConfig | None = None
     audio_config: AudioConfig | None = None
@@ -330,6 +358,7 @@ __all__ = [
     "DEFAULT_GRADIENT_CLIPPING",
     "AttentionType",
     "AudioConfig",
+    "JaxDTypeLike",
     "ModelConfig",
     "ModelConfigPresets",
     "ShardConfig",

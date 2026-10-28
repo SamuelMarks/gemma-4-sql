@@ -61,7 +61,7 @@ def test_apply_bits_and_bytes_quantization_with_model() -> None:
     assert artifact is not None
     assert artifact.is_quantized is True
     assert artifact.method == "int8"
-    assert hasattr(mock_model.config, "quantization_config")
+    assert mock_model.config.quantization_config is not None
 
     mock_model_no_cfg = MagicMock()
     mock_model_no_cfg.config = None
@@ -71,28 +71,25 @@ def test_apply_bits_and_bytes_quantization_with_model() -> None:
 
 def test_quantize_model_wrapper() -> None:
     """Verify quantize model wrapper behavior."""
-    with pytest.raises(DependencyMissingError):
-        quantize_model_wrapper("b", "m", "int8", True, lambda: (0, ""))
-
-    res = quantize_model_wrapper("b", "m", "int8", False, lambda: (0.5, "ok"))
+    res = quantize_model_wrapper("b", "m", "int8", lambda: (0.5, "ok"))
     assert res["status"] == "ok"
 
-    res = quantize_model_wrapper("b", "m", "int8", False, lambda: (0.0, "unsupported_xyz"))
+    res = quantize_model_wrapper("b", "m", "int8", lambda: (0.0, "unsupported_xyz"))
     assert res["status"] == "unsupported_xyz"
 
     def fail_fn() -> Never:
         """Provide fail fn test helper."""
         raise ValueError("oops")
 
-    res = quantize_model_wrapper("b", "m", "int8", False, fail_fn)
+    res = quantize_model_wrapper("b", "m", "int8", fail_fn)
     assert res["status"] == "failed: oops"
 
     with pytest.raises(QuantizationError, match="oops"):
-        quantize_model_wrapper("b", "m", "int8", False, fail_fn, raise_on_error=True)
+        quantize_model_wrapper("b", "m", "int8", fail_fn, raise_on_error=True)
 
     def unsupported_fn() -> Never:
         """Raise UnsupportedQuantizationMethodError."""
         raise UnsupportedQuantizationMethodError("bad method")
 
     with pytest.raises(UnsupportedQuantizationMethodError, match="bad method"):
-        quantize_model_wrapper("b", "m", "int8", False, unsupported_fn)
+        quantize_model_wrapper("b", "m", "int8", unsupported_fn)

@@ -3,42 +3,96 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import itertools
 import logging
 import sqlite3
-from typing import Any
+from collections.abc import Callable, Coroutine, Sequence
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
-from gemma_4_sql.type_hints import JSONPrimitive
+from gemma_4_sql.type_hints import AsyncDatabaseConnectionProtocol, JSONPrimitive
 
-from .base import DatabaseAdapter
+from .base import DatabaseAdapter, DBKwargValue
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _AiosqliteCursorProtocol(Protocol):
+    """Protocol for an `aiosqlite.Cursor` supporting `.fetchall()` and `.close()`."""
+
+    @property
+    def description(self) -> Sequence[Sequence[str | int | None]] | None:
+        """Provide the cursor column description tuple."""
+        ...
+
+    async def fetchall(self) -> Sequence[Sequence[JSONPrimitive]]:
+        """Fetch all remaining rows."""
+        ...
+
+    def close(self) -> Coroutine[None, None, None] | None:
+        """Close the cursor (synchronously or as a coroutine)."""
+        ...
+
+
+@runtime_checkable
+class AiosqliteConnectionProtocol(AsyncDatabaseConnectionProtocol, Protocol):
+    """Protocol for an `aiosqlite.Connection` supporting `.execute(...)`, `.commit()`, and `.rollback()`."""
+
+    async def execute(
+        self,
+        sql: str,
+        parameters: Sequence[JSONPrimitive] = (),
+        /,
+    ) -> _AiosqliteCursorProtocol:
+        """Execute a SQL statement and return a cursor."""
+        ...
+
+    def commit(self) -> Coroutine[None, None, None] | None:
+        """Commit the current transaction."""
+        ...
+
+    def rollback(self) -> Coroutine[None, None, None] | None:
+        """Roll back the current transaction."""
+        ...
+
+
+@runtime_checkable
+class AiosqliteModuleProtocol(Protocol):
+    """Protocol for the `aiosqlite` Python driver module."""
+
+    async def connect(self, database: str, **kwargs: DBKwargValue) -> AiosqliteConnectionProtocol:
+        """Open an asynchronous `aiosqlite` connection."""
+        ...
+
+
 aiosqlite = LazyLoader("aiosqlite").get_module()
+_SQLITE_MEM_COUNTER = itertools.count(1)
 
 
-class SQLiteAdapter(DatabaseAdapter):
+class SQLiteAdapter(DatabaseAdapter[sqlite3.Connection, AiosqliteConnectionProtocol]):
     """Adapter for SQLite databases supporting shared in-memory and file-backed URIs."""
+
+    _actual_path: str
 
     def __init__(
         self,
         db_path: str = ":memory:",
-        db_kwargs: dict[str, object] | None = None,
+        db_kwargs: dict[str, DBKwargValue] | None = None,
         *,
         read_only: bool = True,
     ) -> None:
         """Initialize SQLite adapter with shared-memory support for in-memory databases.
 
         Args:
-            db_path: Database file path or ':memory:'.
+            db_path: Database file path or `':memory:'`.
             db_kwargs: Optional database connection keyword arguments.
             read_only: Read-only enforcement flag.
 
         """
-        self._actual_path = f"file:mem_{id(self)}?mode=memory&cache=shared" if db_path == ":memory:" else db_path
-        self._async_conn: Any = None
-        self._async_lock = asyncio.Lock()
-        self._closing_tasks: set[Any] = set()
+        self._actual_path = f"file:mem_{id(self)}_{next(_SQLITE_MEM_COUNTER)}?mode=memory&cache=shared" if db_path == ":memory:" else db_path
         clean_kwargs = dict(db_kwargs) if db_kwargs else {}
         clean_kwargs.pop("defer_ddl", None)
         super().__init__(db_path, clean_kwargs, read_only=read_only)
@@ -60,16 +114,15 @@ class SQLiteAdapter(DatabaseAdapter):
             An active `sqlite3.Connection` instance.
 
         """
-        kwargs: dict[str, Any] = dict(self.db_kwargs)
+        sqlite_connect: Callable[..., sqlite3.Connection] = sqlite3.connect
+        kwargs: dict[str, DBKwargValue] = dict(self.db_kwargs)
         if self.db_path == ":memory:":
             kwargs["uri"] = True
             kwargs.setdefault("check_same_thread", False)
-            conn_mem: sqlite3.Connection = sqlite3.connect(self._actual_path, **kwargs)
-            return conn_mem
-        conn_file: sqlite3.Connection = sqlite3.connect(self.db_path, **kwargs)
-        return conn_file
+            return sqlite_connect(self._actual_path, **kwargs)  # ty: ignore[no-matching-overload]
+        return sqlite_connect(self.db_path, **kwargs)  # ty: ignore[no-matching-overload]
 
-    async def connect_async(self) -> object:
+    async def connect_async(self) -> AiosqliteConnectionProtocol:
         """Connect asynchronously to SQLite via `aiosqlite`, reusing any cached connection.
 
         Returns:
@@ -88,10 +141,11 @@ class SQLiteAdapter(DatabaseAdapter):
             kwargs = dict(self.db_kwargs)
             if self.db_path == ":memory:":
                 kwargs["uri"] = True
-                self._async_conn = await aiosqlite.connect(self._actual_path, **kwargs)
+                conn: AiosqliteConnectionProtocol = await aiosqlite.connect(self._actual_path, **kwargs)
             else:
-                self._async_conn = await aiosqlite.connect(self.db_path, **self.db_kwargs)
-            return self._async_conn
+                conn = await aiosqlite.connect(self.db_path, **self.db_kwargs)
+            self._async_conn = conn
+            return conn
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL statements to set up the SQLite schema.
@@ -104,39 +158,16 @@ class SQLiteAdapter(DatabaseAdapter):
         with conn_obj:
             conn_obj.executescript(ddl)
 
-    async def execute_with_feedback_async(
-        self,
-        query: str,
-        params: tuple[object, ...] | None = None,
-    ) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-        """Execute a SQLite query asynchronously and return status, rows, and error feedback.
-
-        Args:
-            query: SQL query string.
-            params: Optional tuple of query parameters.
-
-        Returns:
-            A tuple of `(success, fetched_rows, optional_error_message)`.
-
-        """
-        try:
-            rows = await self.execute_query_async(query, params)
-        except self.error_classes + (DatabaseExecutionError,) as e:
-            cause = e.cause if isinstance(e, DatabaseExecutionError) and e.cause is not None else e
-            return (False, [], str(cause))
-        else:
-            return (True, rows, None)
-
     async def execute_query_async(
         self,
         query: str,
-        params: tuple[object, ...] | None = None,
+        params: Sequence[JSONPrimitive] | None = None,
     ) -> list[tuple[JSONPrimitive, ...]]:
         """Execute a SQLite query asynchronously and return fetched rows.
 
         Args:
             query: SQL query string.
-            params: Optional tuple of query parameters.
+            params: Optional sequence of query parameters.
 
         Returns:
             List of result row tuples.
@@ -146,25 +177,28 @@ class SQLiteAdapter(DatabaseAdapter):
 
         """
         try:
-            async_conn: Any = await self.connect_async()
+            async_conn = await self.connect_async()
             try:
                 cursor = await async_conn.execute(query, params or ())
                 try:
-                    if getattr(cursor, "description", None) is not None:
+                    desc = None
+                    with contextlib.suppress(AttributeError):
+                        desc = cursor.description
+                    if desc is not None:
                         fetched = await cursor.fetchall()
                         return [tuple(r) for r in fetched]
-                    if hasattr(async_conn, "commit"):
+                    with contextlib.suppress(AttributeError):
                         res_c = async_conn.commit()
                         if asyncio.iscoroutine(res_c):
                             await res_c
                     return []
                 finally:
-                    if hasattr(cursor, "close"):
+                    with contextlib.suppress(AttributeError):
                         res = cursor.close()
                         if asyncio.iscoroutine(res):
                             await res
             except (sqlite3.Error, RuntimeError, ValueError, TypeError, OSError):
-                if hasattr(async_conn, "rollback"):
+                with contextlib.suppress(AttributeError):
                     res_r = async_conn.rollback()
                     if asyncio.iscoroutine(res_r):
                         await res_r
@@ -173,35 +207,5 @@ class SQLiteAdapter(DatabaseAdapter):
             logger.debug("Async Query execution failed: %s", e)
             raise DatabaseExecutionError(str(e), cause=e) from e
 
-    async def close_async(self) -> None:
-        """Close the cached asynchronous `aiosqlite` connection and await any pending close tasks."""
-        if self._closing_tasks:
-            pending = list(self._closing_tasks)
-            self._closing_tasks.clear()
-            await asyncio.gather(*pending, return_exceptions=True)
-        cached = self._async_conn
-        self._async_conn = None
-        if cached is not None and hasattr(cached, "close"):
-            res = cached.close()
-            if asyncio.iscoroutine(res):
-                await res
-        super().close()
 
-    def close(self) -> None:
-        """Close the synchronous database connection and safely close any cached async connection."""
-        cached = self._async_conn
-        self._async_conn = None
-        if cached is not None and hasattr(cached, "close"):
-            from contextlib import suppress
-
-            res = cached.close()
-            if asyncio.iscoroutine(res):
-                try:
-                    loop = asyncio.get_running_loop()
-                    task = loop.create_task(res)
-                    self._closing_tasks.add(task)
-                    task.add_done_callback(self._closing_tasks.discard)
-                except RuntimeError:
-                    with suppress(RuntimeError, OSError):
-                        asyncio.run(res)
-        super().close()
+__all__ = ["AiosqliteConnectionProtocol", "AiosqliteModuleProtocol", "SQLiteAdapter"]

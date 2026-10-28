@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+import math
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,15 +21,24 @@ def test_real_pytorch_dpo_loss_logps_and_step() -> None:
     import gemma_4_sql.backends.pytorch.dpo as dpo_module
     from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config, Gemma4ForCausalLM
 
-    p_chosen: Any = torch.tensor([-1.0, -1.2], requires_grad=True)
-    p_rejected: Any = torch.tensor([-2.0, -2.5], requires_grad=True)
-    r_chosen: Any = torch.tensor([-1.1, -1.3])
-    r_rejected: Any = torch.tensor([-1.9, -2.4])
+    # (b) Verify loss == math.log(2.0) when policy and reference log-probs are equal
+    eq_logp = torch.tensor([-1.5, -1.5])
+    eq_loss, eq_ch_rew, eq_re_rew = dpo_module.dpo_loss(eq_logp, eq_logp, eq_logp, eq_logp, beta=0.1)
+    assert float(eq_loss) == pytest.approx(math.log(2.0), rel=1e-5)
+    assert float(eq_ch_rew.mean().item()) == pytest.approx(0.0)
+    assert float(eq_re_rew.mean().item()) == pytest.approx(0.0)
+
+    # (a) Verify chosen_rewards > rejected_rewards when policy favors chosen over reference
+    p_chosen = torch.tensor([-1.0, -1.2], requires_grad=True)
+    p_rejected = torch.tensor([-2.0, -2.5], requires_grad=True)
+    r_chosen = torch.tensor([-1.1, -1.3])
+    r_rejected = torch.tensor([-1.9, -2.4])
 
     loss, chosen_rew, rejected_rew = dpo_module.dpo_loss(p_chosen, p_rejected, r_chosen, r_rejected, beta=0.1)
-    assert float(loss.item()) > 0.0
+    assert float(loss) > 0.0
     assert float(chosen_rew.mean().item()) > float(rejected_rew.mean().item())
 
+    # (c) Verify real parameter updates reduce step loss on a miniature model
     tiny_cfg = Gemma4Config(
         vocab_size=32,
         hidden_size=16,
@@ -43,31 +52,37 @@ def test_real_pytorch_dpo_loss_logps_and_step() -> None:
     policy_model = Gemma4ForCausalLM(tiny_cfg)
     ref_model = Gemma4ForCausalLM(tiny_cfg)
     optimizer = torch.optim.AdamW(policy_model.parameters(), lr=1e-2)
-    batch: dict[str, Any] = {
-        "chosen_inputs": torch.tensor([[1, 2, 3]], dtype=torch.long),
-        "chosen_labels": torch.tensor([[2, 3, 0]], dtype=torch.long),
-        "rejected_inputs": torch.tensor([[1, 4, 5]], dtype=torch.long),
-        "rejected_labels": torch.tensor([[4, 5, 0]], dtype=torch.long),
+    chosen_inputs = torch.tensor([[1, 2, 3]], dtype=torch.long)
+    chosen_labels = torch.tensor([[2, 3, 0]], dtype=torch.long)
+    rejected_inputs = torch.tensor([[1, 4, 5]], dtype=torch.long)
+    rejected_labels = torch.tensor([[4, 5, 0]], dtype=torch.long)
+    batch: dict[str, dpo_module.TorchDPOBatchValue] = {
+        "chosen_inputs": chosen_inputs,
+        "chosen_labels": chosen_labels,
+        "rejected_inputs": rejected_inputs,
+        "rejected_labels": rejected_labels,
     }
 
-    logps = dpo_module._compute_pytorch_logps(policy_model, batch["chosen_inputs"], batch["chosen_labels"])
+    logps = dpo_module._compute_pytorch_logps(policy_model, chosen_inputs, chosen_labels)
     assert logps.shape == (1,)
     assert float(logps.item()) < 0.0
 
-    pm_any: Any = policy_model
-    rm_any: Any = ref_model
-    opt_any: Any = optimizer
-    step_loss = dpo_module._run_dpo_step(pm_any, rm_any, opt_any, batch, 0.1)
-    assert float(step_loss.item()) > 0.0
+    logps_shifted = dpo_module._compute_pytorch_logps(policy_model, chosen_inputs, None)
+    assert logps_shifted.shape == (1,)
+
+    loss_1 = float(dpo_module._run_dpo_step(policy_model, ref_model, optimizer, batch, 0.5))
+    loss_2 = float(dpo_module._run_dpo_step(policy_model, ref_model, optimizer, batch, 0.5))
+    assert loss_1 > 0.0
+    assert loss_2 < loss_1
 
 
 def test_dpo_loss_missing_torch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify dpo_loss returns zeros when PyTorch is unavailable."""
+    """Verify dpo_loss raises DependencyMissingError when PyTorch is unavailable."""
     import gemma_4_sql.backends.pytorch.dpo as dpo_module
 
     monkeypatch.setattr(dpo_module, "torch", None)
-    t_any: Any = 1
-    assert dpo_module.dpo_loss(t_any, t_any, t_any, t_any, 0.1) == (0.0, 0.0, 0.0)
+    with pytest.raises(DependencyMissingError, match=r"PyTorch DPO dependencies are missing\."):
+        dpo_module.dpo_loss(1.0, 1.0, 1.0, 1.0, 0.1)
 
 
 def test_run_dpo_step_fallback_branches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -81,7 +96,7 @@ def test_run_dpo_step_fallback_branches(monkeypatch: pytest.MonkeyPatch) -> None
     mock_policy.return_value.mean.return_value = "mean"
     mock_ref.return_value = "no_mean"
 
-    batch = {"chosen_inputs": "c", "rejected_inputs": "r"}
+    batch: dict[str, dpo_module.TorchDPOBatchValue] = {"chosen_inputs": "c", "rejected_inputs": "r"}
 
     with patch("gemma_4_sql.backends.pytorch.dpo.dpo_loss") as mock_loss:
         mock_l = MagicMock()
@@ -105,7 +120,10 @@ def test_run_training_epochs() -> None:
     """Verify _run_training_epochs handles both tensor-like and float step outputs."""
     import gemma_4_sql.backends.pytorch.dpo as dpo_module
 
-    state: Any = TrainerState(dataloader=[{"a": 1}, {"a": 2}], epochs=2)
+    state: TrainerState[None, None, None, dict[str, dpo_module.TorchDPOBatchValue]] = TrainerState(
+        dataloader=[{"a": 1}, {"a": 2}],
+        epochs=2,
+    )
 
     with patch("gemma_4_sql.backends.pytorch.dpo._run_dpo_step") as mock_step:
         mock_l = MagicMock()
@@ -146,7 +164,7 @@ def test_run_dpo_and_load_models(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_auto = MagicMock()
     mock_auto.from_pretrained.return_value = MagicMock()
     monkeypatch.setattr(dpo_module, "AutoModelForCausalLM", mock_auto)
-    monkeypatch.setattr(dpo_module, "optional_attr", lambda *_a, **_k: None)
+    monkeypatch.setattr(dpo_module, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
 
     with (
         patch.object(dpo_module.optim, "AdamW", return_value=MagicMock()),

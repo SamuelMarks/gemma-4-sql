@@ -43,8 +43,15 @@ def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = json.load(f)
         assert cfg == {"k": "v"}
 
-    mock_model.config = MagicMock()
-    mock_model.config.__dict__ = {"k2": "v2"}
+    from dataclasses import dataclass
+
+    @dataclass
+    class _DataclassConfig:
+        """Dataclass config for MLX export testing."""
+
+        k2: str = "v2"
+
+    mock_model.config = _DataclassConfig()
     export_module.export_model("model", str(export_dir))
     with open(config_path, encoding="utf-8") as f:
         cfg = json.load(f)
@@ -57,7 +64,7 @@ def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         assert cfg == {"model_type": "gemma4", "model_name": "model"}
 
     monkeypatch.setattr(export_module, "mlx_load", None)
-    monkeypatch.setattr(export_module, "optional_attr", lambda *_a, **_k: None)
+    monkeypatch.setattr(export_module, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
     with pytest.raises(ExportError, match="Failed to load MLX model"):
         export_module.export_model("model", str(export_dir))
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
 from unittest import mock
 
 import pytest
@@ -13,92 +12,48 @@ from tests.conftest import requires_jax
 pytestmark = requires_jax
 
 import gemma_4_sql.backends.jax.serve as srv
+from gemma_4_sql.backends.common_serve import DirectRunnableAppProtocol
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 
 
-def test_serve_model_jax(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `serve_model` configures startup warmup, single-prompt generation, and batch generation."""
-    monkeypatch.setattr(srv, "jax", object())
+def test_serve_model_jax() -> None:
+    """Verify `serve_model` configures startup warmup, single-prompt generation, and batch generation through real `serve_model_wrapper`."""
+    from fastapi.testclient import TestClient
 
-    def mock_serve_model_wrapper(
-        backend_name: str,
-        model_name: str,
-        port: int,
-        max_batch_size: int,
-        missing_deps: bool,
-        app_factory: Any,
-    ) -> dict[str, Any]:
-        """Exercise the FastAPI app factory callbacks."""
-        assert not missing_deps
-        app = app_factory()
+    mock_module = mock.MagicMock()
+    mock_module.generate_sql.return_value = {"sql": "SELECT 42"}
+    with mock.patch.dict(sys.modules, {"gemma_4_sql.backends.jax.inference": mock_module}):
+        res = srv.serve_model("foo", port=8000, max_batch_size=16)
+        assert res["backend"] == "jax"
+        assert res["model"] == "foo"
+        assert res["port"] == 8000
+        assert res["max_batch_size"] == 16
+        assert res.get("mode") == "continuous_batching"
+        assert res["status"] == "running_jax_serve"
+        app = res.get("app")
+        assert isinstance(app, DirectRunnableAppProtocol)
 
-        startup = app.get("startup_callback")
-        mock_module = mock.MagicMock()
-        with mock.patch.dict(sys.modules, {"gemma_4_sql.backends.jax.inference": mock_module}):
-            startup()
-            mock_module.generate_sql.assert_called_once_with(model_name=model_name, prompt="SELECT 1")
-
-        # Startup warmup error should be logged and ignored
-        mock_module.generate_sql.side_effect = RuntimeError("Warmup fail")
-        with mock.patch.dict(sys.modules, {"gemma_4_sql.backends.jax.inference": mock_module}):
-            startup()
-
-        # Successful generation
-        generate = app.get("generate_logic")
-        mock_module.generate_sql.reset_mock(side_effect=True)
-        mock_module.generate_sql.return_value = {"sql": "SELECT 42"}
-        with mock.patch.dict(sys.modules, {"gemma_4_sql.backends.jax.inference": mock_module}):
-            res = generate("test prompt")
-            assert res == "SELECT 42"
+        with TestClient(app) as client:
+            resp = client.post("/generate", json={"prompt": "test prompt"})
+            assert resp.status_code == 200
+            assert resp.json()["sql"] == "SELECT 42"
 
         # Empty SQL raises InferenceError
         mock_module.generate_sql.return_value = {"other": "data"}
-        with (
-            mock.patch.dict(sys.modules, {"gemma_4_sql.backends.jax.inference": mock_module}),
-            pytest.raises(InferenceError, match="JAX inference returned empty SQL"),
-        ):
-            generate("test prompt")
+        with pytest.raises(InferenceError, match="JAX inference returned empty SQL"):
+            app.run_direct("test prompt")
 
         # Underlying exception raises InferenceError
-        mock_module.generate_sql.reset_mock(side_effect=True)
         mock_module.generate_sql.side_effect = RuntimeError("Gen fail")
-        with (
-            mock.patch.dict(sys.modules, {"gemma_4_sql.backends.jax.inference": mock_module}),
-            pytest.raises(InferenceError, match="JAX generation failed"),
-        ):
-            generate("test prompt")
+        with pytest.raises(InferenceError, match="JAX generation failed"):
+            app.run_direct("test prompt")
 
-        # Batch generation
-        batch_generate = app.get("batch_generate_logic")
-        mock_module.generate_sql.reset_mock(side_effect=True)
-        mock_module.generate_sql.return_value = {"sql": "SELECT 42"}
-        with mock.patch.dict(sys.modules, {"gemma_4_sql.backends.jax.inference": mock_module}):
-            res_batch = batch_generate(["prompt 1", "prompt 2"])
-            assert res_batch == ["SELECT 42", "SELECT 42"]
-
-        return {
-            "backend": backend_name,
-            "model": model_name,
-            "port": port,
-            "max_batch_size": max_batch_size,
-            "mode": "continuous_batching",
-            "status": "running_jax_serve",
-        }
-
-    def mock_create_common_app(**kwargs: Any) -> dict[str, Any]:
-        """Return the keyword arguments passed to `create_common_app`."""
-        return kwargs
-
-    monkeypatch.setattr(srv, "serve_model_wrapper", mock_serve_model_wrapper)
-    monkeypatch.setattr("gemma_4_sql.backends.common_serve.create_common_app", mock_create_common_app)
-
-    res = srv.serve_model("foo", port=8000, max_batch_size=16)
-    assert res["backend"] == "jax"
-    assert res["model"] == "foo"
-    assert res["port"] == 8000
-    assert res["max_batch_size"] == 16
-    assert res.get("mode") == "continuous_batching"
-    assert res["status"] == "running_jax_serve"
+    # Startup warmup error should be logged and ignored during app initialization
+    mock_fail_warmup = mock.MagicMock()
+    mock_fail_warmup.generate_sql.side_effect = RuntimeError("Warmup fail")
+    with mock.patch.dict(sys.modules, {"gemma_4_sql.backends.jax.inference": mock_fail_warmup}):
+        res_warmup = srv.serve_model("foo", port=8000, max_batch_size=16)
+        assert res_warmup["status"] == "running_jax_serve"
 
 
 def test_serve_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,19 +64,7 @@ def test_serve_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_serve_model_jax_other_status(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `serve_model` returns wrapper status when server is not in running state."""
-    monkeypatch.setattr(srv, "jax", object())
-
-    def mock_serve_model_wrapper(**_kwargs: Any) -> dict[str, Any]:
-        """Simulate a non-running status."""
-        return {
-            "backend": "jax",
-            "model": "foo",
-            "port": 8000,
-            "max_batch_size": 256,
-            "status": "backend_unavailable",
-        }
-
-    monkeypatch.setattr(srv, "serve_model_wrapper", mock_serve_model_wrapper)
+    """Verify `serve_model` returns failed status when app creation raises an operational error."""
+    monkeypatch.setattr(srv, "create_backend_serve_app", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("init fail")))  # pyright: ignore[reportUnknownLambdaType]
     res = srv.serve_model("foo")
-    assert res["status"] == "backend_unavailable"
+    assert res["status"] == "failed: init fail"

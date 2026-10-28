@@ -3,24 +3,96 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from collections.abc import Callable
+from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
+from starlette.requests import Request
+from starlette.responses import Response
+
+from gemma_4_sql.backends.common_serve import (
+    JSONResponseConstructorProtocol,
+    create_backend_serve_app,
+    serve_model_wrapper,
+)
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import JSONDict, JSONValue, ServeResultDict
+from gemma_4_sql.type_hints import (
+    FastAPIAppProtocol,
+    JSONDict,
+    JSONValue,
+    ServeResultDict,
+    VLLMEngineProtocol,
+    VLLMRequestOutputProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
+
+@runtime_checkable
+class _VLLMEngineArgsProtocol(Protocol):
+    """Protocol for an initialized vLLM `AsyncEngineArgs` configuration instance."""
+
+
+@runtime_checkable
+class _VLLMEngineArgsConstructorProtocol(Protocol):
+    """Protocol for `vllm.AsyncEngineArgs` constructor."""
+
+    def __call__(
+        self,
+        *,
+        model: str,
+        max_num_batched_tokens: int,
+        max_num_seqs: int,
+        disable_log_requests: bool,
+    ) -> _VLLMEngineArgsProtocol:
+        """Instantiate vLLM `AsyncEngineArgs`."""
+        ...
+
+
+@runtime_checkable
+class _VLLMEngineLoaderProtocol(Protocol):
+    """Protocol for `vllm.AsyncLLMEngine` class exposing `.from_engine_args(...)`."""
+
+    def from_engine_args(self, engine_args: _VLLMEngineArgsProtocol | None, /) -> VLLMEngineProtocol:
+        """Create a `VLLMEngineProtocol` from `engine_args`."""
+        ...
+
+
+@runtime_checkable
+class _VLLMFastAPIConstructorProtocol(Protocol):
+    """Protocol for `fastapi.FastAPI` constructor used by `_create_vllm_app`."""
+
+    def __call__(self, *, title: str) -> FastAPIAppProtocol:
+        """Construct a FastAPI application with `title`."""
+        ...
+
+
 torch = optional_import("torch")
-FastAPI = optional_attr("fastapi", "FastAPI")
-JSONResponse = optional_attr("fastapi.responses", "JSONResponse")
-AsyncEngineArgs = optional_attr("vllm", "AsyncEngineArgs")
-AsyncLLMEngine = optional_attr("vllm", "AsyncLLMEngine")
-random_uuid = optional_attr("vllm.utils", "random_uuid")
+FastAPI: _VLLMFastAPIConstructorProtocol | None = optional_attr(
+    "fastapi",
+    "FastAPI",
+    _VLLMFastAPIConstructorProtocol,
+)
+JSONResponse: JSONResponseConstructorProtocol | None = optional_attr(
+    "fastapi.responses",
+    "JSONResponse",
+    JSONResponseConstructorProtocol,
+)
+AsyncEngineArgs: _VLLMEngineArgsConstructorProtocol | None = optional_attr(
+    "vllm",
+    "AsyncEngineArgs",
+    _VLLMEngineArgsConstructorProtocol,
+)
+AsyncLLMEngine: _VLLMEngineLoaderProtocol | None = optional_attr(
+    "vllm",
+    "AsyncLLMEngine",
+    _VLLMEngineLoaderProtocol,
+)
+_raw_uuid = optional_attr("vllm.utils", "random_uuid")
+random_uuid: Callable[[], str] | None = _raw_uuid if callable(_raw_uuid) else None  # ty: ignore[invalid-assignment]
 
 
-def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
+def _create_vllm_app(model_name: str, max_batch_size: int) -> FastAPIAppProtocol | None:
     """Create the FastAPI application for the PyTorch vLLM server.
 
     Args:
@@ -28,11 +100,11 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
         max_batch_size: The maximum allowed batch size.
 
     Returns:
-        The FastAPI application instance.
+        The FastAPI application instance or `None` if FastAPI/JSONResponse is unavailable.
 
     """
     engine_args = (
-        AsyncEngineArgs.__call__(
+        AsyncEngineArgs(
             model=model_name,
             max_num_batched_tokens=max_batch_size * 256,
             max_num_seqs=max_batch_size,
@@ -41,14 +113,14 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
         if AsyncEngineArgs is not None
         else None
     )
-    engine: Any = AsyncLLMEngine.from_engine_args(engine_args) if AsyncLLMEngine is not None else None
-
-    app = FastAPI.__call__(title=f"vLLM Serve: {model_name}") if FastAPI is not None else None
+    engine = AsyncLLMEngine.from_engine_args(engine_args) if AsyncLLMEngine is not None else None
+    app = FastAPI(title=f"vLLM Serve: {model_name}") if FastAPI is not None else None
 
     if app is not None and JSONResponse is not None:
+        json_resp_cls = JSONResponse
 
         @app.post("/generate")
-        async def generate(request: Any) -> Any:
+        async def generate(request: Request) -> Response:
             """Execute vLLM-backed streaming request generation.
 
             Args:
@@ -58,23 +130,24 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
                 A JSON response containing the generated text.
 
             """
+            assert engine is not None
             request_dict = await request.json()
-            prompt = request_dict.pop("prompt", "")
+            prompt = str(request_dict.pop("prompt", ""))
             request_id = random_uuid() if random_uuid is not None else ""
             results_generator = engine.generate(prompt, None, request_id)
-            final_output = None
+            final_output: VLLMRequestOutputProtocol | None = None
             results_iterator = aiter(results_generator)
             try:
                 while True:
                     request_output = await anext(results_iterator)
                     if await request.is_disconnected():
                         await engine.abort(request_id)
-                        return JSONResponse.__call__(content={"error": "Client disconnected"})
+                        return json_resp_cls(content={"error": "Client disconnected"})  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
                     final_output = request_output
             except StopAsyncIteration:
                 pass
-            text = final_output.outputs[0].text if final_output else ""
-            return JSONResponse.__call__(content={"sql": text})
+            text = final_output.outputs[0].text if final_output is not None and final_output.outputs else ""
+            return json_resp_cls(content={"sql": text})  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
 
         return app
     return None
@@ -83,7 +156,7 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> object:
 _create_app = _create_vllm_app
 
 
-def _create_native_app(model_name: str, max_batch_size: int) -> object:
+def _create_native_app(model_name: str, max_batch_size: int) -> FastAPIAppProtocol:
     """Create native PyTorch in-process continuous batching FastAPI server.
 
     Args:
@@ -99,7 +172,8 @@ def _create_native_app(model_name: str, max_batch_size: int) -> object:
         """Delegate single-prompt generation to `pytorch.inference.generate_sql`."""
         from gemma_4_sql.backends.pytorch.inference import generate_sql
 
-        return dict(generate_sql(model_name=model_name, prompt=prompt))
+        res = generate_sql(model_name=model_name, prompt=prompt)
+        return {k: v for k, v in res.items() if isinstance(v, (str, int, float, bool)) or v is None}
 
     return create_backend_serve_app(
         backend_name="pytorch",
@@ -134,22 +208,23 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
     if use_native:
 
-        def app_factory() -> Any:
+        def app_factory() -> FastAPIAppProtocol:
             """Create FastAPI app backed by native PyTorch model inference."""
             return _create_native_app(model_name, max_batch_size)
 
     else:
 
-        def app_factory() -> Any:
+        def app_factory() -> FastAPIAppProtocol:
             """Create FastAPI app backed by vLLM async engine."""
-            return _create_vllm_app(model_name, max_batch_size)
+            vllm_app = _create_vllm_app(model_name, max_batch_size)
+            assert vllm_app is not None
+            return vllm_app
 
     result = serve_model_wrapper(
         backend_name="pytorch",
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
-        missing_deps=False,
         app_factory=app_factory,
     )
 

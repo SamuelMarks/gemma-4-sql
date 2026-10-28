@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from gemma_4_sql.type_hints import TrainingConfig
+from gemma_4_sql.type_hints import JSONValue, TrainingConfig
 
 
 @dataclass
@@ -18,13 +18,13 @@ class MaxTextHyperparameters:
     """Hyperparameters and distributed topology settings for MaxText training.
 
     Attributes:
-        model_architecture: Target model architecture identifier (e.g., 'gemma4_2b', 'gemma4_7b').
+        model_architecture: Target model architecture identifier (e.g., `'gemma4_2b'`, `'gemma4_7b'`).
         per_device_batch_size: Batch size allocated per individual accelerator device.
         global_batch_size: Global effective batch size across all participating devices.
         learning_rate: Base peak learning rate for optimizer.
         learning_rate_schedule_steps: Total number of steps over which the schedule is computed.
         warmup_steps_fraction: Proportion of total steps dedicated to linear learning rate warmup.
-        opt_type: Name of the optimizer ('adamw', 'adam', 'sgd', etc.).
+        opt_type: Name of the optimizer (`'adamw'`, `'adam'`, `'sgd'`, etc.).
         mesh_axes: List of axis names defining the multi-dimensional device mesh topology.
         base_output_directory: Base filesystem or storage path for checkpoints and artifacts.
         run_name: Unique identifier for this specific training execution run.
@@ -49,36 +49,36 @@ class MaxTextHyperparameters:
     checkpoint_period: int = 500
 
 
-def _to_float(val: object, default: float) -> float:
-    """Safely convert an object value to float.
+def _to_float(val: JSONValue, default: float) -> float:
+    """Safely convert a `JSONValue` to `float`.
 
     Args:
-        val: Input object value.
+        val: Input `JSONValue`.
         default: Fallback float value.
 
     Returns:
         Converted float value.
 
     """
-    if val is None:
+    if val is None or isinstance(val, bool):
         return default
     if isinstance(val, (int, float, str)):
         return float(val)
     return default
 
 
-def _to_int(val: object, default: int) -> int:
-    """Safely convert an object value to int.
+def _to_int(val: JSONValue, default: int) -> int:
+    """Safely convert a `JSONValue` to `int`.
 
     Args:
-        val: Input object value.
+        val: Input `JSONValue`.
         default: Fallback int value.
 
     Returns:
         Converted int value.
 
     """
-    if val is None:
+    if val is None or isinstance(val, bool):
         return default
     if isinstance(val, (int, float, str)):
         return int(val)
@@ -89,13 +89,13 @@ def normalize_model_architecture(model_name: str) -> str:
     """Normalize user model identifier into a supported MaxText model architecture.
 
     Args:
-        model_name: Raw model identifier (e.g., 'gemma-4', 'gemma-4-7b', 'gemma4_2b').
+        model_name: Raw model identifier (e.g., `'gemma-4'`, `'gemma-4-7b'`, `'gemma4_2b'`).
 
     Returns:
-        Canonical MaxText model architecture string ('gemma4_2b' or 'gemma4_7b').
+        Canonical MaxText model architecture string (`'gemma4_2b'` or `'gemma4_7b'`).
 
     Raises:
-        ValueError: If model_name is empty or cannot be parsed.
+        ValueError: If `model_name` is empty or cannot be parsed.
 
     """
     if not model_name:
@@ -108,27 +108,27 @@ def normalize_model_architecture(model_name: str) -> str:
     return "gemma4_2b"
 
 
-def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: object) -> MaxTextHyperparameters:
-    """Build and validate MaxTextHyperparameters from TrainingConfig and optional overrides.
+def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: JSONValue) -> MaxTextHyperparameters:
+    """Build and validate `MaxTextHyperparameters` from `TrainingConfig` and optional overrides.
 
     Args:
-        config: High-level TrainingConfig instance containing training metadata.
+        config: High-level `TrainingConfig` instance containing training metadata.
         **kwargs: Explicit keyword overrides for MaxText hyperparameters.
 
     Returns:
-        Validated MaxTextHyperparameters instance.
+        Validated `MaxTextHyperparameters` instance.
 
     Raises:
         ValueError: If any hyperparameter violates numerical or structural constraints.
 
     """
-    extra = dict(getattr(config, "extra_kwargs", {}) or {})
-    merged: dict[str, object] = {**extra, **kwargs}
+    extra: dict[str, JSONValue] = {k: v for k, v in (config.extra_kwargs or {}).items() if isinstance(v, (str, int, float, bool)) or v is None}
+    merged: dict[str, JSONValue] = {**extra, **kwargs}
 
-    raw_arch = str(merged.get("model_architecture") or getattr(config, "model_name", "gemma4_2b"))
+    raw_arch = str(merged.get("model_architecture") or config.model_name or "gemma4_2b")
     model_architecture = normalize_model_architecture(raw_arch)
 
-    per_device = _to_float(merged.get("per_device_batch_size"), float(getattr(config, "batch_size", 2.0)))
+    per_device = _to_float(merged.get("per_device_batch_size"), float(config.batch_size))
     if per_device <= 0:
         msg = f"per_device_batch_size must be positive, got {per_device}"
         raise ValueError(msg)
@@ -138,12 +138,12 @@ def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: object) -> M
         msg = f"global_batch_size must be positive, got {global_batch}"
         raise ValueError(msg)
 
-    learning_rate = _to_float(merged.get("learning_rate"), float(getattr(config, "learning_rate", 1e-4)))
+    learning_rate = _to_float(merged.get("learning_rate"), float(config.learning_rate))
     if learning_rate <= 0:
         msg = f"learning_rate must be positive, got {learning_rate}"
         raise ValueError(msg)
 
-    epochs = int(getattr(config, "epochs", 1))
+    epochs = int(config.epochs)
     default_steps = max(1, epochs * 1000)
     steps = _to_int(merged.get("steps"), default_steps)
     if steps <= 0:
@@ -172,7 +172,7 @@ def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: object) -> M
     mesh_axes: list[str] = [str(x) for x in raw_mesh]
 
     base_output_dir = str(merged.get("base_output_directory", "./maxtext_output"))
-    dataset_name = str(merged.get("dataset_name", getattr(config, "dataset", "dummy")))
+    dataset_name = str(merged.get("dataset_name", config.dataset))
     run_name = str(merged.get("run_name", f"{model_architecture}_{dataset_name}"))
     checkpoint_period = _to_int(merged.get("checkpoint_period"), 500)
     if checkpoint_period <= 0:
@@ -196,11 +196,11 @@ def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: object) -> M
     )
 
 
-def generate_maxtext_gin_config(config: TrainingConfig, **kwargs: object) -> str:
-    """Generate a MaxText-compliant Gin configuration file string from TrainingConfig.
+def generate_maxtext_gin_config(config: TrainingConfig, **kwargs: JSONValue) -> str:
+    """Generate a MaxText-compliant Gin configuration file string from `TrainingConfig`.
 
     Args:
-        config: High-level TrainingConfig instance.
+        config: High-level `TrainingConfig` instance.
         **kwargs: Optional hyperparameter overrides.
 
     Returns:
@@ -246,13 +246,13 @@ def save_maxtext_gin_config(gin_content: str, output_path: str | Path | None = N
 
     Args:
         gin_content: String containing formatted Gin configuration lines.
-        output_path: Optional explicit filesystem path. If None, a temporary file is created.
+        output_path: Optional explicit filesystem path. If `None`, a temporary file is created.
 
     Returns:
         Path pointing to the written Gin configuration file.
 
     Raises:
-        ValueError: If gin_content is empty.
+        ValueError: If `gin_content` is empty.
         OSError: If writing to the filesystem fails.
 
     """
@@ -271,12 +271,16 @@ def save_maxtext_gin_config(gin_content: str, output_path: str | Path | None = N
         return Path(temp_file.name).resolve()
 
 
-def build_maxtext_cli_args(config: TrainingConfig, gin_config_path: str | Path | None = None, **kwargs: object) -> list[str]:
-    """Construct CLI argument list for invoking maxtext.train.main.
+def build_maxtext_cli_args(
+    config: TrainingConfig,
+    gin_config_path: str | Path | None = None,
+    **kwargs: JSONValue,
+) -> list[str]:
+    """Construct CLI argument list for invoking `maxtext.train.main`.
 
     Args:
-        config: High-level TrainingConfig instance.
-        gin_config_path: Optional path to an already saved .gin configuration file.
+        config: High-level `TrainingConfig` instance.
+        gin_config_path: Optional path to an already saved `.gin` configuration file.
         **kwargs: Optional hyperparameter overrides.
 
     Returns:

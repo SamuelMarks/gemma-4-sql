@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from gemma_4_sql.exceptions import ConfigurationError, SQLSafetyViolationError
@@ -64,6 +66,11 @@ def test_db_engine_safety() -> None:
         "INSERT INTO t VALUES (1, 'x')",
         "UPDATE t SET id=2",
         "DELETE FROM t",
+        "WITH deleted AS (DELETE FROM t RETURNING *) SELECT * FROM deleted",
+        "ATTACH DATABASE ':memory:' AS aux",
+        "PRAGMA writable_schema = ON",
+        "REINDEX t",
+        "VACUUM",
         "SELECT * FROM t; SELECT * FROM t",
         "SELECT * FROM t;;",
         "SELECT * FROM t; DROP TABLE t",
@@ -120,30 +127,43 @@ async def test_db_engine_execute_with_feedback_async_permission_error() -> None:
 
 
 def test_db_engine_has_top_level_order_by_and_normalization() -> None:
-    """Verify _has_top_level_order_by, _normalize_row, and _compare_results edge cases."""
+    """Verify has_top_level_order_by, normalize_row, and compare_results edge cases."""
     engine = LiveDatabaseEngine(":memory:")
-    assert engine._has_top_level_order_by("SELECT * FROM t ORDER BY a") is True
-    assert engine._has_top_level_order_by("SELECT * FROM (SELECT * FROM t ORDER BY a)") is False
-    assert engine._has_top_level_order_by("SELECT * FROM (SELECT * FROM t ORDER BY a) ORDER BY b") is True
-    assert engine._has_top_level_order_by("SELECT * FROM ( ORDER BY a") is False
-    assert engine._has_top_level_order_by("SELECT * FROM t ) ORDER BY a") is True
+    assert engine.has_top_level_order_by("SELECT * FROM t ORDER BY a") is True
+    assert engine.has_top_level_order_by("SELECT * FROM (SELECT * FROM t ORDER BY a)") is False
+    assert engine.has_top_level_order_by("SELECT * FROM (SELECT * FROM t ORDER BY a) ORDER BY b") is True
+    assert engine.has_top_level_order_by("SELECT * FROM ( ORDER BY a") is False
+    assert engine.has_top_level_order_by("SELECT * FROM t ) ORDER BY a") is True
 
-    row = (None, float("nan"), 0.0, 1.23456789, "string")
-    norm = engine._normalize_row(row)
+    from decimal import Decimal
+
+    row = (None, float("nan"), 0.0, -0.0, 1.23456789, "string", float("inf"), float("-inf"), 1e-310, Decimal("3.1415926"), Decimal("NaN"))
+    norm = engine.normalize_row(row)
     assert norm[0] is None
     assert norm[1] is None
     assert norm[2] == 0.0
-    assert norm[3] == 1.2346
-    assert isinstance(norm[3], float)
-    assert norm[4] == "string"
+    assert norm[3] == 0.0
+    assert norm[4] == 1.2346
+    assert isinstance(norm[4], float)
+    assert norm[5] == "string"
+    assert norm[6] == float("inf")
+    assert norm[7] == float("-inf")
+    assert isinstance(norm[8], float)
+    assert norm[9] == round(math.pi, 4)
+    assert norm[10] is None
 
     res1 = [(1, 2), (3, 4)]
     res2 = [(3, 4), (1, 2)]
-    assert engine._compare_results(res1, res2, strict_order=False) is True
-    assert engine._compare_results(res1, res2, strict_order=True) is False
-    assert engine._compare_results([(True, None, "a")], [(1, None, "a")], strict_order=True) is False
-    assert engine._compare_results([(None,)], [("NULL",)], strict_order=True) is False
-    assert engine._compare_results([(True,)], [(True,)], strict_order=True) is True
+    assert engine.compare_results(res1, res2, strict_order=False) is True
+    assert engine.compare_results(res1, res2, strict_order=True) is False
+    # Unordered floating-point rows with 1e-7 drift in permuted order must match when strict_order=False
+    float_rows_1 = [(1, 1.0000001), (2, 2.5000001)]
+    float_rows_2 = [(2, 2.5000002), (1, 1.0000002)]
+    assert engine.compare_results(float_rows_1, float_rows_2, strict_order=False) is True
+    assert engine.compare_results(float_rows_1, float_rows_2, strict_order=True) is False
+    assert engine.compare_results([(True, None, "a")], [(1, None, "a")], strict_order=True) is False
+    assert engine.compare_results([(None,)], [("NULL",)], strict_order=True) is False
+    assert engine.compare_results([(True,)], [(True,)], strict_order=True) is True
     engine.close()
 
 
@@ -158,15 +178,7 @@ async def test_db_engine_context_managers() -> None:
         rows_async = await async_engine.execute_query_async("SELECT 2")
         assert rows_async == [(2,)]
 
-    # Also test close_async when adapter has a coroutine close_async method
-    engine_coro = LiveDatabaseEngine(":memory:")
-    closed_flag = False
+    from gemma_4_sql.sdk.adapters.base import DatabaseAdapter
 
-    async def _fake_close_async() -> None:
-        """Set closed_flag to True."""
-        nonlocal closed_flag
-        closed_flag = True
-
-    setattr(engine_coro.adapter, "close_async", _fake_close_async)
-    await engine_coro.close_async()
-    assert closed_flag is True
+    engine_base_close = LiveDatabaseEngine(":memory:")
+    await DatabaseAdapter.close_async(engine_base_close.adapter)

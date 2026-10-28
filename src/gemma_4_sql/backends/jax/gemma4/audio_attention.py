@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -67,7 +66,7 @@ def convert_to_block(x: jax.Array, chunk_size: int) -> jax.Array:
     return x.reshape(batch_size, num_blocks, chunk_size, num_heads, head_dim)
 
 
-def extract_block_context(x: jax.Array, attn: Any) -> jax.Array:
+def extract_block_context(x: jax.Array, attn: Gemma4AudioAttention) -> jax.Array:
     """Extract the local context windows for block-wise attention.
 
     Args:
@@ -81,7 +80,7 @@ def extract_block_context(x: jax.Array, attn: Any) -> jax.Array:
     (batch_size, seq_len, num_heads, head_dim) = x.shape
     x = jnp.pad(x, ((0, 0), (attn.max_past_horizon, attn.max_future_horizon + attn.chunk_size - 1), (0, 0), (0, 0)))
     num_blocks = (seq_len + attn.chunk_size - 1) // attn.chunk_size
-    blocks: list[Any] = []
+    blocks: list[jax.Array] = []
     for i in range(num_blocks):
         start = i * attn.chunk_size
         blocks.append(jax.lax.dynamic_slice(x, (0, start, 0, 0), (batch_size, attn.context_size, num_heads, head_dim)))
@@ -106,7 +105,7 @@ def rel_shift(x: jax.Array, context_size: int) -> jax.Array:
     return x.reshape((batch_size, num_heads, num_blocks, block_size, context_size))
 
 
-def compute_audio_attention_outputs(attn: Any, qkv: tuple[jax.Array, jax.Array, jax.Array], pos_emb: jax.Array, mask: jax.Array | None) -> jax.Array:
+def compute_audio_attention_outputs(attn: Gemma4AudioAttention, qkv: tuple[jax.Array, jax.Array, jax.Array], pos_emb: jax.Array, mask: jax.Array | None) -> jax.Array:
     """Compute the multi-head attention outputs for audio.
 
     Args:

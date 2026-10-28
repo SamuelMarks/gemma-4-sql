@@ -2,35 +2,72 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import types
-from collections.abc import Iterable, Mapping
-from typing import Any
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Protocol, SupportsFloat, runtime_checkable
 
-from gemma_4_sql.backends.common_dpo import generic_dpo_loss, run_dpo_wrapper
+from gemma_4_sql.backends.common_dpo import ArithmeticTensorProtocol, generic_dpo_loss, run_dpo_wrapper
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.mlx.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, DPOResultDict, ETLConfig, JSONDict, MlxCausalLMProtocol, TensorType, TrainerState
+from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
+from gemma_4_sql.type_hints import (
+    DPOConfig,
+    DPOLoopState,
+    DPOResultDict,
+    ETLConfig,
+    JSONValue,
+    MlxArrayProtocol,
+    MlxCausalLMProtocol,
+    MlxCoreProtocol,
+    MlxNNProtocol,
+    TensorType,
+    TokenizerProtocol,
+    TrainerState,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _MlxOptimizerProtocol[ModelT](Protocol):
+    """Protocol for an `mlx.optimizers` optimizer supporting `.update(model, grads)`."""
+
+    def update(
+        self,
+        model: ModelT,
+        grads: dict[str, MlxArrayProtocol],
+        /,
+    ) -> None:
+        """Apply gradients to `model` parameters."""
+        ...
+
+
+type MlxDPOBatchValue = TensorType | JSONValue | MlxArrayProtocol | SupportsFloat | Sequence[int] | Sequence[Sequence[int]] | int | float | str | None
+type MlxDPOBatch = Mapping[str, MlxDPOBatchValue]
+type MlxDPOModel = Callable[..., MlxArrayProtocol | SupportsFloat | str] | MlxCausalLMProtocol
+
 
 mlx = optional_import("mlx")
 mx = optional_import("mlx.core")
 nn = optional_import("mlx.nn")
 mx_nn: types.ModuleType | None = nn
 optim = optional_import("mlx.optimizers")
-load = optional_attr("mlx_lm", "load")
+_raw_load = optional_attr("mlx_lm", "load")
+load: Callable[[str], tuple[MlxCausalLMProtocol, TokenizerProtocol | str | None] | MlxCausalLMProtocol] | None = (  # ty: ignore[invalid-assignment]
+    _raw_load if callable(_raw_load) else None
+)
 
 
-def dpo_loss(
-    policy_chosen_logps: TensorType,
-    policy_rejected_logps: TensorType,
-    ref_chosen_logps: TensorType,
-    ref_rejected_logps: TensorType,
+def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
+    policy_chosen_logps: TensorT,
+    policy_rejected_logps: TensorT,
+    ref_chosen_logps: TensorT,
+    ref_rejected_logps: TensorT,
     beta: float = 0.1,
-) -> tuple[Any, Any, Any]:
+) -> tuple[TensorT | ArithmeticTensorProtocol | float, TensorT, TensorT]:
     """Compute the Direct Preference Optimization (DPO) loss for MLX arrays.
 
     Args:
@@ -43,25 +80,27 @@ def dpo_loss(
     Returns:
         A 3-tuple of `(mean_loss, chosen_rewards, rejected_rewards)`.
 
+    Raises:
+        DependencyMissingError: If MLX dependencies (`mx` or `mx_nn`) are missing.
+
     """
     if mx is None or mx_nn is None:
-        return (0.0, 0.0, 0.0)
-
-    def _fallback_log_sig(x: Any) -> Any:
-        """Compute log-sigmoid `-log(1 + exp(-x))` or negative fallback when `nn.log_sigmoid` is absent."""
-        if hasattr(mx, "logaddexp"):
-            try:
-                return -mx.logaddexp(0.0, -x)
-            except (TypeError, ValueError):
-                pass
-        return mx.negative(x) if hasattr(mx, "negative") else -x
-
-    losses_mod = getattr(mx_nn, "losses", None)
-    log_sig_fn = getattr(losses_mod, "log_sigmoid", getattr(mx_nn, "log_sigmoid", _fallback_log_sig))
-    return generic_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta, log_sig_fn)
+        raise DependencyMissingError("MLX DPO dependencies are missing.", backend="mlx")
+    return generic_dpo_loss(
+        policy_chosen_logps,
+        policy_rejected_logps,
+        ref_chosen_logps,
+        ref_rejected_logps,
+        beta,
+        mx_nn.log_sigmoid,
+    )
 
 
-def _compute_mlx_logps(model: MlxCausalLMProtocol, inputs: Any, labels: Any = None) -> Any:
+def _compute_mlx_logps(
+    model: MlxDPOModel,
+    inputs: MlxDPOBatchValue,
+    labels: MlxDPOBatchValue = None,
+) -> MlxArrayProtocol:
     """Compute per-sequence summed token log-probabilities for MLX models.
 
     Args:
@@ -73,22 +112,35 @@ def _compute_mlx_logps(model: MlxCausalLMProtocol, inputs: Any, labels: Any = No
         Per-sequence log-probability tensor of shape `(batch_size,)`.
 
     """
-    logits: Any = model(inputs)
+    raw_logits = model(inputs)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
     target = labels if labels is not None else inputs
-    ndim = getattr(logits, "ndim", 0)
-    if mx is not None and isinstance(ndim, int) and ndim >= 2 and hasattr(mx, "take_along_axis") and hasattr(mx, "expand_dims") and target is not None and not isinstance(target, str):
-        log_probs = logits - mx.logsumexp(logits, axis=-1, keepdims=True) if hasattr(mx, "logsumexp") else logits
-        target_arr = target if hasattr(target, "shape") else mx.array(target)
-        indices = mx.expand_dims(target_arr, axis=-1)
-        gathered = mx.take_along_axis(log_probs, indices, axis=-1)
-        squeezed = mx.squeeze(gathered, axis=-1) if hasattr(mx, "squeeze") else gathered
-        mask = target_arr != 0
-        masked = squeezed * mask if hasattr(squeezed, "__mul__") else squeezed
-        return masked.sum(axis=-1) if hasattr(masked, "sum") else masked
-    return logits.mean(axis=-1) if hasattr(logits, "mean") else logits
+    if mx is not None and isinstance(raw_logits, MlxArrayProtocol) and raw_logits.ndim >= 2:
+        logits: MlxArrayProtocol = raw_logits
+        target_arr: MlxArrayProtocol = (
+            target if isinstance(target, MlxArrayProtocol) else mx.array(target)  # pyright: ignore[reportArgumentType]
+        )
+        if labels is None and target_arr.ndim == 2 and int(target_arr.shape[1]) > 1 and int(logits.shape[1]) > 1:
+            logits = logits[:, :-1, :]
+            target_arr = target_arr[:, 1:]
+        log_probs: MlxArrayProtocol = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+        indices: MlxArrayProtocol = mx.expand_dims(target_arr, axis=-1)
+        gathered: MlxArrayProtocol = mx.take_along_axis(log_probs, indices, axis=-1)
+        squeezed: MlxArrayProtocol = mx.squeeze(gathered, axis=-1)
+        mask = target_arr != 0  # pyright: ignore[reportUnnecessaryComparison]
+        masked = squeezed * mask  # pyright: ignore[reportOperatorIssue]
+        res: MlxArrayProtocol = masked.sum(axis=-1)
+        return res
+    with contextlib.suppress(AttributeError, TypeError):
+        return raw_logits.mean(axis=-1)  # pyright: ignore[reportAttributeAccessIssue,reportCallIssue,reportReturnType]  # ty: ignore[unresolved-attribute]
+    return raw_logits  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
 
 
-def _loss_fn(policy_model: MlxCausalLMProtocol, ref_model: MlxCausalLMProtocol, batch: Mapping[str, Any], beta: float) -> Any:
+def _loss_fn(
+    policy_model: MlxDPOModel,
+    ref_model: MlxDPOModel,
+    batch: MlxDPOBatch,
+    beta: float,
+) -> MlxArrayProtocol | ArithmeticTensorProtocol | float:
     """Evaluate scalar DPO loss for `mlx.nn.value_and_grad` differentiation.
 
     Args:
@@ -113,7 +165,13 @@ def _loss_fn(policy_model: MlxCausalLMProtocol, ref_model: MlxCausalLMProtocol, 
     return loss
 
 
-def _run_dpo_step(policy_model: MlxCausalLMProtocol, ref_model: MlxCausalLMProtocol, optimizer: Any, batch: JSONDict, beta: float) -> Any:
+def _run_dpo_step[ModelT: MlxDPOModel](
+    policy_model: ModelT,
+    ref_model: ModelT,
+    optimizer: _MlxOptimizerProtocol[ModelT] | str | None,
+    batch: MlxDPOBatch,
+    beta: float,
+) -> MlxArrayProtocol | ArithmeticTensorProtocol | float:
     """Run a single MLX DPO training step using functional `nn.value_and_grad`.
 
     Args:
@@ -127,19 +185,20 @@ def _run_dpo_step(policy_model: MlxCausalLMProtocol, ref_model: MlxCausalLMProto
         Scalar DPO step loss.
 
     """
-    if nn is not None and hasattr(nn, "value_and_grad"):
+    if nn is not None:
         loss_and_grad_fn = nn.value_and_grad(policy_model, _loss_fn)
         (loss, grads) = loss_and_grad_fn(policy_model, ref_model, batch, beta)
-        if optimizer is not None and hasattr(optimizer, "update"):
-            optimizer.update(policy_model, grads)
-        if mx is not None and hasattr(mx, "eval") and hasattr(policy_model, "parameters"):
-            opt_state = getattr(optimizer, "state", {})
-            mx.eval(policy_model.parameters(), opt_state, loss)
+        with contextlib.suppress(AttributeError, TypeError):
+            optimizer.update(policy_model, grads)  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        with contextlib.suppress(AttributeError, TypeError):
+            mx.eval(policy_model.parameters(), optimizer.state if optimizer is not None else {}, loss)  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportFunctionMemberAccess]  # ty: ignore[unresolved-attribute]
         return loss
     return _loss_fn(policy_model, ref_model, batch, beta)
 
 
-def _run_training_epochs(state: DPOLoopState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> float:
+def _run_training_epochs[ModelT, OptT, BatchT: MlxDPOBatch, ParamsT](
+    state: DPOLoopState[ModelT, OptT, BatchT] | TrainerState[ModelT, ParamsT, OptT, BatchT],
+) -> float:
     """Run MLX DPO training epochs over the preference dataloader.
 
     Args:
@@ -149,21 +208,33 @@ def _run_training_epochs(state: DPOLoopState[Any, Any, Any] | TrainerState[Any, 
         Mean batch loss from the final epoch.
 
     """
-    dataloader: Iterable[JSONDict] = state.dataloader or ()
-    policy_model: Any = state.policy_model
-    ref_model: Any = state.ref_model
+    dataloader: Iterable[BatchT] = state.dataloader or ()
+    policy_model = state.policy_model
+    ref_model = state.ref_model
     optimizer = state.optimizer
     beta = state.beta
 
-    def _step(batch: JSONDict) -> float:
+    def _step(batch: BatchT) -> float:
         """Process a single preference batch and return scalar float loss."""
-        loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)
-        return float(loss.item() if hasattr(loss, "item") else loss)
+        assert policy_model is not None
+        assert ref_model is not None
+        loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        try:
+            return float(loss.item())  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        except (AttributeError, TypeError, ValueError):
+            return float(loss)  # pyright: ignore[reportArgumentType]
 
     return generic_run_training_epochs(state.epochs, dataloader, _step)
 
 
-def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learning_rate: float, batch_size: int = 2) -> tuple[str, float]:
+def _execute_dpo(
+    model_name: str,
+    dataset: str,
+    beta: float,
+    epochs: int,
+    learning_rate: float,
+    batch_size: int = 2,
+) -> tuple[str, float]:
     """Execute the core DPO loop for MLX.
 
     Args:
@@ -181,14 +252,17 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
         ValueError: If dataloader is invalid.
 
     """
-    loaded_p: Any = load(model_name)
+    assert load is not None
+    assert optim is not None
+    loaded_p = load(model_name)
     policy_model: MlxCausalLMProtocol = loaded_p[0] if isinstance(loaded_p, (tuple, list)) else loaded_p
-    loaded_r: Any = load(model_name)
+    loaded_r = load(model_name)
     ref_model: MlxCausalLMProtocol = loaded_r[0] if isinstance(loaded_r, (tuple, list)) else loaded_r
-    optimizer = optim.AdamW(learning_rate=learning_rate)
+    optimizer: _MlxOptimizerProtocol[MlxCausalLMProtocol] = optim.AdamW(learning_rate=learning_rate)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
-    if dataloader is None or not hasattr(dataloader, "__iter__"):
+    has_loader = isinstance(dataloader, Iterable)
+    if not has_loader:
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
     final_loss = _run_training_epochs(
         DPOLoopState(
@@ -203,12 +277,12 @@ def _execute_dpo(model_name: str, dataset: str, beta: float, epochs: int, learni
     return "completed", float(final_loss)
 
 
-def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
+def run_dpo(config: DPOConfig, **kwargs: StatusValue) -> DPOResultDict:
     """Execute Direct Preference Optimization (DPO) using the MLX backend.
 
     Args:
         config: DPO configuration parameters.
-        **kwargs: Hyperparameters for DPO (e.g., beta, learning_rate, raise_on_error).
+        **kwargs: Hyperparameters for DPO (e.g., `beta`, `learning_rate`, `raise_on_error`).
 
     Returns:
         Structured `DPOResultDict` containing backend, model, dataset, beta, status, and final_loss.
@@ -226,3 +300,13 @@ def run_dpo(config: DPOConfig, **kwargs: object) -> DPOResultDict:
         lambda m, d, b, ep, lr, bs: _execute_dpo(m, d, b, ep, lr, batch_size=bs),
         **kwargs,
     )
+
+
+__all__ = [
+    "MlxArrayProtocol",
+    "MlxCausalLMProtocol",
+    "MlxCoreProtocol",
+    "MlxNNProtocol",
+    "dpo_loss",
+    "run_dpo",
+]

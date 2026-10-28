@@ -5,7 +5,8 @@ from __future__ import annotations
 import importlib
 import sys
 import types
-from typing import Any
+from collections.abc import Callable
+from typing import NoReturn
 
 import pytest
 
@@ -36,6 +37,8 @@ from gemma_4_sql.backends.lazy_loader import (
     get_transformers,
     optional_attr,
     optional_import,
+    override_lazy_module,
+    reset_all_lazy_loaders,
 )
 
 
@@ -76,7 +79,7 @@ def test_lazy_loader_submodule_resolution(monkeypatch: pytest.MonkeyPatch) -> No
     """Verify LazyLoader resolves submodules and optional_import / optional_attr work."""
     fake_pkg = types.ModuleType("fake_pkg_test")
     fake_sub = types.ModuleType("fake_pkg_test.sub")
-    setattr(fake_sub, "val", "ok")
+    monkeypatch.setattr(fake_sub, "val", "ok", raising=False)
     monkeypatch.setitem(sys.modules, "fake_pkg_test", fake_pkg)
     monkeypatch.setitem(sys.modules, "fake_pkg_test.sub", fake_sub)
 
@@ -88,8 +91,9 @@ def test_lazy_loader_submodule_resolution(monkeypatch: pytest.MonkeyPatch) -> No
     class RaisingAttrModule(types.ModuleType):
         """Module whose __getattr__ raises ImportError (simulating transformers lazy objects)."""
 
-        def __getattr__(self, _name: str) -> Any:
+        def __getattr__(self, name: str) -> NoReturn:
             """Raise ImportError."""
+            _ = name
             raise ImportError("lazy attr failed")
 
     monkeypatch.setitem(sys.modules, "raising_attr_mod", RaisingAttrModule("raising_attr_mod"))
@@ -127,7 +131,7 @@ def test_lazy_loader_import_error(monkeypatch: pytest.MonkeyPatch) -> None:
     ],
 )
 def test_lazy_loader_getters(
-    getter: Any,
+    getter: Callable[[], types.ModuleType | None],
     loader_obj: LazyLoader[types.ModuleType],
     module_name: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -148,5 +152,21 @@ def test_lazy_loader_getters(
     loader_obj._module = None
 
     fake_mod = types.ModuleType(module_name)
-    monkeypatch.setattr(importlib, "import_module", lambda _name, _package=None: fake_mod)
+    monkeypatch.setattr(importlib, "import_module", lambda _name, _package=None: fake_mod)  # pyright: ignore[reportUnknownLambdaType]
     assert getter() is fake_mod
+
+
+def test_reset_all_and_override_lazy_module() -> None:
+    """Verify reset_all_lazy_loaders and override_lazy_module context manager."""
+    fake_mod = types.ModuleType("custom_overridden_mod")
+    with override_lazy_module("custom_overridden_mod", fake_mod):
+        assert _JAX_LOADER.module_name == "jax"
+        from gemma_4_sql.backends.lazy_loader import _LOADER_REGISTRY
+
+        assert _LOADER_REGISTRY["custom_overridden_mod"][0].get_module() is fake_mod
+
+    with override_lazy_module("jax", fake_mod):
+        assert get_jax() is fake_mod
+
+    reset_all_lazy_loaders()
+    assert not _JAX_LOADER._loaded

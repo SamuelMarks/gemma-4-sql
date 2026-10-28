@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
+from gemma_4_sql.type_hints import MlxArrayProtocol
 from tests.conftest import requires_mlx
 
 pytestmark = requires_mlx
@@ -20,70 +20,76 @@ def test_mlx_quantize_imports() -> None:
 
     import gemma_4_sql.backends.mlx.quantize as quantize_module
 
-    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None, "numpy": None}):
+    with patch.dict(sys.modules, {"mlx": None, "mlx.core": None}):
         importlib.reload(quantize_module)
         assert quantize_module.mlx is None
-        assert quantize_module.np is None
     importlib.reload(quantize_module)
 
 
 def test_calibrate_awq_scales(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify calibrate_awq_scales computes grid-searched per-channel scales and handles missing numpy."""
-    import numpy as np
+    """Verify calibrate_awq_scales computes grid-searched per-channel scales and handles missing mlx."""
+    import mlx.core as mx
 
     import gemma_4_sql.backends.mlx.quantize as quantize_module
 
     with pytest.raises(ValueError, match="alpha_range"):
         quantize_module.calibrate_awq_scales(MagicMock(), MagicMock(), alpha_range=[])
 
-    monkeypatch.setattr(quantize_module, "np", None)
+    monkeypatch.setattr(quantize_module, "mlx", None)
     res = quantize_module.calibrate_awq_scales(MagicMock(shape=(2, 10)), MagicMock())
     assert res == [1.0] * 10
+    calib_fallback = quantize_module._build_calibration_activations(["SELECT 1"], 4)
+    assert isinstance(calib_fallback, list)
+    assert len(calib_fallback) == 4
 
-    monkeypatch.setattr(quantize_module, "np", np)
-    rng = np.random.default_rng(42)
-    w = rng.standard_normal(size=(10, 5))
-    acts = rng.standard_normal(size=(100, 5))
+    monkeypatch.setattr(quantize_module, "mlx", mx)
+    mx.random.seed(42)
+    w = mx.random.normal((10, 5))
+    acts = mx.random.normal((100, 5))
 
-    scales: Any = quantize_module.calibrate_awq_scales(w, acts)
+    scales = quantize_module.calibrate_awq_scales(w, acts)
+    assert isinstance(scales, MlxArrayProtocol)
     assert scales.shape == (5,)
 
-    acts_1d = rng.standard_normal(size=5)
-    scales2: Any = quantize_module.calibrate_awq_scales(w, acts_1d)
+    acts_1d = mx.random.normal((5,))
+    scales2 = quantize_module.calibrate_awq_scales(w, acts_1d)
+    assert isinstance(scales2, MlxArrayProtocol)
     assert scales2.shape == (5,)
 
 
 def test_calibrate_gptq_weights(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify calibrate_gptq_weights computes Hessian-compensated weights and handles singular matrices."""
-    import numpy as np
+    import mlx.core as mx
 
     import gemma_4_sql.backends.mlx.quantize as quantize_module
 
-    monkeypatch.setattr(quantize_module, "np", None)
-    w_dummy: Any = "w"
-    a_dummy: Any = "a"
-    res = quantize_module.calibrate_gptq_weights(w_dummy, a_dummy)
+    monkeypatch.setattr(quantize_module, "mlx", None)
+    res = quantize_module.calibrate_gptq_weights("w", "a")
     assert res == "w"
 
-    monkeypatch.setattr(quantize_module, "np", np)
-    rng = np.random.default_rng(42)
-    w = rng.standard_normal(size=(10, 5))
-    acts = rng.standard_normal(size=(100, 5))
+    monkeypatch.setattr(quantize_module, "mlx", mx)
+    mx.random.seed(42)
+    w = mx.random.normal((10, 5))
+    acts = mx.random.normal((100, 5))
 
-    w_q: Any = quantize_module.calibrate_gptq_weights(w, acts)
+    w_q = quantize_module.calibrate_gptq_weights(w, acts)
+    assert isinstance(w_q, MlxArrayProtocol)
     assert w_q.shape == (10, 5)
 
-    acts_1d = rng.standard_normal(size=5)
-    w_q2: Any = quantize_module.calibrate_gptq_weights(w, acts_1d)
+    acts_1d = mx.random.normal((5,))
+    w_q2 = quantize_module.calibrate_gptq_weights(w, acts_1d)
+    assert isinstance(w_q2, MlxArrayProtocol)
     assert w_q2.shape == (10, 5)
 
-    with patch("numpy.linalg.inv", side_effect=np.linalg.LinAlgError("singular")):
-        w_q_err: Any = quantize_module.calibrate_gptq_weights(w, acts)
+    with patch.object(mx.linalg, "inv", side_effect=RuntimeError("singular")):
+        w_q_err = quantize_module.calibrate_gptq_weights(w, acts)
+        assert isinstance(w_q_err, MlxArrayProtocol)
         assert w_q_err.shape == (10, 5)
 
 
 def test_quantize_model_real_mlx() -> None:
     """Verify quantize_model quantizes a real tiny mlx.nn.Module into QuantizedLinear layers with expected scale shapes."""
+    import mlx.core as mx
     import mlx.nn as mlx_nn
 
     import gemma_4_sql.backends.mlx.quantize as quantize_module
@@ -96,13 +102,11 @@ def test_quantize_model_real_mlx() -> None:
             super().__init__()
             self.proj = mlx_nn.Linear(64, 64)
 
-        def __call__(self, x: Any) -> Any:
+        def __call__(self, x: mx.array) -> mx.array:
             """Apply linear projection."""
             return self.proj(x)
 
     # INT8 real quantization
-    import mlx.core as mx
-
     m_int8 = TinyMLXModel()
     assert m_int8(mx.ones((1, 64))).shape == (1, 64)
     res_int8 = quantize_module.quantize_model("tiny-mlx", "int8", model=m_int8, group_size=64)
@@ -119,19 +123,33 @@ def test_quantize_model_real_mlx() -> None:
     assert isinstance(m_int4.proj, mlx_nn.QuantizedLinear)
     assert m_int4.proj.scales.shape == (64, 2)
 
-    # AWQ real quantization with calibration scales attached
+    # AWQ real quantization with calibration scales registered in artifact registry
+    from gemma_4_sql.type_hints import get_quantized_artifact
+
     m_awq = TinyMLXModel()
     res_awq = quantize_module.quantize_model("tiny-mlx", "awq", model=m_awq, calib_data=["SELECT 1;"], group_size=32)
     assert res_awq["status"] == "quantized_awq"
     assert isinstance(m_awq.proj, mlx_nn.QuantizedLinear)
-    assert hasattr(m_awq, "_awq_scales")
+    awq_artifact = get_quantized_artifact(m_awq)
+    assert awq_artifact is not None
+    assert awq_artifact.method == "awq"
+    assert "layer_0" in awq_artifact.scales
 
-    # GPTQ real quantization with Hessian-compensated weights attached
+    # GPTQ real quantization with Hessian-compensated weights registered in artifact registry
     m_gptq = TinyMLXModel()
     res_gptq = quantize_module.quantize_model("tiny-mlx", "gptq", model=m_gptq, calib_data=["SELECT 1;"], group_size="32")
     assert res_gptq["status"] == "quantized_gptq"
     assert isinstance(m_gptq.proj, mlx_nn.QuantizedLinear)
-    assert hasattr(m_gptq, "_gptq_compensated_weights")
+    gptq_artifact = get_quantized_artifact(m_gptq)
+    assert gptq_artifact is not None
+    assert gptq_artifact.method == "gptq"
+
+    # Direct weight attribute extraction on a single Linear layer and 1D weight
+    direct_lin = mlx_nn.Linear(32, 32)
+    assert quantize_module._extract_first_2d_weight(direct_lin) is not None
+    emb_1d = mlx_nn.RMSNorm(32)
+    assert quantize_module._get_layer_weight(emb_1d) is None
+    assert quantize_module._extract_first_2d_weight(MagicMock(spec=[])) is None
 
 
 def test_quantize_model_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:

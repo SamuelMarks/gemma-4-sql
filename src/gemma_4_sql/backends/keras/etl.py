@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import typing
-
 from gemma_4_sql.backends.common_data import (
+    GrainModuleProtocol,
+    HFDatasetsModuleProtocol,
     build_grain_dataloader,
     get_grain_classes,
     get_grain_sampler,
@@ -15,8 +15,10 @@ from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig, ETLResultDict, JSONValue
 
-datasets: typing.Any = optional_import("datasets")
-grain: typing.Any = optional_import("grain.python")
+_raw_datasets = optional_import("datasets")
+datasets: HFDatasetsModuleProtocol | None = _raw_datasets if isinstance(_raw_datasets, HFDatasetsModuleProtocol) else None
+_raw_grain = optional_import("grain.python")
+grain: GrainModuleProtocol | None = _raw_grain if isinstance(_raw_grain, GrainModuleProtocol) else None
 
 
 def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> ETLResultDict:
@@ -24,7 +26,7 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> ETLResultDict:
 
     Args:
         config: The configuration parameters.
-        **kwargs: Overrides for ETL configuration (e.g., duckdb_path, duckdb_table).
+        **kwargs: Overrides for ETL configuration (e.g., `duckdb_path`, `duckdb_table`).
 
     Returns:
         A dictionary containing the results.
@@ -40,7 +42,7 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> ETLResultDict:
         grain_module=grain,
         grain_classes_fn=get_grain_classes,
         tokenizer_cls=SQLTokenizer,
-        **kwargs,
+        extra_options=kwargs,
     )
 
 

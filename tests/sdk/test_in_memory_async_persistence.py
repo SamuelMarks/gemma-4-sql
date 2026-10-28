@@ -19,6 +19,7 @@ async def test_sqlite_in_memory_async_persistence() -> None:
 
     Returns:
         None.
+
     """
     ddl = """
     CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
@@ -44,9 +45,9 @@ async def test_sqlite_in_memory_async_persistence() -> None:
     res1, res2 = await asyncio.gather(q1, q2)
     assert res1 == [("Alice",)]
     assert res2 == [("Bob",)]
-    assert getattr(engine.adapter, "_async_conn", None) is not None
+    assert engine.adapter._async_conn is not None
     await engine.close_async()
-    assert getattr(engine.adapter, "_async_conn", None) is None
+    assert engine.adapter._async_conn is None
 
 
 @pytest.mark.asyncio
@@ -58,8 +59,8 @@ async def test_duckdb_in_memory_async_persistence(monkeypatch: pytest.MonkeyPatc
 
     Returns:
         None.
-    """
 
+    """
     ddl = """
     CREATE TABLE products (id INT, title TEXT);
     INSERT INTO products VALUES (10, 'Laptop');
@@ -91,6 +92,7 @@ async def test_sqlite_async_rollback_on_error() -> None:
 
     Returns:
         None.
+
     """
     ddl = "CREATE TABLE accounts (id INT PRIMARY KEY, balance INT);"
     engine = LiveDatabaseEngine(db_path=":memory:", db_type="sqlite", ddl=ddl, read_only=False)
@@ -117,6 +119,7 @@ async def test_sqlite_async_schema_migration() -> None:
 
     Returns:
         None.
+
     """
     ddl = "CREATE TABLE items (id INT, name TEXT);"
     engine = LiveDatabaseEngine(db_path=":memory:", db_type="sqlite", ddl=ddl, read_only=False)

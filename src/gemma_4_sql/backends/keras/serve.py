@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -12,9 +12,23 @@ from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, Kera
 
 logger = logging.getLogger(__name__)
 
+
+@runtime_checkable
+class _GemmaCausalLMLoaderProtocol(Protocol):
+    """Protocol for `keras_nlp.models.GemmaCausalLM` exposing `.from_preset(model_name)`."""
+
+    def from_preset(self, model_name: str, /) -> KerasCausalLMProtocol:
+        """Load a `GemmaCausalLM` model from a preset identifier."""
+        ...
+
+
 keras = optional_import("keras")
 tf = optional_import("tensorflow")
-GemmaCausalLM: Any = optional_attr("keras_nlp.models", "GemmaCausalLM")
+GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = optional_attr(
+    "keras_nlp.models",
+    "GemmaCausalLM",
+    _GemmaCausalLMLoaderProtocol,
+)
 
 
 def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
@@ -35,7 +49,7 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
         nonlocal loaded_model
         logger.info("Pre-loading Keras model %s for continuous batching server...", model_name)
         try:
-            gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM")
+            gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM", _GemmaCausalLMLoaderProtocol)
             if gemma_causal_lm_cls is None:
                 raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
             loaded_model = gemma_causal_lm_cls.from_preset(model_name)
@@ -46,23 +60,24 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
         """Generate SQL using pre-loaded Keras model or fallback to `keras.inference.generate_sql`."""
         from gemma_4_sql.backends.keras.inference import generate_sql
 
-        if loaded_model is not None and hasattr(loaded_model, "generate"):
+        if loaded_model is not None:
             try:
                 out = loaded_model.generate(prompt)
                 return {"sql": str(out).strip()}
             except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 logger.warning("Keras loaded_model.generate failed, falling back to generate_sql: %s", e)
 
-        return dict(generate_sql(model_name=model_name, prompt=prompt))
+        res = generate_sql(model_name=model_name, prompt=prompt)
+        return {k: v for k, v in res.items() if isinstance(v, (str, int, float, bool)) or v is None}
 
     def _batch_generate(prompts: list[str]) -> list[str]:
         """Generate SQL queries for a batch of prompts using pre-loaded Keras model or per-prompt fallback."""
         from gemma_4_sql.exceptions import InferenceError
 
-        if loaded_model is not None and hasattr(loaded_model, "generate"):
+        if loaded_model is not None:
             try:
-                outputs: Any = loaded_model.generate(prompts)
-                return [str(out).strip() for out in outputs]
+                outputs = loaded_model.generate(prompts)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+                return [str(out).strip() for out in outputs]  # pyright: ignore[reportGeneralTypeIssues]  # ty: ignore[not-iterable]
             except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 logger.warning("Keras batch generation failed, falling back to individual generation: %s", e)
 
@@ -114,6 +129,5 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
-        missing_deps=False,
         app_factory=lambda: create_app(model_name, max_batch_size=max_batch_size),
     )

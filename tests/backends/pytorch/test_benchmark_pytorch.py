@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -98,23 +97,22 @@ def test_sync_and_memory(monkeypatch: pytest.MonkeyPatch) -> None:
 
     benchmark_module._sync_cuda("cpu")
 
-    dummy_m: Any = None
     mock_torch.cuda.max_memory_allocated.return_value = 1048576 * 10
-    assert benchmark_module._get_memory_mb(dummy_m, "cuda") == 10.0
+    assert benchmark_module._get_memory_mb(None, "cuda") == 10.0
 
     mock_torch.mps.driver_allocated_memory.return_value = 1048576 * 5
-    assert benchmark_module._get_memory_mb(dummy_m, "mps") == 5.0
+    assert benchmark_module._get_memory_mb(None, "mps") == 5.0
 
-    assert benchmark_module._get_memory_mb(dummy_m, "cpu") > 0.0
+    assert benchmark_module._get_memory_mb(None, "cpu") > 0.0
 
 
 @patch("time.time")
-def test_run_benchmark_pass(mock_time: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_benchmark_pass(mock_time: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test _run_benchmark_pass."""
     mock_torch = MagicMock()
     monkeypatch.setattr(benchmark_module, "torch", mock_torch)
 
-    mock_model: Any = MagicMock()
+    mock_model = MagicMock()
     times = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
     mock_time.side_effect = times * 5
@@ -149,6 +147,54 @@ def test_benchmark_model_behavioral(monkeypatch: pytest.MonkeyPatch) -> None:
         assert res["tokens_per_sec"] == 250.0
         assert res["latency_ms"] == 4.0
 
-    mock_model_no_gen: Any = MagicMock(spec=[])
+    mock_model_no_gen = MagicMock(spec=[])
     with patch("time.time", side_effect=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]):
         benchmark_module._run_benchmark_pass(mock_model_no_gen, "cpu", 1, 1, 1, "decode", 10)
+
+
+def test_real_pytorch_tiny_gemma4_benchmark_cpu() -> None:
+    """Verify _run_benchmark_pass executes against a real tiny Gemma4ForCausalLM on CPU."""
+    from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
+    from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM
+
+    cfg = Gemma4Config(
+        vocab_size=64,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=8,
+        num_experts=1,
+    )
+    model = Gemma4ForCausalLM(cfg)
+    tps, lat, mem = benchmark_module._run_benchmark_pass(model, "cpu", 1, 1, 1, "prefill", 2)
+    assert tps > 0.0
+    assert lat > 0.0
+    assert mem > 0.0
+
+
+def test_torch_runtime_adapter_edge_cases() -> None:
+    """Verify TorchRuntimeAdapter handles None torch module and float16/float32 dtype resolution."""
+    from gemma_4_sql.backends.pytorch.runtime_adapter import TorchRuntimeAdapter
+
+    empty_adapter = TorchRuntimeAdapter(None)
+    assert empty_adapter.get_device("gpu") == "cpu"
+    assert empty_adapter.resolve_dtype("bfloat16") is None
+    assert empty_adapter.long_dtype() is None
+    assert empty_adapter.compile_model("m") == "m"
+    empty_adapter.synchronize("cuda")
+    assert empty_adapter.max_memory_mb("cuda", 32.0) == 32.0
+    empty_adapter.reset_peak_memory_stats("cuda")
+    empty_adapter.manual_seed(0)
+    with empty_adapter.no_grad():
+        pass
+
+    mock_t = MagicMock()
+    mock_t.float16 = "fp16"
+    mock_t.float32 = "fp32"
+    mock_t.compile = 123  # non-callable compile attribute
+    adapter = TorchRuntimeAdapter(mock_t)
+    assert adapter.resolve_dtype("float16") == "fp16"
+    assert adapter.resolve_dtype("float32") == "fp32"
+    assert adapter.compile_model("m") == "m"

@@ -54,6 +54,8 @@ def test_export_pytorch_routing_and_execution(tmp_path: Path) -> None:
 
 
 def test_export_invalid(tmp_path: Path) -> None:
-    """Verify export_model raises ValueError on an invalid backend name."""
-    with pytest.raises(ValueError, match="Unknown backend: invalid"):
+    """Verify export_model raises ConfigurationError on an invalid backend name."""
+    from gemma_4_sql.exceptions import ConfigurationError
+
+    with pytest.raises(ConfigurationError, match="Unknown backend: invalid"):
         export_model("model1", str(tmp_path / "path1"), "invalid")

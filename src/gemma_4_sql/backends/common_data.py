@@ -2,91 +2,301 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from typing import Protocol, TypedDict, runtime_checkable
 
-from gemma_4_sql.exceptions import DependencyMissingError, ETLError
+from gemma_4_sql.exceptions import DependencyMissingError, ETLError, StatusValue
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import ETLConfig, ETLResultDict, JSONDict
+from gemma_4_sql.type_hints import (
+    AudioInput,
+    DataLoaderProtocol,
+    ETLConfig,
+    ETLResultDict,
+    ImageInput,
+    JSONDict,
+    JSONPrimitive,
+    JSONValue,
+    NDArrayProtocol,
+    TensorType,
+    TokenizerProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _create_hf_data_source(base_ds: Any) -> Any:
+class RawSQLDatasetRow(TypedDict, total=False):
+    """Typed schema for a raw Text-to-SQL, DPO, or multimodal dataset record."""
+
+    sql_prompt: str
+    question: str
+    prompt: str
+    sql: str
+    query: str
+    chosen: str
+    chosen_sql: str
+    rejected: str
+    rejected_sql: str
+    image_bytes: ImageInput
+    image_url: ImageInput
+    image: ImageInput
+    audio_clip: AudioInput
+    audio: AudioInput
+
+
+type TokenizedElementValue = list[int] | NDArrayProtocol | list[float] | JSONValue
+type TokenizedElementDict = dict[str, TokenizedElementValue]
+
+
+@runtime_checkable
+class DatasetSequenceProtocol(Protocol):
+    """Protocol for an indexable sequence of dataset records."""
+
+    def __len__(self) -> int:
+        """Return the number of records in the dataset."""
+        ...
+
+    def __getitem__(self, idx: int, /) -> JSONDict | Mapping[str, JSONValue] | int | str:
+        """Retrieve a dataset record by zero-based index."""
+        ...
+
+
+@runtime_checkable
+class HFDatasetsModuleProtocol(Protocol):
+    """Protocol for the Hugging Face `datasets` module."""
+
+    def load_dataset(self, path: str, *, split: str = "train") -> DatasetSequenceProtocol:
+        """Load a dataset split by name."""
+        ...
+
+
+@runtime_checkable
+class GrainShardingCallableProtocol(Protocol):
+    """Protocol for a Grain sharding class or factory."""
+
+    def __call__(self) -> JSONValue:
+        """Instantiate sharding options."""
+        ...
+
+
+@runtime_checkable
+class GrainModuleWithShardingProtocol(Protocol):
+    """Protocol for a `grain.python` module exposing `JAXDistributedSharding` and `NoSharding`."""
+
+    @property
+    def JAXDistributedSharding(self) -> GrainShardingCallableProtocol:
+        """Provide the distributed sharding constructor."""
+        ...
+
+    @property
+    def NoSharding(self) -> GrainShardingCallableProtocol:
+        """Provide the single-process sharding constructor."""
+        ...
+
+
+@runtime_checkable
+class GrainModuleClassesProtocol(Protocol):
+    """Protocol for a `grain.python` module exposing `RandomAccessDataSource` and `MapTransform`."""
+
+    @property
+    def RandomAccessDataSource(self) -> type:
+        """Provide the base class for random access data sources."""
+        ...
+
+    @property
+    def MapTransform(self) -> type:
+        """Provide the base class for elementwise map transforms."""
+        ...
+
+
+@runtime_checkable
+class GrainModuleProtocol(GrainModuleWithShardingProtocol, GrainModuleClassesProtocol, Protocol):
+    """Protocol for the `grain.python` module."""
+
+    def IndexSampler(
+        self,
+        *,
+        num_records: int,
+        shard_options: JSONValue,
+        shuffle: bool = False,
+        num_epochs: int = 1,
+    ) -> JSONValue:
+        """Create an `IndexSampler`."""
+        ...
+
+    def Batch(self, *, batch_size: int) -> JSONValue:
+        """Create a `Batch` operation."""
+        ...
+
+    def DataLoader(
+        self,
+        *,
+        data_source: DatasetSequenceProtocol,
+        sampler: JSONValue,
+        operations: Sequence[_DefaultBaseTransform | JSONValue],
+    ) -> DataLoaderProtocol[Mapping[str, TensorType | Sequence[int]]]:
+        """Construct a `DataLoader`."""
+        ...
+
+
+@runtime_checkable
+class DuckDBDescribedCursorProtocol(Protocol):
+    """Protocol for a DuckDB cursor or connection with `.description` and `.fetchall()`."""
+
+    @property
+    def description(self) -> Sequence[tuple[str, ...]] | None:
+        """Provide column metadata tuples."""
+        ...
+
+    def fetchall(self) -> list[tuple[JSONPrimitive, ...]]:
+        """Fetch all result rows."""
+        ...
+
+
+@runtime_checkable
+class DuckDBRawConnectionProtocol(Protocol):
+    """Protocol for a raw DuckDB connection."""
+
+    @property
+    def description(self) -> Sequence[tuple[str, ...]] | None:
+        """Provide column metadata tuples on the connection."""
+        ...
+
+    def execute(self, query: str) -> DuckDBDescribedCursorProtocol:
+        """Execute a SQL query and return a cursor."""
+        ...
+
+    def close(self) -> None:
+        """Close the DuckDB connection."""
+        ...
+
+
+@runtime_checkable
+class DuckDBModuleWithErrorProtocol(Protocol):
+    """Protocol for the `duckdb` module with `.Error` and `.connect(...)`."""
+
+    @property
+    def Error(self) -> type | str | None:
+        """Provide the DuckDB base exception class."""
+        ...
+
+    def connect(self, database: str, *, read_only: bool = False) -> DuckDBRawConnectionProtocol:
+        """Open a DuckDB database connection."""
+        ...
+
+
+@runtime_checkable
+class DuckDBConnectCallableProtocol(Protocol):
+    """Protocol for a `duckdb` module exposing `.connect(...)`."""
+
+    def connect(self, database: str, *, read_only: bool = False) -> DuckDBRawConnectionProtocol:
+        """Open a DuckDB database connection."""
+        ...
+
+
+class _DefaultBaseSource:
+    """Default base class for `HFDataSource` when Grain is not installed."""
+
+    _ds: DatasetSequenceProtocol
+
+    def __init__(self, hf_ds: DatasetSequenceProtocol) -> None:
+        """Initialize data source with underlying dataset."""
+        self._ds = hf_ds
+
+    def __len__(self) -> int:
+        """Return total number of records in the dataset."""
+        return len(self._ds)
+
+    def __getitem__(self, idx: int) -> JSONDict | Mapping[str, JSONValue] | int | str:
+        """Retrieve a single dataset element by index."""
+        return self._ds[idx]
+
+
+class _DefaultBaseTransform:
+    """Default base class for `BaseFormatTransform` when Grain is not installed."""
+
+
+def _create_hf_data_source(base_ds: type) -> type[_DefaultBaseSource]:
     """Create a Grain RandomAccessDataSource subclass wrapping a Hugging Face dataset.
 
     Args:
-        base_ds: Base class (`grain.RandomAccessDataSource` or `object`).
+        base_ds: Base class (`grain.RandomAccessDataSource` or `_DefaultBaseSource`).
 
     Returns:
         Constructed `HFDataSource` class.
 
     """
+    with contextlib.suppress(TypeError):
+        bases = (base_ds,) if issubclass(base_ds, _DefaultBaseSource) else (_DefaultBaseSource, base_ds)
+        cls: type[_DefaultBaseSource] = type(
+            "HFDataSource",
+            bases,
+            {"__doc__": "Adapter to turn Hugging Face Dataset into Grain RandomAccessDataSource."},
+        )
+        return cls
+    return type(
+        "HFDataSource",
+        (_DefaultBaseSource,),
+        {"__doc__": "Adapter to turn Hugging Face Dataset into Grain RandomAccessDataSource."},
+    )
 
-    class HFDataSource(base_ds):
-        """Adapter to turn Hugging Face Dataset into Grain RandomAccessDataSource."""
 
-        _ds: Any
+def resolve_duckdb_options(config: ETLConfig, kwargs: Mapping[str, StatusValue]) -> tuple[str | None, str | None]:
+    """Resolve optional `duckdb_path` and `duckdb_table` strings from `ETLConfig` and `kwargs`.
 
-        def __init__(self, hf_ds: Any) -> None:
-            """Initialize data source with underlying Hugging Face dataset.
+    Args:
+        config: `ETLConfig` instance.
+        kwargs: Keyword argument overrides.
 
-            Args:
-                hf_ds: Hugging Face Dataset or sequence of records.
+    Returns:
+        Tuple of `(duckdb_path, duckdb_table)` where unset values are `None`.
 
-            """
-            self._ds = hf_ds
-
-        def __len__(self) -> int:
-            """Return total number of records in the dataset.
-
-            Returns:
-                Dataset record count.
-
-            """
-            return len(self._ds)
-
-        def __getitem__(self, idx: int) -> object:
-            """Retrieve a single dataset element by index.
-
-            Args:
-                idx: Zero-based record index.
-
-            Returns:
-                Dataset record at `idx`.
-
-            """
-            return self._ds[idx]
-
-    return HFDataSource
+    """
+    raw_dp = config.duckdb_path or kwargs.get("duckdb_path")
+    raw_dt = config.duckdb_table or kwargs.get("duckdb_table")
+    duckdb_path: str | None = str(raw_dp) if raw_dp else None
+    duckdb_table: str | None = str(raw_dt) if raw_dt else None
+    return (duckdb_path, duckdb_table)
 
 
 def tokenize_dataset_element(
-    element: JSONDict,
-    tokenizer: SQLTokenizer,
+    element: Mapping[str, JSONValue | ImageInput | AudioInput] | RawSQLDatasetRow,
+    tokenizer: TokenizerProtocol,
     *,
     process_multimodal: bool = False,
-) -> dict[str, Any]:
-    """Extract and tokenize prompt, SQL target, and optional multimodal inputs from a dataset element.
+) -> TokenizedElementDict:
+    """Extract and tokenize prompt, SQL target, preference pairs, and optional multimodal inputs from a dataset element.
 
     Args:
         element: Input dictionary element from dataset.
-        tokenizer: `SQLTokenizer` instance.
+        tokenizer: `SQLTokenizer` or `TokenizerProtocol` instance.
         process_multimodal: Whether to format multimodal placeholders and extract image/audio tensors.
 
     Returns:
-        Dictionary containing `'inputs'`, `'targets'`, and optional `'pixel_values'` / `'audio_values'`.
+        Dictionary containing `'inputs'`, `'targets'`, optional `'chosen_inputs'`, `'chosen_labels'`,
+        `'rejected_inputs'`, `'rejected_labels'`, and optional `'pixel_values'` / `'audio_values'`.
 
     """
-    prompt = str(element.get("sql_prompt", element.get("question", "")))
-    target = str(element.get("sql", element.get("query", "")))
+    prompt = str(element.get("sql_prompt", element.get("question", element.get("prompt", ""))))
+    target = str(element.get("sql", element.get("query", element.get("chosen", ""))))
+    chosen_raw = element.get("chosen", element.get("chosen_sql"))
+    rejected_raw = element.get("rejected", element.get("rejected_sql"))
 
     if not process_multimodal:
-        return {
+        base_res: TokenizedElementDict = {
             "inputs": tokenizer.encode(prompt),
             "targets": tokenizer.encode(target),
         }
+        if chosen_raw is not None or rejected_raw is not None:
+            chosen_str = str(chosen_raw if chosen_raw is not None else target)
+            rejected_str = str(rejected_raw if rejected_raw is not None else f"{target} -- rejected")
+            nl = chr(10)
+            base_res["chosen_inputs"] = tokenizer.encode(f"{prompt}{nl}{chosen_str}".strip())
+            base_res["chosen_labels"] = tokenizer.encode(chosen_str)
+            base_res["rejected_inputs"] = tokenizer.encode(f"{prompt}{nl}{rejected_str}".strip())
+            base_res["rejected_labels"] = tokenizer.encode(rejected_str)
+        return base_res
 
     from gemma_4_sql.backends.common_multimodal import (
         format_multimodal_prompt,
@@ -102,20 +312,56 @@ def tokenize_dataset_element(
         has_image=image_input is not None,
         has_audio=audio_input is not None,
     )
-    res: dict[str, Any] = {
-        "inputs": tokenizer.encode(str(formatted.get("prompt", prompt))),
+    resolved_prompt = str(formatted.get("prompt", prompt))
+    res: TokenizedElementDict = {
+        "inputs": tokenizer.encode(resolved_prompt),
         "targets": tokenizer.encode(str(target)),
     }
-    if image_input is not None:
+    if chosen_raw is not None or rejected_raw is not None:
+        chosen_str = str(chosen_raw if chosen_raw is not None else target)
+        rejected_str = str(rejected_raw if rejected_raw is not None else f"{target} -- rejected")
+        nl = chr(10)
+        res["chosen_inputs"] = tokenizer.encode(f"{resolved_prompt}{nl}{chosen_str}".strip())
+        res["chosen_labels"] = tokenizer.encode(chosen_str)
+        res["rejected_inputs"] = tokenizer.encode(f"{resolved_prompt}{nl}{rejected_str}".strip())
+        res["rejected_labels"] = tokenizer.encode(rejected_str)
+    if image_input is not None and isinstance(image_input, (str, bytes, NDArrayProtocol)):
         img_data = process_image(image_input)
         res["pixel_values"] = img_data["pixel_values"]
-    if audio_input is not None:
-        aud_data = process_audio(audio_input)
+    if audio_input is not None and isinstance(audio_input, (str, bytes, list, tuple, NDArrayProtocol)):
+        aud_data = process_audio(audio_input)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
         res["audio_values"] = aud_data["audio_values"]
     return res
 
 
-def wrap_maxtext_transform(base_transform_cls: Any) -> Any:
+class _BaseFormatTransformRoot(_DefaultBaseTransform):
+    """Root class for format transforms with a typed `.map(element)` method."""
+
+    tokenizer: TokenizerProtocol
+
+    def __init__(self, tokenizer: TokenizerProtocol) -> None:
+        """Initialize transform with tokenizer.
+
+        Args:
+            tokenizer: The SQL tokenizer instance.
+
+        """
+        self.tokenizer = tokenizer
+
+    def map(self, element: Mapping[str, JSONValue | ImageInput | AudioInput] | RawSQLDatasetRow) -> TokenizedElementDict:
+        """Execute data mapping transformation with multimodal support.
+
+        Args:
+            element: Input dictionary element from dataset.
+
+        Returns:
+            Dictionary with tokenized inputs, targets, and optional multimodal features.
+
+        """
+        return tokenize_dataset_element(element, self.tokenizer, process_multimodal=True)
+
+
+def wrap_maxtext_transform(base_transform_cls: type[_BaseFormatTransformRoot]) -> type[_BaseFormatTransformRoot]:
     """Wrap the base Grain transform class to inject MaxText `segment_ids` and `positions`.
 
     Args:
@@ -126,10 +372,15 @@ def wrap_maxtext_transform(base_transform_cls: Any) -> Any:
 
     """
 
-    class MaxTextFormatTransform(base_transform_cls):
+    class MaxTextFormatTransform(_BaseFormatTransformRoot):
         """Transforms data into MaxText expected format with segment_ids and positions."""
 
-        def map(self, element: JSONDict) -> JSONDict:
+        def __init__(self, tokenizer: TokenizerProtocol) -> None:
+            """Initialize MaxText transform with wrapped base transform."""
+            super().__init__(tokenizer)
+            self._base = base_transform_cls(tokenizer)
+
+        def map(self, element: Mapping[str, JSONValue | ImageInput | AudioInput] | RawSQLDatasetRow) -> TokenizedElementDict:
             """Map an element with MaxText specific features.
 
             Args:
@@ -139,53 +390,42 @@ def wrap_maxtext_transform(base_transform_cls: Any) -> Any:
                 Tokenized dictionary augmented with `segment_ids` and `positions`.
 
             """
-            result: dict[str, Any] = super().map(element)
-            result["segment_ids"] = [1]
-            result["positions"] = [0]
+            result: TokenizedElementDict = self._base.map(element)
+            inputs_seq = result.get("inputs", [])
+            seq_len = max(1, len(inputs_seq)) if isinstance(inputs_seq, list) else 1
+            result["segment_ids"] = [1] * seq_len
+            result["positions"] = list(range(seq_len))
             return result
 
     return MaxTextFormatTransform
 
 
-def _create_base_format_transform(base_map: Any) -> Any:
+def _create_base_format_transform(base_map: type) -> type[_BaseFormatTransformRoot]:
     """Create a Grain MapTransform subclass for SQL tokenization and multimodal preprocessing.
 
     Args:
-        base_map: Base class (`grain.MapTransform` or `object`).
+        base_map: Base class (`grain.MapTransform` or `_DefaultBaseTransform`).
 
     Returns:
         Constructed `BaseFormatTransform` class.
 
     """
-
-    class BaseFormatTransform(base_map):
-        """Transforms dataset records into tokenized and multimodal array dictionaries."""
-
-        def __init__(self, tokenizer: SQLTokenizer) -> None:
-            """Initialize transform with tokenizer.
-
-            Args:
-                tokenizer: The SQL tokenizer instance.
-
-            """
-            self.tokenizer = tokenizer
-
-        def map(self, element: JSONDict) -> JSONDict:
-            """Execute data mapping transformation with multimodal support.
-
-            Args:
-                element: Input dictionary element from dataset.
-
-            Returns:
-                Dictionary with tokenized inputs, targets, and optional multimodal features.
-
-            """
-            return tokenize_dataset_element(element, self.tokenizer, process_multimodal=True)
-
-    return BaseFormatTransform
+    with contextlib.suppress(TypeError):
+        bases = (base_map,) if issubclass(base_map, _BaseFormatTransformRoot) else (_BaseFormatTransformRoot, base_map)
+        cls: type[_BaseFormatTransformRoot] = type(
+            "BaseFormatTransform",
+            bases,
+            {"__doc__": "Transforms dataset records into tokenized and multimodal array dictionaries."},
+        )
+        return cls
+    return type(
+        "BaseFormatTransform",
+        (_BaseFormatTransformRoot,),
+        {"__doc__": "Transforms dataset records into tokenized and multimodal array dictionaries."},
+    )
 
 
-def get_grain_classes(grain_module: object) -> tuple[Any, Any]:
+def get_grain_classes(grain_module: GrainModuleClassesProtocol | None) -> tuple[type[_DefaultBaseSource], type[_BaseFormatTransformRoot]]:
     """Dynamically construct Grain data source and transform classes.
 
     Args:
@@ -195,8 +435,13 @@ def get_grain_classes(grain_module: object) -> tuple[Any, Any]:
         A tuple of `(HFDataSource, BaseFormatTransform)` classes.
 
     """
-    base_ds = getattr(grain_module, "RandomAccessDataSource", object)
-    base_map = getattr(grain_module, "MapTransform", object)
+    base_ds: type = _DefaultBaseSource
+    base_map: type = _DefaultBaseTransform
+    if grain_module is not None:
+        with contextlib.suppress(AttributeError):
+            base_ds = grain_module.RandomAccessDataSource
+        with contextlib.suppress(AttributeError):
+            base_map = grain_module.MapTransform
 
     return (_create_hf_data_source(base_ds), _create_base_format_transform(base_map))
 
@@ -206,9 +451,9 @@ def load_hf_or_duckdb_dataset(
     split: str,
     duckdb_path: str | None,
     duckdb_table: str | None,
-    datasets_module: Any,
+    datasets_module: HFDatasetsModuleProtocol | None,
     load_duckdb_fn: Callable[[str, str], list[JSONDict]] | None = None,
-) -> object:
+) -> DatasetSequenceProtocol | list[JSONDict]:
     """Load a dataset from DuckDB if configured, otherwise from Hugging Face `datasets`.
 
     Args:
@@ -234,7 +479,11 @@ def load_hf_or_duckdb_dataset(
     return datasets_module.load_dataset(dataset_name, split=split)
 
 
-def get_grain_sampler(source_len: int, distributed: bool, grain_module: Any) -> object:
+def get_grain_sampler(
+    source_len: int,
+    distributed: bool,
+    grain_module: GrainModuleProtocol | None,
+) -> JSONValue:
     """Construct a Grain `IndexSampler` with optional JAX distributed sharding.
 
     Args:
@@ -251,7 +500,8 @@ def get_grain_sampler(source_len: int, distributed: bool, grain_module: Any) -> 
     """
     if grain_module is None:
         raise DependencyMissingError("Grain dependency is missing.", dependency_name="grain")
-    shard_options = getattr(grain_module, "JAXDistributedSharding", lambda: None)() if distributed else getattr(grain_module, "NoSharding", lambda: None)()
+    shard_fn = grain_module.JAXDistributedSharding if distributed else grain_module.NoSharding
+    shard_options: JSONValue = shard_fn() if callable(shard_fn) else None
     return grain_module.IndexSampler(
         num_records=source_len,
         shard_options=shard_options,
@@ -263,14 +513,15 @@ def get_grain_sampler(source_len: int, distributed: bool, grain_module: Any) -> 
 def build_grain_dataloader(
     config: ETLConfig,
     backend_name: str,
-    datasets_module: Any,
-    grain_module: Any,
-    load_fn: Any = None,
-    grain_classes_fn: Any = None,
-    tokenizer_cls: Any = SQLTokenizer,
-    sampler_fn: Any = None,
-    transform_wrapper: Any = None,
-    **kwargs: Any,
+    datasets_module: HFDatasetsModuleProtocol | None,
+    grain_module: GrainModuleProtocol | None,
+    load_fn: Callable[[str, str, str | None, str | None], DatasetSequenceProtocol | list[JSONDict]] | None = None,
+    grain_classes_fn: Callable[[GrainModuleProtocol | None], tuple[type, type]] | None = None,
+    tokenizer_cls: Callable[..., TokenizerProtocol] = SQLTokenizer,
+    sampler_fn: Callable[[int, bool], JSONValue] | None = None,
+    transform_wrapper: Callable[[type], type] | None = None,
+    extra_options: Mapping[str, JSONValue] | None = None,
+    **kwargs: StatusValue,
 ) -> ETLResultDict:
     """Build a Grain DataLoader pipeline shared across JAX, Keras, and MaxText backends.
 
@@ -284,6 +535,7 @@ def build_grain_dataloader(
         tokenizer_cls: Tokenizer class to instantiate.
         sampler_fn: Optional sampler factory override.
         transform_wrapper: Optional function wrapping `base_transform_cls` (used by MaxText).
+        extra_options: Optional mapping of runtime overrides (such as `duckdb_path`, `duckdb_table`).
         **kwargs: Overrides for `duckdb_path` or `duckdb_table`.
 
     Returns:
@@ -298,10 +550,9 @@ def build_grain_dataloader(
     batch_size = config.batch_size
     distributed = config.distributed
     tokenizer_name = config.tokenizer_name
-    raw_dp = config.duckdb_path or kwargs.get("duckdb_path")
-    raw_dt = config.duckdb_table or kwargs.get("duckdb_table")
-    duckdb_path: str | None = str(raw_dp) if raw_dp else None
-    duckdb_table: str | None = str(raw_dt) if raw_dt else None
+    merged_options: dict[str, JSONValue] = dict(extra_options) if extra_options is not None else {}
+    merged_options.update(kwargs)
+    duckdb_path, duckdb_table = resolve_duckdb_options(config, merged_options)
 
     if datasets_module is None or grain_module is None:
         raise DependencyMissingError(
@@ -309,16 +560,16 @@ def build_grain_dataloader(
             backend=backend_name,
         )
 
-    def _default_load(ds: str, sp: str, dp: str | None, dt: str | None) -> object:
+    def _default_load(ds: str, sp: str, dp: str | None, dt: str | None) -> DatasetSequenceProtocol | list[JSONDict]:
         """Load dataset using default Hugging Face or DuckDB loader."""
         return load_hf_or_duckdb_dataset(ds, sp, dp, dt, datasets_module)
 
-    def _default_sampler(length: int, dist: bool) -> object:
+    def _default_sampler(length: int, dist: bool) -> JSONValue:
         """Create default Grain sampler for dataset length and distributed setting."""
         return get_grain_sampler(length, dist, grain_module)
 
     effective_load = load_fn or _default_load
-    effective_classes = grain_classes_fn or get_grain_classes
+    effective_classes: Callable[[GrainModuleProtocol | None], tuple[type, type]] = grain_classes_fn if grain_classes_fn is not None else get_grain_classes
     effective_sampler = sampler_fn or _default_sampler
 
     hf_dataset = effective_load(dataset_name, split, duckdb_path, duckdb_table)
@@ -344,6 +595,20 @@ def build_grain_dataloader(
     }
 
 
+def pad_1d_list(seqs: list[list[int]]) -> list[list[int]]:
+    """Zero-pad a list of 1D integer token lists to the maximum sequence length in the batch.
+
+    Args:
+        seqs: List of variable-length integer token sequences.
+
+    Returns:
+        Zero-padded 2D integer token list.
+
+    """
+    max_len = max((len(x) for x in seqs), default=1)
+    return [x + [0] * (max_len - len(x)) for x in seqs]
+
+
 def pad_token_batch(inputs: list[list[int]], targets: list[list[int]]) -> dict[str, list[list[int]]]:
     """Pad variable-length input and target token sequences to uniform batch lengths with zeros.
 
@@ -355,11 +620,22 @@ def pad_token_batch(inputs: list[list[int]], targets: list[list[int]]) -> dict[s
         Dictionary with `'inputs'` and `'targets'` keys mapped to zero-padded 2D token lists.
 
     """
-    max_in = max((len(x) for x in inputs), default=1)
-    max_tgt = max((len(x) for x in targets), default=1)
-    padded_in = [x + [0] * (max_in - len(x)) for x in inputs]
-    padded_tgt = [x + [0] * (max_tgt - len(x)) for x in targets]
-    return {"inputs": padded_in, "targets": padded_tgt}
+    return {"inputs": pad_1d_list(inputs), "targets": pad_1d_list(targets)}
+
+
+def _extract_column_descriptions(
+    conn: DuckDBRawConnectionProtocol,
+    cur: DuckDBDescribedCursorProtocol,
+    default_cols: list[tuple[str, ...]],
+) -> list[tuple[str, ...]]:
+    """Extract column description tuples from `conn` or `cur`, falling back to `default_cols`."""
+    desc = None
+    with contextlib.suppress(AttributeError):
+        desc = conn.description
+    if not isinstance(desc, (list, tuple)) or not desc:
+        with contextlib.suppress(AttributeError):
+            desc = cur.description
+    return list(desc) if isinstance(desc, (list, tuple)) and desc else default_cols
 
 
 def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
@@ -379,30 +655,26 @@ def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
     """
     from gemma_4_sql.backends.lazy_loader import LazyLoader
     from gemma_4_sql.exceptions import DatabaseExecutionError
-    from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
     from gemma_4_sql.sdk.sql_lexer import validate_sql_identifier
 
-    duckdb_module: Any = LazyLoader("duckdb").get_module()
-    if duckdb_module is None:
+    duckdb_module = LazyLoader("duckdb").get_module()
+    if duckdb_module is None or not isinstance(duckdb_module, DuckDBConnectCallableProtocol):
         msg = "duckdb is required. Install with `pip install duckdb`."
         raise DependencyMissingError(msg, dependency_name="duckdb")
 
-    raw_err = getattr(duckdb_module, "Error", None)
-    duckdb_error: type[Exception] = raw_err if isinstance(raw_err, type) and issubclass(raw_err, Exception) else RuntimeError
-    raw_conn: Any = None
+    duckdb_error: type[Exception] = RuntimeError
+    with contextlib.suppress(AttributeError):
+        raw_err = duckdb_module.Error  # pyright: ignore[reportAttributeAccessIssue]
+        duckdb_error = raw_err if isinstance(raw_err, type) and issubclass(raw_err, Exception) else RuntimeError
+
+    raw_conn: DuckDBRawConnectionProtocol | None = None
     try:
         validated_table = validate_sql_identifier(table)
         raw_conn = duckdb_module.connect(db_path, read_only=True)
-        adapter = DuckDBAdapter(db_path=db_path, db_kwargs={"existing_conn": raw_conn}, read_only=True)
-        conn: Any = adapter.conn
-        cur = conn.execute(f'SELECT * FROM "{validated_table}"')
-        results: list[tuple[Any, ...]] = cur.fetchall()
+        cur = raw_conn.execute(f'SELECT * FROM "{validated_table}"')
+        results: Sequence[Sequence[JSONPrimitive]] = cur.fetchall()
         default_cols: list[tuple[str, ...]] = [("col" + str(i),) for i in range(len(results[0]))] if results else []
-        raw_desc = next(
-            (d for d in (getattr(conn, "description", None), getattr(cur, "description", None)) if isinstance(d, (list, tuple)) and d),
-            None,
-        )
-        desc_list: list[tuple[str, ...]] = list(raw_desc) if raw_desc is not None else default_cols
+        desc_list = _extract_column_descriptions(raw_conn, cur, default_cols)
         columns = [desc[0] for desc in desc_list]
         return [dict(zip(columns, row)) for row in results]
     except (duckdb_error, DatabaseExecutionError, ValueError, TypeError, OSError, RuntimeError, AttributeError) as e:
@@ -410,5 +682,5 @@ def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
         msg = f"DuckDB error: {e}"
         raise ETLError(msg, cause=e) from e
     finally:
-        if raw_conn is not None and hasattr(raw_conn, "close"):
+        if raw_conn is not None:
             raw_conn.close()

@@ -6,7 +6,8 @@ import argparse
 import json
 from typing import Protocol
 
-from gemma_4_sql.exceptions import is_failed_status
+from gemma_4_sql.cli_misc import print_cli_error
+from gemma_4_sql.exceptions import GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk import benchmark
 
 
@@ -36,18 +37,27 @@ def benchmark_cmd(args: argparse.Namespace | BenchmarkArgsProtocol) -> int:
         Exit code `0` on success, or `1` if benchmarking fails.
 
     """
-    res = benchmark(
-        model_name=args.model,
-        hardware=args.hardware,
-        batch_size=args.batch_size,
-        backend=args.backend,
-        dtype=args.dtype,
-        mode=args.mode,
-        max_new_tokens=args.max_new_tokens,
-        warmup_steps=args.warmup_steps,
-        image_path=args.image_path,
-        audio_path=args.audio_path,
-        modality=args.modality,
-    )
+    try:
+        res = benchmark(
+            model_name=args.model,
+            hardware=args.hardware,
+            batch_size=args.batch_size,
+            backend=args.backend,
+            dtype=args.dtype,
+            mode=args.mode,
+            max_new_tokens=args.max_new_tokens,
+            warmup_steps=args.warmup_steps,
+            image_path=args.image_path,
+            audio_path=args.audio_path,
+            modality=args.modality,
+        )
+    except GemmaSQLError as err:
+        return print_cli_error(
+            err,
+            args.backend,
+            model=args.model,
+            hardware=args.hardware,
+            batch_size=args.batch_size,
+        )
     print(json.dumps(res, indent=2))
     return 1 if is_failed_status(res) else 0

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Iterable
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,8 +21,8 @@ from gemma_4_sql.type_hints import ETLConfig
 def test_pytorch_dataset_and_collate_real_tensors() -> None:
     """Verify PyTorchDataset and _collate_fn produce real padded torch.Tensor batches."""
     records = [
-        {"sql_prompt": "SELECT 1", "sql": "SELECT 1;"},
-        {"question": "Find all users", "query": "SELECT * FROM users;", "image_url": "img.png", "audio_clip": "aud.wav"},
+        {"sql_prompt": "SELECT 1", "sql": "SELECT 1;", "chosen": "SELECT 1;", "rejected": "SELECT 2;"},
+        {"question": "Find all users", "query": "SELECT * FROM users;", "chosen": "SELECT * FROM users;", "rejected": "SELECT id;", "image_url": "img.png", "audio_clip": "aud.wav"},
     ]
     tok = SQLTokenizer()
     cls = etl_module._get_pytorch_classes()
@@ -54,6 +54,8 @@ def test_pytorch_dataset_and_collate_real_tensors() -> None:
         batch_mm = etl_module._collate_fn([item0_with_mm, item1])
         assert batch_mm["pixel_values"].shape == (2, 1, 2)
         assert batch_mm["audio_values"].shape == (2, 2)
+        assert batch_mm["chosen_inputs"].shape[0] == 2
+        assert batch_mm["rejected_inputs"].shape[0] == 2
 
 
 def test_get_sampler_and_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,13 +63,13 @@ def test_get_sampler_and_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> N
     assert etl_module._get_sampler("ds", False) is None
 
     mock_sampler_cls = MagicMock(return_value="sampler")
-    monkeypatch.setattr(etl_module, "optional_attr", lambda *_a, **_k: mock_sampler_cls)
+    monkeypatch.setattr(etl_module, "optional_attr", lambda *_a, **_k: mock_sampler_cls)  # pyright: ignore[reportUnknownLambdaType]
     assert etl_module._get_sampler("ds", True) == "sampler"
 
     mock_sampler_cls.side_effect = RuntimeError("error")
     assert etl_module._get_sampler("ds", True) is None
 
-    monkeypatch.setattr(etl_module, "optional_attr", lambda *_a, **_k: None)
+    monkeypatch.setattr(etl_module, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
     assert etl_module._get_sampler("ds", True) is None
 
     with patch("gemma_4_sql.backends.pytorch.etl.load_duckdb_dataset", return_value="duck"):
@@ -95,8 +97,12 @@ def test_build_dataloader_real_torch(monkeypatch: pytest.MonkeyPatch) -> None:
     config = ETLConfig(dataset_name="ds", split="train", batch_size=2)
     res = etl_module.build_dataloader(config)
     assert res["status"] == "loaded"
-    loader: Any = res["loader"]
+    loader = res.get("loader")
+    assert isinstance(loader, Iterable)
     first_batch = next(iter(loader))
+    assert isinstance(first_batch, dict)
+    assert isinstance(first_batch["inputs"], torch.Tensor)
+    assert isinstance(first_batch["targets"], torch.Tensor)
     assert first_batch["inputs"].shape[0] == 2
     assert first_batch["targets"].shape[0] == 2
 

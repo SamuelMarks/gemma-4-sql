@@ -3,18 +3,29 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, overload
+from typing import overload
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import is_failed_status
+from gemma_4_sql.sdk.adapters.base import DBKwargValue
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.protocols import BackendProtocol
 from gemma_4_sql.sdk.registry import get_backend
-from gemma_4_sql.type_hints import AgentAttemptDict, AgentLoopResultDict, JSONPrimitive, JSONValue
+from gemma_4_sql.type_hints import (
+    AgentAttemptDict,
+    AgentLoopResultDict,
+    JSONPrimitive,
+    JSONValue,
+    extract_float_kwarg,
+    extract_int_kwarg,
+    run_coroutine_sync,
+)
+
+type AgentKwargValue = JSONValue | Mapping[str, DBKwargValue]
 
 MAX_ERR_LEN = 500
 
@@ -44,7 +55,7 @@ class AgentContext:
     image_path: str | Path | None = None
     audio_path: str | Path | None = None
     modality: str = "text"
-    multimodal_context: dict[str, Any] | None = None
+    multimodal_context: dict[str, JSONValue] | None = None
 
 
 def extract_sql_from_response(raw_sql: str) -> str:
@@ -62,9 +73,6 @@ def extract_sql_from_response(raw_sql: str) -> str:
     if fence_match:
         return fence_match.group(1).strip()
     return text
-
-
-_extract_sql_from_response = extract_sql_from_response
 
 
 def classify_error_hint(error_msg: str | None) -> str:
@@ -86,14 +94,11 @@ def classify_error_hint(error_msg: str | None) -> str:
     return ""
 
 
-_classify_error_hint = classify_error_hint
-
-
 def _prepare_attempt_kwargs(
     context: AgentContext,
     attempts: int,
     gen_kwargs: dict[str, JSONValue],
-) -> tuple[int, int, dict[str, Any]]:
+) -> tuple[int, int, dict[str, JSONValue]]:
     """Build generation parameters for the current self-correction attempt.
 
     Args:
@@ -105,12 +110,12 @@ def _prepare_attempt_kwargs(
         Tuple of `(beam_width, max_length, extra_generation_kwargs)`.
 
     """
-    b_width = int(str(gen_kwargs.get("beam_width", 3)))
-    m_len = int(str(gen_kwargs.get("max_length", 50)))
-    base_temp = float(str(gen_kwargs.get("temperature", 0.0)))
+    b_width = extract_int_kwarg(gen_kwargs, "beam_width", 3)
+    m_len = extract_int_kwarg(gen_kwargs, "max_length", 50)
+    base_temp = extract_float_kwarg(gen_kwargs, "temperature", 0.0)
     current_temp = min(1.0, base_temp + (attempts - 1) * 0.1)
 
-    other_kwargs: dict[str, Any] = {k: v for k, v in gen_kwargs.items() if k not in ("beam_width", "max_length", "temperature")}
+    other_kwargs: dict[str, JSONValue] = {k: v for k, v in gen_kwargs.items() if k not in ("beam_width", "max_length", "temperature")}
     other_kwargs["temperature"] = current_temp
     if context.image_path is not None:
         other_kwargs["image_path"] = str(context.image_path)
@@ -180,8 +185,8 @@ async def _process_single_prompt(
         attempts += 1
         (b_width, m_len, other_kwargs) = _prepare_attempt_kwargs(context, attempts, gen_kwargs)
         gen_res = backend_impl.generate_sql(model_name, current_prompt, beam_width=b_width, max_length=m_len, **other_kwargs)
-        sql = _extract_sql_from_response(str(gen_res.get("sql", ""))) if not is_failed_status(gen_res) else ""
-        confidence_score = float(str(gen_res.get("confidence_score", 1.0)))
+        sql = extract_sql_from_response(str(gen_res.get("sql", ""))) if not is_failed_status(gen_res) else ""
+        confidence_score = extract_float_kwarg(gen_res, "confidence_score", 1.0)
         if context.min_confidence and confidence_score < context.min_confidence:
             history.append({
                 "attempt": attempts,
@@ -203,7 +208,7 @@ Previous attempt was rejected due to low confidence ({confidence_score:.2f}). Pl
             final_results = query_results
             break
 
-        hint = _classify_error_hint(error_msg)
+        hint = classify_error_hint(error_msg)
         current_prompt = f"""{base_prompt}
 Previous attempt failed with error: {error_msg}{hint}
 Please fix the SQL query."""
@@ -222,34 +227,34 @@ Please fix the SQL query."""
 
 
 @overload
-async def run_agentic_loop_async(
+async def run_agentic_loop_async(  # noqa: D418
     model_name: str,
     prompt: str,
     backend: str = DEFAULT_BACKEND,
     context: AgentContext | None = None,
-    **kwargs: JSONValue,
+    **kwargs: AgentKwargValue,
 ) -> AgentLoopResultDict:
     """Asynchronously run an agentic self-correction loop for a single prompt."""
 
 
 @overload
-async def run_agentic_loop_async(
+async def run_agentic_loop_async(  # noqa: D418
     model_name: str,
     prompt: list[str],
     backend: str = DEFAULT_BACKEND,
     context: AgentContext | None = None,
-    **kwargs: JSONValue,
+    **kwargs: AgentKwargValue,
 ) -> list[AgentLoopResultDict]:
     """Asynchronously run an agentic self-correction loop for a batch of prompts."""
 
 
 @overload
-async def run_agentic_loop_async(
+async def run_agentic_loop_async(  # noqa: D418
     model_name: str,
     prompt: str | list[str],
     backend: str = DEFAULT_BACKEND,
     context: AgentContext | None = None,
-    **kwargs: JSONValue,
+    **kwargs: AgentKwargValue,
 ) -> AgentLoopResultDict | list[AgentLoopResultDict]:
     """Asynchronously run an agentic self-correction loop for a prompt or prompt list."""
 
@@ -259,7 +264,7 @@ async def run_agentic_loop_async(
     prompt: str | list[str],
     backend: str = DEFAULT_BACKEND,
     context: AgentContext | None = None,
-    **kwargs: JSONValue,
+    **kwargs: AgentKwargValue,
 ) -> AgentLoopResultDict | list[AgentLoopResultDict]:
     """Asynchronously run an agentic self-correction loop.
 
@@ -277,7 +282,7 @@ async def run_agentic_loop_async(
     if context is None:
         context = AgentContext()
     db_kwargs = kwargs.get("db_kwargs")
-    gen_kwargs = {k: v for k, v in kwargs.items() if k != "db_kwargs"}
+    gen_kwargs: dict[str, JSONValue] = {k: v for k, v in kwargs.items() if k != "db_kwargs" and not isinstance(v, Mapping)}
     engine = LiveDatabaseEngine(db_path=context.db_path, ddl=context.ddl, db_type=context.db_type, db_kwargs=db_kwargs)
     backend_impl = get_backend(backend)
     prompts = prompt if isinstance(prompt, list) else [prompt]
@@ -290,34 +295,34 @@ async def run_agentic_loop_async(
 
 
 @overload
-def run_agentic_loop(
+def run_agentic_loop(  # noqa: D418
     model_name: str,
     prompt: str,
     backend: str = DEFAULT_BACKEND,
     context: AgentContext | None = None,
-    **kwargs: JSONValue,
+    **kwargs: AgentKwargValue,
 ) -> AgentLoopResultDict:
     """Run an agentic self-correction loop synchronously for a single prompt."""
 
 
 @overload
-def run_agentic_loop(
+def run_agentic_loop(  # noqa: D418
     model_name: str,
     prompt: list[str],
     backend: str = DEFAULT_BACKEND,
     context: AgentContext | None = None,
-    **kwargs: JSONValue,
+    **kwargs: AgentKwargValue,
 ) -> list[AgentLoopResultDict]:
     """Run an agentic self-correction loop synchronously for a batch of prompts."""
 
 
 @overload
-def run_agentic_loop(
+def run_agentic_loop(  # noqa: D418
     model_name: str,
     prompt: str | list[str],
     backend: str = DEFAULT_BACKEND,
     context: AgentContext | None = None,
-    **kwargs: JSONValue,
+    **kwargs: AgentKwargValue,
 ) -> AgentLoopResultDict | list[AgentLoopResultDict]:
     """Run an agentic self-correction loop synchronously for a prompt or prompt list."""
 
@@ -327,7 +332,7 @@ def run_agentic_loop(
     prompt: str | list[str],
     backend: str = DEFAULT_BACKEND,
     context: AgentContext | None = None,
-    **kwargs: JSONValue,
+    **kwargs: AgentKwargValue,
 ) -> AgentLoopResultDict | list[AgentLoopResultDict]:
     """Run an agentic self-correction loop synchronously.
 
@@ -342,25 +347,13 @@ def run_agentic_loop(
         A single result dictionary or list of result dictionaries.
 
     """
-    try:
-        running_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        running_loop = None
-
-    if running_loop is not None and running_loop.is_running():
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(
-                asyncio.run,
-                run_agentic_loop_async(model_name, prompt, backend=backend, context=context, **kwargs),
-            ).result()
-    return asyncio.run(run_agentic_loop_async(model_name, prompt, backend=backend, context=context, **kwargs))
+    res: AgentLoopResultDict | list[AgentLoopResultDict] = run_coroutine_sync(lambda: run_agentic_loop_async(model_name, prompt, backend=backend, context=context, **kwargs))
+    return res
 
 
 __all__ = [
     "MAX_ERR_LEN",
     "AgentContext",
-    "_classify_error_hint",
-    "_extract_sql_from_response",
     "classify_error_hint",
     "extract_sql_from_response",
     "run_agentic_loop",

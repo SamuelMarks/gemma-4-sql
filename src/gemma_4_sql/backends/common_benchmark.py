@@ -6,6 +6,7 @@ import logging
 import resource
 from collections.abc import Callable
 
+from gemma_4_sql.exceptions import StatusValue
 from gemma_4_sql.type_hints import BenchmarkResultDict, LatencyStatsDict
 
 logger = logging.getLogger(__name__)
@@ -75,13 +76,13 @@ def run_benchmark_wrapper(
     model_name: str,
     hardware: str,
     batch_size: int,
-    missing_deps: bool,
     benchmark_fn: Callable[[], tuple[float, float, float]],
     *,
+    missing_deps: bool = False,
     raise_if_missing: bool = False,
     latency_samples: list[float] | None = None,
     raise_on_error: bool | None = None,
-    **kwargs: object,
+    **kwargs: StatusValue,
 ) -> BenchmarkResultDict:
     """Wrap benchmarking logic to unify exception handling and result formatting.
 
@@ -90,8 +91,8 @@ def run_benchmark_wrapper(
         model_name: The name of the model.
         hardware: The target hardware.
         batch_size: The batch size.
-        missing_deps: Whether dependencies are missing.
         benchmark_fn: A callable that executes the benchmark and returns (tokens_per_sec, latency_ms, memory_mb).
+        missing_deps: Whether dependencies are missing.
         raise_if_missing: If True, raises DependencyMissingError when missing_deps is True.
         latency_samples: Optional sequence of individual request latency samples for percentile stats.
         raise_on_error: If True, raises `BenchmarkError` when `benchmark_fn` fails.
@@ -106,11 +107,11 @@ def run_benchmark_wrapper(
 
     """
     from gemma_4_sql.exceptions import (
+        OPERATIONAL_EXCEPTIONS,
         BenchmarkError,
         ConfigurationError,
         DependencyMissingError,
         ExecutionStatus,
-        GemmaSQLError,
         resolve_raise_on_error,
     )
 
@@ -142,7 +143,7 @@ def run_benchmark_wrapper(
         status_code = ExecutionStatus.SUCCESS.value
     except (DependencyMissingError, ConfigurationError):
         raise
-    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
+    except OPERATIONAL_EXCEPTIONS as e:
         logger.exception("Benchmark failed: ")
         if should_raise:
             raise BenchmarkError(

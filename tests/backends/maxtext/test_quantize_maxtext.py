@@ -1,17 +1,21 @@
 """Unit and behavioral tests for quantize maxtext."""
 
-from typing import Any
+from __future__ import annotations
+
 from unittest.mock import MagicMock, patch
 
-import numpy as np
+import jax.numpy as jnp
 import pytest
 
 import gemma_4_sql.backends.maxtext.quantize as quantize_mod
+from gemma_4_sql.backends.maxtext.quantize import AQTParamDict
 from gemma_4_sql.exceptions import (
-    ConfigurationError,
     DependencyMissingError,
     UnsupportedQuantizationMethodError,
 )
+from tests.conftest import requires_jax
+
+pytestmark = requires_jax
 
 
 @pytest.fixture(autouse=True)
@@ -25,53 +29,40 @@ def _restore_quantize_mod(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_quantize_tensor_aqt_missing_jax() -> None:
     """Verify quantize_tensor_aqt raises DependencyMissingError when JAX is missing."""
+    dummy_tensor = jnp.zeros((1, 1), dtype=jnp.float32)
     quantize_mod.jax = None
     quantize_mod.jnp = None
-    none_tensor: Any = None
     with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing\."):
-        quantize_mod.quantize_tensor_aqt(none_tensor)
+        quantize_mod.quantize_tensor_aqt(dummy_tensor)
 
 
 def test_quantize_tensor_aqt_negative_bits() -> None:
-    """Verify quantize tensor aqt negative bits behavior."""
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = MagicMock()
+    """Verify quantize_tensor_aqt raises ValueError on non-positive bits."""
+    tensor = jnp.array([[1.0, 2.0]])
     with pytest.raises(ValueError, match="Quantization bits must be positive, got 0"):
-        quantize_mod.quantize_tensor_aqt(MagicMock(), bits=0)
+        quantize_mod.quantize_tensor_aqt(tensor, bits=0)
     with pytest.raises(ValueError, match="Quantization bits must be positive, got -1"):
-        quantize_mod.quantize_tensor_aqt(MagicMock(), bits=-1)
+        quantize_mod.quantize_tensor_aqt(tensor, bits=-1)
 
 
-def test_quantize_tensor_aqt_int8() -> None:
-    """Verify quantize tensor aqt int8 behavior."""
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
-
-    tensor = np.array([[100.0, 50.0], [-10.0, -100.0]])
+def test_quantize_tensor_aqt_int8_and_int16() -> None:
+    """Verify quantize_tensor_aqt produces accurate int8 and int16 quantized arrays on real JAX tensors."""
+    tensor = jnp.array([[100.0, 50.0], [-10.0, -100.0]], dtype=jnp.float32)
     quantized, scale = quantize_mod.quantize_tensor_aqt(tensor, bits=8)
 
-    # clipping_bound = 127
-    # max_val = [[100.0], [100.0]]
-    # scale = max_val / 127 = [[0.78740157], [0.78740157]]
-    # tensor / scale = [[127.0, 63.5], [-12.7, -127.0]]
-    assert quantized.dtype == np.int8
+    assert quantized.dtype == jnp.int8
     assert quantized.shape == (2, 2)
     assert scale.shape == (2, 1)
+    reconstructed = quantized.astype(jnp.float32) * scale
+    assert bool(jnp.allclose(jnp.asarray(reconstructed), tensor, atol=1.0))
 
-
-def test_quantize_tensor_aqt_int16() -> None:
-    """Verify quantize tensor aqt int16 behavior."""
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
-
-    tensor = np.array([[1000.0, 500.0]])
-    quantized, _scale = quantize_mod.quantize_tensor_aqt(tensor, bits=16)
-
-    assert quantized.dtype == np.int16
+    tensor16 = jnp.array([[1000.0, 500.0]], dtype=jnp.float32)
+    quantized16, _scale16 = quantize_mod.quantize_tensor_aqt(tensor16, bits=16)
+    assert quantized16.dtype == jnp.int16
 
 
 def test_apply_aqt_quantization_missing_jax() -> None:
-    """Verify apply aqt quantization missing jax behavior."""
+    """Verify apply_aqt_quantization raises DependencyMissingError when JAX is missing."""
     quantize_mod.jax = None
     quantize_mod.jnp = None
     with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing\."):
@@ -79,161 +70,130 @@ def test_apply_aqt_quantization_missing_jax() -> None:
 
 
 def test_apply_aqt_quantization_methods() -> None:
-    """Verify apply aqt quantization methods behavior."""
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
+    """Verify apply_aqt_quantization supports int8, int4, and aqt and rejects unsupported methods."""
+    params: AQTParamDict = {}
 
-    params: dict[str, Any] = {}
+    _, meta_int8, _ = quantize_mod.apply_aqt_quantization(params, method="int8")
+    assert meta_int8["bits"] == 8
+    assert meta_int8["memory_reduction_factor"] == 0.5
 
-    # int8
-    _, meta, _ = quantize_mod.apply_aqt_quantization(params, method="int8")
-    assert meta["bits"] == 8
-    assert meta["memory_reduction_factor"] == 0.5
+    _, meta_int4, _ = quantize_mod.apply_aqt_quantization(params, method="int4")
+    assert meta_int4["bits"] == 4
+    assert meta_int4["memory_reduction_factor"] == 0.75
 
-    # int4
-    _, meta, _ = quantize_mod.apply_aqt_quantization(params, method="int4")
-    assert meta["bits"] == 4
-    assert meta["memory_reduction_factor"] == 0.75
+    _, meta_aqt, _ = quantize_mod.apply_aqt_quantization(params, method="aqt")
+    assert meta_aqt["bits"] == 8
+    assert meta_aqt["memory_reduction_factor"] == 0.5
 
-    # other
-    _, meta, _ = quantize_mod.apply_aqt_quantization(params, method="unknown")
-    assert meta["bits"] == 8
-    assert meta["memory_reduction_factor"] == 0.7
+    with pytest.raises(UnsupportedQuantizationMethodError):
+        quantize_mod.apply_aqt_quantization(params, method="unknown")
 
 
 def test_apply_aqt_quantization_targets_and_traverse() -> None:
-    """Verify apply aqt quantization targets and traverse behavior."""
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
-    quantize_mod.aqt = MagicMock()
+    """Verify apply_aqt_quantization traverses nested parameter PyTrees and wires aqt.config.fully_quantized."""
+    mock_aqt = MagicMock()
+    mock_aqt.config.fully_quantized.return_value = "dg_cfg_int8"
+    quantize_mod.aqt = mock_aqt
 
-    tensor = np.array([[1.0]])
+    tensor = jnp.array([[1.0, -2.0], [0.5, 4.0]], dtype=jnp.float32)
+    params: AQTParamDict = {
+        "non_dict": "value",
+        "nested": {
+            "q_proj": {"kernel": tensor, "other_param": 42},
+            "unrelated": {"kernel": tensor},
+            "k_proj": {"kernel": tensor},
+        },
+        "deep": {"layer": {"v_proj": {"kernel": tensor}}},
+    }
 
-    params = {"non_dict": "value", "nested": {"q_proj": {"kernel": tensor, "other_param": 42}, "unrelated": {"kernel": tensor}, "k_proj": {"kernel": tensor}}, "deep": {"layer": {"v_proj": {"kernel": tensor}}}}
-
-    # custom targets
-    q_params, _meta, count = quantize_mod.apply_aqt_quantization(params, quant_targets=["q_proj"])
-
+    q_params, meta1, count = quantize_mod.apply_aqt_quantization(params, quant_targets=["q_proj"])
     assert count == 1
-    assert "kernel_scale" in q_params["nested"]["q_proj"]
-    assert q_params["nested"]["q_proj"]["other_param"] == 42
-    assert "kernel_scale" not in q_params["nested"]["k_proj"]
-    assert "kernel_scale" not in q_params["deep"]["layer"]["v_proj"]
+    nested_sub = q_params["nested"]
+    assert isinstance(nested_sub, dict)
+    q_sub = nested_sub["q_proj"]
+    k_sub = nested_sub["k_proj"]
+    assert isinstance(q_sub, dict) and isinstance(k_sub, dict)
+    assert "kernel_scale" in q_sub
+    assert q_sub["other_param"] == 42
+    assert "kernel_scale" not in k_sub
+    deep_sub = q_params["deep"]
+    assert isinstance(deep_sub, dict)
+    layer_sub = deep_sub["layer"]
+    assert isinstance(layer_sub, dict)
+    v_sub = layer_sub["v_proj"]
+    assert isinstance(v_sub, dict)
+    assert "kernel_scale" not in v_sub
     assert q_params["non_dict"] == "value"
+    assert meta1["aqt_dg_config"] == "dg_cfg_int8"
 
-    # default targets
     _q_params2, meta2, count2 = quantize_mod.apply_aqt_quantization(params)
-    assert count2 == 3  # q_proj, k_proj, v_proj
+    assert count2 == 3
     assert meta2["aqt_native"] is True
 
 
 def test_quantize_model_missing_maxtext_deps() -> None:
-    """Verify quantize model missing maxtext deps behavior."""
-    quantize_mod.jax = None
+    """Verify quantize_model raises DependencyMissingError when JAX or Gemma4Model is missing."""
+    quantize_mod.Gemma4Model = None
     with pytest.raises(DependencyMissingError, match=r"MaxText dependencies are missing\."):
         quantize_mod.quantize_model("model")
 
-    quantize_mod.jax = MagicMock()
+    with pytest.raises(DependencyMissingError, match=r"MaxText dependencies are missing\."):
+        quantize_mod.quantize_model("model", params=None)
+
     quantize_mod.jnp = None
     with pytest.raises(DependencyMissingError, match=r"MaxText dependencies are missing\."):
         quantize_mod.quantize_model("model")
 
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
-    quantize_mod.Gemma4Model = None
-    # No params provided
+    quantize_mod.jax = None
     with pytest.raises(DependencyMissingError, match=r"MaxText dependencies are missing\."):
         quantize_mod.quantize_model("model")
 
-    # Gemma4Model missing but inside try block
-    # We can hit this if we mock Gemma4Model to None *inside* the function if we bypass the outer check
-    # But outer check is `jax is None or jnp is None or (Gemma4Model is None and "params" not in kwargs)`
-    # We can pass params to bypass outer check, then remove params inside? No, it's kwargs.
-    # To hit the inner `DependencyMissingError("MaxText dependency missing.")`, we provide params=None!
-    with pytest.raises(DependencyMissingError, match=r"MaxText dependency missing\."):
-        quantize_mod.quantize_model("model", params=None)
-
 
 def test_quantize_model_with_gemma4_init() -> None:
-    """Verify quantize model with gemma4 init behavior."""
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
-    quantize_mod.Gemma4Model = MagicMock()
-
+    """Verify quantize_model initializes Gemma4Model and quantizes its parameters when params is omitted."""
     model_mock = MagicMock()
-    quantize_mod.Gemma4Model.return_value = model_mock
+    quantize_mod.Gemma4Model = MagicMock(return_value=model_mock)
 
-    tensor = np.array([[1.0]])
+    tensor = jnp.array([[1.0, -1.0]], dtype=jnp.float32)
     model_mock.init.return_value = {"q_proj": {"kernel": tensor}}
 
     res = quantize_mod.quantize_model("my_model")
-
     assert res["backend"] == "maxtext"
     assert res["model"] == "my_model"
     assert res["status"] == "quantized_int8"
-    assert "metadata" in res
-    assert res["metadata"]["quantized_modules_count"] == 1
+    meta = res.get("metadata")
+    assert isinstance(meta, dict)
+    assert meta["quantized_modules_count"] == 1
 
 
-def test_quantize_model_with_params_kwargs_dict() -> None:
-    """Verify quantize model with params kwargs dict behavior."""
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
-
-    tensor = np.array([[1.0]])
-    params = {"q_proj": {"kernel": tensor}}
+def test_quantize_model_with_params_kwargs_dict_and_non_dict() -> None:
+    """Verify quantize_model with explicit params dict and non-dict params fallback."""
+    tensor = jnp.array([[1.0, 2.0]], dtype=jnp.float32)
+    params: AQTParamDict = {"q_proj": {"kernel": tensor}}
 
     res = quantize_mod.quantize_model("my_model", method="int4", params=params, quant_targets=["q_proj"])
     assert res["status"] == "quantized_int4"
     assert res["memory_reduction_factor"] == 0.75
-    assert res["metadata"]["bits"] == 4
+    meta = res.get("metadata")
+    assert isinstance(meta, dict)
+    assert meta["bits"] == 4
 
+    assert quantize_mod.apply_aqt_quantization("not_a_dict")[0] == "not_a_dict"
 
-def test_apply_aqt_quantization_non_dict_param() -> None:
-    """Verify apply aqt quantization non dict param behavior."""
-    from typing import Any
-
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
-
-    non_dict: Any = "not_a_dict"
-    res = quantize_mod.apply_aqt_quantization(non_dict)
-    assert res[0] == "not_a_dict"
-
-
-def test_quantize_model_with_params_non_dict() -> None:
-    """Verify quantize model with params non dict behavior."""
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
-
-    # Pass a non-dict for params to hit the else branch for isinstance(params, dict)
-    res = quantize_mod.quantize_model("my_model", method="other", params="not_a_dict")
-
-    assert res["status"] == "quantized_other"
-    assert res["memory_reduction_factor"] == 0.7
-    assert res["metadata"]["method"] == "other"
-    assert res["metadata"]["memory_reduction_factor"] == 0.7
+    res_non_dict = quantize_mod.quantize_model("my_model", method="int8", params="not_a_dict")
+    assert res_non_dict["status"] == "quantized_int8"
+    assert res_non_dict["memory_reduction_factor"] == 0.5
 
 
 def test_quantize_model_exception_handling() -> None:
-    """Verify quantize model exception handling behavior."""
-    quantize_mod.jax = MagicMock()
-    quantize_mod.jnp = np
+    """Verify quantize_model error handling and UnsupportedQuantizationMethodError."""
+    params: AQTParamDict = {"q_proj": {"kernel": jnp.array([[1.0]])}}
 
-    # Pass a bad tensor to cause TypeError or something in apply_aqt_quantization
-    params = {
-        "q_proj": {"kernel": None}  # None doesn't have .abs() or whatever jnp expects
-    }
-
-    # We'll mock apply_aqt_quantization to just raise a RuntimeError
     with patch.object(quantize_mod, "apply_aqt_quantization", side_effect=RuntimeError("mock error")):
         res = quantize_mod.quantize_model("my_model", params=params)
 
     assert res["status"] == "failed: mock error"
-    assert "metadata" not in res  # metadata was empty when error raised
+    assert "metadata" not in res
 
     with pytest.raises(UnsupportedQuantizationMethodError):
-        quantize_mod.quantize_model("my_model", method="fp4", params=params, strict_method=True)
-
-    with patch.object(quantize_mod, "quantize_model_wrapper", side_effect=ConfigurationError("cfg err")), pytest.raises(ConfigurationError, match="cfg err"):
-        quantize_mod.quantize_model("my_model", params=params)
+        quantize_mod.quantize_model("my_model", method="fp4", params=params)

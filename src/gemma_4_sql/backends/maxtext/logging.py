@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from gemma_4_sql.backends.common_logging import (
+    SummaryWriterFactory,
     get_tensorboard_summary_writer,
     log_metrics_wrapper,
 )
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
-SummaryWriter: Any | None = get_tensorboard_summary_writer()
+SummaryWriter: SummaryWriterFactory | None = get_tensorboard_summary_writer()
 
 
-def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> LogMetricsResultDict:
+def log_metrics(
+    metrics: dict[str, float],
+    step: int,
+    log_dir: str = "logs",
+    **kwargs: JSONValue,
+) -> LogMetricsResultDict:
     """Log metrics for a MaxText training run using TensorBoard or JSONL fallback.
 
     Args:

@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import io
 import os
 import sys
+import types
 import warnings
-from collections.abc import AsyncGenerator, Generator
-from contextlib import contextmanager
-from typing import Any, Self
+from collections.abc import AsyncGenerator, Callable, Generator, Sequence
+from contextlib import AbstractContextManager, contextmanager
+from pathlib import Path
+from typing import Self
 from unittest.mock import patch
 
+import aiosqlite
+import duckdb
 import pytest
 import pytest_asyncio
 
@@ -40,30 +45,26 @@ requires_duckdb = pytest.mark.skipif(not HAS_DUCKDB, reason="DuckDB is not insta
 
 
 @pytest.fixture
-def in_memory_duckdb() -> Generator[Any, None, None]:
+def in_memory_duckdb() -> Generator[duckdb.DuckDBPyConnection, None, None]:
     """Provide an isolated in-memory DuckDB instance with automatic cleanup.
 
     Yields:
         DuckDB connection object.
 
     """
-    import duckdb
-
     conn = duckdb.connect(":memory:")
     yield conn
     conn.close()
 
 
 @pytest_asyncio.fixture
-async def in_memory_sqlite() -> AsyncGenerator[Any, None]:
+async def in_memory_sqlite() -> AsyncGenerator[aiosqlite.Connection, None]:
     """Provide an isolated in-memory SQLite / aiosqlite database.
 
     Yields:
         Active `aiosqlite` connection object.
 
     """
-    import aiosqlite
-
     async with aiosqlite.connect(":memory:") as db:
         yield db
 
@@ -93,7 +94,7 @@ def synthetic_dataset() -> list[dict[str, str]]:
 
 
 @pytest.fixture
-def missing_dependency_context() -> Any:
+def missing_dependency_context() -> Callable[[list[str]], AbstractContextManager[None]]:
     """Provide an opt-in context manager fixture for testing missing optional packages.
 
     Returns:
@@ -122,24 +123,27 @@ class MockOpenedImage:
         """Enter context manager."""
         return self
 
-    def __exit__(self, *_args: object) -> None:
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None = None,
+        _exc_val: BaseException | None = None,
+        _exc_tb: types.TracebackType | None = None,
+    ) -> None:
         """Exit context manager."""
 
-    def convert(self, _mode: Any) -> MockOpenedImage:
+    def convert(self, _mode: str) -> MockOpenedImage:
         """Return self on mode conversion."""
         return self
 
-    def resize(self, size: Any, _resample: Any = None) -> MockOpenedImage:
+    def resize(self, size: tuple[int, int] | Sequence[int], _resample: int | None = None) -> MockOpenedImage:
         """Record resized dimensions and return self."""
         self._size = (int(size[0]), int(size[1]))
         return self
 
-    def __array__(self, *_args: Any, **_kwargs: Any) -> Any:
-        """Return (H, W, 3) float32 numpy array matching resized dimensions."""
-        import numpy as np
-
+    def tobytes(self) -> bytes:
+        """Return raw RGB pixel bytes of length `height * width * 3`."""
         w, h = self._size
-        return np.zeros((h, w, 3), dtype=np.float32)
+        return b"\x00" * (h * w * 3)
 
 
 class MockPILImage:
@@ -151,7 +155,7 @@ class MockPILImage:
         BILINEAR = 2
 
     @staticmethod
-    def open(_buf: Any) -> MockOpenedImage:
+    def open(_buf: str | Path | bytes | io.BytesIO) -> MockOpenedImage:
         """Return a new MockOpenedImage."""
         return MockOpenedImage()
 
@@ -159,7 +163,7 @@ class MockPILImage:
 @pytest.fixture
 def synthetic_image_bytes() -> bytes:
     """Provide a minimal valid 1x1 PNG byte sequence."""
-    return b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xfc\xcf\xc0P\x0f\x00\x04\x85\x01\x80\x84\xa9\x8c!\x00\x00\x00\x00IEND\xaeB`\x82"
+    return bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082")
 
 
 @pytest.fixture

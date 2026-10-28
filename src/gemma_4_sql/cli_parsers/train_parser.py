@@ -77,7 +77,7 @@ def add_peft_quantize_parsers(subparsers: SubParsersType) -> None:
 
     parser_quantize = subparsers.add_parser("quantize", help="Quantize a model.")
     parser_quantize.add_argument("--model", default="gemma-4", help="Model name.")
-    parser_quantize.add_argument("--method", default="int8", choices=["int8", "awq", "gptq", "gguf"], help="Quantization method.")
+    parser_quantize.add_argument("--method", default="int8", choices=["int8", "int4", "awq", "gptq", "gguf"], help="Quantization method.")
     parser_quantize.add_argument("--backend", default="pytorch", help="Backend to use.")
     parser_quantize.set_defaults(func=quantize_cmd)
 

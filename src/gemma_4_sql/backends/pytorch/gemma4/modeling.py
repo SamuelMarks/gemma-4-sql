@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import torch
 from torch import nn
+
+from gemma_4_sql.type_hints import JSONValue
 
 from .audio import Gemma4AudioModel
 from .cache import Cache, DynamicCache
@@ -74,7 +75,7 @@ def merge_modality_embeddings(
 class Gemma4MultiModalProjector(nn.Module):
     """Multimodal projector for Gemma 4."""
 
-    def __init__(self, config: Gemma4Config):
+    def __init__(self, config: Gemma4Config) -> None:
         """Initialize Gemma4MultiModalProjector.
 
         Args:
@@ -126,9 +127,9 @@ class Gemma4ForCausalLM(nn.Module):
         # Text embeddings
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
 
-        ple_dim = getattr(config, "hidden_size_per_layer_input", None)
+        ple_dim = config.hidden_size_per_layer_input
         if ple_dim:
-            vocab_ple = getattr(config, "vocab_size_per_layer_input", None) or config.vocab_size
+            vocab_ple = config.vocab_size_per_layer_input or config.vocab_size
             self.embed_tokens_per_layer = nn.Embedding(int(vocab_ple), config.num_hidden_layers * int(ple_dim))
             self.per_layer_model_projection = nn.Linear(config.hidden_size, config.num_hidden_layers * int(ple_dim), bias=False)
             self.per_layer_projection_norm = Gemma4RMSNorm(int(ple_dim), eps=config.rms_norm_eps)
@@ -157,7 +158,7 @@ class Gemma4ForCausalLM(nn.Module):
             Per-layer token embeddings of shape `(batch_size, seq_len, num_layers, ple_dim)` or `None`.
 
         """
-        ple_dim = getattr(self.config, "hidden_size_per_layer_input", None)
+        ple_dim = self.config.hidden_size_per_layer_input
         if not ple_dim or self.embed_tokens_per_layer is None:
             return None
         ple: torch.Tensor = self.embed_tokens_per_layer(input_ids) * math.sqrt(float(ple_dim))
@@ -180,7 +181,7 @@ class Gemma4ForCausalLM(nn.Module):
             Combined per-layer embeddings of shape `(batch_size, seq_len, num_layers, ple_dim)` or `None`.
 
         """
-        ple_dim = getattr(self.config, "hidden_size_per_layer_input", None)
+        ple_dim = self.config.hidden_size_per_layer_input
         if not ple_dim or self.per_layer_model_projection is None or self.per_layer_projection_norm is None:
             return None
         batch_size, seq_len, _ = inputs_embeds.shape
@@ -224,7 +225,7 @@ class Gemma4ForCausalLM(nn.Module):
             vision_outputs = self.vision_model(pixel_values)
             image_features = self.multi_modal_projector(vision_outputs)
             if image_token_mask is None:
-                image_token_id = getattr(self.config, "image_token_id", 255999)
+                image_token_id = self.config.image_token_id
                 image_token_mask = input_ids == image_token_id
 
             hidden_states = merge_modality_embeddings(
@@ -236,7 +237,7 @@ class Gemma4ForCausalLM(nn.Module):
         if audio_values is not None:
             audio_features = self.audio_model(audio_values)
             if audio_token_mask is None:
-                audio_token_id = getattr(self.config, "audio_token_id", 255998)
+                audio_token_id = self.config.audio_token_id if self.config.audio_token_id is not None else 255998
                 audio_token_mask = input_ids == audio_token_id
 
             hidden_states = merge_modality_embeddings(
@@ -246,7 +247,7 @@ class Gemma4ForCausalLM(nn.Module):
             )
 
         curr_seq_len = hidden_states.shape[1]
-        if position_ids is None:
+        if position_ids is None or position_ids.shape[-1] != curr_seq_len:
             position_ids = torch.arange(0, curr_seq_len, dtype=torch.long, device=hidden_states.device).unsqueeze(0).expand(hidden_states.shape[0], -1)
 
         if attention_mask is not None and attention_mask.dim() == 2 and attention_mask.shape[1] != curr_seq_len:
@@ -261,7 +262,7 @@ class Gemma4ForCausalLM(nn.Module):
         next_decoder_cache: list[tuple[torch.Tensor, torch.Tensor]] = []
         aux_losses: list[torch.Tensor] = []
         num_layers = len(self.layers)
-        kv_shared = int(getattr(self.config, "num_kv_shared_layers", 0) or 0)
+        kv_shared = int(self.config.num_kv_shared_layers or 0)
         pivot = max(1, num_layers - kv_shared) if kv_shared > 0 else num_layers
 
         for idx, decoder_layer in enumerate(self.layers):
@@ -285,6 +286,7 @@ class Gemma4ForCausalLM(nn.Module):
                 past_key_value=layer_past_key_value,
                 per_layer_input=layer_ple,
             )
+            next_decoder_cache.append(present_key_value)
             if router_logits is not None:
                 aux_losses.append(
                     calculate_load_balancing_loss(
@@ -293,27 +295,25 @@ class Gemma4ForCausalLM(nn.Module):
                         self.config.num_experts_per_tok,
                     )
                 )
-            if present_key_value is not None and not isinstance(present_key_value, Cache):
-                next_decoder_cache.append(present_key_value)
 
         self.last_aux_loss = torch.stack(aux_losses).mean() if aux_losses else None
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)
-        softcap = getattr(self.config, "final_logit_softcapping", None)
+        softcap = self.config.final_logit_softcapping
         if softcap is not None:
             logits = torch.tanh(logits / float(softcap)) * float(softcap)
 
         if isinstance(past_key_values, Cache):
             return logits, past_key_values
 
-        return logits, tuple(next_decoder_cache) if len(next_decoder_cache) > 0 else None
+        return logits, tuple(next_decoder_cache)
 
     def generate(
         self,
         input_ids: torch.Tensor,
         max_new_tokens: int = 128,
         min_new_tokens: int = 0,
-        **kwargs: Any,
+        **kwargs: float | bool | str | None,
     ) -> torch.Tensor:
         """Generate text using autoregressive generation with DynamicCache KV caching.
 
@@ -328,7 +328,8 @@ class Gemma4ForCausalLM(nn.Module):
 
         """
         gen_cache: Cache | tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = DynamicCache()
-        eos_token_id = kwargs.get("eos_token_id", getattr(self.config, "eos_token_id", None))
+        raw_eos = kwargs.get("eos_token_id", self.config.eos_token_id)
+        eos_token_id = int(raw_eos) if isinstance(raw_eos, (int, float, str)) else None
         for i in range(max_new_tokens):
             curr_input = input_ids if i == 0 else input_ids[:, -1:]
             call_res = self(
@@ -340,10 +341,10 @@ class Gemma4ForCausalLM(nn.Module):
             next_token_logits = logits[:, -1, :]
             if eos_token_id is not None and i < min_new_tokens:
                 next_token_logits = next_token_logits.clone()
-                next_token_logits[:, int(eos_token_id)] = float("-inf")
+                next_token_logits[:, eos_token_id] = float("-inf")
             next_tokens = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
             input_ids = torch.cat([input_ids, next_tokens], dim=-1)
-            if eos_token_id is not None and i >= min_new_tokens and bool((next_tokens == int(eos_token_id)).all()):
+            if eos_token_id is not None and i >= min_new_tokens and bool((next_tokens == eos_token_id).all()):
                 break
         return input_ids
 
@@ -352,17 +353,23 @@ class Gemma4ForCausalLM(nn.Module):
         cls,
         model_name_or_path: str,
         config: Gemma4Config | None = None,
-        **kwargs: object,
+        *,
+        strict: bool = False,
+        **kwargs: JSONValue,
     ) -> Gemma4ForCausalLM:
         """Load native Gemma 4 model from path or initialize with config.
 
         Args:
             model_name_or_path: Directory, safetensors path, or model identifier.
             config: Optional Gemma4Config instance.
+            strict: If True, raise `ExportError` when safetensors loading fails.
             **kwargs: Extra arguments.
 
         Returns:
             Initialized Gemma4ForCausalLM model instance.
+
+        Raises:
+            ExportError: If `strict=True` and loading safetensors fails.
 
         """
         from pathlib import Path
@@ -370,6 +377,7 @@ class Gemma4ForCausalLM(nn.Module):
         from safetensors import SafetensorError
         from safetensors.torch import load_file
 
+        _ = kwargs
         path = Path(str(model_name_or_path))
         if config is None:
             config_json_path = (path if path.is_dir() else path.parent) / "config.json"
@@ -380,7 +388,7 @@ class Gemma4ForCausalLM(nn.Module):
                     config_dict = json.load(f)
                 config = Gemma4Config(**config_dict)
             else:
-                config = Gemma4Config()
+                config = Gemma4Config.from_preset(str(model_name_or_path))
 
         model = cls(config)
         weights_file: Path | None = None
@@ -394,11 +402,15 @@ class Gemma4ForCausalLM(nn.Module):
         if weights_file is not None and weights_file.exists():
             try:
                 state_dict = load_file(str(weights_file))
-                model.load_state_dict(state_dict, strict=False)
+                model.load_state_dict(state_dict, strict=strict)
             except (SafetensorError, ValueError, RuntimeError, OSError, KeyError, AttributeError, TypeError) as exc:
                 import logging
 
-                logging.getLogger(__name__).debug("Failed to load safetensors: %s", exc)
+                logging.getLogger(__name__).warning("Failed to load safetensors from '%s': %s", weights_file, exc)
+                if strict:
+                    from gemma_4_sql.exceptions import ExportError
+
+                    raise ExportError(f"Failed to load safetensors from '{weights_file}': {exc}", backend="pytorch", cause=exc) from exc
 
         return model
 

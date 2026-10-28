@@ -28,16 +28,15 @@ def test_compute_keras_confidence() -> None:
     """Verify compute_keras_confidence handles tensor-like objects, negative log-probs, scalars, and empty lists."""
     assert inf.compute_keras_confidence(None, 0) == 0.0
 
-    mock_np = MagicMock()
-    mock_np.numpy.return_value = [0.1, 0.2]
-    mock_np.tolist.return_value = [0.1, 0.2]
-    assert inf.compute_keras_confidence(mock_np, 2) == pytest.approx(0.15)
+    mock_tensor = MagicMock()
+    mock_tensor.tolist.return_value = [0.1, 0.2]
+    assert inf.compute_keras_confidence(mock_tensor, 2) == pytest.approx(0.15)
 
     assert inf.compute_keras_confidence([-1.0, -2.0], 2) == pytest.approx(math.exp(-1.5))
     assert inf.compute_keras_confidence(0.5, 2) == 0.5
     assert inf.compute_keras_confidence(-1.0, 2) == pytest.approx(math.exp(-0.5))
-    assert inf.compute_keras_confidence([], 2) == 0.5
-    assert inf.compute_keras_confidence(None, 10) > 0.0
+    assert inf.compute_keras_confidence([], 2) == 1.0
+    assert inf.compute_keras_confidence(None, 10) == 1.0
 
 
 def test_configure_beam_sampler(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -75,7 +74,7 @@ def test_generate_sql_and_output_variants(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(inf, "tf", MagicMock())
     monkeypatch.setattr(inf, "configure_beam_sampler", MagicMock())
 
-    def setup_mock(ret_val: object) -> None:
+    def setup_mock(ret_val: str | int | dict[str, str | float] | tuple[str, float]) -> None:
         """Install a GemmaCausalLM mock returning `ret_val` on `.generate()`."""
         mock_cls = MagicMock()
         mock_model = MagicMock()
@@ -103,7 +102,7 @@ def test_generate_sql_and_output_variants(monkeypatch: pytest.MonkeyPatch) -> No
     assert "12345" in res_num["sql"]
 
     monkeypatch.setattr(inf, "GemmaCausalLM", None)
-    monkeypatch.setattr(inf, "optional_attr", lambda *_a, **_k: None)
+    monkeypatch.setattr(inf, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
     res_missing_cls = inf.generate_sql("m", "SELECT")
     assert res_missing_cls["status"].startswith("failed:")
     assert "keras_nlp.models.GemmaCausalLM is not available" in res_missing_cls["status"]

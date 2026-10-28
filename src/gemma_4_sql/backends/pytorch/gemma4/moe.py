@@ -24,9 +24,9 @@ class Gemma4MoERouter(nn.Module):
         self.hidden_size = config.hidden_size
         self.num_experts = config.num_experts
         self.num_experts_per_tok = config.num_experts_per_tok
-        self.float32_gate_logits = bool(getattr(config, "float32_gate_logits", True))
-        self.router_jitter_noise = float(getattr(config, "router_jitter_noise", 0.0))
-        rms_eps = float(getattr(config, "rms_norm_eps", 1e-6))
+        self.float32_gate_logits = bool(config.float32_gate_logits)
+        self.router_jitter_noise = float(config.router_jitter_noise)
+        rms_eps = float(config.rms_norm_eps)
 
         self.gate_norm = Gemma4RMSNorm(config.hidden_size, eps=rms_eps, with_scale=False)
         self.scale = nn.Parameter(torch.ones(config.hidden_size))
@@ -103,10 +103,10 @@ class Gemma4MoE(nn.Module):
         self.config = config
         self.num_experts = config.num_experts
         self.num_experts_per_tok = config.num_experts_per_tok
-        num_shared = int(getattr(config, "num_shared_experts", 1))
+        num_shared = int(config.num_shared_experts)
         shared_inter = config.intermediate_size * max(1, num_shared)
-        routed_inter = config.moe_intermediate_size if getattr(config, "moe_intermediate_size", None) is not None else config.intermediate_size
-        rms_eps = float(getattr(config, "rms_norm_eps", 1e-6))
+        routed_inter = config.moe_intermediate_size if config.moe_intermediate_size is not None else config.intermediate_size
+        rms_eps = float(config.rms_norm_eps)
 
         self.shared_experts = Gemma4MLP(config, intermediate_size=shared_inter)
         self.router = Gemma4MoERouter(config)

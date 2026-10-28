@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from gemma_4_sql.backends.common_logging import log_metrics_wrapper
+from gemma_4_sql.backends.common_logging import SummaryWriterFactory, log_metrics_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
@@ -21,6 +19,7 @@ class _TFSummaryWriterAdapter:
             log_dir: Directory path where TensorFlow event files are written.
 
         """
+        assert tf is not None
         self._writer = tf.summary.create_file_writer(log_dir)
 
     def add_scalar(self, key: str, val: float, step: int) -> None:
@@ -32,6 +31,7 @@ class _TFSummaryWriterAdapter:
             step: Training step index.
 
         """
+        assert tf is not None
         with self._writer.as_default():
             tf.summary.scalar(key, val, step=step)
 
@@ -40,7 +40,12 @@ class _TFSummaryWriterAdapter:
         self._writer.close()
 
 
-def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", **_kwargs: JSONValue) -> LogMetricsResultDict:
+def log_metrics(
+    metrics: dict[str, float],
+    step: int,
+    log_dir: str = "logs",
+    **_kwargs: JSONValue,
+) -> LogMetricsResultDict:
     """Log metrics using Keras/TensorFlow TensorBoard tools and common JSONL fallback.
 
     Args:
@@ -61,8 +66,13 @@ def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", **_
 
         raise DependencyMissingError("TensorFlow dependencies are missing.", backend="keras")
 
-    has_summary = hasattr(tf, "summary")
-    writer_cls: Any = _TFSummaryWriterAdapter if has_summary else None
+    try:
+        _ = tf.summary
+        has_summary = True
+    except AttributeError:
+        has_summary = False
+
+    writer_cls: SummaryWriterFactory | None = _TFSummaryWriterAdapter if has_summary else None
     res = log_metrics_wrapper(
         backend_name="keras",
         metrics=metrics,

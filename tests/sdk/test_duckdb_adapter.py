@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+import duckdb
 import pytest
 
 import gemma_4_sql.sdk.adapters.duckdb_adapter as dda
@@ -56,7 +56,10 @@ async def test_duckdb_adapter_live(tmp_path: Path) -> None:
 
     conn = duckdb.connect(db_path)
     existing_adapter = DuckDBAdapter(db_path, {"existing_conn": conn})
-    existing_adapter.setup_schema("CREATE TABLE should_be_skipped (id INT);")
+    existing_adapter.setup_schema("")
+    existing_adapter.setup_schema("CREATE TABLE extra_tbl (id INT); INSERT INTO extra_tbl VALUES (7);")
+    res_extra = await existing_adapter.execute_query_async("SELECT id FROM extra_tbl")
+    assert res_extra == [(7,)]
     res_ex = await existing_adapter.execute_query_async("SELECT name FROM products")
     assert res_ex == [("apple",)]
 
@@ -82,8 +85,13 @@ def test_duckdb_adapter_missing_duckdb(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @requires_duckdb
-def test_duckdb_adapter_with_in_memory_fixture(in_memory_duckdb: Any) -> None:
-    """Verify DuckDBAdapter works with the shared in_memory_duckdb fixture."""
+def test_duckdb_adapter_with_in_memory_fixture(
+    in_memory_duckdb: duckdb.DuckDBPyConnection,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify DuckDBAdapter works with the shared in_memory_duckdb fixture and handles missing duckdb.Error."""
     adapter = DuckDBAdapter(":memory:", {"existing_conn": in_memory_duckdb})
     assert adapter.execute_query("SELECT 42") == [(42,)]
+    monkeypatch.setattr(dda, "duckdb", None)
+    assert DatabaseExecutionError in adapter.error_classes
     adapter.close()

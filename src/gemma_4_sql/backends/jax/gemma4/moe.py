@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 
 from .config import ModelConfig
-from .layers import Gemma4MLP, Gemma4RMSNorm, make_linear
+from .layers import Gemma4MLP, Gemma4RMSNorm, LinearLayerProtocol, make_linear
 
 
 class Gemma4RoutedExperts(nnx.Module):
@@ -74,6 +76,8 @@ class Gemma4MoE(nnx.Module):
     a shared MLP that is always executed.
     """
 
+    gate: nnx.Linear | None
+
     def __init__(self, config: ModelConfig, *, rngs: nnx.Rngs) -> None:
         """Initialize the Gemma 4 MoE block with shared and routed experts.
 
@@ -97,6 +101,23 @@ class Gemma4MoE(nnx.Module):
         self.post_feedforward_layernorm_1 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         self.post_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
 
+    def inject_lora_projections(
+        self,
+        target_modules: list[str],
+        adapter_factory: Callable[[nnx.Linear], LinearLayerProtocol],
+    ) -> int:
+        """Delegate LoRA projection wrapping to the inner `shared_experts` MLP.
+
+        Args:
+            target_modules: List of target projection names to wrap.
+            adapter_factory: Factory callable converting an `nnx.Linear` into a `LinearLayerProtocol` adapter.
+
+        Returns:
+            Number of projections wrapped in `shared_experts`.
+
+        """
+        return self.shared_experts.inject_lora_projections(target_modules, adapter_factory)
+
     @jax.named_scope("gemma4_moe")
     def __call__(self, x: Array, original_x: Array) -> Array:
         """Apply Mixture of Experts with shared and routed execution paths.
@@ -116,7 +137,7 @@ class Gemma4MoE(nnx.Module):
         root_size = self.config.hidden_size ** (-0.5)
         router_scale = jnp.asarray(self.pre_forward_scale_2[...], dtype=unscaled_norm.dtype)
         gate_inputs = unscaled_norm * root_size * router_scale
-        router_logits = self.gate.__call__(gate_inputs) if hasattr(self, "gate") and self.gate is not None else gate_inputs
+        router_logits = self.gate(gate_inputs) if self.gate is not None else gate_inputs
         routing_weights = jax.nn.softmax(router_logits, axis=-1)
         (topk_weights, topk_indices) = jax.lax.top_k(routing_weights, k=self.config.num_experts_per_tok)
         topk_weights /= jnp.sum(topk_weights, axis=-1, keepdims=True)

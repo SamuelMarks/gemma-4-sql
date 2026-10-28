@@ -2,20 +2,42 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
-from typing import Any
+from collections.abc import Sequence
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.sdk.agent import AgentContext, run_agentic_loop
-from gemma_4_sql.type_hints import AgentLoopResultDict
+from gemma_4_sql.sdk.rag import build_rag_prompt
+from gemma_4_sql.type_hints import (
+    AgentLoopResultDict,
+    CursorProtocol,
+    DatabaseConnectionProtocol,
+    DuckDBConnectionProtocol,
+    JSONPrimitive,
+)
 
 logger = logging.getLogger(__name__)
 duckdb = LazyLoader("duckdb").get_module()
 
 
-def _extract_duckdb_ddl(cur: Any) -> str:
+@runtime_checkable
+class DuckDBCursorProtocol(Protocol):
+    """Protocol for DuckDB connections and cursors supporting `.execute(...).fetchall()`."""
+
+    def execute(self, query: str, parameters: Sequence[JSONPrimitive] | None = ..., /) -> DuckDBCursorProtocol:
+        """Execute a SQL statement and return a fetchable cursor."""
+        ...
+
+    def fetchall(self) -> Sequence[Sequence[JSONPrimitive]]:
+        """Fetch all result rows."""
+        ...
+
+
+def _extract_duckdb_ddl(cur: DuckDBCursorProtocol | DatabaseConnectionProtocol | CursorProtocol) -> str:
     """Extract CREATE TABLE DDL statements from DuckDB metadata or information_schema.
 
     Queries `duckdb_tables()` first to preserve full `CREATE TABLE` DDL including
@@ -30,31 +52,34 @@ def _extract_duckdb_ddl(cur: Any) -> str:
 
     """
     try:
-        rows = cur.execute(
+        exec_res = cur.execute(
             "SELECT sql FROM duckdb_tables() WHERE schema_name = 'main' AND internal = false AND sql IS NOT NULL",
-        ).fetchall()
+        )
+        rows = exec_res.fetchall()
         sql_defs = [str(r[0]).strip() for r in rows if r and r[0]]
         if sql_defs:
             return chr(10).join(s if s.endswith(";") else f"{s};" for s in sql_defs)
     except (RuntimeError, ValueError, TypeError, AttributeError, OSError):
         pass
 
-    tables = cur.execute(
+    exec_tables = cur.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='main'",
-    ).fetchall()
+    )
+    tables = exec_tables.fetchall()
     ddl_parts: list[str] = []
     for (t,) in tables:
-        cols = cur.execute(
-            "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ?",
+        exec_cols = cur.execute(
+            "SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'main' AND table_name = ?",
             [t],
-        ).fetchall()
+        )
+        cols = exec_cols.fetchall()
         col_defs = ", ".join(f"{c[0]} {c[1]}" for c in cols)
         ddl_parts.append(f"CREATE TABLE {t} ({col_defs});")
     return chr(10).join(ddl_parts)
 
 
 def embed_in_duckdb(
-    conn: object,
+    conn: DuckDBConnectionProtocol | DatabaseConnectionProtocol | DuckDBCursorProtocol,
     model_name: str,
     backend: str = "jax",
     db_path: str = ":memory:",
@@ -64,7 +89,7 @@ def embed_in_duckdb(
 ) -> None:
     """Register a scalar function in DuckDB to ask natural language questions.
 
-    The function 'ask_gemma' will take a natural language string, use the Gemma 4 model
+    The function `'ask_gemma'` will take a natural language string, use the Gemma 4 model
     to generate the appropriate SQL, and return the execution results as a JSON string.
 
     Args:
@@ -83,7 +108,7 @@ def embed_in_duckdb(
         msg = "duckdb is required. Install with `pip install duckdb`."
         raise DependencyMissingError(msg, dependency_name="duckdb", backend="duckdb")
 
-    duck_conn: Any = conn
+    duck_conn = conn
     cached_ddl: str | None = ddl
 
     def ask_gemma(prompt: str) -> str:
@@ -98,13 +123,16 @@ def embed_in_duckdb(
         """
         nonlocal cached_ddl
         try:
-            cur = duck_conn.cursor() if callable(getattr(duck_conn, "cursor", None)) else duck_conn
+            cur: DatabaseConnectionProtocol | DuckDBCursorProtocol | CursorProtocol = duck_conn
+            with contextlib.suppress(AttributeError, TypeError):
+                cur = duck_conn.cursor()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
             if cached_ddl is None:
                 cached_ddl = _extract_duckdb_ddl(cur)
-            context = AgentContext(db_path=db_path, ddl=cached_ddl, db_type="duckdb", max_retries=max_retries)
+            augmented_prompt = build_rag_prompt(prompt, cached_ddl) if cached_ddl else prompt
+            context = AgentContext(db_path=db_path, ddl=None, db_type="duckdb", max_retries=max_retries)
             res: AgentLoopResultDict = run_agentic_loop(
                 model_name=model_name,
-                prompt=prompt,
+                prompt=augmented_prompt,
                 backend=backend,
                 context=context,
                 db_kwargs={"existing_conn": cur},
@@ -123,7 +151,7 @@ def embed_in_duckdb(
                 "success": False,
             })
 
-    duck_conn.create_function("ask_gemma", ask_gemma, [str], str)
+    duck_conn.create_function("ask_gemma", ask_gemma, [str], str)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
 
 
-__all__ = ["embed_in_duckdb"]
+__all__ = ["DuckDBConnectionProtocol", "DuckDBCursorProtocol", "embed_in_duckdb"]

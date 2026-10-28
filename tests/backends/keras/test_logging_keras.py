@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -54,7 +53,7 @@ def test_log_metrics_missing_summary(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 def test_log_metrics_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify Keras log_metrics propagates RuntimeError when summary writer creation fails."""
-    mock_tf: Any = MagicMock()
+    mock_tf = MagicMock()
     mock_tf.summary.create_file_writer.side_effect = RuntimeError("TF error")
     monkeypatch.setattr(log_keras, "tf", mock_tf)
 

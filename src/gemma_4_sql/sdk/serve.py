@@ -20,7 +20,6 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, ba
         Structured `ServeResultDict` containing `backend`, `model`, `port`, `max_batch_size`, `mode`, `status`, and FastAPI `app`.
 
     """
-
     return get_backend(backend).serve_model(model_name, port, max_batch_size, **kwargs)
 
 

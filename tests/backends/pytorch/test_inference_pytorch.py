@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import NoReturn
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 
+from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config, Gemma4ForCausalLM
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from tests.conftest import requires_torch
 
@@ -23,10 +26,8 @@ def _restore_inf_mod(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(inf_module, "AutoTokenizer", inf_module.AutoTokenizer)
 
 
-def _make_tiny_native_model() -> Any:
+def _make_tiny_native_model() -> Gemma4ForCausalLM:
     """Create a minimal native Gemma4ForCausalLM instance for fast CPU testing."""
-    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config, Gemma4ForCausalLM
-
     cfg = Gemma4Config(
         vocab_size=320,
         hidden_size=16,
@@ -47,7 +48,6 @@ def _make_tiny_native_model() -> Any:
 def test_real_tiny_pytorch_native_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify generate_sql runs real token generation using a tiny native Gemma4ForCausalLM."""
     import gemma_4_sql.backends.pytorch.inference as inf_module
-    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4ForCausalLM
 
     tiny_model = _make_tiny_native_model()
     monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda _cls, *_a, **_k: tiny_model))
@@ -61,13 +61,17 @@ def test_real_tiny_pytorch_native_generation(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_run_generation_native(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_generation native path with real torch tensors and tokenizer fallbacks."""
-    import torch
-
     import gemma_4_sql.backends.pytorch.inference as inf_module
-    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4ForCausalLM
 
     tiny_model = _make_tiny_native_model()
     monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda _cls, *_a, **_k: tiny_model))
+
+    class StubTokInputs:
+        """Minimal namespace holding input_ids tensor."""
+
+        def __init__(self, ids: torch.Tensor) -> None:
+            """Initialize StubTokInputs."""
+            self.input_ids = ids
 
     class StubTokenizer:
         """Minimal tokenizer returning real PyTorch tensors."""
@@ -76,14 +80,12 @@ def test_run_generation_native(monkeypatch: pytest.MonkeyPatch) -> None:
             """Initialize stub tokenizer with target decoded output."""
             self.decoded = decoded
 
-        def __call__(self, _prompt: str, return_tensors: str = "pt") -> Any:
+        def __call__(self, _prompt: str, return_tensors: str = "pt") -> StubTokInputs:
             """Encode prompt into real tensor input_ids."""
             _ = return_tensors
-            ns = MagicMock()
-            ns.input_ids = torch.tensor([[10, 20]], dtype=torch.long)
-            return ns
+            return StubTokInputs(torch.tensor([[10, 20]], dtype=torch.long))
 
-        def decode(self, _tokens: Any, skip_special_tokens: bool = True) -> str:
+        def decode(self, _tokens: torch.Tensor | Sequence[int], skip_special_tokens: bool = True) -> str:
             """Decode generated tokens into configured SQL string."""
             _ = skip_special_tokens
             return self.decoded
@@ -116,7 +118,6 @@ def test_run_generation_native(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_run_generation_native_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_generation native multimodal preprocessing with real PyTorch tensors."""
     import gemma_4_sql.backends.pytorch.inference as inf_module
-    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4ForCausalLM
 
     tiny_model = _make_tiny_native_model()
     monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda _cls, *_a, **_k: tiny_model))
@@ -148,8 +149,6 @@ def test_run_generation_native_multimodal(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_run_generation_hf(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_generation HuggingFace path using real torch.Tensor sequences and scores."""
-    import torch
-
     import gemma_4_sql.backends.pytorch.inference as inf_module
 
     class StubHFOutput:
@@ -169,11 +168,11 @@ def test_run_generation_hf(monkeypatch: pytest.MonkeyPatch) -> None:
             self.dummy_param = torch.nn.Parameter(torch.zeros(1))
             self.score = score
 
-        def generate(self, **_kwargs: Any) -> StubHFOutput:
+        def generate(self, **_kwargs: torch.Tensor | int | bool) -> StubHFOutput:
             """Return a real 2D token tensor and score."""
             return StubHFOutput(torch.tensor([[1, 2, 65, 66]], dtype=torch.long), self.score)
 
-    class StubBatchEncoding(dict[str, Any]):
+    class StubBatchEncoding(dict[str, torch.Tensor]):
         """Minimal dict with .input_ids and .to(device) matching HF BatchEncoding."""
 
         def __init__(self) -> None:
@@ -183,7 +182,7 @@ def test_run_generation_hf(monkeypatch: pytest.MonkeyPatch) -> None:
             self["input_ids"] = t
             self.input_ids = t
 
-        def to(self, _device: Any) -> StubBatchEncoding:
+        def to(self, _device: torch.device | str) -> StubBatchEncoding:
             """Return self on device transfer."""
             return self
 
@@ -203,13 +202,15 @@ def test_run_generation_hf(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sql == "SELECT 1;"
     assert conf == 0.5
 
-    # Adapter load success and fallback when peft is unavailable
+    # Adapter load success, cache hit on second call, and fallback when peft is unavailable
     mock_peft_cls = MagicMock()
     mock_peft_cls.from_pretrained.return_value = stub_model
     with patch.object(inf_module, "optional_attr", return_value=mock_peft_cls):
         inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", adapter_path="p")
-    with patch.object(inf_module, "optional_attr", return_value=None):
         inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", adapter_path="p")
+        mock_peft_cls.from_pretrained.assert_called_once()
+    with patch.object(inf_module, "optional_attr", return_value=None):
+        inf_module._run_generation("model", "prompt", 1, 10, backend_alias="pytorch", adapter_path="p_missing")
 
     # Negative log-probability score branch (raw_score <= 0.0 -> exp(raw_score))
     stub_model.score = -0.5
@@ -230,11 +231,9 @@ def test_run_generation_hf(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_run_generation_hf_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_generation HuggingFace multimodal path attaches real pixel and audio tensors."""
-    import torch
-
     import gemma_4_sql.backends.pytorch.inference as inf_module
 
-    captured_kwargs: dict[str, Any] = {}
+    captured_kwargs: dict[str, torch.Tensor | int | bool] = {}
 
     class StubHFModel(torch.nn.Module):
         """Minimal HF model stub recording generate kwargs."""
@@ -244,7 +243,7 @@ def test_run_generation_hf_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
             super().__init__()
             self.p = torch.nn.Parameter(torch.zeros(1))
 
-        def generate(self, **kwargs: Any) -> Any:
+        def generate(self, **kwargs: torch.Tensor | int | bool) -> MagicMock:
             """Record kwargs and return tensor sequences."""
             captured_kwargs.update(kwargs)
             out = MagicMock()
@@ -252,7 +251,7 @@ def test_run_generation_hf_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
             out.sequences_scores = torch.tensor([0.9], dtype=torch.float32)
             return out
 
-    class StubInputs(dict[str, Any]):
+    class StubInputs(dict[str, torch.Tensor]):
         """Minimal BatchEncoding stub."""
 
         def __init__(self) -> None:
@@ -261,7 +260,7 @@ def test_run_generation_hf_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
             self.input_ids = torch.tensor([[1, 2]], dtype=torch.long)
             self["input_ids"] = self.input_ids
 
-        def to(self, _dev: Any) -> StubInputs:
+        def to(self, _dev: torch.device | str) -> StubInputs:
             """Return self."""
             return self
 
@@ -301,7 +300,6 @@ def test_run_generation_hf_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_generate_sql(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify generate_sql end-to-end wrapper, error handling, and missing dependency check."""
     import gemma_4_sql.backends.pytorch.inference as inf_module
-    from gemma_4_sql.backends.pytorch.gemma4 import Gemma4ForCausalLM
 
     tiny_model = _make_tiny_native_model()
     monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda _cls, *_a, **_k: tiny_model))
@@ -312,7 +310,7 @@ def test_generate_sql(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(res["sql"], str) and len(str(res["sql"])) > 0
 
     # Error handling when model loading raises RuntimeError
-    def _raise_err(*_a: Any, **_k: Any) -> Any:
+    def _raise_err(*_a: str | type, **_k: str | int) -> NoReturn:
         """Raise RuntimeError to test failure status."""
         raise RuntimeError("boom")
 

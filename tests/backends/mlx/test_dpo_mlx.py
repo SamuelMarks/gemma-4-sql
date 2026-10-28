@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+import math
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import DPOConfig, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, TrainerState
 from tests.conftest import requires_mlx
 
 pytestmark = requires_mlx
@@ -31,7 +31,7 @@ def test_real_mlx_dpo_loss_logps_and_step() -> None:
             self.embed = mlx_nn.Embedding(32, 8)
             self.head = mlx_nn.Linear(8, 32)
 
-        def __call__(self, x: Any) -> Any:
+        def __call__(self, x: mx.array) -> mx.array:
             """Compute vocabulary logits from token IDs."""
             return self.head(self.embed(x))
 
@@ -40,68 +40,64 @@ def test_real_mlx_dpo_loss_logps_and_step() -> None:
     mx.eval(policy_model.parameters(), ref_model.parameters())
 
     optimizer = optim.AdamW(learning_rate=1e-2)
-    batch: dict[str, Any] = {
-        "chosen_inputs": mx.array([[1, 2, 3]], dtype=mx.int32),
-        "chosen_labels": mx.array([[2, 3, 0]], dtype=mx.int32),
-        "rejected_inputs": mx.array([[1, 4, 5]], dtype=mx.int32),
-        "rejected_labels": mx.array([[4, 5, 0]], dtype=mx.int32),
+    chosen_inputs = mx.array([[1, 2, 3]], dtype=mx.int32)
+    chosen_labels = mx.array([[2, 3, 0]], dtype=mx.int32)
+    rejected_inputs = mx.array([[1, 4, 5]], dtype=mx.int32)
+    rejected_labels = mx.array([[4, 5, 0]], dtype=mx.int32)
+    batch: dpo_module.MlxDPOBatch = {
+        "chosen_inputs": chosen_inputs,
+        "chosen_labels": chosen_labels,
+        "rejected_inputs": rejected_inputs,
+        "rejected_labels": rejected_labels,
     }
 
-    pm_any: Any = policy_model
-    rm_any: Any = ref_model
-    opt_any: Any = optimizer
-    labels_list_any: Any = [[2, 3, 0]]
-    logps = dpo_module._compute_mlx_logps(pm_any, batch["chosen_inputs"], batch["chosen_labels"])
+    logps = dpo_module._compute_mlx_logps(policy_model, chosen_inputs, chosen_labels)
     mx.eval(logps)
     assert logps.shape == (1,)
-    assert float(logps.item()) < 0.0
+    assert float(logps) < 0.0
 
-    # Also test _compute_mlx_logps when labels is a Python list
-    logps_list = dpo_module._compute_mlx_logps(pm_any, batch["chosen_inputs"], labels_list_any)
+    # Also test _compute_mlx_logps when labels is a Python list or omitted (shifted input token IDs)
+    logps_list = dpo_module._compute_mlx_logps(policy_model, chosen_inputs, [[2, 3, 0]])
     mx.eval(logps_list)
     assert logps_list.shape == (1,)
 
-    step_loss = dpo_module._run_dpo_step(pm_any, rm_any, opt_any, batch, 0.1)
-    assert float(step_loss.item()) > 0.0
+    logps_shifted = dpo_module._compute_mlx_logps(policy_model, chosen_inputs, None)
+    mx.eval(logps_shifted)
+    assert logps_shifted.shape == (1,)
+
+    loss_step_1 = float(dpo_module._run_dpo_step(policy_model, ref_model, optimizer, batch, 0.5))
+    loss_step_2 = float(dpo_module._run_dpo_step(policy_model, ref_model, optimizer, batch, 0.5))
+    assert loss_step_1 > 0.0
+    assert loss_step_2 < loss_step_1
 
 
 def test_dpo_loss_and_fallback_log_sigmoid(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify dpo_loss handles missing dependencies and fallback log-sigmoid implementations."""
+    """Verify dpo_loss computes exact preference loss on real MLX arrays and checks missing dependencies."""
+    import mlx.core as mx
+
     import gemma_4_sql.backends.mlx.dpo as dpo_module
 
-    mock_mx = MagicMock()
-    mock_nn = MagicMock(spec=[])
-    monkeypatch.setattr(dpo_module, "mx", mock_mx)
-    monkeypatch.setattr(dpo_module, "mx_nn", mock_nn)
+    # (b) Equal policy and reference logps -> loss == log(2.0), rewards == 0.0
+    eq_logp = mx.array([-1.5])
+    eq_loss, eq_ch_r, eq_re_r = dpo_module.dpo_loss(eq_logp, eq_logp, eq_logp, eq_logp, 0.1)
+    assert float(eq_loss) == pytest.approx(math.log(2.0), rel=1e-5)
+    assert float(eq_ch_r) == pytest.approx(0.0)
+    assert float(eq_re_r) == pytest.approx(0.0)
 
-    t1: Any = 1
-    t2: Any = 2
-    t3: Any = 3
-    t4: Any = 4
-    with patch.object(dpo_module, "generic_dpo_loss") as mock_generic:
-        mock_generic.return_value = (1.0, 2.0, 3.0)
-        res = dpo_module.dpo_loss(t1, t2, t3, t4, 0.1)
-        assert res == (1.0, 2.0, 3.0)
-
-        log_sig_fn = mock_generic.call_args[0][5]
-        mock_mx.logaddexp.side_effect = TypeError("no logaddexp on mock")
-        mock_mx.negative.return_value = -1.0
-        assert log_sig_fn(1.0) == -1.0
-
-        del mock_mx.logaddexp
-        del mock_mx.negative
-
-        class NegatableScalar:
-            """Scalar stub implementing unary negation."""
-
-            def __neg__(self) -> str:
-                """Return negated string marker."""
-                return "negated_scalar"
-
-        assert log_sig_fn(NegatableScalar()) == "negated_scalar"
+    # (a) Policy favors chosen over reference -> chosen_rewards > rejected_rewards
+    real_loss, chosen_r, rejected_r = dpo_module.dpo_loss(
+        mx.array([-1.0]),
+        mx.array([-3.0]),
+        mx.array([-2.0]),
+        mx.array([-2.0]),
+        0.5,
+    )
+    assert float(real_loss) > 0.0
+    assert float(chosen_r) > float(rejected_r)
 
     monkeypatch.setattr(dpo_module, "mx", None)
-    assert dpo_module.dpo_loss(t1, t2, t3, t4, 0.1) == (0.0, 0.0, 0.0)
+    with pytest.raises(DependencyMissingError, match=r"MLX DPO dependencies are missing\."):
+        dpo_module.dpo_loss(eq_logp, eq_logp, eq_logp, eq_logp, 0.1)
 
 
 def test_run_dpo_step_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,14 +112,14 @@ def test_run_dpo_step_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_ref.return_value = "scalar_logits"
 
     monkeypatch.setattr(dpo_module, "nn", None)
-    batch: dict[str, Any] = {"chosen_inputs": "ci", "rejected_inputs": "ri"}
+    batch: dpo_module.MlxDPOBatch = {"chosen_inputs": "ci", "rejected_inputs": "ri"}
 
     with patch.object(dpo_module, "dpo_loss", return_value=(0.75, 0.0, 0.0)):
         res = dpo_module._run_dpo_step(mock_policy, mock_ref, None, batch, 0.1)
         assert res == 0.75
 
     mock_nn = MagicMock()
-    mock_nn.value_and_grad.return_value = lambda *_a: (0.5, "grads")
+    mock_nn.value_and_grad.return_value = lambda *_a: (0.5, "grads")  # pyright: ignore[reportUnknownLambdaType]
     monkeypatch.setattr(dpo_module, "nn", mock_nn)
     monkeypatch.setattr(dpo_module, "mx", None)
     res_no_opt = dpo_module._run_dpo_step(MagicMock(spec=[]), mock_ref, MagicMock(spec=[]), batch, 0.1)
@@ -134,7 +130,7 @@ def test_run_training_epochs() -> None:
     """Verify _run_training_epochs averages step losses across multiple epochs."""
     import gemma_4_sql.backends.mlx.dpo as dpo_module
 
-    state: Any = TrainerState(
+    state: TrainerState[str, None, str, dict[str, int]] = TrainerState(
         dataloader=[{"chosen_inputs": 1}, {"chosen_inputs": 2}],
         epochs=2,
         policy_model="p",
@@ -184,6 +180,17 @@ def test_run_dpo_lifecycle_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
         mock_build_dataloader.return_value = {"loader": MagicMock(spec=[])}
         res4 = dpo_module.run_dpo(config)
         assert "failed: Invalid dataloader" in res4["status"]
+
+    with patch.object(dpo_module, "_run_dpo_step", return_value=0.375):
+        state_float: DPOLoopState[MagicMock, MagicMock, dict[str, list[int]]] = DPOLoopState(
+            dataloader=[{"chosen_inputs": [1], "rejected_inputs": [2]}],
+            epochs=1,
+            policy_model=MagicMock(),
+            ref_model=MagicMock(),
+            optimizer=MagicMock(),
+            beta=0.1,
+        )
+        assert dpo_module._run_training_epochs(state_float) == 0.375
 
     monkeypatch.setattr(dpo_module, "mlx", None)
     with pytest.raises(DependencyMissingError):

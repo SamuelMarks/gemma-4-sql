@@ -35,11 +35,11 @@ def test_apply_rope() -> None:
     assert out.shape == x.shape
     assert jnp.allclose(out, x)
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match=r"Expected \(x\.ndim, sin\.ndim, cos\.ndim\) == \(4, 3, 3\)"):
         apply_rope(jnp.zeros((2, 3, 4)), sin, cos)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match=r"Expected \(x\.ndim, sin\.ndim, cos\.ndim\) == \(4, 3, 3\)"):
         apply_rope(x, jnp.zeros((2, 3)), cos)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match=r"Expected \(x\.ndim, sin\.ndim, cos\.ndim\) == \(4, 3, 3\)"):
         apply_rope(x, sin, jnp.zeros((2, 3)))
 
 

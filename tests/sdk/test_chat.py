@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
 from typing import NoReturn as Never
 
 import pytest
 
 from gemma_4_sql.sdk.chat import chat_turn
+from gemma_4_sql.sdk.registry import get_backend
+from gemma_4_sql.type_hints import JSONValue
 
 
 def test_chat_turn_routing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -18,27 +19,23 @@ def test_chat_turn_routing(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Raises:
         AssertionError: If backend routing assertion fails.
+
     """
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     for backend in ["jax", "keras", "maxtext", "pytorch"]:
         backend_impl = get_backend(backend)
-        monkeypatch.setattr(backend_impl, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})
+        monkeypatch.setattr(backend_impl, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})  # pyright: ignore[reportUnknownLambdaType]
         res = chat_turn("foo", [{"role": "user", "content": "hi"}], "prompt", backend=backend)
         assert res["backend"] == backend
-
         assert res["model"] == "foo"
-
         assert res["response"] == "SELECT 1"
-
         assert len(res["history"]) == 3
 
 
 def test_chat_turn_routing_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify chat turn routing error behavior."""
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend("jax")
 
-    def mock_generate(*_args: Any, **_kwargs: Any) -> Never:
+    def mock_generate(*_args: str | int, **_kwargs: JSONValue) -> Never:
         """Provide mock generate test helper."""
         msg = "mock error"
         raise ValueError(msg)
@@ -53,10 +50,11 @@ def test_multiturn_history_accumulation_and_prompt_formatting(monkeypatch: pytes
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
+
     """
     captured_prompts: list[str] = []
 
-    def mock_generate(_model: str, prompt: str, **_kwargs: Any) -> dict[str, str]:
+    def mock_generate(_model: str, prompt: str, **_kwargs: JSONValue) -> dict[str, str]:
         """Capture generated prompt and return mock SQL.
 
         Args:
@@ -66,11 +64,11 @@ def test_multiturn_history_accumulation_and_prompt_formatting(monkeypatch: pytes
 
         Returns:
             Dictionary with SQL response.
+
         """
         captured_prompts.append(prompt)
         return {"sql": f"SELECT * FROM tbl_{len(captured_prompts)}"}
 
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend("jax")
     monkeypatch.setattr(backend_impl, "generate_sql", mock_generate)
 
@@ -80,16 +78,17 @@ def test_multiturn_history_accumulation_and_prompt_formatting(monkeypatch: pytes
         {"role": "assistant", "content": "SELECT * FROM employees;"},
     ]
 
+    nl = chr(10)
     # Turn 1
     res1 = chat_turn("model_v1", initial_history, "Filter by department Sales", backend="jax")
     assert res1["response"] == "SELECT * FROM tbl_1"
     assert len(res1["history"]) == 5
     assert res1["history"][-2] == {"role": "user", "content": "Filter by department Sales"}
     assert res1["history"][-1] == {"role": "assistant", "content": "SELECT * FROM tbl_1"}
-    assert "system: You are a SQL assistant.\n" in captured_prompts[0]
-    assert "user: Show me employees.\n" in captured_prompts[0]
-    assert "assistant: SELECT * FROM employees;\n" in captured_prompts[0]
-    assert "user: Filter by department Sales\nassistant: " in captured_prompts[0]
+    assert f"system: You are a SQL assistant.{nl}" in captured_prompts[0]
+    assert f"user: Show me employees.{nl}" in captured_prompts[0]
+    assert f"assistant: SELECT * FROM employees;{nl}" in captured_prompts[0]
+    assert f"user: Filter by department Sales{nl}assistant: " in captured_prompts[0]
 
     # Turn 2
     res2 = chat_turn("model_v1", res1["history"], "Sort by salary descending", backend="jax")
@@ -97,9 +96,9 @@ def test_multiturn_history_accumulation_and_prompt_formatting(monkeypatch: pytes
     assert len(res2["history"]) == 7
     assert res2["history"][-2] == {"role": "user", "content": "Sort by salary descending"}
     assert res2["history"][-1] == {"role": "assistant", "content": "SELECT * FROM tbl_2"}
-    assert "user: Filter by department Sales\n" in captured_prompts[1]
-    assert "assistant: SELECT * FROM tbl_1\n" in captured_prompts[1]
-    assert "user: Sort by salary descending\nassistant: " in captured_prompts[1]
+    assert f"user: Filter by department Sales{nl}" in captured_prompts[1]
+    assert f"assistant: SELECT * FROM tbl_1{nl}" in captured_prompts[1]
+    assert f"user: Sort by salary descending{nl}assistant: " in captured_prompts[1]
 
 
 def test_chat_turn_missing_sql_response_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,10 +106,10 @@ def test_chat_turn_missing_sql_response_error(monkeypatch: pytest.MonkeyPatch) -
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
+
     """
-    get_backend = __import__("gemma_4_sql.sdk.registry", fromlist=["get_backend"]).get_backend
     backend_impl = get_backend("jax")
 
-    monkeypatch.setattr(backend_impl, "generate_sql", lambda *_a, **_k: {"status": "error_no_sql"})
+    monkeypatch.setattr(backend_impl, "generate_sql", lambda *_a, **_k: {"status": "error_no_sql"})  # pyright: ignore[reportUnknownLambdaType]
     with pytest.raises(RuntimeError, match=r"Chat turn failed: Backend jax did not return SQL\."):
         chat_turn("model_v1", [], "test prompt", backend="jax")

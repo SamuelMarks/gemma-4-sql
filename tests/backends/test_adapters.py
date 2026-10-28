@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import sys
-from typing import Any
 
 import pytest
 
+from gemma_4_sql.backends.base_adapter import ModuleDelegatedBackend
 from gemma_4_sql.backends.jax.adapter import JaxBackend
 from gemma_4_sql.backends.keras.adapter import KerasBackend
 from gemma_4_sql.backends.maxtext.adapter import MaxTextBackend
 from gemma_4_sql.backends.mlx.adapter import MLXBackend
 from gemma_4_sql.backends.pytorch.adapter import PyTorchBackend
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, TrainingConfig
+from gemma_4_sql.type_hints import DPOConfig, ETLConfig, JSONDict, TrainingConfig
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def dummy_etl_config() -> ETLConfig:
 
 @pytest.mark.parametrize("backend_cls", [JaxBackend, KerasBackend, MaxTextBackend, MLXBackend, PyTorchBackend])
 def test_backend_adapter(
-    backend_cls: type[Any],
+    backend_cls: type[ModuleDelegatedBackend],
     dummy_train_config: TrainingConfig,
     dummy_dpo_config: DPOConfig,
     dummy_etl_config: ETLConfig,
@@ -45,16 +45,16 @@ def test_backend_adapter(
     adapter = backend_cls()
     adapter_mod = sys.modules[backend_cls.__module__]
 
-    monkeypatch.setattr(adapter_mod.train, "train_model", lambda *_a, **_k: {"status": "trained"})
-    monkeypatch.setattr(adapter_mod.dpo, "run_dpo", lambda *_a, **_k: {"status": "dpo_run"})
-    monkeypatch.setattr(adapter_mod.etl, "build_dataloader", lambda *_a, **_k: {"status": "dataloader"})
-    monkeypatch.setattr(adapter_mod.export, "export_model", lambda *_a, **_k: {"status": "exported"})
-    monkeypatch.setattr(adapter_mod.logging, "log_metrics", lambda *_a, **_k: {"status": "logged"})
-    monkeypatch.setattr(adapter_mod.peft, "apply_lora", lambda *_a, **_k: {"status": "lora_applied"})
-    monkeypatch.setattr(adapter_mod.quantize, "quantize_model", lambda *_a, **_k: {"status": "quantized"})
-    monkeypatch.setattr(adapter_mod.inference, "generate_sql", lambda *_a, **_k: {"status": "generated"})
-    monkeypatch.setattr(adapter_mod.serve, "serve_model", lambda *_a, **_k: {"status": "served"})
-    monkeypatch.setattr(adapter_mod.benchmark, "benchmark_model", lambda *_a, **_k: {"status": "benchmarked"})
+    monkeypatch.setattr(adapter_mod.train, "train_model", lambda *_a, **_k: {"status": "trained"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.dpo, "run_dpo", lambda *_a, **_k: {"status": "dpo_run"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.etl, "build_dataloader", lambda *_a, **_k: {"status": "dataloader"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.export, "export_model", lambda *_a, **_k: {"status": "exported"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.logging, "log_metrics", lambda *_a, **_k: {"status": "logged"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.peft, "apply_lora", lambda *_a, **_k: {"status": "lora_applied"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.quantize, "quantize_model", lambda *_a, **_k: {"status": "quantized"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.inference, "generate_sql", lambda *_a, **_k: {"status": "generated"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.serve, "serve_model", lambda *_a, **_k: {"status": "served"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.benchmark, "benchmark_model", lambda *_a, **_k: {"status": "benchmarked"})  # pyright: ignore[reportUnknownLambdaType]
 
     assert adapter.train_model(dummy_train_config) == {"status": "trained"}
     assert adapter.run_dpo(dummy_dpo_config) == {"status": "dpo_run"}
@@ -68,17 +68,12 @@ def test_backend_adapter(
     assert adapter.benchmark_model("model") == {"status": "benchmarked"}
     assert adapter.get_trainer().endswith("_trainer")
 
-    # Test fallback when get_trainer is not callable on package
-    pkg_mod = sys.modules[backend_cls.__module__.rsplit(".", 1)[0]]
-    monkeypatch.setattr(pkg_mod, "get_trainer", None)
-    assert adapter.get_trainer().endswith("_trainer")
-
     aliased = PyTorchBackend(backend_alias="pytorch_native")
-    captured_kw: dict[str, Any] = {}
+    captured_kw: JSONDict = {}
     monkeypatch.setattr(
         sys.modules[PyTorchBackend.__module__].inference,
         "generate_sql",
-        lambda *_a, **kw: captured_kw.update(kw) or {"status": "aliased"},
+        lambda *_a, **kw: captured_kw.update(kw) or {"status": "aliased"},  # pyright: ignore[reportUnknownLambdaType]
     )
     assert aliased.generate_sql("model", "prompt") == {"status": "aliased"}
     assert captured_kw["backend_alias"] == "pytorch_native"

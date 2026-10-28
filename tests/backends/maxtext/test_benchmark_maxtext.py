@@ -1,6 +1,5 @@
 """Unit and behavioral tests for benchmark maxtext."""
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import jax.numpy as jnp
@@ -11,7 +10,7 @@ from gemma_4_sql.backends.maxtext import benchmark
 def test_get_device() -> None:
     """Verify get device behavior."""
     mock_jax = MagicMock()
-    mock_jax.devices.side_effect = lambda x: ["tpu0"] if x == "tpu" else ["gpu0"] if x == "gpu" else ["cpu0"]
+    mock_jax.devices.side_effect = lambda x: ["tpu0"] if x == "tpu" else ["gpu0"] if x == "gpu" else ["cpu0"]  # pyright: ignore[reportUnknownLambdaType]
     with patch("gemma_4_sql.backends.maxtext.benchmark.jax", mock_jax):
         assert benchmark._get_device("tpu") == "tpu0"
         assert benchmark._get_device("gpu") == "gpu0"
@@ -22,7 +21,7 @@ def test_get_device_runtime_error() -> None:
     """Verify get device runtime error behavior."""
     mock_jax = MagicMock()
 
-    def mock_devices(t: Any) -> list[str]:
+    def mock_devices(t: str) -> list[str]:
         """Provide mock devices test helper."""
         if t == "cpu":
             return ["cpu0"]
@@ -46,10 +45,8 @@ def test_run_benchmark_pass() -> None:
 
     mock_jax = MagicMock()
     mock_jax.default_device.return_value.__enter__.return_value = None
-    mock_jax.jit = lambda x: x
+    mock_jax.jit = lambda x: x  # pyright: ignore[reportUnknownLambdaType]
     mock_jax.random.randint.return_value = jnp.zeros((2, 32), dtype=jnp.int32)
-
-    MagicMock()
 
     mock_device = MagicMock()
     mock_device.memory_stats.return_value = {"peak_bytes_in_use": 1024 * 1024 * 100}

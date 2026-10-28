@@ -2,14 +2,36 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.backends.lazy_loader import LazyLoader
-from gemma_4_sql.type_hints import LogMetricsResultDict
+from gemma_4_sql.backends.lazy_loader import optional_attr
+from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
+
+
+@runtime_checkable
+class SummaryWriterInstanceProtocol(Protocol):
+    """Protocol for a TensorBoard `SummaryWriter` instance."""
+
+    def add_scalar(self, tag: str, scalar_value: float, global_step: int) -> None:
+        """Record a scalar metric at `global_step`."""
+        ...
+
+
+@runtime_checkable
+class ClosableSummaryWriterProtocol(SummaryWriterInstanceProtocol, Protocol):
+    """Protocol for a TensorBoard `SummaryWriter` instance supporting `.close()`."""
+
+    def close(self) -> None:
+        """Flush and close the summary writer."""
+        ...
+
+
+type SummaryWriterFactory = Callable[..., SummaryWriterInstanceProtocol] | type
 
 
 def get_tensorboard_summary_writer() -> type | None:
@@ -19,8 +41,19 @@ def get_tensorboard_summary_writer() -> type | None:
         The `SummaryWriter` class or `None` if `tensorboardX` is unavailable.
 
     """
-    tbx = LazyLoader("tensorboardX").get_module()
-    return getattr(tbx, "SummaryWriter", None) if tbx is not None else None
+    writer_cls = optional_attr("tensorboardX", "SummaryWriter", type)
+    return writer_cls if isinstance(writer_cls, type) else None
+
+
+def get_torch_tensorboard_writer() -> type | None:
+    """Resolve `torch.utils.tensorboard.SummaryWriter` lazily if installed.
+
+    Returns:
+        The `SummaryWriter` class or `None` if `torch.utils.tensorboard` is unavailable.
+
+    """
+    writer_cls = optional_attr("torch.utils.tensorboard", "SummaryWriter", type)
+    return writer_cls if isinstance(writer_cls, type) else None
 
 
 def log_metrics_wrapper(
@@ -28,8 +61,8 @@ def log_metrics_wrapper(
     metrics: dict[str, float],
     step: int,
     log_dir: str,
-    summary_writer_cls: type | None,
-    extra_fields: Mapping[str, object] | None = None,
+    summary_writer_cls: SummaryWriterFactory | None,
+    extra_fields: Mapping[str, JSONValue] | None = None,
     step_duration_s: float | None = None,
 ) -> LogMetricsResultDict:
     """Log metrics for a training run using TensorBoard or a structured file-based fallback.
@@ -54,20 +87,20 @@ def log_metrics_wrapper(
     fallback_file: str | None = None
 
     if summary_writer_cls is not None:
-        writer = summary_writer_cls(log_dir=log_dir)
+        writer: SummaryWriterInstanceProtocol = summary_writer_cls(log_dir=log_dir)
         try:
             for k, v in metrics.items():
                 writer.add_scalar(k, v, step)
         finally:
-            if hasattr(writer, "close"):
-                writer.close()
+            with contextlib.suppress(AttributeError):
+                writer.close()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
         status = "success"
     else:
         status = "backend_unavailable"
         log_path = Path(log_dir)
         log_path.mkdir(parents=True, exist_ok=True)
         metrics_file = log_path / "metrics.jsonl"
-        record: dict[str, Any] = {
+        record: dict[str, JSONValue] = {
             "backend": backend_name,
             "step": step,
             "timestamp": timestamp,
@@ -78,7 +111,7 @@ def log_metrics_wrapper(
         if extra_fields:
             record.update(extra_fields)
         with open(metrics_file, "a", encoding="utf-8") as f:
-            f.write(f"{json.dumps(record)}\n")
+            f.write(json.dumps(record) + chr(10))
         fallback_file = str(metrics_file)
 
     result: LogMetricsResultDict = {
@@ -98,7 +131,19 @@ def log_metrics_wrapper(
     if fallback_file is not None:
         result["fallback_file"] = fallback_file
     if extra_fields:
-        raw_res: Any = result
-        raw_res.update(extra_fields)
+        if "run_id" in extra_fields and isinstance(extra_fields["run_id"], str):
+            result["run_id"] = extra_fields["run_id"]
+        if "model" in extra_fields and isinstance(extra_fields["model"], str):
+            result["model"] = extra_fields["model"]
 
     return result
+
+
+__all__ = [
+    "ClosableSummaryWriterProtocol",
+    "SummaryWriterFactory",
+    "SummaryWriterInstanceProtocol",
+    "get_tensorboard_summary_writer",
+    "get_torch_tensorboard_writer",
+    "log_metrics_wrapper",
+]

@@ -8,9 +8,10 @@ import pytest
 
 from gemma_4_sql.exceptions import DatabaseExecutionError
 from gemma_4_sql.sdk.adapters.base import DatabaseAdapter
+from gemma_4_sql.type_hints import JSONPrimitive
 
 
-class DummyAdapter(DatabaseAdapter):
+class DummyAdapter(DatabaseAdapter[MagicMock, MagicMock]):
     """Concrete DatabaseAdapter subclass for unit testing base behavior."""
 
     def connect(self) -> MagicMock:
@@ -24,7 +25,7 @@ class DummyAdapter(DatabaseAdapter):
 
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
-        """Return handled exception classes for DummyAdapter.
+        """Provide handled exception classes for DummyAdapter.
 
         Returns:
             Tuple containing `ValueError`.
@@ -34,7 +35,7 @@ class DummyAdapter(DatabaseAdapter):
 
 
 @pytest.mark.asyncio
-async def test_base_adapter() -> None:
+async def test_base_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify synchronous and asynchronous execution, feedback, and error propagation on DatabaseAdapter."""
     adapter = DummyAdapter("path", {})
 
@@ -66,7 +67,7 @@ async def test_base_adapter() -> None:
             """Initialize cursor with a non-null description."""
             self.description = True
 
-        def execute(self, q: str, p: tuple[object, ...]) -> None:
+        def execute(self, q: str, p: tuple[JSONPrimitive, ...]) -> None:
             """Execute query no-op."""
 
         def fetchall(self) -> list[tuple[str, ...]]:
@@ -83,7 +84,7 @@ async def test_base_adapter() -> None:
         def close(self) -> None:
             """Close connection no-op."""
 
-    adapter.conn = ConnMock()
+    monkeypatch.setattr(adapter, "conn", ConnMock())
     res2 = adapter.execute_with_feedback("SELECT")
     assert res2 == (True, [("c_row",)], None)
 
@@ -113,7 +114,7 @@ async def test_base_adapter() -> None:
             """Initialize cursor with a non-null description."""
             self.description = True
 
-        def execute(self, q: str, p: tuple[object, ...]) -> None:
+        def execute(self, q: str, p: tuple[JSONPrimitive, ...]) -> None:
             """Execute query no-op."""
 
         def fetchall(self) -> list[tuple[str, ...]]:
@@ -133,6 +134,6 @@ async def test_base_adapter() -> None:
         def close(self) -> None:
             """Close connection no-op."""
 
-    adapter.conn = ConnMockClose()
+    monkeypatch.setattr(adapter, "conn", ConnMockClose())
     assert adapter.execute_with_feedback("SELECT") == (True, [("c_row",)], None)
     assert adapter.execute_query("SELECT") == [("c_row",)]

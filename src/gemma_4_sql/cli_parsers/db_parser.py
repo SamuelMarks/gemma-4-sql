@@ -31,5 +31,4 @@ def add_db_parsers(subparsers: SubParsersType) -> None:
     parser_embed.add_argument("--ddl", default="", help="Optional DDL to setup the schema.")
     parser_embed.add_argument("--backend", default="jax", help="Backend to use.")
     parser_embed.add_argument("--max-retries", type=int, default=3, help="Max self-correction attempts.")
-    parser_embed.add_argument("--test-mode", action="store_true", help="Run embed-duckdb in fast test mode.")
     parser_embed.set_defaults(func=embed_duckdb_cmd)

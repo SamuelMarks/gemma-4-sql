@@ -36,7 +36,6 @@ def generate(
         A dictionary containing the generated SQL and generation metadata.
 
     """
-
     backend_impl = get_backend(backend)
     result = backend_impl.generate_sql(
         model_name,

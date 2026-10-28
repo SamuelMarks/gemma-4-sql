@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable
-from typing import Any, TypeVar
+from typing import Protocol, TypeVar, runtime_checkable
 
 from gemma_4_sql.exceptions import (
+    OPERATIONAL_EXCEPTIONS,
     ConfigurationError,
     DependencyMissingError,
     ExecutionStatus,
-    GemmaSQLError,
+    StatusValue,
     TrainingError,
+    is_failed_status,
     resolve_raise_on_error,
 )
 from gemma_4_sql.type_hints import TrainingConfig, TrainResultDict
@@ -20,8 +22,35 @@ T_Batch = TypeVar("T_Batch")
 logger = logging.getLogger(__name__)
 
 
-def create_nnx_optimizer(nnx_module: Any, model: Any, tx: Any) -> Any:
-    """Create a Flax NNX Optimizer compatible with both Flax <0.11 and >=0.11 (`wrt=nnx.Param`).
+@runtime_checkable
+class NNXOptimizerProtocol[ModelT, GradsT](Protocol):
+    """Protocol for a Flax NNX Optimizer supporting `.update(model, grads)`."""
+
+    def update(self, model: ModelT, grads: GradsT, /) -> None:
+        """Apply gradients to model parameters."""
+        ...
+
+
+@runtime_checkable
+class NNXModuleNamespaceProtocol[ModelT, TxT, OptT](Protocol):
+    """Protocol for the `flax.nnx` module providing `Optimizer` and `Param`."""
+
+    @property
+    def Param(self) -> type | str:
+        """Provide the `nnx.Param` variable filter type."""
+        ...
+
+    def Optimizer(self, model: ModelT, tx: TxT, *, wrt: type | str) -> OptT:
+        """Construct an `nnx.Optimizer`."""
+        ...
+
+
+def create_nnx_optimizer[ModelT, TxT, OptT](
+    nnx_module: NNXModuleNamespaceProtocol[ModelT, TxT, OptT],
+    model: ModelT,
+    tx: TxT,
+) -> OptT:
+    """Create a Flax NNX Optimizer (`nnx.Optimizer(model, tx, wrt=nnx.Param)`).
 
     Args:
         nnx_module: Loaded `flax.nnx` module.
@@ -32,14 +61,15 @@ def create_nnx_optimizer(nnx_module: Any, model: Any, tx: Any) -> Any:
         Configured `nnx.Optimizer` instance.
 
     """
-    try:
-        return nnx_module.Optimizer(model, tx, wrt=nnx_module.Param)
-    except TypeError:
-        return nnx_module.Optimizer(model, tx)
+    return nnx_module.Optimizer(model, tx, wrt=nnx_module.Param)
 
 
-def apply_nnx_optimizer_update(optimizer: Any, model: Any, grads: Any) -> None:
-    """Apply gradient updates on an `nnx.Optimizer` across Flax NNX versions.
+def apply_nnx_optimizer_update[ModelT, GradsT](
+    optimizer: NNXOptimizerProtocol[ModelT, GradsT],
+    model: ModelT,
+    grads: GradsT,
+) -> None:
+    """Apply gradient updates on an `nnx.Optimizer` (`optimizer.update(model, grads)`).
 
     Args:
         optimizer: Flax NNX optimizer instance.
@@ -47,17 +77,14 @@ def apply_nnx_optimizer_update(optimizer: Any, model: Any, grads: Any) -> None:
         grads: Computed gradient PyTree.
 
     """
-    try:
-        optimizer.update(model, grads)
-    except TypeError:
-        optimizer.update(grads)
+    optimizer.update(model, grads)
 
 
 def run_train_wrapper(
     backend_name: str,
     config: TrainingConfig,
     execute_fn: Callable[[], tuple[str, float]],
-    **kwargs: object,
+    **kwargs: StatusValue,
 ) -> TrainResultDict:
     """Execute a backend training loop with standardized config unpacking, error handling, and result formatting.
 
@@ -74,21 +101,21 @@ def run_train_wrapper(
         TrainingError: If `execute_fn` raises an exception and `raise_on_error` is True.
 
     """
-    action = str(getattr(config, "action", "sft") or "sft")
-    model_name = str(getattr(config, "model_name", "gemma-4"))
-    dataset = str(getattr(config, "dataset", "dummy"))
-    epochs = int(getattr(config, "epochs", 1))
-    learning_rate = float(getattr(config, "learning_rate", 1e-4))
+    action = str(config.action or "sft")
+    model_name = str(config.model_name)
+    dataset = str(config.dataset)
+    epochs = int(config.epochs)
+    learning_rate = float(config.learning_rate)
     raise_on_error = resolve_raise_on_error(config, kwargs=dict(kwargs))
 
     final_loss = 0.0
     error_message: str | None = None
     try:
         status, final_loss = execute_fn()
-        status_code = ExecutionStatus.FAILED.value if status.startswith("failed") else ExecutionStatus.COMPLETED.value
+        status_code = ExecutionStatus.FAILED.value if is_failed_status(status) else ExecutionStatus.COMPLETED.value
     except (DependencyMissingError, ConfigurationError):
         raise
-    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
+    except OPERATIONAL_EXCEPTIONS as e:
         logger.exception("%s training failed: ", backend_name)
         if raise_on_error:
             raise TrainingError(
@@ -118,7 +145,7 @@ def run_train_wrapper(
     dist_strat = kwargs.get("distributed_strategy")
     if dist_strat is not None:
         result["distributed_strategy"] = str(dist_strat)
-    extra = getattr(config, "extra_kwargs", {}) or {}
+    extra = config.extra_kwargs
     ckpt_dir = kwargs.get("checkpoint_dir") or extra.get("checkpoint_dir")
     if ckpt_dir:
         result["checkpoint_dir"] = str(ckpt_dir)

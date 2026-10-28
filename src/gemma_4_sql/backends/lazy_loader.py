@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
+import sys
+import threading
 import types
 from collections.abc import Generator
 from contextlib import contextmanager, suppress
-from typing import Any, Generic, TypeVar
+from typing import Generic, TypeVar, overload
 
 logger = logging.getLogger(__name__)
 OPTIONAL_IMPORT_ERRORS = (ImportError,)
+_LOADER_LOCK = threading.RLock()
 
 
 @contextmanager
@@ -25,11 +29,14 @@ def catch_optional_imports() -> Generator[None, None, None]:
         yield
 
 
-T = TypeVar("T", bound=types.ModuleType)
+T_co = TypeVar("T_co", bound=types.ModuleType, covariant=True)
+TAttr = TypeVar("TAttr")
+
+_LOADER_REGISTRY: dict[str, list[LazyLoader[types.ModuleType]]] = {}
 
 
-class LazyLoader(Generic[T]):
-    """Lazily load an optional module dependency upon first request."""
+class LazyLoader(Generic[T_co]):
+    """Thread-safe lazy loader for an optional module dependency."""
 
     def __init__(self, module_name: str) -> None:
         """Initialize the lazy loader for the given module path.
@@ -39,33 +46,105 @@ class LazyLoader(Generic[T]):
 
         """
         self.module_name = module_name
-        self._module: T | None = None
+        self._module: types.ModuleType | None = None
         self._loaded = False
+        with _LOADER_LOCK:
+            _LOADER_REGISTRY.setdefault(module_name, []).append(self)
 
-    def get_module(self) -> T | None:
+    def reset(self) -> None:
+        """Reset the cached module state so the next `get_module()` re-imports."""
+        with _LOADER_LOCK:
+            self._module = None
+            self._loaded = False
+
+    def set_override(self, mock_mod: types.ModuleType | None) -> tuple[bool, types.ModuleType | None]:
+        """Set a temporary module override and return the previous `(loaded, module)` state.
+
+        Args:
+            mock_mod: Replacement module or `None`.
+
+        Returns:
+            Tuple of `(previous_loaded, previous_module)`.
+
+        """
+        with _LOADER_LOCK:
+            prev = (self._loaded, self._module)
+            self._loaded = True
+            self._module = mock_mod
+            return prev
+
+    def restore_state(self, state: tuple[bool, types.ModuleType | None]) -> None:
+        """Restore a previously saved `(loaded, module)` state.
+
+        Args:
+            state: Tuple of `(previous_loaded, previous_module)`.
+
+        """
+        with _LOADER_LOCK:
+            self._loaded, self._module = state
+
+    def get_module(self) -> types.ModuleType | None:
         """Provide the imported module if available, otherwise return None.
 
         Returns:
             The imported `types.ModuleType` instance or `None` if not installed.
 
         """
-        if not self._loaded:
-            try:
-                loaded_mod: Any = importlib.import_module(self.module_name)
-                self._module = loaded_mod
-            except (ImportError, AttributeError) as err:
-                logger.debug("Optional module %s not available: %s", self.module_name, err)
-                self._module = None
-            self._loaded = True
-        return self._module
+        with _LOADER_LOCK:
+            if self.module_name in sys.modules and not sys.modules.get(self.module_name):
+                return None
+            if not self._loaded:
+                if self.module_name == "keras" or self.module_name.startswith(("keras.", "keras_nlp")):
+                    os.environ.setdefault("KERAS_BACKEND", "torch")
+                try:
+                    self._module = importlib.import_module(self.module_name)
+                except (ImportError, AttributeError) as err:
+                    logger.debug("Optional module %s not available: %s", self.module_name, err)
+                    self._module = None
+                self._loaded = True
+            return self._module
 
     @property
     def is_available(self) -> bool:
-        """Return True if the target module can be imported."""
+        """Indicate whether the target module can be imported."""
         return self.get_module() is not None
 
 
-def optional_import(module_name: str) -> Any:
+def reset_all_lazy_loaders() -> None:
+    """Reset all registered `LazyLoader` instances in a thread-safe manner."""
+    with _LOADER_LOCK:
+        for loader_list in _LOADER_REGISTRY.values():
+            for loader in loader_list:
+                loader.reset()
+
+
+@contextmanager
+def override_lazy_module(module_name: str, mock_mod: types.ModuleType | None) -> Generator[None, None, None]:
+    """Temporarily override all `LazyLoader` instances for `module_name` within a context block.
+
+    Args:
+        module_name: Dotted module name registered in `_LOADER_REGISTRY`.
+        mock_mod: Replacement module or `None` to simulate a missing dependency.
+
+    Yields:
+        None while the override is active.
+
+    """
+    with _LOADER_LOCK:
+        loaders = _LOADER_REGISTRY.get(module_name)
+        if not loaders:
+            LazyLoader(module_name)
+            loaders = _LOADER_REGISTRY[module_name]
+        saved_states = [(ldr, ldr.set_override(mock_mod)) for ldr in loaders]
+    try:
+        yield
+    finally:
+        with _LOADER_LOCK:
+            for ldr, prev_state in saved_states:
+                ldr.restore_state(prev_state)
+
+
+def optional_import(module_name: str) -> types.ModuleType | None:
     """Import an optional module using LazyLoader, returning None if unavailable.
 
     Args:
@@ -75,15 +154,32 @@ def optional_import(module_name: str) -> Any:
         The imported `types.ModuleType` instance or `None` if unavailable.
 
     """
-    return LazyLoader(module_name).get_module()
+    with _LOADER_LOCK:
+        existing = _LOADER_REGISTRY.get(module_name)
+        loader = existing[0] if existing else LazyLoader(module_name)
+    mod = loader.get_module()
+    if module_name in sys.modules:
+        return sys.modules.get(module_name)
+    return mod
 
 
-def optional_attr(module_name: str, attr_name: str) -> Any:
+@overload
+def optional_attr(module_name: str, attr_name: str, _default_type: type[TAttr]) -> TAttr | None:  # noqa: D418
+    """Import an optional module and retrieve an attribute typed as `TAttr | None`."""
+
+
+@overload
+def optional_attr(module_name: str, attr_name: str, _default_type: None = None) -> types.ModuleType | None:  # noqa: D418
+    """Import an optional module and retrieve a dynamic attribute or submodule."""
+
+
+def optional_attr(module_name: str, attr_name: str, _default_type: type[TAttr] | None = None) -> TAttr | types.ModuleType | None:
     """Import an optional module and retrieve an attribute from it, returning None if unavailable.
 
     Args:
         module_name: Dotted module name string to import.
         attr_name: Attribute name on the target module.
+        _default_type: Optional expected attribute type for static type inference.
 
     Returns:
         The attribute value from the module or `None` if the module or attribute is unavailable.
@@ -219,3 +315,25 @@ def get_maxtext_gemma4() -> types.ModuleType | None:
 
     """
     return _MAXTEXT_GEMMA4_LOADER.get_module()
+
+
+__all__ = [
+    "OPTIONAL_IMPORT_ERRORS",
+    "LazyLoader",
+    "catch_optional_imports",
+    "get_duckdb",
+    "get_flax_nnx",
+    "get_jax",
+    "get_jnp",
+    "get_keras",
+    "get_maxtext_gemma4",
+    "get_mlx",
+    "get_safetensors",
+    "get_tensorflow",
+    "get_torch",
+    "get_transformers",
+    "optional_attr",
+    "optional_import",
+    "override_lazy_module",
+    "reset_all_lazy_loaders",
+]

@@ -1,5 +1,7 @@
 """Unit and behavioral tests for gemma4 decoder layer."""
 
+from __future__ import annotations
+
 import jax.numpy as jnp
 from flax import nnx
 
@@ -7,6 +9,7 @@ from tests.conftest import requires_jax
 
 pytestmark = requires_jax
 
+from gemma_4_sql.backends.jax.gemma4.cache import LayerCache
 from gemma_4_sql.backends.jax.gemma4.config import AttentionType, ModelConfig
 from gemma_4_sql.backends.jax.gemma4.decoder_layer import Gemma4DecoderLayer
 
@@ -28,21 +31,7 @@ def test_decoder_layer_mlp() -> None:
     positions = jnp.arange(10)[None, :]
 
     # Test with cache and mask
-    class DummyCache:
-        """Test stub for `DummyCache`."""
-
-        def __init__(self) -> None:
-            """Initialize test stub instance."""
-            import jax.numpy as jnp
-            from flax import nnx
-
-            self.k_cache = nnx.Variable(jnp.zeros((2, 10, 2, 16)))
-            self.v_cache = nnx.Variable(jnp.zeros((2, 10, 2, 16)))
-            self.cur_ind = nnx.Variable(jnp.array(0))
-
-    from typing import Any
-
-    layer_cache: Any = DummyCache()
+    layer_cache = LayerCache((2, 10, 2, 16), jnp.float32)
     attention_mask = jnp.ones((2, 1, 10, 10))
     out = layer(x, positions, layer_cache=layer_cache, attention_mask=attention_mask)
     assert out.shape == (2, 10, 64)

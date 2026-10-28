@@ -5,30 +5,83 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol, runtime_checkable
 
 from starlette.requests import Request
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import (
+    OPERATIONAL_EXCEPTIONS,
     ConfigurationError,
     DependencyMissingError,
     ExecutionStatus,
-    GemmaSQLError,
     InferenceError,
     ServingError,
+    StatusValue,
     resolve_raise_on_error,
 )
-from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, ServeResultDict
+from gemma_4_sql.type_hints import (
+    FastAPIAppProtocol,
+    JSONDict,
+    JSONValue,
+    ServeResultDict,
+    extract_float_kwarg,
+    extract_int_kwarg,
+    extract_str_kwarg,
+)
 
 logger = logging.getLogger(__name__)
 
+
+@runtime_checkable
+class DirectRunnableAppProtocol(FastAPIAppProtocol, Protocol):
+    """Protocol for a FastAPI app augmented with a synchronous `.run_direct(prompt)` helper."""
+
+    run_direct: Callable[[str], str]
+
+
+@runtime_checkable
+class FastAPIConstructorProtocol(Protocol):
+    """Protocol for the `FastAPI` class constructor."""
+
+    def __call__(self, *, title: str, lifespan: Callable[..., contextlib.AbstractAsyncContextManager[None]]) -> DirectRunnableAppProtocol:
+        """Instantiate a FastAPI application."""
+        ...
+
+
+@runtime_checkable
+class JSONResponseConstructorProtocol(Protocol):
+    """Protocol for the `JSONResponse` class constructor."""
+
+    def __call__(self, *, content: dict[str, JSONValue]) -> JSONValue:
+        """Instantiate a JSONResponse."""
+        ...
+
+
+@runtime_checkable
+class UvicornModuleProtocol(Protocol):
+    """Protocol for the `uvicorn` server module exposing `.run(...)`."""
+
+    def run(self, app: FastAPIAppProtocol, *, host: str = "0.0.0.0", port: int = 8000) -> None:
+        """Run an ASGI application with uvicorn."""
+        ...
+
+
 uvicorn = optional_import("uvicorn")
-FastAPI = optional_attr("fastapi", "FastAPI")
+FastAPI: FastAPIConstructorProtocol | None = optional_attr("fastapi", "FastAPI", FastAPIConstructorProtocol)
 HTTPException = optional_attr("fastapi", "HTTPException")
-JSONResponse = optional_attr("fastapi.responses", "JSONResponse")
+JSONResponse: JSONResponseConstructorProtocol | None = optional_attr("fastapi.responses", "JSONResponse", JSONResponseConstructorProtocol)
+
+
+@dataclass
+class _QueuedBatchItem:
+    """Strongly-typed queue item for continuous batching."""
+
+    prompt: str
+    kwargs: dict[str, JSONValue]
+    future: asyncio.Future[str]
 
 
 @dataclass
@@ -57,7 +110,7 @@ class GenerateRequest:
     modality: str = "text"
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> GenerateRequest:
+    def from_dict(cls, data: Mapping[str, JSONValue]) -> GenerateRequest:
         """Construct and validate GenerateRequest from payload dictionary.
 
         Args:
@@ -74,12 +127,12 @@ class GenerateRequest:
         if prompt is None or not isinstance(prompt, str):
             msg = "Field 'prompt' must be a valid string."
             raise ValueError(msg)
-        max_tokens = int(data.get("max_tokens", 128))
-        temperature = float(data.get("temperature", 0.0))
+        max_tokens = extract_int_kwarg(data, "max_tokens", 128)
+        temperature = extract_float_kwarg(data, "temperature", 0.0)
         image_base64 = data.get("image_base64") or data.get("image")
         audio_base64 = data.get("audio_base64") or data.get("audio")
-        image_path = data.get("image_path")
-        audio_path = data.get("audio_path")
+        image_path = extract_str_kwarg(data, "image_path")
+        audio_path = extract_str_kwarg(data, "audio_path")
         modality = str(data.get("modality", "text"))
         return cls(
             prompt=prompt,
@@ -97,13 +150,13 @@ def create_common_app(
     backend_name: str,
     model_name: str,
     startup_callback: Callable[[], None] | None = None,
-    generate_logic: Callable[[str], str] | None = None,
+    generate_logic: Callable[..., str] | None = None,
     batch_generate_logic: Callable[[list[str]], list[str]] | None = None,
     max_batch_size: int = 32,
     max_wait_ms: float = 10.0,
     require_handlers: bool = False,
     request_timeout_s: float = 30.0,
-) -> FastAPIAppProtocol:
+) -> DirectRunnableAppProtocol:
     """Create a common FastAPI application for model serving with continuous batching.
 
     Args:
@@ -128,11 +181,11 @@ def create_common_app(
         msg = f"At least one generation logic callback must be provided for backend '{backend_name}'."
         raise ValueError(msg)
 
-    request_queue: asyncio.Queue[dict[str, Any]] | None = None
+    request_queue: asyncio.Queue[_QueuedBatchItem] | None = None
     worker_task: asyncio.Task[None] | None = None
 
     @contextlib.asynccontextmanager
-    async def _lifespan(_app: Any) -> AsyncGenerator[None, None]:
+    async def _lifespan(_app: FastAPIAppProtocol) -> AsyncGenerator[None, None]:
         """Manage continuous batching background worker lifecycle on FastAPI startup and shutdown."""
         nonlocal request_queue, worker_task
         try:
@@ -146,14 +199,24 @@ def create_common_app(
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
-    app = FastAPI(title=f"{backend_name.title()} Serve: {model_name}", lifespan=_lifespan)
+    assert callable(FastAPI)
+    app: DirectRunnableAppProtocol = FastAPI(title=f"{backend_name.title()} Serve: {model_name}", lifespan=_lifespan)
 
     if startup_callback is not None:
         startup_callback()
 
-    def _run_seq(fn: Callable[[str], str], ps: list[str]) -> list[str]:
-        """Run single-prompt generation sequentially across a batch of prompts."""
-        return [fn(p) for p in ps]
+    def _invoke_single(fn: Callable[..., str], prompt_text: str, req_kwargs: Mapping[str, JSONValue] | None = None) -> str:
+        """Invoke single-prompt generation callback, forwarding `req_kwargs` if supported."""
+        if req_kwargs:
+            try:
+                return fn(prompt_text, **req_kwargs)
+            except TypeError:
+                return fn(prompt_text)
+        return fn(prompt_text)
+
+    def _run_seq(fn: Callable[..., str], items: list[_QueuedBatchItem]) -> list[str]:
+        """Run single-prompt generation sequentially across a batch of request items."""
+        return [_invoke_single(fn, it.prompt, it.kwargs) for it in items]
 
     def _run_direct(prompt_text: str) -> str:
         """Execute synchronous single-prompt generation directly without queueing."""
@@ -182,30 +245,33 @@ def create_common_app(
                 except TimeoutError:
                     break
 
-            prompts = [item["prompt"] for item in batch]
+            prompts = [item.prompt for item in batch]
+            has_custom_kwargs = any(bool(item.kwargs) for item in batch)
             try:
-                if batch_generate_logic is not None:
+                if has_custom_kwargs and generate_logic is not None:
+                    sql_responses = await asyncio.to_thread(_run_seq, generate_logic, batch)
+                elif batch_generate_logic is not None:
                     sql_responses = await asyncio.to_thread(batch_generate_logic, prompts)
                     if len(sql_responses) != len(prompts):
                         msg = f"Batch generation returned {len(sql_responses)} results for {len(prompts)} prompts."
                         raise ValueError(msg)
                 elif generate_logic is not None:
-                    sql_responses = await asyncio.to_thread(_run_seq, generate_logic, prompts)
+                    sql_responses = await asyncio.to_thread(_run_seq, generate_logic, batch)
                 else:
                     msg = f"No generation logic registered for backend '{backend_name}'."
                     raise NotImplementedError(msg)
             except (ValueError, TypeError, RuntimeError, OSError, AttributeError, KeyError, DependencyMissingError, NotImplementedError) as e:
                 for item in batch:
-                    if not item["future"].done():
-                        item["future"].set_exception(e)
+                    if not item.future.done():
+                        item.future.set_exception(e)
                 continue
 
             for item, sql in zip(batch, sql_responses):
-                if not item["future"].done():
-                    item["future"].set_result(sql)
+                if not item.future.done():
+                    item.future.set_result(sql)
 
     @app.post("/generate", response_model=None)
-    async def generate(request: Request) -> Any:
+    async def generate(request: Request) -> JSONValue:
         """Handle continuous batching Text-to-SQL generation.
 
         Args:
@@ -230,10 +296,10 @@ def create_common_app(
         if worker_task is None or worker_task.done():
             worker_task = loop.create_task(_batching_worker())
 
-        req_any: Any = request
-        data: Any = await req_any.json()
+        data: Mapping[str, JSONValue] = await request.json()
         validated_req = GenerateRequest.from_dict(data)
         prompt = validated_req.prompt
+        req_kwargs: dict[str, JSONValue] = {}
         if validated_req.image_base64 or validated_req.audio_base64 or validated_req.image_path or validated_req.audio_path:
             from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
 
@@ -243,9 +309,25 @@ def create_common_app(
                 has_audio=bool(validated_req.audio_base64 or validated_req.audio_path),
             )
             prompt = str(formatted.get("prompt", prompt))
+            req_kwargs.update({
+                k: v
+                for k, v in (
+                    ("image_bytes", validated_req.image_base64),
+                    ("audio_clip", validated_req.audio_base64),
+                    ("image_path", validated_req.image_path),
+                    ("audio_path", validated_req.audio_path),
+                )
+                if v
+            })
+        if validated_req.modality != "text":
+            req_kwargs["modality"] = validated_req.modality
+        if validated_req.temperature != 0.0:
+            req_kwargs["temperature"] = validated_req.temperature
+        if validated_req.max_tokens != 128:
+            req_kwargs["max_length"] = validated_req.max_tokens
 
-        future: asyncio.Future[Any] = loop.create_future()
-        await request_queue.put({"prompt": prompt, "future": future})
+        future: asyncio.Future[str] = loop.create_future()
+        await request_queue.put(_QueuedBatchItem(prompt=prompt, kwargs=req_kwargs, future=future))
 
         try:
             sql_response = await asyncio.wait_for(future, timeout=request_timeout_s)
@@ -253,16 +335,15 @@ def create_common_app(
             future.cancel()
             raise
 
-        res_payload = {"sql": sql_response, "modality": validated_req.modality}
-        if JSONResponse is not None:
+        res_payload: dict[str, JSONValue] = {"sql": sql_response, "modality": validated_req.modality}
+        if callable(JSONResponse):
             return JSONResponse(content=res_payload)
         return res_payload
 
-    app_any: Any = app
-    app_any.run_direct = _run_direct
+    app.run_direct = _run_direct
 
     @app.get("/health", response_model=None)
-    async def health() -> Any:
+    async def health() -> JSONValue:
         """Return server health status.
 
         Returns:
@@ -270,18 +351,18 @@ def create_common_app(
 
         """
         queue_depth = request_queue.qsize() if request_queue is not None else 0
-        content = {
+        content: dict[str, JSONValue] = {
             "status": "healthy",
             "backend": backend_name,
             "model": model_name,
             "queue_depth": queue_depth,
         }
-        if JSONResponse is not None:
+        if callable(JSONResponse):
             return JSONResponse(content=content)
         return content
 
     @app.get("/ready", response_model=None)
-    async def ready() -> Any:
+    async def ready() -> JSONValue:
         """Return server readiness and queue depth status.
 
         Returns:
@@ -289,26 +370,26 @@ def create_common_app(
 
         """
         queue_depth = request_queue.qsize() if request_queue is not None else 0
-        content = {
+        content: dict[str, JSONValue] = {
             "status": "ready",
             "backend": backend_name,
             "model": model_name,
             "queue_depth": queue_depth,
             "max_batch_size": max_batch_size,
         }
-        if JSONResponse is not None:
+        if callable(JSONResponse):
             return JSONResponse(content=content)
         return content
 
     @app.get("/v1/models", response_model=None)
-    async def list_models() -> Any:
+    async def list_models() -> JSONValue:
         """Return available models in OpenAI format.
 
         Returns:
             A JSON response listing served models.
 
         """
-        content: dict[str, Any] = {
+        content: dict[str, JSONValue] = {
             "object": "list",
             "data": [
                 {
@@ -319,18 +400,17 @@ def create_common_app(
                 }
             ],
         }
-        if JSONResponse is not None:
+        if callable(JSONResponse):
             return JSONResponse(content=content)
         return content
 
-    typed_app: FastAPIAppProtocol = app
-    return typed_app
+    return app
 
 
-def create_backend_serve_app(
+def create_backend_serve_app[ResT: Mapping[str, JSONValue]](
     backend_name: str,
     model_name: str,
-    generate_sql_fn: Callable[..., JSONDict],
+    generate_sql_fn: Callable[..., ResT],
     startup_callback: Callable[[], None] | None = None,
     batch_generate_logic: Callable[[list[str]], list[str]] | None = None,
     max_batch_size: int = 32,
@@ -350,14 +430,20 @@ def create_backend_serve_app(
 
     """
 
-    def _generate(prompt: str) -> str:
+    def _generate(prompt: str, **gen_kwargs: JSONValue) -> str:
         """Execute backend SQL generation and validate non-empty output."""
         display_name = {"jax": "JAX", "mlx": "MLX", "maxtext": "MaxText", "pytorch": "PyTorch", "keras": "Keras"}.get(
             backend_name.lower(),
             backend_name.title(),
         )
         try:
-            out = generate_sql_fn(model_name=model_name, prompt=prompt)
+            if gen_kwargs:
+                try:
+                    out = generate_sql_fn(model_name=model_name, prompt=prompt, **gen_kwargs)
+                except TypeError:
+                    out = generate_sql_fn(model_name=model_name, prompt=prompt)
+            else:
+                out = generate_sql_fn(model_name=model_name, prompt=prompt)
             sql = out.get("sql", "")
             if sql:
                 return str(sql)
@@ -388,13 +474,12 @@ def serve_model_wrapper(
     model_name: str,
     port: int,
     max_batch_size: int,
-    missing_deps: bool,
     app_factory: Callable[[], FastAPIAppProtocol],
     run_server: bool = False,
     host: str = "0.0.0.0",
     *,
     raise_on_error: bool | None = None,
-    **kwargs: object,
+    **kwargs: StatusValue,
 ) -> ServeResultDict:
     """Wrap serving logic to unify exception handling and result formatting.
 
@@ -403,7 +488,6 @@ def serve_model_wrapper(
         model_name: Target model identifier.
         port: Listening network port.
         max_batch_size: Maximum concurrency/batch size.
-        missing_deps: Whether required dependencies are missing.
         app_factory: Factory callback to create the FastAPI application.
         run_server: Whether to run the uvicorn HTTP server.
         host: Network host binding interface.
@@ -418,9 +502,6 @@ def serve_model_wrapper(
         ServingError: If `raise_on_error` is enabled and server initialization fails.
 
     """
-    if missing_deps:
-        raise DependencyMissingError(f"Dependencies missing for backend: {backend_name}")
-
     if FastAPI is None or uvicorn is None:
         msg = "FastAPI and uvicorn are required for serving."
         raise DependencyMissingError(msg)
@@ -434,10 +515,11 @@ def serve_model_wrapper(
         status_code = ExecutionStatus.SUCCESS.value
         logger.info("Starting %s server on port %d", backend_name.title(), port)
         if run_server:
+            assert isinstance(uvicorn, UvicornModuleProtocol)
             uvicorn.run(app, host=host, port=port)
     except (DependencyMissingError, ConfigurationError):
         raise
-    except (GemmaSQLError, RuntimeError, ValueError, TypeError, OSError, LookupError, ArithmeticError, AttributeError, ImportError) as e:
+    except OPERATIONAL_EXCEPTIONS as e:
         logger.exception("Failed to start %s serve: ", backend_name)
         if should_raise:
             raise ServingError(
@@ -465,3 +547,13 @@ def serve_model_wrapper(
     if error_message is not None:
         result["error_message"] = error_message
     return result
+
+
+__all__ = [
+    "DirectRunnableAppProtocol",
+    "GenerateRequest",
+    "JSONDict",
+    "create_backend_serve_app",
+    "create_common_app",
+    "serve_model_wrapper",
+]

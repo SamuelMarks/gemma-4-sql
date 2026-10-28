@@ -4,25 +4,26 @@ from __future__ import annotations
 
 import argparse
 import json
-from typing import Any
 
 import pytest
 
 from gemma_4_sql.cli_benchmark import benchmark_cmd
+from gemma_4_sql.exceptions import BenchmarkError
+from gemma_4_sql.type_hints import BenchmarkResultDict, JSONDict, JSONValue
 
 
 def test_benchmark_cmd(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Verify `benchmark_cmd` forwards all CLI arguments to `sdk.benchmark` and prints JSON output."""
-    captured_kwargs: dict[str, Any] = {}
+    captured_kwargs: JSONDict = {}
 
-    def _fake_benchmark(**kwargs: Any) -> dict[str, Any]:
+    def _fake_benchmark(**kwargs: JSONValue) -> BenchmarkResultDict:
         """Capture forwarded benchmark arguments and return a structured result."""
         captured_kwargs.update(kwargs)
         return {
-            "backend": kwargs["backend"],
-            "model": kwargs["model_name"],
-            "hardware": kwargs["hardware"],
-            "batch_size": kwargs["batch_size"],
+            "backend": str(kwargs["backend"]),
+            "model": str(kwargs["model_name"]),
+            "hardware": str(kwargs["hardware"]),
+            "batch_size": int(str(kwargs["batch_size"])),
             "tokens_per_sec": 512.0,
             "latency_ms": 12.5,
             "memory_mb": 1024.0,
@@ -61,3 +62,13 @@ def test_benchmark_cmd(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFi
     assert parsed["status"] == "success"
     assert parsed["tokens_per_sec"] == 512.0
     assert parsed["backend"] == "jax"
+
+    def _fail_benchmark(**_kwargs: JSONValue) -> BenchmarkResultDict:
+        """Raise BenchmarkError to verify CLI error formatting."""
+        raise BenchmarkError("tpu benchmark error", backend="jax", model_name="gemma-4")
+
+    monkeypatch.setattr("gemma_4_sql.cli_benchmark.benchmark", _fail_benchmark)
+    assert benchmark_cmd(args) == 1
+    err_parsed = json.loads(capsys.readouterr().out)
+    assert err_parsed["status_code"] == "failed"
+    assert "tpu benchmark error" in err_parsed["error_message"]

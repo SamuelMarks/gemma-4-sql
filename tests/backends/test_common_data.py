@@ -1,6 +1,5 @@
-"""Tests for common_data.py"""
+"""Tests for common_data.py."""
 
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -39,7 +38,7 @@ def test_create_base_format_transform() -> None:
     BaseFormatTransform = _create_base_format_transform(DummyBaseMap)
 
     mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.side_effect = lambda x: [len(x)]
+    mock_tokenizer.encode.side_effect = lambda x: [len(x)]  # pyright: ignore[reportUnknownLambdaType]
 
     transform = BaseFormatTransform(mock_tokenizer)
 
@@ -69,43 +68,67 @@ def test_create_base_format_transform() -> None:
 
 def test_get_grain_classes() -> None:
     """Test get_grain_classes."""
+
+    class CustomDS:
+        """Custom data source base class."""
+
+    class CustomMap:
+        """Custom map transform base class."""
+
     mock_module = MagicMock()
-    mock_module.RandomAccessDataSource = int
-    mock_module.MapTransform = float
+    mock_module.RandomAccessDataSource = CustomDS
+    mock_module.MapTransform = CustomMap
 
     DataSource, MapTransform = get_grain_classes(mock_module)
-    assert issubclass(DataSource, int)
-    assert issubclass(MapTransform, float)
+    assert issubclass(DataSource, CustomDS)
+    assert issubclass(MapTransform, CustomMap)
 
     # Test without attributes
     mock_module2 = MagicMock(spec=[])
     DataSource2, MapTransform2 = get_grain_classes(mock_module2)
-    assert issubclass(DataSource2, object)
-    assert issubclass(MapTransform2, object)
+    assert isinstance(DataSource2, type)
+    assert isinstance(MapTransform2, type)
+
+
+class _MockDuckDBModule:
+    """Typed mock DuckDB module satisfying DuckDBConnectCallableProtocol."""
+
+    Error: type[Exception] = RuntimeError
+
+    def __init__(self, conn: MagicMock | None = None, side_effect: Exception | None = None) -> None:
+        """Initialize with optional mock connection or side_effect."""
+        self.conn = conn or MagicMock()
+        self.side_effect = side_effect
+        self.calls: list[tuple[str, bool]] = []
+
+    def connect(self, database: str, *, read_only: bool = False) -> MagicMock:
+        """Record connect call and return mock connection or raise side_effect."""
+        self.calls.append((database, read_only))
+        if self.side_effect is not None:
+            raise self.side_effect
+        return self.conn
 
 
 def test_load_duckdb_dataset_success() -> None:
     """Test load_duckdb_dataset success."""
-    mock_duckdb = MagicMock()
     mock_conn = MagicMock()
-    mock_duckdb.connect.return_value = mock_conn
+    mock_duckdb = _MockDuckDBModule(conn=mock_conn)
     mock_conn.execute.return_value.fetchall.return_value = [(1, "test")]
     mock_conn.description = [("id",), ("name",)]
 
     with patch("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", return_value=mock_duckdb):
         res = load_duckdb_dataset("test.db", "test_table")
         assert res == [{"id": 1, "name": "test"}]
-        mock_duckdb.connect.assert_called_once_with("test.db", read_only=True)
+        assert mock_duckdb.calls == [("test.db", True)]
         mock_conn.execute.assert_called_once_with('SELECT * FROM "test_table"')
         mock_conn.close.assert_called_once()
 
 
 def test_load_duckdb_dataset_fallback_description() -> None:
     """Test load_duckdb_dataset fallback description."""
-    mock_duckdb = MagicMock()
     mock_conn = MagicMock()
     del mock_conn.description
-    mock_duckdb.connect.return_value = mock_conn
+    mock_duckdb = _MockDuckDBModule(conn=mock_conn)
     mock_conn.execute.return_value.fetchall.return_value = [(1, "test")]
 
     with patch("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", return_value=mock_duckdb):
@@ -121,15 +144,14 @@ def test_load_duckdb_dataset_missing_module() -> None:
 
 def test_load_duckdb_dataset_invalid_table() -> None:
     """Test load_duckdb_dataset invalid table."""
-    mock_duckdb = MagicMock()
+    mock_duckdb = _MockDuckDBModule()
     with patch("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", return_value=mock_duckdb), pytest.raises(RuntimeError, match="DuckDB error: Invalid or unsafe table name:"):
         load_duckdb_dataset("test.db", "invalid table")
 
 
 def test_load_duckdb_dataset_exception() -> None:
     """Test load_duckdb_dataset exception."""
-    mock_duckdb = MagicMock()
-    mock_duckdb.connect.side_effect = RuntimeError("duckdb error")
+    mock_duckdb = _MockDuckDBModule(side_effect=RuntimeError("duckdb error"))
     with patch("gemma_4_sql.backends.lazy_loader.LazyLoader.get_module", return_value=mock_duckdb), pytest.raises(RuntimeError, match="DuckDB error"):
         load_duckdb_dataset("test.db", "test_table")
 
@@ -150,7 +172,7 @@ def test_load_hf_or_duckdb_and_grain_dataloader() -> None:
 
     mock_datasets = MagicMock()
     mock_datasets.load_dataset.return_value = [{"sql_prompt": "q", "sql": "SELECT 1"}]
-    loaded_ds: Any = load_hf_or_duckdb_dataset("ds", "train", None, None, mock_datasets)
+    loaded_ds = load_hf_or_duckdb_dataset("ds", "train", None, None, mock_datasets)
     assert len(loaded_ds) == 1
 
     with pytest.raises(DependencyMissingError):
@@ -177,6 +199,22 @@ def test_load_hf_or_duckdb_and_grain_dataloader() -> None:
     tok = SQLTokenizer()
     tok_res = tokenize_dataset_element({"sql_prompt": "q", "sql": "SELECT 1"}, tok, process_multimodal=False)
     assert "inputs" in tok_res and "targets" in tok_res
+
+    pref_res_nomm = tokenize_dataset_element(
+        {"sql_prompt": "q", "chosen": "SELECT 1", "rejected": "SELECT 2"},
+        tok,
+        process_multimodal=False,
+    )
+    assert "chosen_inputs" in pref_res_nomm and "rejected_inputs" in pref_res_nomm
+    assert pref_res_nomm["chosen_inputs"] != pref_res_nomm["rejected_inputs"]
+
+    pref_res_mm = tokenize_dataset_element(
+        {"sql_prompt": "q", "chosen": "SELECT 1", "rejected": "SELECT 2"},
+        tok,
+        process_multimodal=True,
+    )
+    assert "chosen_inputs" in pref_res_mm and "rejected_inputs" in pref_res_mm
+    assert pref_res_mm["chosen_inputs"] != pref_res_mm["rejected_inputs"]
 
     _, base_transform_cls = get_grain_classes(None)
     mt_cls = wrap_maxtext_transform(base_transform_cls)

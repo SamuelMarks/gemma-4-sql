@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+import jax
+import jax.numpy as jnp
 import pytest
 
 from gemma_4_sql.backends.common_data import _create_base_format_transform
@@ -48,7 +49,8 @@ def test_jax_grain_multimodal_map(
     assert "targets" in mapped
     assert "pixel_values" in mapped
     assert "audio_values" in mapped
-    assert len(mapped["inputs"]) > 0
+    inputs_seq = mapped["inputs"]
+    assert isinstance(inputs_seq, list) and len(inputs_seq) > 0
 
 
 def test_jax_inference_multimodal(
@@ -65,10 +67,13 @@ def test_jax_inference_multimodal(
     class MockJAXModel:
         """Mock JAX causal model for beam search."""
 
-        def __call__(self, input_ids: Any, _positions: Any = None, **_kwargs: Any) -> Any:
+        def __call__(
+            self,
+            input_ids: jax.Array,
+            _positions: jax.Array | None = None,
+            **_kwargs: jax.Array | str | float | bool | None,
+        ) -> jax.Array:
             """Execute callable test stub."""
-            import jax.numpy as jnp
-
             batch, seq = input_ids.shape
             return jnp.ones((batch, seq, 100), dtype=jnp.float32)
 
@@ -104,10 +109,13 @@ def test_jax_inference_multimodal_live(
     class MockJAXModel:
         """Mock JAX causal model for beam search."""
 
-        def __call__(self, input_ids: Any, _positions: Any = None, **_kwargs: Any) -> Any:
+        def __call__(
+            self,
+            input_ids: jax.Array,
+            _positions: jax.Array | None = None,
+            **_kwargs: jax.Array | str | float | bool | None,
+        ) -> jax.Array:
             """Return logits for beam search."""
-            import jax.numpy as jnp
-
             batch, seq = input_ids.shape
             return jnp.ones((batch, seq, 100), dtype=jnp.float32)
 

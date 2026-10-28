@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
 from gemma_4_sql.sdk.peft import apply_peft
+from gemma_4_sql.type_hints import KerasLayerProtocol
 
 
 def test_apply_peft_jax(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -59,7 +58,7 @@ def test_apply_peft_keras(monkeypatch: pytest.MonkeyPatch) -> None:
         def __init__(self) -> None:
             """Initialize backbone stub."""
             self.enabled_rank = 0
-            self.layers: list[Any] = []
+            self.layers: list[KerasLayerProtocol] = []
 
         def enable_lora(self, rank: int) -> None:
             """Record enabled LoRA rank."""
@@ -82,8 +81,11 @@ def test_apply_peft_keras(monkeypatch: pytest.MonkeyPatch) -> None:
             """Return the FakeKerasModel instance."""
             return backbone_holder
 
-    monkeypatch.setattr(kpeft, "keras", object())
-    monkeypatch.setattr(kpeft, "optional_attr", lambda *_a: FakeGemmaCausalLM)
+    class DummyKerasSentinel:
+        """Non-None sentinel for keras module check."""
+
+    monkeypatch.setattr(kpeft, "keras", DummyKerasSentinel())
+    monkeypatch.setattr(kpeft, "optional_attr", lambda *_a: FakeGemmaCausalLM)  # pyright: ignore[reportUnknownLambdaType]
     res = apply_peft(model_name="test-model", backend="keras", lora_r=12)
     assert res["backend"] == "keras"
     assert res["target_modules"] == ["q_proj", "v_proj"]
@@ -96,23 +98,29 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify apply_peft routes custom target_modules through MLX apply_lora."""
     import gemma_4_sql.backends.mlx.peft as mpeft
 
+    class DummyMlxModel:
+        """Minimal MLX model stub."""
+
     injected_targets: list[str] = []
 
     def _fake_inject_lora(
-        model: Any,
+        model: DummyMlxModel,
         target_modules: list[str],
         lora_r: int = 8,
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
-    ) -> tuple[Any, int]:
+    ) -> tuple[DummyMlxModel, int]:
         """Record target modules and return injected count."""
         _ = (lora_r, lora_alpha, lora_dropout)
         injected_targets.extend(target_modules)
         return (model, len(target_modules))
 
-    monkeypatch.setattr(mpeft, "nn", object())
-    monkeypatch.setattr(mpeft, "mx", object())
-    monkeypatch.setattr(mpeft, "load", lambda _m: (object(), None))
+    class DummyMlxSentinel:
+        """Non-None sentinel for mlx modules."""
+
+    monkeypatch.setattr(mpeft, "nn", DummyMlxSentinel())
+    monkeypatch.setattr(mpeft, "mx", DummyMlxSentinel())
+    monkeypatch.setattr(mpeft, "load", lambda _m: (DummyMlxModel(), None))  # pyright: ignore[reportUnknownLambdaType]
     monkeypatch.setattr(mpeft, "inject_lora", _fake_inject_lora)
 
     res = apply_peft(model_name="test-model", target_modules=["k_proj"], backend="mlx")
@@ -129,6 +137,6 @@ def test_apply_peft_maxtext() -> None:
 
 
 def test_apply_peft_error() -> None:
-    """Verify apply_peft raises ValueError on an unknown backend."""
-    with pytest.raises(ValueError, match="Unknown backend: unknown"):
+    """Verify apply_peft raises ConfigurationError on an unknown backend."""
+    with pytest.raises(ConfigurationError, match="Unknown backend: unknown"):
         apply_peft(model_name="test-model", backend="unknown")

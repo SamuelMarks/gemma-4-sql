@@ -1,19 +1,27 @@
-"""Vision modules for Gemma 4."""
+"""Vision modules for Gemma 4 with 2D Rotary Positional Embeddings and spatial pooling."""
 
 from __future__ import annotations
+
+import math
 
 import torch
 from torch import nn
 
 from .config import Gemma4VisionConfig
 from .layers import Gemma4RMSNorm
+from .rope import Gemma4RotaryEmbedding2D, rotate_half
 
 
 class Gemma4VisionEmbeddings(nn.Module):
     """Vision embeddings for Gemma 4."""
 
-    def __init__(self, config: Gemma4VisionConfig):
-        """Initialize Gemma4VisionEmbeddings."""
+    def __init__(self, config: Gemma4VisionConfig) -> None:
+        """Initialize Gemma4VisionEmbeddings.
+
+        Args:
+            config: Vision transformer configuration.
+
+        """
         super().__init__()
         self.patch_size = config.patch_size
         self.image_size = config.image_size
@@ -34,8 +42,11 @@ class Gemma4VisionEmbeddings(nn.Module):
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """Forward pass for vision embeddings.
 
+        Args:
+            pixel_values: Input pixel tensor of shape `(batch, 3, height, width)`.
+
         Returns:
-            Patch embeddings tensor.
+            Patch embeddings tensor of shape `(batch, num_patches, hidden_size)`.
 
         """
         batch_size = pixel_values.shape[0]
@@ -50,10 +61,15 @@ class Gemma4VisionEmbeddings(nn.Module):
 
 
 class Gemma4VisionAttention(nn.Module):
-    """Vision self-attention for Gemma 4."""
+    """Vision self-attention for Gemma 4 with 2D Rotary Positional Embeddings."""
 
-    def __init__(self, config: Gemma4VisionConfig):
-        """Initialize Gemma4VisionAttention."""
+    def __init__(self, config: Gemma4VisionConfig) -> None:
+        """Initialize Gemma4VisionAttention.
+
+        Args:
+            config: Vision transformer configuration.
+
+        """
         super().__init__()
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
@@ -61,12 +77,16 @@ class Gemma4VisionAttention(nn.Module):
 
         self.qkv_proj = nn.Linear(self.hidden_size, 3 * self.hidden_size, bias=True)
         self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=True)
+        self.rotary_emb_2d = Gemma4RotaryEmbedding2D(dim=self.head_dim)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        """Forward pass for vision attention.
+        """Forward pass for vision attention with 2D RoPE when head_dim >= 4.
+
+        Args:
+            hidden_states: Input patch embeddings of shape `(batch, seq_len, hidden_size)`.
 
         Returns:
-            Output projected attention tensor.
+            Output projected attention tensor of shape `(batch, seq_len, hidden_size)`.
 
         """
         bsz, seq_len, _ = hidden_states.size()
@@ -74,6 +94,14 @@ class Gemma4VisionAttention(nn.Module):
         qkv = self.qkv_proj(hidden_states)
         qkv = qkv.view(bsz, seq_len, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
+
+        grid_side = math.isqrt(seq_len)
+        if grid_side * grid_side == seq_len and self.head_dim >= 4 and self.head_dim % 4 == 0:
+            cos, sin = self.rotary_emb_2d(hidden_states, grid_side, grid_side)
+            cos_b = cos.unsqueeze(0).unsqueeze(0)
+            sin_b = sin.unsqueeze(0).unsqueeze(0)
+            q = (q * cos_b) + (rotate_half(q) * sin_b)
+            k = (k * cos_b) + (rotate_half(k) * sin_b)
 
         attn_output = nn.functional.scaled_dot_product_attention(q, k, v)
 
@@ -85,8 +113,13 @@ class Gemma4VisionAttention(nn.Module):
 class Gemma4VisionEncoderLayer(nn.Module):
     """Vision encoder layer for Gemma 4."""
 
-    def __init__(self, config: Gemma4VisionConfig):
-        """Initialize Gemma4VisionEncoderLayer."""
+    def __init__(self, config: Gemma4VisionConfig) -> None:
+        """Initialize Gemma4VisionEncoderLayer.
+
+        Args:
+            config: Vision transformer configuration.
+
+        """
         super().__init__()
         self.hidden_size = config.hidden_size
         self.self_attn = Gemma4VisionAttention(config)
@@ -100,6 +133,9 @@ class Gemma4VisionEncoderLayer(nn.Module):
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         """Forward pass for vision encoder layer.
+
+        Args:
+            hidden_states: Input hidden states tensor.
 
         Returns:
             Encoded layer hidden states tensor.
@@ -119,18 +155,48 @@ class Gemma4VisionEncoderLayer(nn.Module):
 
 
 class Gemma4VisionModel(nn.Module):
-    """Vision model for Gemma 4."""
+    """Vision model for Gemma 4 with optional 2D spatial token pooling."""
 
-    def __init__(self, config: Gemma4VisionConfig):
-        """Initialize Gemma4VisionModel."""
+    def __init__(self, config: Gemma4VisionConfig) -> None:
+        """Initialize Gemma4VisionModel.
+
+        Args:
+            config: Vision transformer configuration.
+
+        """
         super().__init__()
         self.config = config
         self.embeddings = Gemma4VisionEmbeddings(config)
         self.layers = nn.ModuleList([Gemma4VisionEncoderLayer(config) for _ in range(config.num_hidden_layers)])
         self.post_layernorm = Gemma4RMSNorm(config.hidden_size)
+        self.pooling_kernel_size = int(config.pooling_kernel_size or 1)
+
+    def _pool_image_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Apply 2D spatial average pooling over vision patch tokens when `pooling_kernel_size > 1`.
+
+        Args:
+            tokens: Patch embeddings of shape `(batch, seq_len, hidden_size)`.
+
+        Returns:
+            Spatially pooled patch embeddings.
+
+        """
+        k = self.pooling_kernel_size
+        if k <= 1:
+            return tokens
+        bsz, seq_len, dim = tokens.shape
+        side = math.isqrt(seq_len)
+        if side * side != seq_len or side % k != 0:
+            return tokens
+        grid = tokens.view(bsz, side // k, k, side // k, k, dim)
+        pooled: torch.Tensor = grid.mean(dim=(2, 4)).reshape(bsz, (side // k) ** 2, dim)
+        return pooled
 
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """Forward pass for vision model.
+
+        Args:
+            pixel_values: Input pixel tensor of shape `(batch, 3, height, width)`.
 
         Returns:
             Final vision representations tensor.
@@ -141,5 +207,6 @@ class Gemma4VisionModel(nn.Module):
         for layer in self.layers:
             hidden_states = layer(hidden_states)
 
-        res: torch.Tensor = self.post_layernorm(hidden_states)
+        hidden_states = self.post_layernorm(hidden_states)
+        res: torch.Tensor = self._pool_image_tokens(hidden_states)
         return res

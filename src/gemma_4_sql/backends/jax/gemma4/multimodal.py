@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import jax
 import jax.numpy as jnp
@@ -23,7 +22,7 @@ def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array)
 
     """
 
-    def merge_modalities(i_emb: Any, t_emb: Any, mask: Any) -> Any:
+    def merge_modalities(i_emb: Array, t_emb: Array, mask: Array) -> Array:
         """Merge single-example modality and text embeddings using a boolean token mask.
 
         Args:

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
 
+import keras
 import pytest
+from keras import ops
 
 from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.sdk.quantize import quantize_model
@@ -28,35 +30,16 @@ def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
         quantize_model("model2", "int4", backend="pytorch")
 
 
-def test_quantize_keras(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
+def test_quantize_keras(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify `quantize_model` executes Keras INT8 quantization and rejects unsupported methods."""
-    from pathlib import Path
-
-    import numpy as np
-
     import gemma_4_sql.backends.keras.quantize as kq
 
-    class DummyWeight:
-        """Minimal 2D weight variable stub."""
-
-        def __init__(self) -> None:
-            """Initialize 2x2 float32 matrix."""
-            self.arr = np.array([[1.0, -2.0], [3.0, -4.0]], dtype=np.float32)
-
-        def numpy(self) -> Any:
-            """Return underlying numpy array."""
-            return self.arr
-
-        def assign(self, new_val: Any) -> None:
-            """Update underlying numpy array."""
-            self.arr = np.asarray(new_val)
-
     class DummyLayer:
-        """Minimal layer stub with 2D weights."""
+        """Minimal layer stub with 2D Keras tensor weights."""
 
         def __init__(self) -> None:
             """Initialize layer stub."""
-            self.weights = [DummyWeight()]
+            self.weights = [ops.reshape(ops.linspace(1.0, 4.0, 4), (2, 2))]
 
     class DummyKerasModel:
         """Minimal Keras model stub with quantizable layers."""
@@ -66,10 +49,8 @@ def test_quantize_keras(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
             self.layers = [DummyLayer(), DummyLayer()]
             self.saved_path: str | None = None
 
-        def save(self, path: Any) -> None:
+        def save(self, path: str | Path) -> None:
             """Write dummy file to verify export_path persistence."""
-            from pathlib import Path
-
             p = Path(path)
             p.write_bytes(b"keras_quantized")
             self.saved_path = str(p)
@@ -84,8 +65,9 @@ def test_quantize_keras(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> None:
             """Return the DummyKerasModel instance."""
             return dummy_model
 
-    monkeypatch.setattr(kq, "keras", object())
-    monkeypatch.setattr(kq, "optional_attr", lambda *_a: DummyGemmaCausalLM)
+    monkeypatch.setattr(kq, "keras", keras)
+    monkeypatch.setattr(kq, "ops", ops)
+    monkeypatch.setattr(kq, "optional_attr", lambda *_a: DummyGemmaCausalLM)  # pyright: ignore[reportUnknownLambdaType]
     export_dest = tmp_path / "q_dir"
 
     res = quantize_model("model3", "int8", backend="keras", export_path=str(export_dest))

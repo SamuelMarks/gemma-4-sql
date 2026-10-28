@@ -1,10 +1,11 @@
 """Tests for RAG-based schema contextualization module."""
 
-from typing import Any
+from collections.abc import Sequence
+from typing import NoReturn
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
+import torch
 
 from gemma_4_sql.sdk import rag
 from gemma_4_sql.sdk.rag import build_rag_prompt, extract_schema_entities, retrieve_relevant_schema
@@ -66,16 +67,19 @@ class MockSentenceTransformer:
 class MockSimilarities:
     """Provide class docstring."""
 
-    def argsort(self) -> Any:
+    def argsort(self) -> list[int]:
         """Provide argsort test helper."""
         return [0]
 
-    def __getitem__(self, idx: Any) -> Any:
-        """Provide getitem   test helper."""
+    def __getitem__(self, _idx: int) -> float:
+        """Provide getitem test helper."""
         return 1.0
 
 
-def mock_cosine_similarity(_a: Any, _b: Any) -> list[Any]:
+def mock_cosine_similarity(
+    _a: Sequence[Sequence[float]],
+    _b: Sequence[Sequence[float]],
+) -> list[MockSimilarities]:
     """Provide mock cosine similarity test helper."""
     return [MockSimilarities()]
 
@@ -92,9 +96,11 @@ def test_retrieve_relevant_schema_semantic(monkeypatch: pytest.MonkeyPatch) -> N
 def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify retrieve relevant schema semantic error behavior."""
     monkeypatch.setattr(rag, "SentenceTransformer", MockSentenceTransformer)
-    __import__("typing", fromlist=[""])
 
-    def raise_err(*_args: Any, **_kwargs: Any) -> Any:
+    def raise_err(
+        *_args: Sequence[Sequence[float]],
+        **_kwargs: str | float,
+    ) -> NoReturn:
         """Provide raise err test helper."""
         msg = "err"
         raise ValueError(msg)
@@ -130,12 +136,19 @@ def test_rag_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rag.cosine_similarity is None
     assert rag.build_rag_prompt("Find users", "CREATE TABLE users (id INT);", sql_prefix="") == "-- Relevant Schema Context:\n-- Table: users | Columns: id\n\n-- Request:\n-- Find users"
 
+    ddl_emp_weather = "CREATE TABLE weather (city TEXT, temp FLOAT); CREATE TABLE employees (id INT, salary FLOAT);"
+    schema_ew = extract_schema_entities(ddl_emp_weather)
+    ranked_ctx = retrieve_relevant_schema("average employee salary", schema_ew, top_k_tables=1)
+    assert "Table: employees" in ranked_ctx
+    assert "Table: weather" not in ranked_ctx
+
 
 def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test semantic search when similarity is lower than MIN_SIMILARITY.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
+
     """
     import gemma_4_sql.sdk.rag as rg
 
@@ -145,7 +158,7 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
     class MockModel:
         """Mock SentenceTransformer model."""
 
-        def encode(self, _x: Any) -> list[list[float]]:
+        def encode(self, _x: Sequence[str]) -> list[list[float]]:
             """Return mock embedding.
 
             Args:
@@ -153,10 +166,11 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
 
             Returns:
                 Mock embedding list.
+
             """
             return [[1.0]]
 
-    monkeypatch.setattr(rg, "SentenceTransformer", lambda *a, **k: MockModel())
+    monkeypatch.setattr(rg, "SentenceTransformer", lambda *a, **k: MockModel())  # pyright: ignore[reportUnknownLambdaType]
 
     class MockSim:
         """Mock similarity array."""
@@ -166,6 +180,7 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
 
             Returns:
                 Index list.
+
             """
             return [0, 1]
 
@@ -177,10 +192,11 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
 
             Returns:
                 Similarity float.
+
             """
             return 0.5
 
-    monkeypatch.setattr(rg, "cosine_similarity", lambda _a, _b: [MockSim()])
+    monkeypatch.setattr(rg, "cosine_similarity", lambda _a, _b: [MockSim()])  # pyright: ignore[reportUnknownLambdaType]
     res = rg._semantic_search("hi", schema, ["users", "orders"], 2, min_similarity=0.9)
     assert len(res) == 2
     assert res == ["users", "orders"]
@@ -189,9 +205,9 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_rag_semantic_no_relevant() -> None:
     """Test rag semantic when all similarity scores are below threshold."""
     mock_st = MagicMock()
-    mock_st.return_value.encode.return_value = np.array([[1.0]])
+    mock_st.return_value.encode.return_value = torch.tensor([[1.0]])
 
-    with patch("gemma_4_sql.sdk.rag.SentenceTransformer", mock_st), patch("gemma_4_sql.sdk.rag.cosine_similarity", lambda _a, _b: np.array([[0.0, 0.0]])):
+    with patch("gemma_4_sql.sdk.rag.SentenceTransformer", mock_st), patch("gemma_4_sql.sdk.rag.cosine_similarity", lambda _a, _b: torch.tensor([[0.0, 0.0]])):  # pyright: ignore[reportUnknownLambdaType]
         schema = {"t1": ["c1"], "t2": ["c2"]}
         res = retrieve_relevant_schema("prompt", schema)
         assert "Table: t1" in res
@@ -223,10 +239,23 @@ def test_extract_schema_entities_complex() -> None:
 
 
 def test_extract_schema_entities_edge_cases() -> None:
-    """Test extract_schema_entities with empty columns, trailing commas, and invalid entries."""
-    ddl = "CREATE TABLE t (col1 INT, , @invalid INT, col2 TEXT, );\nCREATE TABLE t2 (a INT,);"
-    schema = extract_schema_entities(ddl)
+    """Test extract_schema_entities with empty columns, trailing commas, TEMP tables, catalog prefixes, and strict=True."""
+    from gemma_4_sql.exceptions import SchemaExtractionError
+
+    ddl = "CREATE TEMP TABLE cat.sch.t (col1 INT, , @invalid INT, col2 TEXT, );\nCREATE TEMPORARY TABLE t2 (a INT,);"
+    schema = extract_schema_entities(ddl, strict=True)
     assert schema == {"t": ["col1", "col2"], "t2": ["a"]}
+
+    with pytest.raises(SchemaExtractionError, match="Unbalanced parentheses"):
+        extract_schema_entities("CREATE TABLE broken (id INT", strict=True)
+
+    # Non-strict mode tolerates unbalanced parentheses
+    assert extract_schema_entities("CREATE TABLE broken (id INT", strict=False) == {"broken": ["id"]}
+
+    # Verify snake_case table and column matching in keyword and BM25 search
+    snake_schema = {"user_orders": ["order_total", "user_id"], "inventory_logs": ["log_id"]}
+    ctx = retrieve_relevant_schema("total for orders", snake_schema, top_k_tables=1)
+    assert "Table: user_orders" in ctx
 
 
 def test_extract_schema_entities_quoted_identifiers() -> None:
@@ -298,6 +327,7 @@ def test_semantic_search_missing_sentence_transformers(monkeypatch: pytest.Monke
 
     Returns:
         None.
+
     """
     from gemma_4_sql.sdk import rag
 
@@ -319,8 +349,25 @@ def test_rag_bm25_search() -> None:
     ranked = _bm25_search("Find email and address in customers", schema, top_k_tables=1)
     assert ranked == ["customers"]
 
+    # Fuzzy / character 3-gram fallback when exact token overlap is 0 ("custmer" -> "customers")
+    fuzzy_ranked = _bm25_search("custmer emal", schema, top_k_tables=1)
+    assert fuzzy_ranked == ["customers"]
+
     empty = _bm25_search("", schema, top_k_tables=2)
     assert len(empty) == 2
+
+    assert rag._compute_embedding("") == [0.0] * rag.EMBEDDING_DIM
+    vec = rag._compute_embedding("customers email_address")
+    assert len(vec) == rag.EMBEDDING_DIM
+
+    rag.clear_rag_model_cache()
+    orig_st = rag.SentenceTransformer
+    try:
+        rag.SentenceTransformer = None
+        with pytest.raises(RuntimeError, match="SentenceTransformer is unavailable"):
+            rag._get_sentence_transformer("all-MiniLM-L6-v2")
+    finally:
+        rag.SentenceTransformer = orig_st
 
 
 def test_rag_successful_imports(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -328,10 +375,10 @@ def test_rag_successful_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     rag.clear_rag_model_cache()
     mock_st_class = MagicMock()
     mock_model = MagicMock()
-    mock_model.encode.side_effect = lambda texts: np.array([[1.0, 0.0]] * len(texts))
+    mock_model.encode.side_effect = lambda texts: torch.tensor([[1.0, 0.0]] * len(texts))  # pyright: ignore[reportUnknownLambdaType]
     mock_st_class.return_value = mock_model
 
-    mock_cos = MagicMock(return_value=np.array([[0.9, 0.1]]))
+    mock_cos = MagicMock(return_value=torch.tensor([[0.9, 0.1]], dtype=torch.float64))
     monkeypatch.setattr(rag, "SentenceTransformer", mock_st_class)
     monkeypatch.setattr(rag, "cosine_similarity", mock_cos)
 

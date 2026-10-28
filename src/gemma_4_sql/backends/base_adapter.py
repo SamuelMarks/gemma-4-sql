@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-from typing import Any, TypeVar
-
 from gemma_4_sql.sdk.protocols import BackendProtocol
 from gemma_4_sql.type_hints import (
     BenchmarkResultDict,
@@ -33,11 +30,21 @@ from gemma_4_sql.type_hints import (
     TrainSubmoduleProtocol,
 )
 
-TSubmod = TypeVar("TSubmod")
-
 
 class ModuleDelegatedBackend(BackendProtocol):
-    """Base backend adapter that delegates BackendProtocol calls to package submodules."""
+    """Base backend adapter that delegates BackendProtocol calls to typed package submodules."""
+
+    train_module: TrainSubmoduleProtocol
+    dpo_module: DPOSubmoduleProtocol
+    etl_module: ETLSubmoduleProtocol
+    export_module: ExportSubmoduleProtocol
+    logging_module: LoggingSubmoduleProtocol
+    peft_module: PEFTSubmoduleProtocol
+    quantize_module: QuantizeSubmoduleProtocol
+    inference_module: InferenceSubmoduleProtocol
+    serve_module: ServeSubmoduleProtocol
+    benchmark_module: BenchmarkSubmoduleProtocol
+    trainer_name: str = ""
 
     def __init__(self, backend_alias: str | None = None) -> None:
         """Initialize the backend adapter with an optional backend alias.
@@ -47,9 +54,8 @@ class ModuleDelegatedBackend(BackendProtocol):
 
         """
         self.backend_alias = backend_alias
-        self._adapter_module = importlib.import_module(self.__class__.__module__)
 
-    def _inject_alias(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def _inject_alias(self, kwargs: dict[str, JSONValue]) -> dict[str, JSONValue]:
         """Inject `backend_alias` into `kwargs` if configured and not already present.
 
         Args:
@@ -60,24 +66,10 @@ class ModuleDelegatedBackend(BackendProtocol):
 
         """
         if self.backend_alias is not None and "backend_alias" not in kwargs:
-            merged: dict[str, Any] = dict(kwargs)
+            merged: dict[str, JSONValue] = dict(kwargs)
             merged["backend_alias"] = self.backend_alias
             return merged
         return kwargs
-
-    def _get_submodule(self, attr_name: str, _protocol_cls: type[TSubmod] | object = object) -> TSubmod:
-        """Resolve a typed submodule attribute from the concrete adapter's defining module.
-
-        Args:
-            attr_name: Name of the submodule attribute (e.g., `'train'`, `'inference'`).
-            _protocol_cls: Target submodule protocol class used for static type resolution.
-
-        Returns:
-            The resolved submodule object satisfying `TSubmod`.
-
-        """
-        submod: TSubmod = getattr(self._adapter_module, attr_name)
-        return submod
 
     def train_model(self, config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
         """Train a model according to training configuration.
@@ -90,8 +82,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing training status and final metrics.
 
         """
-        mod: TrainSubmoduleProtocol = self._get_submodule("train")
-        return mod.train_model(config, **self._inject_alias(kwargs))
+        return self.train_module.train_model(config, **self._inject_alias(kwargs))
 
     def run_dpo(self, config: DPOConfig, **kwargs: JSONValue) -> DPOResultDict:
         """Run Direct Preference Optimization (DPO).
@@ -104,8 +95,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing DPO training status and final metrics.
 
         """
-        mod: DPOSubmoduleProtocol = self._get_submodule("dpo")
-        return mod.run_dpo(config, **self._inject_alias(kwargs))
+        return self.dpo_module.run_dpo(config, **self._inject_alias(kwargs))
 
     def build_dataloader(self, config: ETLConfig, **kwargs: JSONValue) -> DataloaderResultDict:
         """Construct ETL dataloader pipeline.
@@ -118,8 +108,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing dataloader objects and metadata.
 
         """
-        mod: ETLSubmoduleProtocol = self._get_submodule("etl")
-        return mod.build_dataloader(config, **self._inject_alias(kwargs))
+        return self.etl_module.build_dataloader(config, **self._inject_alias(kwargs))
 
     def export_model(self, model_name: str, export_path: str, **kwargs: JSONValue) -> ExportResultDict:
         """Export model weights and architecture definition.
@@ -133,8 +122,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing export status and target path.
 
         """
-        mod: ExportSubmoduleProtocol = self._get_submodule("export")
-        return mod.export_model(model_name, export_path, **self._inject_alias(kwargs))
+        return self.export_module.export_model(model_name, export_path, **self._inject_alias(kwargs))
 
     def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> LogMetricsResultDict:
         """Log training and evaluation metrics.
@@ -149,8 +137,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing logging confirmation and status.
 
         """
-        mod: LoggingSubmoduleProtocol = self._get_submodule("logging")
-        return mod.log_metrics(metrics, step, log_dir, **self._inject_alias(kwargs))
+        return self.logging_module.log_metrics(metrics, step, log_dir, **self._inject_alias(kwargs))
 
     def apply_lora(
         self,
@@ -175,8 +162,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing adapter configuration status.
 
         """
-        mod: PEFTSubmoduleProtocol = self._get_submodule("peft")
-        return mod.apply_lora(model_name, target_modules, lora_r, lora_alpha, lora_dropout, **self._inject_alias(kwargs))
+        return self.peft_module.apply_lora(model_name, target_modules, lora_r, lora_alpha, lora_dropout, **self._inject_alias(kwargs))
 
     def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> QuantizeResultDict:
         """Quantize model weights for reduced memory footprint.
@@ -190,8 +176,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing quantization status and reduction factor.
 
         """
-        mod: QuantizeSubmoduleProtocol = self._get_submodule("quantize")
-        return mod.quantize_model(model_name, method, **self._inject_alias(kwargs))
+        return self.quantize_module.quantize_model(model_name, method, **self._inject_alias(kwargs))
 
     def generate_sql(
         self,
@@ -214,8 +199,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing generated SQL and confidence metrics.
 
         """
-        mod: InferenceSubmoduleProtocol = self._get_submodule("inference")
-        return mod.generate_sql(model_name, prompt, beam_width, max_length, **self._inject_alias(kwargs))
+        return self.inference_module.generate_sql(model_name, prompt, beam_width, max_length, **self._inject_alias(kwargs))
 
     def serve_model(
         self,
@@ -236,8 +220,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing server status and instance details.
 
         """
-        mod: ServeSubmoduleProtocol = self._get_submodule("serve")
-        return mod.serve_model(model_name, port, max_batch_size, **self._inject_alias(kwargs))
+        return self.serve_module.serve_model(model_name, port, max_batch_size, **self._inject_alias(kwargs))
 
     def benchmark_model(
         self,
@@ -258,11 +241,10 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing throughput (tokens/sec), latency (ms), and memory (MB).
 
         """
-        mod: BenchmarkSubmoduleProtocol = self._get_submodule("benchmark")
-        return mod.benchmark_model(model_name, hardware, batch_size, **self._inject_alias(kwargs))
+        return self.benchmark_module.benchmark_model(model_name, hardware, batch_size, **self._inject_alias(kwargs))
 
-    def get_trainer(self, **_kwargs: object) -> str:
-        """Return the canonical trainer identifier from the parent backend package.
+    def get_trainer(self, **_kwargs: JSONValue) -> str:
+        """Return the canonical trainer identifier for this backend.
 
         Args:
             **_kwargs: Optional backend-specific keyword arguments.
@@ -271,10 +253,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Trainer identifier string (e.g., `'jax_trainer'`).
 
         """
-        pkg_name = self.__class__.__module__.rsplit(".", 1)[0]
-        pkg_mod = importlib.import_module(pkg_name)
-        trainer_fn = getattr(pkg_mod, "get_trainer", None)
-        return str(trainer_fn()) if callable(trainer_fn) else f"{pkg_name.rsplit('.', 1)[-1]}_trainer"
+        return self.trainer_name
 
 
 __all__ = ["ModuleDelegatedBackend"]

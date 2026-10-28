@@ -2,15 +2,33 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
-from typing import Any
+from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
+from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.type_hints import BenchmarkResultDict, JSONValue, KerasCausalLMProtocol, TensorType
+from gemma_4_sql.type_hints import (
+    BenchmarkResultDict,
+    ForwardOutput,
+    JSONValue,
+    KerasCausalLMProtocol,
+    TensorType,
+    TfModuleProtocol,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _GemmaCausalLMLoaderProtocol(Protocol):
+    """Protocol for `keras_nlp.models.GemmaCausalLM` exposing `.from_preset(model_name)`."""
+
+    def from_preset(self, model_name: str, /) -> KerasCausalLMProtocol:
+        """Load a `GemmaCausalLM` model from a preset identifier."""
+        ...
+
 
 keras = optional_import("keras")
 tf = optional_import("tensorflow")
@@ -37,7 +55,11 @@ def _load_keras_model(model_name: str, dtype: str) -> KerasCausalLMProtocol:
         raise DependencyMissingError("Keras dependencies are missing.")
     try:
         keras.config.set_floatx(dtype)
-        gemma_causal_lm_cls = optional_attr("keras_nlp.models", "GemmaCausalLM")
+        gemma_causal_lm_cls = optional_attr(
+            "keras_nlp.models",
+            "GemmaCausalLM",
+            _GemmaCausalLMLoaderProtocol,
+        )
         if gemma_causal_lm_cls is None:
             raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
         loaded_model: KerasCausalLMProtocol = gemma_causal_lm_cls.from_preset(model_name)
@@ -70,8 +92,17 @@ def _get_device_str(hardware: str) -> str:
     return "/CPU:0"
 
 
+@runtime_checkable
+class _KerasBenchmarkTargetProtocol(Protocol):
+    """Protocol satisfied by any Keras model or benchmark test double."""
+
+    def __repr__(self) -> str:
+        """Return string representation."""
+        ...
+
+
 def _run_benchmark_pass(
-    model: Any,
+    model: KerasCausalLMProtocol | _KerasBenchmarkTargetProtocol,
     batch_size: int,
     num_runs: int,
     warmup_steps: int,
@@ -109,7 +140,7 @@ def _run_benchmark_pass(
         dummy_inputs = tf.random.uniform((batch_size, 32), minval=1, maxval=256000, dtype=tf.int32)
 
         @tf.function(jit_compile=True)
-        def forward_pass(inputs: TensorType) -> object:
+        def forward_pass(inputs: TensorType) -> ForwardOutput:
             """Run JIT-compiled forward pass.
 
             Args:
@@ -119,36 +150,32 @@ def _run_benchmark_pass(
                 Output logits tensor.
 
             """
-            return model(inputs)
+            return model(inputs)  # pyright: ignore[reportCallIssue]  # ty: ignore[call-non-callable]
 
         if "GPU" in device_str:
-            try:
+            with contextlib.suppress(ValueError):
                 tf.config.experimental.reset_memory_stats(device_str.replace("/", ""))
-            except ValueError:
-                pass
 
         for _ in range(warmup_steps):
             if mode == "prefill":
                 out = forward_pass(dummy_inputs)
-                if hasattr(out, "numpy"):
-                    _ = out.numpy()
+                with contextlib.suppress(AttributeError, TypeError):
+                    _ = tf.identity(out)
             else:
-                if hasattr(model, "generate"):
-                    out = model.generate(dummy_inputs, max_length=32 + 2)
-                    if hasattr(out, "numpy"):
-                        _ = out.numpy()
+                with contextlib.suppress(AttributeError, TypeError):
+                    out = model.generate(dummy_inputs, max_length=32 + 2)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                    _ = tf.identity(out)
 
         start_time = time.perf_counter()
         for _ in range(num_runs):
             if mode == "prefill":
                 out = forward_pass(dummy_inputs)
-                if hasattr(out, "numpy"):
-                    _ = out.numpy()
+                with contextlib.suppress(AttributeError, TypeError):
+                    _ = tf.identity(out)
             else:
-                if hasattr(model, "generate"):
-                    out = model.generate(dummy_inputs, max_length=32 + max_new_tokens)
-                    if hasattr(out, "numpy"):
-                        _ = out.numpy()
+                with contextlib.suppress(AttributeError, TypeError):
+                    out = model.generate(dummy_inputs, max_length=32 + max_new_tokens)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                    _ = tf.identity(out)
         end_time = time.perf_counter()
 
         elapsed_s = max(end_time - start_time, 1e-09)
@@ -165,14 +192,19 @@ def _run_benchmark_pass(
                 memory_info = tf.config.experimental.get_memory_info(device_str.replace("/", ""))
                 memory_mb = memory_info.get("peak", memory_info.get("current", 0.0)) / (1024 * 1024)
             else:
-                memory_mb = 0.0
+                memory_mb = get_current_rss_mb()
         except ValueError:
-            memory_mb = 0.0
+            memory_mb = get_current_rss_mb()
 
         return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 
 
-def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int = 32, **kwargs: JSONValue) -> BenchmarkResultDict:
+def benchmark_model(
+    model_name: str,
+    hardware: str = "tpu-v5p",
+    batch_size: int = 32,
+    **kwargs: JSONValue,
+) -> BenchmarkResultDict:
     """Benchmark a model using the Keras backend.
 
     Args:
@@ -215,6 +247,12 @@ def benchmark_model(model_name: str, hardware: str = "tpu-v5p", batch_size: int 
         model_name=model_name,
         hardware=hardware,
         batch_size=batch_size,
-        missing_deps=False,
         benchmark_fn=_run,
     )
+
+
+__all__ = [
+    "KerasCausalLMProtocol",
+    "TfModuleProtocol",
+    "benchmark_model",
+]

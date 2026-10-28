@@ -37,7 +37,7 @@ def test_embed_in_duckdb_success() -> None:
 
         mock_agent.assert_called_once()
         kwargs = mock_agent.call_args.kwargs
-        assert "CREATE TABLE users" in kwargs["context"].ddl
+        assert "Table: users" in kwargs["prompt"]
 
         # Second invocation reuses cached DDL without re-extracting
         row2 = conn.execute("SELECT ask_gemma('Get users again')").fetchone()
@@ -65,6 +65,7 @@ def test_embed_in_duckdb_missing(monkeypatch: pytest.MonkeyPatch) -> None:
         if "information_schema.tables" in query:
             res_mock.fetchall.return_value = [("users",)]
         else:
+            assert "table_schema = 'main'" in query
             res_mock.fetchall.return_value = [("id", "INTEGER"), ("name", "VARCHAR")]
         return res_mock
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
@@ -10,7 +12,7 @@ from jax import Array
 from .attention import Gemma4Attention
 from .cache import LayerCache
 from .config import AttentionType, ModelConfig
-from .layers import Gemma4MLP, Gemma4RMSNorm, make_linear
+from .layers import Gemma4MLP, Gemma4RMSNorm, LinearLayerProtocol, make_linear
 from .moe import Gemma4MoE
 
 
@@ -45,6 +47,25 @@ class Gemma4DecoderLayer(nnx.Module):
             self.post_per_layer_input_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
         self.layer_scalar = nnx.Param(jnp.ones(1, dtype=config.weight_dtype))
 
+    def inject_lora_projections(
+        self,
+        target_modules: list[str],
+        adapter_factory: Callable[[nnx.Linear], LinearLayerProtocol],
+    ) -> int:
+        """Wrap matching attention and MLP projections in this decoder layer with LoRA adapters.
+
+        Args:
+            target_modules: List of target projection names to wrap.
+            adapter_factory: Factory callable converting an `nnx.Linear` into a `LinearLayerProtocol` adapter.
+
+        Returns:
+            Total number of projections wrapped across `self_attention` and `mlp`.
+
+        """
+        injected = self.self_attention.inject_lora_projections(target_modules, adapter_factory)
+        injected += self.mlp.inject_lora_projections(target_modules, adapter_factory)
+        return injected
+
     @jax.named_scope("gemma4_layer")
     def __call__(self, x: Array, positions: Array, layer_cache: LayerCache | None = None, attention_mask: Array | None = None, per_layer_input: Array | None = None) -> Array:
         """Apply the decoder layer.
@@ -62,12 +83,12 @@ class Gemma4DecoderLayer(nnx.Module):
         """
         lnx = self.pre_self_attention_norm(x)
         attn_out = self.self_attention(lnx, positions, layer_cache, attention_mask)
-        if getattr(self.config, "use_post_norms", True):
+        if self.config.use_post_norms:
             attn_out = self.post_self_attention_norm(attn_out)
         x += attn_out
         lnx2 = self.pre_ffw_norm(x)
         mlp_out = self.mlp(lnx2, original_x=x)
-        if getattr(self.config, "use_post_norms", True):
+        if self.config.use_post_norms:
             mlp_out = self.post_ffw_norm(mlp_out)
         x += mlp_out
         if self.config.hidden_size_per_layer_input and per_layer_input is not None:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from tests.conftest import requires_torch
 
 pytestmark = requires_torch
@@ -74,11 +72,24 @@ def test_quantize_tensor_q4_0() -> None:
 
 
 def test_quantize_tensor_q4_k_m() -> None:
-    """Test Q4_K_M quantization format."""
-    data = [float(i % 10) for i in range(256)]
+    """Test Q4_K_M quantization format and dequantization reconstruction accuracy."""
+    from gemma_4_sql.backends.pytorch.gguf import dequantize_tensor_q4_k_m
+    from tests.utils.tensor_helpers import compute_snr
+
+    data = [math.sin(i * 0.1) * 5.0 - 1.2 for i in range(256)]
     res = quantize_tensor_q4_k_m(data)
     # 256 block: 2 scale + 2 dmin + 12 meta + 128 data = 144 bytes
     assert len(res) == 144
+    # 12-byte scales_mins metadata must not be all zeros
+    assert res[4:16] != b"\x00" * 12
+
+    recon = dequantize_tensor_q4_k_m(res)
+    assert len(recon) == 256
+    snr_db = compute_snr(data, recon)
+    assert snr_db > 15.0
+
+    with pytest.raises(ValueError, match="multiple of 144"):
+        dequantize_tensor_q4_k_m(b"\x00" * 10)
 
 
 def test_extract_pytorch_state_dict_from_dict() -> None:
@@ -136,10 +147,15 @@ def test_extract_pytorch_state_dict_empty_raises() -> None:
 
 
 def test_extract_pytorch_state_dict_string_preset(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test string preset extraction fallback."""
-    # When transformers fails, it falls back to Gemma4 native modeling
-    extracted = extract_pytorch_state_dict("gemma4-preset")
+    """Test string preset extraction fallback for both e2b and tiny presets."""
+    with pytest.raises(ExportError, match="allow_dummy_fallback is False"):
+        extract_pytorch_state_dict("gemma4-preset")
+
+    extracted = extract_pytorch_state_dict("gemma4-preset", allow_dummy_fallback=True)
     assert "token_embd.weight" in extracted
+
+    extracted_tiny = extract_pytorch_state_dict("gemma-4-tiny", allow_dummy_fallback=True)
+    assert "token_embd.weight" in extracted_tiny
 
 
 def test_write_and_validate_gguf_v3(tmp_path: Path) -> None:
@@ -168,7 +184,9 @@ def test_write_and_validate_gguf_v3(tmp_path: Path) -> None:
     assert info["metadata"]["general.name"] == "test-model"
     assert info["metadata"]["model.context_length"] == 4096
     assert info["metadata"]["model.is_fine_tuned"] == 1
-    assert abs(info["metadata"]["model.learning_rate"] - 0.0001) < 1e-4
+    lr_val = info["metadata"]["model.learning_rate"]
+    assert isinstance(lr_val, float)
+    assert abs(lr_val - 0.0001) < 1e-4
 
     # Verify tensor descriptors
     tensor_names = [t["name"] for t in info["tensors"]]
@@ -212,27 +230,25 @@ def test_export_gguf_end_to_end(tmp_path: Path) -> None:
 
 
 def test_flatten_values_edge_cases() -> None:
-    """Test _flatten_values on bytes, bytearrays, torch-like, numpy-like, and scalar objects."""
-    import numpy as np
+    """Test _flatten_values on bytes, bytearrays, torch-like, and scalar objects."""
+    import torch
 
     from gemma_4_sql.backends.pytorch.gguf import _flatten_values
 
     assert _flatten_values(b"\x01\x02") == [1.0, 2.0]
     assert _flatten_values(bytearray([3, 4])) == [3.0, 4.0]
     assert _flatten_values(42.5) == [42.5]
-    assert _flatten_values(np.array([[1.0, 2.0], [3.0, 4.0]])) == [1.0, 2.0, 3.0, 4.0]
-
-    import torch
+    assert _flatten_values(torch.tensor([[1.0, 2.0], [3.0, 4.0]])) == [1.0, 2.0, 3.0, 4.0]
 
     t = torch.tensor([5.0, 6.0], dtype=torch.float32)
     assert _flatten_values(t) == [5.0, 6.0]
 
 
-def test_quantize_fallbacks_without_numpy(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test quantize fallback implementations when numpy is None."""
+def test_quantize_fallbacks_without_torch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test quantize fallback implementations when torch is None."""
     import gemma_4_sql.backends.pytorch.gguf as gguf_mod
 
-    monkeypatch.setattr(gguf_mod, "np", None)
+    monkeypatch.setattr(gguf_mod, "torch", None)
 
     # Q8_0 fallback
     data = [float(i) for i in range(35)]  # Needs padding
@@ -295,6 +311,7 @@ def test_extract_state_dict_local_file_failure(tmp_path: Path, monkeypatch: pyte
 
     Returns:
         None.
+
     """
     import sys
 
@@ -306,25 +323,20 @@ def test_extract_state_dict_local_file_failure(tmp_path: Path, monkeypatch: pyte
 
     monkeypatch.setitem(sys.modules, "gemma_4_sql.backends.pytorch.gemma4.modeling", None)
     with pytest.raises(ExportError, match="Failed to extract state dict"):
-        extract_pytorch_state_dict(str(local_dir))
+        extract_pytorch_state_dict(str(local_dir), allow_dummy_fallback=True)
 
 
-def test_gguf_tensor_quantize_with_numpy_and_torch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test tensor quantization with numpy arrays, torch tensors, and fallback when numpy is None.
+def test_gguf_tensor_quantize_with_torch_and_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test tensor quantization with torch tensors and fallback when torch is None.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
 
     Returns:
         None.
+
     """
-    import numpy as np
-
     import gemma_4_sql.backends.pytorch.gguf as gguf_mod
-
-    # Numpy and Torch inputs
-    np_arr = np.array([1.0, 2.0, -1.0, 0.5], dtype=np.float32)
-    assert len(quantize_tensor_f16(np_arr)) == 8
 
     monkeypatch.setattr(gguf_mod, "torch", torch)
     t_f16 = torch.tensor([1.0, 2.0, -1.0, 0.5], dtype=torch.float32)
@@ -337,8 +349,9 @@ def test_gguf_tensor_quantize_with_numpy_and_torch(monkeypatch: pytest.MonkeyPat
     t_256 = torch.tensor([float(i % 10) for i in range(256)], dtype=torch.float32)
     assert len(quantize_tensor_q4_k_m(t_256)) == 144
 
-    # Pure Python fallback when np is None
-    monkeypatch.setattr(gguf_mod, "np", None)
+    # Pure Python fallback when torch is None
+    monkeypatch.setattr(gguf_mod, "torch", None)
+    assert len(quantize_tensor_f16([1.0, 2.0, -1.0, 0.5])) == 8
     py_data_64 = [float(i) for i in range(64)]
     assert len(quantize_tensor_q8_0(py_data_64, block_size=32)) == 68
     assert len(quantize_tensor_q4_0(py_data_64, block_size=32)) == 36
@@ -355,18 +368,29 @@ def test_gguf_write_metadata_types_and_payloads(tmp_path: Path) -> None:
 
     Returns:
         None.
+
     """
+
+    class _CustomObj:
+        """Custom object fallback for GGUF string metadata serialization."""
+
+        def __str__(self) -> str:
+            """Return string representation."""
+            return "custom"
+
+    from gemma_4_sql.backends.pytorch.gguf import GGUFMetadataValue, TensorInput
+
     target_file = tmp_path / "metadata_test.gguf"
-    metadata: dict[str, Any] = {
+    metadata: dict[str, GGUFMetadataValue | _CustomObj] = {
         "float_val": math.pi,
         "list_val": ["a", "b", "c"],
         "tuple_val": (1, 2),
         "int_val": 42,
         "bool_val": True,
         "str_val": "hello",
-        "custom_obj": object(),
+        "custom_obj": _CustomObj(),
     }
-    tensors: dict[str, Any] = {
+    tensors: dict[str, TensorInput] = {
         "raw_tensor": b"\x00" * 32,
         "2d_tensor": [[1.0] * 32] * 8,
         "1d_tensor": [0.5] * 256,
@@ -428,12 +452,11 @@ def test_gguf_branches_and_edge_cases(tmp_path: Path) -> None:
 
     Returns:
         None.
-    """
-    # 1. Line 120: quantize_tensor_q8_0 with np.ndarray
-    import numpy as np
 
-    res_q8_np = quantize_tensor_q8_0(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32))
-    assert len(res_q8_np) > 0
+    """
+    # 1. Line 120: quantize_tensor_q8_0 with torch.Tensor
+    res_q8_pt = quantize_tensor_q8_0(torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32))
+    assert len(res_q8_pt) > 0
 
     # Plain list fallback
     res_q8 = quantize_tensor_q8_0([1.0, 2.0, 3.0, 4.0])
@@ -485,88 +508,76 @@ def test_gguf_export_corrupted_file_validation(tmp_path: Path) -> None:
 
 
 def test_gguf_import_errors_mock(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test except ImportError block for numpy and torch."""
+    """Test optional torch import when torch is unavailable."""
     import importlib
     import sys
 
     import gemma_4_sql.backends.pytorch.gguf as gguf_mod
 
-    # Store originals
-
-    # Force ImportError on numpy
-    monkeypatch.setitem(sys.modules, "numpy", None)
-    importlib.reload(gguf_mod)
-    assert gguf_mod.np is None
-
-    # Clean up numpy, force torch
-    monkeypatch.undo()
     monkeypatch.setitem(sys.modules, "torch", None)
     importlib.reload(gguf_mod)
     assert gguf_mod.torch is None
 
-    # Restore
     monkeypatch.undo()
     importlib.reload(gguf_mod)
 
 
-def test_quantize_tensor_numpy_arrays() -> None:
-    """Test quantization branches for numpy arrays directly."""
-    import numpy as np
-
+def test_quantize_tensor_torch_tensors() -> None:
+    """Test quantization branches for torch tensors directly."""
     from gemma_4_sql.backends.pytorch.gguf import quantize_tensor_q4_k_m, quantize_tensor_q8_0
 
-    arr = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    arr = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
     res_q8 = quantize_tensor_q8_0(arr)
     assert len(res_q8) > 0
 
-    arr_unaligned = np.array([1.0] * 10, dtype=np.float32)
+    arr_unaligned = torch.tensor([1.0] * 10, dtype=torch.float32)
     res_q4k = quantize_tensor_q4_k_m(arr_unaligned)
     assert len(res_q4k) > 0
 
 
 def test_quantize_tensor_q4_k_m_extra_branches() -> None:
-    """Test quantization branches for Q4_K_M with list and perfectly aligned array."""
-    import numpy as np
-
+    """Test quantization branches for Q4_K_M with list and perfectly aligned tensor."""
     from gemma_4_sql.backends.pytorch.gguf import quantize_tensor_q4_k_m
 
-    # Hit else branch (not numpy, not torch) -> pass a list
     arr_list = [1.0] * 10
     res_list = quantize_tensor_q4_k_m(arr_list)
     assert len(res_list) > 0
 
-    # Hit rem == 0 branch -> length 256
-    arr_aligned = np.array([1.0] * 256, dtype=np.float32)
+    arr_aligned = torch.tensor([1.0] * 256, dtype=torch.float32)
     res_aligned = quantize_tensor_q4_k_m(arr_aligned)
     assert len(res_aligned) > 0
 
 
-def test_quantize_tensor_q4_0_numpy() -> None:
-    """Test quantization branches for Q4_0 with numpy arrays."""
-    import numpy as np
-
+def test_quantize_tensor_q4_0_torch() -> None:
+    """Test quantization branches for Q4_0 with torch tensors."""
     from gemma_4_sql.backends.pytorch.gguf import quantize_tensor_q4_0
 
-    arr = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    arr = torch.tensor([1.0, 2.0, 3.0, 4.0], dtype=torch.float32)
     res = quantize_tensor_q4_0(arr)
     assert len(res) > 0
 
 
-def test_flatten_values_torch_no_numpy(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _flatten_values with torch tensor when numpy is not available."""
-    import importlib
-    import sys
-
-    import torch
-
+def test_flatten_values_torch_and_flattenable_protocol() -> None:
+    """Test _flatten_values with torch tensor and custom _FlattenableArrayProtocol object."""
     import gemma_4_sql.backends.pytorch.gguf as gguf_mod
 
-    monkeypatch.setitem(sys.modules, "numpy", None)
-    importlib.reload(gguf_mod)
+    class _CustomFlattenable:
+        """Minimal implementation of `_FlattenableArrayProtocol`."""
+
+        @property
+        def shape(self) -> tuple[int, ...]:
+            """Provide array shape."""
+            return (2, 2)
+
+        def flatten(self) -> _CustomFlattenable:
+            """Return flattened self."""
+            return self
+
+        def tolist(self) -> list[float]:
+            """Return flat float list."""
+            return [1.0, 2.0, 3.0, 4.0]
 
     tensor = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
     flat = gguf_mod._flatten_values(tensor)
     assert flat == [1.0, 2.0, 3.0, 4.0]
-
-    monkeypatch.undo()
-    importlib.reload(gguf_mod)
+    assert gguf_mod._flatten_values(_CustomFlattenable()) == [1.0, 2.0, 3.0, 4.0]

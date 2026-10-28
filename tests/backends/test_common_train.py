@@ -1,7 +1,5 @@
 """Unit and behavioral tests for common train."""
 
-from unittest.mock import MagicMock
-
 from gemma_4_sql.backends.common_train import (
     apply_nnx_optimizer_update,
     create_nnx_optimizer,
@@ -10,39 +8,31 @@ from gemma_4_sql.backends.common_train import (
 
 
 def test_nnx_optimizer_helpers() -> None:
-    """Verify create_nnx_optimizer and apply_nnx_optimizer_update support both Flax <0.11 and >=0.11 signatures."""
-    mock_nnx = MagicMock()
-    mock_nnx.Param = "Param"
-    mock_nnx.Optimizer.return_value = "opt_with_wrt"
-    assert create_nnx_optimizer(mock_nnx, "model", "tx") == "opt_with_wrt"
+    """Verify create_nnx_optimizer and apply_nnx_optimizer_update invoke standardized Flax NNX APIs."""
 
-    def opt_no_wrt(model: str, tx: str, **kwargs: object) -> str:
-        """Raise TypeError when wrt is passed."""
-        if "wrt" in kwargs:
-            raise TypeError("unexpected keyword wrt")
-        return f"{model}_{tx}"
+    class _MockNNX:
+        """Typed NNX module stub."""
 
-    mock_nnx.Optimizer.side_effect = opt_no_wrt
-    assert create_nnx_optimizer(mock_nnx, "model", "tx") == "model_tx"
+        Param: type = int
 
-    opt_new = MagicMock()
-    apply_nnx_optimizer_update(opt_new, "model", "grads")
-    opt_new.update.assert_called_once_with("model", "grads")
+        @staticmethod
+        def Optimizer(model: str, tx: str, *, wrt: type | str) -> str:
+            """Return formatted optimizer identifier."""
+            return f"{model}_{tx}_{wrt.__name__ if isinstance(wrt, type) else wrt}"
 
-    class LegacyOpt:
-        """Legacy Flax NNX optimizer accepting only grads."""
+    assert create_nnx_optimizer(_MockNNX(), "model", "tx") == "model_tx_int"
 
-        def __init__(self) -> None:
-            """Initialize LegacyOpt."""
-            self.updated_grads: object = None
+    calls: list[tuple[str, str]] = []
 
-        def update(self, grads: object) -> None:
-            """Record grads."""
-            self.updated_grads = grads
+    class _StandardOpt:
+        """Optimizer stub accepting `(model, grads)`."""
 
-    opt_old = LegacyOpt()
-    apply_nnx_optimizer_update(opt_old, "model", "grads")
-    assert opt_old.updated_grads == "grads"
+        def update(self, model: str, grads: str, /) -> None:
+            """Record `(model, grads)` update call."""
+            calls.append((model, grads))
+
+    apply_nnx_optimizer_update(_StandardOpt(), "model", "grads")
+    assert calls == [("model", "grads")]
 
 
 def test_generic_run_training_epochs_empty_dataloader() -> None:

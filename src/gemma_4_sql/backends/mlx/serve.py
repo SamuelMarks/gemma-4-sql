@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from gemma_4_sql.backends.common_inference import BoundedLRUCache
 from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.backends.mlx.inference import MODEL_CACHE as _mlx_model_cache
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
-from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, MlxCausalLMProtocol, ServeResultDict
+from gemma_4_sql.type_hints import (
+    FastAPIAppProtocol,
+    JSONDict,
+    JSONValue,
+    MlxCausalLMProtocol,
+    ServeResultDict,
+    TokenizerProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
 mx = optional_import("mlx.core")
 
 MAX_MLX_CACHE_SIZE = 4
-_mlx_model_cache: BoundedLRUCache[tuple[Any, Any]] = BoundedLRUCache(maxsize=MAX_MLX_CACHE_SIZE)
 
 
 def clear_mlx_model_cache() -> None:
@@ -24,7 +29,7 @@ def clear_mlx_model_cache() -> None:
     _mlx_model_cache.clear()
 
 
-def _load_mlx_model(model_name: str) -> tuple[Any, Any]:
+def _load_mlx_model(model_name: str) -> tuple[MlxCausalLMProtocol, TokenizerProtocol | None]:
     """Load an MLX model and tokenizer into the bounded LRU cache.
 
     Args:
@@ -40,14 +45,15 @@ def _load_mlx_model(model_name: str) -> tuple[Any, Any]:
     _mlx_model_cache.maxsize = MAX_MLX_CACHE_SIZE
     cached = _mlx_model_cache.get_model(model_name)
     if cached is not None:
-        return cached
+        return cached  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
     try:
-        import mlx_lm
-
-        loaded: Any = mlx_lm.load(model_name)
+        mlx_lm = optional_import("mlx_lm")
+        if mlx_lm is None:
+            raise ImportError("mlx_lm is not installed.")
+        loaded = mlx_lm.load(model_name)
         if isinstance(loaded, (tuple, list)):
             model: MlxCausalLMProtocol = loaded[0]
-            tokenizer = loaded[1] if len(loaded) > 1 else None
+            tokenizer: TokenizerProtocol | None = loaded[1] if len(loaded) > 1 else None
         else:
             model = loaded
             tokenizer = None
@@ -165,7 +171,6 @@ def serve_model(
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
-        missing_deps=mx is None,
         app_factory=lambda: _app_factory(model_name, max_batch_size=max_batch_size),
     )
 

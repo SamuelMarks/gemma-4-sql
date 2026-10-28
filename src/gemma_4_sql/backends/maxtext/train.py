@@ -2,45 +2,112 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Protocol, SupportsFloat, runtime_checkable
 
 from gemma_4_sql.backends.common_train import generic_run_training_epochs, run_train_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ETLConfig, JSONDict, MaxTextCausalLMProtocol, MaxTextTrainerState, TensorType, TrainerState, TrainingConfig, TrainResultDict
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError, StatusValue
+from gemma_4_sql.type_hints import (
+    ETLConfig,
+    JaxArrayProtocol,
+    JSONValue,
+    MaxTextCausalLMProtocol,
+    MaxTextTrainerState,
+    TensorProtocol,
+    TensorType,
+    TrainerState,
+    TrainingConfig,
+    TrainResultDict,
+)
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _StatelessApplyModelProtocol[ValT](Protocol):
+    """Protocol for a stateless Flax/MaxText model exposing `.apply(params, inputs)`."""
+
+    def apply(
+        self,
+        params: Mapping[str, ValT],
+        inputs: ValT,
+        /,
+    ) -> ValT:
+        """Apply model parameters to `inputs`."""
+        ...
+
+
+type MaxTextTrainModel[ValT] = _StatelessApplyModelProtocol[ValT] | MaxTextCausalLMProtocol
+
+
+@runtime_checkable
+class _OptaxOptimizerProtocol[OptInputT, OptStateT](Protocol):
+    """Protocol for an Optax `GradientTransformation` supporting `.init(params)` and `.update(grads, opt_state, params)`."""
+
+    def init(self, params: OptInputT, /) -> OptStateT:
+        """Initialize optimizer state from parameters."""
+        ...
+
+    def update(
+        self,
+        updates: OptInputT,
+        state: OptStateT,
+        params: OptInputT | None = None,
+        /,
+    ) -> tuple[OptInputT, OptStateT]:
+        """Compute parameter updates and next optimizer state."""
+        ...
+
+
+type MaxTextStepCallable[ParamsT, OptStateT, BatchT] = Callable[
+    [ParamsT, OptStateT, BatchT],
+    tuple[ParamsT, OptStateT, SupportsFloat | float],
+]
+
 
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
 optax = optional_import("optax")
 maxtext_train = optional_import("maxtext.train")
-Gemma4Model = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
+Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
 ocp = optional_import("orbax.checkpoint")
 
 
-def _loss_fn(model: MaxTextCausalLMProtocol, params: dict[str, TensorType], batch: JSONDict) -> Any:
+def _loss_fn[ValT: TensorType | SupportsFloat](
+    model: MaxTextTrainModel[ValT],
+    params: Mapping[str, ValT],
+    batch: Mapping[str, ValT],
+) -> JaxArrayProtocol:
     """Compute the cross-entropy loss over a training batch.
 
     Args:
-        model: Model instance providing an apply method.
+        model: Model instance providing an `apply` method.
         params: Model parameter PyTree.
-        batch: Dictionary containing 'inputs' and integer 'targets' tensors.
+        batch: Dictionary containing `'inputs'` and integer `'targets'` tensors.
 
     Returns:
         Scalar mean cross-entropy loss tensor.
 
     """
-    logits = model.apply(params, batch["inputs"])
+    assert optax is not None
+    assert jnp is not None
+    logits = model.apply(params, batch["inputs"])  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[invalid-argument-type]
     targets = batch["targets"]
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
-    return jnp.mean(loss)
+    res: JaxArrayProtocol = jnp.mean(loss)
+    return res
 
 
-def _get_train_step_fn(model: MaxTextCausalLMProtocol, optimizer: object) -> Any:
+def _get_train_step_fn[ValT: TensorType | SupportsFloat, ParamsT, OptInputT, OptStateT, BatchT](
+    model: MaxTextTrainModel[ValT],
+    optimizer: _OptaxOptimizerProtocol[OptInputT, OptStateT],
+) -> MaxTextStepCallable[ParamsT, OptStateT, BatchT]:
     """Construct a JIT-compiled or standard training step execution function.
 
     Args:
@@ -48,11 +115,15 @@ def _get_train_step_fn(model: MaxTextCausalLMProtocol, optimizer: object) -> Any
         optimizer: Optax optimizer instance for parameter updates.
 
     Returns:
-        A callable train_step(params, opt_state, batch) returning updated params, opt_state, and loss.
+        A callable `train_step(params, opt_state, batch)` returning `(updated_params, updated_opt_state, loss)`.
 
     """
 
-    def train_step(params: dict[str, TensorType], opt_state: dict[str, TensorType], batch: JSONDict) -> Any:
+    def train_step(
+        params: ParamsT,
+        opt_state: OptStateT,
+        batch: BatchT,
+    ) -> tuple[ParamsT, OptStateT, SupportsFloat | float]:
         """Perform a single forward-backward pass and update optimizer state.
 
         Args:
@@ -61,41 +132,45 @@ def _get_train_step_fn(model: MaxTextCausalLMProtocol, optimizer: object) -> Any
             batch: Dictionary containing inputs and target tensors.
 
         Returns:
-            Tuple of (updated_params, updated_opt_state, scalar_loss).
+            Tuple of `(updated_params, updated_opt_state, scalar_loss)`.
+
         """
 
-        # type ignore for lambda mapping to dynamic PyTree
-        def _wrapper(p: Any, b: Any) -> Any:
-            """Evaluate _loss_fn for JAX value_and_grad differentiation."""
-            return _loss_fn(model, p, b)
+        def _wrapper(p: ParamsT, b: BatchT) -> JaxArrayProtocol:
+            """Evaluate `_loss_fn` for JAX `value_and_grad` differentiation."""
+            return _loss_fn(model, p, b)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
 
+        assert jax is not None
+        assert optax is not None
         (loss, grads) = jax.value_and_grad(_wrapper)(params, batch)
-        opt_any: Any = optimizer
-        (updates, opt_state) = opt_any.update(grads, opt_state, params)
-        params = optax.apply_updates(params, updates)
-        return (params, opt_state, loss)
+        (updates, opt_state) = optimizer.update(grads, opt_state, params)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        params = optax.apply_updates(params, updates)  # pyright: ignore[reportAssignmentType]
+        return (params, opt_state, loss)  # pyright: ignore[reportReturnType]
 
-    if jax is not None and hasattr(jax, "jit"):
-        return jax.jit(train_step)
+    with contextlib.suppress(AttributeError, TypeError):
+        compiled: MaxTextStepCallable[ParamsT, OptStateT, BatchT] = jax.jit(train_step)  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        return compiled
     return train_step
 
 
-def _run_training_epochs(state: MaxTextTrainerState[Any, Any, Any] | TrainerState[Any, Any, Any, Any]) -> tuple[TensorType, TensorType, float]:
-    """Execute epochs over dataloader using MaxTextTrainerState.
+def _run_training_epochs[ModelT, ParamsT, OptT, BatchT](
+    state: MaxTextTrainerState[ParamsT, OptT, BatchT] | TrainerState[ModelT, ParamsT, OptT, BatchT],
+) -> tuple[ParamsT | None, OptT | None, float]:
+    """Execute epochs over dataloader using `MaxTextTrainerState`.
 
     Args:
-        state: MaxTextTrainerState containing dataloader, epochs, step function, and initial states.
+        state: `MaxTextTrainerState` containing dataloader, epochs, step function, and initial states.
 
     Returns:
-        Tuple of (final_params, final_opt_state, final_loss).
+        Tuple of `(final_params, final_opt_state, final_loss)`.
 
     """
-    params: Any = state.params
-    opt_state: Any = state.opt_state
+    params = state.params
+    opt_state = state.opt_state
     train_step = state.train_step
-    dataloader: Any = state.dataloader or ()
+    dataloader: Iterable[BatchT] = state.dataloader or ()
 
-    def process_batch(batch: dict[str, Any]) -> float:
+    def process_batch(batch: BatchT) -> float:
         """Process a single batch during epoch iteration.
 
         Args:
@@ -107,8 +182,13 @@ def _run_training_epochs(state: MaxTextTrainerState[Any, Any, Any] | TrainerStat
         """
         nonlocal params, opt_state
         assert train_step is not None
-        (params, opt_state, loss) = train_step(params, opt_state, batch)
-        return float(loss.item() if hasattr(loss, "item") else loss)
+        step_out: tuple[ParamsT | None, OptT | None, SupportsFloat | float] = train_step(  # ty: ignore[invalid-assignment]
+            params,
+            opt_state,
+            batch,
+        )  # pyright: ignore[reportAssignmentType]
+        params, opt_state, loss = step_out
+        return float(loss)
 
     final_loss = generic_run_training_epochs(state.epochs, dataloader, process_batch)
     return (params, opt_state, final_loss)
@@ -128,12 +208,12 @@ def _initialize_jax_distributed(
         process_id: Rank/ID of the current host process.
 
     Returns:
-        True if initialization was performed, False if skipped.
+        `True` if initialization was performed, `False` if skipped.
 
     """
-    if jax is not None and hasattr(jax, "distributed") and hasattr(jax.distributed, "initialize"):
+    if jax is not None:
         try:
-            init_kwargs: dict[str, Any] = {}
+            init_kwargs: dict[str, str | int] = {}
             if coordinator_address is not None:
                 init_kwargs["coordinator_address"] = coordinator_address
             if num_processes is not None:
@@ -147,13 +227,13 @@ def _initialize_jax_distributed(
     return False
 
 
-def save_maxtext_checkpoint(
+def save_maxtext_checkpoint[ParamValT, OptValT](
     checkpoint_dir: str | Path,
     step: int,
-    params: dict[str, TensorType],
-    opt_state: dict[str, TensorType] | None = None,
+    params: Mapping[str, ParamValT],
+    opt_state: Mapping[str, OptValT] | None = None,
 ) -> Path:
-    """Save model parameters and optimizer state using Orbax CheckpointManager.
+    """Save model parameters and optimizer state using Orbax `CheckpointManager`.
 
     Args:
         checkpoint_dir: Target directory for storing Orbax checkpoints.
@@ -170,17 +250,13 @@ def save_maxtext_checkpoint(
 
     """
     if ocp is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("Orbax checkpoint dependency (orbax.checkpoint) is missing.")
-
-    from gemma_4_sql.exceptions import ExportError
 
     ckpt_path = Path(checkpoint_dir).resolve()
     try:
         ckpt_path.mkdir(parents=True, exist_ok=True)
         options = ocp.CheckpointManagerOptions(max_to_keep=2, create=True)
-        state_to_save: dict[str, Any] = {"params": params}
+        state_to_save: dict[str, Mapping[str, ParamValT] | Mapping[str, OptValT]] = {"params": params}
         if opt_state is not None:
             state_to_save["opt_state"] = opt_state
         with ocp.CheckpointManager(ckpt_path, ocp.PyTreeCheckpointer(), options) as mngr:
@@ -197,12 +273,12 @@ def _execute_train(
     learning_rate: float = 1e-4,
     batch_size: int = 2,
     local_step_mode: bool = False,
-    **kwargs: object,
+    **kwargs: JSONValue,
 ) -> tuple[str, float]:
     """Execute the MaxText training pipeline, dispatching to cluster training or local step loop.
 
     Args:
-        model_name_or_config: Target model identifier or complete TrainingConfig.
+        model_name_or_config: Target model identifier or complete `TrainingConfig`.
         dataset: Dataset identifier.
         epochs: Number of training epochs.
         learning_rate: Training learning rate.
@@ -211,7 +287,7 @@ def _execute_train(
         **kwargs: Additional parameters for MaxText cluster orchestration and checkpointing.
 
     Returns:
-        A tuple of (status, final_loss).
+        A tuple of `(status, final_loss)`.
 
     Raises:
         DependencyMissingError: If required MaxText dependencies are missing.
@@ -225,7 +301,7 @@ def _execute_train(
         epochs = cfg.epochs
         learning_rate = cfg.learning_rate
         batch_size = cfg.batch_size
-        extra = dict(getattr(cfg, "extra_kwargs", {}) or {})
+        extra: dict[str, JSONValue] = {k: v for k, v in (cfg.extra_kwargs or {}).items() if isinstance(v, (str, int, float, bool)) or v is None}
     else:
         model_name = str(model_name_or_config)
         extra = {}
@@ -237,12 +313,10 @@ def _execute_train(
             batch_size=batch_size,
         )
 
-    merged_kwargs: dict[str, object] = {**extra, **kwargs}
+    merged_kwargs: dict[str, JSONValue] = {**extra, **kwargs}
     local_step_mode = bool(merged_kwargs.get("local_step_mode", local_step_mode))
 
     if jax is None or jnp is None or optax is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MaxText dependencies are missing for training.")
 
     coord_addr = merged_kwargs.get("coordinator_address")
@@ -254,7 +328,7 @@ def _execute_train(
         process_id=int(proc_id) if isinstance(proc_id, (int, str)) else None,
     )
 
-    etl_kwargs: dict[str, Any] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool, list, dict)) or v is None}
+    etl_kwargs: dict[str, JSONValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool, list, dict)) or v is None}
     data_dict = build_dataloader(
         ETLConfig(
             dataset_name=dataset,
@@ -265,7 +339,8 @@ def _execute_train(
         **etl_kwargs,
     )
     dataloader = data_dict.get("loader", None)
-    if dataloader is None or not hasattr(dataloader, "__iter__"):
+    has_loader = isinstance(dataloader, Iterable)
+    if not has_loader:
         msg = f"Invalid dataloader for dataset: {dataset}"
         raise ValueError(msg)
 
@@ -290,19 +365,20 @@ def _execute_train(
         return "completed", dist_loss
 
     if Gemma4Model is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
         raise DependencyMissingError("MaxText dependencies are missing for training.")
 
     model = Gemma4Model(model_name)
     rng = jax.random.PRNGKey(0)
     dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-    params: dict[str, TensorType] = model.init(rng, dummy_input)
-    optimizer = optax.adamw(learning_rate)
-    opt_state: dict[str, TensorType] = optimizer.init(params)
+    params = model.init(rng, dummy_input)
+    optimizer: _OptaxOptimizerProtocol[
+        Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]],
+        Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]],
+    ] = optax.adamw(learning_rate)
+    opt_state = optimizer.init(params)
     train_step = _get_train_step_fn(model, optimizer)
 
-    final_state: tuple[Any, Any, float] = _run_training_epochs(
+    final_params, final_opt_state, final_loss = _run_training_epochs(
         MaxTextTrainerState(
             dataloader=dataloader,
             epochs=epochs,
@@ -311,25 +387,24 @@ def _execute_train(
             opt_state=opt_state,
         )
     )
-    final_params, final_opt_state, final_loss = final_state
 
     ckpt_dir = merged_kwargs.get("checkpoint_dir")
-    if ckpt_dir and ocp is not None:
+    if ckpt_dir and ocp is not None and isinstance(final_params, Mapping):
         save_maxtext_checkpoint(
             checkpoint_dir=str(ckpt_dir),
             step=epochs,
-            params=final_params,
-            opt_state=final_opt_state,
+            params=final_params,  # pyright: ignore[reportArgumentType]
+            opt_state=final_opt_state if isinstance(final_opt_state, Mapping) else None,  # pyright: ignore[reportArgumentType]
         )
 
     return "completed", float(final_loss)
 
 
-def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
+def train_model(config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
     """Train a Text-to-SQL model using the MaxText backend.
 
     Args:
-        config: The TrainingConfig specifying hyperparameters and settings.
+        config: The `TrainingConfig` specifying hyperparameters and settings.
         **kwargs: Extra parameters passed to the training pipeline (including `raise_on_error`).
 
     Returns:
@@ -343,13 +418,14 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
     if jax is None or jnp is None or optax is None or (Gemma4Model is None and maxtext_train is None):
         raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
 
-    dataset = getattr(config, "dataset", "dummy")
-    epochs = getattr(config, "epochs", 1)
-    learning_rate = getattr(config, "learning_rate", 1e-05)
-    extra = getattr(config, "extra_kwargs", {}) or {}
+    dataset = config.dataset
+    epochs = config.epochs
+    learning_rate = config.learning_rate
+    extra = config.extra_kwargs or {}
     local_step_mode = bool(kwargs.get("local_step_mode") or extra.get("local_step_mode", False))
     call_kwargs = dict(kwargs)
     call_kwargs.pop("raise_on_error", None)
+    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
 
     return run_train_wrapper(
         "maxtext",
@@ -359,9 +435,9 @@ def train_model(config: TrainingConfig, **kwargs: object) -> TrainResultDict:
             dataset=dataset,
             epochs=epochs,
             learning_rate=learning_rate,
-            batch_size=getattr(config, "batch_size", 2),
+            batch_size=config.batch_size,
             local_step_mode=local_step_mode,
             **call_kwargs,
         ),
-        **kwargs,
+        **wrapper_kwargs,
     )

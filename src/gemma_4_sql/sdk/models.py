@@ -63,17 +63,18 @@ def train_from_scratch(config: TrainingConfig | None = None) -> TrainResultDict:
     return _route_training(cfg)
 
 
-def pretrain_model(config: TrainingConfig | None = None) -> TrainResultDict:
+def pretrain_model(config: TrainingConfig | None = None, *, default_backend: str = "maxtext") -> TrainResultDict:
     """Pretrains an existing model.
 
     Args:
         config: Optional TrainingConfig object specifying pretraining parameters.
+        default_backend: Backend used when `config` is None (defaults to `'maxtext'`).
 
     Returns:
         A dictionary indicating the pretraining job status.
 
     """
-    cfg = _clone_training_config(config, action="pretrain", default_backend="maxtext")
+    cfg = _clone_training_config(config, action="pretrain", default_backend=default_backend)
     return _route_training(cfg)
 
 
@@ -91,15 +92,16 @@ def sft_model(config: TrainingConfig | None = None) -> TrainResultDict:
     return _route_training(cfg)
 
 
-def posttrain_model(config: TrainingConfig | None = None) -> TrainResultDict:
+def posttrain_model(config: TrainingConfig | None = None, *, default_backend: str = "keras") -> TrainResultDict:
     """Post-trains an existing model (e.g., RLHF, DPO).
 
     Args:
         config: Optional TrainingConfig object specifying posttraining parameters.
+        default_backend: Backend used when `config` is None (defaults to `'keras'`).
 
     Returns:
         A dictionary indicating the post-training job status.
 
     """
-    cfg = _clone_training_config(config, action="posttrain", default_backend="keras")
+    cfg = _clone_training_config(config, action="posttrain", default_backend=default_backend)
     return _route_training(cfg)

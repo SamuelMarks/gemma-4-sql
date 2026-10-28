@@ -33,29 +33,29 @@ class Gemma4Attention(nn.Module):
         self.layer_idx = layer_idx
         self.hidden_size = config.hidden_size
         self.num_heads = config.num_attention_heads
-        self.sliding_window = getattr(config, "sliding_window", 4096)
-        global_layers = getattr(config, "global_attn_layers", ())
-        self.is_global = bool(layer_idx in global_layers or getattr(config, "is_global", False))
+        self.sliding_window = config.sliding_window
+        global_layers = config.global_attn_layers
+        self.is_global = bool(layer_idx in global_layers or config.is_global)
 
         if self.is_global:
-            global_kv = getattr(config, "num_global_key_value_heads", None)
+            global_kv = config.num_global_key_value_heads
             self.num_key_value_heads = int(global_kv) if global_kv is not None else int(config.num_key_value_heads)
-            global_hd = getattr(config, "global_head_dim", None)
+            global_hd = config.global_head_dim
             self.head_dim = int(global_hd) if global_hd is not None else int(config.head_dim)
-            self.share_kv = bool(getattr(config, "share_kv_projections", False))
-            rope_factor = float(getattr(config, "global_rope_proportion", 1.0))
-            global_theta = getattr(config, "global_rope_max_timescale", None)
-            rope_base = float(global_theta) if global_theta is not None else float(getattr(config, "rope_theta", 10000.0))
+            self.share_kv = bool(config.share_kv_projections)
+            rope_factor = float(config.global_rope_proportion)
+            global_theta = config.global_rope_max_timescale
+            rope_base = float(global_theta) if global_theta is not None else float(config.rope_theta)
         else:
             self.num_key_value_heads = int(config.num_key_value_heads)
             self.head_dim = int(config.head_dim)
             self.share_kv = False
-            rope_factor = float(getattr(config, "local_rope_proportion", 1.0))
-            local_theta = getattr(config, "local_rope_max_timescale", None)
-            rope_base = float(local_theta) if local_theta is not None else float(getattr(config, "rope_theta", 10000.0))
+            rope_factor = float(config.local_rope_proportion)
+            local_theta = config.local_rope_max_timescale
+            rope_base = float(local_theta) if local_theta is not None else float(config.rope_theta)
 
-        self.attn_logits_soft_cap = getattr(config, "attn_logits_soft_cap", None)
-        rms_eps = float(getattr(config, "rms_norm_eps", 1e-6))
+        self.attn_logits_soft_cap = config.attn_logits_soft_cap
+        rms_eps = float(config.rms_norm_eps)
 
         self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
         self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
@@ -82,7 +82,7 @@ class Gemma4Attention(nn.Module):
         attention_mask: torch.Tensor | None = None,
         position_ids: torch.Tensor | None = None,
         past_key_value: tuple[torch.Tensor, torch.Tensor] | Cache | None = None,
-    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor] | Cache | None]:
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """Forward pass for attention.
 
         Args:
@@ -126,6 +126,7 @@ class Gemma4Attention(nn.Module):
                 past_key_value = (key_states, value_states)
             else:
                 key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx)
+                past_key_value = (key_states, value_states)
         else:
             past_key_value = (key_states, value_states)
 

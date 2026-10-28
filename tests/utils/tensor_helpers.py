@@ -4,7 +4,32 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Any
+from typing import Protocol, runtime_checkable
+
+import jax.numpy as jnp
+import mlx.core as mx
+import torch
+
+
+@runtime_checkable
+class FlattenableTensorProtocol(Protocol):
+    """Protocol for tensors supporting `.shape`, `.flatten()`, and `.tolist()`."""
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Provide tensor dimensions."""
+        ...
+
+    def flatten(self) -> FlattenableTensorProtocol:
+        """Return a 1D flattened tensor view."""
+        ...
+
+    def tolist(self) -> list[float] | Sequence[float]:
+        """Convert flattened tensor to a list of floats."""
+        ...
+
+
+type ComparableTensor = FlattenableTensorProtocol | Sequence[float] | Sequence[Sequence[float]]
 
 
 def create_dummy_weight_matrix(rows: int, cols: int, seed: float = 0.42) -> list[list[float]]:
@@ -17,6 +42,7 @@ def create_dummy_weight_matrix(rows: int, cols: int, seed: float = 0.42) -> list
 
     Returns:
         2D nested list representing the generated weight matrix.
+
     """
     matrix: list[list[float]] = []
     val = seed
@@ -45,6 +71,7 @@ def assert_sequences_close(
 
     Raises:
         AssertionError: If lengths differ or any element diverges beyond tolerance.
+
     """
     if len(actual) != len(expected):
         raise AssertionError(f"Length mismatch: {len(actual)} vs {len(expected)}")
@@ -63,7 +90,8 @@ def compute_snr(original: Sequence[float], reconstructed: Sequence[float]) -> fl
         reconstructed: Quantized or reconstructed numerical signal.
 
     Returns:
-        SNR in decibels (dB).
+        SNR in decibels (B).
+
     """
     if len(original) != len(reconstructed):
         raise ValueError("Sequence lengths must match for SNR computation.")
@@ -76,7 +104,13 @@ def compute_snr(original: Sequence[float], reconstructed: Sequence[float]) -> fl
     return 10.0 * math.log10(signal_power / noise_power)
 
 
-def assert_tensors_close(actual: Any, expected: Any, backend: str = "pytorch", rtol: float = 1e-3, atol: float = 1e-4) -> None:
+def assert_tensors_close(
+    actual: ComparableTensor,
+    expected: ComparableTensor,
+    backend: str = "pytorch",
+    rtol: float = 1e-3,
+    atol: float = 1e-4,
+) -> None:
     """Compare tensor values flexibly across frameworks.
 
     Args:
@@ -88,16 +122,33 @@ def assert_tensors_close(actual: Any, expected: Any, backend: str = "pytorch", r
 
     Raises:
         AssertionError: If shapes differ or elements diverge.
-    """
-    if backend == "pytorch":
-        assert list(actual.shape) == list(expected.shape)
-        assert_sequences_close(actual.flatten().tolist(), expected.flatten().tolist(), rtol=rtol, atol=atol)
-    elif backend in ["jax", "mlx"]:
-        import numpy as np
+        ValueError: If `backend` is not recognized.
 
-        actual_np = np.array(actual)
-        expected_np = np.array(expected)
-        assert list(actual_np.shape) == list(expected_np.shape)
-        assert_sequences_close(actual_np.flatten().tolist(), expected_np.flatten().tolist(), rtol=rtol, atol=atol)
+    """
+    if isinstance(actual, FlattenableTensorProtocol) and isinstance(expected, FlattenableTensorProtocol) and backend in {"pytorch", "jax", "mlx"}:
+        assert list(actual.shape) == list(expected.shape)
+        actual_list = [float(x) for x in actual.flatten().tolist()]
+        expected_list = [float(x) for x in expected.flatten().tolist()]
+        assert_sequences_close(actual_list, expected_list, rtol=rtol, atol=atol)
+    elif backend == "jax":
+        actual_jax = jnp.asarray(actual, dtype=jnp.float32)
+        expected_jax = jnp.asarray(expected, dtype=jnp.float32)
+        assert list(actual_jax.shape) == list(expected_jax.shape)
+        actual_flat = [float(x) for x in actual_jax.reshape(-1).tolist()]
+        expected_flat = [float(x) for x in expected_jax.reshape(-1).tolist()]
+        assert_sequences_close(actual_flat, expected_flat, rtol=rtol, atol=atol)
+    elif backend == "mlx":
+        assert not isinstance(actual, FlattenableTensorProtocol) and not isinstance(expected, FlattenableTensorProtocol)
+        actual_mx = mx.array(list(actual), dtype=mx.float32)
+        expected_mx = mx.array(list(expected), dtype=mx.float32)
+        assert list(actual_mx.shape) == list(expected_mx.shape)
+        assert bool(mx.allclose(actual_mx, expected_mx, rtol=rtol, atol=atol).item())
+    elif backend == "pytorch":
+        actual_pt = torch.as_tensor(actual, dtype=torch.float32)
+        expected_pt = torch.as_tensor(expected, dtype=torch.float32)
+        assert list(actual_pt.shape) == list(expected_pt.shape)
+        actual_flat = [float(x) for x in actual_pt.reshape(-1).tolist()]
+        expected_flat = [float(x) for x in expected_pt.reshape(-1).tolist()]
+        assert_sequences_close(actual_flat, expected_flat, rtol=rtol, atol=atol)
     else:
         raise ValueError(f"Unknown backend for tensor comparison: {backend}")

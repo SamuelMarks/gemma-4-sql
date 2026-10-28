@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sized
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +15,14 @@ from gemma_4_sql.type_hints import ETLConfig
 from tests.conftest import requires_duckdb
 
 pytestmark = requires_duckdb
+
+
+class _DummyBase:
+    """Base class stub for Grain RandomAccessDataSource and MapTransform."""
+
+
+class _DummyDatasetsSentinel:
+    """Non-None sentinel for `datasets` module."""
 
 
 @pytest.fixture
@@ -39,7 +47,7 @@ def test_real_duckdb_etl_stages(seeded_duckdb_file: str, monkeypatch: pytest.Mon
     assert rows[1] == {"question": "Count active orders", "query": "SELECT COUNT(*) FROM orders WHERE active = 1;"}
 
     # MLX backend uses pure Python MLXDataLoader over the real DuckDB rows
-    monkeypatch.setattr("gemma_4_sql.backends.mlx.etl.datasets", object(), raising=False)
+    monkeypatch.setattr("gemma_4_sql.backends.mlx.etl.datasets", _DummyDatasetsSentinel(), raising=False)
     config = ETLConfig(
         dataset_name="local_duckdb",
         split="train",
@@ -51,20 +59,29 @@ def test_real_duckdb_etl_stages(seeded_duckdb_file: str, monkeypatch: pytest.Mon
     res_pre = etl_pretrain(config, backend="mlx")
     assert res_pre["status"] == "loaded"
     assert res_pre["backend"] == "mlx"
-    loader_pre: Any = res_pre.get("loader")
+    loader_pre = res_pre.get("loader")
+    assert isinstance(loader_pre, Iterable)
     batches_pre = list(loader_pre)
     assert len(batches_pre) == 1
-    assert len(batches_pre[0]["inputs"]) == 2
-    assert len(batches_pre[0]["targets"]) == 2
+    first_pre = batches_pre[0]
+    assert isinstance(first_pre, Mapping)
+    inputs_pre = first_pre["inputs"]
+    targets_pre = first_pre["targets"]
+    assert isinstance(inputs_pre, Sized) and len(inputs_pre) == 2
+    assert isinstance(targets_pre, Sized) and len(targets_pre) == 2
 
     res_sft = etl_sft(config, backend="mlx")
     assert res_sft["status"] == "loaded"
-    batches_sft = list(res_sft.get("loader") or ())
+    loader_sft = res_sft.get("loader")
+    assert isinstance(loader_sft, Iterable)
+    batches_sft = list(loader_sft)
     assert len(batches_sft) == 1
 
     res_post = etl_posttrain(config, backend="mlx")
     assert res_post["status"] == "loaded"
-    batches_post = list(res_post.get("loader") or ())
+    loader_post = res_post.get("loader")
+    assert isinstance(loader_post, Iterable)
+    batches_post = list(loader_post)
     assert len(batches_post) == 1
 
 
@@ -76,10 +93,10 @@ def test_duckdb_etl_grain_backends(
 ) -> None:
     """Verify Grain-based backends (jax, keras, maxtext) load real rows from DuckDB."""
     mock_grain = MagicMock()
-    mock_grain.RandomAccessDataSource = object
-    mock_grain.MapTransform = object
+    mock_grain.RandomAccessDataSource = _DummyBase
+    mock_grain.MapTransform = _DummyBase
     monkeypatch.setattr(f"gemma_4_sql.backends.{backend}.etl.grain", mock_grain, raising=False)
-    monkeypatch.setattr(f"gemma_4_sql.backends.{backend}.etl.datasets", object(), raising=False)
+    monkeypatch.setattr(f"gemma_4_sql.backends.{backend}.etl.datasets", _DummyDatasetsSentinel(), raising=False)
 
     config = ETLConfig(
         dataset_name="local_duckdb",

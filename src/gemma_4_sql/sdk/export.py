@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from gemma_4_sql.sdk.registry import get_backend
-from gemma_4_sql.type_hints import ExportResultDict
+from gemma_4_sql.type_hints import ExportResultDict, JSONValue
 
 
-def export_model(model_name: str, export_path: str, backend: str = "jax", **kwargs: Any) -> ExportResultDict:
+def export_model(model_name: str, export_path: str, backend: str = "jax", **kwargs: JSONValue) -> ExportResultDict:
     """Export a trained Text-to-SQL model.
 
     Args:
@@ -21,7 +19,6 @@ def export_model(model_name: str, export_path: str, backend: str = "jax", **kwar
         Structured `ExportResultDict` containing `backend`, `model`, `export_path`, `file_path`, `format`, and `status`.
 
     """
-
     return get_backend(backend).export_model(model_name, export_path, **kwargs)
 
 

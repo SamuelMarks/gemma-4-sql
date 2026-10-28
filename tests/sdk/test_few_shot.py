@@ -14,13 +14,18 @@ from gemma_4_sql.sdk.few_shot import (
 
 
 def test_few_shot_routing() -> None:
-    """Test few-shot prompt routing across all backends."""
-    for backend in ["jax", "keras", "maxtext", "pytorch", "unknown"]:
+    """Test few-shot prompt routing across all valid backends and reject unknown backends."""
+    from gemma_4_sql.exceptions import ConfigurationError
+
+    for backend in ["jax", "keras", "maxtext", "mlx", "pytorch"]:
         res = build_few_shot_prompt("foo", "prompt", [{"input": "a", "output": "b"}], backend=backend)
         assert res["backend"] == backend
         assert res["model"] == "foo"
         assert res["status"] == f"success_{backend}_few_shot"
         assert "Input: a\nOutput: b" in str(res["few_shot_prompt"])
+
+    with pytest.raises(ConfigurationError, match="Unknown backend: unknown"):
+        build_few_shot_prompt("foo", "prompt", [{"input": "a", "output": "b"}], backend="unknown")
 
 
 def test_select_relevant_examples() -> None:
@@ -58,6 +63,10 @@ def test_build_few_shot_prompt_with_selection() -> None:
     res_empty = build_few_shot_prompt("test_model", "Find customers", [], backend="jax")
     assert res_empty["few_shot_prompt"] == "Input: Find customers\nOutput: "
 
+    # Budgeting when top_k is None
+    res_budget = build_few_shot_prompt("test_model", "Find customers", pool, backend="jax", top_k=None, max_tokens=15)
+    assert res_budget["num_examples"] == 1
+
 
 def test_generate_few_shot_sql(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test end-to-end generate_few_shot_sql using registry backend."""
@@ -67,7 +76,7 @@ def test_generate_few_shot_sql(monkeypatch: pytest.MonkeyPatch) -> None:
         "confidence_score": 0.92,
         "status": "success",
     }
-    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _name: mock_backend)
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _name: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
 
     pool = [{"input": "Count users", "output": "SELECT count(*) FROM users"}]
     res = generate_few_shot_sql(

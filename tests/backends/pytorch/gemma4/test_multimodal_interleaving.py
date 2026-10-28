@@ -260,6 +260,6 @@ def test_gemma4_causal_lm_from_pretrained_default_config(tmp_path: Path) -> None
         intermediate_size=64,
     )
 
-    with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4Config", return_value=tiny_cfg):
+    with patch.object(Gemma4Config, "from_preset", return_value=tiny_cfg):
         m = Gemma4ForCausalLM.from_pretrained(str(empty_dir))
         assert isinstance(m, Gemma4ForCausalLM)

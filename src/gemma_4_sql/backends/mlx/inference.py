@@ -2,44 +2,80 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Protocol, SupportsFloat, runtime_checkable
 
-from gemma_4_sql.backends.common_inference import BoundedLRUCache, normalize_logprob_confidence, run_inference_wrapper
+from gemma_4_sql.backends.common_inference import (
+    BoundedLRUCache,
+    make_model_cache_key,
+    normalize_logprob_confidence,
+    run_inference_wrapper,
+)
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
-from gemma_4_sql.type_hints import InferenceResultDict, JSONValue, MlxCausalLMProtocol
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError, StatusValue
+from gemma_4_sql.type_hints import (
+    InferenceResultDict,
+    JSONValue,
+    MlxArrayProtocol,
+    MlxCausalLMProtocol,
+    TokenizerProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
+
+@runtime_checkable
+class _MlxTokenizerProtocol(Protocol):
+    """Protocol for an MLX tokenizer supporting `.encode(text)`, `.decode(ids)`, and `.eos_token_id`."""
+
+    @property
+    def eos_token_id(self) -> int | None:
+        """Provide the end-of-sequence token ID."""
+        ...
+
+    def encode(self, text: str, /) -> Sequence[int] | MlxArrayProtocol:
+        """Encode `text` into token IDs."""
+        ...
+
+    def decode(self, token_ids: Sequence[int], /) -> str:
+        """Decode `token_ids` into text."""
+        ...
+
+
 mx = optional_import("mlx.core")
-load = optional_attr("mlx_lm", "load")
+_raw_load = optional_attr("mlx_lm", "load")
+load: Callable[[str], tuple[MlxCausalLMProtocol, TokenizerProtocol | _MlxTokenizerProtocol | None] | MlxCausalLMProtocol] | None = (  # ty: ignore[invalid-assignment]
+    _raw_load if callable(_raw_load) else None
+)
 generate = optional_attr("mlx_lm", "generate")
 
-_MODEL_CACHE: BoundedLRUCache[tuple[MlxCausalLMProtocol, Any]] = BoundedLRUCache(maxsize=4)
+_MODEL_CACHE: BoundedLRUCache[tuple[MlxCausalLMProtocol, TokenizerProtocol | _MlxTokenizerProtocol | None]] = BoundedLRUCache(maxsize=4)
+MODEL_CACHE = _MODEL_CACHE
 
 
 def compute_confidence_score(log_probs: list[float] | float, num_tokens: int) -> float:
     """Compute length-normalized sequence confidence score from log probabilities.
 
     Mathematical formulation:
-        confidence = exp( (1 / max(1, L)) * sum_{i=1}^L log P(t_i) )
-    bounded within the range [0.0, 1.0].
+        `confidence = exp((1 / max(1, L)) * sum_{i=1}^L log P(t_i))`
+    bounded within the range `[0.0, 1.0]`.
 
     Args:
         log_probs: List of per-token log probabilities or cumulative log probability scalar.
-        num_tokens: Total number of generated tokens L.
+        num_tokens: Total number of generated tokens `L`.
 
     Returns:
-        Sequence confidence score between 0.0 and 1.0.
+        Sequence confidence score between `0.0` and `1.0`.
 
     """
     return normalize_logprob_confidence(log_probs, num_tokens)
 
 
 def mlx_beam_search(
-    model: MlxCausalLMProtocol | None,
-    tokenizer: Any,
+    model: MlxCausalLMProtocol | Callable[..., MlxArrayProtocol | SupportsFloat | Sequence[MlxArrayProtocol | SupportsFloat] | Sequence[int]] | None,
+    tokenizer: TokenizerProtocol | _MlxTokenizerProtocol | None,
     prompt: str,
     beam_width: int = 3,
     max_length: int = 50,
@@ -53,14 +89,14 @@ def mlx_beam_search(
 
     Args:
         model: MLX model instance with callable forward pass.
-        tokenizer: Tokenizer instance supporting encode and decode.
+        tokenizer: Tokenizer instance supporting `encode` and `decode`.
         prompt: Natural language input prompt string.
         beam_width: Number of beam hypotheses to maintain.
         max_length: Maximum number of new tokens to generate.
         eos_token_id: Optional end-of-sequence token ID.
 
     Returns:
-        Tuple of (generated SQL query string, confidence score in [0.0, 1.0]).
+        Tuple of `(generated SQL query string, confidence score in [0.0, 1.0])`.
 
     Raises:
         DependencyMissingError: If MLX dependencies are missing.
@@ -70,24 +106,22 @@ def mlx_beam_search(
     if model is None:
         raise InferenceError("Valid model instance is required for MLX beam search.")
 
-    # Encode prompt
-    if tokenizer is not None and hasattr(tokenizer, "encode"):
-        encoded = tokenizer.encode(prompt)
-        input_ids = encoded.tolist() if hasattr(encoded, "tolist") else list(encoded)
-    else:
+    input_ids: list[int] | None = None
+    with contextlib.suppress(AttributeError, TypeError):
+        encoded = tokenizer.encode(prompt)  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        input_ids = [int(x) for x in encoded]
+    if input_ids is None:
         from gemma_4_sql.tokenization import SQLTokenizer
 
         input_ids = SQLTokenizer().encode(prompt)
 
-    # Determine EOS ID
+    eos_id = 1
     if eos_token_id is not None:
         eos_id = eos_token_id
-    elif tokenizer is not None and hasattr(tokenizer, "eos_token_id") and tokenizer.eos_token_id is not None:
-        eos_id = int(tokenizer.eos_token_id)
     else:
-        eos_id = 1
+        with contextlib.suppress(AttributeError, TypeError, ValueError):
+            eos_id = int(tokenizer.eos_token_id)  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[invalid-argument-type, unresolved-attribute]
 
-    # Initialize beams: (generated_tokens, cumulative_log_prob, is_done)
     beams: list[tuple[list[int], float, bool]] = [([], 0.0, False)]
 
     for _ in range(max_length):
@@ -101,30 +135,30 @@ def mlx_beam_search(
             full_seq = input_ids + gen_tokens
             if mx is not None:
                 tensor_in = mx.array([full_seq])
-                out: Any = model(tensor_in)
+                out = model(tensor_in)
             else:
                 out = model(full_seq)
 
-            next_logits: Any = None
-            # Extract logits for the next token position
-            if hasattr(out, "ndim") and out.ndim == 3:
-                next_logits = out[0, -1, slice(None)]
-            elif hasattr(out, "ndim") and out.ndim == 2:
-                next_logits = out[-1, slice(None)]
-            elif isinstance(out, (list, tuple)):
-                next_logits = out[-1]
+            if isinstance(out, MlxArrayProtocol):
+                if out.ndim == 3:
+                    next_logits: MlxArrayProtocol | None = out[0, -1, :]
+                elif out.ndim == 2:
+                    next_logits = out[-1, :]
+                else:
+                    next_logits = out
             else:
-                next_logits = out
+                last_item = out[-1]  # pyright: ignore[reportIndexIssue,reportArgumentType]  # ty: ignore[invalid-argument-type, not-subscriptable]
+                next_logits = last_item if isinstance(last_item, MlxArrayProtocol) else None
 
-            if mx is not None and hasattr(next_logits, "shape"):
-                log_probs = next_logits - mx.logsumexp(next_logits, axis=-1, keepdims=True)
+            if mx is not None and next_logits is not None:
+                log_probs: MlxArrayProtocol = next_logits - mx.logsumexp(next_logits, axis=-1, keepdims=True)
                 vocab_size = int(next_logits.shape[-1])
                 k = min(beam_width, vocab_size)
                 top_k_indices = mx.argsort(log_probs)[-k:].tolist()
                 for tok_idx in top_k_indices:
                     idx = int(tok_idx)
                     log_prob_idx = log_probs[idx]
-                    lp = float(log_prob_idx.item() if hasattr(log_prob_idx, "item") else log_prob_idx)
+                    lp = float(log_prob_idx.item())
                     new_tokens = [*gen_tokens, idx]
                     new_cum = cum_score + lp
                     candidates.append((new_tokens, new_cum, idx == eos_id))
@@ -142,22 +176,22 @@ def mlx_beam_search(
 
     confidence = compute_confidence_score(best_score, len(best_tokens))
 
-    # Strip EOS token if present
     output_tokens = best_tokens[:-1] if best_tokens and best_tokens[-1] == eos_id else best_tokens
     if not output_tokens:
         raise InferenceError("MLX beam search yielded only an EOS token.")
 
-    if tokenizer is not None and hasattr(tokenizer, "decode"):
-        sql = tokenizer.decode(output_tokens).strip()
-    else:
+    decoded_sql: str | None = None
+    with contextlib.suppress(AttributeError, TypeError):
+        decoded_sql = tokenizer.decode(output_tokens).strip()  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+    if decoded_sql is None:
         from gemma_4_sql.tokenization import SQLTokenizer
 
-        sql = SQLTokenizer().decode(output_tokens).strip()
+        decoded_sql = SQLTokenizer().decode(output_tokens).strip()
 
-    if not sql:
+    if not decoded_sql:
         raise InferenceError("MLX beam search decoded into an empty SQL query string.")
 
-    return (sql, confidence)
+    return (decoded_sql, confidence)
 
 
 def generate_sql(
@@ -174,7 +208,7 @@ def generate_sql(
         prompt: The input natural language prompt.
         beam_width: The number of beams for beam search.
         max_length: The maximum length of the sequence.
-        **kwargs: Advanced generation parameters (e.g., eos_token_id).
+        **kwargs: Advanced generation parameters (e.g., `eos_token_id`).
 
     Returns:
         A dictionary containing the generated SQL and metadata.
@@ -186,15 +220,26 @@ def generate_sql(
     if load is None:
         raise DependencyMissingError("MLX dependencies are missing.")
 
+    if kwargs.get("image_path") is not None or kwargs.get("audio_path") is not None:
+        from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
+
+        mm_input = format_multimodal_prompt(
+            prompt,
+            has_image=kwargs.get("image_path") is not None,
+            has_audio=kwargs.get("audio_path") is not None,
+        )
+        prompt = str(mm_input.get("prompt", prompt))
+
     def _execute() -> tuple[str, float]:
         """Load or retrieve cached MLX model and run beam search decoding."""
+        assert load is not None
         logger.info("Generating with MLX %s (beam_width=%d)", model_name, beam_width)
-        cache_key = f"{model_name}:{id(load)}"
+        cache_key = make_model_cache_key(model_name, backend_name="mlx", factories=(load,))
         cached_pair = _MODEL_CACHE.get_model(cache_key)
         if cached_pair is not None:
             model, tokenizer = cached_pair
         else:
-            loaded: Any = load(model_name)
+            loaded = load(model_name)
             model = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
             tokenizer = loaded[1] if isinstance(loaded, (tuple, list)) and len(loaded) > 1 else None
             _MODEL_CACHE.put_model(cache_key, (model, tokenizer))
@@ -209,4 +254,5 @@ def generate_sql(
             eos_token_id=eos_id,
         )
 
-    return run_inference_wrapper("mlx", model_name, prompt, beam_width, _execute, **kwargs)
+    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    return run_inference_wrapper("mlx", model_name, prompt, beam_width, _execute, **wrapper_kwargs)

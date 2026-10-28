@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping, Sequence
+from typing import Self
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import gemma_4_sql.sdk.adapters.snowflake_adapter as sa
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
+from gemma_4_sql.type_hints import CursorProtocol, JSONPrimitive, JSONValue
 from tests.utils.test_utils import FakeDBConnection
 
 
@@ -54,10 +56,12 @@ async def test_snowflake_adapter_execution(
         assert snowflake_error_cls in adapter.error_classes
 
         mock_snowflake.connector.errors.Error = 123
-        assert Exception in adapter.error_classes
+        assert DatabaseExecutionError in adapter.error_classes
 
         original_connector = mock_snowflake.connector
         del mock_snowflake.connector
+        mock_snowflake.connect = lambda **_kw: conn  # pyright: ignore[reportUnknownLambdaType]
+        assert adapter.connect() == conn
         mock_snowflake.connect = None
         with pytest.raises(DependencyMissingError, match="snowflake connect function could not be resolved"):
             adapter.connect()
@@ -75,14 +79,14 @@ async def test_snowflake_adapter_execution(
 
         mock_snowflake.connector.errors.Error = snowflake_error_cls
 
-        def mock_fail(*_a: Any, **_k: Any) -> None:
+        def mock_fail(*_a: str | Sequence[JSONPrimitive], **_k: JSONValue) -> None:
             """Raise simulated SnowflakeError."""
             msg = "Simulated"
             raise snowflake_error_cls(msg)
 
         mock_cur_fn = MagicMock()
         mock_cur_fn.return_value.execute = mock_fail
-        setattr(conn, "cursor", mock_cur_fn)
+        monkeypatch.setattr(conn, "cursor", mock_cur_fn)
         suc, res, err = await adapter.execute_with_feedback_async("FAIL")
         assert suc is False
         assert "Simulated" in str(err)
@@ -105,15 +109,14 @@ async def test_snowflake_adapter_missing_deps(
     with pytest.raises(DependencyMissingError, match="snowflake-connector-python is required"):
         sa.SnowflakeAdapter("path", {})
 
-    with patch.dict("sys.modules", {"snowflake.connector": None}):
-        assert Exception in adapter.error_classes
+    assert DatabaseExecutionError in adapter.error_classes
 
 
 def test_snowflake_adapter_schema(
     fake_snowflake_module: tuple[MagicMock, FakeDBConnection, type[Exception]],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify SnowflakeAdapter.setup_schema commits on success and rolls back on failure."""
+    """Verify SnowflakeAdapter.setup_schema commits on success and wraps errors in DatabaseExecutionError."""
     mock_snowflake, conn, _ = fake_snowflake_module
 
     monkeypatch.setattr(sa, "snowflake", mock_snowflake)
@@ -123,16 +126,52 @@ def test_snowflake_adapter_schema(
     assert conn._transactions_committed == 1
 
     conn.set_fail_query("FAIL")
-    with pytest.raises(Exception, match="Simulated execution failure"):
+    with pytest.raises(DatabaseExecutionError, match="Simulated execution failure"):
         adapter.setup_schema("FAIL")
     assert conn._transactions_rolled_back == 1
 
-    adapter.conn = MagicMock()
-    del adapter.conn.commit
-    del adapter.conn.rollback
+    class StatelessCursorConn:
+        """Connection stub without commit/rollback methods."""
 
+        def __init__(self, should_fail: bool = False) -> None:
+            """Initialize with optional failure flag."""
+            self.should_fail = should_fail
+
+        def cursor(self) -> CursorProtocol:
+            """Return a minimal cursor."""
+            outer = self
+
+            class _Cur:
+                """Minimal cursor stub for DDL execution."""
+
+                description: Sequence[Sequence[str | int | None]] | bool | None = None
+
+                def execute(
+                    self,
+                    _q: str,
+                    _params: Sequence[JSONPrimitive] | Mapping[str, JSONPrimitive] | None = None,
+                    /,
+                ) -> Self:
+                    """Execute DDL or raise RuntimeError."""
+                    if outer.should_fail:
+                        raise RuntimeError("Mock error")
+                    return self
+
+                def fetchall(self) -> Sequence[Sequence[JSONPrimitive]]:
+                    """Return empty result set."""
+                    return []
+
+                def close(self) -> None:
+                    """Close cursor no-op."""
+
+            return _Cur()
+
+        def close(self) -> None:
+            """Close connection no-op."""
+
+    monkeypatch.setattr(adapter, "conn", StatelessCursorConn(should_fail=False))
     adapter.setup_schema("CREATE TABLE t2 (a INT)")
 
-    adapter.conn.cursor.return_value.execute.side_effect = RuntimeError("Mock error")
-    with pytest.raises(RuntimeError, match="Mock error"):
+    monkeypatch.setattr(adapter, "conn", StatelessCursorConn(should_fail=True))
+    with pytest.raises(DatabaseExecutionError, match="Mock error"):
         adapter.setup_schema("FAIL2")

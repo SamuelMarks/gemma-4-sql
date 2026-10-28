@@ -34,7 +34,7 @@ class Gemma4DecoderLayer(nn.Module):
         self.config = config
         self.layer_idx = layer_idx
         self.hidden_size = config.hidden_size
-        self.use_post_norms = bool(getattr(config, "use_post_norms", False))
+        self.use_post_norms = bool(config.use_post_norms)
         self.self_attn = Gemma4Attention(config=config, layer_idx=layer_idx)
 
         if config.num_experts > 1:
@@ -51,7 +51,7 @@ class Gemma4DecoderLayer(nn.Module):
             self.pre_feedforward_layernorm = None
             self.post_feedforward_layernorm = None
 
-        ple_dim = getattr(config, "hidden_size_per_layer_input", None)
+        ple_dim = config.hidden_size_per_layer_input
         if ple_dim:
             self.per_layer_input_gate = nn.Linear(config.hidden_size, int(ple_dim), bias=False)
             self.per_layer_projection = nn.Linear(int(ple_dim), config.hidden_size, bias=False)
@@ -70,7 +70,7 @@ class Gemma4DecoderLayer(nn.Module):
         position_ids: torch.Tensor | None = None,
         past_key_value: tuple[torch.Tensor, torch.Tensor] | Cache | None = None,
         per_layer_input: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor] | Cache | None, torch.Tensor | None]:
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor], torch.Tensor | None]:
         """Forward pass for decoder layer.
 
         Args:

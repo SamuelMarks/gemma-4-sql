@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
+import contextlib
 import re
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import EvaluationError, GemmaSQLError, is_failed_status
@@ -15,14 +15,27 @@ from gemma_4_sql.sdk.protocols import BackendProtocol
 from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.sdk.sql_lexer import split_preserving_literals, strip_sql_comments
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import ETLConfig, EvaluationMetricsDict, EvaluationResultDict, JSONValue
+from gemma_4_sql.type_hints import (
+    ETLConfig,
+    EvaluationMetricsDict,
+    EvaluationResultDict,
+    JSONValue,
+    TensorProtocol,
+    TensorType,
+    extract_float_kwarg,
+    extract_int_kwarg,
+    run_coroutine_sync,
+)
 
 MAX_BATCHES = 10
-_EVAL_SYNC_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="gemma_eval_sync")
+_COMPARISON_OP_PATTERN = re.compile(r"\s*(!=|<>|<=|>=|=|<|>)\s*")
+
+type TokenSequenceItem = Sequence[Sequence[int]] | Sequence[int] | TensorProtocol | TensorType | int | str | None
+type TokenSequenceBatch = Mapping[str, Sequence[Sequence[int]] | TensorProtocol | TensorType] | tuple[Sequence[Sequence[int]] | TensorProtocol | TensorType, Sequence[Sequence[int]] | TensorProtocol | TensorType] | Sequence[TokenSequenceItem] | int | str | None
 
 
 def normalize_sql(sql: str) -> str:
-    """Normalize SQL by stripping comments, standardizing punctuation spacing, and lowercasing unquoted text.
+    """Normalize SQL by stripping comments, standardizing punctuation and operator spacing, and lowercasing unquoted text.
 
     Args:
         sql: The string representing the SQL query.
@@ -39,6 +52,7 @@ def normalize_sql(sql: str) -> str:
         segment = re.sub(r"\s*,\s*", ", ", segment)
         segment = re.sub(r"\(\s+", "(", segment)
         segment = re.sub(r"\s+\)", ")", segment)
+        segment = _COMPARISON_OP_PATTERN.sub(r" \1 ", segment)
         parts[i] = segment
 
     res = "".join(parts)
@@ -122,20 +136,11 @@ def compute_metrics(
         Dictionary containing `exact_match`, `valid_sql`, and `execution_accuracy` metrics.
 
     """
-    try:
-        running_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        running_loop = None
-
-    if running_loop is not None and running_loop.is_running():
-        return _EVAL_SYNC_EXECUTOR.submit(
-            asyncio.run,
-            compute_metrics_async(engine, preds, truths),
-        ).result()
-    return asyncio.run(compute_metrics_async(engine, preds, truths))
+    res: EvaluationMetricsDict = run_coroutine_sync(lambda: compute_metrics_async(engine, preds, truths))
+    return res
 
 
-def _to_int_seq(seq: Any) -> list[int]:
+def _to_int_seq(seq: TokenSequenceItem) -> list[int]:
     """Convert a 1D tensor, array, or sequence of token IDs into a Python `list[int]`.
 
     Args:
@@ -145,11 +150,16 @@ def _to_int_seq(seq: Any) -> list[int]:
         List of integer token IDs.
 
     """
-    raw = seq.tolist() if hasattr(seq, "tolist") else seq
-    return [raw] if isinstance(raw, int) else [int(x) for x in raw]
+    raw: TokenSequenceItem = seq
+    with contextlib.suppress(AttributeError, TypeError):
+        raw = seq.tolist()  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportAssignmentType]  # ty: ignore[invalid-assignment, unresolved-attribute]
+    if isinstance(raw, int):
+        return [raw]
+    assert raw is not None
+    return [int(x) for x in raw]  # pyright: ignore[reportGeneralTypeIssues,reportArgumentType]  # ty: ignore[invalid-argument-type, not-iterable]
 
 
-def _normalize_id_matrix(raw_item: Any) -> list[list[int]]:
+def _normalize_id_matrix(raw_item: TokenSequenceItem) -> list[list[int]]:
     """Normalize a 1D or 2D tensor/sequence of token IDs into a 2D `list[list[int]]`.
 
     Args:
@@ -159,20 +169,24 @@ def _normalize_id_matrix(raw_item: Any) -> list[list[int]]:
         2D list of integer token ID sequences.
 
     """
-    if not hasattr(raw_item, "tolist") and not hasattr(raw_item, "__iter__"):
-        return [[]]
-    seq_list = raw_item.tolist() if hasattr(raw_item, "tolist") else list(raw_item)
+    try:
+        seq_list: list[TokenSequenceItem] | int | float = raw_item.tolist()  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportAssignmentType]  # ty: ignore[invalid-assignment, unresolved-attribute]
+    except (AttributeError, TypeError):
+        try:
+            seq_list = list(raw_item)  # pyright: ignore[reportArgumentType,reportAssignmentType]  # ty: ignore[invalid-argument-type]
+        except TypeError:
+            return [[]]
     if not isinstance(seq_list, list) or not seq_list:
         return [[]]
     if isinstance(seq_list[0], int):
-        return [[int(x) for x in seq_list]]
+        return [[int(x) for x in seq_list]]  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
     return [_to_int_seq(row) for row in seq_list]
 
 
-def _extract_batch_ids(batch: object) -> tuple[list[list[int]], list[list[int]]]:
+def _extract_batch_ids(batch: TokenSequenceBatch) -> tuple[list[list[int]], list[list[int]]]:
     """Extract all input and target token ID sequences from a batch structure.
 
-    Handles NumPy arrays, PyTorch tensors, JAX arrays, MLX arrays, lists, and dicts uniformly.
+    Handles PyTorch tensors, JAX arrays, MLX arrays, Keras tensors, lists, and dicts uniformly.
 
     Args:
         batch: Batch tuple, list, or dictionary containing `'inputs'` and `'targets'`.
@@ -182,16 +196,15 @@ def _extract_batch_ids(batch: object) -> tuple[list[list[int]], list[list[int]]]
 
     """
     min_batch_tuple_length = 2
-    batch_any: Any = batch
-    raw_inputs: Any = None
-    raw_targets: Any = None
+    raw_inputs: TokenSequenceItem = None
+    raw_targets: TokenSequenceItem = None
 
-    if isinstance(batch_any, (tuple, list)) and len(batch_any) >= min_batch_tuple_length:
-        raw_inputs = batch_any[0]
-        raw_targets = batch_any[1]
-    elif isinstance(batch_any, dict) and "inputs" in batch_any and "targets" in batch_any:
-        raw_inputs = batch_any["inputs"]
-        raw_targets = batch_any["targets"]
+    if isinstance(batch, (tuple, list)) and len(batch) >= min_batch_tuple_length:
+        raw_inputs = batch[0]
+        raw_targets = batch[1]
+    elif isinstance(batch, Mapping) and "inputs" in batch and "targets" in batch:
+        raw_inputs = batch["inputs"]
+        raw_targets = batch["targets"]
 
     if raw_inputs is None or raw_targets is None:
         return ([[]], [[]])
@@ -199,7 +212,7 @@ def _extract_batch_ids(batch: object) -> tuple[list[list[int]], list[list[int]]]
     return (_normalize_id_matrix(raw_inputs), _normalize_id_matrix(raw_targets))
 
 
-def _process_batch_inputs(batch: object) -> tuple[list[int], list[int]]:
+def _process_batch_inputs(batch: TokenSequenceBatch) -> tuple[list[int], list[int]]:
     """Extract first-element input and target IDs from a batch.
 
     Args:
@@ -221,7 +234,7 @@ def _run_evaluation_inference(
     audio_path: str | Path | None = None,
     modality: str = "text",
     max_batches: int | None = MAX_BATCHES,
-    **kwargs: object,
+    **kwargs: JSONValue,
 ) -> tuple[list[str], list[str], list[float]]:
     """Run inference for evaluation across text and multimodal benchmarks.
 
@@ -231,7 +244,7 @@ def _run_evaluation_inference(
         backend_impl: Backend protocol implementation.
         image_path: Optional path to schema diagram or ERD image.
         audio_path: Optional path to recorded query audio.
-        modality: Explicit modality selector ('text', 'vision', 'audio', 'multimodal').
+        modality: Explicit modality selector (`'text'`, `'vision'`, `'audio'`, `'multimodal'`).
         max_batches: Maximum number of batches to evaluate (`None` for default `MAX_BATCHES`).
         **kwargs: Additional inference arguments.
 
@@ -258,35 +271,43 @@ def _run_evaluation_inference(
     )
     dataloader = data_dict.get("loader", None)
     tokenizer = SQLTokenizer(model_name=tokenizer_name)
-    if dataloader is None or not hasattr(dataloader, "__iter__"):
+    if dataloader is None:
         msg = "Valid iterable dataloader is required for evaluation; dataset could not be constructed."
         raise EvaluationError(msg, model_name=model_name, operation="evaluate")
 
     limit = MAX_BATCHES if max_batches is None else int(max_batches)
-    loader_iter: Any = dataloader
-    for i, batch in enumerate(loader_iter):
+    for i, batch in enumerate(dataloader):
         if limit > 0 and i >= limit:
             break
 
-        batch_inputs, batch_targets = _extract_batch_ids(batch)
+        batch_inputs, batch_targets = _extract_batch_ids(batch)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
         for inp_seq, tgt_seq in zip(batch_inputs, batch_targets):
             prompt_text = tokenizer.decode(inp_seq)
             truth_text = tokenizer.decode(tgt_seq)
+            if prompt_text and truth_text.startswith(prompt_text) and len(truth_text) > len(prompt_text):
+                truth_text = truth_text[len(prompt_text) :].strip()
 
-            gen_kwargs: dict[str, Any] = {"modality": modality}
-            if image_path is not None:
-                gen_kwargs["image_path"] = str(image_path)
-            elif isinstance(batch, dict) and "pixel_values" in batch:
-                gen_kwargs["pixel_values"] = batch["pixel_values"]
+            img_arg: JSONValue = str(image_path) if image_path is not None else None
+            pv_arg: JSONValue = None
+            if image_path is None and isinstance(batch, dict) and "pixel_values" in batch:
+                pv_arg = batch["pixel_values"]  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
 
-            if audio_path is not None:
-                gen_kwargs["audio_path"] = str(audio_path)
-            elif isinstance(batch, dict) and "audio_values" in batch:
-                gen_kwargs["audio_values"] = batch["audio_values"]
+            aud_arg: JSONValue = str(audio_path) if audio_path is not None else None
+            av_arg: JSONValue = None
+            if audio_path is None and isinstance(batch, dict) and "audio_values" in batch:
+                av_arg = batch["audio_values"]  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
 
-            gen_res = backend_impl.generate_sql(model_name, prompt_text, **gen_kwargs)
+            gen_res = backend_impl.generate_sql(
+                model_name,
+                prompt_text,
+                modality=modality,
+                image_path=img_arg,
+                pixel_values=pv_arg,
+                audio_path=aud_arg,
+                audio_values=av_arg,
+            )
             sql_pred = "" if is_failed_status(gen_res) else str(gen_res.get("sql", ""))
-            conf_score = 0.0 if is_failed_status(gen_res) else float(str(gen_res.get("confidence_score", 0.0)))
+            conf_score = 0.0 if is_failed_status(gen_res) else extract_float_kwarg(gen_res, "confidence_score", 0.0)
             preds.append(sql_pred)
             confidence_scores.append(conf_score)
             truths.append(truth_text)
@@ -331,8 +352,8 @@ def evaluate(
         eval_kwargs.pop("image_path", None)
         eval_kwargs.pop("audio_path", None)
         eval_kwargs.pop("modality", None)
-        raw_max_batches = eval_kwargs.pop("max_batches", max_batches)
-        resolved_max_batches = int(raw_max_batches) if isinstance(raw_max_batches, (int, float, str)) else max_batches
+        resolved_max_batches = extract_int_kwarg(eval_kwargs, "max_batches", max_batches)
+        eval_kwargs.pop("max_batches", None)
 
         (preds, truths, confidence_scores) = _run_evaluation_inference(
             model_name,
@@ -363,4 +384,13 @@ def evaluate(
     return res
 
 
-__all__ = ["MAX_BATCHES", "compute_metrics", "compute_metrics_async", "evaluate", "normalize_sql"]
+__all__ = [
+    "MAX_BATCHES",
+    "TokenSequenceBatch",
+    "TokenSequenceItem",
+    "_process_batch_inputs",
+    "compute_metrics",
+    "compute_metrics_async",
+    "evaluate",
+    "normalize_sql",
+]
