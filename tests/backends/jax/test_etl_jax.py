@@ -65,9 +65,14 @@ def test_jax_etl_build_dataloader_real_transform(
     mock_grain.DataLoader = FakeGrainDataLoader
     monkeypatch.setattr(jax_etl, "grain", mock_grain)
     monkeypatch.setattr(jax_etl, "datasets", MagicMock())
+
+    def _load_duckdb_stub(_p: str, _t: str) -> list[dict[str, str]]:
+        """Return 1-row SQL training dataset."""
+        return [{"sql_prompt": "Count users", "sql": "SELECT COUNT(*) FROM users;"}]
+
     monkeypatch.setattr(
         "gemma_4_sql.backends.common_data.load_duckdb_dataset",
-        lambda _p, _t: [{"sql_prompt": "Count users", "sql": "SELECT COUNT(*) FROM users;"}],  # pyright: ignore[reportUnknownLambdaType]
+        _load_duckdb_stub,
     )
 
     cfg = ETLConfig(

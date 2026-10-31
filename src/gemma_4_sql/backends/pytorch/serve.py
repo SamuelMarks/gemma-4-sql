@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from starlette.requests import Request
-from starlette.responses import Response
 
 from gemma_4_sql.backends.common_serve import (
     JSONResponseConstructorProtocol,
@@ -67,6 +65,15 @@ class _VLLMFastAPIConstructorProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class _RandomUUIDProtocol(Protocol):
+    """Protocol for `vllm.utils.random_uuid`."""
+
+    def __call__(self) -> str:
+        """Generate a unique request identifier string."""
+        ...
+
+
 torch = optional_import("torch")
 FastAPI: _VLLMFastAPIConstructorProtocol | None = optional_attr(
     "fastapi",
@@ -88,8 +95,11 @@ AsyncLLMEngine: _VLLMEngineLoaderProtocol | None = optional_attr(
     "AsyncLLMEngine",
     _VLLMEngineLoaderProtocol,
 )
-_raw_uuid = optional_attr("vllm.utils", "random_uuid")
-random_uuid: Callable[[], str] | None = _raw_uuid if callable(_raw_uuid) else None  # ty: ignore[invalid-assignment]
+random_uuid: _RandomUUIDProtocol | None = optional_attr(
+    "vllm.utils",
+    "random_uuid",
+    _RandomUUIDProtocol,
+)
 
 
 def _create_vllm_app(model_name: str, max_batch_size: int) -> FastAPIAppProtocol | None:
@@ -120,7 +130,7 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> FastAPIAppProtocol
         json_resp_cls = JSONResponse
 
         @app.post("/generate")
-        async def generate(request: Request) -> Response:
+        async def generate(request: Request) -> JSONValue:
             """Execute vLLM-backed streaming request generation.
 
             Args:
@@ -142,12 +152,12 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> FastAPIAppProtocol
                     request_output = await anext(results_iterator)
                     if await request.is_disconnected():
                         await engine.abort(request_id)
-                        return json_resp_cls(content={"error": "Client disconnected"})  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
+                        return json_resp_cls(content={"error": "Client disconnected"})
                     final_output = request_output
             except StopAsyncIteration:
                 pass
             text = final_output.outputs[0].text if final_output is not None and final_output.outputs else ""
-            return json_resp_cls(content={"sql": text})  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
+            return json_resp_cls(content={"sql": text})
 
         return app
     return None

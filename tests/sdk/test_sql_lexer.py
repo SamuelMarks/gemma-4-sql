@@ -108,6 +108,15 @@ def test_validate_readonly_sql_unclosed_and_stacked() -> None:
     with pytest.raises(SQLSafetyViolationError, match="Multiple stacked SQL statements"):
         validate_readonly_sql("SELECT 1; SELECT 2", read_only=True)
 
+    with pytest.raises(SQLSafetyViolationError, match="DELETE"):
+        validate_readonly_sql("WITH deleted AS (DELETE FROM users RETURNING id) SELECT * FROM deleted", read_only=True)
+
+    with pytest.raises(SQLSafetyViolationError, match="SELECT INTO"):
+        validate_readonly_sql("SELECT * INTO new_users FROM users", read_only=True)
+
+    with pytest.raises(SQLSafetyViolationError, match="SELECT INTO"):
+        validate_readonly_sql("SELECT id, name INTO TEMP TABLE tmp_users FROM users", read_only=True)
+
 
 def test_extract_word_tokens_and_validate_identifier() -> None:
     """Verify `extract_word_tokens` and `validate_sql_identifier` behavior."""

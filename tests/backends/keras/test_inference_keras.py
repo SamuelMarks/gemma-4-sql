@@ -101,8 +101,12 @@ def test_generate_sql_and_output_variants(monkeypatch: pytest.MonkeyPatch) -> No
     assert res_num["status"] == "success"
     assert "12345" in res_num["sql"]
 
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
     monkeypatch.setattr(inf, "GemmaCausalLM", None)
-    monkeypatch.setattr(inf, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(inf, "optional_attr", _none_attr)
     res_missing_cls = inf.generate_sql("m", "SELECT")
     assert res_missing_cls["status"].startswith("failed:")
     assert "keras_nlp.models.GemmaCausalLM is not available" in res_missing_cls["status"]

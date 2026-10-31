@@ -7,7 +7,8 @@ import contextlib
 import itertools
 import logging
 import sqlite3
-from collections.abc import Callable, Coroutine, Sequence
+import threading
+from collections.abc import Coroutine, Sequence
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
@@ -76,6 +77,7 @@ class SQLiteAdapter(DatabaseAdapter[sqlite3.Connection, AiosqliteConnectionProto
     """Adapter for SQLite databases supporting shared in-memory and file-backed URIs."""
 
     _actual_path: str
+    _lock: threading.Lock
 
     def __init__(
         self,
@@ -92,6 +94,7 @@ class SQLiteAdapter(DatabaseAdapter[sqlite3.Connection, AiosqliteConnectionProto
             read_only: Read-only enforcement flag.
 
         """
+        self._lock = threading.Lock()
         self._actual_path = f"file:mem_{id(self)}_{next(_SQLITE_MEM_COUNTER)}?mode=memory&cache=shared" if db_path == ":memory:" else db_path
         clean_kwargs = dict(db_kwargs) if db_kwargs else {}
         clean_kwargs.pop("defer_ddl", None)
@@ -114,13 +117,25 @@ class SQLiteAdapter(DatabaseAdapter[sqlite3.Connection, AiosqliteConnectionProto
             An active `sqlite3.Connection` instance.
 
         """
-        sqlite_connect: Callable[..., sqlite3.Connection] = sqlite3.connect
-        kwargs: dict[str, DBKwargValue] = dict(self.db_kwargs)
-        if self.db_path == ":memory:":
-            kwargs["uri"] = True
-            kwargs.setdefault("check_same_thread", False)
-            return sqlite_connect(self._actual_path, **kwargs)  # ty: ignore[no-matching-overload]
-        return sqlite_connect(self.db_path, **kwargs)  # ty: ignore[no-matching-overload]
+        raw_timeout = self.db_kwargs.get("timeout", 5.0)
+        timeout = float(raw_timeout) if isinstance(raw_timeout, (int, float)) else 5.0
+        raw_detect = self.db_kwargs.get("detect_types", 0)
+        detect_types = int(raw_detect) if isinstance(raw_detect, int) else 0
+        raw_cached = self.db_kwargs.get("cached_statements", 128)
+        cached_statements = int(raw_cached) if isinstance(raw_cached, int) else 128
+        raw_uri = self.db_kwargs.get("uri", False)
+        uri = True if self.db_path == ":memory:" else bool(raw_uri)
+        raw_same_thread = self.db_kwargs.get("check_same_thread")
+        check_same_thread = False if (self.db_path == ":memory:" and raw_same_thread is None) else (bool(raw_same_thread) if raw_same_thread is not None else True)
+        target_path = self._actual_path if self.db_path == ":memory:" else self.db_path
+        return sqlite3.connect(
+            target_path,
+            timeout=timeout,
+            detect_types=detect_types,
+            check_same_thread=check_same_thread,
+            cached_statements=cached_statements,
+            uri=uri,
+        )
 
     async def connect_async(self) -> AiosqliteConnectionProtocol:
         """Connect asynchronously to SQLite via `aiosqlite`, reusing any cached connection.
@@ -154,9 +169,31 @@ class SQLiteAdapter(DatabaseAdapter[sqlite3.Connection, AiosqliteConnectionProto
             ddl: DDL string containing SQL statements to execute.
 
         """
-        conn_obj = self.conn
-        with conn_obj:
-            conn_obj.executescript(ddl)
+        with self._lock:
+            conn_obj = self.conn
+            with conn_obj:
+                conn_obj.executescript(ddl)
+
+    def execute_query(
+        self,
+        query: str,
+        params: Sequence[JSONPrimitive] | None = None,
+    ) -> list[tuple[JSONPrimitive, ...]]:
+        """Execute a SQLite query synchronously with thread-lock synchronization.
+
+        Args:
+            query: SQL query string to execute.
+            params: Optional positional query parameters.
+
+        Returns:
+            List of result row tuples.
+
+        Raises:
+            DatabaseExecutionError: If SQLite query execution fails.
+
+        """
+        with self._lock:
+            return super().execute_query(query, params)
 
     async def execute_query_async(
         self,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.exceptions import ExecutionStatus, GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk.export import export_model
@@ -15,6 +16,52 @@ from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import JSONValue
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ModalityCLIArgsProtocol(Protocol):
+    """Protocol for CLI arguments carrying an optional `.modality` attribute."""
+
+    @property
+    def modality(self) -> str | None:
+        """Provide the modality string."""
+        ...
+
+
+@runtime_checkable
+class MultimodalCLIArgsProtocol(ModalityCLIArgsProtocol, Protocol):
+    """Protocol for parsed CLI arguments carrying multimodal flags (`image_path`, `audio_path`, `modality`)."""
+
+    @property
+    def image_path(self) -> str | None:
+        """Provide optional image path."""
+        ...
+
+    @property
+    def audio_path(self) -> str | None:
+        """Provide optional audio path."""
+        ...
+
+
+def extract_multimodal_cli_kwargs(args: argparse.Namespace) -> dict[str, JSONValue]:
+    """Extract optional multimodal arguments (`image_path`, `audio_path`, `modality`) from CLI args.
+
+    Args:
+        args: Parsed command-line arguments namespace.
+
+    Returns:
+        Dictionary of non-default multimodal keyword arguments.
+
+    """
+    extra: dict[str, JSONValue] = {}
+    if isinstance(args, MultimodalCLIArgsProtocol):
+        if args.image_path is not None:
+            extra["image_path"] = str(args.image_path)
+        if args.audio_path is not None:
+            extra["audio_path"] = str(args.audio_path)
+        if args.modality and args.modality != "text":
+            extra["modality"] = str(args.modality)
+    return extra
 
 
 def print_cli_error(
@@ -171,7 +218,7 @@ def rag_cmd(args: argparse.Namespace) -> None:
         retrieved = retrieve_relevant_schema(args.prompt, schema)
         print(str(retrieved))
     else:
-        modality = str((args.modality if "modality" in vars(args) else "text") or "text")
+        modality = str((args.modality if isinstance(args, ModalityCLIArgsProtocol) else "text") or "text")
         image_path = None if modality == "audio" else args.image_path
         audio_path = None if modality == "vision" else args.audio_path
         rag_prompt = build_rag_prompt(

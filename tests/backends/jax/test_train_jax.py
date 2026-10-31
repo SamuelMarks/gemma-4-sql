@@ -20,6 +20,7 @@ def test_real_tiny_jax_training_step_and_train_model(monkeypatch: pytest.MonkeyP
     import jax.numpy as jnp
 
     from gemma_4_sql.backends.jax.gemma4 import Gemma4Config
+    from gemma_4_sql.type_hints import ETLConfig
 
     tiny_cfg = Gemma4Config(
         vocab_size=64,
@@ -31,13 +32,22 @@ def test_real_tiny_jax_training_step_and_train_model(monkeypatch: pytest.MonkeyP
         head_dim=8,
         num_experts=1,
     )
-    monkeypatch.setattr(tr, "_resolve_gemma4_config", lambda _m: tiny_cfg)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _resolve_tiny(_m: str) -> Gemma4Config:
+        """Return `tiny_cfg`."""
+        return tiny_cfg
 
     batch = {
         "inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
         "targets": jnp.array([[2, 3, 4]], dtype=jnp.int32),
     }
-    monkeypatch.setattr(tr, "build_dataloader", lambda *_a, **_k: {"loader": [batch]})  # pyright: ignore[reportUnknownLambdaType]
+
+    def _batch_loader(*_a: ETLConfig) -> dict[str, list[dict[str, jax.Array]]]:
+        """Return 1-batch loader."""
+        return {"loader": [batch]}
+
+    monkeypatch.setattr(tr, "_resolve_gemma4_config", _resolve_tiny)
+    monkeypatch.setattr(tr, "build_dataloader", _batch_loader)
 
     res = tr.train_model(TrainingConfig(action="sft", model_name="tiny", dataset="dat", epochs=1, learning_rate=1e-2))
     assert res["backend"] == "jax"
@@ -64,6 +74,7 @@ def test_loss_fn_single_arg_model() -> None:
 def test_train_model_jax_error_and_invalid_dataloader(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify train_model and _execute_train handle invalid dataloaders and runtime exceptions."""
     from gemma_4_sql.backends.jax.gemma4 import Gemma4Config
+    from gemma_4_sql.type_hints import ETLConfig
 
     tiny_cfg = Gemma4Config(
         vocab_size=32,
@@ -75,8 +86,17 @@ def test_train_model_jax_error_and_invalid_dataloader(monkeypatch: pytest.Monkey
         head_dim=8,
         num_experts=1,
     )
-    monkeypatch.setattr(tr, "_resolve_gemma4_config", lambda _m: tiny_cfg)  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(tr, "build_dataloader", lambda *_a, **_k: {"loader": None})  # pyright: ignore[reportUnknownLambdaType]
+
+    def _resolve_tiny(_m: str) -> Gemma4Config:
+        """Return `tiny_cfg`."""
+        return tiny_cfg
+
+    def _none_loader(*_a: ETLConfig) -> dict[str, None]:
+        """Return loader=None."""
+        return {"loader": None}
+
+    monkeypatch.setattr(tr, "_resolve_gemma4_config", _resolve_tiny)
+    monkeypatch.setattr(tr, "build_dataloader", _none_loader)
 
     with pytest.raises(ValueError, match="Invalid dataloader"):
         tr._execute_train("dat", 1, 0.1)
@@ -106,25 +126,38 @@ def test_get_train_step_fn_and_optimizer_fallbacks(monkeypatch: pytest.MonkeyPat
 
 def test_run_training_epochs_float_return() -> None:
     """Verify _run_training_epochs handles plain float and non-numeric returns from train_step."""
+
+    def _ident_put(x: dict[str, list[int]], _p: None) -> dict[str, list[int]]:
+        """Return `x` unchanged."""
+        return x
+
+    def _float_step(*_a: dict[str, list[int]] | None) -> float:
+        """Return 0.42."""
+        return 0.42
+
+    def _str_step(*_a: dict[str, list[int]] | None) -> str:
+        """Return 'non_numeric'."""
+        return "non_numeric"
+
     state: TrainingLoopState[None, None, dict[str, list[int]]] = TrainingLoopState(
         dataloader=[{"inputs": [1], "targets": [1]}],
         epochs=1,
         model=None,
         optimizer=None,
-        train_step=lambda *_a: 0.42,
+        train_step=_float_step,
         sharding=None,
     )
-    with patch.object(tr.jax, "device_put", side_effect=lambda x, _p: x):  # pyright: ignore[reportUnknownLambdaType]
+    with patch.object(tr.jax, "device_put", side_effect=_ident_put):
         assert tr._run_training_epochs(state) == pytest.approx(0.42)
     state_non_num: TrainingLoopState[None, None, dict[str, list[int]]] = TrainingLoopState(
         dataloader=[{"inputs": [1], "targets": [1]}],
         epochs=1,
         model=None,
         optimizer=None,
-        train_step=lambda *_a: "non_numeric",
+        train_step=_str_step,
         sharding=None,
     )
-    with patch.object(tr.jax, "device_put", side_effect=lambda x, _p: x):  # pyright: ignore[reportUnknownLambdaType]
+    with patch.object(tr.jax, "device_put", side_effect=_ident_put):
         assert tr._run_training_epochs(state_non_num) == 0.0
 
 

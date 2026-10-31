@@ -87,10 +87,14 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         created_apps.append(app)
         return app
 
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.create_common_app", mock_create_common_app)
 
     monkeypatch.setattr(srv, "GemmaCausalLM", None)
-    monkeypatch.setattr(srv, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(srv, "optional_attr", _none_attr)
     srv.create_app("test_model")
     app = created_apps[-1]
 
@@ -145,7 +149,15 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(srv, "GemmaCausalLM", DummyPresetFail)
     app.startup()
 
-    monkeypatch.setattr(real_inf, "generate_sql", lambda **_kwargs: {"sql": "FALLBACK_SQL"})  # pyright: ignore[reportUnknownLambdaType]
+    def _fb_sql(**_kwargs: str | int) -> dict[str, str]:
+        """Return FALLBACK_SQL dict."""
+        return {"sql": "FALLBACK_SQL"}
+
+    def _empty_fb_sql(**_kwargs: str | int) -> dict[str, str]:
+        """Return empty SQL dict."""
+        return {"sql": ""}
+
+    monkeypatch.setattr(real_inf, "generate_sql", _fb_sql)
 
     assert app.generate("prompt") == "FALLBACK_SQL"
     assert app.batch_generate(["p1", "p2"]) == ["FALLBACK_SQL", "FALLBACK_SQL"]
@@ -177,7 +189,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
     app.startup()
 
     # Test empty fallback output
-    monkeypatch.setattr(real_inf, "generate_sql", lambda **_kwargs: {"sql": ""})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(real_inf, "generate_sql", _empty_fb_sql)
 
     with pytest.raises(InferenceError, match="empty SQL"):
         app.generate("prompt")
@@ -191,7 +203,7 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(real_inf, "generate_sql", gen_err)
     monkeypatch.setattr(srv, "GemmaCausalLM", None)
-    monkeypatch.setattr(srv, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(srv, "optional_attr", _none_attr)
 
     srv.create_app("test_model")
     app_none = created_apps[-1]

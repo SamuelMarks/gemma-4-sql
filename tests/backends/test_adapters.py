@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 
 import pytest
 
@@ -12,7 +13,17 @@ from gemma_4_sql.backends.keras.adapter import KerasBackend
 from gemma_4_sql.backends.maxtext.adapter import MaxTextBackend
 from gemma_4_sql.backends.mlx.adapter import MLXBackend
 from gemma_4_sql.backends.pytorch.adapter import PyTorchBackend
-from gemma_4_sql.type_hints import DPOConfig, ETLConfig, JSONDict, TrainingConfig
+from gemma_4_sql.type_hints import DPOConfig, ETLConfig, JSONDict, JSONValue, TrainingConfig
+
+
+def _make_status_stub(status: str) -> Callable[..., dict[str, str]]:
+    """Create a typed callable returning `{'status': status}`."""
+
+    def _stub(*_a: TrainingConfig | DPOConfig | ETLConfig | dict[str, float] | list[str] | str | float, **_k: JSONValue) -> dict[str, str]:
+        """Return status dict."""
+        return {"status": status}
+
+    return _stub
 
 
 @pytest.fixture
@@ -45,16 +56,16 @@ def test_backend_adapter(
     adapter = backend_cls()
     adapter_mod = sys.modules[backend_cls.__module__]
 
-    monkeypatch.setattr(adapter_mod.train, "train_model", lambda *_a, **_k: {"status": "trained"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(adapter_mod.dpo, "run_dpo", lambda *_a, **_k: {"status": "dpo_run"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(adapter_mod.etl, "build_dataloader", lambda *_a, **_k: {"status": "dataloader"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(adapter_mod.export, "export_model", lambda *_a, **_k: {"status": "exported"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(adapter_mod.logging, "log_metrics", lambda *_a, **_k: {"status": "logged"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(adapter_mod.peft, "apply_lora", lambda *_a, **_k: {"status": "lora_applied"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(adapter_mod.quantize, "quantize_model", lambda *_a, **_k: {"status": "quantized"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(adapter_mod.inference, "generate_sql", lambda *_a, **_k: {"status": "generated"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(adapter_mod.serve, "serve_model", lambda *_a, **_k: {"status": "served"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(adapter_mod.benchmark, "benchmark_model", lambda *_a, **_k: {"status": "benchmarked"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(adapter_mod.train, "train_model", _make_status_stub("trained"))
+    monkeypatch.setattr(adapter_mod.dpo, "run_dpo", _make_status_stub("dpo_run"))
+    monkeypatch.setattr(adapter_mod.etl, "build_dataloader", _make_status_stub("dataloader"))
+    monkeypatch.setattr(adapter_mod.export, "export_model", _make_status_stub("exported"))
+    monkeypatch.setattr(adapter_mod.logging, "log_metrics", _make_status_stub("logged"))
+    monkeypatch.setattr(adapter_mod.peft, "apply_lora", _make_status_stub("lora_applied"))
+    monkeypatch.setattr(adapter_mod.quantize, "quantize_model", _make_status_stub("quantized"))
+    monkeypatch.setattr(adapter_mod.inference, "generate_sql", _make_status_stub("generated"))
+    monkeypatch.setattr(adapter_mod.serve, "serve_model", _make_status_stub("served"))
+    monkeypatch.setattr(adapter_mod.benchmark, "benchmark_model", _make_status_stub("benchmarked"))
 
     assert adapter.train_model(dummy_train_config) == {"status": "trained"}
     assert adapter.run_dpo(dummy_dpo_config) == {"status": "dpo_run"}
@@ -70,10 +81,16 @@ def test_backend_adapter(
 
     aliased = PyTorchBackend(backend_alias="pytorch_native")
     captured_kw: JSONDict = {}
+
+    def _aliased_gen(*_a: str | int, **kw: JSONValue) -> dict[str, str]:
+        """Record kwargs and return aliased status."""
+        captured_kw.update(kw)
+        return {"status": "aliased"}
+
     monkeypatch.setattr(
         sys.modules[PyTorchBackend.__module__].inference,
         "generate_sql",
-        lambda *_a, **kw: captured_kw.update(kw) or {"status": "aliased"},  # pyright: ignore[reportUnknownLambdaType]
+        _aliased_gen,
     )
     assert aliased.generate_sql("model", "prompt") == {"status": "aliased"}
     assert captured_kw["backend_alias"] == "pytorch_native"

@@ -99,22 +99,23 @@ def test_etl_pretrain_propagates_missing_dependency(monkeypatch: pytest.MonkeyPa
 def test_etl_sft_and_posttrain_forwarding(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify etl_sft and etl_posttrain forward ETLConfig to the requested backend."""
     config = ETLConfig(dataset_name="dummy/data", split="train", batch_size=16, distributed=False)
+
+    def _keras_loader(cfg: ETLConfig, **_k: JSONValue) -> dict[str, str | int]:
+        """Return keras loader dict."""
+        return {"backend": "keras", "dataset": cfg.dataset_name, "batch_size": cfg.batch_size}
+
+    def _maxtext_loader(cfg: ETLConfig, **_k: JSONValue) -> dict[str, str | int]:
+        """Return maxtext loader dict."""
+        return {"backend": "maxtext", "dataset": cfg.dataset_name, "batch_size": cfg.batch_size}
+
     keras_agent = get_backend("keras")
-    monkeypatch.setattr(
-        keras_agent,
-        "build_dataloader",
-        lambda cfg, **_k: {"backend": "keras", "dataset": cfg.dataset_name, "batch_size": cfg.batch_size},  # pyright: ignore[reportUnknownLambdaType]
-    )
+    monkeypatch.setattr(keras_agent, "build_dataloader", _keras_loader)
     res_sft = etl_sft(config, backend="keras")
     assert res_sft["dataset"] == "dummy/data"
     assert res_sft["batch_size"] == 16
 
     maxtext_agent = get_backend("maxtext")
-    monkeypatch.setattr(
-        maxtext_agent,
-        "build_dataloader",
-        lambda cfg, **_k: {"backend": "maxtext", "dataset": cfg.dataset_name, "batch_size": cfg.batch_size},  # pyright: ignore[reportUnknownLambdaType]
-    )
+    monkeypatch.setattr(maxtext_agent, "build_dataloader", _maxtext_loader)
     res_post = etl_posttrain(config, backend="maxtext")
     assert res_post["dataset"] == "dummy/data"
     assert res_post["batch_size"] == 16

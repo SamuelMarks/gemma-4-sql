@@ -170,7 +170,11 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
             """
             return [[1.0]]
 
-    monkeypatch.setattr(rg, "SentenceTransformer", lambda *a, **k: MockModel())  # pyright: ignore[reportUnknownLambdaType]
+    def _create_mock_model(*_a: str, **_k: str) -> MockModel:
+        """Return MockModel instance."""
+        return MockModel()
+
+    monkeypatch.setattr(rg, "SentenceTransformer", _create_mock_model)
 
     class MockSim:
         """Mock similarity array."""
@@ -196,7 +200,11 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
             """
             return 0.5
 
-    monkeypatch.setattr(rg, "cosine_similarity", lambda _a, _b: [MockSim()])  # pyright: ignore[reportUnknownLambdaType]
+    def _mock_cos_sim(_a: Sequence[Sequence[float]], _b: Sequence[Sequence[float]]) -> list[MockSim]:
+        """Return list containing MockSim."""
+        return [MockSim()]
+
+    monkeypatch.setattr(rg, "cosine_similarity", _mock_cos_sim)
     res = rg._semantic_search("hi", schema, ["users", "orders"], 2, min_similarity=0.9)
     assert len(res) == 2
     assert res == ["users", "orders"]
@@ -207,7 +215,11 @@ def test_rag_semantic_no_relevant() -> None:
     mock_st = MagicMock()
     mock_st.return_value.encode.return_value = torch.tensor([[1.0]])
 
-    with patch("gemma_4_sql.sdk.rag.SentenceTransformer", mock_st), patch("gemma_4_sql.sdk.rag.cosine_similarity", lambda _a, _b: torch.tensor([[0.0, 0.0]])):  # pyright: ignore[reportUnknownLambdaType]
+    def _zero_cos(_a: torch.Tensor, _b: torch.Tensor) -> torch.Tensor:
+        """Return zero cosine similarity tensor."""
+        return torch.tensor([[0.0, 0.0]])
+
+    with patch("gemma_4_sql.sdk.rag.SentenceTransformer", mock_st), patch("gemma_4_sql.sdk.rag.cosine_similarity", _zero_cos):
         schema = {"t1": ["c1"], "t2": ["c2"]}
         res = retrieve_relevant_schema("prompt", schema)
         assert "Table: t1" in res
@@ -375,7 +387,12 @@ def test_rag_successful_imports(monkeypatch: pytest.MonkeyPatch) -> None:
     rag.clear_rag_model_cache()
     mock_st_class = MagicMock()
     mock_model = MagicMock()
-    mock_model.encode.side_effect = lambda texts: torch.tensor([[1.0, 0.0]] * len(texts))  # pyright: ignore[reportUnknownLambdaType]
+
+    def _encode_texts(texts: Sequence[str]) -> torch.Tensor:
+        """Return 2D embedding tensor for `texts`."""
+        return torch.tensor([[1.0, 0.0]] * len(texts))
+
+    mock_model.encode.side_effect = _encode_texts
     mock_st_class.return_value = mock_model
 
     mock_cos = MagicMock(return_value=torch.tensor([[0.9, 0.1]], dtype=torch.float64))

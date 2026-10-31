@@ -6,7 +6,7 @@ import argparse
 import json
 from collections.abc import Callable
 
-from gemma_4_sql.cli_misc import print_cli_error
+from gemma_4_sql.cli_misc import extract_multimodal_cli_kwargs, print_cli_error
 from gemma_4_sql.exceptions import GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk import (
     TrainingConfig,
@@ -17,7 +17,7 @@ from gemma_4_sql.sdk import (
     sft_model,
     train_from_scratch,
 )
-from gemma_4_sql.type_hints import JSONValue, TrainResultDict
+from gemma_4_sql.type_hints import TrainResultDict
 
 
 def _format_cli_error(err: GemmaSQLError, action: str, backend: str, model: str) -> int:
@@ -36,28 +36,7 @@ def _format_cli_error(err: GemmaSQLError, action: str, backend: str, model: str)
     return print_cli_error(err, backend, model=model, action=action)
 
 
-def _extract_multimodal_kwargs(args: argparse.Namespace) -> dict[str, JSONValue]:
-    """Extract optional multimodal arguments (`image_path`, `audio_path`, `modality`) from CLI args.
-
-    Args:
-        args: Parsed command-line arguments namespace.
-
-    Returns:
-        Dictionary of non-default multimodal keyword arguments.
-
-    """
-    extra: dict[str, JSONValue] = {}
-    args_dict = vars(args)
-    image_path = args.image_path if "image_path" in args_dict else None
-    audio_path = args.audio_path if "audio_path" in args_dict else None
-    modality = args.modality if "modality" in args_dict else "text"
-    if image_path is not None:
-        extra["image_path"] = str(image_path)
-    if audio_path is not None:
-        extra["audio_path"] = str(audio_path)
-    if modality and modality != "text":
-        extra["modality"] = str(modality)
-    return extra
+_extract_multimodal_kwargs = extract_multimodal_cli_kwargs
 
 
 def _run_training_stage(

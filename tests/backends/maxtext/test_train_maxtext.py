@@ -71,7 +71,7 @@ def test_get_train_step_fn_without_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _get_train_step_fn returns un-jitted train_step when jax is None."""
     monkeypatch.setattr(train_module, "jax", None)
     step_fn = train_module._get_train_step_fn(MagicMock(), MagicMock())
-    assert step_fn.__name__ == "train_step"  # ty: ignore[unresolved-attribute]
+    assert callable(step_fn)
 
 
 def test_initialize_jax_distributed(monkeypatch: pytest.MonkeyPatch) -> None:

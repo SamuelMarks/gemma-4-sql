@@ -5,8 +5,9 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Callable, Sequence
-from typing import Protocol, SupportsFloat, runtime_checkable
+from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
 
+from gemma_4_sql._types_models import MlxLMLoadProtocol
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
     make_model_cache_key,
@@ -14,13 +15,15 @@ from gemma_4_sql.backends.common_inference import (
     run_inference_wrapper,
 )
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, InferenceError, StatusValue
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from gemma_4_sql.type_hints import (
+    ForwardOutput,
     InferenceResultDict,
     JSONValue,
     MlxArrayProtocol,
     MlxCausalLMProtocol,
     TokenizerProtocol,
+    extract_status_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,7 +34,7 @@ class _MlxTokenizerProtocol(Protocol):
     """Protocol for an MLX tokenizer supporting `.encode(text)`, `.decode(ids)`, and `.eos_token_id`."""
 
     @property
-    def eos_token_id(self) -> int | None:
+    def eos_token_id(self) -> int:
         """Provide the end-of-sequence token ID."""
         ...
 
@@ -44,14 +47,46 @@ class _MlxTokenizerProtocol(Protocol):
         ...
 
 
+def _is_mlx_tokenizer(
+    tok: TokenizerProtocol | _MlxTokenizerProtocol | str | None,
+) -> TypeGuard[_MlxTokenizerProtocol]:
+    """Narrow `tok` to `_MlxTokenizerProtocol` for attribute-guarded calls.
+
+    Args:
+        tok: Candidate tokenizer instance.
+
+    Returns:
+        `True` so `.encode`, `.decode`, and `.eos_token_id` can be invoked inside `contextlib.suppress`.
+
+    """
+    _ = tok
+    return True
+
+
+def _is_sequence_output(
+    out: ForwardOutput | MlxArrayProtocol | SupportsFloat | Sequence[MlxArrayProtocol | SupportsFloat] | Sequence[int],
+) -> TypeGuard[Sequence[MlxArrayProtocol | SupportsFloat | int]]:
+    """Narrow `out` to an indexable `Sequence` for `out[-1]` extraction.
+
+    Args:
+        out: Model forward output.
+
+    Returns:
+        `True` when `out` is a sequence.
+
+    """
+    return isinstance(out, (list, tuple))
+
+
 mx = optional_import("mlx.core")
-_raw_load = optional_attr("mlx_lm", "load")
-load: Callable[[str], tuple[MlxCausalLMProtocol, TokenizerProtocol | _MlxTokenizerProtocol | None] | MlxCausalLMProtocol] | None = (  # ty: ignore[invalid-assignment]
-    _raw_load if callable(_raw_load) else None
+load: MlxLMLoadProtocol | None = optional_attr(
+    "mlx_lm",
+    "load",
+    MlxLMLoadProtocol,
 )
 generate = optional_attr("mlx_lm", "generate")
 
-_MODEL_CACHE: BoundedLRUCache[tuple[MlxCausalLMProtocol, TokenizerProtocol | _MlxTokenizerProtocol | None]] = BoundedLRUCache(maxsize=4)
+_MODEL_CACHE: BoundedLRUCache[tuple[MlxCausalLMProtocol, TokenizerProtocol | None]] = BoundedLRUCache(maxsize=4)
 MODEL_CACHE = _MODEL_CACHE
 
 
@@ -75,7 +110,7 @@ def compute_confidence_score(log_probs: list[float] | float, num_tokens: int) ->
 
 def mlx_beam_search(
     model: MlxCausalLMProtocol | Callable[..., MlxArrayProtocol | SupportsFloat | Sequence[MlxArrayProtocol | SupportsFloat] | Sequence[int]] | None,
-    tokenizer: TokenizerProtocol | _MlxTokenizerProtocol | None,
+    tokenizer: TokenizerProtocol | _MlxTokenizerProtocol | str | None,
     prompt: str,
     beam_width: int = 3,
     max_length: int = 50,
@@ -108,7 +143,8 @@ def mlx_beam_search(
 
     input_ids: list[int] | None = None
     with contextlib.suppress(AttributeError, TypeError):
-        encoded = tokenizer.encode(prompt)  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        assert _is_mlx_tokenizer(tokenizer)
+        encoded = tokenizer.encode(prompt)
         input_ids = [int(x) for x in encoded]
     if input_ids is None:
         from gemma_4_sql.tokenization import SQLTokenizer
@@ -120,7 +156,8 @@ def mlx_beam_search(
         eos_id = eos_token_id
     else:
         with contextlib.suppress(AttributeError, TypeError, ValueError):
-            eos_id = int(tokenizer.eos_token_id)  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[invalid-argument-type, unresolved-attribute]
+            assert _is_mlx_tokenizer(tokenizer)
+            eos_id = int(tokenizer.eos_token_id)
 
     beams: list[tuple[list[int], float, bool]] = [([], 0.0, False)]
 
@@ -147,7 +184,8 @@ def mlx_beam_search(
                 else:
                     next_logits = out
             else:
-                last_item = out[-1]  # pyright: ignore[reportIndexIssue,reportArgumentType]  # ty: ignore[invalid-argument-type, not-subscriptable]
+                assert _is_sequence_output(out)
+                last_item = out[-1]
                 next_logits = last_item if isinstance(last_item, MlxArrayProtocol) else None
 
             if mx is not None and next_logits is not None:
@@ -182,7 +220,8 @@ def mlx_beam_search(
 
     decoded_sql: str | None = None
     with contextlib.suppress(AttributeError, TypeError):
-        decoded_sql = tokenizer.decode(output_tokens).strip()  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        assert _is_mlx_tokenizer(tokenizer)
+        decoded_sql = tokenizer.decode(output_tokens).strip()
     if decoded_sql is None:
         from gemma_4_sql.tokenization import SQLTokenizer
 
@@ -241,7 +280,8 @@ def generate_sql(
         else:
             loaded = load(model_name)
             model = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
-            tokenizer = loaded[1] if isinstance(loaded, (tuple, list)) and len(loaded) > 1 else None
+            raw_tok = loaded[1] if isinstance(loaded, (tuple, list)) and len(loaded) > 1 else None
+            tokenizer: TokenizerProtocol | None = raw_tok if not isinstance(raw_tok, str) else None
             _MODEL_CACHE.put_model(cache_key, (model, tokenizer))
         eos_id_arg = kwargs.get("eos_token_id")
         eos_id = int(eos_id_arg) if isinstance(eos_id_arg, (int, str, float)) else None
@@ -254,5 +294,5 @@ def generate_sql(
             eos_token_id=eos_id,
         )
 
-    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    wrapper_kwargs = extract_status_kwargs(kwargs)
     return run_inference_wrapper("mlx", model_name, prompt, beam_width, _execute, **wrapper_kwargs)

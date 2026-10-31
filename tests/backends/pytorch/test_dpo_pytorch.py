@@ -160,11 +160,15 @@ def test_run_dpo_and_load_models(monkeypatch: pytest.MonkeyPatch) -> None:
     assert p_mod is not None
     assert r_mod is not None
 
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
     # Test HF loader fallback
     mock_auto = MagicMock()
     mock_auto.from_pretrained.return_value = MagicMock()
     monkeypatch.setattr(dpo_module, "AutoModelForCausalLM", mock_auto)
-    monkeypatch.setattr(dpo_module, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(dpo_module, "optional_attr", _none_attr)
 
     with (
         patch.object(dpo_module.optim, "AdamW", return_value=MagicMock()),

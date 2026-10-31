@@ -5,8 +5,10 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Sequence
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
+from gemma_4_sql._types_models import KerasSamplerProtocol
+from gemma_4_sql._types_tensors import NestedScalarList, ToListArrayProtocol
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
     make_model_cache_key,
@@ -36,12 +38,22 @@ class _GemmaCausalLMLoaderProtocol(Protocol):
         ...
 
 
-@runtime_checkable
-class _BeamSamplerInstanceProtocol(Protocol):
-    """Protocol for an instantiated KerasNLP `BeamSampler`."""
+type _BeamSamplerInstanceProtocol = KerasSamplerProtocol
+type KerasScoreInput = TfTensorProtocol | NDArrayProtocol | NestedScalarList | float | int | str | Sequence[float | int | str | Sequence[float | int | str | None] | None] | None
 
 
-type KerasScoreInput = TfTensorProtocol | NDArrayProtocol | float | int | str | Sequence[float | int | str | Sequence[float | int | str | None] | None] | None
+def _is_tolist_capable(val: KerasScoreInput) -> TypeGuard[ToListArrayProtocol]:
+    """Narrow `val` to `ToListArrayProtocol` for attribute-guarded `.tolist()` calls.
+
+    Args:
+        val: Candidate score tensor or array.
+
+    Returns:
+        `True` so `.tolist()` can be invoked inside `contextlib.suppress`.
+
+    """
+    _ = val
+    return True
 
 
 keras = optional_import("keras")
@@ -96,7 +108,8 @@ def compute_keras_confidence(scores: KerasScoreInput, num_tokens: int) -> float:
         return 0.0
     resolved: KerasScoreInput = scores
     with contextlib.suppress(AttributeError, TypeError):
-        resolved = resolved.tolist()  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportAssignmentType]  # ty: ignore[invalid-assignment, unresolved-attribute]
+        assert _is_tolist_capable(resolved)
+        resolved = resolved.tolist()
 
     if isinstance(resolved, (list, tuple)):
         flat_scores = _extract_flat_scores(resolved)
@@ -142,10 +155,10 @@ def configure_beam_sampler(
 
     if sampler is not None:
         try:
-            model.compile(sampler=sampler)  # pyright: ignore[reportArgumentType]
+            model.compile(sampler=sampler)
         except (AttributeError, TypeError):
             with contextlib.suppress(AttributeError, TypeError):
-                model.sampler = sampler  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[invalid-assignment]
+                model.sampler = sampler
 
     return sampler
 
@@ -200,14 +213,14 @@ def generate_sql(
         if isinstance(output, dict):
             raw_text = str(output.get("text", ""))
             raw_scores = output.get("scores") or output.get("token_probabilities")
-            scores = raw_scores  # pyright: ignore[reportAssignmentType]
+            scores = raw_scores
         elif isinstance(output, (tuple, list)) and len(output) >= 2:
             raw_text = str(output[0])
-            scores = output[1]  # pyright: ignore[reportAssignmentType]
+            scores = output[1]
         elif isinstance(output, str):
             raw_text = output
             with contextlib.suppress(AttributeError):
-                scores = model.last_scores  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                scores = model.last_scores
         else:
             raw_text = str(output)
 

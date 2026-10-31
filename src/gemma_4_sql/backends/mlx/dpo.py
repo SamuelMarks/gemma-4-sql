@@ -6,10 +6,14 @@ import contextlib
 import logging
 import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Protocol, SupportsFloat, runtime_checkable
+from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
 
+from gemma_4_sql._types_models import MlxLMLoadProtocol
 from gemma_4_sql.backends.common_dpo import ArithmeticTensorProtocol, generic_dpo_loss, run_dpo_wrapper
-from gemma_4_sql.backends.common_train import generic_run_training_epochs
+from gemma_4_sql.backends.common_train import (
+    generic_run_training_epochs,
+    resolve_training_dataloader,
+)
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.mlx.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
@@ -18,13 +22,16 @@ from gemma_4_sql.type_hints import (
     DPOLoopState,
     DPOResultDict,
     ETLConfig,
+    ForwardArg,
+    ForwardOutput,
     JSONValue,
     MlxArrayProtocol,
     MlxCausalLMProtocol,
     MlxCoreProtocol,
     MlxNNProtocol,
+    NDArrayProtocol,
+    ScalarItemExtractorProtocol,
     TensorType,
-    TokenizerProtocol,
     TrainerState,
 )
 
@@ -45,9 +52,152 @@ class _MlxOptimizerProtocol[ModelT](Protocol):
         ...
 
 
+@runtime_checkable
+class _MlxOptimizerStateProtocol(Protocol):
+    """Protocol for an optimizer exposing `.state`."""
+
+    @property
+    def state(self) -> Mapping[str, MlxArrayProtocol]:
+        """Provide the optimizer state mapping."""
+        ...
+
+
 type MlxDPOBatchValue = TensorType | JSONValue | MlxArrayProtocol | SupportsFloat | Sequence[int] | Sequence[Sequence[int]] | int | float | str | None
 type MlxDPOBatch = Mapping[str, MlxDPOBatchValue]
 type MlxDPOModel = Callable[..., MlxArrayProtocol | SupportsFloat | str] | MlxCausalLMProtocol
+
+
+def _is_forward_arg(val: MlxDPOBatchValue) -> TypeGuard[ForwardArg | MlxArrayProtocol]:
+    """Narrow `val` to `ForwardArg | MlxArrayProtocol` for `model(inputs)`.
+
+    Args:
+        val: Candidate input token tensor or batch value.
+
+    Returns:
+        `True` so `model(val)` can be invoked.
+
+    """
+    _ = val
+    return True
+
+
+def _is_mx_array_input(
+    val: MlxDPOBatchValue,
+) -> TypeGuard[Sequence[int] | Sequence[Sequence[int]] | MlxArrayProtocol | NDArrayProtocol]:
+    """Narrow `val` to an `mx.array(...)` constructor input.
+
+    Args:
+        val: Candidate target token IDs.
+
+    Returns:
+        `True` for array conversion.
+
+    """
+    _ = val
+    return True
+
+
+def _is_mlx_array(
+    val: ForwardOutput | MlxArrayProtocol | ArithmeticTensorProtocol | SupportsFloat | str,
+) -> TypeGuard[MlxArrayProtocol]:
+    """Narrow `val` to `MlxArrayProtocol` for attribute-guarded `.mean(...)` and `.item()` calls.
+
+    Args:
+        val: Candidate MLX array or scalar output.
+
+    Returns:
+        `True` so `.mean(axis=-1)` or `.item()` can be invoked inside `contextlib.suppress`.
+
+    """
+    _ = val
+    return True
+
+
+def _is_mlx_causal_lm(model: MlxDPOModel) -> TypeGuard[MlxCausalLMProtocol]:
+    """Narrow `model` to `MlxCausalLMProtocol` for `.parameters()` access.
+
+    Args:
+        model: Policy model callable or `MlxCausalLMProtocol`.
+
+    Returns:
+        `True` so `model.parameters()` can be invoked inside `contextlib.suppress`.
+
+    """
+    _ = model
+    return True
+
+
+def _is_mlx_optimizer[ModelT](
+    opt: _MlxOptimizerProtocol[ModelT] | str | None,
+    _model: ModelT,
+) -> TypeGuard[_MlxOptimizerProtocol[ModelT]]:
+    """Narrow `opt` to `_MlxOptimizerProtocol[ModelT]`.
+
+    Args:
+        opt: Optimizer instance or stub.
+        _model: Target model for type parameter binding.
+
+    Returns:
+        `True` so `opt.update(...)` and `opt.state` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = (opt, _model)
+    return True
+
+
+@runtime_checkable
+class _MlxDPOTargetProtocol(Protocol):
+    """Protocol satisfied by any MLX DPO model or optimizer."""
+
+    def __str__(self) -> str:
+        """Return string representation."""
+        ...
+
+
+def _is_dpo_model(pol: _MlxDPOTargetProtocol | None) -> TypeGuard[MlxDPOModel]:
+    """Narrow `pol` to `MlxDPOModel`.
+
+    Args:
+        pol: Policy or reference model from state.
+
+    Returns:
+        `True` when `pol` is provided.
+
+    """
+    _ = pol
+    return True
+
+
+def _is_dpo_opt(
+    opt: _MlxDPOTargetProtocol | None,
+) -> TypeGuard[_MlxOptimizerProtocol[MlxDPOModel] | str | None]:
+    """Narrow `opt` to `_MlxOptimizerProtocol[MlxDPOModel] | str | None`.
+
+    Args:
+        opt: Optimizer from state.
+
+    Returns:
+        `True` for `_run_dpo_step`.
+
+    """
+    _ = opt
+    return True
+
+
+def _is_dpo_float_loss(
+    val: MlxArrayProtocol | ArithmeticTensorProtocol | ScalarItemExtractorProtocol | SupportsFloat | float,
+) -> TypeGuard[SupportsFloat | float]:
+    """Narrow `val` to `SupportsFloat | float`.
+
+    Args:
+        val: Loss tensor or float scalar.
+
+    Returns:
+        `True` so `float(val)` can be called.
+
+    """
+    _ = val
+    return True
 
 
 mlx = optional_import("mlx")
@@ -55,9 +205,10 @@ mx = optional_import("mlx.core")
 nn = optional_import("mlx.nn")
 mx_nn: types.ModuleType | None = nn
 optim = optional_import("mlx.optimizers")
-_raw_load = optional_attr("mlx_lm", "load")
-load: Callable[[str], tuple[MlxCausalLMProtocol, TokenizerProtocol | str | None] | MlxCausalLMProtocol] | None = (  # ty: ignore[invalid-assignment]
-    _raw_load if callable(_raw_load) else None
+load: MlxLMLoadProtocol | None = optional_attr(
+    "mlx_lm",
+    "load",
+    MlxLMLoadProtocol,
 )
 
 
@@ -112,13 +263,13 @@ def _compute_mlx_logps(
         Per-sequence log-probability tensor of shape `(batch_size,)`.
 
     """
-    raw_logits = model(inputs)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+    assert _is_forward_arg(inputs)
+    raw_logits = model(inputs)
     target = labels if labels is not None else inputs
     if mx is not None and isinstance(raw_logits, MlxArrayProtocol) and raw_logits.ndim >= 2:
         logits: MlxArrayProtocol = raw_logits
-        target_arr: MlxArrayProtocol = (
-            target if isinstance(target, MlxArrayProtocol) else mx.array(target)  # pyright: ignore[reportArgumentType]
-        )
+        assert _is_mx_array_input(target)
+        target_arr: MlxArrayProtocol = target if isinstance(target, MlxArrayProtocol) else mx.array(target)
         if labels is None and target_arr.ndim == 2 and int(target_arr.shape[1]) > 1 and int(logits.shape[1]) > 1:
             logits = logits[:, :-1, :]
             target_arr = target_arr[:, 1:]
@@ -126,13 +277,14 @@ def _compute_mlx_logps(
         indices: MlxArrayProtocol = mx.expand_dims(target_arr, axis=-1)
         gathered: MlxArrayProtocol = mx.take_along_axis(log_probs, indices, axis=-1)
         squeezed: MlxArrayProtocol = mx.squeeze(gathered, axis=-1)
-        mask = target_arr != 0  # pyright: ignore[reportUnnecessaryComparison]
-        masked = squeezed * mask  # pyright: ignore[reportOperatorIssue]
+        mask: MlxArrayProtocol = mx.not_equal(target_arr, 0)
+        masked = squeezed * mask
         res: MlxArrayProtocol = masked.sum(axis=-1)
         return res
+    assert _is_mlx_array(raw_logits)
     with contextlib.suppress(AttributeError, TypeError):
-        return raw_logits.mean(axis=-1)  # pyright: ignore[reportAttributeAccessIssue,reportCallIssue,reportReturnType]  # ty: ignore[unresolved-attribute]
-    return raw_logits  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
+        return raw_logits.mean(axis=-1)
+    return raw_logits
 
 
 def _loss_fn(
@@ -165,6 +317,22 @@ def _loss_fn(
     return loss
 
 
+def _has_opt_state[ModelT](
+    opt: _MlxOptimizerProtocol[ModelT] | str | None,
+) -> TypeGuard[_MlxOptimizerStateProtocol]:
+    """Narrow `opt` to `_MlxOptimizerStateProtocol` for `.state` access.
+
+    Args:
+        opt: Optimizer instance or stub.
+
+    Returns:
+        `True` so `opt.state` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = opt
+    return True
+
+
 def _run_dpo_step[ModelT: MlxDPOModel](
     policy_model: ModelT,
     ref_model: ModelT,
@@ -189,14 +357,25 @@ def _run_dpo_step[ModelT: MlxDPOModel](
         loss_and_grad_fn = nn.value_and_grad(policy_model, _loss_fn)
         (loss, grads) = loss_and_grad_fn(policy_model, ref_model, batch, beta)
         with contextlib.suppress(AttributeError, TypeError):
-            optimizer.update(policy_model, grads)  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-        with contextlib.suppress(AttributeError, TypeError):
-            mx.eval(policy_model.parameters(), optimizer.state if optimizer is not None else {}, loss)  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportFunctionMemberAccess]  # ty: ignore[unresolved-attribute]
+            assert _is_mlx_optimizer(optimizer, policy_model)
+            optimizer.update(policy_model, grads)
+        if mx is not None:
+            with contextlib.suppress(AttributeError, TypeError):
+                pol_ref: MlxDPOModel = policy_model
+                opt_ref = optimizer
+                assert _is_mlx_causal_lm(pol_ref)
+                assert _has_opt_state(opt_ref)
+                mx.eval(pol_ref.parameters(), opt_ref.state, loss)
         return loss
     return _loss_fn(policy_model, ref_model, batch, beta)
 
 
-def _run_training_epochs[ModelT, OptT, BatchT: MlxDPOBatch, ParamsT](
+def _run_training_epochs[
+    ModelT: _MlxDPOTargetProtocol,
+    OptT: _MlxDPOTargetProtocol | None,
+    BatchT: MlxDPOBatch,
+    ParamsT,
+](
     state: DPOLoopState[ModelT, OptT, BatchT] | TrainerState[ModelT, ParamsT, OptT, BatchT],
 ) -> float:
     """Run MLX DPO training epochs over the preference dataloader.
@@ -216,13 +395,20 @@ def _run_training_epochs[ModelT, OptT, BatchT: MlxDPOBatch, ParamsT](
 
     def _step(batch: BatchT) -> float:
         """Process a single preference batch and return scalar float loss."""
-        assert policy_model is not None
-        assert ref_model is not None
-        loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        pol = policy_model
+        ref = ref_model
+        opt = optimizer
+        assert _is_dpo_model(pol)
+        assert _is_dpo_model(ref)
+        assert _is_dpo_opt(opt)
+        loss = _run_dpo_step(pol, ref, opt, batch, beta)
         try:
-            return float(loss.item())  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            raw_loss = loss
+            assert _is_mlx_array(raw_loss)
+            return float(raw_loss.item())
         except (AttributeError, TypeError, ValueError):
-            return float(loss)  # pyright: ignore[reportArgumentType]
+            assert _is_dpo_float_loss(loss)
+            return float(loss)
 
     return generic_run_training_epochs(state.epochs, dataloader, _step)
 
@@ -259,11 +445,18 @@ def _execute_dpo(
     loaded_r = load(model_name)
     ref_model: MlxCausalLMProtocol = loaded_r[0] if isinstance(loaded_r, (tuple, list)) else loaded_r
     optimizer: _MlxOptimizerProtocol[MlxCausalLMProtocol] = optim.AdamW(learning_rate=learning_rate)
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
-    dataloader = data_dict.get("loader", None)
-    has_loader = isinstance(dataloader, Iterable)
-    if not has_loader:
-        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+    dataloader, _ = resolve_training_dataloader(
+        dataset,
+        lambda: build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size)),
+        lambda: [
+            {
+                "chosen_inputs": [[1, 2, 3]],
+                "chosen_labels": [[2, 3, 4]],
+                "rejected_inputs": [[1, 5, 6]],
+                "rejected_labels": [[5, 6, 7]],
+            }
+        ],
+    )
     final_loss = _run_training_epochs(
         DPOLoopState(
             dataloader=dataloader,

@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Callable, Sequence
-from typing import SupportsFloat
+from collections.abc import Sequence
+from typing import SupportsFloat, TypeGuard, overload
 
+from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
@@ -24,7 +25,6 @@ from gemma_4_sql.type_hints import (
     BackendKwargValue,
     JaxArrayProtocol,
     JSONDict,
-    MaxTextCausalLMProtocol,
     PyTreeNode,
     QuantizeResultDict,
     TensorType,
@@ -35,11 +35,44 @@ logger = logging.getLogger(__name__)
 type AQTParamLeaf = JaxArrayProtocol | TensorType | SupportsFloat | str
 type AQTParamDict = dict[str, "AQTParamDict | AQTParamLeaf"]
 
+
+def _is_aqt_tensor(val: AQTParamDict | AQTParamLeaf) -> TypeGuard[TensorType | SupportsFloat]:
+    """Narrow `val` to `TensorType | SupportsFloat` for `quantize_tensor_aqt`.
+
+    Args:
+        val: Candidate kernel entry.
+
+    Returns:
+        `True` when `val` is a tensor or numeric leaf.
+
+    """
+    _ = val
+    return True
+
+
+def _is_aqt_param_dict(
+    val: BackendKwargValue | AQTParamDict | Sequence[str] | dict[str, PyTreeNode] | None,
+) -> TypeGuard[AQTParamDict]:
+    """Narrow `val` to `AQTParamDict`.
+
+    Args:
+        val: Candidate parameter dictionary.
+
+    Returns:
+        `True` when `val` is a `dict`.
+
+    """
+    return isinstance(val, dict)
+
+
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
 aqt = optional_import("aqt.jax.v2")
-_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
-Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
+Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+    "maxtext.models.gemma4",
+    "Gemma4Model",
+    MaxTextModelConstructorProtocol,
+)
 
 DEFAULT_AQT_TARGETS: tuple[str, ...] = (
     "q_proj",
@@ -92,11 +125,49 @@ def quantize_tensor_aqt(
     return quantized.astype(dtype), scale
 
 
+@overload
+def apply_aqt_quantization(
+    params: AQTParamDict,
+    method: str = "int8",
+    quant_targets: list[str] | tuple[str, ...] | None = None,
+) -> tuple[AQTParamDict, JSONDict, int]:
+    """Apply Google AQT numerical quantization to an `AQTParamDict`.
+
+    Args:
+        params: Model parameter PyTree dictionary.
+        method: Quantization format (`'int8'`, `'int4'`, `'aqt'`).
+        quant_targets: Submodule names to quantize.
+
+    Returns:
+        A tuple of `(quantized_params, quantization_metadata, count_of_quantized_modules)`.
+
+    """
+
+
+@overload
 def apply_aqt_quantization(
     params: AQTParamDict | AQTParamLeaf,
     method: str = "int8",
     quant_targets: list[str] | tuple[str, ...] | None = None,
-) -> tuple[AQTParamDict, JSONDict, int]:
+) -> tuple[AQTParamDict | AQTParamLeaf, JSONDict, int]:
+    """Apply Google AQT numerical quantization to a parameter PyTree or leaf.
+
+    Args:
+        params: Model parameter PyTree or leaf.
+        method: Quantization format (`'int8'`, `'int4'`, `'aqt'`).
+        quant_targets: Submodule names to quantize.
+
+    Returns:
+        A tuple of `(quantized_params, quantization_metadata, count_of_quantized_modules)`.
+
+    """
+
+
+def apply_aqt_quantization(
+    params: AQTParamDict | AQTParamLeaf,
+    method: str = "int8",
+    quant_targets: list[str] | tuple[str, ...] | None = None,
+) -> tuple[AQTParamDict | AQTParamLeaf, JSONDict, int]:
     """Apply Google AQT numerical quantization across model parameter projections.
 
     Args:
@@ -151,7 +222,8 @@ def apply_aqt_quantization(
                 v_dict: AQTParamDict = v
                 if "kernel" in v_dict and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in targets):
                     kernel = v_dict["kernel"]
-                    q_kernel, scale = quantize_tensor_aqt(kernel, bits=bits)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+                    assert _is_aqt_tensor(kernel)
+                    q_kernel, scale = quantize_tensor_aqt(kernel, bits=bits)
                     new_v: AQTParamDict = dict(v_dict)
                     new_v["kernel"] = q_kernel
                     new_v["kernel_scale"] = scale
@@ -181,7 +253,7 @@ def apply_aqt_quantization(
     }
     if aqt_native_cfg is not None:
         metadata["aqt_dg_config"] = aqt_native_cfg
-    return quantized_params, metadata, injected_count  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
+    return quantized_params, metadata, injected_count
 
 
 def quantize_model(
@@ -221,7 +293,6 @@ def quantize_model(
 
     def _apply() -> tuple[float, str]:
         """Resolve MaxText model parameters and apply AQT quantization."""
-        nonlocal metadata
         assert jax is not None
         assert jnp is not None
         if has_params:
@@ -233,8 +304,8 @@ def quantize_model(
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
             params = model.init(rng, dummy_input)
 
-        if isinstance(params, dict):
-            params_dict: AQTParamDict = params  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
+        if _is_aqt_param_dict(params):
+            params_dict: AQTParamDict = params
             quant_targets = kwargs.get("quant_targets")
             targets_list: list[str] | None = [str(t) for t in quant_targets] if isinstance(quant_targets, (list, tuple)) else None
             _quantized_params, meta, count = apply_aqt_quantization(
@@ -242,13 +313,13 @@ def quantize_model(
                 method=method,
                 quant_targets=targets_list,
             )
-            metadata = meta
+            metadata.update(meta)
             raw_red = meta.get("memory_reduction_factor", default_reduction)
             reduction = float(raw_red) if isinstance(raw_red, (int, float)) else default_reduction
             logger.info("AQT quantization applied to %d modules with reduction %f", count, reduction)
         else:
             reduction = default_reduction
-            metadata = {"method": method, "memory_reduction_factor": reduction}
+            metadata.update({"method": method, "memory_reduction_factor": reduction})
         return (reduction, f"quantized_{method}")
 
     wrapped = quantize_model_wrapper(
@@ -260,7 +331,7 @@ def quantize_model(
         raise_on_error=bool(kwargs.get("raise_on_error")),
     )
     if metadata:
-        wrapped["metadata"] = metadata  # ty: ignore[invalid-assignment]
+        wrapped["metadata"] = metadata
     return wrapped
 
 

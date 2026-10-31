@@ -83,9 +83,13 @@ def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> typing.Iterator[None]:
             """Compute token embeddings."""
             return self.emb(x.long())
 
+    def _from_pretrained_dummy(*_a: str, **_k: str | None) -> DummyModel:
+        """Return `DummyModel()`."""
+        return DummyModel()
+
     monkeypatch.setattr(
         "gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM.from_pretrained",
-        lambda *_a, **_k: DummyModel(),  # pyright: ignore[reportUnknownLambdaType]
+        _from_pretrained_dummy,
     )
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
 
@@ -154,7 +158,12 @@ def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify rank-0 process exports safetensors weights in distributed mode."""
     saved_files: list[str] = []
-    monkeypatch.setattr(ex, "save_file", lambda _tensors, filename: saved_files.append(filename))  # pyright: ignore[reportUnknownLambdaType]
+
+    def _record_save(_tensors: dict[str, torch.Tensor], filename: str) -> None:
+        """Append filename to `saved_files`."""
+        saved_files.append(filename)
+
+    monkeypatch.setattr(ex, "save_file", _record_save)
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12356"
@@ -170,8 +179,8 @@ def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify non-rank-0 process skips safetensors export in distributed mode."""
-    saved_files: list[str] = []
-    monkeypatch.setattr(ex, "save_file", lambda _tensors, filename: saved_files.append(filename))  # pyright: ignore[reportUnknownLambdaType]
+    mock_save = MagicMock()
+    monkeypatch.setattr(ex, "save_file", mock_save)
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12357"
@@ -181,7 +190,7 @@ def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     try:
         res = ex.export_model("test_model", str(tmp_path), backend_alias="pytorch_native")
         assert res["status"] == "skipped_non_rank_zero"
-        assert saved_files == []
+        mock_save.assert_not_called()
     finally:
         dist.destroy_process_group()
 
@@ -192,11 +201,15 @@ def test_etl_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
     os.environ["MASTER_PORT"] = "12358"
     dist.init_process_group("gloo", rank=0, world_size=1)
 
+    def _load_ds(*_a: str, **_k: str) -> list[dict[str, str]]:
+        """Return 1-row SQL dataset."""
+        return [{"question": "SELECT 1", "query": "SELECT 1;"}]
+
     try:
         monkeypatch.setattr(
             etl,
             "datasets",
-            MagicMock(load_dataset=lambda *_a, **_k: [{"question": "SELECT 1", "query": "SELECT 1;"}]),  # pyright: ignore[reportUnknownLambdaType]
+            MagicMock(load_dataset=_load_ds),
         )
         monkeypatch.setattr(etl, "SQLTokenizer", SQLTokenizer)
 

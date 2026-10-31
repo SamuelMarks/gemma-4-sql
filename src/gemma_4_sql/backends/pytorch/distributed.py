@@ -51,12 +51,12 @@ def setup_distributed(
     device_count = max(1, int(torch_module.cuda.device_count()))
 
     if is_distributed:
-        import torch.distributed as dist
-
-        dist_mod = dist  # ty: ignore[invalid-assignment]
-        if not dist_mod.is_initialized():  # ty: ignore[unresolved-attribute]
-            dist_mod.init_process_group("nccl" if cuda_available else "gloo")  # ty: ignore[unresolved-attribute]
-        rank = dist_mod.get_rank()  # ty: ignore[unresolved-attribute]
+        raw_dist = optional_import("torch.distributed")
+        assert isinstance(raw_dist, TorchDistModuleProtocol)
+        dist_mod = raw_dist
+        if not dist_mod.is_initialized():
+            dist_mod.init_process_group("nccl" if cuda_available else "gloo")
+        rank = dist_mod.get_rank()
         device_id = rank % device_count
         device_str = f"cuda:{device_id}" if cuda_available else "cpu"
         if cuda_available:

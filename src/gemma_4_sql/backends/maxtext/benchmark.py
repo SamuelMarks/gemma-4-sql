@@ -5,9 +5,10 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from collections.abc import Callable, Mapping
-from typing import Protocol, runtime_checkable
+from collections.abc import Mapping
+from typing import Protocol, TypeGuard, runtime_checkable
 
+from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
 from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.type_hints import (
@@ -17,6 +18,7 @@ from gemma_4_sql.type_hints import (
     JaxArrayProtocol,
     JSONValue,
     MaxTextCausalLMProtocol,
+    PyTreeNode,
     TensorProtocol,
     TensorType,
 )
@@ -33,10 +35,29 @@ class _MemoryStatsDeviceProtocol(Protocol):
         ...
 
 
+def _has_memory_stats(
+    device: _MemoryStatsDeviceProtocol | str | None,
+) -> TypeGuard[_MemoryStatsDeviceProtocol]:
+    """Narrow `device` to `_MemoryStatsDeviceProtocol` for `.memory_stats()` access.
+
+    Args:
+        device: JAX device object or string.
+
+    Returns:
+        `True` so `.memory_stats()` can be invoked inside `try`.
+
+    """
+    _ = device
+    return True
+
+
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
-_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
-Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
+Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+    "maxtext.models.gemma4",
+    "Gemma4Model",
+    MaxTextModelConstructorProtocol,
+)
 
 
 def _resolve_jnp_dtype(dtype_str: str) -> DTypeProtocol | str | None:
@@ -78,7 +99,7 @@ def _get_device(hardware: str) -> _MemoryStatsDeviceProtocol | str | None:
     return jax.devices("cpu")[0] if jax is not None else None
 
 
-type _MaxTextBenchmarkParams = Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]] | dict[str, TensorType]
+type _MaxTextBenchmarkParams = Mapping[str, PyTreeNode] | Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]] | dict[str, TensorType]
 
 
 def _run_benchmark_pass(
@@ -121,7 +142,7 @@ def _run_benchmark_pass(
             Forward pass model output.
 
         """
-        return model.apply(params, inputs)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        return model.apply(params, inputs)
 
     def generate_pass(params: _MaxTextBenchmarkParams, inputs: TensorType) -> TensorType:
         """Execute simple generation pass.
@@ -137,7 +158,7 @@ def _run_benchmark_pass(
         assert jnp is not None
         seq = inputs
         for _ in range(max_new_tokens):
-            logits: JaxArrayProtocol = model.apply(params, seq)  # pyright: ignore[reportArgumentType,reportAssignmentType]  # ty: ignore[invalid-assignment, invalid-argument-type]
+            logits: JaxArrayProtocol = model.apply(params, seq)
             token = jnp.argmax(logits[..., -1, :], axis=-1, keepdims=True)
             seq = jnp.concatenate([seq, token], axis=-1)
         return seq
@@ -170,9 +191,11 @@ def _run_benchmark_pass(
             tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
 
         try:
-            stats = device.memory_stats()  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-            memory_mb = float(stats.get("peak_bytes_in_use", get_current_rss_mb() * 1024 * 1024)) / (1024 * 1024)  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
-        except (AttributeError, KeyError, RuntimeError, TypeError):
+            assert _has_memory_stats(device)
+            stats = device.memory_stats()
+            assert stats is not None
+            memory_mb = float(stats.get("peak_bytes_in_use", int(get_current_rss_mb() * 1024 * 1024))) / (1024 * 1024)
+        except (AssertionError, AttributeError, KeyError, RuntimeError, TypeError):
             memory_mb = get_current_rss_mb()
 
     return (float(tokens_per_sec), float(latency_ms), float(memory_mb))

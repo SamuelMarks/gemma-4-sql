@@ -111,6 +111,23 @@ AutoModelForCausalLM: _HFModelLoaderProtocol | None = optional_attr(
 )
 
 
+@runtime_checkable
+class _SubmoduleRegistrarProtocol[SubmodT](Protocol):
+    """Protocol for a `torch.nn.Module` supporting `get_submodule` and `add_module`."""
+
+    def named_modules(self) -> Iterable[tuple[str, SubmodT]]:
+        """Yield `(name, module)` pairs across the module hierarchy."""
+        ...
+
+    def get_submodule(self, target: str) -> SubmodT:
+        """Retrieve a submodule by dotted path."""
+        ...
+
+    def add_module(self, name: str, module: SubmodT | None) -> None:
+        """Register a child submodule on this module."""
+        ...
+
+
 def _count_injected_peft_modules(
     model: _NamedModulesContainerProtocol | str | None,
     target_modules: list[str],
@@ -133,6 +150,67 @@ def _count_injected_peft_modules(
         except (TypeError, ValueError, RuntimeError):
             pass
     return len(target_modules)
+
+
+def inject_native_pytorch_lora[SubmodT](
+    model: _SubmoduleRegistrarProtocol[SubmodT],
+    target_modules: list[str],
+    lora_r: int = 8,
+    lora_alpha: int = 16,
+    lora_dropout: float = 0.05,
+) -> int:
+    """Inject native PyTorch LoRA linear wrappers into matching `nn.Linear` submodules using `add_module`.
+
+    Args:
+        model: Target `torch.nn.Module` hierarchy.
+        target_modules: Target module suffix names (e.g. `['q_proj', 'v_proj']`).
+        lora_r: LoRA rank (`r > 0`).
+        lora_alpha: LoRA scaling factor (`alpha`).
+        lora_dropout: Dropout probability.
+
+    Returns:
+        Number of linear submodules wrapped with native LoRA adapters.
+
+    Raises:
+        DependencyMissingError: If PyTorch is unavailable.
+
+    """
+    if torch is None:
+        raise DependencyMissingError("PyTorch is required for native LoRA injection.", backend="pytorch")
+    import math as _math
+
+    import torch as _torch
+    from torch import nn
+
+    scale = float(lora_alpha) / float(max(1, lora_r))
+
+    class NativeLoRALinear(nn.Module):
+        """Low-rank adapter wrapper around a `torch.nn.Linear` module."""
+
+        def __init__(self, base: nn.Linear) -> None:
+            """Initialize `NativeLoRALinear` around `base`."""
+            super().__init__()
+            self.base = base
+            self.lora_a = nn.Parameter(_torch.full((base.in_features, lora_r), 1.0 / _math.sqrt(max(1, lora_r)), dtype=base.weight.dtype, device=base.weight.device))
+            self.lora_b = nn.Parameter(_torch.zeros((lora_r, base.out_features), dtype=base.weight.dtype, device=base.weight.device))
+            self.dropout = nn.Dropout(p=lora_dropout) if lora_dropout > 0.0 else nn.Identity()
+
+        def forward(self, x: _torch.Tensor) -> _torch.Tensor:
+            """Compute `base(x) + scale * ((dropout(x) @ lora_a) @ lora_b)`."""
+            return self.base(x) + scale * ((self.dropout(x) @ self.lora_a) @ self.lora_b)
+
+    matched_paths: list[tuple[str, nn.Linear]] = [(name, mod) for name, mod in list(model.named_modules()) if isinstance(mod, nn.Linear) and matches_target_module(name, target_modules)]
+    for path, lin_mod in matched_paths:
+        wrapped = NativeLoRALinear(lin_mod)
+        if "." in path:
+            parent_path, child_name = path.rsplit(".", 1)
+            parent = model.get_submodule(parent_path)
+            assert isinstance(parent, nn.Module)
+            parent.add_module(child_name, wrapped)
+        else:
+            assert isinstance(model, nn.Module)
+            model.add_module(path, wrapped)
+    return len(matched_paths)
 
 
 def apply_lora(
@@ -161,7 +239,31 @@ def apply_lora(
         TrainingError: If LoRA application fails and `raise_on_error` is enabled.
 
     """
-    if peft is None or torch is None or AutoModelForCausalLM is None:
+    backend_alias = str(kwargs.get("backend_alias", "pytorch"))
+    if torch is None:
+        raise DependencyMissingError("PyTorch PEFT dependencies are missing.", backend=backend_alias)
+
+    if backend_alias == "pytorch_native":
+
+        def _inject_native() -> int:
+            """Load native Gemma 4 model and inject native LoRA linear wrappers."""
+            from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM
+
+            native_model = Gemma4ForCausalLM.from_pretrained(model_name)
+            return inject_native_pytorch_lora(native_model, target_modules, lora_r, lora_alpha, lora_dropout)
+
+        return apply_lora_wrapper(
+            "pytorch_native",
+            model_name,
+            target_modules,
+            lora_r,
+            lora_alpha,
+            lora_dropout,
+            _inject_native,
+            **kwargs,
+        )
+
+    if peft is None or AutoModelForCausalLM is None:
         raise DependencyMissingError("PyTorch PEFT dependencies are missing.", backend="pytorch")
 
     def _inject() -> int:

@@ -4,6 +4,7 @@ from gemma_4_sql.backends.common_train import (
     apply_nnx_optimizer_update,
     create_nnx_optimizer,
     generic_run_training_epochs,
+    resolve_training_dataloader,
 )
 
 
@@ -96,3 +97,53 @@ def test_run_train_wrapper() -> None:
 
     with pytest.raises(DependencyMissingError, match="missing dep"):
         run_train_wrapper("jax", cfg, lambda: (_ for _ in ()).throw(DependencyMissingError("missing dep")))
+
+
+def test_resolve_training_dataloader() -> None:
+    """Verify resolve_training_dataloader handles loaded, synthetic fallback, invalid loader, and strict dataset modes."""
+    import pytest
+
+    from gemma_4_sql.exceptions import DependencyMissingError, ETLError
+    from gemma_4_sql.type_hints import ETLResultDict
+
+    def _loaded_fn() -> ETLResultDict:
+        """Return a valid loaded ETLResultDict."""
+        return {"backend": "jax", "status": "loaded", "dataset": "ds", "split": "train", "batch_size": 1, "loader": [{"inputs": [1]}]}
+
+    def _none_loader_fn() -> ETLResultDict:
+        """Return an ETLResultDict with loader=None."""
+        return {"backend": "jax", "status": "loaded", "dataset": "ds", "split": "train", "batch_size": 1, "loader": None}
+
+    def _err_loader_fn() -> ETLResultDict:
+        """Raise ETLError."""
+        raise ETLError("bad dataset")
+
+    loader1, src1 = resolve_training_dataloader("real_ds", _loaded_fn, lambda: [{"inputs": [0]}])
+    assert list(loader1) == [{"inputs": [1]}]
+    assert src1 == "loaded"
+
+    loader2, src2 = resolve_training_dataloader("synthetic", _none_loader_fn, lambda: [{"inputs": [0]}])
+    assert list(loader2) == [{"inputs": [0]}]
+    assert src2 == "synthetic_fallback"
+
+    with pytest.raises(ValueError, match="Invalid dataloader"):
+        resolve_training_dataloader("real_ds", _none_loader_fn, lambda: [{"inputs": [0]}])
+
+    loader3, src3 = resolve_training_dataloader("synthetic", _err_loader_fn, lambda: [{"inputs": [0]}])
+    assert list(loader3) == [{"inputs": [0]}]
+    assert src3 == "synthetic_fallback"
+
+    with pytest.raises(ETLError, match="bad dataset"):
+        resolve_training_dataloader("real_ds", _err_loader_fn, lambda: [{"inputs": [0]}])
+
+    with pytest.raises(ETLError, match="bad dataset"):
+        resolve_training_dataloader("synthetic", _err_loader_fn, lambda: [{"inputs": [0]}], strict_dataset=True)
+
+    loader4, src4 = resolve_training_dataloader(
+        "real_ds",
+        lambda: (_ for _ in ()).throw(DependencyMissingError("no grain")),
+        lambda: [{"inputs": [0]}],
+        allow_synthetic_fallback=True,
+    )
+    assert list(loader4) == [{"inputs": [0]}]
+    assert src4 == "synthetic_fallback"

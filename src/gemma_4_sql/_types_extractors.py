@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import atexit
+import concurrent.futures
 from collections.abc import Callable, Coroutine, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, TypeVar, Union, runtime_checkable
 
 type KwargScalar = str | int | float | bool | Path | None
+type StatusScalar = str | int | float | bool | None
 type KwargValue = Union[
     KwargScalar,
     Sequence["KwargValue"],
@@ -112,11 +115,26 @@ def extract_bool_kwarg(kwargs: KwargMapping, key: str, default: bool = False) ->
     return bool(val)
 
 
+def extract_status_kwargs[ValT](kwargs: Mapping[str, ValT]) -> dict[str, StatusScalar]:
+    """Filter a keyword-argument mapping down to scalar `StatusScalar` (`str | int | float | bool | None`) entries.
+
+    Args:
+        kwargs: Input keyword-argument mapping.
+
+    Returns:
+        Dictionary containing only scalar status values (`str`, `int`, `float`, `bool`, or `None`).
+
+    """
+    return {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+
+
 TResult = TypeVar("TResult")
+_SYNC_COROUTINE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="gemma4sql-sync")
+atexit.register(_SYNC_COROUTINE_EXECUTOR.shutdown, wait=False)
 
 
 def run_coroutine_sync(coro_factory: Callable[[], Coroutine[None, None, TResult]]) -> TResult:
-    """Execute an async coroutine factory synchronously, safely offloading to a worker thread if an event loop is already running.
+    """Execute an async coroutine factory synchronously, safely offloading to a shared worker thread if an event loop is already running.
 
     Args:
         coro_factory: Zero-argument callable returning the coroutine to await.
@@ -126,7 +144,6 @@ def run_coroutine_sync(coro_factory: Callable[[], Coroutine[None, None, TResult]
 
     """
     import asyncio
-    import concurrent.futures
 
     try:
         running_loop = asyncio.get_running_loop()
@@ -134,18 +151,19 @@ def run_coroutine_sync(coro_factory: Callable[[], Coroutine[None, None, TResult]
         running_loop = None
 
     if running_loop is not None and running_loop.is_running():
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(lambda: asyncio.run(coro_factory())).result()
+        return _SYNC_COROUTINE_EXECUTOR.submit(lambda: asyncio.run(coro_factory())).result()
     return asyncio.run(coro_factory())
 
 
 __all__ = [
     "KwargScalar",
     "KwargValue",
+    "StatusScalar",
     "TResult",
     "extract_bool_kwarg",
     "extract_float_kwarg",
     "extract_int_kwarg",
+    "extract_status_kwargs",
     "extract_str_kwarg",
     "run_coroutine_sync",
 ]

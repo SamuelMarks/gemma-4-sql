@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Callable, Mapping
@@ -13,7 +14,7 @@ from flax import nnx
 from jax import Array
 
 from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
-from gemma_4_sql.backends.jax.gemma4.config import JaxDTypeLike, ModelConfig
+from gemma_4_sql.backends.jax.gemma4.config import JaxDTypeLike, ModelConfig, resolve_gemma4_config
 from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import BenchmarkResultDict, JaxArrayProtocol, JaxCausalLMProtocol, JSONValue
@@ -68,13 +69,13 @@ def _resolve_jax_dtype(dtype_str: str) -> JaxDTypeLike:
 
     """
     dtype_map: dict[str, JaxDTypeLike] = {
-        "bfloat16": jnp.bfloat16,
+        "bfloat16": jnp.bfloat16 or "bfloat16",
         "float16": jnp.float16,
         "float32": jnp.float32,
         "int32": jnp.int32,
         "int8": jnp.int8,
     }
-    return dtype_map.get(dtype_str, jnp.bfloat16)  # pyright: ignore[reportReturnType]
+    return dtype_map.get(dtype_str, jnp.bfloat16 or "bfloat16")
 
 
 def _get_device(hardware: str) -> JaxDeviceProtocol | str | None:
@@ -159,7 +160,8 @@ def _run_benchmark_pass(
     compiled_forward = nnx.jit(forward_pass) if isinstance(nnx, _NNXJitProtocol) else forward_pass
     compiled_generate = nnx.jit(generate_pass) if isinstance(nnx, _NNXJitProtocol) else generate_pass
 
-    with jax.default_device(device):  # pyright: ignore[reportArgumentType]
+    default_dev_fn: Callable[[JaxDeviceProtocol | str | None], contextlib.AbstractContextManager[None]] = jax.default_device
+    with default_dev_fn(device):
         dummy_inputs = jax.random.randint(jax.random.key(42), (batch_size, 32), 1, 256000, dtype=jnp.int32)
 
         for _ in range(warmup_steps):
@@ -184,7 +186,7 @@ def _run_benchmark_pass(
 
         memory_mb = get_current_rss_mb()
         try:
-            stats = device.memory_stats() or {}  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            stats = (device.memory_stats() if isinstance(device, JaxDeviceProtocol) else None) or {}
             memory_mb = float(stats.get("peak_bytes_in_use", memory_mb * 1024.0 * 1024.0)) / (1024.0 * 1024.0)
         except (AttributeError, KeyError, RuntimeError, TypeError):
             memory_mb = get_current_rss_mb()
@@ -228,7 +230,7 @@ def benchmark_model(
 
         target_dtype = _resolve_jax_dtype(dtype_str)
 
-        config = Gemma4Config.gemma4_e2b()
+        config = resolve_gemma4_config(Gemma4Config, model_name)
         config.dtype = target_dtype
         model = Gemma4ForCausalLM(config, rngs=nnx.Rngs(0))
 
@@ -237,7 +239,7 @@ def benchmark_model(
         num_runs = int(str(kwargs.get("num_runs", 5)))
         return _run_benchmark_pass(model, batch_size, num_runs, warmup_steps, mode, max_new_tokens, device)
 
-    if jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None:  # pyright: ignore[reportUnnecessaryComparison]
+    if jax is None or jnp is None or nnx is None or not callable(Gemma4ForCausalLM):
         raise DependencyMissingError("JAX dependencies are missing.")
 
     return run_benchmark_wrapper(

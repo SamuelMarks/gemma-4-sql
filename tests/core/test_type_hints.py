@@ -200,6 +200,20 @@ def test_type_hints_dataclasses_and_defaults() -> None:
     assert extract_str_kwarg(kw_map, "missing", "def") == "def"
     assert extract_str_kwarg(kw_map, "s_val", "def") == "hello"
 
+    from gemma_4_sql.type_hints import extract_status_kwargs
+
+    assert extract_status_kwargs(kw_map) == {
+        "i_int": 4,
+        "i_str": "8",
+        "i_bool": True,
+        "f_float": 0.25,
+        "f_bool": False,
+        "s_val": "hello",
+        "b_str_true": "yes",
+        "b_str_false": "no",
+        "b_bool": True,
+    }
+
     assert extract_bool_kwarg(kw_map, "missing", False) is False
     assert extract_bool_kwarg(kw_map, "b_str_true", False) is True
     assert extract_bool_kwarg(kw_map, "b_str_false", True) is False

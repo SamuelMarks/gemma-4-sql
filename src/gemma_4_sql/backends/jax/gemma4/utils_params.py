@@ -17,7 +17,7 @@ from flax import nnx
 
 from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
 from gemma_4_sql.backends.lazy_loader import optional_attr
-from gemma_4_sql.type_hints import DTypeProtocol, DTypeSpec, ModelConfigProtocol, NDArrayProtocol, TensorProtocol, ToListArrayProtocol
+from gemma_4_sql.type_hints import DTypeProtocol, DTypeSpec, ModelConfigProtocol, NDArrayProtocol
 
 type TransformSpec = tuple[tuple[int, ...] | None, tuple[int, ...] | None, bool] | None
 
@@ -64,7 +64,7 @@ class TransformableArrayProtocol(Protocol):
         ...
 
 
-type ArrayLikeTensor = jax.Array | TensorProtocol | NDArrayProtocol | TransformableArrayProtocol | ToListArrayProtocol
+type ArrayLikeTensor = jax.Array | TransformableArrayProtocol | NDArrayProtocol
 
 
 @runtime_checkable
@@ -235,11 +235,11 @@ def _apply_transform(tensor: ArrayLikeTensor, transform: TransformType) -> Array
     (permute, reshape, reshape_first) = spec
     res: ArrayLikeTensor = tensor
     if reshape_first and reshape is not None:
-        res = res.reshape(reshape)  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[unresolved-attribute, invalid-argument-type]
+        res = res.reshape(*reshape)
     if permute:
-        res = res.transpose(permute)  # pyright: ignore[reportAttributeAccessIssue,reportCallIssue,reportArgumentType]  # ty: ignore[missing-argument, unresolved-attribute, invalid-argument-type]
+        res = res.transpose(*permute)
     if not reshape_first and reshape is not None:
-        res = res.reshape(reshape)  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[unresolved-attribute, invalid-argument-type]
+        res = res.reshape(*reshape)
     return res
 
 
@@ -346,7 +346,7 @@ def assign_weights_from_eval_shape(
             msg = f"Shape mismatch for {st_key}: {transformed.shape} vs {expected_shape}"
             raise ValueError(msg)
         resolved_dtype: DTypeSpec | jax.numpy.dtype = str(expected_dtype) if isinstance(expected_dtype, DTypeProtocol) and not isinstance(expected_dtype, jax.numpy.dtype) else expected_dtype
-        casted: ArrayLikeTensor = transformed.astype(resolved_dtype)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        casted: ArrayLikeTensor = transformed.astype(resolved_dtype)
         target = val_obj.value if isinstance(val_obj, ParamValueHolderProtocol) else val_obj
         if isinstance(target, ShardedTargetProtocol) and bool(target.sharding):
             shd = target.sharding
@@ -415,7 +415,18 @@ class FlatDictStateProtocol(Protocol):
         ...
 
 
-def state_to_mutable_dict(abs_state: PureDictStateProtocol | FlatDictStateProtocol | Mapping[StateKey, StateLeafValue] | Iterable[tuple[StateKey, StateLeafValue]]) -> StateNode:
+@runtime_checkable
+class _ItemsStateProtocol(Protocol):
+    """Protocol for a mapping-like state supporting `.items()`."""
+
+    def items(self) -> Iterable[tuple[StateKey, StateLeafValue]]:
+        """Yield `(key, value)` pairs."""
+        ...
+
+
+def state_to_mutable_dict(
+    abs_state: PureDictStateProtocol | FlatDictStateProtocol | _ItemsStateProtocol | Iterable[tuple[StateKey, StateLeafValue]],
+) -> StateNode:
     """Convert an NNX `State` or mapping into a mutable `StateNode` dictionary.
 
     Args:
@@ -429,7 +440,7 @@ def state_to_mutable_dict(abs_state: PureDictStateProtocol | FlatDictStateProtoc
         return dict(abs_state.to_pure_dict())
     if isinstance(abs_state, FlatDictStateProtocol):
         return dict(abs_state.to_flat_dict())
-    return dict(abs_state)  # pyright: ignore[reportArgumentType]
+    return dict(abs_state.items()) if isinstance(abs_state, _ItemsStateProtocol) else dict(abs_state)
 
 
 def _get_model_and_state[ModelT](
@@ -449,7 +460,8 @@ def _get_model_and_state[ModelT](
     model = model_cls(cfg, rngs=nnx.Rngs(0))
     state: StateNode = {}
     with contextlib.suppress(RuntimeError, ValueError, TypeError, AttributeError):
-        split_res = nnx.split(model)  # pyright: ignore[reportArgumentType]
+        split_fn: Callable[[ModelT], tuple[nnx.GraphDef[ModelT], PureDictStateProtocol | FlatDictStateProtocol | StateNode]] = nnx.split
+        split_res = split_fn(model)
         raw_state = split_res[1]
         state = state_to_mutable_dict(raw_state) if not isinstance(raw_state, dict) else raw_state
     return model, state
@@ -507,7 +519,8 @@ def create_model_from_safe_tensors[ModelT](
     _populate_state_from_files(file_dir, state, key_mapping)
 
     try:
-        nnx.update(model, state)  # pyright: ignore[reportArgumentType]
+        update_fn: Callable[[ModelT, StateNode], None] = nnx.update
+        update_fn(model, state)
     except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as e:
         logger.exception("Failed to update model with loaded state")
         if strict:

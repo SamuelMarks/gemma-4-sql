@@ -189,7 +189,16 @@ def test_cli_evaluate_and_agent(
 
 def test_cli_generate_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Verify generate_cmd handles confidence display, non-confidence display, and empty SQL."""
-    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "SELECT 1;", "confidence_score": 0.95, "status": "success"})  # pyright: ignore[reportUnknownLambdaType]
+
+    def _gen_with_conf(**_k: JSONValue) -> dict[str, str | float]:
+        """Return SQL with confidence score."""
+        return {"sql": "SELECT 1;", "confidence_score": 0.95, "status": "success"}
+
+    def _gen_empty_sql(**_k: JSONValue) -> dict[str, str]:
+        """Return empty SQL dict."""
+        return {"sql": "", "status": "success"}
+
+    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", _gen_with_conf)
     assert (
         cli([
             "generate",
@@ -216,7 +225,7 @@ def test_cli_generate_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.C
     assert "SELECT 1;" in out_no_conf
     assert "Confidence" not in out_no_conf
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", lambda **_k: {"sql": "", "status": "success"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.cli_serve.generate", _gen_empty_sql)
     assert cli(["generate", "--model", "test-model", "--prompt", "Find all users"]) == 0
     assert capsys.readouterr().out == ""
 
@@ -228,7 +237,11 @@ def test_cli_rag_variants(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Captur
     assert cli(["rag", "--action", "retrieve", "--prompt", "test", "--ddl", "CREATE TABLE t (id INT);"]) == 0
     capsys.readouterr()
 
-    monkeypatch.setattr("gemma_4_sql.cli_misc.build_rag_prompt", lambda prompt, ddl, **_k: f"{prompt} with {ddl}")  # pyright: ignore[reportUnknownLambdaType]
+    def _fake_build_rag(prompt: str, ddl: str, **_k: JSONValue) -> str:
+        """Return formatted rag prompt."""
+        return f"{prompt} with {ddl}"
+
+    monkeypatch.setattr("gemma_4_sql.cli_misc.build_rag_prompt", _fake_build_rag)
     assert cli(["rag", "--prompt", "Test prompt", "--ddl", "Test DDL", "--image-path", "test.jpg", "--audio-path", "test.mp3"]) == 0
     assert "Test prompt with Test DDL" in capsys.readouterr().out
 
@@ -288,19 +301,35 @@ def test_cli_serve_chat_and_few_shot(monkeypatch: pytest.MonkeyPatch, capsys: py
     assert cli(["few-shot", "--prompt", "hello", "--examples", "invalid_json"]) == 1
     capsys.readouterr()
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.serve_model", lambda **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    def _serve_none(**_k: JSONValue) -> None:
+        """Return None from serve_model."""
+        return
+
+    def _chat_select_1(**_k: JSONValue) -> dict[str, str]:
+        """Return SELECT 1 chat response."""
+        return {"response": "SELECT 1;"}
+
+    def _chat_empty(**_k: JSONValue) -> dict[str, str]:
+        """Return empty chat response."""
+        return {}
+
+    def _few_shot_stub(**kw: JSONValue) -> dict[str, str]:
+        """Return few-shot prompt dict."""
+        return {"few_shot_prompt": "prompt with examples" if kw.get("examples") else ""}
+
+    monkeypatch.setattr("gemma_4_sql.cli_serve.serve_model", _serve_none)
     serve_cmd(argparse.Namespace(model="dummy", port=8000, max_batch_size=32, backend="dummy", run_server=False, modality="text"))
     assert "Serving model dummy on port 8000 (status: unknown)" in capsys.readouterr().out
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", lambda **_k: {"response": "SELECT 1;"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", _chat_select_1)
     assert cli(["chat", "--prompt", "hello"]) == 0
     assert "SELECT 1;" in capsys.readouterr().out
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", lambda **_k: {})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", _chat_empty)
     chat_cmd(argparse.Namespace(model="d", prompt="d", backend="d", history="", image_path=None, audio_path=None, modality="text"))
     assert capsys.readouterr().out == ""
 
-    monkeypatch.setattr("gemma_4_sql.cli_serve.build_few_shot_prompt", lambda **kw: {"few_shot_prompt": "prompt with examples" if kw.get("examples") else ""})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.cli_serve.build_few_shot_prompt", _few_shot_stub)
     assert cli(["few-shot", "--prompt", "dummy", "--examples", '[{"prompt": "q", "sql": "s"}]']) == 0
     assert "prompt with examples" in capsys.readouterr().out
 

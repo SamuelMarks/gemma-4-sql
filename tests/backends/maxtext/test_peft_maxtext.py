@@ -152,8 +152,13 @@ def test_create_maxtext_lora_optimizer_real(monkeypatch: pytest.MonkeyPatch) -> 
             }
         }
     }
+
+    def _add_leaf(p: jax.Array, u: jax.Array) -> jax.Array:
+        """Add parameter and update array."""
+        return p + u
+
     updates, _ = opt.update(grads, opt_state, params)
-    updated_params: MaxTextParamDict = jax.tree_util.tree_map(lambda p, u: p + u, params, updates)  # pyright: ignore[reportUnknownLambdaType]
+    updated_params: MaxTextParamDict = jax.tree_util.tree_map(_add_leaf, params, updates)
     up_l0 = updated_params["layer_0"]
     assert isinstance(up_l0, dict)
     up_q = up_l0["q_proj"]

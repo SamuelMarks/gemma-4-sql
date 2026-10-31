@@ -98,7 +98,7 @@ def normalize_model_architecture(model_name: str) -> str:
         ValueError: If `model_name` is empty or cannot be parsed.
 
     """
-    if not model_name:
+    if not model_name or not model_name.strip():
         msg = "model_name must be a non-empty string."
         raise ValueError(msg)
 

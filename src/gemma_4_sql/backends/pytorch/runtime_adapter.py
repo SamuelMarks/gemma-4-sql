@@ -240,7 +240,7 @@ class TorchRuntimeAdapter:
         assert self._torch is not None
         tensor: TorchTensorProtocol = self._torch.randint(low, high, size, dtype=self.long_dtype())
         with contextlib.suppress(AttributeError, TypeError):
-            tensor = tensor.to(device)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            tensor = tensor.to(device)
         return tensor
 
 

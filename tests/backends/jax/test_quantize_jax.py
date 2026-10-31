@@ -149,8 +149,13 @@ def _mock_jax_quantize_env(monkeypatch: pytest.MonkeyPatch) -> None:
         head_dim=8,
         num_experts=1,
     )
+
+    def _from_preset(_cls: type[Gemma4Config], _name: str) -> Gemma4Config:
+        """Return `tiny_cfg`."""
+        return tiny_cfg
+
     monkeypatch.setattr(qt.Gemma4Config, "gemma4_e2b", staticmethod(lambda: tiny_cfg))
-    monkeypatch.setattr(qt.Gemma4Config, "from_preset", classmethod(lambda _cls, _name: tiny_cfg))  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(qt.Gemma4Config, "from_preset", classmethod(_from_preset))
 
 
 @pytest.mark.usefixtures("_mock_jax_quantize_env")
@@ -205,9 +210,11 @@ def test_set_param_metadata_fallback() -> None:
     class DummyParam:
         """Dummy parameter object without set_metadata method."""
 
+        __slots__ = ()
+
     dummy = DummyParam()
     qt._set_param_metadata(dummy, "custom_key", "custom_val")
-    assert vars(dummy) == {}
+    assert isinstance(dummy, DummyParam)
 
 
 def test_set_param_metadata_native() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -101,6 +101,35 @@ class _KerasBenchmarkTargetProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class _KerasExecutableModelProtocol(Protocol):
+    """Protocol for a Keras model supporting forward calls and `.generate(...)`."""
+
+    def __call__(self, inputs: TensorType, /) -> ForwardOutput:
+        """Run forward pass."""
+        ...
+
+    def generate(self, inputs: TensorType, *, max_length: int = 32) -> ForwardOutput:
+        """Generate token sequences."""
+        ...
+
+
+def _is_executable_keras_model(
+    model: KerasCausalLMProtocol | _KerasBenchmarkTargetProtocol,
+) -> TypeGuard[_KerasExecutableModelProtocol]:
+    """Narrow `model` to `_KerasExecutableModelProtocol`.
+
+    Args:
+        model: Target Keras model or benchmark double.
+
+    Returns:
+        `True` so `model(...)` and `model.generate(...)` can be called.
+
+    """
+    _ = model
+    return True
+
+
 def _run_benchmark_pass(
     model: KerasCausalLMProtocol | _KerasBenchmarkTargetProtocol,
     batch_size: int,
@@ -135,6 +164,8 @@ def _run_benchmark_pass(
 
     tf.random.set_seed(42)
     device_str = _get_device_str(hardware)
+    assert _is_executable_keras_model(model)
+    exec_model = model
 
     with tf.device(device_str):
         dummy_inputs = tf.random.uniform((batch_size, 32), minval=1, maxval=256000, dtype=tf.int32)
@@ -150,7 +181,7 @@ def _run_benchmark_pass(
                 Output logits tensor.
 
             """
-            return model(inputs)  # pyright: ignore[reportCallIssue]  # ty: ignore[call-non-callable]
+            return exec_model(inputs)
 
         if "GPU" in device_str:
             with contextlib.suppress(ValueError):
@@ -163,7 +194,7 @@ def _run_benchmark_pass(
                     _ = tf.identity(out)
             else:
                 with contextlib.suppress(AttributeError, TypeError):
-                    out = model.generate(dummy_inputs, max_length=32 + 2)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                    out = exec_model.generate(dummy_inputs, max_length=32 + 2)
                     _ = tf.identity(out)
 
         start_time = time.perf_counter()
@@ -174,7 +205,7 @@ def _run_benchmark_pass(
                     _ = tf.identity(out)
             else:
                 with contextlib.suppress(AttributeError, TypeError):
-                    out = model.generate(dummy_inputs, max_length=32 + max_new_tokens)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                    out = exec_model.generate(dummy_inputs, max_length=32 + max_new_tokens)
                     _ = tf.identity(out)
         end_time = time.perf_counter()
 

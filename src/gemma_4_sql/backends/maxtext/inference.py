@@ -2,60 +2,88 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
+import types
 from collections.abc import Callable
-from typing import Protocol, runtime_checkable
+from typing import TypeGuard
 
+from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
 from gemma_4_sql.backends.common_inference import (
     BeamSequenceArrayProtocol,
     BoundedLRUCache,
-    compute_jax_step_probs,
-    expand_jax_beams,
+    JaxModuleBeamProtocol,
+    JaxNumpyBeamProtocol,
     normalize_logprob_confidence,
     run_array_beam_search,
     run_inference_wrapper,
+    run_jax_beam_search_step,
 )
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import (
     InferenceResultDict,
     JaxArrayProtocol,
     JSONValue,
     MaxTextCausalLMProtocol,
+    extract_status_kwargs,
     extract_str_kwarg,
 )
 
 logger = logging.getLogger(__name__)
 
 
-@runtime_checkable
-class _JaxJitModuleProtocol(Protocol):
-    """Protocol for a `jax` module exposing `.jit`."""
+def _is_jax_beam_mod[ArrayT: BeamSequenceArrayProtocol](
+    mod: types.ModuleType | None,
+    _sample: ArrayT,
+) -> TypeGuard[JaxModuleBeamProtocol[ArrayT]]:
+    """Narrow `mod` to `JaxModuleBeamProtocol[ArrayT]`.
 
-    def jit[ArrayT: BeamSequenceArrayProtocol](
-        self,
-        fun: Callable[[ArrayT, int], tuple[ArrayT, ArrayT]],
-        *,
-        static_argnums: tuple[int, ...],
-    ) -> Callable[[ArrayT, int], tuple[ArrayT, ArrayT]]:
-        """JIT-compile a step probability function."""
-        ...
+    Args:
+        mod: Loaded `jax` module.
+        _sample: Sample array for type inference.
+
+    Returns:
+        `True` when `mod` is loaded.
+
+    """
+    _ = (mod, _sample)
+    return True
+
+
+def _is_jnp_beam_mod[ArrayT: BeamSequenceArrayProtocol](
+    mod: types.ModuleType | None,
+    _sample: ArrayT,
+) -> TypeGuard[JaxNumpyBeamProtocol[ArrayT]]:
+    """Narrow `mod` to `JaxNumpyBeamProtocol[ArrayT]`.
+
+    Args:
+        mod: Loaded `jax.numpy` module.
+        _sample: Sample array for type inference.
+
+    Returns:
+        `True` when `mod` is loaded.
+
+    """
+    _ = (mod, _sample)
+    return True
 
 
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
-_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
-Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
+Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+    "maxtext.models.gemma4",
+    "Gemma4Model",
+    MaxTextModelConstructorProtocol,
+)
 
 MAX_MODEL_CACHE_SIZE = 4
-_MODEL_CACHE: BoundedLRUCache[MaxTextCausalLMProtocol | Callable[..., JaxArrayProtocol]] = BoundedLRUCache(maxsize=MAX_MODEL_CACHE_SIZE)
+_MODEL_CACHE: BoundedLRUCache[MaxTextCausalLMProtocol | Callable[[JaxArrayProtocol], JaxArrayProtocol]] = BoundedLRUCache(maxsize=MAX_MODEL_CACHE_SIZE)
 
 
 def _get_or_create_maxtext_model(
     model_name: str,
-) -> MaxTextCausalLMProtocol | Callable[..., JaxArrayProtocol]:
+) -> MaxTextCausalLMProtocol | Callable[[JaxArrayProtocol], JaxArrayProtocol]:
     """Retrieve a cached MaxText model instance or initialize and cache a new one.
 
     Args:
@@ -93,17 +121,9 @@ def _beam_search_step[ArrayT: BeamSequenceArrayProtocol](
 
     """
     logits = model_apply_fn(seq)
-    if isinstance(jax, _JaxJitModuleProtocol):
-
-        def _step_probs(l_arr: ArrayT, bw: int) -> tuple[ArrayT, ArrayT]:
-            """Compute step probabilities for JIT compilation."""
-            return compute_jax_step_probs(l_arr, bw, jax, jnp)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-
-        step_fn = jax.jit(_step_probs, static_argnums=(1,))
-        (top_indices, top_probs) = step_fn(logits, beam_width)
-    else:
-        (top_indices, top_probs) = compute_jax_step_probs(logits, beam_width, jax, jnp)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-    return expand_jax_beams(seq, score, top_indices, top_probs, beam_width, jnp)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+    assert _is_jax_beam_mod(jax, logits)
+    assert _is_jnp_beam_mod(jnp, logits)
+    return run_jax_beam_search_step(seq, score, logits, beam_width, jax, jnp)
 
 
 def maxtext_beam_search[ArrayT: BeamSequenceArrayProtocol](
@@ -168,14 +188,11 @@ def _execute_generate(
 
         def _apply_with_params(seq_in: JaxArrayProtocol) -> JaxArrayProtocol:
             """Apply stateless MaxText model with initialized parameters."""
-            res: JaxArrayProtocol = model.apply(params, seq_in)  # pyright: ignore[reportArgumentType,reportAssignmentType]  # ty: ignore[invalid-assignment, invalid-argument-type]
-            return res
+            return model.apply(params, seq_in)
 
         apply_fn: Callable[[JaxArrayProtocol], JaxArrayProtocol] = _apply_with_params
     else:
-        apply_fn = model  # pyright: ignore[reportAssignmentType]
-        with contextlib.suppress(AttributeError):
-            apply_fn = model.apply  # pyright: ignore[reportAttributeAccessIssue,reportFunctionMemberAccess,reportAssignmentType]  # ty: ignore[unresolved-attribute]
+        apply_fn = model
     (output_ids, logprob_sum) = maxtext_beam_search(apply_fn, input_ids, beam_width, max_length, eos_token_id)
     raw_list = output_ids[0].tolist()
     tok_list = [int(t) for t in raw_list if isinstance(t, (int, float, bool))] if isinstance(raw_list, list) else [int(raw_list)]
@@ -228,5 +245,5 @@ def generate_sql(
         )
         return (sql, confidence_score)
 
-    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    wrapper_kwargs = extract_status_kwargs(kwargs)
     return run_inference_wrapper("maxtext", model_name, prompt, beam_width, _execute, **wrapper_kwargs)

@@ -31,9 +31,24 @@ def test_require_handlers() -> None:
         create_common_app("pytorch", "test", require_handlers=True)
 
 
+def _select_1_logic(_p: str) -> str:
+    """Return SELECT 1;."""
+    return "SELECT 1;"
+
+
+def _f_logic(_p: str) -> str:
+    """Return F."""
+    return "F"
+
+
+def _echo_logic(p: str) -> str:
+    """Return prompt unchanged."""
+    return p
+
+
 def test_common_serve_endpoints() -> None:
     """Verify common serve endpoints behavior and lifespan worker cleanup."""
-    app = create_common_app("pytorch", "test", generate_logic=lambda _p: "SELECT 1;")  # pyright: ignore[reportUnknownLambdaType]
+    app = create_common_app("pytorch", "test", generate_logic=_select_1_logic)
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
         assert client.get("/ready").status_code == 200
@@ -76,7 +91,7 @@ async def test_worker_async_generate_fallback() -> None:
     """Verify worker async generate fallback behavior."""
     import httpx
 
-    app = create_common_app("pytorch", "test", generate_logic=lambda _p: "F", max_batch_size=2)  # pyright: ignore[reportUnknownLambdaType]
+    app = create_common_app("pytorch", "test", generate_logic=_f_logic, max_batch_size=2)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post("/generate", json={"prompt": "a"})
         assert r.json()["sql"] == "F"
@@ -100,7 +115,7 @@ async def test_multimodal_request() -> None:
 
     from gemma_4_sql.backends.common_serve import create_backend_serve_app
 
-    app = create_common_app("pytorch", "test", generate_logic=lambda p: p)  # pyright: ignore[reportUnknownLambdaType]
+    app = create_common_app("pytorch", "test", generate_logic=_echo_logic)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         r = await client.post("/generate", json={"prompt": "p", "image_base64": "img"})
         assert "<image>" in r.json()["sql"]
@@ -138,10 +153,14 @@ async def test_multimodal_request() -> None:
         assert captured["temperature"] == 0.4
         assert captured["max_length"] == 64
 
+    def _strict_gen(model_name: str, prompt: str) -> dict[str, str]:
+        """Return model_name:prompt dict without accepting **kwargs."""
+        return {"sql": f"{model_name}:{prompt}"}
+
     app_strict = create_backend_serve_app(
         "jax",
         "test-model",
-        generate_sql_fn=lambda model_name, prompt: {"sql": f"{model_name}:{prompt}"},  # pyright: ignore[reportUnknownLambdaType]
+        generate_sql_fn=_strict_gen,
     )
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_strict), base_url="http://test") as client:
         r_strict = await client.post("/generate", json={"prompt": "q", "temperature": 0.5})
@@ -194,7 +213,7 @@ def test_json_response_fallback() -> None:
 
     with pytest.MonkeyPatch.context() as monkeypatch_ctx:
         monkeypatch_ctx.setattr(mod, "JSONResponse", None)
-        app = create_common_app("pytorch", "test", generate_logic=lambda _p: "SELECT 1;")  # pyright: ignore[reportUnknownLambdaType]
+        app = create_common_app("pytorch", "test", generate_logic=_select_1_logic)
         client = TestClient(app)
 
         r1 = client.post("/generate", json={"prompt": "sync"})
@@ -206,7 +225,12 @@ def test_json_response_fallback() -> None:
 
 def test_sync_fallback_branches() -> None:
     """Verify `app.run_direct` synchronous helper for single, batched, and missing handlers."""
-    app0: DirectRunnableAppProtocol = create_common_app("pytorch", "test", generate_logic=lambda p: f"G:{p}")  # pyright: ignore[reportUnknownLambdaType]
+
+    def _g_prefix(p: str) -> str:
+        """Return G: prefixed prompt."""
+        return f"G:{p}"
+
+    app0: DirectRunnableAppProtocol = create_common_app("pytorch", "test", generate_logic=_g_prefix)
     assert app0.run_direct("q") == "G:q"
 
     app1: DirectRunnableAppProtocol = create_common_app("pytorch", "test", batch_generate_logic=lambda p: [f"B:{p[0]}"])
@@ -246,7 +270,7 @@ async def test_common_serve_cancel_request() -> None:
         await asyncio.sleep(0.01)
 
     called: list[int] = []
-    create_common_app("pytorch", "test", startup_callback=lambda: called.append(1), generate_logic=lambda _p: "")  # pyright: ignore[reportUnknownLambdaType]
+    create_common_app("pytorch", "test", startup_callback=lambda: called.append(1), generate_logic=_select_1_logic)
     assert len(called) == 1
 
 
@@ -283,7 +307,7 @@ def test_fastapi_missing_and_run_server(monkeypatch: pytest.MonkeyPatch) -> None
     import gemma_4_sql.backends.common_serve as mod
     from gemma_4_sql.exceptions import DependencyMissingError
 
-    real_app = create_common_app("pytorch", "test", generate_logic=lambda _p: "SELECT 1")  # pyright: ignore[reportUnknownLambdaType]
+    real_app = create_common_app("pytorch", "test", generate_logic=_select_1_logic)
     monkeypatch.setattr(mod, "FastAPI", None)
     with pytest.raises(DependencyMissingError):
         mod.serve_model_wrapper(
@@ -318,11 +342,19 @@ def test_fastapi_missing_and_run_server(monkeypatch: pytest.MonkeyPatch) -> None
 
     from gemma_4_sql.exceptions import InferenceError
 
-    app_ok = mod.create_backend_serve_app("jax", "test", generate_sql_fn=lambda **_k: {"sql": "SELECT 1"})  # pyright: ignore[reportUnknownLambdaType]
+    def _ok_sql_fn(**_k: JSONValue) -> dict[str, str]:
+        """Return SELECT 1 dict."""
+        return {"sql": "SELECT 1"}
+
+    def _empty_sql_fn(**_k: JSONValue) -> dict[str, str]:
+        """Return empty sql dict."""
+        return {"sql": ""}
+
+    app_ok = mod.create_backend_serve_app("jax", "test", generate_sql_fn=_ok_sql_fn)
     client_ok = TestClient(app_ok)
     assert client_ok.post("/generate", json={"prompt": "hi"}).json()["sql"] == "SELECT 1"
 
-    app_empty = mod.create_backend_serve_app("jax", "test", generate_sql_fn=lambda **_k: {"sql": ""})  # pyright: ignore[reportUnknownLambdaType]
+    app_empty = mod.create_backend_serve_app("jax", "test", generate_sql_fn=_empty_sql_fn)
     client_empty = TestClient(app_empty, raise_server_exceptions=False)
     assert client_empty.post("/generate", json={"prompt": "hi"}).status_code == 500
 

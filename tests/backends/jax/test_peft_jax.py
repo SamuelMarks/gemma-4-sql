@@ -279,7 +279,11 @@ def test_jax_peft_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     assert opt_default is not None
 
     # apply_lora without passing model instance (creates model from config)
-    monkeypatch.setattr(pt, "resolve_gemma4_config", lambda _cls, _name: _make_tiny_config())  # pyright: ignore[reportUnknownLambdaType]
+    def _resolve_tiny(_cls: type[Gemma4Config], _name: str) -> Gemma4Config:
+        """Return tiny config."""
+        return _make_tiny_config()
+
+    monkeypatch.setattr(pt, "resolve_gemma4_config", _resolve_tiny)
     res_new = apply_lora("test-tiny-jax", ["q_proj"], lora_r=2)
     assert res_new["status"] == "completed"
     assert res_new["injected_modules"] == 2
@@ -290,8 +294,12 @@ def test_jax_peft_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ConfigurationError, match="lora_r must be > 0"):
         apply_lora("test-err", ["q_proj"], lora_r=0)
 
+    def _fail_inject(*_a: Gemma4ForCausalLM | list[str] | float, **_k: nnx.Rngs | None) -> tuple[Gemma4ForCausalLM, int]:
+        """Raise RuntimeError."""
+        raise RuntimeError("inject boom")
+
     with monkeypatch.context() as monkeypatch_ctx:
-        monkeypatch_ctx.setattr(pt, "inject_lora", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("inject boom")))  # pyright: ignore[reportUnknownLambdaType]
+        monkeypatch_ctx.setattr(pt, "inject_lora", _fail_inject)
         res_err = apply_lora("test-err", ["q_proj"], lora_r=2)
         assert "failed: inject boom" in res_err["status"]
         with pytest.raises(TrainingError, match="inject boom"):

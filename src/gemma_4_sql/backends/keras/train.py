@@ -25,7 +25,7 @@ class _KerasFitHistoryProtocol(Protocol):
     """Protocol for a Keras `.fit(...)` `History` object exposing `.history`."""
 
     @property
-    def history(self) -> Mapping[str, list[float]]:
+    def history(self) -> Mapping[str, Sequence[float]]:
         """Provide the dictionary of recorded training metric lists."""
         ...
 
@@ -82,7 +82,7 @@ def _execute_train(
             if gemma_causal_lm_cls is None:
                 raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
             model: KerasCausalLMProtocol = gemma_causal_lm_cls.from_preset(model_name)
-            model.preprocessor.sequence_length = 512  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportFunctionMemberAccess]  # ty: ignore[invalid-assignment]
+            model.preprocessor.sequence_length = 512
             model.compile(
                 loss=keras.losses.SparseCategoricalCrossentropy(from_logits=True),
                 optimizer=keras.optimizers.AdamW(learning_rate=learning_rate),
@@ -105,7 +105,7 @@ def _execute_train(
             else:
                 yield batch
 
-    history: _KerasFitHistoryProtocol = model.fit(_iter_keras_batches(), epochs=epochs)  # pyright: ignore[reportAssignmentType,reportArgumentType]  # ty: ignore[invalid-assignment, invalid-argument-type]
+    history: _KerasFitHistoryProtocol = model.fit(_iter_keras_batches(), epochs=epochs)
     final_loss = float(history.history["loss"][-1]) if "loss" in history.history else 0.0
     return "completed", final_loss
 

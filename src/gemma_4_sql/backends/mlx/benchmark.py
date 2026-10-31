@@ -5,8 +5,9 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
+from gemma_4_sql._types_models import MlxLMLoadProtocol
 from gemma_4_sql.backends.common_benchmark import run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
@@ -16,15 +17,15 @@ from gemma_4_sql.type_hints import (
     JSONValue,
     MlxArrayProtocol,
     MlxCausalLMProtocol,
-    TokenizerProtocol,
 )
 
 logger = logging.getLogger(__name__)
 
 mx = optional_import("mlx.core")
-_raw_load = optional_attr("mlx_lm", "load")
-load: Callable[[str], tuple[MlxCausalLMProtocol, TokenizerProtocol | str | None] | MlxCausalLMProtocol] | None = (  # ty: ignore[invalid-assignment]
-    _raw_load if callable(_raw_load) else None
+load: MlxLMLoadProtocol | None = optional_attr(
+    "mlx_lm",
+    "load",
+    MlxLMLoadProtocol,
 )
 
 

@@ -21,9 +21,24 @@ def test_quantize_jax() -> None:
     assert res["memory_reduction_factor"] > 0.0
 
 
-def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `quantize_model` raises `DependencyMissingError` when PyTorch is unavailable."""
+def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Verify `quantize_model` executes real PyTorch AWQ and GGUF quantization on a tiny model and raises when PyTorch is unavailable."""
     import gemma_4_sql.backends.pytorch.quantize as pt_q
+
+    res = quantize_model("gemma-4-tiny", "awq", backend="pytorch_native")
+    assert res["backend"] == "pytorch_native"
+    assert res["method"] == "awq"
+    assert res["memory_reduction_factor"] == 0.75
+
+    gguf_res = quantize_model(
+        "gemma-4-tiny",
+        "gguf",
+        backend="pytorch_native",
+        export_path=str(tmp_path / "gguf_out"),
+    )
+    assert gguf_res["backend"] == "pytorch_native"
+    assert gguf_res["method"] == "gguf"
+    assert gguf_res["memory_reduction_factor"] == 0.6
 
     monkeypatch.setattr(pt_q, "torch", None)
     with pytest.raises(DependencyMissingError):
@@ -65,9 +80,13 @@ def test_quantize_keras(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
             """Return the DummyKerasModel instance."""
             return dummy_model
 
+    def _resolve_dummy_causal_lm(*_args: str | type) -> type[DummyGemmaCausalLM]:
+        """Return DummyGemmaCausalLM class."""
+        return DummyGemmaCausalLM
+
     monkeypatch.setattr(kq, "keras", keras)
     monkeypatch.setattr(kq, "ops", ops)
-    monkeypatch.setattr(kq, "optional_attr", lambda *_a: DummyGemmaCausalLM)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(kq, "optional_attr", _resolve_dummy_causal_lm)
     export_dest = tmp_path / "q_dir"
 
     res = quantize_model("model3", "int8", backend="keras", export_path=str(export_dest))

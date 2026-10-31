@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 import jax
 import jax.numpy as jnp
@@ -16,10 +15,10 @@ from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
     call_jax_causal_lm,
     compute_jax_step_probs,
-    expand_jax_beams,
     normalize_logprob_confidence,
     run_array_beam_search,
     run_inference_wrapper,
+    run_jax_beam_search_step,
 )
 from gemma_4_sql.backends.common_multimodal import prepare_multimodal_inputs
 from gemma_4_sql.backends.jax.gemma4.config import ModelConfig, resolve_gemma4_config
@@ -42,22 +41,8 @@ logger = logging.getLogger(__name__)
 Gemma4Config = ModelConfig
 
 MAX_MODEL_CACHE_SIZE = 4
-_MODEL_CACHE: BoundedLRUCache[JaxCausalLMProtocol | Callable[..., Array]] = BoundedLRUCache(maxsize=MAX_MODEL_CACHE_SIZE)
+_MODEL_CACHE: BoundedLRUCache[JaxCausalLMProtocol | Gemma4ForCausalLM | Callable[..., Array]] = BoundedLRUCache(maxsize=MAX_MODEL_CACHE_SIZE)
 MODEL_CACHE = _MODEL_CACHE
-
-
-@runtime_checkable
-class _JaxJitModuleProtocol(Protocol):
-    """Protocol for a `jax` module exposing `.jit`."""
-
-    def jit(
-        self,
-        fun: Callable[[Array, int], tuple[Array, Array]],
-        *,
-        static_argnums: tuple[int, ...],
-    ) -> Callable[[Array, int], tuple[Array, Array]]:
-        """JIT-compile a step probability function."""
-        ...
 
 
 def _compute_step_probs(logits: Array, beam_width: int) -> tuple[Array, Array]:
@@ -94,12 +79,7 @@ def _beam_search_step(
     """
     positions = jnp.arange(seq.shape[1])[None, :]
     logits = model_apply_fn(seq, positions)
-    if isinstance(jax, _JaxJitModuleProtocol):
-        step_fn = jax.jit(_compute_step_probs, static_argnums=(1,))
-        (top_indices, top_probs) = step_fn(logits, beam_width)
-    else:
-        (top_indices, top_probs) = _compute_step_probs(logits, beam_width)
-    return expand_jax_beams(seq, score, top_indices, top_probs, beam_width, jnp)
+    return run_jax_beam_search_step(seq, score, logits, beam_width, jax, jnp)
 
 
 def jax_beam_search(
@@ -154,7 +134,7 @@ def generate_sql(
         DependencyMissingError: If JAX inference dependencies are missing.
 
     """
-    if jax is None or jnp is None or Gemma4ForCausalLM is None:  # pyright: ignore[reportUnnecessaryComparison]
+    if jax is None or jnp is None or not callable(Gemma4ForCausalLM):
         raise DependencyMissingError("JAX inference dependencies are missing.")
 
     def _to_jax_tensor(
@@ -184,9 +164,10 @@ def generate_sql(
         if cached_model is not None:
             model = cached_model
         else:
-            rngs = nnx.Rngs(0) if nnx is not None else None
+            assert nnx is not None
+            rngs = nnx.Rngs(0)
             cfg = resolve_gemma4_config(Gemma4Config, model_name)
-            model = Gemma4ForCausalLM(cfg, rngs=rngs)  # pyright: ignore[reportArgumentType]
+            model = Gemma4ForCausalLM(cfg, rngs=rngs)
             model_path = Path(model_name)
             if model_path.exists():
                 try:
@@ -223,8 +204,9 @@ def generate_sql(
                 extra_kwargs["pixel_values"] = pixel_values
             if audio_values is not None:
                 extra_kwargs["audio_values"] = audio_values
-            res: Array = call_jax_causal_lm(model, seq, pos, **extra_kwargs)  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
-            return res
+            raw_out = call_jax_causal_lm(model, seq, pos, **extra_kwargs)
+            first_out = raw_out[0] if isinstance(raw_out, tuple) else raw_out
+            return first_out if isinstance(first_out, Array) else jnp.asarray(first_out)
 
         (output_ids, logprob_sum) = jax_beam_search(_model_forward, input_ids, beam_width, max_length, eos_token_id)
         sql_out = tokenizer.decode(output_ids[0].tolist())
@@ -237,3 +219,13 @@ def generate_sql(
         "strict_checkpoint": strict_checkpoint,
     }
     return run_inference_wrapper("jax", model_name, prompt, beam_width, _execute, **wrapper_kwargs)
+
+
+__all__ = [
+    "MODEL_CACHE",
+    "Gemma4Config",
+    "_beam_search_step",
+    "_compute_step_probs",
+    "generate_sql",
+    "jax_beam_search",
+]

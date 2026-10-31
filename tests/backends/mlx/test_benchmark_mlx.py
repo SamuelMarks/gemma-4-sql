@@ -158,7 +158,12 @@ def test_benchmark_model_behavioral(monkeypatch: pytest.MonkeyPatch) -> None:
 
     tiny_model = TinyMLXBenchModel()
     mx.eval(tiny_model.parameters())
-    monkeypatch.setattr(benchmark_module, "load", lambda _m: (tiny_model, "tok"))  # pyright: ignore[reportUnknownLambdaType]
+
+    def _load_tiny(_m: str) -> tuple[TinyMLXBenchModel, str]:
+        """Return `(tiny_model, 'tok')`."""
+        return (tiny_model, "tok")
+
+    monkeypatch.setattr(benchmark_module, "load", _load_tiny)
 
     res = benchmark_module.benchmark_model("model", "cpu", 1, num_runs=1, prompt_len=4, decode_tokens=2)
     assert res["backend"] == "mlx"

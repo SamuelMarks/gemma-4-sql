@@ -63,13 +63,22 @@ def test_get_sampler_and_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> N
     assert etl_module._get_sampler("ds", False) is None
 
     mock_sampler_cls = MagicMock(return_value="sampler")
-    monkeypatch.setattr(etl_module, "optional_attr", lambda *_a, **_k: mock_sampler_cls)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _return_sampler_cls(*_a: str, **_k: str) -> MagicMock:
+        """Return `mock_sampler_cls`."""
+        return mock_sampler_cls
+
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
+    monkeypatch.setattr(etl_module, "optional_attr", _return_sampler_cls)
     assert etl_module._get_sampler("ds", True) == "sampler"
 
     mock_sampler_cls.side_effect = RuntimeError("error")
     assert etl_module._get_sampler("ds", True) is None
 
-    monkeypatch.setattr(etl_module, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(etl_module, "optional_attr", _none_attr)
     assert etl_module._get_sampler("ds", True) is None
 
     with patch("gemma_4_sql.backends.pytorch.etl.load_duckdb_dataset", return_value="duck"):

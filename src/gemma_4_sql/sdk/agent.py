@@ -227,7 +227,7 @@ Please fix the SQL query."""
 
 
 @overload
-async def run_agentic_loop_async(  # noqa: D418
+async def run_agentic_loop_async(
     model_name: str,
     prompt: str,
     backend: str = DEFAULT_BACKEND,
@@ -238,7 +238,7 @@ async def run_agentic_loop_async(  # noqa: D418
 
 
 @overload
-async def run_agentic_loop_async(  # noqa: D418
+async def run_agentic_loop_async(
     model_name: str,
     prompt: list[str],
     backend: str = DEFAULT_BACKEND,
@@ -249,7 +249,7 @@ async def run_agentic_loop_async(  # noqa: D418
 
 
 @overload
-async def run_agentic_loop_async(  # noqa: D418
+async def run_agentic_loop_async(
     model_name: str,
     prompt: str | list[str],
     backend: str = DEFAULT_BACKEND,
@@ -295,7 +295,7 @@ async def run_agentic_loop_async(
 
 
 @overload
-def run_agentic_loop(  # noqa: D418
+def run_agentic_loop(
     model_name: str,
     prompt: str,
     backend: str = DEFAULT_BACKEND,
@@ -306,7 +306,7 @@ def run_agentic_loop(  # noqa: D418
 
 
 @overload
-def run_agentic_loop(  # noqa: D418
+def run_agentic_loop(
     model_name: str,
     prompt: list[str],
     backend: str = DEFAULT_BACKEND,
@@ -317,7 +317,7 @@ def run_agentic_loop(  # noqa: D418
 
 
 @overload
-def run_agentic_loop(  # noqa: D418
+def run_agentic_loop(
     model_name: str,
     prompt: str | list[str],
     backend: str = DEFAULT_BACKEND,

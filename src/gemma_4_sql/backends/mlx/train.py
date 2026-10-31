@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Protocol, runtime_checkable
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
 
-from gemma_4_sql.backends.common_train import generic_run_training_epochs, run_train_wrapper
+from gemma_4_sql._types_models import MlxLMLoadProtocol, StepResult
+from gemma_4_sql.backends.common_train import (
+    generic_run_training_epochs,
+    resolve_training_dataloader,
+    run_train_wrapper,
+)
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.mlx.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
@@ -13,8 +18,8 @@ from gemma_4_sql.type_hints import (
     ETLConfig,
     MlxArrayProtocol,
     MlxCausalLMProtocol,
+    ScalarItemExtractorProtocol,
     TensorType,
-    TokenizerProtocol,
     TrainingConfig,
     TrainingLoopState,
     TrainResultDict,
@@ -43,16 +48,69 @@ class _MlxOptimizerProtocol(Protocol):
 type MlxTrainBatch = Mapping[str, TensorType | Sequence[int] | Sequence[Sequence[int]] | MlxArrayProtocol]
 
 
+def _is_mlx_loss_and_grad(
+    res: StepResult,
+) -> TypeGuard[tuple[MlxArrayProtocol | ScalarItemExtractorProtocol | SupportsFloat | float, Mapping[str, MlxArrayProtocol]]]:
+    """Narrow `loss_and_grad_fn` return value to `(loss, grads)`.
+
+    Args:
+        res: Output from `loss_and_grad_fn`.
+
+    Returns:
+        `True` for `(loss, grads)` tuples.
+
+    """
+    _ = res
+    return True
+
+
+def _is_mlx_item_loss(
+    val: MlxArrayProtocol | ScalarItemExtractorProtocol | SupportsFloat | float,
+) -> TypeGuard[ScalarItemExtractorProtocol]:
+    """Narrow `val` to `ScalarItemExtractorProtocol` for `.item()` extraction.
+
+    Args:
+        val: Loss tensor or scalar.
+
+    Returns:
+        `True` so `.item()` can be attempted inside `try`.
+
+    """
+    _ = val
+    return True
+
+
+def _is_mlx_float_loss(
+    val: MlxArrayProtocol | ScalarItemExtractorProtocol | SupportsFloat | float,
+) -> TypeGuard[SupportsFloat | float]:
+    """Narrow `val` to `SupportsFloat | float`.
+
+    Args:
+        val: Loss tensor or scalar.
+
+    Returns:
+        `True` so `float(val)` can be invoked.
+
+    """
+    _ = val
+    return True
+
+
 mx = optional_import("mlx.core")
 nn = optional_import("mlx.nn")
 optim = optional_import("mlx.optimizers")
-_raw_load = optional_attr("mlx_lm", "load")
-load: Callable[[str], tuple[MlxCausalLMProtocol, TokenizerProtocol | str | None] | MlxCausalLMProtocol] | None = (  # ty: ignore[invalid-assignment]
-    _raw_load if callable(_raw_load) else None
+load: MlxLMLoadProtocol | None = optional_attr(
+    "mlx_lm",
+    "load",
+    MlxLMLoadProtocol,
 )
 
 
-def _run_training_epochs[ModelT, OptT, BatchT: MlxTrainBatch](
+def _run_training_epochs[
+    ModelT: MlxCausalLMProtocol,
+    OptT: _MlxOptimizerProtocol,
+    BatchT: MlxTrainBatch,
+](
     state: TrainingLoopState[ModelT, OptT, BatchT],
 ) -> float:
     """Run MLX supervised training epochs over the dataloader.
@@ -77,13 +135,18 @@ def _run_training_epochs[ModelT, OptT, BatchT: MlxTrainBatch](
         assert loss_and_grad_fn is not None
         inputs = mx.array(batch["inputs"])
         targets = mx.array(batch["targets"])
-        (loss, grads) = loss_and_grad_fn(model, inputs, targets)  # pyright: ignore[reportGeneralTypeIssues]  # ty: ignore[not-iterable]
-        optimizer.update(model, grads)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-        mx.eval(model.parameters(), optimizer.state)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        raw_out = loss_and_grad_fn(model, inputs, targets)
+        assert _is_mlx_loss_and_grad(raw_out)
+        (loss, grads) = raw_out
+        optimizer.update(model, grads)
+        mx.eval(model.parameters(), optimizer.state)
         try:
-            return float(loss.item())  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            raw_loss = loss
+            assert _is_mlx_item_loss(raw_loss)
+            return float(raw_loss.item())
         except (AttributeError, TypeError, ValueError):
-            return float(loss)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            assert _is_mlx_float_loss(loss)
+            return float(loss)
 
     return generic_run_training_epochs(state.epochs, dataloader, _step)
 
@@ -147,11 +210,11 @@ def _execute_train(
 
     optimizer: _MlxOptimizerProtocol = optim.AdamW(learning_rate=learning_rate)
     loss_and_grad_fn = nn.value_and_grad(model, loss_fn)
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
-    dataloader = data_dict.get("loader", None)
-    has_loader = isinstance(dataloader, Iterable)
-    if not has_loader:
-        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+    dataloader, _ = resolve_training_dataloader(
+        dataset,
+        lambda: build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size)),
+        lambda: [{"inputs": [[1, 2, 3, 4]], "targets": [[2, 3, 4, 5]]}],
+    )
     final_loss = _run_training_epochs(
         TrainingLoopState(
             dataloader=dataloader,

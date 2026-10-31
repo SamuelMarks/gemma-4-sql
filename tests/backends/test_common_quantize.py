@@ -5,7 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gemma_4_sql.backends.common_quantize import apply_bits_and_bytes_quantization, quantize_model_wrapper
+from gemma_4_sql.backends.common_quantize import (
+    apply_bits_and_bytes_quantization,
+    compute_awq_channel_scales,
+    compute_gptq_compensated_weights,
+    quantize_model_wrapper,
+)
 from gemma_4_sql.exceptions import (
     DependencyMissingError,
     QuantizationError,
@@ -93,3 +98,31 @@ def test_quantize_model_wrapper() -> None:
 
     with pytest.raises(UnsupportedQuantizationMethodError, match="bad method"):
         quantize_model_wrapper("b", "m", "int8", unsupported_fn)
+
+
+def test_compute_awq_and_gptq_calibration() -> None:
+    """Verify compute_awq_channel_scales and compute_gptq_compensated_weights across valid and edge-case inputs."""
+    w = [[0.5, -1.2, 0.3], [1.1, 0.4, -0.8]]
+    acts = [[1.0, 2.0, 0.5], [0.5, 4.0, 1.0]]
+
+    scales_with_act = compute_awq_channel_scales(w, acts)
+    assert len(scales_with_act) == 3
+    assert all(s > 0.0 for s in scales_with_act)
+
+    scales_no_act = compute_awq_channel_scales(w, None)
+    assert len(scales_no_act) == 3
+
+    with pytest.raises(ValueError, match="alpha_range"):
+        compute_awq_channel_scales(w, acts, alpha_range=())
+
+    with pytest.raises(ValueError, match="weight_2d"):
+        compute_awq_channel_scales([], acts)
+
+    gptq_with_act = compute_gptq_compensated_weights(w, acts, bits=4)
+    assert len(gptq_with_act) == 2
+    assert len(gptq_with_act[0]) == 3
+
+    gptq_no_act = compute_gptq_compensated_weights(w, None, bits=4, damp_percent=-1.0)
+    assert len(gptq_no_act) == 2
+    assert len(gptq_no_act[0]) == 3
+    assert compute_gptq_compensated_weights([], None) == []

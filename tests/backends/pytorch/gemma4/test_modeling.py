@@ -363,8 +363,13 @@ def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest
         intermediate_size=128,
     )
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", lambda *_args, **_kwargs: None)  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr("safetensors.torch.save_file", lambda *_args, **_kwargs: None, raising=False)  # pyright: ignore[reportUnknownLambdaType]
+    from gemma_4_sql.type_hints import ETLConfig
+
+    def _noop_save(*_args: dict[str, torch.Tensor] | str, **_kwargs: str) -> None:
+        """No-op save_file."""
+
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.export.save_file", _noop_save)
+    monkeypatch.setattr("safetensors.torch.save_file", _noop_save, raising=False)
     exp_res = export_model("test_model", str(tmp_path), backend_alias="pytorch_native", config=tiny_cfg)
     assert exp_res["status"] == "exported_with_safetensors"
     assert exp_res["backend"] == "pytorch_native"
@@ -386,7 +391,11 @@ def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest
             """Initialize __len__."""
             return 1
 
-    monkeypatch.setattr("gemma_4_sql.backends.pytorch.train.build_dataloader", lambda c: {"loader": MockLoader()})  # pyright: ignore[reportUnknownLambdaType]
+    def _mock_build_loader(_c: ETLConfig) -> dict[str, MockLoader]:
+        """Return MockLoader dict."""
+        return {"loader": MockLoader()}
+
+    monkeypatch.setattr("gemma_4_sql.backends.pytorch.train.build_dataloader", _mock_build_loader)
     train_res = train_model(
         TrainingConfig(action="sft", model_name="test_model", dataset="dummy", epochs=1, backend="pytorch_native"),
         backend_alias="pytorch_native",

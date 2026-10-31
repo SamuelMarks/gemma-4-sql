@@ -45,7 +45,7 @@ def _load_mlx_model(model_name: str) -> tuple[MlxCausalLMProtocol, TokenizerProt
     _mlx_model_cache.maxsize = MAX_MLX_CACHE_SIZE
     cached = _mlx_model_cache.get_model(model_name)
     if cached is not None:
-        return cached  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
+        return cached
     try:
         mlx_lm = optional_import("mlx_lm")
         if mlx_lm is None:

@@ -13,7 +13,12 @@ from tests.utils.test_utils import RecordingBackendDouble
 def test_run_dpo_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `run_dpo` constructs a `DPOConfig` and forwards `**kwargs` to the JAX backend."""
     jax_double = RecordingBackendDouble("jax")
-    monkeypatch.setattr(dpo_sdk, "get_backend", lambda _b: jax_double)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _get_jax_double(_b: str) -> RecordingBackendDouble:
+        """Return `jax_double`."""
+        return jax_double
+
+    monkeypatch.setattr(dpo_sdk, "get_backend", _get_jax_double)
 
     res = run_dpo("model1", "data1", "jax", 0.1, epochs=3, learning_rate=2e-5, batch_size=4, custom_flag="enabled")
     assert res["backend"] == "jax"
@@ -34,11 +39,11 @@ def test_run_dpo_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     import torch
 
     import gemma_4_sql.backends.pytorch.dpo as pt_dpo
+    from gemma_4_sql.type_hints import ETLConfig
 
-    monkeypatch.setattr(
-        pt_dpo,
-        "build_dataloader",
-        lambda _cfg: {  # pyright: ignore[reportUnknownLambdaType]
+    def _pt_loader(_cfg: ETLConfig) -> dict[str, list[dict[str, torch.Tensor]]]:
+        """Return 1-batch synthetic PyTorch DPO loader."""
+        return {
             "loader": [
                 {
                     "chosen_inputs": torch.tensor([[1, 2, 3]], dtype=torch.long),
@@ -47,8 +52,9 @@ def test_run_dpo_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
                     "rejected_labels": torch.tensor([[5, 6, 7]], dtype=torch.long),
                 }
             ]
-        },
-    )
+        }
+
+    monkeypatch.setattr(pt_dpo, "build_dataloader", _pt_loader)
     res = run_dpo(
         model_name="gemma-4-tiny",
         dataset="synthetic-dpo",
@@ -107,14 +113,22 @@ def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     class DummyTFModule:
         """Minimal TensorFlow sentinel."""
 
-    monkeypatch.setattr(kdpo, "keras", DummyKerasMod)
-    monkeypatch.setattr(kdpo, "tf", DummyTFModule())
-    monkeypatch.setattr(kdpo, "GemmaCausalLM", DummyGemmaCausalLM)
-    monkeypatch.setattr(kdpo, "_get_train_step_fn", lambda *_a: lambda _b: 0.15)  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(
-        kdpo,
-        "build_dataloader",
-        lambda _cfg: {  # pyright: ignore[reportUnknownLambdaType]
+    from collections.abc import Callable
+
+    from gemma_4_sql.type_hints import ETLConfig
+
+    def _fake_step_fn(*_a: DummyModel | str | float) -> Callable[[dict[str, list[list[int]]]], float]:
+        """Return constant 0.15 step function."""
+
+        def _step(_b: dict[str, list[list[int]]]) -> float:
+            """Return 0.15."""
+            return 0.15
+
+        return _step
+
+    def _keras_dpo_loader(_cfg: ETLConfig) -> dict[str, list[dict[str, list[list[int]]]]]:
+        """Return 1-batch Keras DPO loader."""
+        return {
             "loader": [
                 {
                     "chosen_inputs": [[1, 2]],
@@ -123,8 +137,13 @@ def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
                     "rejected_labels": [[1, 3]],
                 }
             ]
-        },
-    )
+        }
+
+    monkeypatch.setattr(kdpo, "keras", DummyKerasMod)
+    monkeypatch.setattr(kdpo, "tf", DummyTFModule())
+    monkeypatch.setattr(kdpo, "GemmaCausalLM", DummyGemmaCausalLM)
+    monkeypatch.setattr(kdpo, "_get_train_step_fn", _fake_step_fn)
+    monkeypatch.setattr(kdpo, "build_dataloader", _keras_dpo_loader)
 
     res = run_dpo(model_name="model3", dataset="data3", backend="keras", beta=0.3)
     assert res["backend"] == "keras"
@@ -137,14 +156,15 @@ def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_run_dpo_jax_real_tiny_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `run_dpo` executes a real 1-step JAX DPO preference update on a tiny Gemma 4 model."""
+    import jax
     import jax.numpy as jnp
 
     import gemma_4_sql.backends.jax.dpo as jax_dpo
+    from gemma_4_sql.type_hints import ETLConfig
 
-    monkeypatch.setattr(
-        jax_dpo,
-        "build_dataloader",
-        lambda _cfg: {  # pyright: ignore[reportUnknownLambdaType]
+    def _jax_dpo_loader(_cfg: ETLConfig) -> dict[str, list[dict[str, jax.Array]]]:
+        """Return 1-batch JAX DPO loader."""
+        return {
             "loader": [
                 {
                     "chosen_inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
@@ -153,8 +173,9 @@ def test_run_dpo_jax_real_tiny_execution(monkeypatch: pytest.MonkeyPatch) -> Non
                     "rejected_labels": jnp.array([[5, 6, 7]], dtype=jnp.int32),
                 }
             ]
-        },
-    )
+        }
+
+    monkeypatch.setattr(jax_dpo, "build_dataloader", _jax_dpo_loader)
     res = run_dpo("gemma-4-tiny", "synthetic-dpo", "jax", beta=0.1, epochs=1, learning_rate=1e-4, batch_size=1)
     assert res["backend"] == "jax"
     assert res["status"] == "completed"

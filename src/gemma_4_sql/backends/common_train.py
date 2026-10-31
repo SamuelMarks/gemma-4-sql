@@ -3,23 +3,68 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Protocol, TypeVar, runtime_checkable
 
 from gemma_4_sql.exceptions import (
     OPERATIONAL_EXCEPTIONS,
     ConfigurationError,
     DependencyMissingError,
+    ETLError,
     ExecutionStatus,
     StatusValue,
     TrainingError,
     is_failed_status,
     resolve_raise_on_error,
 )
-from gemma_4_sql.type_hints import TrainingConfig, TrainResultDict
+from gemma_4_sql.type_hints import ETLResultDict, TensorType, TrainingConfig, TrainResultDict
 
 T_Batch = TypeVar("T_Batch")
 logger = logging.getLogger(__name__)
+
+SYNTHETIC_DATASET_NAMES: frozenset[str] = frozenset({"synthetic", "synthetic-dpo", "dummy"})
+
+
+def resolve_training_dataloader[BatchT](
+    dataset: str,
+    build_loader_fn: Callable[[], ETLResultDict],
+    synthetic_fallback_fn: Callable[[], Iterable[BatchT]],
+    *,
+    allow_synthetic_fallback: bool = False,
+    strict_dataset: bool = False,
+) -> tuple[Iterable[BatchT | Mapping[str, TensorType | Sequence[int]]], str]:
+    """Load a training/DPO dataloader or fall back to synthetic batches when explicitly permitted.
+
+    Args:
+        dataset: Dataset identifier string.
+        build_loader_fn: Callable invoking backend `build_dataloader(...)`.
+        synthetic_fallback_fn: Callable returning a synthetic batch iterable.
+        allow_synthetic_fallback: Whether fallback to synthetic data is explicitly enabled.
+        strict_dataset: When `True`, propagate `ETLError` / `DependencyMissingError` even for synthetic names if `build_loader_fn` fails.
+
+    Returns:
+        Tuple of `(dataloader, dataset_source)` where `dataset_source` is `"loaded"` or `"synthetic_fallback"`.
+
+    Raises:
+        ETLError: If dataloader loading fails and synthetic fallback is not permitted.
+        DependencyMissingError: If ETL dependencies are missing and synthetic fallback is not permitted.
+        ValueError: If the loaded dataloader is not an `Iterable`.
+
+    """
+    is_synthetic_name = dataset.strip().lower() in SYNTHETIC_DATASET_NAMES
+    can_fallback = (is_synthetic_name or allow_synthetic_fallback) and not strict_dataset
+    try:
+        data_dict = build_loader_fn()
+        dataloader = data_dict.get("loader", None)
+        if isinstance(dataloader, Iterable):
+            return (dataloader, "loaded")
+        if can_fallback:
+            return (synthetic_fallback_fn(), "synthetic_fallback")
+        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+    except (ETLError, DependencyMissingError):
+        if can_fallback:
+            return (synthetic_fallback_fn(), "synthetic_fallback")
+        raise
 
 
 @runtime_checkable
@@ -139,6 +184,7 @@ def run_train_wrapper(
         "status": status,
         "status_code": status_code,
         "final_loss": float(final_loss),
+        "dataset_source": str(kwargs.get("dataset_source") or ("synthetic_fallback" if dataset.strip().lower() in SYNTHETIC_DATASET_NAMES else "loaded")),
     }
     if error_message is not None:
         result["error_message"] = error_message

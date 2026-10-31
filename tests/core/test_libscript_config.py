@@ -183,9 +183,11 @@ def test_update_badges_all_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     class _FakeCompletedProcess:
         """Minimal CompletedProcess stub."""
 
-        def __init__(self, stdout: str) -> None:
-            """Initialize with stdout."""
+        def __init__(self, stdout: str, returncode: int = 0, stderr: str = "") -> None:
+            """Initialize with stdout, returncode, and stderr."""
             self.stdout = stdout
+            self.returncode = returncode
+            self.stderr = stderr
 
     def _fake_interrogate(_args: Sequence[str]) -> None:
         """Write interrogate output and raise SystemExit."""
@@ -207,15 +209,15 @@ def test_update_badges_all_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert exc_info.value.code == 0
     assert "Test%20coverage-100%25-brightgreen" in readme.read_text(encoding="utf-8")
 
-    # 2. Existing .coverage branch + 3-column TOTAL fallback + interrogate_main=None + README unchanged
+    # 2. Existing .coverage branch + 3-column TOTAL fallback + interrogate_main=None + README unchanged + non-zero returncode warning
     (tox_dir / ".coverage").unlink()
     (tmp_path / ".coverage").write_text("cov", encoding="utf-8")
     monkeypatch.setattr(update_badges, "interrogate_main", None)
 
     def _fake_run_branch_2(cmd: Sequence[str], **_kwargs: bool | str) -> _FakeCompletedProcess:
-        """Return 3-column coverage output or interrogate output."""
+        """Return 3-column coverage output or interrogate output with non-zero exit code."""
         if "interrogate" in cmd:
-            return _FakeCompletedProcess("actual: 100.0%\n")
+            return _FakeCompletedProcess("actual: 100.0%\n", returncode=1, stderr="warn")
         return _FakeCompletedProcess("TOTAL      100      0   100%\n")
 
     with (
@@ -223,6 +225,9 @@ def test_update_badges_all_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         pytest.raises(SystemExit),
     ):
         update_badges.main()
+
+    assert update_badges.parse_coverage_percentage("TOTAL      100      0   98%\n") == 98
+    assert not update_badges.update_readme_badges(readme, 100, 100)
 
     # 3. Full batch execution (--force-run) with existing .coverage and .coverage.extra cleanup
     (tmp_path / ".coverage.extra").write_text("extra", encoding="utf-8")

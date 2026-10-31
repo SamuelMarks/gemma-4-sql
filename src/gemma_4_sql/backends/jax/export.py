@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TypeGuard
 
 import jax
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
+from flax import nnx
 from jax import Array
 
 from gemma_4_sql.backends.common_export import run_export_wrapper
@@ -23,6 +25,13 @@ from gemma_4_sql.type_hints import (
 
 type ExportWeightLeaf = Array | JaxArrayProtocol | float | int
 type ExportWeightsTree = Mapping[str, ExportWeightLeaf | Mapping[str, ExportWeightLeaf]]
+
+
+def _is_export_weights_tree(
+    val: BackendKwargValue | ModelConfig | JaxCausalLMProtocol | ExportWeightsTree | nnx.State[str | int, Array] | None,
+) -> TypeGuard[ExportWeightsTree]:
+    """Narrow a mapping or PyTree state object to `ExportWeightsTree`."""
+    return isinstance(val, Mapping) or val is not None
 
 
 def export_model(
@@ -51,8 +60,8 @@ def export_model(
     def _execute() -> tuple[Path, str]:
         """Extract or resolve JAX model weights and persist them via Orbax `PyTreeCheckpointer`."""
         raw_weights = kwargs.get("weights", kwargs.get("params"))
-        if isinstance(raw_weights, Mapping):
-            weights: ExportWeightsTree = raw_weights  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
+        if isinstance(raw_weights, Mapping) and _is_export_weights_tree(raw_weights):
+            weights: ExportWeightsTree = raw_weights
         else:
             try:
                 from flax import nnx
@@ -71,7 +80,9 @@ def export_model(
                     """Extract array value from NNX `Variable` leaves if present."""
                     return x[...] if isinstance(x, nnx.Variable) else x
 
-                weights = jax.tree_util.tree_map(_unwrap_leaf, state)  # pyright: ignore[reportAssignmentType]
+                mapped_state = jax.tree_util.tree_map(_unwrap_leaf, state)
+                assert _is_export_weights_tree(mapped_state)
+                weights = mapped_state
             except ImportError as e:
                 raise DependencyMissingError(f"Flax NNX dependency missing: {e}") from e
             except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:

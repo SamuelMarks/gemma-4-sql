@@ -7,11 +7,11 @@ import contextlib
 import logging
 import threading
 from collections.abc import Sequence
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
-from gemma_4_sql.type_hints import DatabaseConnectionProtocol, DuckDBConnectionProtocol, JSONPrimitive
+from gemma_4_sql.type_hints import CursorProtocol, DatabaseConnectionProtocol, DuckDBConnectionProtocol, JSONPrimitive
 
 from .base import DatabaseAdapter, DBKwargValue
 
@@ -39,6 +39,19 @@ class DuckDBModuleProtocol(Protocol):
 
 
 duckdb = LazyLoader("duckdb").get_module()
+
+
+def _is_duckdb_conn(val: DBKwargValue | None) -> TypeGuard[DatabaseConnectionProtocol]:
+    """Check whether `val` is an active database connection or cursor exposing `.execute`.
+
+    Args:
+        val: Candidate `db_kwargs` value.
+
+    Returns:
+        `True` if `val` is a connection object, `False` otherwise.
+
+    """
+    return val is not None and not isinstance(val, (str, int, float, bool, list, dict, tuple))
 
 
 class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnectionProtocol]):
@@ -72,9 +85,10 @@ class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnecti
             Tuple containing `duckdb.Error` or fallback execution error classes.
 
         """
-        with contextlib.suppress(AttributeError, TypeError):
-            err: type[Exception] = duckdb.Error  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
-            return (err,)
+        if duckdb is not None:
+            with contextlib.suppress(AttributeError, TypeError):
+                err: type[Exception] = duckdb.Error
+                return (err,)
         return (RuntimeError, OSError, DatabaseExecutionError)
 
     def connect(self) -> DatabaseConnectionProtocol:
@@ -87,10 +101,9 @@ class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnecti
             DependencyMissingError: If `duckdb` is not installed.
 
         """
-        if "existing_conn" in self.db_kwargs and self.db_kwargs["existing_conn"] is not None:
-            return self.db_kwargs["existing_conn"]  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
-        if "conn" in self.db_kwargs and self.db_kwargs["conn"] is not None:
-            return self.db_kwargs["conn"]  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
+        candidate = self.db_kwargs.get("existing_conn") or self.db_kwargs.get("conn")
+        if _is_duckdb_conn(candidate):
+            return candidate
         if duckdb is None:
             msg = "duckdb is required. Install with `pip install duckdb`."
             raise DependencyMissingError(msg, dependency_name="duckdb", backend="duckdb")
@@ -174,9 +187,9 @@ class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnecti
 
                 """
                 with self._lock:
-                    cur = self.conn
+                    cur: DatabaseConnectionProtocol | CursorProtocol = self.conn
                     with contextlib.suppress(AttributeError, TypeError):
-                        cur = self.conn.cursor()  # pyright: ignore[reportAssignmentType]
+                        cur = self.conn.cursor()
                     rows: list[tuple[JSONPrimitive, ...]] = [tuple(r) for r in cur.execute(query, params or ()).fetchall()]
                     return rows
 

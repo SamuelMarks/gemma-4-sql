@@ -38,10 +38,21 @@ def test_real_mlx_training_epochs_and_execute_train(monkeypatch: pytest.MonkeyPa
     old_weight = mx.array(tiny_model.head.weight)
     mx.eval(old_weight)
 
-    monkeypatch.setattr(train_module, "load", lambda _m: (tiny_model, "tok"))  # pyright: ignore[reportUnknownLambdaType]
+    from gemma_4_sql.type_hints import ETLConfig
+
+    def _load_tiny(_m: str) -> tuple[TinyMLXModel, str]:
+        """Return `(tiny_model, 'tok')`."""
+        return (tiny_model, "tok")
+
     batch = {"inputs": [[1, 2, 3]], "targets": [[2, 3, 4]]}
     batch_mismatched = {"inputs": [[1, 2, 3, 4]], "targets": [[2, 3]]}
-    monkeypatch.setattr(train_module, "build_dataloader", lambda *_a, **_k: {"loader": [batch, batch_mismatched]})  # pyright: ignore[reportUnknownLambdaType]
+
+    def _mlx_loader(*_a: ETLConfig) -> dict[str, list[dict[str, list[list[int]]]]]:
+        """Return 2-batch MLX loader."""
+        return {"loader": [batch, batch_mismatched]}
+
+    monkeypatch.setattr(train_module, "load", _load_tiny)
+    monkeypatch.setattr(train_module, "build_dataloader", _mlx_loader)
 
     status, final_loss = train_module._execute_train("tiny", "ds", epochs=1, learning_rate=1e-2, batch_size=1)
     assert status == "completed"
@@ -67,9 +78,18 @@ def test_run_training_epochs_scalar_loss() -> None:
 def test_execute_train_invalid_dataloader_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _execute_train validates the dataloader and raises DependencyMissingError when MLX is missing."""
     import gemma_4_sql.backends.mlx.train as train_module
+    from gemma_4_sql.type_hints import ETLConfig
 
-    monkeypatch.setattr(train_module, "load", lambda _m: MagicMock())  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(train_module, "build_dataloader", lambda *_a, **_k: {})  # pyright: ignore[reportUnknownLambdaType]
+    def _load_mock(_m: str) -> MagicMock:
+        """Return MagicMock."""
+        return MagicMock()
+
+    def _empty_loader(*_a: ETLConfig) -> dict[str, None]:
+        """Return empty loader dict."""
+        return {}
+
+    monkeypatch.setattr(train_module, "load", _load_mock)
+    monkeypatch.setattr(train_module, "build_dataloader", _empty_loader)
     with pytest.raises(ValueError, match="Invalid dataloader"):
         train_module._execute_train("m", "d", 1, 0.1)
 

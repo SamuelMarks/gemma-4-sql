@@ -21,9 +21,14 @@ def test_chat_turn_routing(monkeypatch: pytest.MonkeyPatch) -> None:
         AssertionError: If backend routing assertion fails.
 
     """
+
+    def _stub_select_1(*_args: str | int, **_kwargs: JSONValue) -> dict[str, str]:
+        """Return SELECT 1 dict."""
+        return {"sql": "SELECT 1"}
+
     for backend in ["jax", "keras", "maxtext", "pytorch"]:
         backend_impl = get_backend(backend)
-        monkeypatch.setattr(backend_impl, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})  # pyright: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(backend_impl, "generate_sql", _stub_select_1)
         res = chat_turn("foo", [{"role": "user", "content": "hi"}], "prompt", backend=backend)
         assert res["backend"] == backend
         assert res["model"] == "foo"
@@ -110,6 +115,10 @@ def test_chat_turn_missing_sql_response_error(monkeypatch: pytest.MonkeyPatch) -
     """
     backend_impl = get_backend("jax")
 
-    monkeypatch.setattr(backend_impl, "generate_sql", lambda *_a, **_k: {"status": "error_no_sql"})  # pyright: ignore[reportUnknownLambdaType]
+    def _stub_no_sql(*_a: str | int, **_k: JSONValue) -> dict[str, str]:
+        """Return response dict missing 'sql'."""
+        return {"status": "error_no_sql"}
+
+    monkeypatch.setattr(backend_impl, "generate_sql", _stub_no_sql)
     with pytest.raises(RuntimeError, match=r"Chat turn failed: Backend jax did not return SQL\."):
         chat_turn("model_v1", [], "test prompt", backend="jax")

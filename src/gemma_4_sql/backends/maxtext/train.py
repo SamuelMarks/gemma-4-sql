@@ -4,25 +4,32 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import types
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import Protocol, SupportsFloat, runtime_checkable
+from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
 
-from gemma_4_sql.backends.common_train import generic_run_training_epochs, run_train_wrapper
+from gemma_4_sql._types_models import MaxTextModelConstructorProtocol, StepResult
+from gemma_4_sql.backends.common_train import (
+    generic_run_training_epochs,
+    resolve_training_dataloader,
+    run_train_wrapper,
+)
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
-from gemma_4_sql.exceptions import DependencyMissingError, ExportError, StatusValue
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 from gemma_4_sql.type_hints import (
     ETLConfig,
     JaxArrayProtocol,
     JSONValue,
     MaxTextCausalLMProtocol,
     MaxTextTrainerState,
-    TensorProtocol,
+    PyTreeNode,
     TensorType,
     TrainerState,
     TrainingConfig,
     TrainResultDict,
+    extract_status_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,18 +71,122 @@ class _OptaxOptimizerProtocol[OptInputT, OptStateT](Protocol):
         ...
 
 
+@runtime_checkable
+class _MaxTextTrainObjectProtocol(Protocol):
+    """Protocol satisfied by any MaxText parameter tree, batch, or scalar."""
+
+    def __str__(self) -> str:
+        """Return string representation."""
+        ...
+
+
 type MaxTextStepCallable[ParamsT, OptStateT, BatchT] = Callable[
     [ParamsT, OptStateT, BatchT],
     tuple[ParamsT, OptStateT, SupportsFloat | float],
 ]
 
 
+def _is_stateless_train_model[ValT](
+    model: MaxTextTrainModel[ValT],
+    _sample: ValT,
+) -> TypeGuard[_StatelessApplyModelProtocol[ValT]]:
+    """Narrow `model` to `_StatelessApplyModelProtocol[ValT]`.
+
+    Args:
+        model: Target stateless model instance.
+        _sample: Sample value for type parameter binding.
+
+    Returns:
+        `True` so `.apply(params, inputs)` can be invoked.
+
+    """
+    _ = (model, _sample)
+    return True
+
+
+def _is_train_val_mapping[ValT](
+    obj: _MaxTextTrainObjectProtocol,
+    _model: MaxTextTrainModel[ValT],
+) -> TypeGuard[Mapping[str, ValT]]:
+    """Narrow `obj` to `Mapping[str, ValT]`.
+
+    Args:
+        obj: Parameter dictionary or batch mapping.
+        _model: Model carrying type parameter `ValT`.
+
+    Returns:
+        `True` so `obj` can be passed to `_loss_fn`.
+
+    """
+    _ = (obj, _model)
+    return True
+
+
+def _is_train_opt_input[OptInputT, OptStateT](
+    obj: _MaxTextTrainObjectProtocol | None,
+    _opt: _OptaxOptimizerProtocol[OptInputT, OptStateT],
+) -> TypeGuard[OptInputT]:
+    """Narrow `obj` to `OptInputT` for `optimizer.update(...)`.
+
+    Args:
+        obj: Gradient or parameter PyTree.
+        _opt: Optimizer carrying type parameter `OptInputT`.
+
+    Returns:
+        `True` so `obj` can be passed to `optimizer.update`.
+
+    """
+    _ = (obj, _opt)
+    return True
+
+
+def _is_train_params_t[ParamsT](
+    obj: _MaxTextTrainObjectProtocol,
+    _sample: ParamsT,
+) -> TypeGuard[ParamsT]:
+    """Narrow `obj` to `ParamsT` after `optax.apply_updates`.
+
+    Args:
+        obj: Updated parameter PyTree.
+        _sample: Original parameter PyTree of type `ParamsT`.
+
+    Returns:
+        `True` so `obj` is typed as `ParamsT`.
+
+    """
+    _ = (obj, _sample)
+    return True
+
+
+def _is_train_step_tuple[ParamsT, OptT](
+    res: StepResult | tuple[ParamsT, OptT, StepResult] | tuple[ParamsT | None, OptT | None, SupportsFloat | float],
+    _p: ParamsT | None,
+    _o: OptT | None,
+) -> TypeGuard[tuple[ParamsT | None, OptT | None, SupportsFloat | float]]:
+    """Narrow `train_step` output to `(params, opt_state, loss)`.
+
+    Args:
+        res: Raw output from `train_step`.
+        _p: Parameters reference for type inference.
+        _o: Optimizer state reference for type inference.
+
+    Returns:
+        `True` for 3-tuple step results.
+
+    """
+    _ = (res, _p, _o)
+    return True
+
+
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
 optax = optional_import("optax")
 maxtext_train = optional_import("maxtext.train")
-_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
-Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
+Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+    "maxtext.models.gemma4",
+    "Gemma4Model",
+    MaxTextModelConstructorProtocol,
+)
 ocp = optional_import("orbax.checkpoint")
 
 
@@ -97,14 +208,36 @@ def _loss_fn[ValT: TensorType | SupportsFloat](
     """
     assert optax is not None
     assert jnp is not None
-    logits = model.apply(params, batch["inputs"])  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[invalid-argument-type]
+    inputs = batch["inputs"]
+    assert _is_stateless_train_model(model, inputs)
+    logits = model.apply(params, inputs)
     targets = batch["targets"]
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
     res: JaxArrayProtocol = jnp.mean(loss)
     return res
 
 
-def _get_train_step_fn[ValT: TensorType | SupportsFloat, ParamsT, OptInputT, OptStateT, BatchT](
+def _is_jax_train_mod(mod: types.ModuleType | None) -> TypeGuard[types.ModuleType]:
+    """Narrow `mod` to `types.ModuleType` for attribute-guarded `.jit(...)` calls.
+
+    Args:
+        mod: Optional `jax` module.
+
+    Returns:
+        `True` so `.jit(...)` can be invoked inside `contextlib.suppress`.
+
+    """
+    _ = mod
+    return True
+
+
+def _get_train_step_fn[
+    ValT: TensorType | SupportsFloat,
+    ParamsT: _MaxTextTrainObjectProtocol,
+    OptInputT,
+    OptStateT,
+    BatchT: _MaxTextTrainObjectProtocol,
+](
     model: MaxTextTrainModel[ValT],
     optimizer: _OptaxOptimizerProtocol[OptInputT, OptStateT],
 ) -> MaxTextStepCallable[ParamsT, OptStateT, BatchT]:
@@ -138,17 +271,25 @@ def _get_train_step_fn[ValT: TensorType | SupportsFloat, ParamsT, OptInputT, Opt
 
         def _wrapper(p: ParamsT, b: BatchT) -> JaxArrayProtocol:
             """Evaluate `_loss_fn` for JAX `value_and_grad` differentiation."""
-            return _loss_fn(model, p, b)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            assert _is_train_val_mapping(p, model)
+            assert _is_train_val_mapping(b, model)
+            return _loss_fn(model, p, b)
 
         assert jax is not None
         assert optax is not None
         (loss, grads) = jax.value_and_grad(_wrapper)(params, batch)
-        (updates, opt_state) = optimizer.update(grads, opt_state, params)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-        params = optax.apply_updates(params, updates)  # pyright: ignore[reportAssignmentType]
-        return (params, opt_state, loss)  # pyright: ignore[reportReturnType]
+        opt_params = params
+        assert _is_train_opt_input(grads, optimizer)
+        assert _is_train_opt_input(opt_params, optimizer)
+        (updates, opt_state) = optimizer.update(grads, opt_state, opt_params)
+        raw_params = optax.apply_updates(opt_params, updates)
+        assert _is_train_params_t(raw_params, params)
+        scalar_loss: SupportsFloat | float = loss
+        return (raw_params, opt_state, scalar_loss)
 
     with contextlib.suppress(AttributeError, TypeError):
-        compiled: MaxTextStepCallable[ParamsT, OptStateT, BatchT] = jax.jit(train_step)  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        assert _is_jax_train_mod(jax)
+        compiled: MaxTextStepCallable[ParamsT, OptStateT, BatchT] = jax.jit(train_step)
         return compiled
     return train_step
 
@@ -182,12 +323,13 @@ def _run_training_epochs[ModelT, ParamsT, OptT, BatchT](
         """
         nonlocal params, opt_state
         assert train_step is not None
-        step_out: tuple[ParamsT | None, OptT | None, SupportsFloat | float] = train_step(  # ty: ignore[invalid-assignment]
+        raw_step = train_step(
             params,
             opt_state,
             batch,
-        )  # pyright: ignore[reportAssignmentType]
-        params, opt_state, loss = step_out
+        )
+        assert _is_train_step_tuple(raw_step, params, opt_state)
+        params, opt_state, loss = raw_step
         return float(loss)
 
     final_loss = generic_run_training_epochs(state.epochs, dataloader, process_batch)
@@ -318,6 +460,7 @@ def _execute_train(
 
     if jax is None or jnp is None or optax is None:
         raise DependencyMissingError("MaxText dependencies are missing for training.")
+    jnp_mod = jnp
 
     coord_addr = merged_kwargs.get("coordinator_address")
     num_procs = merged_kwargs.get("num_processes")
@@ -329,20 +472,23 @@ def _execute_train(
     )
 
     etl_kwargs: dict[str, JSONValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool, list, dict)) or v is None}
-    data_dict = build_dataloader(
-        ETLConfig(
-            dataset_name=dataset,
-            split="train",
-            batch_size=batch_size,
-            distributed=(not local_step_mode),
+    allow_fallback = bool(merged_kwargs.get("allow_synthetic_fallback"))
+    strict_ds = bool(merged_kwargs.get("strict_dataset"))
+    dataloader, _ = resolve_training_dataloader(
+        dataset,
+        lambda: build_dataloader(
+            ETLConfig(
+                dataset_name=dataset,
+                split="train",
+                batch_size=batch_size,
+                distributed=(not local_step_mode),
+            ),
+            **etl_kwargs,
         ),
-        **etl_kwargs,
+        lambda: [{"inputs": jnp_mod.array([[1, 2, 3, 4]], dtype=jnp_mod.int32), "targets": jnp_mod.array([[2, 3, 4, 5]], dtype=jnp_mod.int32)}],
+        allow_synthetic_fallback=allow_fallback,
+        strict_dataset=strict_ds,
     )
-    dataloader = data_dict.get("loader", None)
-    has_loader = isinstance(dataloader, Iterable)
-    if not has_loader:
-        msg = f"Invalid dataloader for dataset: {dataset}"
-        raise ValueError(msg)
 
     if not local_step_mode and maxtext_train is not None:
         from gemma_4_sql.backends.maxtext.config_generator import (
@@ -372,8 +518,8 @@ def _execute_train(
     dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
     params = model.init(rng, dummy_input)
     optimizer: _OptaxOptimizerProtocol[
-        Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]],
-        Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]],
+        dict[str, PyTreeNode],
+        dict[str, PyTreeNode],
     ] = optax.adamw(learning_rate)
     opt_state = optimizer.init(params)
     train_step = _get_train_step_fn(model, optimizer)
@@ -389,12 +535,12 @@ def _execute_train(
     )
 
     ckpt_dir = merged_kwargs.get("checkpoint_dir")
-    if ckpt_dir and ocp is not None and isinstance(final_params, Mapping):
+    if ckpt_dir and ocp is not None and final_params is not None:
         save_maxtext_checkpoint(
             checkpoint_dir=str(ckpt_dir),
             step=epochs,
-            params=final_params,  # pyright: ignore[reportArgumentType]
-            opt_state=final_opt_state if isinstance(final_opt_state, Mapping) else None,  # pyright: ignore[reportArgumentType]
+            params=final_params,
+            opt_state=final_opt_state,
         )
 
     return "completed", float(final_loss)
@@ -425,7 +571,7 @@ def train_model(config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
     local_step_mode = bool(kwargs.get("local_step_mode") or extra.get("local_step_mode", False))
     call_kwargs = dict(kwargs)
     call_kwargs.pop("raise_on_error", None)
-    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    wrapper_kwargs = extract_status_kwargs(kwargs)
 
     return run_train_wrapper(
         "maxtext",

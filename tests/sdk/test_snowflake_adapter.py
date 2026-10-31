@@ -60,7 +60,12 @@ async def test_snowflake_adapter_execution(
 
         original_connector = mock_snowflake.connector
         del mock_snowflake.connector
-        mock_snowflake.connect = lambda **_kw: conn  # pyright: ignore[reportUnknownLambdaType]
+
+        def _connect_fallback(**_kw: JSONValue) -> FakeDBConnection:
+            """Return `conn`."""
+            return conn
+
+        mock_snowflake.connect = _connect_fallback
         assert adapter.connect() == conn
         mock_snowflake.connect = None
         with pytest.raises(DependencyMissingError, match="snowflake connect function could not be resolved"):

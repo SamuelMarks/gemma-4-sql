@@ -86,16 +86,48 @@ def test_generic_dpo_loss_with_methods() -> None:
 
 
 def test_generic_dpo_loss_without_methods() -> None:
-    """Verify generic_dpo_loss works on plain scalar numbers lacking detach/mean methods."""
-    policy_chosen = 1.0
-    policy_rejected = 0.5
-    ref_chosen = 0.8
-    ref_rejected = 0.4
+    """Verify generic_dpo_loss works on ArithmeticTensorProtocol objects lacking detach/mean methods."""
+
+    class PlainArith:
+        """Minimal arithmetic wrapper without `.detach()` or `.mean()`."""
+
+        def __init__(self, val: float) -> None:
+            """Initialize wrapper."""
+            self.val = val
+
+        def __float__(self) -> float:
+            """Convert to float."""
+            return self.val
+
+        def __sub__(self, other: PlainArith | float, /) -> PlainArith:
+            """Subtract."""
+            return PlainArith(self.val - float(other))
+
+        def __rsub__(self, other: PlainArith | float, /) -> PlainArith:
+            """Right subtract."""
+            return PlainArith(float(other) - self.val)
+
+        def __mul__(self, other: PlainArith | float, /) -> PlainArith:
+            """Multiply."""
+            return PlainArith(self.val * float(other))
+
+        def __rmul__(self, other: PlainArith | float, /) -> PlainArith:
+            """Right multiply."""
+            return PlainArith(float(other) * self.val)
+
+        def __neg__(self) -> PlainArith:
+            """Negate."""
+            return PlainArith(-self.val)
+
+    policy_chosen = PlainArith(1.0)
+    policy_rejected = PlainArith(0.5)
+    ref_chosen = PlainArith(0.8)
+    ref_rejected = PlainArith(0.4)
     beta = 0.1
 
-    def log_sigmoid(x: float) -> float:
-        """Scale float by 2."""
-        return float(x) * 2.0
+    def log_sigmoid(x: PlainArith) -> PlainArith:
+        """Scale value by 2."""
+        return PlainArith(x.val * 2.0)
 
     loss, chosen_rewards, rejected_rewards = generic_dpo_loss(
         policy_chosen,
@@ -106,9 +138,20 @@ def test_generic_dpo_loss_without_methods() -> None:
         log_sigmoid,
     )
 
-    assert loss == pytest.approx(-0.02)
-    assert chosen_rewards == pytest.approx(0.02)
-    assert rejected_rewards == pytest.approx(0.01)
+    assert float(loss) == pytest.approx(-0.02)
+    assert float(1.0 - policy_chosen) == pytest.approx(0.0)
+    assert float(policy_chosen * 2.0) == pytest.approx(2.0)
+    assert chosen_rewards.val == pytest.approx(0.02)
+    assert rejected_rewards.val == pytest.approx(0.01)
+
+    def log_sigmoid_float(x: float) -> float:
+        """Scale float by 2."""
+        return float(x) * 2.0
+
+    loss_f, ch_f, rej_f = generic_dpo_loss(1.0, 0.5, 0.8, 0.4, 0.1, log_sigmoid_float)
+    assert loss_f == pytest.approx(-0.02)
+    assert ch_f == pytest.approx(0.02)
+    assert rej_f == pytest.approx(0.01)
 
 
 def test_generic_run_training_epochs_none_dataloader() -> None:
@@ -175,5 +218,9 @@ def test_run_dpo_wrapper() -> None:
     with pytest.raises(TrainingError, match="dpo boom"):
         run_dpo_wrapper("jax", cfg, _fail, raise_on_error=True)
 
+    def _raise_dep(_m: str, _d: str, _b: float, _ep: int, _lr: float, _bs: int) -> tuple[str, float]:
+        """Raise DependencyMissingError."""
+        raise DependencyMissingError("missing dpo dep")
+
     with pytest.raises(DependencyMissingError, match="missing dpo dep"):
-        run_dpo_wrapper("jax", cfg, lambda *_a: (_ for _ in ()).throw(DependencyMissingError("missing dpo dep")))  # pyright: ignore[reportUnknownLambdaType]
+        run_dpo_wrapper("jax", cfg, _raise_dep)

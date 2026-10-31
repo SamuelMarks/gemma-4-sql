@@ -45,12 +45,22 @@ def _make_tiny_native_model() -> Gemma4ForCausalLM:
     return Gemma4ForCausalLM(cfg)
 
 
+def _make_from_pretrained_stub(model: Gemma4ForCausalLM) -> classmethod[Gemma4ForCausalLM, ..., Gemma4ForCausalLM]:
+    """Create a typed `from_pretrained` classmethod returning `model`."""
+
+    def _from_pretrained(_cls: type[Gemma4ForCausalLM], *_a: str, **_k: Gemma4Config | bool | None) -> Gemma4ForCausalLM:
+        """Return `model`."""
+        return model
+
+    return classmethod(_from_pretrained)
+
+
 def test_real_tiny_pytorch_native_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify generate_sql runs real token generation using a tiny native Gemma4ForCausalLM."""
     import gemma_4_sql.backends.pytorch.inference as inf_module
 
     tiny_model = _make_tiny_native_model()
-    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda _cls, *_a, **_k: tiny_model))
+    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", _make_from_pretrained_stub(tiny_model))
     monkeypatch.setattr(inf_module, "AutoTokenizer", None)
 
     res = inf_module.generate_sql("tiny-native", "SELECT 1", beam_width=1, max_length=2, backend_alias="pytorch_native")
@@ -64,7 +74,7 @@ def test_run_generation_native(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.pytorch.inference as inf_module
 
     tiny_model = _make_tiny_native_model()
-    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda _cls, *_a, **_k: tiny_model))
+    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", _make_from_pretrained_stub(tiny_model))
 
     class StubTokInputs:
         """Minimal namespace holding input_ids tensor."""
@@ -120,7 +130,7 @@ def test_run_generation_native_multimodal(monkeypatch: pytest.MonkeyPatch) -> No
     import gemma_4_sql.backends.pytorch.inference as inf_module
 
     tiny_model = _make_tiny_native_model()
-    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda _cls, *_a, **_k: tiny_model))
+    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", _make_from_pretrained_stub(tiny_model))
     monkeypatch.setattr(inf_module, "AutoTokenizer", None)
 
     with (
@@ -302,7 +312,7 @@ def test_generate_sql(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.pytorch.inference as inf_module
 
     tiny_model = _make_tiny_native_model()
-    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda _cls, *_a, **_k: tiny_model))
+    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", _make_from_pretrained_stub(tiny_model))
     monkeypatch.setattr(inf_module, "AutoTokenizer", None)
 
     res = inf_module.generate_sql("model", "SELECT 1", max_length=2, backend_alias="pytorch_native")

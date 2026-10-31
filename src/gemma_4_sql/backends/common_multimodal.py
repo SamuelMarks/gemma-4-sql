@@ -16,7 +16,7 @@ import struct
 import types
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol, Self, TypedDict, runtime_checkable
+from typing import Protocol, Self, TypedDict, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import MultimodalProcessingError
@@ -661,6 +661,24 @@ def format_multimodal_prompt(
     }
 
 
+def _is_image_or_audio_source(
+    val: BackendKwargValue | None,
+) -> TypeGuard[str | Path | bytes | Sequence[float] | NDArrayProtocol]:
+    """Narrow `BackendKwargValue` to a valid `process_image` / `process_audio` input."""
+    return isinstance(val, (str, Path, bytes, Sequence, NDArrayProtocol))
+
+
+def _is_passthrough_tensor[TOut](
+    val: BackendKwargValue | None,
+    _target_fn: Callable[[NDArrayProtocol | Sequence[float]], TOut],
+) -> TypeGuard[TOut]:
+    """Check whether `val` is an already-converted tensor/array object."""
+    return isinstance(
+        val,
+        (TensorProtocol, TorchTensorProtocol, TfTensorProtocol, MlxArrayProtocol, NDArrayProtocol, ToListArrayProtocol),
+    )
+
+
 def prepare_multimodal_inputs[TOut](
     prompt: str,
     kwargs: Mapping[str, BackendKwargValue],
@@ -681,22 +699,9 @@ def prepare_multimodal_inputs[TOut](
     audio_path = kwargs.get("audio_path")
     raw_px = kwargs.get("pixel_values")
     raw_au = kwargs.get("audio_values")
-    pixel_values: TOut | None = (  # ty: ignore[invalid-assignment]
-        raw_px  # pyright: ignore[reportAssignmentType]
-        if isinstance(
-            raw_px,
-            (TensorProtocol, TorchTensorProtocol, TfTensorProtocol, MlxArrayProtocol, NDArrayProtocol, ToListArrayProtocol),
-        )
-        else None
-    )
-    audio_values: TOut | None = (  # ty: ignore[invalid-assignment]
-        raw_au  # pyright: ignore[reportAssignmentType]
-        if isinstance(
-            raw_au,
-            (TensorProtocol, TorchTensorProtocol, TfTensorProtocol, MlxArrayProtocol, NDArrayProtocol, ToListArrayProtocol),
-        )
-        else None
-    )
+
+    pixel_values: TOut | None = raw_px if _is_passthrough_tensor(raw_px, tensor_convert_fn) else None
+    audio_values: TOut | None = raw_au if _is_passthrough_tensor(raw_au, tensor_convert_fn) else None
 
     if image_path is not None or audio_path is not None:
         formatted = format_multimodal_prompt(
@@ -706,12 +711,12 @@ def prepare_multimodal_inputs[TOut](
         )
         prompt = str(formatted.get("prompt", prompt))
 
-        if image_path is not None and raw_px is None and isinstance(image_path, (str, Path, bytes, Sequence, NDArrayProtocol)):
-            img_res = process_image(image_path)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        if image_path is not None and raw_px is None and _is_image_or_audio_source(image_path):
+            img_res = process_image(image_path)
             pixel_values = tensor_convert_fn(img_res["pixel_values"])
 
-        if audio_path is not None and raw_au is None and isinstance(audio_path, (str, Path, bytes, Sequence, NDArrayProtocol)):
-            aud_res = process_audio(audio_path)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        if audio_path is not None and raw_au is None and _is_image_or_audio_source(audio_path):
+            aud_res = process_audio(audio_path)
             audio_values = tensor_convert_fn(aud_res["audio_values"])
 
     return (prompt, pixel_values, audio_values)

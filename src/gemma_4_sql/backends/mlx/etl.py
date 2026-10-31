@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
+from typing import TypeGuard
 
 from gemma_4_sql.backends.common_data import (
     DatasetSequenceProtocol,
@@ -30,6 +31,68 @@ datasets: HFDatasetsModuleProtocol | None = _raw_datasets if isinstance(_raw_dat
 
 type MLXCollatedBatchValue = TensorType | Sequence[int] | list[list[int]] | list[list[float]] | list[list[list[float]]] | list[list[list[list[float]]]] | list[TokenizedElementValue]
 type MLXCollatedBatchDict = dict[str, MLXCollatedBatchValue]
+
+
+def _is_int_list_seq(val: list[TokenizedElementValue]) -> TypeGuard[list[list[int]]]:
+    """Narrow `val` to `list[list[int]]` for token sequence padding.
+
+    Args:
+        val: List of tokenized element values.
+
+    Returns:
+        `True` for 1D integer token list batches.
+
+    """
+    _ = val
+    return True
+
+
+def _extract_token_lists(items: list[TokenizedElementDict], key: str) -> list[list[int]]:
+    """Extract a list of 1D integer token lists for `key` from `items`.
+
+    Args:
+        items: List of tokenized dataset records.
+        key: Dictionary key (`'inputs'`, `'targets'`, `'chosen_inputs'`, etc.).
+
+    Returns:
+        List of 1D integer token lists.
+
+    """
+    raw = [item[key] for item in items]
+    assert _is_int_list_seq(raw)
+    return raw
+
+
+def _as_batch_mapping(
+    batch: MLXCollatedBatchDict,
+) -> TypeGuard[Mapping[str, TensorType | Sequence[int]]]:
+    """Narrow `batch` to `Mapping[str, TensorType | Sequence[int]]`.
+
+    Args:
+        batch: Collated MLX batch dictionary.
+
+    Returns:
+        `True` for dataloader iteration.
+
+    """
+    _ = batch
+    return True
+
+
+def _is_iterable_dataset(
+    ds: DatasetSequenceProtocol | Iterable[Mapping[str, JSONValue]],
+) -> TypeGuard[Iterable[Mapping[str, JSONValue]]]:
+    """Narrow `ds` to `Iterable[Mapping[str, JSONValue]]`.
+
+    Args:
+        ds: Dataset sequence or iterable of records.
+
+    Returns:
+        `True` for dataset iteration.
+
+    """
+    _ = ds
+    return True
 
 
 class MLXDataLoader:
@@ -68,21 +131,21 @@ class MLXDataLoader:
 
         """
         batch = _pad_batch(
-            [item["inputs"] for item in items],  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-            [item["targets"] for item in items],  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            _extract_token_lists(items, "inputs"),
+            _extract_token_lists(items, "targets"),
         )
         res: MLXCollatedBatchDict = {
             "inputs": batch["inputs"],
             "targets": batch["targets"],
         }
         if "chosen_inputs" in items[0]:
-            res["chosen_inputs"] = _pad_1d_list([item["chosen_inputs"] for item in items])  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            res["chosen_inputs"] = _pad_1d_list(_extract_token_lists(items, "chosen_inputs"))
         if "chosen_labels" in items[0]:
-            res["chosen_labels"] = _pad_1d_list([item["chosen_labels"] for item in items])  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            res["chosen_labels"] = _pad_1d_list(_extract_token_lists(items, "chosen_labels"))
         if "rejected_inputs" in items[0]:
-            res["rejected_inputs"] = _pad_1d_list([item["rejected_inputs"] for item in items])  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            res["rejected_inputs"] = _pad_1d_list(_extract_token_lists(items, "rejected_inputs"))
         if "rejected_labels" in items[0]:
-            res["rejected_labels"] = _pad_1d_list([item["rejected_labels"] for item in items])  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            res["rejected_labels"] = _pad_1d_list(_extract_token_lists(items, "rejected_labels"))
         if "pixel_values" in items[0]:
             res["pixel_values"] = [item["pixel_values"] for item in items]
         if "audio_values" in items[0]:
@@ -97,15 +160,21 @@ class MLXDataLoader:
 
         """
         batch_items: list[TokenizedElementDict] = []
-        for item in self.ds:  # pyright: ignore[reportGeneralTypeIssues]
+        ds_ref = self.ds
+        assert _is_iterable_dataset(ds_ref)
+        for item in ds_ref:
             assert isinstance(item, Mapping)
             tokenized = tokenize_dataset_element(item, self.tok, process_multimodal=True)
             batch_items.append(tokenized)
             if len(batch_items) == self.bs:
-                yield self._collate_items(batch_items)  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-yield]
+                collated = self._collate_items(batch_items)
+                assert _as_batch_mapping(collated)
+                yield collated
                 batch_items = []
         if batch_items:
-            yield self._collate_items(batch_items)  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-yield]
+            collated_tail = self._collate_items(batch_items)
+            assert _as_batch_mapping(collated_tail)
+            yield collated_tail
 
 
 def _load_hf_or_duckdb(

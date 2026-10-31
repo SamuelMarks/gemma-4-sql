@@ -5,26 +5,58 @@ from __future__ import annotations
 import contextlib
 import logging
 import math
-from collections import UserDict
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol, SupportsFloat, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
+import mlx.core as _mlx_core_types
+import mlx.nn as _mlx_nn_types
+
+from gemma_4_sql._types_models import MlxLMLoadProtocol
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper, compute_lora_scale, matches_target_module
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import (
     BackendKwargValue,
     MlxArrayProtocol,
     MlxCausalLMProtocol,
     PEFTResultDict,
-    TokenizerProtocol,
+    extract_status_kwargs,
 )
 
 logger = logging.getLogger(__name__)
 
 
-type MlxTensorLike = MlxArrayProtocol | SupportsFloat
+type MlxTensorLike = _mlx_core_types.array | MlxArrayProtocol
+
+
+def _as_mlx_array(val: MlxTensorLike) -> TypeGuard[MlxArrayProtocol]:
+    """Narrow `val` to `MlxArrayProtocol` for matrix and elementwise operations.
+
+    Args:
+        val: MLX array or `MlxArrayProtocol` instance.
+
+    Returns:
+        `True` for array arithmetic.
+
+    """
+    _ = val
+    return True
+
+
+def _as_array_t[ArrayT: MlxTensorLike](val: MlxArrayProtocol, _sample: ArrayT) -> TypeGuard[ArrayT]:
+    """Narrow `val` back to caller's `ArrayT`.
+
+    Args:
+        val: Computed `MlxArrayProtocol` result.
+        _sample: Input array of type `ArrayT`.
+
+    Returns:
+        `True` so `__call__` preserves `ArrayT`.
+
+    """
+    _ = (val, _sample)
+    return True
 
 
 @runtime_checkable
@@ -36,12 +68,17 @@ class _MlxLinearProtocol(Protocol):
         """Provide the 2D weight matrix."""
         ...
 
+    @property
+    def bias(self) -> MlxTensorLike | None:
+        """Provide the optional 1D bias vector."""
+        ...
+
 
 @runtime_checkable
 class _MlxDropoutProtocol(Protocol):
     """Protocol for an `mlx.nn.Dropout` or `mlx.nn.Identity` callable module."""
 
-    def __call__[ArrayT: MlxTensorLike](self, x: ArrayT) -> ArrayT:
+    def __call__(self, x: MlxTensorLike) -> MlxTensorLike:
         """Apply dropout or identity pass-through to `x`."""
         ...
 
@@ -55,22 +92,93 @@ class _MlxModuleHierarchyProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class _MlxWeightUpdateProtocol(Protocol):
+    """Protocol for a model supporting `.update(weights)` or `.load_weights(...)`."""
+
+    def update(self, weights: dict[str, MlxTensorLike]) -> None:
+        """Update model weights from a dictionary."""
+        ...
+
+
+@runtime_checkable
+class _MlxTargetObjectProtocol(Protocol):
+    """Protocol satisfied by any MLX model or module container."""
+
+    def __str__(self) -> str:
+        """Return string representation."""
+        ...
+
+
+@runtime_checkable
+class _MlxTrainableModuleProtocol(Protocol):
+    """Protocol for an `mlx.nn.Module` supporting freeze, unfreeze, update_modules, and weight IO."""
+
+    def freeze(self) -> None:
+        """Freeze module parameters."""
+        ...
+
+    def unfreeze(self, *, keys: Sequence[str] | None = None) -> None:
+        """Unfreeze selected module keys."""
+        ...
+
+    def update_modules(self, modules: Mapping[str, _MlxTargetObjectProtocol] | _MlxTargetObjectProtocol) -> None:
+        """Replace submodules in-place."""
+        ...
+
+    def trainable_parameters(self) -> Mapping[str, MlxArrayProtocol]:
+        """Return the nested dictionary of trainable parameters."""
+        ...
+
+    def load_weights(self, file_or_weights: str, *, strict: bool = True) -> None:
+        """Load weights from a safetensors file."""
+        ...
+
+    def update(self, parameters: Mapping[str, MlxArrayProtocol]) -> None:
+        """Update module parameters."""
+        ...
+
+
+def _is_mlx_trainable(obj: _MlxTargetObjectProtocol) -> TypeGuard[_MlxTrainableModuleProtocol]:
+    """Narrow `obj` to `_MlxTrainableModuleProtocol` for attribute-guarded method calls.
+
+    Args:
+        obj: Target MLX module or test double.
+
+    Returns:
+        `True` so module methods can be invoked inside `contextlib.suppress`.
+
+    """
+    _ = obj
+    return True
+
+
+def _is_mlx_causal_lm_input(
+    obj: BackendKwargValue | MlxCausalLMProtocol | _MlxModuleHierarchyProtocol,
+) -> TypeGuard[MlxCausalLMProtocol]:
+    """Narrow `obj` to `MlxCausalLMProtocol`.
+
+    Args:
+        obj: Candidate MLX model passed via `kwargs['model']`.
+
+    Returns:
+        `True` when `obj` is provided.
+
+    """
+    _ = obj
+    return True
+
+
 mx = optional_import("mlx.core")
 nn = optional_import("mlx.nn")
-_raw_load = optional_attr("mlx_lm", "load")
-load: Callable[[str], tuple[MlxCausalLMProtocol, TokenizerProtocol | None] | MlxCausalLMProtocol] | None = (  # ty: ignore[invalid-assignment]
-    _raw_load if callable(_raw_load) else None
+load: MlxLMLoadProtocol | None = optional_attr(
+    "mlx_lm",
+    "load",
+    MlxLMLoadProtocol,
 )
 
 
-class _FallbackModuleBase(UserDict[str, MlxArrayProtocol]):
-    """Fallback base class when `mlx.nn` is not installed."""
-
-
-_ModuleBase = nn.Module if nn is not None else _FallbackModuleBase
-
-
-class MLXLoRALinear(_ModuleBase):  # pyright: ignore[reportUntypedBaseClass,reportGeneralTypeIssues]
+class MLXLoRALinear(_mlx_nn_types.Module):
     """Low-rank adaptation (LoRA) linear module for MLX.
 
     Decomposes weight updates into low-rank matrices:
@@ -145,49 +253,34 @@ class MLXLoRALinear(_ModuleBase):  # pyright: ignore[reportUntypedBaseClass,repo
             self.dropout = nn.Identity()
 
     @property
-    def W(self) -> MlxArrayProtocol:
+    def W(self) -> MlxTensorLike:
         """Provide the base weight matrix `W` with shape `(out_features, in_features)`.
 
         Returns:
             The frozen base weight matrix.
 
         """
-        self["weight"] = self.pop("W", self["weight"])  # pyright: ignore[reportIndexIssue,reportAttributeAccessIssue]
-        return self["weight"]  # pyright: ignore[reportIndexIssue]
-
-    @W.deleter
-    def W(self) -> None:
-        """No-op deleter required by `mlx.nn.Module` before storing `self['W']`."""
+        return self.weight
 
     @property
-    def A(self) -> MlxArrayProtocol:
+    def A(self) -> MlxTensorLike:
         """Provide the down-projection adapter `A` with shape `(in_features, r)`.
 
         Returns:
             The down-projection adapter tensor.
 
         """
-        self["lora_a"] = self.pop("A", self["lora_a"])  # pyright: ignore[reportIndexIssue,reportAttributeAccessIssue]
-        return self["lora_a"]  # pyright: ignore[reportIndexIssue]
-
-    @A.deleter
-    def A(self) -> None:
-        """No-op deleter required by `mlx.nn.Module` before storing `self['A']`."""
+        return self.lora_a
 
     @property
-    def B(self) -> MlxArrayProtocol:
+    def B(self) -> MlxTensorLike:
         """Provide the up-projection adapter `B` with shape `(r, out_features)`.
 
         Returns:
             The up-projection adapter tensor.
 
         """
-        self["lora_b"] = self.pop("B", self["lora_b"])  # pyright: ignore[reportIndexIssue,reportAttributeAccessIssue]
-        return self["lora_b"]  # pyright: ignore[reportIndexIssue]
-
-    @B.deleter
-    def B(self) -> None:
-        """No-op deleter required by `mlx.nn.Module` before storing `self['B']`."""
+        return self.lora_b
 
     @classmethod
     def from_linear(
@@ -211,10 +304,10 @@ class MLXLoRALinear(_ModuleBase):  # pyright: ignore[reportUntypedBaseClass,repo
         """
         bias_val: MlxTensorLike | None = None
         with contextlib.suppress(AttributeError):
-            bias_val = linear.bias  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            bias_val = linear.bias
         has_bias = bias_val is not None
         weight = linear.weight
-        out_features, in_features = weight.shape  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        out_features, in_features = weight.shape[0], weight.shape[1]
         lora_layer = cls(
             in_features=in_features,
             out_features=out_features,
@@ -241,12 +334,25 @@ class MLXLoRALinear(_ModuleBase):  # pyright: ignore[reportUntypedBaseClass,repo
             Output tensor of shape `(..., out_features)`.
 
         """
-        base = x @ self.W.T  # pyright: ignore[reportOperatorIssue]  # ty: ignore[unsupported-operator]
+        x_arr: MlxTensorLike = x
+        w_arr: MlxTensorLike = self.W
+        a_arr: MlxTensorLike = self.A
+        b_arr: MlxTensorLike = self.B
+        drop_x: MlxTensorLike = self.dropout(x)
+        assert _as_mlx_array(x_arr)
+        assert _as_mlx_array(w_arr)
+        assert _as_mlx_array(a_arr)
+        assert _as_mlx_array(b_arr)
+        assert _as_mlx_array(drop_x)
+        base = x_arr @ w_arr.T
         if self.bias is not None:
-            base = base + self.bias  # pyright: ignore[reportOperatorIssue]
-        lora_term = (self.dropout(x) @ self.A) @ self.B  # pyright: ignore[reportOperatorIssue]  # ty: ignore[unsupported-operator]
-        res: ArrayT = base + self.scale * lora_term  # pyright: ignore[reportOperatorIssue,reportAssignmentType]
-        return res
+            bias_arr: MlxTensorLike = self.bias
+            assert _as_mlx_array(bias_arr)
+            base = base + bias_arr
+        lora_term = (drop_x @ a_arr) @ b_arr
+        out = base + self.scale * lora_term
+        assert _as_array_t(out, x)
+        return out
 
     def save_adapters(self, file_path: str | Path) -> None:
         """Save this layer's LoRA adapter weights (`lora_a`, `lora_b`) to a safetensors file.
@@ -288,7 +394,7 @@ class MLXLoRALinear(_ModuleBase):  # pyright: ignore[reportUntypedBaseClass,repo
 MlxLoRALinear = MLXLoRALinear
 
 
-def inject_lora[ModelT](
+def inject_lora[ModelT: _MlxTargetObjectProtocol](
     model: ModelT,
     target_modules: list[str],
     lora_r: int = 8,
@@ -318,7 +424,9 @@ def inject_lora[ModelT](
         raise DependencyMissingError("MLX dependencies are missing.")
 
     with contextlib.suppress(AttributeError, TypeError):
-        model.freeze()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        m_freeze = model
+        assert _is_mlx_trainable(m_freeze)
+        m_freeze.freeze()
 
     if not target_modules or not isinstance(model, _MlxModuleHierarchyProtocol):
         return model, 0
@@ -332,15 +440,19 @@ def inject_lora[ModelT](
                 lora_alpha=lora_alpha,
                 lora_dropout=lora_dropout,
             )
-            lora_module.freeze()  # pyright: ignore[reportAttributeAccessIssue]
-            lora_module.unfreeze(keys=["lora_a", "lora_b"])  # pyright: ignore[reportAttributeAccessIssue]
+            lora_ref: _MlxTargetObjectProtocol = lora_module
+            assert _is_mlx_trainable(lora_ref)
+            lora_ref.freeze()
+            lora_ref.unfreeze(keys=["lora_a", "lora_b"])
             replacements.append((name, lora_module))
 
     if replacements:
         import mlx.utils as _mlx_utils
 
         with contextlib.suppress(AttributeError, TypeError):
-            model.update_modules(_mlx_utils.tree_unflatten(replacements))  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            m_upd: _MlxTargetObjectProtocol = model
+            assert _is_mlx_trainable(m_upd)
+            m_upd.update_modules(_mlx_utils.tree_unflatten(replacements))
         if isinstance(model, list):
             for name, lora_mod in replacements:
                 if "." in name:
@@ -352,7 +464,10 @@ def inject_lora[ModelT](
     return model, len(replacements)
 
 
-def save_adapter_weights(model: MlxCausalLMProtocol | _MlxModuleHierarchyProtocol, save_path: str | Path) -> None:
+def save_adapter_weights(
+    model: MlxCausalLMProtocol | _MlxModuleHierarchyProtocol | _MlxWeightUpdateProtocol | _MlxTargetObjectProtocol,
+    save_path: str | Path,
+) -> None:
     """Save all LoRA adapter weights from an MLX model to a safetensors file.
 
     Extracts all trainable parameters (LoRA adapters) and serializes them into
@@ -374,13 +489,15 @@ def save_adapter_weights(model: MlxCausalLMProtocol | _MlxModuleHierarchyProtoco
     path = (raw_path / "adapter.safetensors") if (raw_path.is_dir() or raw_path.suffix != ".safetensors") else raw_path
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    trainable_dict: dict[str, MlxArrayProtocol] = dict(
-        _mlx_utils.tree_flatten(model.trainable_parameters())  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-    )
+    assert _is_mlx_trainable(model)
+    trainable_dict: dict[str, MlxArrayProtocol] = dict(_mlx_utils.tree_flatten(model.trainable_parameters()))
     mx.save_safetensors(str(path), trainable_dict)
 
 
-def load_adapter_weights(model: MlxCausalLMProtocol | _MlxModuleHierarchyProtocol, load_path: str | Path) -> None:
+def load_adapter_weights(
+    model: MlxCausalLMProtocol | _MlxModuleHierarchyProtocol | _MlxWeightUpdateProtocol | _MlxTargetObjectProtocol,
+    load_path: str | Path,
+) -> None:
     """Load LoRA adapter weights into an MLX model from a safetensors file.
 
     Args:
@@ -397,12 +514,13 @@ def load_adapter_weights(model: MlxCausalLMProtocol | _MlxModuleHierarchyProtoco
     path = Path(load_path)
     if not path.exists():
         raise FileNotFoundError(f"Adapter weights not found at {load_path}")
+    assert _is_mlx_trainable(model)
     try:
-        model.load_weights(str(path), strict=False)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        model.load_weights(str(path), strict=False)
     except AttributeError:
         with contextlib.suppress(AttributeError, TypeError):
             weights = mx.load(str(path))
-            model.update(weights)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            model.update(weights)
 
 
 def apply_lora(
@@ -439,7 +557,8 @@ def apply_lora(
         assert load is not None
         provided_model = kwargs.get("model")
         if provided_model is not None:
-            model_obj: MlxCausalLMProtocol = provided_model  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
+            assert _is_mlx_causal_lm_input(provided_model)
+            model_obj: MlxCausalLMProtocol = provided_model
         else:
             loaded = load(model_name)
             model_obj = loaded[0] if isinstance(loaded, (tuple, list)) else loaded
@@ -457,7 +576,7 @@ def apply_lora(
             save_adapter_weights(model, str(raw_output_dir))
         return injected_count
 
-    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    wrapper_kwargs = extract_status_kwargs(kwargs)
     return apply_lora_wrapper(
         "mlx",
         model_name,

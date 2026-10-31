@@ -63,8 +63,12 @@ def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = json.load(f)
         assert cfg == {"model_type": "gemma4", "model_name": "model"}
 
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
     monkeypatch.setattr(export_module, "mlx_load", None)
-    monkeypatch.setattr(export_module, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(export_module, "optional_attr", _none_attr)
     with pytest.raises(ExportError, match="Failed to load MLX model"):
         export_module.export_model("model", str(export_dir))
 

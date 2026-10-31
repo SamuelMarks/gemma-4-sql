@@ -417,7 +417,7 @@ def apply_lora(
         DependencyMissingError: If JAX PEFT dependencies are missing.
 
     """
-    if optax is None or jax is None or nnx is None or Gemma4ForCausalLM is None:  # pyright: ignore[reportUnnecessaryComparison]
+    if optax is None or jax is None or nnx is None or not callable(Gemma4ForCausalLM):
         raise DependencyMissingError("JAX PEFT dependencies are missing.")
 
     raw_rngs = kwargs.get("rngs")

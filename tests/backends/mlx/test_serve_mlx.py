@@ -26,9 +26,14 @@ class _DummySentinel:
     """Sentinel stub for loaded MLX model and tokenizer."""
 
 
+def _load_dummy_mlx(_name: str) -> tuple[_DummySentinel, _DummySentinel]:
+    """Return tuple of _DummySentinel instances."""
+    return (_DummySentinel(), _DummySentinel())
+
+
 def test_mlx_serve_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify mlx serve model behavior."""
-    monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda _name: (_DummySentinel(), _DummySentinel()))  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(mlx_serve, "_load_mlx_model", _load_dummy_mlx)
     res = serve_model("dummy_mlx_model", port=8080, max_batch_size=128)
     assert res["status"] == "running_mlx_serve"
     assert res["backend"] == "mlx"
@@ -82,14 +87,19 @@ def test_generate_query_error() -> None:
 
 def test_batch_generate_queries(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify batch generate queries behavior."""
-    monkeypatch.setattr(mlx_serve, "_generate_query", lambda *_a, **_k: "SELECT 1")  # pyright: ignore[reportUnknownLambdaType]
+
+    def _gen_select_1(*_a: str, **_k: str) -> str:
+        """Return SELECT 1."""
+        return "SELECT 1"
+
+    monkeypatch.setattr(mlx_serve, "_generate_query", _gen_select_1)
     res = _batch_generate_queries(["query1", "query2"])
     assert res == ["SELECT 1", "SELECT 1"]
 
 
 def test_app_factory(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify app factory behavior."""
-    monkeypatch.setattr(mlx_serve, "_load_mlx_model", lambda _name: (_DummySentinel(), _DummySentinel()))  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(mlx_serve, "_load_mlx_model", _load_dummy_mlx)
     app = _app_factory("dummy_model")
     assert app is not None
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import jax
@@ -21,7 +22,12 @@ pytestmark = requires_jax
 @pytest.fixture(autouse=True)
 def _bypass_jax_jit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Bypass XLA jit compilation during unit tests for fast, deterministic execution."""
-    monkeypatch.setattr(inf.jax, "jit", lambda fn, *_args, **_kwargs: fn)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _identity_jit[FnT](fn: FnT, *_args: int, **_kwargs: tuple[int, ...]) -> FnT:
+        """Return `fn` unchanged."""
+        return fn
+
+    monkeypatch.setattr(inf.jax, "jit", _identity_jit)
 
 
 def _make_tiny_jax_model() -> Gemma4ForCausalLM:
@@ -99,9 +105,17 @@ def test_beam_search_step_and_jax_beam_search_real_model(monkeypatch: pytest.Mon
 
 def test_generate_sql_real_tiny_model_and_caching(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
     """Verify generate_sql initializes a tiny model, caches it, and decodes SQL output."""
+    from flax import nnx
+
     tiny_model = _make_tiny_jax_model()
+
+    def _return_tiny(_cfg: Gemma4Config, rngs: nnx.Rngs | None = None) -> Gemma4ForCausalLM:
+        """Return `tiny_model`."""
+        _ = rngs
+        return tiny_model
+
     monkeypatch.setattr(inf.Gemma4Config, "gemma4_e2b", staticmethod(lambda: tiny_model.config))
-    monkeypatch.setattr(inf, "Gemma4ForCausalLM", lambda _cfg, rngs=None: tiny_model)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(inf, "Gemma4ForCausalLM", _return_tiny)
 
     model_key = str(tmp_path / "nonexistent_checkpoint")
     inf._MODEL_CACHE.pop(model_key, None)
@@ -122,10 +136,28 @@ def test_generate_sql_real_tiny_model_and_caching(monkeypatch: pytest.MonkeyPatc
 
 def test_generate_sql_checkpoint_restore_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
     """Verify generate_sql handles Orbax checkpoint restoration success, None return, no nnx.update, and errors."""
+    from flax import nnx
+
     tiny_model = _make_tiny_jax_model()
+
+    def _return_tiny(_cfg: Gemma4Config, rngs: nnx.Rngs | None = None) -> Gemma4ForCausalLM:
+        """Return `tiny_model`."""
+        _ = rngs
+        return tiny_model
+
+    def _fast_beam(
+        _fn: Callable[[jax.Array, jax.Array], jax.Array],
+        ids: jax.Array,
+        _bw: int,
+        _ml: int,
+        _eos: int,
+    ) -> tuple[jax.Array, float]:
+        """Return `(ids, -0.5)`."""
+        return (ids, -0.5)
+
     monkeypatch.setattr(inf.Gemma4Config, "gemma4_e2b", staticmethod(lambda: tiny_model.config))
-    monkeypatch.setattr(inf, "Gemma4ForCausalLM", lambda _cfg, rngs=None: tiny_model)  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(inf, "jax_beam_search", lambda _fn, ids, _bw, _ml, _eos: (ids, -0.5))  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(inf, "Gemma4ForCausalLM", _return_tiny)
+    monkeypatch.setattr(inf, "jax_beam_search", _fast_beam)
 
     ckpt_dir = tmp_path / "ckpt"
     ckpt_dir.mkdir()
@@ -174,13 +206,21 @@ def test_generate_sql_multimodal_and_typeerror_fallback(monkeypatch: pytest.Monk
     """Verify generate_sql processes image/audio paths and falls back when model rejects extra kwargs."""
     import jax.numpy as jnp
 
+    def _proc_img(_p: str | bytes) -> dict[str, list[list[float]]]:
+        """Return pixel_values dict."""
+        return {"pixel_values": [[1.0, 2.0]]}
+
+    def _proc_aud(_p: str | bytes) -> dict[str, list[list[float]]]:
+        """Return audio_values dict."""
+        return {"audio_values": [[0.5, -0.5]]}
+
     monkeypatch.setattr(
         "gemma_4_sql.backends.common_multimodal.process_image",
-        lambda _p: {"pixel_values": [[1.0, 2.0]]},  # pyright: ignore[reportUnknownLambdaType]
+        _proc_img,
     )
     monkeypatch.setattr(
         "gemma_4_sql.backends.common_multimodal.process_audio",
-        lambda _p: {"audio_values": [[0.5, -0.5]]},  # pyright: ignore[reportUnknownLambdaType]
+        _proc_aud,
     )
 
     def strict_PosOnlyModel(seq: jax.Array, _pos: jax.Array | None = None) -> jax.Array:

@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import TypeGuard
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import EvaluationError, GemmaSQLError, is_failed_status
@@ -20,8 +21,10 @@ from gemma_4_sql.type_hints import (
     EvaluationMetricsDict,
     EvaluationResultDict,
     JSONValue,
+    NestedScalarList,
     TensorProtocol,
     TensorType,
+    ToListArrayProtocol,
     extract_float_kwarg,
     extract_int_kwarg,
     run_coroutine_sync,
@@ -30,8 +33,82 @@ from gemma_4_sql.type_hints import (
 MAX_BATCHES = 10
 _COMPARISON_OP_PATTERN = re.compile(r"\s*(!=|<>|<=|>=|=|<|>)\s*")
 
-type TokenSequenceItem = Sequence[Sequence[int]] | Sequence[int] | TensorProtocol | TensorType | int | str | None
-type TokenSequenceBatch = Mapping[str, Sequence[Sequence[int]] | TensorProtocol | TensorType] | tuple[Sequence[Sequence[int]] | TensorProtocol | TensorType, Sequence[Sequence[int]] | TensorProtocol | TensorType] | Sequence[TokenSequenceItem] | int | str | None
+type TokenSequenceItem = Sequence[Sequence[int]] | Sequence[int] | Sequence[ToListArrayProtocol] | NestedScalarList | ToListArrayProtocol | TensorProtocol | TensorType | int | float | str | None
+type TokenSequenceBatch = Mapping[str, TokenSequenceItem] | tuple[TokenSequenceItem, TokenSequenceItem] | Sequence[TokenSequenceItem] | int | str | None
+
+
+def _is_tolist_item(val: TokenSequenceItem) -> TypeGuard[ToListArrayProtocol]:
+    """Narrow `val` to `ToListArrayProtocol` for attribute-guarded `.tolist()` calls.
+
+    Args:
+        val: Candidate token sequence or tensor.
+
+    Returns:
+        `True` so `.tolist()` can be invoked inside `contextlib.suppress` or `try`.
+
+    """
+    _ = val
+    return True
+
+
+def _is_int_iterable(val: TokenSequenceItem) -> TypeGuard[Iterable[int | float | str]]:
+    """Narrow `val` to `Iterable[int | float | str]`.
+
+    Args:
+        val: Candidate 1D token sequence.
+
+    Returns:
+        `True` for elementwise `int(x)` conversion.
+
+    """
+    _ = val
+    return True
+
+
+def _is_row_iterable(val: TokenSequenceItem) -> TypeGuard[Iterable[TokenSequenceItem]]:
+    """Narrow `val` to `Iterable[TokenSequenceItem]`.
+
+    Args:
+        val: Candidate 2D token sequence.
+
+    Returns:
+        `True` for `list(val)` conversion.
+
+    """
+    _ = val
+    return True
+
+
+def _is_int_list(
+    val: Sequence[TokenSequenceItem | int | float | bool],
+) -> TypeGuard[Sequence[int]]:
+    """Narrow `val` to `Sequence[int]` when `isinstance(val[0], int)` is true.
+
+    Args:
+        val: Non-empty sequence whose first element is an `int`.
+
+    Returns:
+        `True` for 1D integer sequences.
+
+    """
+    _ = val
+    return True
+
+
+def _as_json_value(
+    val: TensorType | Sequence[int] | Sequence[Sequence[int]] | TensorProtocol,
+) -> TypeGuard[JSONValue]:
+    """Narrow multimodal batch value to `JSONValue` for `generate_sql` kwargs.
+
+    Args:
+        val: Multimodal pixel or audio values from batch.
+
+    Returns:
+        `True` for forwarding to `backend_impl.generate_sql`.
+
+    """
+    _ = val
+    return True
 
 
 def normalize_sql(sql: str) -> str:
@@ -152,11 +229,12 @@ def _to_int_seq(seq: TokenSequenceItem) -> list[int]:
     """
     raw: TokenSequenceItem = seq
     with contextlib.suppress(AttributeError, TypeError):
-        raw = seq.tolist()  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportAssignmentType]  # ty: ignore[invalid-assignment, unresolved-attribute]
+        assert _is_tolist_item(seq)
+        raw = seq.tolist()
     if isinstance(raw, int):
         return [raw]
-    assert raw is not None
-    return [int(x) for x in raw]  # pyright: ignore[reportGeneralTypeIssues,reportArgumentType]  # ty: ignore[invalid-argument-type, not-iterable]
+    assert _is_int_iterable(raw)
+    return [int(x) for x in raw]
 
 
 def _normalize_id_matrix(raw_item: TokenSequenceItem) -> list[list[int]]:
@@ -170,16 +248,20 @@ def _normalize_id_matrix(raw_item: TokenSequenceItem) -> list[list[int]]:
 
     """
     try:
-        seq_list: list[TokenSequenceItem] | int | float = raw_item.tolist()  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue,reportAssignmentType]  # ty: ignore[invalid-assignment, unresolved-attribute]
+        item_ref = raw_item
+        assert _is_tolist_item(item_ref)
+        seq_list: TokenSequenceItem | list[TokenSequenceItem] = item_ref.tolist()
     except (AttributeError, TypeError):
         try:
-            seq_list = list(raw_item)  # pyright: ignore[reportArgumentType,reportAssignmentType]  # ty: ignore[invalid-argument-type]
+            assert _is_row_iterable(raw_item)
+            seq_list = list(raw_item)
         except TypeError:
             return [[]]
     if not isinstance(seq_list, list) or not seq_list:
         return [[]]
     if isinstance(seq_list[0], int):
-        return [[int(x) for x in seq_list]]  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        assert _is_int_list(seq_list)
+        return [[int(x) for x in seq_list]]
     return [_to_int_seq(row) for row in seq_list]
 
 
@@ -280,7 +362,7 @@ def _run_evaluation_inference(
         if limit > 0 and i >= limit:
             break
 
-        batch_inputs, batch_targets = _extract_batch_ids(batch)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        batch_inputs, batch_targets = _extract_batch_ids(batch)
         for inp_seq, tgt_seq in zip(batch_inputs, batch_targets):
             prompt_text = tokenizer.decode(inp_seq)
             truth_text = tokenizer.decode(tgt_seq)
@@ -290,12 +372,16 @@ def _run_evaluation_inference(
             img_arg: JSONValue = str(image_path) if image_path is not None else None
             pv_arg: JSONValue = None
             if image_path is None and isinstance(batch, dict) and "pixel_values" in batch:
-                pv_arg = batch["pixel_values"]  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
+                raw_pv = batch["pixel_values"]
+                assert _as_json_value(raw_pv)
+                pv_arg = raw_pv
 
             aud_arg: JSONValue = str(audio_path) if audio_path is not None else None
             av_arg: JSONValue = None
             if audio_path is None and isinstance(batch, dict) and "audio_values" in batch:
-                av_arg = batch["audio_values"]  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
+                raw_av = batch["audio_values"]
+                assert _as_json_value(raw_av)
+                av_arg = raw_av
 
             gen_res = backend_impl.generate_sql(
                 model_name,

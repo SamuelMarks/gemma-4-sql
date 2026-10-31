@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 
+from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
 from gemma_4_sql.backends.common_export import run_export_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError, StatusValue
-from gemma_4_sql.type_hints import ExportResultDict, JSONValue, MaxTextCausalLMProtocol, PyTreeNode, TensorType
+from gemma_4_sql.type_hints import ExportResultDict, JSONValue, PyTreeNode, TensorType
 
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
 ocp = optional_import("orbax.checkpoint")
-_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
-Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
+Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+    "maxtext.models.gemma4",
+    "Gemma4Model",
+    MaxTextModelConstructorProtocol,
+)
 
 
 def export_model(

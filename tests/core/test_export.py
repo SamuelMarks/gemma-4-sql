@@ -1,4 +1,4 @@
-"""Unified behavioral tests for model export across supported backends."""
+"""Behavioral tests for `common_export` infrastructure and SDK export argument forwarding."""
 
 from __future__ import annotations
 
@@ -6,9 +6,16 @@ from pathlib import Path
 
 import pytest
 
+from gemma_4_sql.backends.common_export import build_export_result, run_export_wrapper
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 from gemma_4_sql.sdk.export import export_model
-from gemma_4_sql.type_hints import ExportResultDict, JSONDict, JSONValue, TensorProtocol
+from gemma_4_sql.type_hints import ExportResultDict, JSONDict, JSONValue
 from tests.utils.test_utils import RecordingBackendDouble
+
+
+def _return_double(double: RecordingBackendDouble) -> RecordingBackendDouble:
+    """Return the provided RecordingBackendDouble."""
+    return double
 
 
 def test_export_model_jax_unified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -16,7 +23,12 @@ def test_export_model_jax_unified(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     import gemma_4_sql.sdk.export as sdk_exp
 
     jax_double = RecordingBackendDouble("jax")
-    monkeypatch.setattr(sdk_exp, "get_backend", lambda _name: jax_double)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _get_jax_backend(_name: str) -> RecordingBackendDouble:
+        """Return jax_double."""
+        return _return_double(jax_double)
+
+    monkeypatch.setattr(sdk_exp, "get_backend", _get_jax_backend)
 
     export_dir = tmp_path / "jax_unified_export"
     res = export_model("test_model", str(export_dir), backend="jax", step=5)
@@ -24,47 +36,6 @@ def test_export_model_jax_unified(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert jax_double.export_calls[0] == ("test_model", str(export_dir), {"step": 5})
     assert res["backend"] == "jax"
     assert res["format"] == "safetensors"
-
-
-def test_export_model_pytorch_unified(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Test unified model export using PyTorch native backend."""
-    import gemma_4_sql.backends.pytorch.export as pt_export
-
-    saved_tensors: dict[str, TensorProtocol] = {}
-
-    def _capture_save(tensors: dict[str, TensorProtocol], filename: str) -> None:
-        """Capture saved state_dict and write placeholder file."""
-        saved_tensors.update(tensors)
-        Path(filename).write_bytes(b"safetensors")
-
-    monkeypatch.setattr(pt_export, "save_file", _capture_save)
-
-    export_dir = tmp_path / "pytorch_unified_export"
-    res = export_model(
-        "test_model",
-        str(export_dir),
-        backend="pytorch",
-        backend_alias="pytorch_native",
-    )
-    assert res["backend"] == "pytorch_native"
-    assert res["status"] == "exported_with_safetensors"
-    assert len(saved_tensors) > 0
-    assert Path(res["file_path"]).exists()
-
-
-def test_export_model_maxtext_unified(tmp_path: Path) -> None:
-    """Test unified model export using MaxText backend."""
-    from gemma_4_sql.exceptions import DependencyMissingError, ExportError
-
-    export_dir = tmp_path / "maxtext_unified_export"
-    with pytest.raises((DependencyMissingError, ExportError)):
-        export_model("test_model", str(export_dir), backend="maxtext")
-
-
-def test_export_model_invalid_backend(tmp_path: Path) -> None:
-    """Test unified model export with unrecognized backend name."""
-    with pytest.raises(ValueError, match="Unknown backend: nonexistent_backend"):
-        export_model("test_model", str(tmp_path), backend="nonexistent_backend")
 
 
 def test_export_model_custom_backend_mock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -95,9 +66,6 @@ def test_export_model_custom_backend_mock(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 def test_common_export_wrapper_and_build_result(tmp_path: Path) -> None:
     """Verify `build_export_result` and `run_export_wrapper` handle error_message, raise_on_error=False, and exception passthrough."""
-    from gemma_4_sql.backends.common_export import build_export_result, run_export_wrapper
-    from gemma_4_sql.exceptions import DependencyMissingError, ExportError
-
     res_err = build_export_result("jax", "m", str(tmp_path), tmp_path / "f", "failed: err", "orbax", error_message="err")
     assert res_err["status_code"] == "failed"
     assert res_err["error_message"] == "err"

@@ -152,7 +152,12 @@ def test_lazy_loader_getters(
     loader_obj._module = None
 
     fake_mod = types.ModuleType(module_name)
-    monkeypatch.setattr(importlib, "import_module", lambda _name, _package=None: fake_mod)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _return_fake_mod(_name: str, _package: str | None = None) -> types.ModuleType:
+        """Return `fake_mod`."""
+        return fake_mod
+
+    monkeypatch.setattr(importlib, "import_module", _return_fake_mod)
     assert getter() is fake_mod
 
 

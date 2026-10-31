@@ -23,6 +23,17 @@ class DummyAdapter(DatabaseAdapter[MagicMock, MagicMock]):
         """
         return MagicMock()
 
+    async def connect_async(self) -> MagicMock:
+        """Create an async mock connection object via thread worker.
+
+        Returns:
+            A `MagicMock` connection.
+
+        """
+        import asyncio
+
+        return await asyncio.to_thread(self.connect)
+
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
         """Provide handled exception classes for DummyAdapter.

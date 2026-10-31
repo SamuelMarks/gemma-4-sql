@@ -118,8 +118,12 @@ def test_run_dpo_step_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         res = dpo_module._run_dpo_step(mock_policy, mock_ref, None, batch, 0.1)
         assert res == 0.75
 
+    def _val_and_grad(*_a: MagicMock) -> tuple[float, str]:
+        """Return `(0.5, 'grads')`."""
+        return (0.5, "grads")
+
     mock_nn = MagicMock()
-    mock_nn.value_and_grad.return_value = lambda *_a: (0.5, "grads")  # pyright: ignore[reportUnknownLambdaType]
+    mock_nn.value_and_grad.return_value = _val_and_grad
     monkeypatch.setattr(dpo_module, "nn", mock_nn)
     monkeypatch.setattr(dpo_module, "mx", None)
     res_no_opt = dpo_module._run_dpo_step(MagicMock(spec=[]), mock_ref, MagicMock(spec=[]), batch, 0.1)

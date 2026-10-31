@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import NoReturn
 from unittest.mock import MagicMock, patch
 
@@ -23,10 +22,15 @@ from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig, InferenceResultDict, JSONPrimitive, JSONValue
 
 
+def _stub_select_1(*_args: str | int, **_kwargs: JSONValue) -> dict[str, str]:
+    """Return SELECT 1 dict."""
+    return {"sql": "SELECT 1"}
+
+
 def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify evaluate propagates DependencyMissingError when JAX dataloader dependencies are missing."""
     jax_agent = get_backend("jax")
-    monkeypatch.setattr(jax_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(jax_agent, "generate_sql", _stub_select_1)
 
     def raise_err(*_a: ETLConfig, **_k: JSONValue) -> NoReturn:
         """Raise DependencyMissingError when building dataloader."""
@@ -45,18 +49,17 @@ def test_evaluate_keras_with_live_sqlite(monkeypatch: pytest.MonkeyPatch) -> Non
     encoded_target = tokenizer.encode(f"{prompt_str} {target_sql}")
     encoded_prompt = tokenizer.encode(prompt_str)
 
+    def _keras_eval_loader(*_args: ETLConfig, **_kwargs: JSONValue) -> dict[str, list[dict[str, list[list[int]]]]]:
+        """Return encoded prompt/target evaluation loader."""
+        return {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_target]}]}
+
+    def _keras_eval_gen(*_args: str | int, **_kwargs: JSONValue) -> dict[str, str | float]:
+        """Return unnormalized equivalent SQL with 0.92 confidence."""
+        return {"sql": "  select  id , name  FROM users  where  id = 1 ; ", "confidence_score": 0.92}
+
     keras_agent = get_backend("keras")
-    monkeypatch.setattr(
-        keras_agent,
-        "build_dataloader",
-        lambda *_args, **_kwargs: {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_target]}]},  # pyright: ignore[reportUnknownLambdaType]
-    )
-    # Semantically and structurally equivalent query with extra whitespace, comma spacing, and trailing semicolon
-    monkeypatch.setattr(
-        keras_agent,
-        "generate_sql",
-        lambda *_args, **_kwargs: {"sql": "  select  id , name  FROM users  where  id = 1 ; ", "confidence_score": 0.92},  # pyright: ignore[reportUnknownLambdaType]
-    )
+    monkeypatch.setattr(keras_agent, "build_dataloader", _keras_eval_loader)
+    monkeypatch.setattr(keras_agent, "generate_sql", _keras_eval_gen)
     ddl = "CREATE TABLE users (id INT, name TEXT); INSERT INTO users VALUES (1, 'Alice'); INSERT INTO users VALUES (2, 'Bob');"
     res = evaluate("model1", "data1", "keras", ddl=ddl)
     assert res["backend"] == "keras"
@@ -70,13 +73,14 @@ def test_evaluate_keras_with_live_sqlite(monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify evaluate with MaxText backend computes exact match and execution accuracy."""
+
+    def _maxtext_eval_loader(*_args: ETLConfig, **_kwargs: JSONValue) -> dict[str, list[dict[str, list[list[int]]]]]:
+        """Return 1-batch MaxText evaluation loader."""
+        return {"loader": [{"inputs": [[1]], "targets": [[2]]}]}
+
     maxtext_agent = get_backend("maxtext")
-    monkeypatch.setattr(maxtext_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(
-        maxtext_agent,
-        "build_dataloader",
-        lambda *_args, **_kwargs: {"loader": [{"inputs": [[1]], "targets": [[2]]}]},  # pyright: ignore[reportUnknownLambdaType]
-    )
+    monkeypatch.setattr(maxtext_agent, "generate_sql", _stub_select_1)
+    monkeypatch.setattr(maxtext_agent, "build_dataloader", _maxtext_eval_loader)
     res = evaluate("model1", "data1", "maxtext")
     assert res["backend"] == "maxtext"
     assert res["model"] == "model1"
@@ -86,13 +90,14 @@ def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_evaluate_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify evaluate with PyTorch backend handles tuple batches from DataLoader."""
+
+    def _pytorch_eval_loader(*_args: ETLConfig, **_kwargs: JSONValue) -> dict[str, list[tuple[list[list[int]], list[list[int]]]]]:
+        """Return 1-batch tuple evaluation loader."""
+        return {"loader": [([[1]], [[2]])]}
+
     pytorch_agent = get_backend("pytorch")
-    monkeypatch.setattr(pytorch_agent, "generate_sql", lambda *_args, **_kwargs: {"sql": "SELECT 1"})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(
-        pytorch_agent,
-        "build_dataloader",
-        lambda *_args, **_kwargs: {"loader": [([[1]], [[2]])]},  # pyright: ignore[reportUnknownLambdaType]
-    )
+    monkeypatch.setattr(pytorch_agent, "generate_sql", _stub_select_1)
+    monkeypatch.setattr(pytorch_agent, "build_dataloader", _pytorch_eval_loader)
     res = evaluate("model1", "data1", "pytorch")
     assert res["backend"] == "pytorch"
     assert res["model"] == "model1"
@@ -135,17 +140,21 @@ def test_evaluate_end_to_end_and_engine_close_on_error(monkeypatch: pytest.Monke
     encoded_prompt = tokenizer.encode("Count users")
     encoded_truth = tokenizer.encode("SELECT COUNT(*) FROM users")
 
+    def _jax_eval_loader(*_a: ETLConfig, **_k: JSONValue) -> dict[str, list[dict[str, list[list[int]]]]]:
+        """Return encoded prompt/truth evaluation loader."""
+        return {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_truth]}]}
+
+    def _jax_eval_gen(*_a: str | int, **_k: JSONValue) -> dict[str, str | float]:
+        """Return SELECT COUNT(*) FROM users."""
+        return {"sql": "SELECT COUNT(*) FROM users", "confidence_score": 0.99, "status": "success"}
+
+    def _none_loader(*_a: ETLConfig, **_k: JSONValue) -> dict[str, None]:
+        """Return loader=None."""
+        return {"loader": None}
+
     jax_agent = get_backend("jax")
-    monkeypatch.setattr(
-        jax_agent,
-        "build_dataloader",
-        lambda *_a, **_k: {"loader": [{"inputs": [encoded_prompt], "targets": [encoded_truth]}]},  # pyright: ignore[reportUnknownLambdaType]
-    )
-    monkeypatch.setattr(
-        jax_agent,
-        "generate_sql",
-        lambda *_a, **_k: {"sql": "SELECT COUNT(*) FROM users", "confidence_score": 0.99, "status": "success"},  # pyright: ignore[reportUnknownLambdaType]
-    )
+    monkeypatch.setattr(jax_agent, "build_dataloader", _jax_eval_loader)
+    monkeypatch.setattr(jax_agent, "generate_sql", _jax_eval_gen)
     res = evaluate(
         "model",
         "dataset",
@@ -166,7 +175,7 @@ def test_evaluate_end_to_end_and_engine_close_on_error(monkeypatch: pytest.Monke
         orig_close(self)
 
     monkeypatch.setattr(LiveDatabaseEngine, "close", tracking_close)
-    monkeypatch.setattr(jax_agent, "build_dataloader", lambda *_a, **_k: {"loader": None})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(jax_agent, "build_dataloader", _none_loader)
     with pytest.raises(EvaluationError, match="Valid iterable dataloader is required"):
         evaluate("model", "dataset", backend="jax")
     assert closed is True
@@ -381,31 +390,36 @@ def test_evaluate_empty_metrics(synthetic_dataset: list[dict[str, str]]) -> None
 
 def test_extract_batch_ids_dict_edge_cases() -> None:
     """Verify _process_batch_inputs handles dicts with missing keys, non-iterable values, and 1D sequences."""
-    untyped_proc: Callable[..., tuple[list[int], list[int]]] = _process_batch_inputs
-    inputs, targets = untyped_proc({"foo": "bar"})  # ty: ignore[invalid-argument-type]
-    assert inputs == []
-    assert targets == []
-
-    inputs2, targets2 = untyped_proc({"inputs": 123, "targets": 456})  # ty: ignore[invalid-argument-type]
-    assert inputs2 == []
-    assert targets2 == []
-
-    inputs3, targets3 = untyped_proc({"inputs": [1, 2, 3], "targets": [4, 5, 6]})  # ty: ignore[invalid-argument-type]
-    assert inputs3 == [1, 2, 3]
-    assert targets3 == [4, 5, 6]
 
     class ScalarTensor:
         """Stub returning a scalar int from .tolist()."""
+
+        shape: tuple[int, ...] = ()
 
         def tolist(self) -> int:
             """Return scalar int."""
             return 7
 
-    inputs4, targets4 = untyped_proc(([ScalarTensor()], [ScalarTensor()]))  # ty: ignore[invalid-argument-type]
+    inputs, targets = _process_batch_inputs({"foo": "bar"})
+    assert inputs == []
+    assert targets == []
+
+    inputs2, targets2 = _process_batch_inputs({"inputs": 123, "targets": 456})
+    assert inputs2 == []
+    assert targets2 == []
+
+    inputs3, targets3 = _process_batch_inputs({"inputs": [1, 2, 3], "targets": [4, 5, 6]})
+    assert inputs3 == [1, 2, 3]
+    assert targets3 == [4, 5, 6]
+
+    from gemma_4_sql.type_hints import ToListArrayProtocol
+
+    scalar_row: list[ToListArrayProtocol] = [ScalarTensor()]
+    inputs4, targets4 = _process_batch_inputs((scalar_row, scalar_row))
     assert inputs4 == [7]
     assert targets4 == [7]
 
-    inputs5, targets5 = untyped_proc(([], []))
+    inputs5, targets5 = _process_batch_inputs(([], []))
     assert inputs5 == []
     assert targets5 == []
 

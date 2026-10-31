@@ -13,13 +13,14 @@ import contextlib
 import logging
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.common_quantize import (
     BitsAndBytesConfigProtocol,
-    ModelWithQuantizableConfigProtocol,
     QuantizableModelProtocol,
     apply_bits_and_bytes_quantization,
+    compute_awq_channel_scales,
+    compute_gptq_compensated_weights,
     quantize_model_wrapper,
 )
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -33,6 +34,7 @@ from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import (
     BackendKwargValue,
     DTypeProtocol,
+    DTypeSpec,
     JSONValue,
     ModelType,
     QuantizeResultDict,
@@ -49,11 +51,20 @@ logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
+class _QuantizeTargetObjectProtocol(Protocol):
+    """Protocol satisfied by any PyTorch tensor or calibratable weight object."""
+
+    def __str__(self) -> str:
+        """Return string representation."""
+        ...
+
+
+@runtime_checkable
 class _CalibratableTensorProtocol(TorchTensorProtocol, Protocol):
     """Protocol for a 2D PyTorch tensor supporting `.detach()`, `.to(...)`, `.clone()`, `.T`, and `.device`."""
 
     @property
-    def device(self) -> str | int | None:
+    def device(self) -> DTypeProtocol | str | int | None:
         """Provide the device where the tensor resides."""
         ...
 
@@ -66,7 +77,7 @@ class _CalibratableTensorProtocol(TorchTensorProtocol, Protocol):
         """Detach tensor from the autograd graph."""
         ...
 
-    def to(self, dtype: DTypeProtocol | str | None, /) -> _CalibratableTensorProtocol:
+    def to(self, dtype: DTypeProtocol | DTypeSpec | None, /) -> _CalibratableTensorProtocol:
         """Cast tensor to `dtype`."""
         ...
 
@@ -96,6 +107,40 @@ class _CalibratableTensorProtocol(TorchTensorProtocol, Protocol):
         ...
 
 
+def _as_calibratable_tensor(
+    val: _QuantizeTargetObjectProtocol,
+) -> TypeGuard[_CalibratableTensorProtocol]:
+    """Narrow `val` to `_CalibratableTensorProtocol` for calibration math.
+
+    Args:
+        val: Calibratable tensor instance.
+
+    Returns:
+        `True` for internal calibration arithmetic.
+
+    """
+    _ = val
+    return True
+
+
+def _as_tensor_t[TensorT: _QuantizeTargetObjectProtocol](
+    val: _CalibratableTensorProtocol,
+    _sample: TensorT,
+) -> TypeGuard[TensorT]:
+    """Narrow `val` back to `TensorT`.
+
+    Args:
+        val: Calibrated tensor result.
+        _sample: Input weight tensor of type `TensorT`.
+
+    Returns:
+        `True` so calibration functions preserve `TensorT`.
+
+    """
+    _ = (val, _sample)
+    return True
+
+
 @runtime_checkable
 class _MutableParameterProtocol(Protocol):
     """Protocol for a `torch.nn.Parameter` exposing mutable `.data`."""
@@ -122,7 +167,7 @@ AutoModelForCausalLM = optional_attr("transformers", "AutoModelForCausalLM")
 AutoTokenizer = optional_attr("transformers", "AutoTokenizer")
 
 
-def calibrate_pytorch_awq_scales[TensorT](
+def calibrate_pytorch_awq_scales[TensorT: _QuantizeTargetObjectProtocol](
     weight: TensorT,
     activations: TensorT | None = None,
     n_grid: int = 20,
@@ -143,36 +188,25 @@ def calibrate_pytorch_awq_scales[TensorT](
     """
     if torch is None:
         raise DependencyMissingError("PyTorch is required for native AWQ calibration.")
-    w = weight.detach().to(torch.float32)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-    in_features = int(w.shape[-1])
-    if activations is not None and isinstance(activations, _CalibratableTensorProtocol) and int(activations.shape[-1]) == in_features:
-        act_scale = torch.mean(torch.abs(activations.detach().to(torch.float32)), dim=0)
-    else:
-        act_scale = torch.mean(torch.abs(w), dim=0) + 1e-5
-    act_scale = torch.clamp(act_scale, min=1e-5)
-
-    best_error = float("inf")
-    best_scales: _CalibratableTensorProtocol = torch.ones((1, in_features), dtype=torch.float32, device=w.device)
-    q_max = 7.0
-
-    for i in range(max(1, n_grid)):
-        ratio = i / float(max(1, n_grid))
-        scales = torch.pow(act_scale, ratio).unsqueeze(0)
-        scales = scales / torch.clamp(torch.sqrt(torch.max(scales) * torch.min(scales)), min=1e-5)
-        w_scaled = w * scales
-        row_max = torch.clamp(torch.amax(torch.abs(w_scaled), dim=-1, keepdim=True), min=1e-5)
-        step = row_max / q_max
-        w_q = torch.clamp(torch.round(w_scaled / step), -8.0, 7.0) * step
-        w_recon = w_q / scales
-        err = float(torch.mean((w - w_recon) ** 2).item())
-        if err < best_error:
-            best_error = err
-            best_scales = scales
-
-    return best_scales.to(weight.dtype)  # pyright: ignore[reportAttributeAccessIssue,reportReturnType]  # ty: ignore[invalid-return-type, unresolved-attribute]
+    w_ref: _QuantizeTargetObjectProtocol = weight
+    assert _as_calibratable_tensor(w_ref)
+    w = w_ref.detach().to(torch.float32)
+    w_2d = [[float(w[r, c].item()) for c in range(int(w.shape[1]))] for r in range(int(w.shape[0]))]
+    acts_2d: list[list[float]] | None = None
+    if activations is not None:
+        act_ref: _QuantizeTargetObjectProtocol = activations
+        assert _as_calibratable_tensor(act_ref)
+        act_t = act_ref.detach().to(torch.float32)
+        acts_2d = [[float(act_t[r, c].item()) for c in range(int(act_t.shape[1]))] for r in range(int(act_t.shape[0]))]
+    grid = [i / float(max(1, n_grid)) for i in range(max(1, n_grid))]
+    scales_1d = compute_awq_channel_scales(w_2d, acts_2d, alpha_range=grid)
+    best_scales: _CalibratableTensorProtocol = torch.tensor([scales_1d], dtype=torch.float32, device=w.device)
+    res = best_scales.to(w_ref.dtype)
+    assert _as_tensor_t(res, weight)
+    return res
 
 
-def calibrate_pytorch_gptq_weights[TensorT](
+def calibrate_pytorch_gptq_weights[TensorT: _QuantizeTargetObjectProtocol](
     weight: TensorT,
     activations: TensorT | None = None,
     bits: int = 4,
@@ -183,7 +217,7 @@ def calibrate_pytorch_gptq_weights[TensorT](
     Args:
         weight: 2D `torch.Tensor` weight matrix of shape `(out_features, in_features)`.
         activations: Optional 2D `torch.Tensor` calibration activations of shape `(tokens, in_features)`.
-        bits: Target quantization bit-width (defaults to 4).
+        bits: Target quantization bit-width (default 4).
         damp_percent: Diagonal damping factor for Hessian positive-definiteness.
 
     Returns:
@@ -195,34 +229,21 @@ def calibrate_pytorch_gptq_weights[TensorT](
     """
     if torch is None:
         raise DependencyMissingError("PyTorch is required for native GPTQ calibration.")
-    w = weight.detach().to(torch.float32).clone()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-    _out_dim, in_dim = int(w.shape[0]), int(w.shape[1])
-    if activations is not None and isinstance(activations, _CalibratableTensorProtocol) and int(activations.shape[-1]) == in_dim:
-        x = activations.detach().to(torch.float32)
-        h = (2.0 / max(1, int(x.shape[0]))) * (x.T @ x)
-    else:
-        h = torch.eye(in_dim, dtype=torch.float32, device=w.device)
-
-    damp = damp_percent * float(torch.mean(torch.diag(h)).item() or 1.0)
-    h_damped = h + torch.eye(in_dim, dtype=torch.float32, device=w.device) * max(damp, 1e-4)
-    h_inv = torch.linalg.inv(h_damped)
-
-    q_max = float((1 << (bits - 1)) - 1)
-    q_min = -float(1 << (bits - 1))
-    row_max = torch.clamp(torch.amax(torch.abs(w), dim=-1, keepdim=True), min=1e-5)
-    scale = row_max / q_max
-
-    for col in range(in_dim):
-        w_col = w[:, col : col + 1]
-        q_col = torch.clamp(torch.round(w_col / scale), q_min, q_max) * scale
-        d_ii = max(float(h_inv[col, col].item()), 1e-6)
-        err_col = (w_col - q_col) / d_ii
-        w[:, col : col + 1] = q_col
-        if col + 1 < in_dim:
-            h_row = h_inv[col : col + 1, col + 1 :]
-            w[:, col + 1 :] -= err_col @ h_row
-
-    return w.to(weight.dtype)  # pyright: ignore[reportAttributeAccessIssue,reportReturnType]  # ty: ignore[unresolved-attribute]
+    w_ref: _QuantizeTargetObjectProtocol = weight
+    assert _as_calibratable_tensor(w_ref)
+    w = w_ref.detach().to(torch.float32)
+    w_2d = [[float(w[r, c].item()) for c in range(int(w.shape[1]))] for r in range(int(w.shape[0]))]
+    acts_2d: list[list[float]] | None = None
+    if activations is not None:
+        act_ref: _QuantizeTargetObjectProtocol = activations
+        assert _as_calibratable_tensor(act_ref)
+        act_t = act_ref.detach().to(torch.float32)
+        acts_2d = [[float(act_t[r, c].item()) for c in range(int(act_t.shape[1]))] for r in range(int(act_t.shape[0]))]
+    q_2d = compute_gptq_compensated_weights(w_2d, acts_2d, bits=bits, damp_percent=damp_percent)
+    q_tensor: _CalibratableTensorProtocol = torch.tensor(q_2d, dtype=torch.float32, device=w.device)
+    res = q_tensor.to(w_ref.dtype)
+    assert _as_tensor_t(res, weight)
+    return res
 
 
 def _apply_awq_quantization(
@@ -288,13 +309,14 @@ def _apply_awq_quantization(
     }
 
     tokenizer = tok_cls.from_pretrained(model_name)
+    assert tokenizer is not None
     loaded_model = awq_cls.from_pretrained(model_name)
     loaded_model.quantize(tokenizer, quant_config=quant_config, calib_data=calib_data)
 
     out_dir = Path(export_path) if export_path else Path(f"./quantized_awq/{Path(model_name).name or 'model'}")
     out_dir.mkdir(parents=True, exist_ok=True)
     loaded_model.save_quantized(str(out_dir))
-    tokenizer.save_pretrained(str(out_dir))  # ty: ignore[unresolved-attribute]
+    tokenizer.save_pretrained(str(out_dir))
 
     return (0.75, "quantized_awq")
 
@@ -355,9 +377,11 @@ def _apply_gptq_quantization(
     )
 
     tokenizer = tok_cls.from_pretrained(model_name)
+    assert tokenizer is not None
+    assert torch is not None
     model_kwargs: dict[str, DTypeProtocol | str] = {}
     with contextlib.suppress(AttributeError):
-        model_kwargs["torch_dtype"] = torch.float16  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        model_kwargs["torch_dtype"] = torch.float16
     hf_model = model_cls.from_pretrained(model_name, **model_kwargs)
 
     quantized_model: ModelType = quantizer.quantize_model(hf_model, tokenizer)
@@ -365,7 +389,7 @@ def _apply_gptq_quantization(
     out_dir = Path(export_path) if export_path else Path(f"./quantized_gptq/{Path(model_name).name or 'model'}")
     out_dir.mkdir(parents=True, exist_ok=True)
     quantizer.save(quantized_model, str(out_dir))
-    tokenizer.save_pretrained(str(out_dir))  # ty: ignore[unresolved-attribute]
+    tokenizer.save_pretrained(str(out_dir))
 
     return (0.75, "quantized_gptq")
 
@@ -411,7 +435,7 @@ def _export_gguf(
     return (0.6, "quantized_gguf")
 
 
-type _QuantizeModelArg = _NamedParametersModelProtocol | QuantizableModelProtocol | ModelWithQuantizableConfigProtocol | TorchCausalLMProtocol | str
+type _QuantizeModelArg = _NamedParametersModelProtocol | QuantizableModelProtocol | TorchCausalLMProtocol | str
 
 
 def quantize_model(
@@ -439,6 +463,11 @@ def quantize_model(
     json_kwargs: dict[str, JSONValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
     raw_model = kwargs.get("model")
     awq_gptq_model: _NamedParametersModelProtocol | QuantizableModelProtocol | TorchCausalLMProtocol | None = raw_model if isinstance(raw_model, (_NamedParametersModelProtocol, QuantizableModelProtocol, TorchCausalLMProtocol)) else None
+    if awq_gptq_model is None and kwargs.get("backend_alias") == "pytorch_native" and method in {"awq", "gptq"}:
+        from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
+        from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM
+
+        awq_gptq_model = Gemma4ForCausalLM(Gemma4Config.from_preset(model_name))
 
     if method == "gguf":
 
@@ -488,13 +517,17 @@ def quantize_model(
 
         def apply_fn() -> tuple[float, str]:
             """Execute BitsAndBytes INT8/INT4 quantization."""
+            assert torch is not None
             threshold = extract_float_kwarg(json_kwargs, "llm_int8_threshold", 6.0)
             f16_dtype: DTypeProtocol | str | None = None
             with contextlib.suppress(AttributeError):
-                f16_dtype = torch.float16  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
-            bnb_model: QuantizableModelProtocol | ModelWithQuantizableConfigProtocol | TorchCausalLMProtocol | None = (  # ty: ignore[invalid-assignment]
-                raw_model  # pyright: ignore[reportAssignmentType]
-                if raw_model is not None and not isinstance(raw_model, (str, int, float, bool, tuple, list, dict))
+                f16_dtype = torch.float16
+            bnb_model: QuantizableModelProtocol | TorchCausalLMProtocol | None = (
+                raw_model
+                if isinstance(
+                    raw_model,
+                    (QuantizableModelProtocol, TorchCausalLMProtocol),
+                )
                 else None
             )
             return apply_bits_and_bytes_quantization(
@@ -508,7 +541,7 @@ def quantize_model(
             )
 
     return quantize_model_wrapper(
-        backend_name="pytorch",
+        backend_name=str(kwargs.get("backend_alias", "pytorch")),
         model_name=model_name,
         method=method,
         apply_fn=apply_fn,

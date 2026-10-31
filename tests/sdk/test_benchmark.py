@@ -9,29 +9,14 @@ from gemma_4_sql.sdk.benchmark import benchmark
 from tests.utils.test_utils import RecordingBackendDouble
 
 
-def test_benchmark_jax(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify benchmark executes jbm.benchmark_model directly and computes LatencyStatsDict for JAX backend."""
-    from unittest.mock import MagicMock
-
-    import gemma_4_sql.backends.jax.benchmark as jbm
-    from gemma_4_sql.backends.common_benchmark import compute_latency_statistics
-
-    monkeypatch.setattr(jbm, "jax", MagicMock())
-    monkeypatch.setattr(jbm, "jnp", MagicMock())
-    monkeypatch.setattr(jbm, "Gemma4Config", MagicMock())
-    monkeypatch.setattr(jbm, "Gemma4ForCausalLM", MagicMock())
-    monkeypatch.setattr(jbm, "_run_benchmark_pass", lambda *_a, **_k: (100.0, 10.0, 64.0))  # pyright: ignore[reportUnknownLambdaType]
-
-    res = benchmark("gemma-4", "cpu", 1, "jax", warmup_steps=1, num_runs=2)
+def test_benchmark_jax() -> None:
+    """Verify benchmark executes real jbm.benchmark_model on a tiny Gemma 4 model for the JAX backend."""
+    res = benchmark("gemma-4-tiny", "cpu", 1, "jax", warmup_steps=1, num_runs=1, max_new_tokens=2)
     assert res["backend"] == "jax"
-    assert res["tokens_per_sec"] == 100.0
-    assert res["latency_ms"] == 10.0
-    assert res["memory_mb"] == 64.0
-    stats = compute_latency_statistics([9.0, 10.0, 11.0])
-    assert stats["mean_ms"] == pytest.approx(10.0)
-    assert stats["p50_ms"] == pytest.approx(10.0)
-    assert stats["p90_ms"] >= 10.0
-    assert stats["p99_ms"] >= 10.0
+    assert res["model"] == "gemma-4-tiny"
+    assert res["tokens_per_sec"] > 0.0
+    assert res["latency_ms"] >= 0.0
+    assert res["memory_mb"] >= 0.0
 
 
 def test_benchmark_keras_routing_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,7 +61,11 @@ def test_benchmark_pytorch_routing_and_missing(monkeypatch: pytest.MonkeyPatch) 
 
     import gemma_4_sql.backends.pytorch.benchmark as bm
 
-    monkeypatch.setattr(torch, "compile", lambda m: m)  # pyright: ignore[reportUnknownLambdaType]
+    def _identity_compile[T](m: T) -> T:
+        """Return model uncompiled for fast CPU test execution."""
+        return m
+
+    monkeypatch.setattr(torch, "compile", _identity_compile)
     res = benchmark("gemma-4-tiny", "cpu", 1, "pytorch_native", warmup_steps=1, num_runs=1, max_new_tokens=2)
     assert res["backend"] == "pytorch_native"
     assert res["status"] == "success"

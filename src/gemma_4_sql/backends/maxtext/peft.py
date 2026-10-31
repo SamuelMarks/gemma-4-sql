@@ -8,18 +8,19 @@ import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol, SupportsFloat, runtime_checkable
+from typing import Protocol, SupportsFloat, TypeGuard, overload, runtime_checkable
 
+from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
+from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import (
     BackendKwargValue,
     JaxArrayProtocol,
-    MaxTextCausalLMProtocol,
     PEFTResultDict,
     PyTreeNode,
     TensorType,
+    extract_status_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,15 +60,123 @@ class _OptaxTransformProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class _SizedLeafProtocol(Protocol):
+    """Protocol for a tensor or array leaf exposing `.size`."""
+
+    @property
+    def size(self) -> int:
+        """Provide the total number of elements."""
+        ...
+
+
 type MaxTextParamLeaf = JaxArrayProtocol | TensorType | SupportsFloat | str
 type MaxTextParamDict = dict[str, "MaxTextParamDict | MaxTextParamLeaf"]
+
+
+def _is_jax_array_leaf(val: MaxTextParamDict | MaxTextParamLeaf) -> TypeGuard[JaxArrayProtocol]:
+    """Narrow `val` to `JaxArrayProtocol` for matrix multiplication and addition.
+
+    Args:
+        val: Parameter leaf value.
+
+    Returns:
+        `True` when `val` is a JAX array leaf.
+
+    """
+    _ = val
+    return True
+
+
+def _has_size_attr(val: MaxTextParamLeaf) -> TypeGuard[_SizedLeafProtocol]:
+    """Narrow `val` to `_SizedLeafProtocol` for `.size` access.
+
+    Args:
+        val: Parameter leaf value.
+
+    Returns:
+        `True` so `.size` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = val
+    return True
+
+
+def _is_maxtext_param_dict(
+    val: BackendKwargValue | MaxTextParamDict | Mapping[str, PyTreeNode] | dict[str, PyTreeNode] | None,
+) -> TypeGuard[MaxTextParamDict]:
+    """Narrow `val` to `MaxTextParamDict`.
+
+    Args:
+        val: Candidate parameter dictionary.
+
+    Returns:
+        `True` when `val` is a `dict`.
+
+    """
+    return isinstance(val, dict)
 
 
 jax = optional_import("jax")
 jnp = optional_import("jax.numpy")
 optax = optional_import("optax")
-_raw_gemma4 = optional_attr("maxtext.models.gemma4", "Gemma4Model")
-Gemma4Model: Callable[..., MaxTextCausalLMProtocol] | None = _raw_gemma4 if callable(_raw_gemma4) else None  # ty: ignore[invalid-assignment]
+Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+    "maxtext.models.gemma4",
+    "Gemma4Model",
+    MaxTextModelConstructorProtocol,
+)
+
+
+@overload
+def transform_params_to_lora(
+    params: MaxTextParamDict,
+    target_modules: list[str],
+    lora_r: int = 8,
+    lora_alpha: float = 16.0,
+    lora_dropout: float = 0.05,
+    *,
+    rng: JaxArrayProtocol | SupportsFloat | None = None,
+) -> tuple[MaxTextParamDict, int]:
+    """Transform a `MaxTextParamDict` by injecting low-rank adapter matrices.
+
+    Args:
+        params: Nested dictionary representing model parameters.
+        target_modules: List of module name substrings/suffixes to adapt.
+        lora_r: LoRA rank dimension (`lora_r > 0`).
+        lora_alpha: LoRA scaling coefficient.
+        lora_dropout: Dropout probability for LoRA layers.
+        rng: Optional JAX `PRNGKey` for initializing adapter matrices.
+
+    Returns:
+        A tuple of `(transformed_params_dict, count_of_injected_modules)`.
+
+    """
+
+
+@overload
+def transform_params_to_lora(
+    params: MaxTextParamDict | MaxTextParamLeaf,
+    target_modules: list[str],
+    lora_r: int = 8,
+    lora_alpha: float = 16.0,
+    lora_dropout: float = 0.05,
+    *,
+    rng: JaxArrayProtocol | SupportsFloat | None = None,
+) -> tuple[MaxTextParamDict | MaxTextParamLeaf, int]:
+    """Transform a parameter PyTree or leaf by injecting low-rank adapter matrices.
+
+    Args:
+        params: Nested dictionary or leaf representing model parameters.
+        target_modules: List of module name substrings/suffixes to adapt.
+        lora_r: LoRA rank dimension (`lora_r > 0`).
+        lora_alpha: LoRA scaling coefficient.
+        lora_dropout: Dropout probability for LoRA layers.
+        rng: Optional JAX `PRNGKey` for initializing adapter matrices.
+
+    Returns:
+        A tuple of `(transformed_params, count_of_injected_modules)`.
+
+    """
 
 
 def transform_params_to_lora(
@@ -78,7 +187,7 @@ def transform_params_to_lora(
     lora_dropout: float = 0.05,
     *,
     rng: JaxArrayProtocol | SupportsFloat | None = None,
-) -> tuple[MaxTextParamDict, int]:
+) -> tuple[MaxTextParamDict | MaxTextParamLeaf, int]:
     """Transform a MaxText parameter PyTree by injecting low-rank adapter matrices.
 
     For any projection module matching `target_modules` (e.g. `q_proj`, `v_proj`),
@@ -149,7 +258,7 @@ def transform_params_to_lora(
         return res
 
     transformed = _inject(params)
-    return transformed, injected_count  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
+    return transformed, injected_count
 
 
 def segregate_adapter_params(params: MaxTextParamDict | MaxTextParamLeaf) -> tuple[MaxTextParamDict, MaxTextParamDict]:
@@ -261,8 +370,11 @@ def merge_lora_weights(params: MaxTextParamDict | MaxTextParamLeaf) -> MaxTextPa
                 lora_a = v_dict["lora_a"]
                 lora_b = v_dict["lora_b"]
                 kernel = v_dict["kernel"]
-                delta_w = scale * (lora_a @ lora_b)  # pyright: ignore[reportOperatorIssue]  # ty: ignore[unsupported-operator]
-                merged_kernel: MaxTextParamLeaf = kernel + delta_w  # pyright: ignore[reportOperatorIssue]
+                assert _is_jax_array_leaf(lora_a)
+                assert _is_jax_array_leaf(lora_b)
+                assert _is_jax_array_leaf(kernel)
+                delta_w = (lora_a @ lora_b) * scale
+                merged_kernel: MaxTextParamLeaf = kernel + delta_w
                 new_module: MaxTextParamDict = {module_k: module_v for module_k, module_v in v_dict.items() if module_k not in ("lora_a", "lora_b", "lora_scale")}
                 new_module["kernel"] = merged_kernel
                 res[k] = new_module
@@ -372,7 +484,8 @@ def count_maxtext_parameters(params: MaxTextParamDict | MaxTextParamLeaf) -> tup
                 _count(v)
             else:
                 with contextlib.suppress(AttributeError, TypeError, ValueError):
-                    size = int(v.size)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                    assert _has_size_attr(v)
+                    size = int(v.size)
                     total_count += size
                     if k in ("lora_a", "lora_b"):
                         trainable_count += size
@@ -414,18 +527,19 @@ def apply_lora(
         assert jax is not None
         assert jnp is not None
         raw_params = kwargs.get("params")
-        if isinstance(raw_params, dict):
-            params: MaxTextParamDict = raw_params  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
+        if _is_maxtext_param_dict(raw_params):
+            params: MaxTextParamDict = raw_params
         else:
             assert Gemma4Model is not None
             model = Gemma4Model(model_name)
             rng = jax.random.PRNGKey(0)
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-            raw_init = model.init(rng, dummy_input)
-            params = dict(raw_init)  # pyright: ignore[reportAssignmentType]
+            raw_init = dict(model.init(rng, dummy_input))
+            assert _is_maxtext_param_dict(raw_init)
+            params = raw_init
 
         params, injected_count = transform_params_to_lora(
-            params=params,  # ty: ignore[invalid-argument-type]
+            params=params,
             target_modules=target_modules,
             lora_r=lora_r,
             lora_alpha=lora_alpha,
@@ -442,7 +556,7 @@ def apply_lora(
         logger.info("MaxText LoRA applied to %d modules", injected_count)
         return injected_count
 
-    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    wrapper_kwargs = extract_status_kwargs(kwargs)
     return apply_lora_wrapper(
         "maxtext",
         model_name,

@@ -283,17 +283,26 @@ def test_dpo_loss_and_logps_missing_tf(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_run_training_epochs_loss_variants() -> None:
     """Verify _run_training_epochs handles float and non-numeric step return values."""
+
+    def _float_step(_b: dict[str, int]) -> float:
+        """Return 2.0."""
+        return 2.0
+
+    def _str_step(_b: dict[str, int]) -> str:
+        """Return 'non_numeric'."""
+        return "non_numeric"
+
     state_float: KerasTrainerState[None, None, dict[str, int]] = KerasTrainerState(
         dataloader=[{"b": 1}],
         epochs=1,
-        train_step=lambda _b: 2.0,  # pyright: ignore[reportUnknownLambdaType]
+        train_step=_float_step,
     )
     assert dpo._run_training_epochs(state_float) == 2.0
 
     state_str: KerasTrainerState[None, None, dict[str, int]] = KerasTrainerState(
         dataloader=[{"b": 1}],
         epochs=1,
-        train_step=lambda _b: "non_numeric",  # pyright: ignore[reportUnknownLambdaType]
+        train_step=_str_step,
     )
     assert dpo._run_training_epochs(state_str) == 0.0
 
@@ -308,8 +317,12 @@ def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(dpo, "keras", mock_keras)
     monkeypatch.setattr(dpo, "tf", MagicMock())
 
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
     monkeypatch.setattr(dpo, "GemmaCausalLM", None)
-    monkeypatch.setattr(dpo, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(dpo, "optional_attr", _none_attr)
     with pytest.raises(ValueError, match="Failed to load Keras model"):
         dpo._execute_dpo("m", "d", 0.1, 1, 1e-4)
 

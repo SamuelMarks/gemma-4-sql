@@ -76,7 +76,12 @@ def test_generate_few_shot_sql(monkeypatch: pytest.MonkeyPatch) -> None:
         "confidence_score": 0.92,
         "status": "success",
     }
-    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", lambda _name: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _get_mock_backend(_name: str) -> MagicMock:
+        """Return mock_backend."""
+        return mock_backend
+
+    monkeypatch.setattr("gemma_4_sql.sdk.registry.get_backend", _get_mock_backend)
 
     pool = [{"input": "Count users", "output": "SELECT count(*) FROM users"}]
     res = generate_few_shot_sql(

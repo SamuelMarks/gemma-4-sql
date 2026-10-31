@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
-from typing import Protocol, runtime_checkable
+from typing import Protocol, Self, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -17,7 +17,9 @@ from gemma_4_sql.type_hints import (
     ForwardArg,
     ForwardOutput,
     JSONValue,
+    ModelConfigProtocol,
     TorchCausalLMProtocol,
+    TorchTensorProtocol,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,54 @@ class _BenchmarkCallableProtocol(Protocol):
 
     def __call__(self, *args: ForwardArg, **kwargs: ForwardArg) -> ForwardOutput:
         """Execute a forward pass."""
+        ...
+
+
+@runtime_checkable
+class _ConfigVocabProtocol(Protocol):
+    """Protocol for a config object exposing `.vocab_size`."""
+
+    @property
+    def vocab_size(self) -> int | str | None:
+        """Provide the vocabulary size."""
+        ...
+
+
+@runtime_checkable
+class _HasConfigProtocol(Protocol):
+    """Protocol for a model exposing a `.config` attribute."""
+
+    @property
+    def config(self) -> _ConfigVocabProtocol | ModelConfigProtocol | None:
+        """Provide the model configuration object."""
+        ...
+
+
+@runtime_checkable
+class _GenerateCapableProtocol(Protocol):
+    """Protocol for a PyTorch model supporting `.generate(...)`."""
+
+    def generate(
+        self,
+        input_ids: TorchTensorProtocol,
+        *,
+        max_new_tokens: int = 20,
+        min_new_tokens: int = 0,
+    ) -> TorchTensorProtocol | ForwardOutput:
+        """Generate token sequences autoregressively."""
+        ...
+
+
+@runtime_checkable
+class _DeviceMovableModelProtocol(Protocol):
+    """Protocol for a PyTorch model supporting `.to(...)` and `.eval()`."""
+
+    def to(self, device_or_dtype: DTypeProtocol | str, /) -> Self:
+        """Move or cast the model to `device_or_dtype`."""
+        ...
+
+    def eval(self) -> Self:
+        """Set the PyTorch model to evaluation mode."""
         ...
 
 
@@ -77,6 +127,20 @@ def _get_device(hardware: str) -> str:
     return _runtime().get_device(hardware)
 
 
+def _is_device_movable(model: TorchCausalLMProtocol) -> TypeGuard[_DeviceMovableModelProtocol]:
+    """Narrow `model` to `_DeviceMovableModelProtocol`.
+
+    Args:
+        model: Target PyTorch causal language model.
+
+    Returns:
+        `True` so `.to(...)` can be invoked inside an attribute-safe block.
+
+    """
+    _ = model
+    return True
+
+
 def _move_and_eval(
     model: TorchCausalLMProtocol,
     device: str,
@@ -91,11 +155,12 @@ def _move_and_eval(
 
     """
     with contextlib.suppress(AttributeError, TypeError):
+        assert _is_device_movable(model)
         if torch_dtype is not None:
-            model.to(torch_dtype)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-        model.to(device)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            model.to(torch_dtype)
+        model.to(device)
     with contextlib.suppress(AttributeError, TypeError):
-        model.eval()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        model.eval()
 
 
 def _load_pytorch_model_and_device(
@@ -132,8 +197,8 @@ def _load_pytorch_model_and_device(
         model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch_dtype)
         _move_and_eval(model, device)
 
-    model = adapter.compile_model(model)
-    return (model, device)
+    compiled = adapter.compile_model(model)
+    return (compiled, device)
 
 
 def _sync_cuda(device: str) -> None:
@@ -164,6 +229,20 @@ def _get_memory_mb(model: _BenchmarkModelInput, device: str) -> float:
     return _runtime().max_memory_mb(device, get_current_rss_mb())
 
 
+def _has_config_attr(model: _BenchmarkModelInput) -> TypeGuard[_HasConfigProtocol]:
+    """Narrow `model` to `_HasConfigProtocol`.
+
+    Args:
+        model: Target PyTorch causal language model.
+
+    Returns:
+        `True` so `.config` can be inspected inside an attribute-safe block.
+
+    """
+    _ = model
+    return True
+
+
 def _resolve_vocab_bound(model: _BenchmarkModelInput) -> int:
     """Extract positive integer `vocab_size` from `model.config` or default to `256000`.
 
@@ -174,11 +253,45 @@ def _resolve_vocab_bound(model: _BenchmarkModelInput) -> int:
         Positive integer vocabulary upper bound for dummy input sampling.
 
     """
-    with contextlib.suppress(AttributeError, TypeError):
-        raw_vocab = model.config.vocab_size  # pyright: ignore[reportAttributeAccessIssue,reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
-        if isinstance(raw_vocab, int) and raw_vocab > 1:
-            return raw_vocab
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        assert _has_config_attr(model)
+        if model.config is not None:
+            raw_vocab = model.config.vocab_size
+            if isinstance(raw_vocab, int) and raw_vocab > 1:
+                return raw_vocab
     return 256000
+
+
+def _is_generate_capable(model: _BenchmarkModelInput) -> TypeGuard[_GenerateCapableProtocol]:
+    """Narrow `model` to `_GenerateCapableProtocol`.
+
+    Args:
+        model: Benchmark model instance.
+
+    Returns:
+        `True` so `.generate(...)` can be invoked inside an attribute-safe block.
+
+    """
+    _ = model
+    return True
+
+
+def _call_decode_generate(
+    model: _BenchmarkModelInput,
+    dummy_inputs: TorchTensorProtocol,
+    tokens: int,
+) -> None:
+    """Invoke `model.generate` for decode benchmarking when supported.
+
+    Args:
+        model: Benchmark model instance.
+        dummy_inputs: Synthetic input token tensor.
+        tokens: Number of tokens to generate.
+
+    """
+    with contextlib.suppress(AttributeError, TypeError):
+        assert _is_generate_capable(model)
+        _ = model.generate(dummy_inputs, max_new_tokens=tokens, min_new_tokens=tokens)
 
 
 def _run_benchmark_pass(
@@ -215,20 +328,18 @@ def _run_benchmark_pass(
     for _ in range(warmup_steps):
         with adapter.no_grad():
             if mode == "prefill":
-                _ = model(dummy_inputs)  # pyright: ignore[reportCallIssue]
+                _ = model(dummy_inputs)
             else:
-                with contextlib.suppress(AttributeError, TypeError):
-                    _ = model.generate(dummy_inputs, max_new_tokens=2, min_new_tokens=2)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                _call_decode_generate(model, dummy_inputs, 2)
     _sync_cuda(device)
 
     start_time = time.time()
     for _ in range(num_runs):
         with adapter.no_grad():
             if mode == "prefill":
-                _ = model(dummy_inputs)  # pyright: ignore[reportCallIssue]
+                _ = model(dummy_inputs)
             else:
-                with contextlib.suppress(AttributeError, TypeError):
-                    _ = model.generate(dummy_inputs, max_new_tokens=max_new_tokens, min_new_tokens=max_new_tokens)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                _call_decode_generate(model, dummy_inputs, max_new_tokens)
     _sync_cuda(device)
     end_time = time.time()
 

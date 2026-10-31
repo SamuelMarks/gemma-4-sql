@@ -8,7 +8,7 @@ import math
 import weakref
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, SupportsFloat, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
 import keras
 from keras import ops
@@ -29,6 +29,72 @@ from gemma_4_sql.type_hints import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _KerasOpsMatmulProtocol(Protocol):
+    """Protocol for `keras.ops` providing `matmul` returning `TfTensorProtocol`."""
+
+    def matmul(
+        self,
+        x1: TensorType | KerasVariableProtocol,
+        x2: TensorType | KerasVariableProtocol,
+        /,
+    ) -> TfTensorProtocol:
+        """Compute matrix multiplication of `x1` and `x2`."""
+        ...
+
+
+def _typed_ops() -> _KerasOpsMatmulProtocol:
+    """Return `keras.ops` narrowed to `_KerasOpsMatmulProtocol`.
+
+    Returns:
+        Typed `_KerasOpsMatmulProtocol` view of `keras.ops`.
+
+    """
+    assert isinstance(ops, _KerasOpsMatmulProtocol)
+    return ops
+
+
+@runtime_checkable
+class _KerasTargetObjectProtocol(Protocol):
+    """Protocol satisfied by any Keras model, layer, tensor, or container instance."""
+
+    def __str__(self) -> str:
+        """Return string representation."""
+        ...
+
+
+def _is_keras_tensor_input(val: _KerasTargetObjectProtocol) -> TypeGuard[TensorType]:
+    """Narrow `val` to `TensorType` for `KerasLoRADense` shape and forward call.
+
+    Args:
+        val: Input tensor passed to `KerasLoRADense`.
+
+    Returns:
+        `True` for `KerasLoRADense` execution.
+
+    """
+    _ = val
+    return True
+
+
+def _as_keras_input_t[InputT: _KerasTargetObjectProtocol](
+    val: TfTensorProtocol,
+    _sample: InputT,
+) -> TypeGuard[InputT]:
+    """Narrow `val` back to `InputT` for `KerasLoRADense.__call__`.
+
+    Args:
+        val: Output tensor from `KerasLoRADense.call`.
+        _sample: Input tensor of type `InputT`.
+
+    Returns:
+        `True` so `__call__` preserves `InputT`.
+
+    """
+    _ = (val, _sample)
+    return True
 
 
 @runtime_checkable
@@ -173,13 +239,17 @@ class KerasLoRADense(keras.layers.Layer):
         self._lora_built = True
         super().build(input_shape)
 
-    def __call__[InputT](self, inputs: InputT, training: bool | None = None) -> InputT:
+    def __call__[InputT: _KerasTargetObjectProtocol](self, inputs: InputT, training: bool | None = None) -> InputT:
         """Invoke the layer forward pass, building LoRA weights lazily if needed."""
+        in_ref: _KerasTargetObjectProtocol = inputs
+        assert _is_keras_tensor_input(in_ref)
         if not self._lora_built:
-            self.build(tuple(inputs.shape))  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[unresolved-attribute]
-        return self.call(inputs, training=training)  # pyright: ignore[reportArgumentType,reportReturnType]  # ty: ignore[invalid-return-type, invalid-argument-type]
+            self.build(tuple(in_ref.shape))
+        out = self.call(in_ref, training=training)
+        assert _as_keras_input_t(out, inputs)
+        return out
 
-    def call(self, inputs: TensorType | SupportsFloat, training: bool | None = None) -> TfTensorProtocol:
+    def call(self, inputs: TensorType, training: bool | None = None) -> TfTensorProtocol:
         """Execute the forward pass combining frozen base projection and low-rank adapter.
 
         Args:
@@ -190,10 +260,12 @@ class KerasLoRADense(keras.layers.Layer):
             Output tensor of shape `(..., units)`.
 
         """
-        base_out = self.dense(inputs)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-        dropped = self.dropout(inputs, training=training) if self.dropout is not None else inputs
-        lora_out: TfTensorProtocol = ops.matmul(ops.matmul(dropped, self.lora_a), self.lora_b)  # pyright: ignore[reportAssignmentType]
-        res: TfTensorProtocol = base_out + self.scale * lora_out  # pyright: ignore[reportAssignmentType]
+        base_out = self.dense(inputs)
+        dropped: TensorType = self.dropout(inputs, training=training) if self.dropout is not None else inputs
+        k_ops = _typed_ops()
+        lora_out: TfTensorProtocol = k_ops.matmul(k_ops.matmul(dropped, self.lora_a), self.lora_b)
+        scaled_lora: TfTensorProtocol = lora_out * self.scale
+        res: TfTensorProtocol = base_out + scaled_lora
         return res
 
     @property
@@ -235,9 +307,10 @@ class KerasLoRADense(keras.layers.Layer):
         if not self._lora_built:
             return self.dense
 
-        raw_matmul: TfTensorProtocol = ops.matmul(self.lora_a, self.lora_b)  # pyright: ignore[reportAssignmentType]
-        delta = self.scale * raw_matmul
-        self.dense.kernel.assign(self.dense.kernel + delta)  # pyright: ignore[reportOperatorIssue]  # ty: ignore[unsupported-operator]
+        k_ops = _typed_ops()
+        raw_matmul: TfTensorProtocol = k_ops.matmul(self.lora_a, self.lora_b)
+        delta: TfTensorProtocol = raw_matmul * self.scale
+        self.dense.kernel.assign(self.dense.kernel + delta)
         self.dense.trainable = True
         return self.dense
 
@@ -286,8 +359,50 @@ class _LayersContainerProtocol(Protocol):
         ...
 
 
+def _is_registry_key(model: _KerasTargetObjectProtocol) -> TypeGuard[KerasCausalLMProtocol | KerasLayerProtocol]:
+    """Narrow `model` to a weakref-compatible `KerasCausalLMProtocol | KerasLayerProtocol` key.
+
+    Args:
+        model: Target Keras model or container.
+
+    Returns:
+        `True` so `_KERAS_LORA_REGISTRY` lookup can be attempted inside `contextlib.suppress(TypeError)`.
+
+    """
+    _ = model
+    return True
+
+
+def _has_layers(obj: _KerasTargetObjectProtocol) -> TypeGuard[_LayersContainerProtocol]:
+    """Narrow `obj` to `_LayersContainerProtocol` for `.layers` traversal.
+
+    Args:
+        obj: Target Keras model or layer.
+
+    Returns:
+        `True` so `.layers` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = obj
+    return True
+
+
+def _has_backbone(model: _KerasTargetObjectProtocol) -> TypeGuard[_BackboneModelProtocol]:
+    """Narrow `model` to `_BackboneModelProtocol` for `.backbone` access.
+
+    Args:
+        model: Target Keras model.
+
+    Returns:
+        `True` so `.backbone` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = model
+    return True
+
+
 def get_keras_lora_adapter(
-    model: KerasCausalLMProtocol | KerasLayerProtocol | _LayersContainerProtocol | _BackboneModelProtocol | Sequence[KerasLayerProtocol] | str | None,
+    model: _KerasTargetObjectProtocol,
 ) -> KerasLoRAAdapter | None:
     """Look up the registered `KerasLoRAAdapter` for a model instance.
 
@@ -299,14 +414,15 @@ def get_keras_lora_adapter(
 
     """
     with contextlib.suppress(TypeError):
-        found = _KERAS_LORA_REGISTRY.get(model)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        assert _is_registry_key(model)
+        found = _KERAS_LORA_REGISTRY.get(model)
         if found is not None:
             return found
     return _KERAS_LORA_ID_FALLBACK.get(id(model))
 
 
 def _collect_dense_layers(
-    model: KerasCausalLMProtocol | KerasLayerProtocol | Sequence[KerasLayerProtocol],
+    model: _KerasTargetObjectProtocol,
 ) -> list[KerasDenseLayerProtocol]:
     """Collect all `keras.layers.Dense` layers from `model.layers` or a sequence of layers.
 
@@ -330,19 +446,21 @@ def _collect_dense_layers(
             if isinstance(item, keras.layers.Dense):
                 collected.append(item)
             with contextlib.suppress(AttributeError, TypeError):
-                sub_layers = item.layers  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                assert _has_layers(item)
+                sub_layers = item.layers
                 _visit_seq(sub_layers)
 
     if isinstance(model, (list, tuple)):
         _visit_seq(model)
     else:
         with contextlib.suppress(AttributeError, TypeError):
-            top_layers = model.layers  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            assert _has_layers(model)
+            top_layers = model.layers
             _visit_seq(top_layers)
     return collected
 
 
-def inject_lora[ModelT](
+def inject_lora[ModelT: _KerasTargetObjectProtocol](
     model: ModelT,
     target_modules: list[str],
     lora_r: int = 8,
@@ -374,7 +492,7 @@ def inject_lora[ModelT](
     if not target_modules:
         return model, 0
 
-    dense_layers = _collect_dense_layers(model)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+    dense_layers = _collect_dense_layers(model)
     adapted_states: dict[str, KerasLoRALayerState] = {}
 
     for dense in dense_layers:
@@ -400,11 +518,13 @@ def inject_lora[ModelT](
         alpha=float(lora_alpha),
         dropout=lora_dropout,
     )
+    model_id = id(model)
     with contextlib.suppress(TypeError):
-        _KERAS_LORA_REGISTRY[model] = adapter  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-assignment]
-    _KERAS_LORA_ID_FALLBACK[id(model)] = adapter
+        assert _is_registry_key(model)
+        _KERAS_LORA_REGISTRY[model] = adapter
+    _KERAS_LORA_ID_FALLBACK[model_id] = adapter
     register_quantized_artifact(
-        model,  # pyright: ignore[reportArgumentType]
+        model,
         method="lora",
         scales={name: state.lora_layer.scale for name, state in adapted_states.items()},
     )
@@ -412,7 +532,7 @@ def inject_lora[ModelT](
     return model, len(adapted_states)
 
 
-def merge_lora_weights[ModelT](model: ModelT) -> ModelT:
+def merge_lora_weights[ModelT: _KerasTargetObjectProtocol](model: ModelT) -> ModelT:
     """Fold all tracked `KerasLoRADense` adapter weights back into base `Dense` kernels on `model`.
 
     Args:
@@ -422,13 +542,14 @@ def merge_lora_weights[ModelT](model: ModelT) -> ModelT:
         The model with all LoRA layers folded back into native `Dense` kernels.
 
     """
-    adapter = get_keras_lora_adapter(model)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+    adapter = get_keras_lora_adapter(model)
     if adapter is not None:
         adapter.merge_all()
         return model
 
     with contextlib.suppress(AttributeError, TypeError):
-        for layer in (l for l in model.layers if isinstance(l, KerasLoRADense)):  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        assert _has_layers(model)
+        for layer in (l for l in model.layers if isinstance(l, KerasLoRADense)):
             layer.merge_weights()
     return model
 
@@ -446,9 +567,9 @@ def count_parameters(model: KerasLayerProtocol | KerasCausalLMProtocol) -> tuple
     total = 0
     trainable = 0
     with contextlib.suppress(AttributeError, TypeError):
-        total = sum(int(ops.size(w)) for w in model.weights)  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[unresolved-attribute]
+        total = sum(math.prod(int(d) for d in w.shape) for w in model.weights)
     with contextlib.suppress(AttributeError, TypeError):
-        trainable = sum(int(ops.size(w)) for w in model.trainable_weights)  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[unresolved-attribute]
+        trainable = sum(math.prod(int(d) for d in w.shape) for w in model.trainable_weights)
     return total, trainable
 
 
@@ -498,14 +619,15 @@ def apply_lora(
 
         backbone: KerasBackboneProtocol | None = None
         with contextlib.suppress(AttributeError):
-            backbone = model.backbone  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            assert _has_backbone(model)
+            backbone = model.backbone
 
         if backbone is not None:
             backbone.enable_lora(rank=lora_r)
             with contextlib.suppress(AttributeError, TypeError):
                 for layer in backbone.layers:
                     with contextlib.suppress(AttributeError):
-                        layer.trainable = bool(layer.trainable_variables)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                        layer.trainable = bool(layer.trainable_variables)
             logger.info("Enabled Keras native LoRA with rank %d", lora_r)
             injected_count = len(target_modules)
         else:

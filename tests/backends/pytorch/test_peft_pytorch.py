@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import NoReturn
 from unittest.mock import MagicMock
 
@@ -23,21 +22,6 @@ def test_apply_lora_real_tiny_model_and_forward_pass(monkeypatch: pytest.MonkeyP
     from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
     from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM
 
-    class TorchLoRALinear(nn.Module):
-        """Low-rank adapter wrapper around a PyTorch `nn.Linear` module."""
-
-        def __init__(self, base: nn.Linear, r: int = 4, lora_alpha: float = 8.0) -> None:
-            """Initialize TorchLoRALinear with Kaiming-like A and zero B."""
-            super().__init__()
-            self.base = base
-            self.scale = lora_alpha / float(r)
-            self.lora_a = nn.Parameter(torch.full((base.in_features, r), 1.0 / math.sqrt(r)))
-            self.lora_b = nn.Parameter(torch.zeros((r, base.out_features)))
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            """Compute `base(x) + scale * ((x @ lora_a) @ lora_b)`."""
-            return self.base(x) + self.scale * ((x @ self.lora_a) @ self.lora_b)
-
     cfg = Gemma4Config(
         vocab_size=64,
         hidden_size=16,
@@ -55,27 +39,38 @@ def test_apply_lora_real_tiny_model_and_forward_pass(monkeypatch: pytest.MonkeyP
     with torch.no_grad():
         logits_base = tiny_model(tokens)[0].clone()
 
-    attn_mod = tiny_model.get_submodule("layers.0.self_attn")
-    orig_q = attn_mod.get_submodule("q_proj")
-    assert isinstance(orig_q, nn.Linear)
-    lora_q = TorchLoRALinear(orig_q, r=4, lora_alpha=8.0)
-    attn_mod.register_module("q_proj", lora_q)
+    injected = peft_module.inject_native_pytorch_lora(tiny_model, ["q_proj", "v_proj"], lora_r=4, lora_alpha=8, lora_dropout=0.0)
+    assert injected >= 2
+    named_mods = dict(tiny_model.named_modules())
+    lora_q = named_mods["layers.0.self_attn.q_proj"]
+    assert hasattr(lora_q, "lora_a") and hasattr(lora_q, "lora_b")
 
     with torch.no_grad():
         logits_zero_b = tiny_model(tokens)[0].clone()
     assert torch.allclose(logits_base, logits_zero_b, atol=1e-6)
 
     with torch.no_grad():
+        assert isinstance(lora_q.lora_b, torch.Tensor)
         lora_q.lora_b.fill_(0.5)
         logits_nonzero_b = tiny_model(tokens)[0].clone()
     assert not torch.allclose(logits_base, logits_nonzero_b, atol=1e-5)
+
+    # Also test top-level linear module injection
+    top_lin_container = nn.Module()
+    top_lin_container.add_module("q_proj", nn.Linear(4, 4, bias=False))
+    assert peft_module.inject_native_pytorch_lora(top_lin_container, ["q_proj"], lora_r=2, lora_alpha=4, lora_dropout=0.1) == 1
 
     mock_auto = MagicMock()
     mock_auto.from_pretrained.return_value = tiny_model
     monkeypatch.setattr(peft_module, "AutoModelForCausalLM", mock_auto)
     monkeypatch.setattr(peft_module, "peft", MagicMock())
     monkeypatch.setattr(peft_module, "LoraConfig", MagicMock(return_value="lora_cfg"))
-    monkeypatch.setattr(peft_module, "get_peft_model", lambda model, _cfg: model)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _passthrough_peft_model(model: Gemma4ForCausalLM, _cfg: str) -> Gemma4ForCausalLM:
+        """Return the model unchanged."""
+        return model
+
+    monkeypatch.setattr(peft_module, "get_peft_model", _passthrough_peft_model)
 
     res = peft_module.apply_lora("tiny-gemma4", ["q_proj", "v_proj"], lora_r=4, lora_alpha=8)
     assert res["status"] == "completed"
@@ -131,3 +126,9 @@ def test_apply_lora(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(peft_module, "peft", None)
     with pytest.raises(DependencyMissingError):
         peft_module.apply_lora("m", ["l"])
+
+    monkeypatch.setattr(peft_module, "torch", None)
+    with pytest.raises(DependencyMissingError):
+        peft_module.apply_lora("m", ["l"])
+    with pytest.raises(DependencyMissingError):
+        peft_module.inject_native_pytorch_lora(mock_model, ["l"])

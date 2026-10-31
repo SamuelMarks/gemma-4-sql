@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Protocol, Self, SupportsFloat, runtime_checkable
+from typing import Protocol, Self, SupportsFloat, overload, runtime_checkable
 
 from gemma_4_sql.exceptions import (
     OPERATIONAL_EXCEPTIONS,
@@ -157,6 +157,7 @@ def run_dpo_wrapper(
         status = f"failed: {error_message}"
         status_code = ExecutionStatus.FAILED.value
 
+    is_synthetic = dataset.strip().lower() in {"synthetic", "synthetic-dpo", "dummy"}
     result: DPOResultDict = {
         "backend": backend_name,
         "action": "dpo",
@@ -166,10 +167,65 @@ def run_dpo_wrapper(
         "status": status,
         "status_code": status_code,
         "final_loss": float(final_loss),
+        "dataset_source": str(kwargs.get("dataset_source") or ("synthetic_fallback" if is_synthetic else "loaded")),
     }
     if error_message is not None:
         result["error_message"] = error_message
     return result
+
+
+def _detach_if_supported[TensorT: ArithmeticTensorProtocol | float](val: TensorT) -> TensorT:
+    """Return `val.detach()` when `val` implements `DetachableTensorProtocol`, else `val`."""
+    if isinstance(val, DetachableTensorProtocol):
+        res: TensorT = val.detach()
+        return res
+    return val
+
+
+@overload
+def _sub_dpo[TensorT: ArithmeticTensorProtocol | float](a: TensorT, b: TensorT) -> TensorT:
+    """Compute `a - b` for matching tensor or float operands."""
+
+
+@overload
+def _sub_dpo[TensorT: ArithmeticTensorProtocol | float](a: TensorT, b: TensorT, *, scale: float) -> TensorT:
+    """Compute `(a - b) * scale` for matching tensor or float operands."""
+
+
+def _sub_dpo(
+    a: ArithmeticTensorProtocol | float,
+    b: ArithmeticTensorProtocol | float,
+    *,
+    scale: float = 1.0,
+) -> ArithmeticTensorProtocol | float:
+    """Compute `a - b` for either `ArithmeticTensorProtocol` tensors or `float` scalars."""
+    _ = scale
+    if isinstance(a, (int, float)):
+        return float(a) - float(b)
+    return a - b
+
+
+@overload
+def _mul_dpo[TensorT: ArithmeticTensorProtocol | float](beta: float, x: TensorT) -> TensorT:
+    """Compute `beta * x` for tensor or float operands."""
+
+
+@overload
+def _mul_dpo[TensorT: ArithmeticTensorProtocol | float](beta: float, x: TensorT, *, scale: float) -> TensorT:
+    """Compute `beta * x * scale` for tensor or float operands."""
+
+
+def _mul_dpo(
+    beta: float,
+    x: ArithmeticTensorProtocol | float,
+    *,
+    scale: float = 1.0,
+) -> ArithmeticTensorProtocol | float:
+    """Compute `beta * x` for either `ArithmeticTensorProtocol` tensors or `float` scalars."""
+    _ = scale
+    if isinstance(x, (int, float)):
+        return beta * float(x)
+    return beta * x
 
 
 def generic_dpo_loss[TensorT: ArithmeticTensorProtocol | float](
@@ -178,7 +234,7 @@ def generic_dpo_loss[TensorT: ArithmeticTensorProtocol | float](
     ref_chosen_logps: TensorT,
     ref_rejected_logps: TensorT,
     beta: float,
-    log_sigmoid_fn: Callable[..., TensorT],
+    log_sigmoid_fn: Callable[..., ArithmeticTensorProtocol | float],
 ) -> tuple[TensorT | ArithmeticTensorProtocol | float, TensorT, TensorT]:
     """Compute the Direct Preference Optimization (DPO) loss generically across tensor frameworks.
 
@@ -194,14 +250,14 @@ def generic_dpo_loss[TensorT: ArithmeticTensorProtocol | float](
         A 3-tuple of `(mean_loss, chosen_rewards, rejected_rewards)`.
 
     """
-    pi_logratios: TensorT = policy_chosen_logps - policy_rejected_logps  # ty: ignore[unsupported-operator]
-    ref_logratios: TensorT = ref_chosen_logps - ref_rejected_logps  # ty: ignore[unsupported-operator]
-    logits: TensorT = pi_logratios - ref_logratios  # ty: ignore[unsupported-operator]
-    loss = -log_sigmoid_fn(beta * logits)  # ty: ignore[unsupported-operator]
-    diff_chosen: TensorT = policy_chosen_logps - ref_chosen_logps  # ty: ignore[unsupported-operator]
-    chosen_rewards: TensorT = beta * diff_chosen.detach() if isinstance(diff_chosen, DetachableTensorProtocol) else beta * diff_chosen  # ty: ignore[unsupported-operator]
-    diff_rejected: TensorT = policy_rejected_logps - ref_rejected_logps  # ty: ignore[unsupported-operator]
-    rejected_rewards: TensorT = beta * diff_rejected.detach() if isinstance(diff_rejected, DetachableTensorProtocol) else beta * diff_rejected  # ty: ignore[unsupported-operator]
+    pi_logratios: TensorT = _sub_dpo(policy_chosen_logps, policy_rejected_logps)
+    ref_logratios: TensorT = _sub_dpo(ref_chosen_logps, ref_rejected_logps)
+    logits: TensorT = _sub_dpo(pi_logratios, ref_logratios)
+    loss = -log_sigmoid_fn(_mul_dpo(beta, logits))
+    diff_chosen: TensorT = _detach_if_supported(_sub_dpo(policy_chosen_logps, ref_chosen_logps))
+    chosen_rewards: TensorT = _mul_dpo(beta, diff_chosen)
+    diff_rejected: TensorT = _detach_if_supported(_sub_dpo(policy_rejected_logps, ref_rejected_logps))
+    rejected_rewards: TensorT = _mul_dpo(beta, diff_rejected)
     mean_loss = loss.mean() if isinstance(loss, MeanReducibleTensorProtocol) else loss
     return (mean_loss, chosen_rewards, rejected_rewards)
 

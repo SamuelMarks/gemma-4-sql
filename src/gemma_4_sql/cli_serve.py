@@ -6,37 +6,20 @@ import argparse
 import json
 import logging
 
-from gemma_4_sql.cli_misc import parse_db_kwargs, parse_json_list, print_cli_error
+from gemma_4_sql.cli_misc import (
+    MultimodalCLIArgsProtocol,
+    extract_multimodal_cli_kwargs,
+    parse_db_kwargs,
+    parse_json_list,
+    print_cli_error,
+)
 from gemma_4_sql.exceptions import GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk import build_few_shot_prompt, chat_turn, evaluate, generate, run_agentic_loop, serve_model
 from gemma_4_sql.sdk.agent import AgentContext
-from gemma_4_sql.type_hints import JSONValue
 
 logger = logging.getLogger(__name__)
 
-
-def _extract_serve_multimodal_kwargs(args: argparse.Namespace) -> dict[str, JSONValue]:
-    """Extract optional multimodal arguments (`image_path`, `audio_path`, `modality`) from CLI args.
-
-    Args:
-        args: Parsed command-line arguments namespace.
-
-    Returns:
-        Dictionary of non-default multimodal keyword arguments.
-
-    """
-    extra: dict[str, JSONValue] = {}
-    args_dict = vars(args)
-    image_path = args.image_path if "image_path" in args_dict else None
-    audio_path = args.audio_path if "audio_path" in args_dict else None
-    modality = args.modality if "modality" in args_dict else "text"
-    if image_path is not None:
-        extra["image_path"] = str(image_path)
-    if audio_path is not None:
-        extra["audio_path"] = str(audio_path)
-    if modality and modality != "text":
-        extra["modality"] = str(modality)
-    return extra
+_extract_serve_multimodal_kwargs = extract_multimodal_cli_kwargs
 
 
 def evaluate_cmd(args: argparse.Namespace) -> int:
@@ -214,16 +197,18 @@ def few_shot_cmd(args: argparse.Namespace) -> int:
     examples = parse_json_list(args.examples, "examples provided to few_shot_cmd")
     if examples is None:
         return 1
-    args_dict = vars(args)
+    image_path = args.image_path if isinstance(args, MultimodalCLIArgsProtocol) else None
+    audio_path = args.audio_path if isinstance(args, MultimodalCLIArgsProtocol) else None
+    modality = str((args.modality if isinstance(args, MultimodalCLIArgsProtocol) else "text") or "text")
     try:
         res = build_few_shot_prompt(
             model_name=args.model,
             prompt=args.prompt,
             examples=examples,
             backend=args.backend,
-            image_path=args.image_path if "image_path" in args_dict else None,
-            audio_path=args.audio_path if "audio_path" in args_dict else None,
-            modality=str((args.modality if "modality" in args_dict else "text") or "text"),
+            image_path=image_path,
+            audio_path=audio_path,
+            modality=modality,
         )
     except GemmaSQLError as err:
         return print_cli_error(err, args.backend, model=args.model)

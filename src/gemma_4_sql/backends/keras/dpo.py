@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Protocol, SupportsFloat, runtime_checkable
+from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.common_dpo import ArithmeticTensorProtocol, generic_dpo_loss, run_dpo_wrapper
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
@@ -95,7 +95,68 @@ def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
     return (mean_loss, chosen_rewards, rejected_rewards)
 
 
-type KerasDPOModel[TensorT] = Callable[[TensorT], TensorT] | KerasCausalLMProtocol
+@runtime_checkable
+class _KerasDPOCallableProtocol[TensorT](Protocol):
+    """Protocol for any callable Keras DPO model."""
+
+    def __call__(self, inputs: TensorT, /) -> TensorT:
+        """Evaluate forward logits on `inputs`."""
+        ...
+
+
+type KerasDPOModel[TensorT] = _KerasDPOCallableProtocol[TensorT] | Callable[[TensorT], TensorT] | KerasCausalLMProtocol
+
+
+def _is_callable_dpo_model[TensorT](
+    model: KerasDPOModel[TensorT],
+    _sample: TensorT,
+) -> TypeGuard[_KerasDPOCallableProtocol[TensorT]]:
+    """Narrow `model` to `_KerasDPOCallableProtocol[TensorT]`.
+
+    Args:
+        model: Policy or reference model callable.
+        _sample: Sample input tensor for type binding.
+
+    Returns:
+        `True` so `model(inputs)` can be invoked.
+
+    """
+    _ = (model, _sample)
+    return True
+
+
+def _has_trainable_variables[TensorT](
+    model: KerasDPOModel[TensorT],
+) -> TypeGuard[KerasCausalLMProtocol]:
+    """Narrow `model` to `KerasCausalLMProtocol` for `.trainable_variables` access.
+
+    Args:
+        model: Policy model callable or `KerasCausalLMProtocol` instance.
+
+    Returns:
+        `True` so `.trainable_variables` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = model
+    return True
+
+
+def _as_var_seq[TensorT, VarT](
+    vars_seq: Sequence[KerasVariableProtocol | TfTensorProtocol],
+    _opt: _KerasOptimizerProtocol[TensorT, VarT],
+) -> TypeGuard[Sequence[VarT]]:
+    """Narrow `vars_seq` to `Sequence[VarT]` for `optimizer.apply_gradients`.
+
+    Args:
+        vars_seq: Sequence of trainable variables from `policy_model`.
+        _opt: Optimizer carrying type parameter `VarT`.
+
+    Returns:
+        `True` for `optimizer.apply_gradients`.
+
+    """
+    _ = (vars_seq, _opt)
+    return True
 
 
 def _compute_logps[TensorT: TfTensorProtocol | SupportsFloat](
@@ -120,7 +181,8 @@ def _compute_logps[TensorT: TfTensorProtocol | SupportsFloat](
     if tf is None:
         raise DependencyMissingError("Keras DPO dependencies are missing.", backend="keras")
     tf_cast = tf.dtypes.cast
-    logits = model(inputs)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+    assert _is_callable_dpo_model(model, inputs)
+    logits = model(inputs)
     log_probs = tf.nn.log_softmax(logits, axis=-1)
     labels_expanded = tf.expand_dims(tf_cast(labels, tf.int32), axis=-1)
     selected_log_probs = tf.gather(log_probs, labels_expanded, batch_dims=2)
@@ -135,7 +197,7 @@ def _get_train_step_fn[TensorT: ArithmeticTensorProtocol, VarT](
     ref_model: KerasDPOModel[TensorT],
     optimizer: _KerasOptimizerProtocol[TensorT, VarT],
     beta: float,
-) -> Callable[[Mapping[str, TensorT]], TensorT]:
+) -> Callable[[Mapping[str, TensorT]], TensorT | ArithmeticTensorProtocol | float]:
     """Return a `tf.function` compiled DPO train step function.
 
     Args:
@@ -156,7 +218,7 @@ def _get_train_step_fn[TensorT: ArithmeticTensorProtocol, VarT](
 
     def train_step(
         batch: Mapping[str, TensorT],
-    ) -> TensorT:
+    ) -> TensorT | ArithmeticTensorProtocol | float:
         """Compute DPO loss and apply gradients under a TensorFlow GradientTape.
 
         Args:
@@ -173,14 +235,17 @@ def _get_train_step_fn[TensorT: ArithmeticTensorProtocol, VarT](
             ref_ch_logps = _compute_logps(ref_model, batch["chosen_inputs"], batch["chosen_labels"])
             ref_re_logps = _compute_logps(ref_model, batch["rejected_inputs"], batch["rejected_labels"])
             (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
-        trainable_vars: Sequence[KerasVariableProtocol | TfTensorProtocol | TensorT] = ()
+        trainable_vars: Sequence[VarT] = ()
         with contextlib.suppress(AttributeError):
-            trainable_vars = policy_model.trainable_variables  # pyright: ignore[reportAttributeAccessIssue,reportFunctionMemberAccess]  # ty: ignore[unresolved-attribute]
-        grads = tape.gradient(loss, trainable_vars)
-        optimizer.apply_gradients(zip(grads, trainable_vars))  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[invalid-argument-type]
-        return loss  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
+            assert _has_trainable_variables(policy_model)
+            raw_vars = policy_model.trainable_variables
+            assert _as_var_seq(raw_vars, optimizer)
+            trainable_vars = raw_vars
+        grads: Sequence[TensorT] = tape.gradient(loss, trainable_vars)
+        optimizer.apply_gradients(zip(grads, trainable_vars, strict=False))
+        return loss
 
-    compiled_fn: Callable[[Mapping[str, TensorT]], TensorT] = tf.function(train_step)
+    compiled_fn: Callable[[Mapping[str, TensorT]], TensorT | ArithmeticTensorProtocol | float] = tf.function(train_step)
     return compiled_fn
 
 

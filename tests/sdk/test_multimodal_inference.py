@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import struct
-from collections.abc import Callable
 from pathlib import Path
 from typing import NoReturn
 
@@ -87,9 +86,31 @@ def test_load_image_bytes(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Image file not found"):
         load_image_bytes(tmp_path / "nonexistent.png")
 
-    untyped_load_image: Callable[..., bytes] = load_image_bytes
+    import io
+
+    import gemma_4_sql.backends.common_multimodal as cm
+
+    class _DummySavable:
+        """Stub implementing SavablePILImageProtocol."""
+
+        def save(self, fp: io.BytesIO, format: str = "PNG") -> None:
+            """No-op save."""
+            _ = (fp, format)
+
+    def _none_attr(_m: str, _a: str) -> None:
+        """Return None for optional_attr."""
+        return
+
+    savable = _DummySavable()
+    savable.save(io.BytesIO())
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(cm, "Image", None)
+        mp.setattr(cm, "optional_attr", _none_attr)
+        with pytest.raises(ValueError, match="Unsupported image input type"):
+            load_image_bytes(savable)
+
     with pytest.raises(ValueError, match="Unsupported image input type"):
-        untyped_load_image(12345)  # ty: ignore[invalid-argument-type]
+        load_image_bytes([1, 2])
 
 
 def test_process_image(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -136,9 +157,8 @@ def test_load_audio_bytes(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="Audio file not found"):
         load_audio_bytes(tmp_path / "nonexistent.wav")
 
-    untyped_load_audio: Callable[..., bytes] = load_audio_bytes
     with pytest.raises(ValueError, match="Unsupported audio input type"):
-        untyped_load_audio(99999)  # ty: ignore[invalid-argument-type]
+        load_audio_bytes([0.1, 0.2])
 
 
 def test_process_audio() -> None:
@@ -241,7 +261,11 @@ def test_sdk_inference_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
                 "status": "success",
             }
 
-    monkeypatch.setattr("gemma_4_sql.sdk.inference.get_backend", lambda _b: MockBackend())  # pyright: ignore[reportUnknownLambdaType]
+    def _get_mock_backend(_b: str) -> MockBackend:
+        """Return MockBackend instance."""
+        return MockBackend()
+
+    monkeypatch.setattr("gemma_4_sql.sdk.inference.get_backend", _get_mock_backend)
 
     res = generate_sql(
         "test-model",
@@ -290,7 +314,11 @@ def test_sdk_agent_multimodal_preservation(monkeypatch: pytest.MonkeyPatch) -> N
                 "status": "success",
             }
 
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: MockFailingThenSuccessBackend())  # pyright: ignore[reportUnknownLambdaType]
+    def _get_retry_backend(_b: str) -> MockFailingThenSuccessBackend:
+        """Return MockFailingThenSuccessBackend instance."""
+        return MockFailingThenSuccessBackend()
+
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _get_retry_backend)
 
     ctx = AgentContext(
         db_path=":memory:",
@@ -344,7 +372,11 @@ def test_sdk_evaluation_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
                 "status": "success",
             }
 
-    monkeypatch.setattr("gemma_4_sql.sdk.evaluation.get_backend", lambda _b: MockEvalBackend())  # pyright: ignore[reportUnknownLambdaType]
+    def _get_eval_backend(_b: str) -> MockEvalBackend:
+        """Return MockEvalBackend instance."""
+        return MockEvalBackend()
+
+    monkeypatch.setattr("gemma_4_sql.sdk.evaluation.get_backend", _get_eval_backend)
 
     res = evaluate(
         "test-model",
@@ -363,10 +395,14 @@ def test_common_serve_multimodal() -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
+    def _gen_logic(prompt: str) -> str:
+        """Format SQL query with prompt."""
+        return f"SELECT * FROM test WHERE p='{prompt}'"
+
     app = create_common_app(
         backend_name="pytorch",
         model_name="test-model",
-        generate_logic=lambda prompt: f"SELECT * FROM test WHERE p='{prompt}'",  # pyright: ignore[reportUnknownLambdaType]
+        generate_logic=_gen_logic,
     )
 
     req_payload: JSONDict = {
@@ -395,9 +431,13 @@ def test_common_multimodal_pure_python_fallbacks(monkeypatch: pytest.MonkeyPatch
     orig_jnp = cm.jnp
     orig_image = cm.Image
 
+    def _none_import(_name: str) -> None:
+        """Return None for optional_import."""
+        return
+
     monkeypatch.setattr(cm, "jnp", None)
     monkeypatch.setattr(cm, "Image", None)
-    monkeypatch.setattr(cm, "optional_import", lambda _name: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(cm, "optional_import", _none_import)
 
     # Process image with pure python fallback
     raw_img = b"fake_image_bytes"
@@ -460,8 +500,13 @@ def test_multimodal_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Corrupted WAV header triggering struct.error
     corrupt_wav = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 40
+
+    def _raise_struct_err(*_a: str | bytes, **_k: str) -> NoReturn:
+        """Raise struct.error."""
+        raise struct.error("Corrupted WAV unpack")
+
     with monkeypatch.context() as monkeypatch_ctx:
-        monkeypatch_ctx.setattr("struct.unpack", lambda *_a, **_k: (_ for _ in ()).throw(struct.error("Corrupted WAV unpack")))  # pyright: ignore[reportUnknownLambdaType]
+        monkeypatch_ctx.setattr("struct.unpack", _raise_struct_err)
         with pytest.raises(ValueError, match="Corrupted WAV fmt chunk header"):
             cm._parse_wav_samples(corrupt_wav)
 

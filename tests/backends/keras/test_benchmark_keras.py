@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import types
+from collections.abc import Callable
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,6 +13,16 @@ from gemma_4_sql.exceptions import DependencyMissingError
 from tests.conftest import requires_keras
 
 pytestmark = requires_keras
+
+
+def _identity_tf_function[FnT](*_args: bool, **_kwargs: bool) -> Callable[[FnT], FnT]:
+    """Return an identity decorator for `tf.function`."""
+
+    def _dec(fn: FnT) -> FnT:
+        """Return `fn` unchanged."""
+        return fn
+
+    return _dec
 
 
 class _DummySentinel:
@@ -49,12 +60,20 @@ def test_load_keras_model(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_gemma_causal_lm = MagicMock()
     mock_gemma_causal_lm.from_preset.return_value = "fake_model"
 
-    monkeypatch.setattr(bm, "optional_attr", lambda *_a, **_k: mock_gemma_causal_lm)  # pyright: ignore[reportUnknownLambdaType]
+    def _return_gemma_cls(*_a: str, **_k: str) -> MagicMock:
+        """Return `mock_gemma_causal_lm`."""
+        return mock_gemma_causal_lm
+
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
+    monkeypatch.setattr(bm, "optional_attr", _return_gemma_cls)
     res = bm._load_keras_model("test_model", "float32")
     assert res == "fake_model"
     mock_keras.config.set_floatx.assert_called_with("float32")
 
-    monkeypatch.setattr(bm, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(bm, "optional_attr", _none_attr)
     with pytest.raises(ValueError, match="Failed to load actual model"):
         bm._load_keras_model("name", "bfloat16")
 
@@ -81,7 +100,7 @@ def test_run_benchmark_pass(monkeypatch: pytest.MonkeyPatch) -> None:
         bm._run_benchmark_pass(MagicMock(), 1, 1, 1, "prefill", 1, "cpu")
 
     mock_tf = MagicMock()
-    mock_tf.function = lambda *_args, **_kwargs: lambda fn: fn  # pyright: ignore[reportUnknownLambdaType]
+    mock_tf.function = _identity_tf_function
     mock_tf.config.list_physical_devices.return_value = ["GPU:0"]
     mock_tf.device = _MockDeviceCtx
     mock_tf.config.experimental.get_memory_info.return_value = {"peak": 1048576 * 10}
@@ -111,7 +130,7 @@ def test_run_benchmark_pass(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_run_benchmark_pass_missing_attrs(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_benchmark_pass handles models without .generate() and tf.identity failures."""
     mock_tf = MagicMock()
-    mock_tf.function = lambda *_args, **_kwargs: lambda fn: fn  # pyright: ignore[reportUnknownLambdaType]
+    mock_tf.function = _identity_tf_function
     mock_tf.identity.side_effect = TypeError("not a tensor")
     mock_tf.config.list_physical_devices.return_value = ["GPU:0"]
     mock_tf.device = _MockDeviceCtx
@@ -133,11 +152,16 @@ def test_run_benchmark_pass_missing_attrs(monkeypatch: pytest.MonkeyPatch) -> No
 def test_run_benchmark_pass_real_keras_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_benchmark_pass executes against a real Keras layer on CPU."""
     import keras
+    import torch
+
+    def _uniform_ones(shape: tuple[int, int], **_kw: int | str) -> torch.Tensor:
+        """Return int32 ones tensor for `shape`."""
+        return torch.ones(shape, dtype=torch.int32)
 
     mock_tf = MagicMock()
-    mock_tf.function = lambda *_a, **_kw: lambda fn: fn  # pyright: ignore[reportUnknownLambdaType]
+    mock_tf.function = _identity_tf_function
     mock_tf.device = _MockDeviceCtx
-    mock_tf.random.uniform = lambda shape, **_kw: keras.ops.ones(shape, dtype="int32")  # pyright: ignore[reportUnknownLambdaType]
+    mock_tf.random.uniform = _uniform_ones
     monkeypatch.setattr(bm, "tf", mock_tf)
 
     emb = keras.layers.Embedding(input_dim=256000, output_dim=8)
@@ -153,12 +177,21 @@ def test_benchmark_model(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(DependencyMissingError):
         bm.benchmark_model("m", "h", 1)
 
+    def _load_identity_model(*_a: str, **_k: str) -> Callable[[MagicMock], MagicMock]:
+        """Return identity model callable."""
+
+        def _ident(x: MagicMock) -> MagicMock:
+            """Return `x` unchanged."""
+            return x
+
+        return _ident
+
     mock_tf = MagicMock()
-    mock_tf.function = lambda *_a, **_kw: lambda fn: fn  # pyright: ignore[reportUnknownLambdaType]
+    mock_tf.function = _identity_tf_function
     mock_tf.device = _MockDeviceCtx
     monkeypatch.setattr(bm, "keras", MagicMock())
     monkeypatch.setattr(bm, "tf", mock_tf)
-    monkeypatch.setattr(bm, "_load_keras_model", lambda *_a, **_k: lambda x: x)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(bm, "_load_keras_model", _load_identity_model)
 
     res = bm.benchmark_model("m", "cpu", 1, num_runs=1, warmup_steps=1, max_new_tokens=2)
     assert res["status"] == "success"

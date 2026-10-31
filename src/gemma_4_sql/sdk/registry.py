@@ -37,6 +37,16 @@ class SelectableEntryPointsProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class AdapterModuleProtocol(Protocol):
+    """Protocol representing a backend `.adapter` module exposing `ADAPTER_CLASS`."""
+
+    @property
+    def ADAPTER_CLASS(self) -> Callable[..., BackendProtocol | types.ModuleType] | None:
+        """Provide the backend adapter class constructor."""
+        ...
+
+
 ENTRY_POINTS: dict[str, EntryPointProtocol] = {}
 _BACKEND_CACHE: dict[str, BackendProtocol] = {}
 _CACHE_LOCK = threading.Lock()
@@ -92,19 +102,13 @@ def get_backend(name: str) -> BackendProtocol:
             raise ConfigurationError(msg, backend=name, cause=e) from e
 
         adapter_class: Callable[..., BackendProtocol | types.ModuleType] | None = None
-        try:
+        if isinstance(adapter_module, AdapterModuleProtocol):
             adapter_class = adapter_module.ADAPTER_CLASS
-        except AttributeError:
-            adapter_class = None
 
         if adapter_class is None:
             adapter_class_name = f"{name.capitalize()}Backend"
-            mod_dict = vars(adapter_module)
-            if adapter_class_name not in mod_dict:
-                msg = f"Adapter class {adapter_class_name} not found in {adapter_module_name}"
-                raise ConfigurationError(msg, backend=name)
-            resolved_cls: Callable[..., BackendProtocol | types.ModuleType] = mod_dict[adapter_class_name]
-            adapter_class = resolved_cls
+            msg = f"Adapter class {adapter_class_name} not found in {adapter_module_name}"
+            raise ConfigurationError(msg, backend=name)
 
         raw_instance = adapter_class(backend_alias=name) if name.startswith("pytorch_") else adapter_class()
         if not isinstance(raw_instance, BackendProtocol):
@@ -115,6 +119,7 @@ def get_backend(name: str) -> BackendProtocol:
 
 
 __all__ = [
+    "AdapterModuleProtocol",
     "EntryPointProtocol",
     "SelectableEntryPointsProtocol",
     "clear_backend_cache",

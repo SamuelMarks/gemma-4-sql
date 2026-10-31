@@ -28,8 +28,12 @@ def test_get_device(monkeypatch: pytest.MonkeyPatch) -> None:
     dev_cpu = jax_benchmark._get_device("cpu")
     assert dev_cpu is not None
 
+    def _devices_by_hw(hw: str) -> list[str]:
+        """Return mock device list for known hardware types."""
+        return [f"mock_{hw}_device"] if hw in ("gpu", "tpu", "cpu") else []
+
     mock_jax = MagicMock()
-    mock_jax.devices.side_effect = lambda hw: [f"mock_{hw}_device"] if hw in ("gpu", "tpu", "cpu") else []  # pyright: ignore[reportUnknownLambdaType]
+    mock_jax.devices.side_effect = _devices_by_hw
     monkeypatch.setattr(jax_benchmark, "jax", mock_jax)
     assert jax_benchmark._get_device("gpu") == "mock_gpu_device"
     assert jax_benchmark._get_device("tpu") == "mock_tpu_device"
@@ -64,7 +68,7 @@ def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyP
     assert mem_prefill >= 0.0
 
     # Device with explicit peak_bytes_in_use memory_stats and warmup in generate mode
-    from contextlib import nullcontext
+    from contextlib import AbstractContextManager, nullcontext
 
     class _MockJaxDevice:
         """Concrete device stub implementing `JaxDeviceProtocol`."""
@@ -74,7 +78,12 @@ def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyP
             return {"peak_bytes_in_use": 64 * 1024 * 1024}
 
     mock_device_with_stats = _MockJaxDevice()
-    monkeypatch.setattr(jax_benchmark.jax, "default_device", lambda _d: nullcontext())  # pyright: ignore[reportUnknownLambdaType]
+
+    def _null_default_device(_d: _MockJaxDevice | _FailingStatsDevice) -> AbstractContextManager[None]:
+        """Return nullcontext for default_device."""
+        return nullcontext()
+
+    monkeypatch.setattr(jax_benchmark.jax, "default_device", _null_default_device)
     _, _, mem_stats = jax_benchmark._run_benchmark_pass(
         model=model,
         batch_size=1,

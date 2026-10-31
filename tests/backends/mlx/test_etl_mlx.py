@@ -41,8 +41,12 @@ def test_mlx_data_loader() -> None:
 
     ds = [{"sql_prompt": "p1", "sql": "s1"}, {"question": "p2", "query": "s2"}, {"sql_prompt": "p3", "sql": "s3"}]
 
+    def _encode_len(x: str) -> list[int]:
+        """Return 1-element list with string length."""
+        return [len(x)]
+
     mock_tok = MagicMock()
-    mock_tok.encode.side_effect = lambda x: [len(x)]  # pyright: ignore[reportUnknownLambdaType]
+    mock_tok.encode.side_effect = _encode_len
 
     loader = etl_module.MLXDataLoader(ds, mock_tok, bs=2)
 

@@ -7,12 +7,46 @@ import dataclasses
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.common_export import run_export_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError, StatusValue
-from gemma_4_sql.type_hints import ExportResultDict, JSONValue, MlxCausalLMProtocol, TokenizerProtocol
+from gemma_4_sql.type_hints import (
+    ExportResultDict,
+    JSONValue,
+    MlxCausalLMProtocol,
+    TokenizerProtocol,
+)
+
+
+@dataclasses.dataclass
+class _MlxDataclassConfig:
+    """Dataclass representation of an MLX model configuration."""
+
+
+@runtime_checkable
+class _MlxConfigModelProtocol(Protocol):
+    """Protocol for an MLX model exposing `.config`."""
+
+    @property
+    def config(self) -> Mapping[str, JSONValue] | _MlxDataclassConfig:
+        """Provide the model configuration object or mapping."""
+        ...
+
+
+def _has_model_config(model: MlxCausalLMProtocol) -> TypeGuard[_MlxConfigModelProtocol]:
+    """Narrow `model` to `_MlxConfigModelProtocol` for `.config` access.
+
+    Args:
+        model: Loaded MLX model instance.
+
+    Returns:
+        `True` so `.config` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = model
+    return True
 
 
 @runtime_checkable
@@ -73,7 +107,8 @@ def export_model(model_name: str, export_path: str, **_kwargs: StatusValue) -> E
         config_path = export_dir / "config.json"
         cfg_dict: dict[str, JSONValue] = {"model_type": "gemma4", "model_name": model_name}
         with contextlib.suppress(AttributeError, TypeError):
-            raw_cfg = model.config  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            assert _has_model_config(model)
+            raw_cfg = model.config
             cfg_dict = dict(raw_cfg) if isinstance(raw_cfg, Mapping) else dataclasses.asdict(raw_cfg)
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(cfg_dict, f, indent=2)

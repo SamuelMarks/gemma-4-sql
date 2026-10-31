@@ -260,7 +260,13 @@ def test_from_pretrained() -> None:
 
 def test_default_jit() -> None:
     """Verify _default_jit returns the wrapped function and executes JAX operations identically."""
-    fn = _default_jit(lambda x: x + 1)  # pyright: ignore[reportUnknownLambdaType]
+    import jax
+
+    def _add_one(x: jax.Array) -> jax.Array:
+        """Add 1 to array."""
+        return x + 1
+
+    fn = _default_jit(_add_one)
     assert int(fn(jnp.array(4))) == 5
 
 

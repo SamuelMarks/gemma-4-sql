@@ -192,7 +192,12 @@ def test_wrap_model_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
     import gemma_4_sql.backends.pytorch.train as train_module
 
     mock_mod = MagicMock()
-    monkeypatch.setattr(dist_mod, "optional_import", lambda _name: mock_mod)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _return_mock_mod(_name: str) -> MagicMock:
+        """Return `mock_mod`."""
+        return mock_mod
+
+    monkeypatch.setattr(dist_mod, "optional_import", _return_mock_mod)
     mock_torch = MagicMock()
     mock_torch.cuda.is_available.return_value = True
     monkeypatch.setattr(train_module, "torch", mock_torch)
@@ -229,7 +234,18 @@ def test_execute_train(monkeypatch: pytest.MonkeyPatch) -> None:
 
     native_model = _make_tiny_native_model()
     w_before = native_model.lm_head.weight.detach().clone()
-    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(lambda _cls, *_a, **_k: native_model))
+
+    def _from_pretrained_native(_cls: type[Gemma4ForCausalLM], *_a: str, **_k: Gemma4Config | None) -> Gemma4ForCausalLM:
+        """Return `native_model`."""
+        return native_model
+
+    monkeypatch.setattr(Gemma4ForCausalLM, "from_pretrained", classmethod(_from_pretrained_native))
+
+    with (
+        patch.object(train_module, "build_dataloader", return_value={}),
+        pytest.raises(ValueError, match="Invalid dataloader"),
+    ):
+        train_module._execute_train("m", "real_ds", 1, 1e-2, "none", backend_alias="pytorch_native")
 
     with patch.object(train_module, "build_dataloader", return_value={"loader": [batch]}):
         status, loss = train_module._execute_train("m", "d", 1, 1e-2, "none", backend_alias="pytorch_native")
@@ -247,12 +263,6 @@ def test_execute_train(monkeypatch: pytest.MonkeyPatch) -> None:
         assert status2 == "completed"
         assert loss2 > 0.0
         assert not torch.allclose(hf_model.lm_head.weight.detach(), w_hf_before)
-
-    with (
-        patch.object(train_module, "build_dataloader", return_value={}),
-        pytest.raises(ValueError, match="Invalid dataloader"),
-    ):
-        train_module._execute_train("m", "d", 1, 1e-2, "none")
 
     monkeypatch.setattr(train_module, "torch", None)
     with pytest.raises(DependencyMissingError):

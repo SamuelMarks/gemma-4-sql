@@ -229,8 +229,9 @@ def _set_param_metadata(
         value: Metadata value to store.
 
     """
-    with contextlib.suppress(AttributeError, TypeError):
-        param.set_metadata(key, value)  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+    if isinstance(param, _MetadataParamProtocol):
+        with contextlib.suppress(AttributeError, TypeError):
+            param.set_metadata(key, value)
 
 
 def _apply_quantization_to_model(
@@ -317,7 +318,7 @@ def quantize_model(
         UnsupportedQuantizationMethodError: If `strict_method=True` and `method` is unsupported.
 
     """
-    if jax is None or jnp is None or nnx is None or Gemma4ForCausalLM is None:  # pyright: ignore[reportUnnecessaryComparison]
+    if jax is None or jnp is None or nnx is None or not callable(Gemma4ForCausalLM):
         raise DependencyMissingError("JAX dependencies are missing.", backend="jax")
 
     if kwargs.get("strict_method") and method not in {"int8", "awq"}:
@@ -349,7 +350,7 @@ def quantize_model(
             salient_ratio=salient_ratio,
         )
         if not status.startswith("unsupported"):
-            _MODEL_CACHE.put_model(model_name, model)  # pyright: ignore[reportArgumentType]
+            _MODEL_CACHE.put_model(model_name, model)
         return (float(memory_reduction), status)
 
     return quantize_model_wrapper(

@@ -6,7 +6,7 @@ import contextlib
 import logging
 import math
 from collections.abc import Callable, Iterable, Sequence
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
@@ -18,13 +18,16 @@ from gemma_4_sql.backends.common_inference import (
 from gemma_4_sql.backends.common_multimodal import prepare_multimodal_inputs
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
-from gemma_4_sql.exceptions import DependencyMissingError, InferenceError, StatusValue
+from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from gemma_4_sql.type_hints import (
     BackendKwargValue,
+    ForwardArg,
+    ForwardOutput,
     InferenceResultDict,
     NDArrayProtocol,
     TorchCausalLMProtocol,
     TorchTensorProtocol,
+    extract_status_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,15 +122,11 @@ class _PeftModelLoaderProtocol(Protocol):
 
 @runtime_checkable
 class _DeviceMovableTensorProtocol(TorchTensorProtocol, Protocol):
-    """Protocol for a PyTorch tensor supporting `.device`, `.to(device)`, and `.unsqueeze(dim)`."""
+    """Protocol for a PyTorch tensor supporting `.device` and `.unsqueeze(dim)`."""
 
     @property
     def device(self) -> str | int | None:
         """Provide the device where the tensor resides."""
-        ...
-
-    def to(self, device: str, /) -> _DeviceMovableTensorProtocol:
-        """Move tensor to `device`."""
         ...
 
     def unsqueeze(self, dim: int, /) -> _DeviceMovableTensorProtocol:
@@ -146,6 +145,39 @@ class _HFGenerateDictModelProtocol(TorchCausalLMProtocol, Protocol):
     ) -> _HFGenerateOutputProtocol:
         """Generate token sequences and return a structured `_HFGenerateOutputProtocol`."""
         ...
+
+
+@runtime_checkable
+class _NativeGenerateModelProtocol(Protocol):
+    """Protocol for a native PyTorch causal LM supporting `.generate(...)` and forward calls."""
+
+    def __call__(self, *args: ForwardArg, **kwargs: ForwardArg) -> ForwardOutput:
+        """Execute the forward pass of the PyTorch module."""
+        ...
+
+    def generate(
+        self,
+        input_ids: TorchTensorProtocol,
+        **kwargs: TorchTensorProtocol | int | bool | None,
+    ) -> TorchTensorProtocol:
+        """Generate token sequences autoregressively."""
+        ...
+
+
+def _is_native_generate_model(
+    model: TorchCausalLMProtocol,
+) -> TypeGuard[_NativeGenerateModelProtocol]:
+    """Narrow `model` to `_NativeGenerateModelProtocol`.
+
+    Args:
+        model: Target native PyTorch causal language model.
+
+    Returns:
+        `True` so `.generate(...)` can be invoked with multimodal kwargs.
+
+    """
+    _ = model
+    return True
 
 
 torch = optional_import("torch")
@@ -175,7 +207,7 @@ def _resolve_model_device(model: TorchCausalLMProtocol) -> str:
     """
     with contextlib.suppress(AttributeError, StopIteration, TypeError):
         first_param = next(iter(model.parameters()))
-        return str(first_param.device)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        return str(first_param.device)
     return "cpu"
 
 
@@ -278,8 +310,9 @@ def _run_generation(
         if audio_values is not None:
             gen_kwargs["audio_values"] = audio_values
 
+        assert _is_native_generate_model(model)
         with torch.no_grad():
-            output_ids = model.generate(input_ids, **gen_kwargs)  # pyright: ignore[reportAttributeAccessIssue,reportArgumentType]  # ty: ignore[unresolved-attribute]
+            output_ids = model.generate(input_ids, **gen_kwargs)
 
         assert isinstance(output_ids, TorchTensorProtocol)
         gen_tokens = output_ids[0][input_ids.shape[-1] :]
@@ -298,7 +331,9 @@ def _run_generation(
 
         with torch.no_grad():
             fwd_out = model(output_ids)
-            logits: TorchTensorProtocol = fwd_out[0] if isinstance(fwd_out, tuple) else fwd_out  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
+            raw_logits = fwd_out[0] if isinstance(fwd_out, tuple) else fwd_out
+            assert isinstance(raw_logits, TorchTensorProtocol)
+            logits: TorchTensorProtocol = raw_logits
             prompt_len = int(input_ids.shape[-1])
             step_logits = logits[0, prompt_len - 1 : -1, :]
             log_probs = torch.nn.functional.log_softmax(step_logits, dim=-1)
@@ -320,8 +355,8 @@ def _run_generation(
         factories=(tok_factory, model_factory, peft_factory),
     )
     cached_hf = _MODEL_CACHE.get_model(hf_cache_key)
-    if cached_hf is not None and cached_hf[1] is not None:
-        hf_model: _HFGenerateDictModelProtocol = cached_hf[0]  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
+    if cached_hf is not None and cached_hf[1] is not None and isinstance(cached_hf[0], _HFGenerateDictModelProtocol):
+        hf_model: _HFGenerateDictModelProtocol = cached_hf[0]
         hf_tokenizer = cached_hf[1]
     else:
         assert AutoTokenizer is not None
@@ -427,5 +462,5 @@ def generate_sql(
             **gen_kwargs,
         )
 
-    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    wrapper_kwargs = extract_status_kwargs(kwargs)
     return run_inference_wrapper(backend_alias, model_name, prompt, beam_width, _execute, **wrapper_kwargs)

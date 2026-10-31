@@ -7,17 +7,11 @@ from dataclasses import dataclass, field
 
 from gemma_4_sql.backends.common_gemma4_config import (
     DEFAULT_GRADIENT_CLIPPING,
-    GEMMA4_26B_A4B_SPEC,
-    GEMMA4_31B_SPEC,
     GEMMA4_ATTENTION_PATTERN,
-    GEMMA4_E2B_SPEC,
-    GEMMA4_E4B_SPEC,
-    GEMMA4_TINY_SPEC,
     AttentionType,
     BaseAudioConfigFields,
     BaseGemma4ConfigFields,
     BaseVisionConfigFields,
-    resolve_gemma4_preset_name,
 )
 from gemma_4_sql.type_hints import (
     JSONValue,
@@ -392,100 +386,3 @@ class Gemma4Config(BaseGemma4ConfigFields):
 
         self.audio_hidden_size = audio_hidden_size if audio_hidden_size is not None else self.audio_config.hidden_size
         self.extra_attributes = dict(kwargs)
-
-    @classmethod
-    def _from_spec(cls, spec: Mapping[str, int]) -> Gemma4Config:
-        """Instantiate a `Gemma4Config` from a preset specification mapping.
-
-        Args:
-            spec: Mapping of integer architectural hyperparameters.
-
-        Returns:
-            Configured `Gemma4Config` instance.
-
-        """
-        return cls(
-            vocab_size=spec.get("vocab_size", 262144),
-            hidden_size=spec.get("hidden_size", 2048),
-            intermediate_size=spec.get("intermediate_size", 8192),
-            moe_intermediate_size=spec.get("moe_intermediate_size"),
-            num_hidden_layers=spec.get("num_hidden_layers", 24),
-            num_attention_heads=spec.get("num_attention_heads", 8),
-            num_key_value_heads=spec.get("num_key_value_heads", 4),
-            head_dim=spec.get("head_dim", 256),
-            global_head_dim=spec.get("global_head_dim"),
-            num_experts=spec.get("num_experts", 1),
-            num_experts_per_tok=spec.get("num_experts_per_tok", 2),
-        )
-
-    @classmethod
-    def gemma4_e2b(cls) -> Gemma4Config:
-        """Return preset configuration for Gemma 4 E2B matching the JAX specification.
-
-        Returns:
-            Configured `Gemma4Config` for E2B.
-
-        """
-        return cls._from_spec(GEMMA4_E2B_SPEC)
-
-    @classmethod
-    def gemma4_e4b(cls) -> Gemma4Config:
-        """Return preset configuration for Gemma 4 E4B matching the JAX specification.
-
-        Returns:
-            Configured `Gemma4Config` for E4B.
-
-        """
-        return cls._from_spec(GEMMA4_E4B_SPEC)
-
-    @classmethod
-    def gemma4_26b_a4b(cls) -> Gemma4Config:
-        """Return preset configuration for Gemma 4 26B-A4B (MoE) matching the JAX specification.
-
-        Returns:
-            Configured `Gemma4Config` for 26B-A4B.
-
-        """
-        return cls._from_spec(GEMMA4_26B_A4B_SPEC)
-
-    @classmethod
-    def gemma4_31b(cls) -> Gemma4Config:
-        """Return preset configuration for Gemma 4 31B matching the JAX specification.
-
-        Returns:
-            Configured `Gemma4Config` for 31B.
-
-        """
-        return cls._from_spec(GEMMA4_31B_SPEC)
-
-    @classmethod
-    def gemma4_tiny(cls) -> Gemma4Config:
-        """Return miniature preset configuration for Gemma 4 Tiny.
-
-        Returns:
-            Configured `Gemma4Config` for Tiny.
-
-        """
-        return cls._from_spec(GEMMA4_TINY_SPEC)
-
-    @classmethod
-    def from_preset(cls, model_name: str) -> Gemma4Config:
-        """Resolve a `Gemma4Config` preset from a model identifier string.
-
-        Args:
-            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`, `'gemma-4-26B-A4B'`, `'gemma-4-31B'`, `'gemma-4-tiny'`).
-
-        Returns:
-            Matching `Gemma4Config` preset instance.
-
-        """
-        key = resolve_gemma4_preset_name(model_name)
-        if key == "tiny":
-            return cls.gemma4_tiny()
-        if key == "31b":
-            return cls.gemma4_31b()
-        if key == "26b_a4b":
-            return cls.gemma4_26b_a4b()
-        if key == "e4b":
-            return cls.gemma4_e4b()
-        return cls.gemma4_e2b()

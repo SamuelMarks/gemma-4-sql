@@ -179,7 +179,7 @@ def test_sql_tokenizer_get_vocab() -> None:
 
 
 def test_sql_tokenizer_lazy_getattr(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test tokenizer init when AutoTokenizer is None and resolved via getattr.
+    """Test tokenizer init when AutoTokenizer is None and resolved via `get_auto_tokenizer_class()`.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
@@ -191,6 +191,9 @@ def test_sql_tokenizer_lazy_getattr(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tok_mod._transformers_mod, "AutoTokenizer", MockAutoTokenizer, raising=False)
     tok = tok_mod.SQLTokenizer(model_name="dummy")
     assert tok.hf_tokenizer is not None
+
+    monkeypatch.setattr(tok_mod, "_transformers_mod", None)
+    assert tok_mod.get_auto_tokenizer_class() is not None
 
 
 def test_sql_tokenizer_empty_and_special_sql_chars() -> None:

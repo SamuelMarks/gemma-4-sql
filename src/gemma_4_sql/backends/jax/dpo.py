@@ -22,8 +22,8 @@ from gemma_4_sql.backends.common_dpo import (
 from gemma_4_sql.backends.common_inference import call_jax_causal_lm
 from gemma_4_sql.backends.common_train import (
     NNXOptimizerProtocol,
-    create_nnx_optimizer,
     generic_run_training_epochs,
+    resolve_training_dataloader,
 )
 from gemma_4_sql.backends.common_train import (
     apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
@@ -67,8 +67,7 @@ def _create_nnx_optimizer[ModelT: nnx.Module](
         Configured `nnx.Optimizer` instance.
 
     """
-    res: nnx.Optimizer[ModelT] = create_nnx_optimizer(nnx, model, tx)  # pyright: ignore[reportAssignmentType]
-    return res
+    return nnx.Optimizer(model, tx, wrt=nnx.Param)
 
 
 def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
@@ -96,7 +95,7 @@ def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
     """
     if jnp is None or jnn is None:
         raise DependencyMissingError("JAX DPO dependencies are missing.", backend="jax")
-    return generic_dpo_loss(  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type]
+    return generic_dpo_loss(
         policy_chosen_logps,
         policy_rejected_logps,
         ref_chosen_logps,
@@ -111,7 +110,7 @@ def _compute_logps(
     inputs: Array,
     labels: Array,
 ) -> Array:
-    """Compute sequence log probabilities for DPO using token-level log-softmax.
+    """Compute per-sequence summed token log-probabilities for a batch of inputs and labels.
 
     Args:
         model: Policy or reference model callable.
@@ -124,7 +123,9 @@ def _compute_logps(
     """
     seq_len = inputs.shape[1] if len(inputs.shape) > 1 else 1
     positions = jnp.arange(seq_len)[None, :]
-    logits: Array = call_jax_causal_lm(model, inputs, positions)  # pyright: ignore[reportArgumentType,reportAssignmentType]  # ty: ignore[invalid-assignment]
+    raw_out = call_jax_causal_lm(model, inputs, positions)
+    first_out = raw_out[0] if isinstance(raw_out, tuple) else raw_out
+    logits: Array = first_out if isinstance(first_out, Array) else jnp.asarray(first_out)
     res: Array = gather_jax_sequence_logps(jnn, jnp, logits, labels)
     return res
 
@@ -283,7 +284,7 @@ def _execute_dpo(
         ValueError: If dataloader is invalid.
 
     """
-    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:  # pyright: ignore[reportUnnecessaryComparison]
+    if jax is None or jnp is None or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
         raise DependencyMissingError("JAX dependencies are missing for DPO.")
 
     resolved_cfg = _resolve_gemma4_config(model_name)
@@ -291,12 +292,18 @@ def _execute_dpo(
     ref_model = Gemma4ForCausalLM(resolved_cfg, rngs=nnx.Rngs(1))
     optimizer = _create_nnx_optimizer(policy_model, optax.adamw(learning_rate))
     train_step = _get_train_step_fn(beta)
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
-    dataloader = data_dict.get("loader", None)
-    has_loader = isinstance(dataloader, Iterable)
-
-    if not has_loader:
-        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+    dataloader, _ = resolve_training_dataloader(
+        dataset,
+        lambda: build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size)),
+        lambda: [
+            {
+                "chosen_inputs": jnp.array([[1, 2, 3]], dtype=jnp.int32),
+                "chosen_labels": jnp.array([[2, 3, 4]], dtype=jnp.int32),
+                "rejected_inputs": jnp.array([[1, 5, 6]], dtype=jnp.int32),
+                "rejected_labels": jnp.array([[5, 6, 7]], dtype=jnp.int32),
+            }
+        ],
+    )
 
     final_loss = _run_training_epochs(
         DPOLoopState(
@@ -327,7 +334,7 @@ def run_dpo(config: DPOConfig, **kwargs: StatusValue) -> DPOResultDict:
         TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
-    if jax is None or jnp is None or jnn is None or optax is None or Gemma4ForCausalLM is None:  # pyright: ignore[reportUnnecessaryComparison]
+    if jax is None or jnp is None or jnn is None or optax is None or not callable(Gemma4ForCausalLM):
         raise DependencyMissingError("JAX DPO dependencies are missing.", backend="jax")
 
     return run_dpo_wrapper(

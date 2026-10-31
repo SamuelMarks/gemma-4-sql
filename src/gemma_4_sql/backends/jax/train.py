@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Iterable, Mapping
-from typing import Protocol, SupportsFloat, runtime_checkable
+from collections.abc import Callable, Iterable, Mapping, MutableMapping
+from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
 
 import jax
 import jax.numpy as jnp
@@ -16,8 +16,8 @@ from gemma_4_sql.backends.common_dpo import ScalarItemProtocol
 from gemma_4_sql.backends.common_inference import call_jax_causal_lm
 from gemma_4_sql.backends.common_train import (
     NNXOptimizerProtocol,
-    create_nnx_optimizer,
     generic_run_training_epochs,
+    resolve_training_dataloader,
     run_train_wrapper,
 )
 from gemma_4_sql.backends.common_train import (
@@ -28,10 +28,24 @@ from gemma_4_sql.backends.jax.gemma4.config import ModelConfig, resolve_gemma4_c
 from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM
 from gemma_4_sql.backends.jax.inference import MODEL_CACHE as _MODEL_CACHE
 from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
-from gemma_4_sql.type_hints import ETLConfig, JaxCausalLMProtocol, TrainingConfig, TrainingLoopState, TrainResultDict
+from gemma_4_sql.type_hints import (
+    ETLConfig,
+    JaxCausalLMProtocol,
+    JaxShardingProtocol,
+    TrainingConfig,
+    TrainingLoopState,
+    TrainResultDict,
+)
 
 Gemma4Config = ModelConfig
 type JaxTrainStepFn = Callable[..., Array | ScalarItemProtocol | SupportsFloat | float]
+
+
+def _is_mutable_batch[BatchValT](
+    batch: Mapping[str, BatchValT] | None,
+) -> TypeGuard[MutableMapping[str, BatchValT]]:
+    """Narrow `batch` mapping to `MutableMapping` for in-place sharded tensor updates."""
+    return batch is not None
 
 
 @runtime_checkable
@@ -47,10 +61,10 @@ class _NNXValueAndGradModuleProtocol(Protocol):
         ...
 
 
-def _create_nnx_optimizer(
-    model: JaxCausalLMProtocol | Gemma4ForCausalLM | nnx.Module,
+def _create_nnx_optimizer[ModelT: JaxCausalLMProtocol | Gemma4ForCausalLM | nnx.Module](
+    model: ModelT,
     tx: optax.GradientTransformation,
-) -> nnx.Optimizer[nnx.Module]:
+) -> nnx.Optimizer[ModelT]:
     """Create a Flax NNX Optimizer (`nnx.Optimizer(model, tx, wrt=nnx.Param)`).
 
     Args:
@@ -61,8 +75,8 @@ def _create_nnx_optimizer(
         Configured `nnx.Optimizer` instance.
 
     """
-    res: nnx.Optimizer[nnx.Module] = create_nnx_optimizer(nnx, model, tx)  # pyright: ignore[reportAssignmentType]
-    return res
+    opt_cls: Callable[..., nnx.Optimizer[ModelT]] = nnx.Optimizer
+    return opt_cls(model, tx, wrt=nnx.Param)
 
 
 def _loss_fn(
@@ -82,7 +96,9 @@ def _loss_fn(
     inputs = batch["inputs"]
     seq_len = inputs.shape[1] if len(inputs.shape) > 1 else 1
     positions = jnp.arange(seq_len)[None, :]
-    logits: Array = call_jax_causal_lm(model, inputs, positions)  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
+    raw_out = call_jax_causal_lm(model, inputs, positions)
+    first_out = raw_out[0] if isinstance(raw_out, tuple) else raw_out
+    logits: Array = first_out if isinstance(first_out, Array) else jnp.asarray(first_out)
     targets = batch["targets"]
     loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
     res: Array = jnp.mean(loss)
@@ -156,12 +172,14 @@ def _run_training_epochs[ModelT, OptT, BatchValT](
             Scalar batch loss as a float.
 
         """
+        device_put_fn: Callable[[BatchValT, str | Mapping[str, str] | JaxShardingProtocol | None], BatchValT] = jax.device_put
         mutable_batch = dict(batch)
-        mutable_batch["inputs"] = jax.device_put(mutable_batch["inputs"], sharding)  # pyright: ignore[reportArgumentType]
-        mutable_batch["targets"] = jax.device_put(mutable_batch["targets"], sharding)  # pyright: ignore[reportArgumentType]
+        mutable_batch["inputs"] = device_put_fn(mutable_batch["inputs"], sharding)
+        mutable_batch["targets"] = device_put_fn(mutable_batch["targets"], sharding)
         with contextlib.suppress(TypeError):
-            batch["inputs"] = mutable_batch["inputs"]  # pyright: ignore[reportIndexIssue]  # ty: ignore[invalid-assignment]
-            batch["targets"] = mutable_batch["targets"]  # pyright: ignore[reportIndexIssue]  # ty: ignore[invalid-assignment]
+            assert _is_mutable_batch(batch)
+            batch["inputs"] = mutable_batch["inputs"]
+            batch["targets"] = mutable_batch["targets"]
         assert train_step is not None
         loss = train_step(model, state.optimizer, mutable_batch)
         if isinstance(loss, ScalarItemProtocol):
@@ -210,7 +228,7 @@ def _execute_train(
         ValueError: If dataloader is invalid.
 
     """
-    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:  # pyright: ignore[reportUnnecessaryComparison]
+    if jax is None or jnp is None or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
         raise DependencyMissingError("JAX dependencies are missing for training.")
 
     cached_model = _MODEL_CACHE.get_model(model_name)
@@ -230,12 +248,11 @@ def _execute_train(
     )
     optimizer = _create_nnx_optimizer(model, tx)
     train_step = _get_train_step_fn()
-    data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
-    dataloader = data_dict.get("loader", None)
-    has_loader = isinstance(dataloader, Iterable)
-
-    if not has_loader:
-        raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+    dataloader, _ = resolve_training_dataloader(
+        dataset,
+        lambda: build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size)),
+        lambda: [{"inputs": jnp.array([[1, 2, 3, 4]], dtype=jnp.int32), "targets": jnp.array([[2, 3, 4, 5]], dtype=jnp.int32)}],
+    )
 
     final_loss = _run_training_epochs(
         TrainingLoopState(
@@ -266,7 +283,7 @@ def train_model(config: TrainingConfig, **kwargs: StatusValue) -> TrainResultDic
         TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
-    if jax is None or jnp is None or optax is None or Gemma4ForCausalLM is None or nnx is None:  # pyright: ignore[reportUnnecessaryComparison]
+    if jax is None or jnp is None or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
         raise DependencyMissingError("JAX dependencies are missing for training.", backend="jax")
 
     model_name = config.model_name

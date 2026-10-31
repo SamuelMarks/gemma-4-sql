@@ -44,6 +44,22 @@ AutoTokenizer: AutoTokenizerClassProtocol | Callable[..., HFTokenizerProtocol] |
 )
 
 
+def get_auto_tokenizer_class() -> AutoTokenizerClassProtocol | Callable[..., HFTokenizerProtocol] | None:
+    """Resolve the Hugging Face `AutoTokenizer` class from module state or lazy loader.
+
+    Returns:
+        `AutoTokenizerClassProtocol` implementation or `None` if `transformers` is unavailable.
+
+    """
+    if AutoTokenizer is not None:
+        return AutoTokenizer
+    if _transformers_mod is not None:
+        with contextlib.suppress(AttributeError):
+            resolved: AutoTokenizerClassProtocol | Callable[..., HFTokenizerProtocol] | None = _transformers_mod.AutoTokenizer
+            return resolved
+    return optional_attr("transformers", "AutoTokenizer", AutoTokenizerClassProtocol)
+
+
 class ByteFallbackTokenizer:
     """Deterministic, reversible UTF-8 byte-level fallback tokenizer implementing `TokenizerProtocol`.
 
@@ -261,10 +277,7 @@ class SQLTokenizer:
             Loaded Hugging Face tokenizer instance or `None` if unavailable.
 
         """
-        tok_cls = AutoTokenizer
-        if tok_cls is None and _transformers_mod is not None:
-            with contextlib.suppress(AttributeError):
-                tok_cls = _transformers_mod.AutoTokenizer
+        tok_cls = get_auto_tokenizer_class()
         if not self.model_name or tok_cls is None or not isinstance(tok_cls, AutoTokenizerClassProtocol):
             return None
         try:
@@ -286,11 +299,11 @@ class SQLTokenizer:
         return self.byte_fallback.get_vocab()
 
     @overload
-    def encode(self, text: str) -> list[int]:  # noqa: D418
+    def encode(self, text: str) -> list[int]:
         """Encode a single string into a list of integer token IDs."""
 
     @overload
-    def encode(self, text: list[str] | tuple[str, ...]) -> list[list[int]]:  # noqa: D418
+    def encode(self, text: list[str] | tuple[str, ...]) -> list[list[int]]:
         """Encode a sequence of strings into a list of integer token ID lists."""
 
     def encode(self, text: str | Sequence[str]) -> list[int] | list[list[int]]:
@@ -336,4 +349,4 @@ class SQLTokenizer:
         return self.byte_fallback.decode_tokens(tokens)
 
 
-__all__ = ["AutoTokenizerClassProtocol", "ByteFallbackTokenizer", "SQLTokenizer"]
+__all__ = ["AutoTokenizerClassProtocol", "ByteFallbackTokenizer", "SQLTokenizer", "get_auto_tokenizer_class"]

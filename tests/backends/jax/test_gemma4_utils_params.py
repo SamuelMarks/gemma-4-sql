@@ -224,8 +224,12 @@ def test_load_safetensors_and_populate_state(monkeypatch: pytest.MonkeyPatch, tm
         ) -> None:
             """Exit context."""
 
+    def _fake_map_key(_m: dict[str, KeyMapType], k: str) -> tuple[str | None, None]:
+        """Map layer keys to transformer.layer.0."""
+        return ("transformer.layer.0" if "layers" in k else None, None)
+
     monkeypatch.setattr(up, "safe_open", MockSafeOpenOk)
-    monkeypatch.setattr(up, "map_to_jax_key", lambda _m, k: ("transformer.layer.0" if "layers" in k else None, None))  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(up, "map_to_jax_key", _fake_map_key)
     mock_assign = MagicMock()
     monkeypatch.setattr(up, "assign_weights", mock_assign)
     up._load_weights_from_safetensors_file("file", {}, {"r": ("a", None)})
@@ -248,7 +252,14 @@ def test_create_model_from_safe_tensors_flows(monkeypatch: pytest.MonkeyPatch, t
     model, _ = _get_model_and_state(mock_model_cls, "cfg")
     assert model is not None
 
-    monkeypatch.setattr(up.nnx, "split", lambda *_a: ("graph", {"k": "v"}))  # pyright: ignore[reportUnknownLambdaType]
+    def _fake_split(*_a: MagicMock) -> tuple[str, dict[str, str]]:
+        """Return graph and state dict."""
+        return ("graph", {"k": "v"})
+
+    def _noop_populate(*_a: str | StateNode | dict[str, KeyMapType]) -> None:
+        """No-op populate state."""
+
+    monkeypatch.setattr(up.nnx, "split", _fake_split)
     _, state2 = _get_model_and_state(mock_model_cls, "cfg")
     assert state2 == {"k": "v"}
 
@@ -260,7 +271,7 @@ def test_create_model_from_safe_tensors_flows(monkeypatch: pytest.MonkeyPatch, t
     assert res_no_st is not None
 
     monkeypatch.setattr(up, "safe_open", MagicMock())
-    monkeypatch.setattr(up, "_populate_state_from_files", lambda *_a: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(up, "_populate_state_from_files", _noop_populate)
     monkeypatch.setattr(up.nnx, "update", MagicMock(side_effect=ValueError("simulated error updating state")))
 
     create_model_from_safe_tensors(str(tmp_path), mock_model_cls, "cfg", {}, strict=False)

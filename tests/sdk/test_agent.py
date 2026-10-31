@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,6 +16,16 @@ from gemma_4_sql.sdk.agent import (
     run_agentic_loop_async,
 )
 from gemma_4_sql.type_hints import AgentResultDict, InferenceResultDict, JSONValue
+
+
+def _make_backend_getter(mock_b: MagicMock) -> Callable[[str], MagicMock]:
+    """Create a typed `get_backend` replacement returning `mock_b`."""
+
+    def _get(_name: str) -> MagicMock:
+        """Return `mock_b`."""
+        return mock_b
+
+    return _get
 
 
 def test_extract_sql_from_response() -> None:
@@ -76,7 +87,7 @@ SELECT name FROM users WHERE age > 30;
 
     mock_backend = MagicMock()
     mock_backend.generate_sql.side_effect = mock_generate
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=3)
     res = run_agentic_loop("google/gemma-4-2b", "Find users older than 30", backend=backend, context=ctx)
@@ -102,7 +113,7 @@ def test_agentic_loop_self_correction_exhaustion(monkeypatch: pytest.MonkeyPatch
 
     mock_backend = MagicMock()
     mock_backend.generate_sql.return_value = {"sql": "SELECT invalid_col FROM users;", "status": "success"}
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=2)
     res = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
@@ -123,7 +134,7 @@ def test_agentic_loop_confidence_rejection(monkeypatch: pytest.MonkeyPatch) -> N
         "status": "success",
         "confidence_score": 0.4,
     }
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=2, min_confidence=0.8)
     res = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
@@ -143,7 +154,7 @@ def test_agentic_loop_confidence_passes(monkeypatch: pytest.MonkeyPatch) -> None
         "status": "success",
         "confidence_score": 0.9,
     }
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=2, min_confidence=0.8)
     res = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
@@ -163,7 +174,7 @@ async def test_agentic_loop_async_and_batch(monkeypatch: pytest.MonkeyPatch) -> 
         "status": "success",
         "confidence_score": 0.9,
     }
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", lambda _b: mock_backend)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=1)
     prompts = ["Get users", "Count users"]
@@ -209,7 +220,7 @@ def test_agent_multimodal_and_running_loop(monkeypatch: pytest.MonkeyPatch) -> N
 
     mock_b = MagicMock()
     mock_b.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 0.9, "status": "ok"}
-    monkeypatch.setattr(ag, "get_backend", lambda *_a: mock_b)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(ag, "get_backend", _make_backend_getter(mock_b))
 
     context = ag.AgentContext(
         ddl="CREATE TABLE t(id int)",

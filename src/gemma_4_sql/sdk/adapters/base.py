@@ -86,6 +86,7 @@ class DatabaseAdapter[
 
         """
 
+    @abc.abstractmethod
     async def connect_async(self) -> AsyncConnT:
         """Connect asynchronously to the underlying database.
 
@@ -93,8 +94,6 @@ class DatabaseAdapter[
             The active asynchronous database connection object.
 
         """
-        res: AsyncConnT = await asyncio.to_thread(self.connect)  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
-        return res
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL statements to initialize the database schema.
@@ -171,9 +170,9 @@ class DatabaseAdapter[
         """
         try:
             try:
-                cursor = self.conn.cursor()  # pyright: ignore[reportAttributeAccessIssue]
+                cursor = self.conn.cursor()
             except AttributeError:
-                raw_rows = self.conn.execute(query, params or ()).fetchall()  # pyright: ignore[reportAttributeAccessIssue]
+                raw_rows = self.conn.execute(query, params or ()).fetchall()
                 return [tuple(r) for r in raw_rows]
             cursor.execute(query, params or ())
             desc = None
@@ -225,7 +224,7 @@ class DatabaseAdapter[
             return
         res = None
         with contextlib.suppress(AttributeError):
-            res = cached_conn.close()  # pyright: ignore[reportAttributeAccessIssue]
+            res = cached_conn.close()
         if asyncio.iscoroutine(res):
             try:
                 loop = asyncio.get_running_loop()
@@ -243,7 +242,7 @@ class DatabaseAdapter[
         self._schedule_or_run_async_close(cached)
         if self._owns_connection:
             with contextlib.suppress(AttributeError):
-                self.conn.close()  # pyright: ignore[reportAttributeAccessIssue]
+                self.conn.close()
 
     async def close_async(self) -> None:
         """Asynchronously close any cached async connection, pending close tasks, and underlying connection."""
@@ -252,7 +251,7 @@ class DatabaseAdapter[
         self._async_conn = None
         if cached is not None:
             with contextlib.suppress(AttributeError):
-                res = cached.close()  # pyright: ignore[reportAttributeAccessIssue]
+                res = cached.close()
                 if asyncio.iscoroutine(res):
                     await res
         self.close()

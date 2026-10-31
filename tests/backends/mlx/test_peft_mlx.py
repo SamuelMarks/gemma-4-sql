@@ -149,7 +149,8 @@ def test_inject_lora_and_model_adapter_persistence(tmp_path: Path) -> None:
 
     model.attn.q_proj.lora_b = mx.zeros((2, 4))
     load_adapter_weights(model, expected_file)
-    assert bool(mx.allclose(model.attn.q_proj.lora_b, mx.ones((2, 4)) * 0.5).item())
+    restored_b = mx.array(model.attn.q_proj.lora_b)
+    assert bool(mx.allclose(restored_b, mx.ones((2, 4)) * 0.5).item())
 
     with pytest.raises(FileNotFoundError):
         load_adapter_weights(model, tmp_path / "nonexistent.safetensors")
@@ -212,7 +213,12 @@ def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, t
 
     # Test apply_lora loading from mlx_lm.load and error handling
     toy_mod = nn.Linear(4, 4)
-    monkeypatch.setattr(peft_module, "load", lambda _name: (toy_mod, None))  # pyright: ignore[reportUnknownLambdaType]
+
+    def _load_toy(_name: str) -> tuple[nn.Linear, None]:
+        """Return `(toy_mod, None)`."""
+        return (toy_mod, None)
+
+    monkeypatch.setattr(peft_module, "load", _load_toy)
     res = peft_module.apply_lora("model", ["weight"], lora_r=2)
     assert res["status"] == "completed"
 

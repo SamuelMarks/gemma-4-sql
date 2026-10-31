@@ -132,7 +132,7 @@ def test_inject_and_merge_lora_on_model() -> None:
 
     adapted_model, count = inject_lora(model, target_modules=["q_proj", "v_proj"], lora_r=2, lora_alpha=4.0, lora_dropout=0.0)
     assert count == 2
-    adapter = get_keras_lora_adapter(adapted_model)  # ty: ignore[invalid-argument-type]
+    adapter = get_keras_lora_adapter(adapted_model)
     assert adapter is not None
     assert len(adapter.layers) == 2
     assert k_layer.trainable is False
@@ -219,7 +219,16 @@ def test_apply_lora_backbone_and_custom_model(monkeypatch: pytest.MonkeyPatch) -
 
     mock_cls = MagicMock()
     mock_cls.from_preset.return_value = mock_gemma
-    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.optional_attr", lambda *_a: mock_cls)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _return_mock_cls(*_a: str, **_k: str) -> MagicMock:
+        """Return `mock_cls`."""
+        return mock_cls
+
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
+    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.optional_attr", _return_mock_cls)
 
     res_bb = apply_lora("gemma-preset", ["v_proj"], lora_r=4)
     assert res_bb["status"] == "completed"
@@ -232,7 +241,7 @@ def test_apply_lora_backbone_and_custom_model(monkeypatch: pytest.MonkeyPatch) -
     assert res_bb_empty["injected_modules"] == 2
 
     # When GemmaCausalLM is not available and no model is passed
-    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.optional_attr", lambda *_a: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.optional_attr", _none_attr)
     res_fail = apply_lora("gemma-preset", ["q_proj"])
     assert "failed:" in res_fail["status"]
 

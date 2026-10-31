@@ -162,6 +162,10 @@ def validate_readonly_sql(query: str, *, read_only: bool = True) -> None:
             msg = f"Safety Violation: Mutating statements ({word}) are not allowed in read-only mode."
             raise SQLSafetyViolationError(msg)
 
+    if re.search(r"\bSELECT\b[\s\S]*?\bINTO\s+(?:TEMP\s+|TEMPORARY\s+|UNLOGGED\s+)?(?:TABLE\s+)?[A-Za-z_]", cleaned.upper()):
+        msg = "Safety Violation: Mutating statements (SELECT INTO) are not allowed in read-only mode."
+        raise SQLSafetyViolationError(msg)
+
 
 def extract_word_tokens(text: str) -> list[str]:
     """Extract lowercased alphanumeric word tokens from a prompt or SQL fragment.

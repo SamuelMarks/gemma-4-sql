@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.lazy_loader import LazyLoader
@@ -35,6 +35,26 @@ class DuckDBCursorProtocol(Protocol):
     def fetchall(self) -> Sequence[Sequence[JSONPrimitive]]:
         """Fetch all result rows."""
         ...
+
+
+@runtime_checkable
+class DuckDBUDFConnProtocol(DuckDBCursorProtocol, Protocol):
+    """Protocol for DuckDB connections supporting `.cursor()` and `.create_function(...)`."""
+
+    def cursor(self) -> DuckDBCursorProtocol:
+        """Return a duplicate DuckDB cursor."""
+        ...
+
+    def create_function(
+        self,
+        name: str,
+        function: Callable[..., str],
+    ) -> DuckDBCursorProtocol | None:
+        """Register a Python scalar UDF with DuckDB."""
+        ...
+
+
+type DuckDBEmbeddableConnection = DuckDBConnectionProtocol | DuckDBUDFConnProtocol
 
 
 def _extract_duckdb_ddl(cur: DuckDBCursorProtocol | DatabaseConnectionProtocol | CursorProtocol) -> str:
@@ -79,7 +99,7 @@ def _extract_duckdb_ddl(cur: DuckDBCursorProtocol | DatabaseConnectionProtocol |
 
 
 def embed_in_duckdb(
-    conn: DuckDBConnectionProtocol | DatabaseConnectionProtocol | DuckDBCursorProtocol,
+    conn: DuckDBEmbeddableConnection,
     model_name: str,
     backend: str = "jax",
     db_path: str = ":memory:",
@@ -123,9 +143,9 @@ def embed_in_duckdb(
         """
         nonlocal cached_ddl
         try:
-            cur: DatabaseConnectionProtocol | DuckDBCursorProtocol | CursorProtocol = duck_conn
+            cur: DuckDBEmbeddableConnection | DatabaseConnectionProtocol | DuckDBCursorProtocol | CursorProtocol = duck_conn
             with contextlib.suppress(AttributeError, TypeError):
-                cur = duck_conn.cursor()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                cur = duck_conn.cursor()
             if cached_ddl is None:
                 cached_ddl = _extract_duckdb_ddl(cur)
             augmented_prompt = build_rag_prompt(prompt, cached_ddl) if cached_ddl else prompt
@@ -151,7 +171,7 @@ def embed_in_duckdb(
                 "success": False,
             })
 
-    duck_conn.create_function("ask_gemma", ask_gemma, [str], str)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+    duck_conn.create_function("ask_gemma", ask_gemma)
 
 
 __all__ = ["DuckDBConnectionProtocol", "DuckDBCursorProtocol", "embed_in_duckdb"]

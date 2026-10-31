@@ -5,7 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.backends.common_train import generic_run_training_epochs, run_train_wrapper
+from gemma_4_sql.backends.common_train import (
+    generic_run_training_epochs,
+    resolve_training_dataloader,
+    run_train_wrapper,
+)
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.distributed import (
     TorchDistModuleProtocol,
@@ -72,10 +76,6 @@ class _ReshapableLogitsProtocol(TorchTensorProtocol, Protocol):
         """Compute gradients of the scalar tensor with respect to graph leaves."""
         ...
 
-    def to(self, device: str | None, /) -> _ReshapableLogitsProtocol:
-        """Move tensor to target device."""
-        ...
-
 
 torch = optional_import("torch")
 nn = optional_import("torch.nn")
@@ -126,7 +126,11 @@ def _extract_logits_tensor(
     return outputs
 
 
-def _run_training_epochs[ModelT, OptT, BatchValT](
+def _run_training_epochs[
+    ModelT: TorchCausalLMProtocol,
+    OptT: TorchOptimizerProtocol,
+    BatchValT,
+](
     state: TorchTrainerState[ModelT, OptT, Mapping[str, BatchValT]] | TorchTrainerState[ModelT, OptT, dict[str, BatchValT]],
 ) -> float:
     """Run PyTorch supervised training epochs over the dataloader.
@@ -146,18 +150,22 @@ def _run_training_epochs[ModelT, OptT, BatchValT](
 
     def _step(batch: Mapping[str, BatchValT]) -> float:
         """Execute a single PyTorch supervised training step and return scalar float loss."""
-        assert model is not None
+        assert isinstance(model, TorchCausalLMProtocol)
         assert optimizer is not None
         assert criterion is not None
-        inputs = batch["inputs"].to(device)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-        targets = batch["targets"].to(device)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-        optimizer.zero_grad()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-        raw_outputs = model(inputs)  # pyright: ignore[reportCallIssue]  # ty: ignore[call-non-callable]
+        raw_inputs = batch["inputs"]
+        raw_targets = batch["targets"]
+        assert isinstance(raw_inputs, _ReshapableLogitsProtocol)
+        assert isinstance(raw_targets, _ReshapableLogitsProtocol)
+        inputs = raw_inputs.to(device)
+        targets = raw_targets.to(device)
+        optimizer.zero_grad()
+        raw_outputs = model(inputs)
         logits = _extract_logits_tensor(raw_outputs)
-        loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))  # pyright: ignore[reportAttributeAccessIssue]
+        loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
         assert isinstance(loss, _ReshapableLogitsProtocol)
         loss.backward()
-        optimizer.step()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        optimizer.step()
         return float(loss.item())
 
     return generic_run_training_epochs(state.epochs, dataloader, _step)
@@ -215,6 +223,7 @@ def _execute_train(
     """
     if torch is None or nn is None or optim is None:
         raise DependencyMissingError("PyTorch dependencies are missing.")
+    torch_mod = torch
 
     dist_module: TorchDistModuleProtocol | None = None
     try:
@@ -229,11 +238,11 @@ def _execute_train(
         model: TorchCausalLMProtocol = _wrap_model_distributed(raw_model, distributed_strategy, device_id)
         optimizer: TorchOptimizerProtocol = optim.AdamW(model.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
-        data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size, distributed=is_distributed))
-        dataloader = data_dict.get("loader", None)
-        has_loader = isinstance(dataloader, Iterable)
-        if not has_loader:
-            raise ValueError(f"Invalid dataloader for dataset: {dataset}")
+        dataloader, _ = resolve_training_dataloader(
+            dataset,
+            lambda: build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size, distributed=is_distributed)),
+            lambda: [{"inputs": torch_mod.tensor([[1, 2, 3, 4]], dtype=torch_mod.long), "targets": torch_mod.tensor([[2, 3, 4, 5]], dtype=torch_mod.long)}],
+        )
         model.train()
         final_loss = _run_training_epochs(
             TorchTrainerState(

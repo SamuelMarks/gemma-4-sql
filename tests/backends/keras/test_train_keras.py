@@ -11,16 +11,17 @@ from typing import NoReturn
 
 import keras
 import pytest
+import torch
 from keras import ops
 
 import gemma_4_sql.backends.keras.train as tr
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import TensorProtocol, TrainingConfig
+from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
 from tests.conftest import requires_keras
 
 pytestmark = requires_keras
 
-type IntBatch = dict[str, TensorProtocol] | tuple[TensorProtocol, TensorProtocol]
+type IntBatch = dict[str, torch.Tensor] | tuple[torch.Tensor, torch.Tensor]
 
 
 def _make_tiny_keras_model() -> keras.Model:
@@ -71,11 +72,12 @@ def real_keras_env(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
 
         @staticmethod
         def constant(
-            val: TensorProtocol | list[int] | int,
+            val: torch.Tensor | list[int] | list[list[int]] | int,
             dtype: str = "int32",
-        ) -> TensorProtocol:
-            """Convert array-like to Keras tensor with requested dtype."""
-            return ops.convert_to_tensor(val, dtype=dtype)  # pyright: ignore[reportReturnType]
+        ) -> torch.Tensor:
+            """Convert array-like to int32 tensor."""
+            _ = dtype
+            return torch.as_tensor(val, dtype=torch.int32)
 
     monkeypatch.setattr(tr, "keras", keras)
     monkeypatch.setattr(tr, "tf", _TFNamespace)
@@ -130,8 +132,8 @@ def test_execute_train_success_real_keras_model(
     tiny_model = _make_tiny_keras_model()
     w_before = ops.copy(ops.stop_gradient(tiny_model.layers[-1].weights[0]))
 
-    x_batch: TensorProtocol = ops.convert_to_tensor([[1, 2, 3, 4], [2, 3, 4, 5]], dtype="int32")  # pyright: ignore[reportAssignmentType]
-    y_batch: TensorProtocol = ops.convert_to_tensor([[2, 3, 4, 5], [3, 4, 5, 6]], dtype="int32")  # pyright: ignore[reportAssignmentType]
+    x_batch = torch.tensor([[1, 2, 3, 4], [2, 3, 4, 5]], dtype=torch.int32)
+    y_batch = torch.tensor([[2, 3, 4, 5], [3, 4, 5, 6]], dtype=torch.int32)
     yielded_batches = 0
 
     def _batch_gen() -> Iterator[IntBatch]:
@@ -142,7 +144,11 @@ def test_execute_train_success_real_keras_model(
         yielded_batches += 1
         yield (x_batch, y_batch)
 
-    monkeypatch.setattr(tr, "build_dataloader", lambda *_a, **_k: {"loader": _batch_gen()})  # pyright: ignore[reportUnknownLambdaType]
+    def _build_gen_loader(*_a: ETLConfig) -> dict[str, Iterator[IntBatch]]:
+        """Return generator loader dict."""
+        return {"loader": _batch_gen()}
+
+    monkeypatch.setattr(tr, "build_dataloader", _build_gen_loader)
 
     class RealGemmaCls:
         """GemmaCausalLM provider returning the real tiny keras.Model."""
@@ -173,13 +179,31 @@ def test_execute_train_no_loss(
     """Verify _execute_train defaults final_loss to 0.0 when history.history lacks 'loss'."""
     _ = real_keras_env
     tiny_model = _make_tiny_keras_model()
-    monkeypatch.setattr(tiny_model, "fit", lambda *_a, **_k: type("EmptyHistory", (), {"history": {}})())  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(tr, "build_dataloader", lambda *_a, **_k: {"loader": [(1, 2)]})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(
-        tr,
-        "GemmaCausalLM",
-        type("GemmaCls", (), {"from_preset": classmethod(lambda _cls, *_a: tiny_model)}),
-    )
+
+    class _EmptyHistory:
+        """History stub with empty `.history` dict."""
+
+        history: dict[str, list[float]] = {}
+
+    def _empty_fit(*_a: Iterator[tuple[torch.Tensor, torch.Tensor]], **_k: int) -> _EmptyHistory:
+        """Return `_EmptyHistory()`."""
+        return _EmptyHistory()
+
+    def _tuple_loader(*_a: ETLConfig) -> dict[str, list[tuple[int, int]]]:
+        """Return 1-item tuple loader."""
+        return {"loader": [(1, 2)]}
+
+    class _GemmaCls:
+        """GemmaCausalLM stub returning `tiny_model`."""
+
+        @classmethod
+        def from_preset(cls, _model_name: str) -> keras.Model:
+            """Return `tiny_model`."""
+            return tiny_model
+
+    monkeypatch.setattr(tiny_model, "fit", _empty_fit)
+    monkeypatch.setattr(tr, "build_dataloader", _tuple_loader)
+    monkeypatch.setattr(tr, "GemmaCausalLM", _GemmaCls)
 
     status, loss = tr._execute_train("mod", "ds", 1, 2)
     assert status == "completed"
@@ -201,12 +225,16 @@ def test_execute_train_load_fail(
             """Raise ValueError."""
             raise ValueError("Cannot load")
 
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
     monkeypatch.setattr(tr, "GemmaCausalLM", FailingGemmaCls)
     with pytest.raises(ValueError, match="Failed to load Keras model"):
         tr._execute_train("mod", "ds", 1, 2)
 
     monkeypatch.setattr(tr, "GemmaCausalLM", None)
-    monkeypatch.setattr(tr, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(tr, "optional_attr", _none_attr)
     with pytest.raises(ValueError, match="Failed to load Keras model"):
         tr._execute_train("mod", "ds", 1, 2)
 
@@ -218,12 +246,21 @@ def test_execute_train_bad_dataloader(
     """Verify _execute_train raises ValueError when build_dataloader returns a non-iterable loader."""
     _ = real_keras_env
     tiny_model = _make_tiny_keras_model()
-    monkeypatch.setattr(tr, "build_dataloader", lambda *_a, **_k: {"loader": None})  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(
-        tr,
-        "GemmaCausalLM",
-        type("GemmaCls", (), {"from_preset": classmethod(lambda _cls, *_a: tiny_model)}),
-    )
+
+    def _none_loader(*_a: ETLConfig) -> dict[str, None]:
+        """Return loader=None."""
+        return {"loader": None}
+
+    class _GemmaCls:
+        """GemmaCausalLM stub returning `tiny_model`."""
+
+        @classmethod
+        def from_preset(cls, _model_name: str) -> keras.Model:
+            """Return `tiny_model`."""
+            return tiny_model
+
+    monkeypatch.setattr(tr, "build_dataloader", _none_loader)
+    monkeypatch.setattr(tr, "GemmaCausalLM", _GemmaCls)
     monkeypatch.setitem(sys.modules, "keras_nlp", type("keras_nlp", (), {}))
 
     with pytest.raises(ValueError, match="Invalid dataloader"):

@@ -3,21 +3,35 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, KerasCausalLMProtocol, ServeResultDict
+from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _KerasBatchGenerateModelProtocol(Protocol):
+    """Protocol for a Keras causal language model supporting batched `.generate(...)`."""
+
+    def generate(
+        self,
+        prompts: str | list[str],
+        /,
+    ) -> Sequence[str]:
+        """Generate SQL completions for one or more prompts."""
+        ...
 
 
 @runtime_checkable
 class _GemmaCausalLMLoaderProtocol(Protocol):
     """Protocol for `keras_nlp.models.GemmaCausalLM` exposing `.from_preset(model_name)`."""
 
-    def from_preset(self, model_name: str, /) -> KerasCausalLMProtocol:
+    def from_preset(self, model_name: str, /) -> _KerasBatchGenerateModelProtocol:
         """Load a `GemmaCausalLM` model from a preset identifier."""
         ...
 
@@ -42,7 +56,7 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
         The FastAPI application instance.
 
     """
-    loaded_model: KerasCausalLMProtocol | None = None
+    loaded_model: _KerasBatchGenerateModelProtocol | None = None
 
     def _startup() -> None:
         """Initialize Keras model on server startup."""
@@ -76,8 +90,8 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
 
         if loaded_model is not None:
             try:
-                outputs = loaded_model.generate(prompts)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-                return [str(out).strip() for out in outputs]  # pyright: ignore[reportGeneralTypeIssues]  # ty: ignore[not-iterable]
+                outputs = loaded_model.generate(prompts)
+                return [str(out).strip() for out in outputs]
             except (RuntimeError, ValueError, TypeError, AttributeError) as e:
                 logger.warning("Keras batch generation failed, falling back to individual generation: %s", e)
 

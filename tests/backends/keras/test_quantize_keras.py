@@ -78,18 +78,27 @@ def test_quantize_model_real(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     # Preset loading fallback and error paths
     mock_gemma_cls = MagicMock()
     mock_gemma_cls.from_preset.return_value = real_model
-    monkeypatch.setattr(q, "optional_attr", lambda *_a, **_k: mock_gemma_cls)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _return_gemma_cls(*_a: str, **_k: str) -> MagicMock:
+        """Return `mock_gemma_cls`."""
+        return mock_gemma_cls
+
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
+    monkeypatch.setattr(q, "optional_attr", _return_gemma_cls)
     res_preset = q.quantize_model("m", "int4")
     assert res_preset["status"] == "quantized_int4"
 
     mock_gemma_cls.from_preset.return_value = None
     assert q.quantize_model("m", "int8")["status"] == "quantized_int8"
 
-    monkeypatch.setattr(q, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(q, "optional_attr", _none_attr)
     assert q.quantize_model("m", "int8")["status"] == "quantized_int8"
 
     mock_gemma_cls.from_preset.side_effect = ValueError("sim")
-    monkeypatch.setattr(q, "optional_attr", lambda *_a, **_k: mock_gemma_cls)  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(q, "optional_attr", _return_gemma_cls)
     assert q.quantize_model("m", "int8")["status"] == "quantized_int8"
 
     # Keras dtype policy fallback branches

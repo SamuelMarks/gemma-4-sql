@@ -105,7 +105,7 @@ def test_registry_dict_entry_points(monkeypatch: pytest.MonkeyPatch) -> None:
 
     fake_adapter = mock.MagicMock()
     fake_adapter_class = mock.MagicMock(return_value=mock.MagicMock(spec=BackendProtocol))
-    fake_adapter.ADAPTER_CLASS = None
+    fake_adapter.ADAPTER_CLASS = fake_adapter_class
     fake_adapter.Mock_backendBackend = fake_adapter_class
 
     orig_import_module = importlib.import_module

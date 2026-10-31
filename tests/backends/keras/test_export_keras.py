@@ -40,8 +40,12 @@ def test_export_model_keras_success(monkeypatch: pytest.MonkeyPatch) -> None:
         with pytest.raises(ExportError, match="Failed to load model my_model"):
             mod.export_model("my_model", "path")
 
+        def _none_attr(*_a: str, **_k: str) -> None:
+            """Return None for optional_attr."""
+            return
+
         # Missing GemmaCausalLM class raises ExportError
         monkeypatch.setattr(mod, "GemmaCausalLM", None)
-        monkeypatch.setattr(mod, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(mod, "optional_attr", _none_attr)
         with pytest.raises(ExportError, match="Failed to load model my_model"):
             mod.export_model("my_model", "path")

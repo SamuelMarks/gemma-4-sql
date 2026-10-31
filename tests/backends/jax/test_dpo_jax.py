@@ -155,7 +155,12 @@ def test_execute_dpo_and_run_dpo(monkeypatch: pytest.MonkeyPatch) -> None:
         head_dim=8,
         num_experts=1,
     )
-    monkeypatch.setattr(jax_dpo, "_resolve_gemma4_config", lambda _m: tiny_cfg)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _resolve_tiny(_m: str) -> Gemma4Config:
+        """Return `tiny_cfg`."""
+        return tiny_cfg
+
+    monkeypatch.setattr(jax_dpo, "_resolve_gemma4_config", _resolve_tiny)
 
     with (
         patch("gemma_4_sql.backends.jax.dpo.build_dataloader", return_value={"loader": ["batch1"]}),

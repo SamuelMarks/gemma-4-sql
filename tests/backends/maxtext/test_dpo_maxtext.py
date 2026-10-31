@@ -130,8 +130,12 @@ def test_get_train_step_fn_without_jit(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _get_train_step_fn returns an un-jitted step callable when jax.jit is absent."""
     import gemma_4_sql.backends.maxtext.dpo as mt_dpo
 
+    def _val_and_grad(*_args: str) -> tuple[float, str]:
+        """Return `(0.5, 'grads')`."""
+        return (0.5, "grads")
+
     mock_jax = MagicMock(spec=["value_and_grad"])
-    mock_jax.value_and_grad.return_value = lambda *_args: (0.5, "grads")  # pyright: ignore[reportUnknownLambdaType]
+    mock_jax.value_and_grad.return_value = _val_and_grad
     monkeypatch.setattr(mt_dpo, "jax", mock_jax)
 
     optimizer = MagicMock()

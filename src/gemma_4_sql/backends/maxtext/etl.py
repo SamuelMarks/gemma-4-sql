@@ -44,7 +44,7 @@ def build_dataloader(config: ETLConfig, **kwargs: JSONValue) -> ETLResultDict:
         grain_module=grain,
         grain_classes_fn=get_grain_classes,
         tokenizer_cls=SQLTokenizer,
-        transform_wrapper=_wrap_maxtext_transform,  # ty: ignore[invalid-argument-type]
+        transform_wrapper=_wrap_maxtext_transform,
         extra_options=kwargs,
     )
 

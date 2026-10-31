@@ -164,12 +164,12 @@ def optional_import(module_name: str) -> types.ModuleType | None:
 
 
 @overload
-def optional_attr(module_name: str, attr_name: str, _default_type: type[TAttr]) -> TAttr | None:  # noqa: D418
+def optional_attr(module_name: str, attr_name: str, _default_type: type[TAttr]) -> TAttr | None:
     """Import an optional module and retrieve an attribute typed as `TAttr | None`."""
 
 
 @overload
-def optional_attr(module_name: str, attr_name: str, _default_type: None = None) -> types.ModuleType | None:  # noqa: D418
+def optional_attr(module_name: str, attr_name: str, _default_type: None = None) -> types.ModuleType | None:
     """Import an optional module and retrieve a dynamic attribute or submodule."""
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import types
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import pytest
 
@@ -14,6 +14,7 @@ from gemma_4_sql.backends.common_gemma4_config import (
     resolve_gemma4_preset_name,
 )
 from gemma_4_sql.backends.common_inference import (
+    BeamSequenceArrayProtocol,
     BoundedLRUCache,
     JaxNNBeamNamespaceProtocol,
     call_jax_causal_lm,
@@ -24,6 +25,7 @@ from gemma_4_sql.backends.common_inference import (
     normalize_logprob_confidence,
     run_array_beam_search,
     run_inference_wrapper,
+    run_jax_beam_search_step,
 )
 from gemma_4_sql.backends.common_peft import (
     apply_lora_wrapper,
@@ -51,6 +53,11 @@ def test_common_gemma4_config_presets() -> None:
     assert get_gemma4_preset_spec("E4B")["num_hidden_layers"] == 42
     assert get_gemma4_preset_spec("E2B") == GEMMA4_E2B_SPEC
     assert "layers=24" in BaseGemma4ConfigFields().cache_fingerprint()
+    assert BaseGemma4ConfigFields.from_preset("tiny").num_hidden_layers == 1
+    assert BaseGemma4ConfigFields.from_preset("31B").num_hidden_layers == 60
+    assert BaseGemma4ConfigFields.from_preset("26B-A4B").num_experts == 128
+    assert BaseGemma4ConfigFields.from_preset("E4B").num_hidden_layers == 42
+    assert BaseGemma4ConfigFields.from_preset("E2B").num_hidden_layers == 35
 
 
 def test_common_inference_and_peft_utilities() -> None:
@@ -105,7 +112,7 @@ def test_common_inference_and_peft_utilities() -> None:
 
         def __getitem__(
             self,
-            idx: int | slice | types.EllipsisType | tuple[int | slice | types.EllipsisType, ...],
+            idx: int | slice | types.EllipsisType | _Seq2D | tuple[int | slice | types.EllipsisType, ...],
             /,
         ) -> _Seq2D:
             """Index into token sequence and return scalar-compatible `_Seq2D`."""
@@ -217,6 +224,25 @@ def test_common_inference_and_peft_utilities() -> None:
     expanded = expand_jax_beams(_Seq2D([1]), 0.0, top_idx, top_p, 2, fake_jnp)
     assert len(expanded) == 2
 
+    step_no_jit = run_jax_beam_search_step(_Seq2D([1]), 0.0, logits_1d, 2, fake_jax, fake_jnp)
+    assert len(step_no_jit) == 2
+
+    class _FakeJaxWithJit(_FakeJax):
+        """Stub `jax` module implementing `JaxJitBeamModuleProtocol`."""
+
+        def jit[ArrayT: BeamSequenceArrayProtocol](
+            self,
+            fun: Callable[[ArrayT, int], tuple[ArrayT, ArrayT]],
+            *,
+            static_argnums: tuple[int, ...],
+        ) -> Callable[[ArrayT, int], tuple[ArrayT, ArrayT]]:
+            """Return `fun` directly."""
+            _ = static_argnums
+            return fun
+
+    step_with_jit = run_jax_beam_search_step(_Seq2D([1]), 0.0, logits_1d, 2, _FakeJaxWithJit(), fake_jnp)
+    assert len(step_with_jit) == 2
+
     res_inf = run_inference_wrapper("jax", "m", "SELECT", 2, lambda: ("SELECT 1", 0.9))
     assert res_inf["status"] == "success"
     assert res_inf["sql"] == "SELECT 1"
@@ -316,6 +342,10 @@ def test_common_inference_and_peft_utilities() -> None:
     )
     assert kw_logits == [[1, 2], [0, 1], "px", "au", "am"]
     assert kw_cache is None
+
+    # Second call exercises the cached signature traits path
+    kw_logits2, _ = call_jax_causal_lm(_kw_model, [3], positions=[0])
+    assert kw_logits2[0] == [3]
 
     pos_logits, pos_cache = call_jax_causal_lm(_pos_model, [1, 2], pixel_values="px")
     assert pos_logits == [1, 2]

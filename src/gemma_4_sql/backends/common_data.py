@@ -188,9 +188,19 @@ class DuckDBModuleWithErrorProtocol(Protocol):
 
 @runtime_checkable
 class DuckDBConnectCallableProtocol(Protocol):
-    """Protocol for a `duckdb` module exposing `.connect(...)`."""
+    """Protocol for the `duckdb` module providing `.connect(...)`."""
 
-    def connect(self, database: str, *, read_only: bool = False) -> DuckDBRawConnectionProtocol:
+    @property
+    def Error(self) -> type | str | None:
+        """Provide the DuckDB base exception class if defined."""
+        ...
+
+    def connect(
+        self,
+        database: str = ":memory:",
+        *,
+        read_only: bool = False,
+    ) -> DuckDBRawConnectionProtocol:
         """Open a DuckDB database connection."""
         ...
 
@@ -217,29 +227,22 @@ class _DefaultBaseTransform:
     """Default base class for `BaseFormatTransform` when Grain is not installed."""
 
 
-def _create_hf_data_source(base_ds: type) -> type[_DefaultBaseSource]:
-    """Create a Grain RandomAccessDataSource subclass wrapping a Hugging Face dataset.
+class HFDataSource(_DefaultBaseSource):
+    """Adapter to turn a Hugging Face Dataset or sequence into a Grain-compatible RandomAccessDataSource."""
+
+
+def _create_hf_data_source(base_ds: type = _DefaultBaseSource) -> type[HFDataSource]:
+    """Return the concrete `HFDataSource` class.
 
     Args:
-        base_ds: Base class (`grain.RandomAccessDataSource` or `_DefaultBaseSource`).
+        base_ds: Optional Grain base class reference (retained for API compatibility).
 
     Returns:
-        Constructed `HFDataSource` class.
+        `HFDataSource` class.
 
     """
-    with contextlib.suppress(TypeError):
-        bases = (base_ds,) if issubclass(base_ds, _DefaultBaseSource) else (_DefaultBaseSource, base_ds)
-        cls: type[_DefaultBaseSource] = type(
-            "HFDataSource",
-            bases,
-            {"__doc__": "Adapter to turn Hugging Face Dataset into Grain RandomAccessDataSource."},
-        )
-        return cls
-    return type(
-        "HFDataSource",
-        (_DefaultBaseSource,),
-        {"__doc__": "Adapter to turn Hugging Face Dataset into Grain RandomAccessDataSource."},
-    )
+    _ = base_ds
+    return HFDataSource
 
 
 def resolve_duckdb_options(config: ETLConfig, kwargs: Mapping[str, StatusValue]) -> tuple[str | None, str | None]:
@@ -329,7 +332,8 @@ def tokenize_dataset_element(
         img_data = process_image(image_input)
         res["pixel_values"] = img_data["pixel_values"]
     if audio_input is not None and isinstance(audio_input, (str, bytes, list, tuple, NDArrayProtocol)):
-        aud_data = process_audio(audio_input)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        aud_arg: str | bytes | Sequence[float] | NDArrayProtocol = [float(x) for x in audio_input if isinstance(x, (int, float))] if isinstance(audio_input, (list, tuple)) else audio_input
+        aud_data = process_audio(aud_arg)
         res["audio_values"] = aud_data["audio_values"]
     return res
 
@@ -361,89 +365,86 @@ class _BaseFormatTransformRoot(_DefaultBaseTransform):
         return tokenize_dataset_element(element, self.tokenizer, process_multimodal=True)
 
 
-def wrap_maxtext_transform(base_transform_cls: type[_BaseFormatTransformRoot]) -> type[_BaseFormatTransformRoot]:
-    """Wrap the base Grain transform class to inject MaxText `segment_ids` and `positions`.
+class BaseFormatTransform(_BaseFormatTransformRoot):
+    """Transforms dataset records into tokenized and multimodal array dictionaries."""
+
+
+class MaxTextFormatTransform(BaseFormatTransform):
+    """Transforms data into MaxText expected format with `segment_ids` and `positions` via composition."""
+
+    def __init__(
+        self,
+        tokenizer: TokenizerProtocol,
+        base_transform_cls: type[_BaseFormatTransformRoot] = BaseFormatTransform,
+    ) -> None:
+        """Initialize MaxText transform with wrapped base transform.
+
+        Args:
+            tokenizer: The SQL tokenizer instance.
+            base_transform_cls: Base transform class to delegate mapping to.
+
+        """
+        super().__init__(tokenizer)
+        self._base: _BaseFormatTransformRoot = base_transform_cls(tokenizer)
+
+    def map(self, element: Mapping[str, JSONValue | ImageInput | AudioInput] | RawSQLDatasetRow) -> TokenizedElementDict:
+        """Map an element with MaxText specific features (`segment_ids` and `positions`).
+
+        Args:
+            element: Input dataset element dictionary.
+
+        Returns:
+            Tokenized dictionary augmented with `segment_ids` and `positions`.
+
+        """
+        result: TokenizedElementDict = self._base.map(element)
+        inputs_seq = result.get("inputs", [])
+        seq_len = max(1, len(inputs_seq)) if isinstance(inputs_seq, list) else 1
+        result["segment_ids"] = [1] * seq_len
+        result["positions"] = list(range(seq_len))
+        return result
+
+
+def wrap_maxtext_transform(base_transform_cls: type[_BaseFormatTransformRoot] = BaseFormatTransform) -> type[MaxTextFormatTransform]:
+    """Return `MaxTextFormatTransform` configured to delegate to `base_transform_cls`.
 
     Args:
         base_transform_cls: Base transform class from `get_grain_classes`.
 
     Returns:
-        `MaxTextFormatTransform` subclass.
+        `MaxTextFormatTransform` class.
 
     """
-
-    class MaxTextFormatTransform(_BaseFormatTransformRoot):
-        """Transforms data into MaxText expected format with segment_ids and positions."""
-
-        def __init__(self, tokenizer: TokenizerProtocol) -> None:
-            """Initialize MaxText transform with wrapped base transform."""
-            super().__init__(tokenizer)
-            self._base = base_transform_cls(tokenizer)
-
-        def map(self, element: Mapping[str, JSONValue | ImageInput | AudioInput] | RawSQLDatasetRow) -> TokenizedElementDict:
-            """Map an element with MaxText specific features.
-
-            Args:
-                element: Input dataset element dictionary.
-
-            Returns:
-                Tokenized dictionary augmented with `segment_ids` and `positions`.
-
-            """
-            result: TokenizedElementDict = self._base.map(element)
-            inputs_seq = result.get("inputs", [])
-            seq_len = max(1, len(inputs_seq)) if isinstance(inputs_seq, list) else 1
-            result["segment_ids"] = [1] * seq_len
-            result["positions"] = list(range(seq_len))
-            return result
-
+    _ = base_transform_cls
     return MaxTextFormatTransform
 
 
-def _create_base_format_transform(base_map: type) -> type[_BaseFormatTransformRoot]:
-    """Create a Grain MapTransform subclass for SQL tokenization and multimodal preprocessing.
+def _create_base_format_transform(base_map: type = _DefaultBaseTransform) -> type[BaseFormatTransform]:
+    """Return the concrete `BaseFormatTransform` class.
 
     Args:
-        base_map: Base class (`grain.MapTransform` or `_DefaultBaseTransform`).
+        base_map: Optional Grain base class reference (retained for API compatibility).
 
     Returns:
-        Constructed `BaseFormatTransform` class.
+        `BaseFormatTransform` class.
 
     """
-    with contextlib.suppress(TypeError):
-        bases = (base_map,) if issubclass(base_map, _BaseFormatTransformRoot) else (_BaseFormatTransformRoot, base_map)
-        cls: type[_BaseFormatTransformRoot] = type(
-            "BaseFormatTransform",
-            bases,
-            {"__doc__": "Transforms dataset records into tokenized and multimodal array dictionaries."},
-        )
-        return cls
-    return type(
-        "BaseFormatTransform",
-        (_BaseFormatTransformRoot,),
-        {"__doc__": "Transforms dataset records into tokenized and multimodal array dictionaries."},
-    )
+    _ = base_map
+    return BaseFormatTransform
 
 
-def get_grain_classes(grain_module: GrainModuleClassesProtocol | None) -> tuple[type[_DefaultBaseSource], type[_BaseFormatTransformRoot]]:
-    """Dynamically construct Grain data source and transform classes.
+def get_grain_classes(grain_module: GrainModuleClassesProtocol | None) -> tuple[type[HFDataSource], type[BaseFormatTransform]]:
+    """Provide the `HFDataSource` and `BaseFormatTransform` classes.
 
     Args:
-        grain_module: The loaded `grain.python` module.
+        grain_module: Optional loaded `grain.python` module.
 
     Returns:
         A tuple of `(HFDataSource, BaseFormatTransform)` classes.
 
     """
-    base_ds: type = _DefaultBaseSource
-    base_map: type = _DefaultBaseTransform
-    if grain_module is not None:
-        with contextlib.suppress(AttributeError):
-            base_ds = grain_module.RandomAccessDataSource
-        with contextlib.suppress(AttributeError):
-            base_map = grain_module.MapTransform
-
-    return (_create_hf_data_source(base_ds), _create_base_format_transform(base_map))
+    _ = grain_module
+    return (HFDataSource, BaseFormatTransform)
 
 
 def load_hf_or_duckdb_dataset(
@@ -516,10 +517,10 @@ def build_grain_dataloader(
     datasets_module: HFDatasetsModuleProtocol | None,
     grain_module: GrainModuleProtocol | None,
     load_fn: Callable[[str, str, str | None, str | None], DatasetSequenceProtocol | list[JSONDict]] | None = None,
-    grain_classes_fn: Callable[[GrainModuleProtocol | None], tuple[type, type]] | None = None,
+    grain_classes_fn: Callable[[GrainModuleProtocol | None], tuple[type[_DefaultBaseSource], type[_BaseFormatTransformRoot]]] | None = None,
     tokenizer_cls: Callable[..., TokenizerProtocol] = SQLTokenizer,
     sampler_fn: Callable[[int, bool], JSONValue] | None = None,
-    transform_wrapper: Callable[[type], type] | None = None,
+    transform_wrapper: Callable[[type[_BaseFormatTransformRoot]], type[_BaseFormatTransformRoot]] | None = None,
     extra_options: Mapping[str, JSONValue] | None = None,
     **kwargs: StatusValue,
 ) -> ETLResultDict:
@@ -569,7 +570,7 @@ def build_grain_dataloader(
         return get_grain_sampler(length, dist, grain_module)
 
     effective_load = load_fn or _default_load
-    effective_classes: Callable[[GrainModuleProtocol | None], tuple[type, type]] = grain_classes_fn if grain_classes_fn is not None else get_grain_classes
+    effective_classes: Callable[[GrainModuleProtocol | None], tuple[type[_DefaultBaseSource], type[_BaseFormatTransformRoot]]] = grain_classes_fn if grain_classes_fn is not None else get_grain_classes
     effective_sampler = sampler_fn or _default_sampler
 
     hf_dataset = effective_load(dataset_name, split, duckdb_path, duckdb_table)
@@ -664,7 +665,7 @@ def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
 
     duckdb_error: type[Exception] = RuntimeError
     with contextlib.suppress(AttributeError):
-        raw_err = duckdb_module.Error  # pyright: ignore[reportAttributeAccessIssue]
+        raw_err = duckdb_module.Error
         duckdb_error = raw_err if isinstance(raw_err, type) and issubclass(raw_err, Exception) else RuntimeError
 
     raw_conn: DuckDBRawConnectionProtocol | None = None
@@ -684,3 +685,34 @@ def load_duckdb_dataset(db_path: str, table: str) -> list[JSONDict]:
     finally:
         if raw_conn is not None:
             raw_conn.close()
+
+
+__all__ = [
+    "BaseFormatTransform",
+    "DatasetSequenceProtocol",
+    "DuckDBConnectCallableProtocol",
+    "DuckDBDescribedCursorProtocol",
+    "DuckDBRawConnectionProtocol",
+    "GrainModuleClassesProtocol",
+    "GrainModuleProtocol",
+    "HFDataSource",
+    "HFDatasetsModuleProtocol",
+    "MaxTextFormatTransform",
+    "RawSQLDatasetRow",
+    "TokenizedElementDict",
+    "_BaseFormatTransformRoot",
+    "_DefaultBaseSource",
+    "_DefaultBaseTransform",
+    "_create_base_format_transform",
+    "_create_hf_data_source",
+    "build_grain_dataloader",
+    "get_grain_classes",
+    "get_grain_sampler",
+    "load_duckdb_dataset",
+    "load_hf_or_duckdb_dataset",
+    "pad_1d_list",
+    "pad_token_batch",
+    "resolve_duckdb_options",
+    "tokenize_dataset_element",
+    "wrap_maxtext_transform",
+]

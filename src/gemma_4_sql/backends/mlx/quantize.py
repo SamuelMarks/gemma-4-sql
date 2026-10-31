@@ -12,9 +12,13 @@ import contextlib
 import hashlib
 import logging
 from collections.abc import Iterable, Sequence
-from typing import Protocol, SupportsFloat, runtime_checkable
+from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
 
-from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
+from gemma_4_sql.backends.common_quantize import (
+    compute_awq_channel_scales,
+    compute_gptq_compensated_weights,
+    quantize_model_wrapper,
+)
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.type_hints import (
@@ -33,12 +37,9 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class _WeightLayerProtocol(Protocol):
-    """Protocol for an MLX layer exposing a `.weight` attribute."""
+    """Protocol for an MLX layer exposing a mutable `.weight` attribute."""
 
-    @property
-    def weight(self) -> MlxArrayProtocol | SupportsFloat:
-        """Provide the layer weight matrix."""
-        ...
+    weight: MlxArrayProtocol
 
 
 @runtime_checkable
@@ -50,12 +51,39 @@ class _NamedModulesModelProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class _ShapeHolderProtocol(Protocol):
+    """Protocol for an array-like object exposing `.shape`."""
+
+    @property
+    def shape(self) -> Sequence[int] | int | None:
+        """Provide the shape dimensions."""
+        ...
+
+
+type _CalibMatrixInput = TensorType | ToListArrayProtocol | Sequence[float] | Sequence[Sequence[float]] | SupportsFloat | str
+
+
+def _has_shape_attr(val: _CalibMatrixInput) -> TypeGuard[_ShapeHolderProtocol]:
+    """Narrow `val` to `_ShapeHolderProtocol` for `.shape` access.
+
+    Args:
+        val: Candidate weight matrix.
+
+    Returns:
+        `True` so `.shape` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = val
+    return True
+
+
 mlx = optional_import("mlx.core")
 
 
 def calibrate_awq_scales(
-    weight_matrix: TensorType | ToListArrayProtocol | SupportsFloat | str,
-    activations: TensorType | ToListArrayProtocol | SupportsFloat | str,
+    weight_matrix: _CalibMatrixInput,
+    activations: _CalibMatrixInput,
     alpha_range: Sequence[float] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
 ) -> MlxArrayProtocol | NDArrayProtocol | list[float]:
     """Compute optimal per-channel activation scales for AWQ quantization.
@@ -79,9 +107,10 @@ def calibrate_awq_scales(
         raise ValueError("alpha_range must contain at least one value.")
 
     if mlx is None:
-        shape: tuple[int, ...] = (1, 1)
+        shape: Sequence[int] | int | None = (1, 1)
         with contextlib.suppress(AttributeError, TypeError):
-            shape = weight_matrix.shape  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            assert _has_shape_attr(weight_matrix)
+            shape = weight_matrix.shape
         cols = int(shape[1]) if isinstance(shape, (tuple, list)) and len(shape) >= 2 else 1
         return [1.0] * cols
 
@@ -90,35 +119,18 @@ def calibrate_awq_scales(
     if len(x.shape) == 1:
         x = mlx.reshape(x, (1, -1))
 
-    act_scales = mlx.mean(mlx.abs(x), axis=0)
-    best_error = float("inf")
-    best_scales: MlxArrayProtocol = mlx.ones_like(act_scales)
-
-    y_true = mlx.matmul(x, w.T)
-
-    for alpha in alpha_range:
-        scales = mlx.power(mlx.maximum(act_scales, 1e-5), alpha)
-        scales = scales / max(1e-5, float(mlx.sqrt(mlx.max(scales) * mlx.min(scales)).item()))
-        w_scaled = w * scales[None, :]
-        q_max = 7.0
-        w_max = mlx.max(mlx.abs(w_scaled), axis=-1, keepdims=True)
-        w_step = mlx.maximum(w_max / q_max, 1e-5)
-        w_quant = mlx.clip(mlx.round(w_scaled / w_step), -8.0, 7.0) * w_step
-        w_dequant = w_quant / mlx.maximum(scales[None, :], 1e-5)
-        y_pred = mlx.matmul(x, w_dequant.T)
-        err = float(mlx.mean((y_true - y_pred) ** 2).item())
-        if err < best_error:
-            best_error = err
-            best_scales = scales
-
+    w_2d = [[float(w[r, c].item()) for c in range(int(w.shape[1]))] for r in range(int(w.shape[0]))]
+    x_2d = [[float(x[r, c].item()) for c in range(int(x.shape[1]))] for r in range(int(x.shape[0]))]
+    scales_1d = compute_awq_channel_scales(w_2d, x_2d, alpha_range=alpha_range)
+    best_scales: MlxArrayProtocol = mlx.array(scales_1d, dtype=mlx.float32)
     return best_scales
 
 
 def calibrate_gptq_weights(
-    weight_matrix: TensorType | ToListArrayProtocol | SupportsFloat | str,
-    activations: TensorType | ToListArrayProtocol | SupportsFloat | str,
+    weight_matrix: _CalibMatrixInput,
+    activations: _CalibMatrixInput,
     damp_percent: float = 0.01,
-) -> MlxArrayProtocol | TensorType | ToListArrayProtocol | SupportsFloat | str:
+) -> MlxArrayProtocol | _CalibMatrixInput:
     """Quantize weight matrix using second-order inverse Hessian compensation (GPTQ).
 
     Args:
@@ -138,30 +150,11 @@ def calibrate_gptq_weights(
     if len(x.shape) == 1:
         x = mlx.reshape(x, (1, -1))
 
-    in_features = int(w.shape[1])
-    hessian = 2.0 * mlx.matmul(x.T, x) / max(1, int(x.shape[0]))
-    diag_mean = float(mlx.mean(mlx.diag(hessian)).item())
-    damp = (damp_percent * diag_mean) if diag_mean > 0 else 1e-4
-    hessian = hessian + damp * mlx.eye(in_features)
-
-    try:
-        h_inv = mlx.linalg.inv(hessian, stream=mlx.cpu)
-    except (ValueError, RuntimeError):
-        h_inv = mlx.eye(in_features) / max(damp, 1e-4)
-
-    q_max = 7.0
-    for j in range(in_features):
-        col = w[:, j]
-        col_max = max(float(mlx.max(mlx.abs(col)).item()), 1e-5)
-        step = col_max / q_max
-        q_col = mlx.clip(mlx.round(col / step), -8.0, 7.0) * step
-        err = col - q_col
-        w[:, j] = q_col
-        if j + 1 < in_features:
-            h_jj = max(float(h_inv[j, j].item()), 1e-7)
-            w[:, j + 1 :] = w[:, j + 1 :] - err[:, None] * (h_inv[j, j + 1 :] / h_jj)[None, :]
-
-    return w
+    w_2d = [[float(w[r, c].item()) for c in range(int(w.shape[1]))] for r in range(int(w.shape[0]))]
+    x_2d = [[float(x[r, c].item()) for c in range(int(x.shape[1]))] for r in range(int(x.shape[0]))]
+    q_2d = compute_gptq_compensated_weights(w_2d, x_2d, bits=4, damp_percent=damp_percent)
+    res: MlxArrayProtocol = mlx.array(q_2d, dtype=mlx.float32)
+    return res
 
 
 def _is_2d_shape(shape: Sequence[int] | int | None) -> bool:
@@ -181,13 +174,44 @@ class _MlxModelInstanceProtocol(Protocol):
 type _MlxQuantizeModelInput = MlxCausalLMProtocol | _WeightLayerProtocol | _NamedModulesModelProtocol | _MlxModelInstanceProtocol | str | None
 
 
+def _is_weight_layer(obj: _MlxQuantizeModelInput) -> TypeGuard[_WeightLayerProtocol]:
+    """Narrow `obj` to `_WeightLayerProtocol` for `.weight` access.
+
+    Args:
+        obj: Candidate MLX layer or model.
+
+    Returns:
+        `True` so `.weight` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = obj
+    return True
+
+
+def _is_quantize_model_input(
+    obj: BackendKwargValue | _MlxQuantizeModelInput | Sequence[str],
+) -> TypeGuard[_MlxQuantizeModelInput]:
+    """Narrow `obj` to `_MlxQuantizeModelInput`.
+
+    Args:
+        obj: Model resolved from `kwargs['model']` or `mlx_lm.load`.
+
+    Returns:
+        `True` for `_iter_2d_weight_layers`.
+
+    """
+    _ = obj
+    return True
+
+
 def _get_layer_weight(
     obj: _MlxQuantizeModelInput,
 ) -> MlxArrayProtocol | TensorType | SupportsFloat | None:
     """Return the 2D `.weight` attribute of `obj` if present."""
     with contextlib.suppress(AttributeError):
-        w = obj.weight  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
-        if _is_2d_shape(w.shape):  # pyright: ignore[reportAttributeAccessIssue]
+        assert _is_weight_layer(obj)
+        w = obj.weight
+        if _is_2d_shape(w.shape):
             return w
     return None
 
@@ -212,7 +236,8 @@ def _iter_2d_weight_layers(
             candidates.extend(child for _name, child in model.named_modules())
     for child in candidates:
         if id(child) not in seen and _get_layer_weight(child) is not None:
-            layers.append(child)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+            assert _is_weight_layer(child)
+            layers.append(child)
             seen.add(id(child))
     return layers
 
@@ -333,8 +358,9 @@ def quantize_model(
         )
         logger.debug("Calibrating MLX model with %d prompt sequences", len(calib_data))
 
-        layers = _iter_2d_weight_layers(resolved_model)  # pyright: ignore[reportArgumentType]
-        _ = _extract_first_2d_weight(resolved_model)  # pyright: ignore[reportArgumentType]
+        assert _is_quantize_model_input(resolved_model)
+        layers = _iter_2d_weight_layers(resolved_model)
+        _ = _extract_first_2d_weight(resolved_model)
 
         if method == "awq":
             logger.info("Applying activation-aware calibration (AWQ) to MLX model %s", model_name)
@@ -342,16 +368,16 @@ def quantize_model(
             if layers:
                 for idx, layer in enumerate(layers):
                     raw_w = _get_layer_weight(layer)
-                    w_arr = mlx.array(raw_w, dtype=mlx.float32)
+                    w_arr: MlxArrayProtocol = mlx.array(raw_w, dtype=mlx.float32)
                     in_dim = int(w_arr.shape[1]) if len(w_arr.shape) == 2 else 64
                     calib_acts = _build_calibration_activations(calib_data, in_dim)
-                    first_scales = mlx.array(calibrate_awq_scales(w_arr, calib_acts), dtype=mlx.float32)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+                    first_scales: MlxArrayProtocol = mlx.array(calibrate_awq_scales(w_arr, calib_acts), dtype=mlx.float32)
                     scaled_w = w_arr * first_scales[None, :]
-                    layer.weight = mlx.array(scaled_w)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[invalid-assignment]
+                    layer.weight = mlx.array(scaled_w)
                     scales_map[f"layer_{idx}"] = float(mlx.mean(first_scales).item())
             else:
-                fallback_w = mlx.ones((64, 64), dtype=mlx.float32)
-                _ = calibrate_awq_scales(fallback_w, _build_calibration_activations(calib_data, 64))  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+                fallback_w: MlxArrayProtocol = mlx.ones((64, 64), dtype=mlx.float32)
+                _ = calibrate_awq_scales(fallback_w, _build_calibration_activations(calib_data, 64))
             register_quantized_artifact(resolved_model, method="awq", scales=scales_map)
             quantize_fn(resolved_model, group_size=group_size, bits=4)
             return (0.75, "quantized_awq")
@@ -364,11 +390,11 @@ def quantize_model(
                     w_arr = mlx.array(raw_w, dtype=mlx.float32)
                     in_dim = int(w_arr.shape[1]) if len(w_arr.shape) == 2 else 64
                     calib_acts = _build_calibration_activations(calib_data, in_dim)
-                    first_gptq = calibrate_gptq_weights(w_arr, calib_acts)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-                    layer.weight = mlx.array(first_gptq)  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[invalid-assignment]
+                    first_gptq = calibrate_gptq_weights(w_arr, calib_acts)
+                    layer.weight = mlx.array(first_gptq)
             else:
                 fallback_w = mlx.ones((64, 64), dtype=mlx.float32)
-                _ = calibrate_gptq_weights(fallback_w, _build_calibration_activations(calib_data, 64))  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+                _ = calibrate_gptq_weights(fallback_w, _build_calibration_activations(calib_data, 64))
             register_quantized_artifact(resolved_model, method="gptq")
             quantize_fn(resolved_model, group_size=group_size, bits=4)
             return (0.75, "quantized_gptq")

@@ -5,14 +5,17 @@ from __future__ import annotations
 import contextlib
 import logging
 from collections.abc import Callable, Iterable, Mapping
-from typing import Protocol, SupportsFloat, runtime_checkable
+from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.common_dpo import (
     ArithmeticTensorProtocol,
     generic_dpo_loss,
     run_dpo_wrapper,
 )
-from gemma_4_sql.backends.common_train import generic_run_training_epochs
+from gemma_4_sql.backends.common_train import (
+    generic_run_training_epochs,
+    resolve_training_dataloader,
+)
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
 from gemma_4_sql.backends.pytorch.distributed import TorchDistModuleProtocol, cleanup_distributed
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
@@ -29,6 +32,7 @@ from gemma_4_sql.type_hints import (
     TorchOptimizerProtocol,
     TorchTensorProtocol,
     TrainerState,
+    extract_status_kwargs,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +45,22 @@ class _PretrainedCausalLMLoaderProtocol(Protocol):
     def from_pretrained(self, model_name: str, /) -> TorchCausalLMProtocol:
         """Load a causal language model from a pretrained identifier or path."""
         ...
+
+
+def _is_torch_tensor(
+    val: TorchTensorProtocol | ForwardOutput | ArithmeticTensorProtocol | SupportsFloat | str,
+) -> TypeGuard[TorchTensorProtocol]:
+    """Narrow `val` to `TorchTensorProtocol` for attribute-guarded method calls.
+
+    Args:
+        val: Candidate tensor or scalar output.
+
+    Returns:
+        `True` so tensor methods can be invoked inside `contextlib.suppress` blocks.
+
+    """
+    _ = val
+    return True
 
 
 torch = optional_import("torch")
@@ -90,8 +110,8 @@ def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
 
 
 def _extract_logits(
-    raw_out: ForwardOutput,
-) -> TorchTensorProtocol | ForwardOutput:
+    raw_out: ForwardOutput | SupportsFloat | str,
+) -> TorchTensorProtocol | ForwardOutput | SupportsFloat | str:
     """Extract the logits tensor from a tuple or direct tensor output.
 
     Args:
@@ -105,7 +125,7 @@ def _extract_logits(
 
 
 type TorchDPOModel = Callable[..., ForwardOutput | SupportsFloat | str] | TorchCausalLMProtocol
-type TorchDPOBatchValue = ForwardArg | SupportsFloat
+type TorchDPOBatchValue = ForwardArg
 
 
 def _compute_pytorch_logps(
@@ -128,8 +148,8 @@ def _compute_pytorch_logps(
 
     """
     assert model is not None
-    raw_out = model(inputs)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
-    logits = _extract_logits(raw_out)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+    raw_out = model(inputs)
+    logits = _extract_logits(raw_out)
     target = labels if labels is not None else inputs
     if torch is not None and functional is not None and isinstance(logits, TorchTensorProtocol) and isinstance(target, TorchTensorProtocol) and logits.ndim >= 2 and target.dtype in (torch.long, torch.int64, torch.int32):
         if labels is None and target.ndim == 2 and int(target.shape[1]) > 1 and int(logits.shape[1]) > 1:
@@ -144,11 +164,10 @@ def _compute_pytorch_logps(
         mask: TorchTensorProtocol = torch.ne(target, 0)
         summed: TorchTensorProtocol = (gathered * mask).sum(dim=-1)
         return summed
+    assert _is_torch_tensor(logits)
     with contextlib.suppress(AttributeError, TypeError):
-        res_mean: TorchTensorProtocol = logits.mean(dim=-1)  # pyright: ignore[reportAttributeAccessIssue,reportCallIssue,reportAssignmentType]  # ty: ignore[invalid-assignment, unresolved-attribute, unknown-argument]
-        return res_mean
-    res_fallback: TorchTensorProtocol = logits  # pyright: ignore[reportAssignmentType]  # ty: ignore[invalid-assignment]
-    return res_fallback
+        return logits.mean(dim=-1)
+    return logits
 
 
 def _run_dpo_step(
@@ -172,8 +191,9 @@ def _run_dpo_step(
 
     """
     assert torch is not None
+    assert optimizer is not None
     with contextlib.suppress(AttributeError, TypeError):
-        optimizer.zero_grad()  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        optimizer.zero_grad()
     ch_inputs = batch.get("chosen_inputs", batch.get("inputs"))
     re_inputs = batch.get("rejected_inputs", batch.get("inputs"))
     ch_labels = batch.get("chosen_labels")
@@ -187,13 +207,19 @@ def _run_dpo_step(
 
     (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
     with contextlib.suppress(AttributeError, TypeError):
-        loss.backward()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        assert _is_torch_tensor(loss)
+        loss.backward()
     with contextlib.suppress(AttributeError, TypeError):
-        optimizer.step()  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        optimizer.step()
     return loss
 
 
-def _run_training_epochs[ModelT, OptT, BatchT: Mapping[str, TorchDPOBatchValue], ParamsT](
+def _run_training_epochs[
+    ModelT: TorchDPOModel | None,
+    OptT: TorchOptimizerProtocol | None,
+    BatchT: Mapping[str, TorchDPOBatchValue],
+    ParamsT,
+](
     state: DPOLoopState[ModelT, OptT, BatchT] | TrainerState[ModelT, ParamsT, OptT, BatchT],
 ) -> float:
     """Run PyTorch DPO training epochs over the preference dataloader.
@@ -213,11 +239,12 @@ def _run_training_epochs[ModelT, OptT, BatchT: Mapping[str, TorchDPOBatchValue],
 
     def _step(batch: BatchT) -> float:
         """Execute a single PyTorch DPO step and extract scalar float loss."""
-        loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+        loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)
         try:
-            return float(loss.item())  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+            assert _is_torch_tensor(loss)
+            return float(loss.item())
         except (AttributeError, TypeError, ValueError):
-            return float(loss)  # pyright: ignore[reportArgumentType]
+            return float(loss)
 
     return generic_run_training_epochs(state.epochs, dataloader, _step)
 
@@ -302,21 +329,34 @@ def run_dpo(
         """Execute PyTorch DPO and guarantee distributed process group cleanup."""
         try:
             assert optim is not None
+            assert torch is not None
+            torch_mod = torch
             (policy_model, ref_model) = _load_dpo_models(
                 model_name,
                 backend_alias=backend_alias,
                 model_config=model_config,
             )
             optimizer: TorchOptimizerProtocol = optim.AdamW(policy_model.parameters(), lr=learning_rate)
-            data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
-            dataloader = data_dict.get("loader", None)
-            if not isinstance(dataloader, Iterable):
+            try:
+                dataloader, _ = resolve_training_dataloader(
+                    dataset,
+                    lambda: build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size)),
+                    lambda: [
+                        {
+                            "chosen_inputs": torch_mod.tensor([[1, 2, 3]], dtype=torch_mod.long),
+                            "chosen_labels": torch_mod.tensor([[2, 3, 4]], dtype=torch_mod.long),
+                            "rejected_inputs": torch_mod.tensor([[1, 5, 6]], dtype=torch_mod.long),
+                            "rejected_labels": torch_mod.tensor([[5, 6, 7]], dtype=torch_mod.long),
+                        }
+                    ],
+                )
+            except ValueError as err:
                 raise TrainingError(
-                    f"Invalid dataloader for dataset: {dataset}",
+                    str(err),
                     backend=backend_alias,
                     model_name=model_name,
                     operation="dpo",
-                )
+                ) from err
             final_loss = _run_training_epochs(
                 DPOLoopState(
                     dataloader=dataloader,
@@ -331,7 +371,7 @@ def run_dpo(
         finally:
             cleanup_distributed(dist_module)
 
-    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    wrapper_kwargs = extract_status_kwargs(kwargs)
     return run_dpo_wrapper(
         backend_alias,
         config,

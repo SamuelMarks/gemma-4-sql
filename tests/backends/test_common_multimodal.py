@@ -5,7 +5,6 @@ from __future__ import annotations
 import io
 import struct
 import sys
-from collections.abc import Callable
 from typing import NoReturn
 from unittest.mock import MagicMock, patch
 
@@ -28,9 +27,17 @@ def test_missing_jnp_and_pil_fallbacks(
     assert len(synthetic_image_bytes) > 0
     assert len(synthetic_wav_bytes) > 0
 
+    def _none_attr(*_a: str, **_k: str) -> None:
+        """Return None for optional_attr."""
+        return
+
+    def _none_import(_name: str) -> None:
+        """Return None for optional_import."""
+        return
+
     with patch("gemma_4_sql.backends.common_multimodal.logger.debug") as mock_debug:
         monkeypatch.setattr(mod, "Image", None)
-        monkeypatch.setattr(mod, "optional_attr", lambda *_a, **_k: None)  # pyright: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(mod, "optional_attr", _none_attr)
         mock_image_input = MagicMock()
         mock_image_input.save = MagicMock()
         with pytest.raises(MultimodalProcessingError):
@@ -39,17 +46,13 @@ def test_missing_jnp_and_pil_fallbacks(
 
     with patch("gemma_4_sql.backends.common_multimodal.logger.debug"):
         monkeypatch.setattr(mod, "jnp", None)
-        monkeypatch.setattr(mod, "optional_import", lambda _name: None)  # pyright: ignore[reportUnknownLambdaType]
+        monkeypatch.setattr(mod, "optional_import", _none_import)
         wav_header = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
         res = mod.process_audio(wav_header)
         assert len(res["audio_values"]) > 0
 
-        class DummyAudio:
-            """Unsupported audio input stub."""
-
-        untyped_process_audio: Callable[..., mod.ProcessedAudioDict] = mod.process_audio
         with pytest.raises(MultimodalProcessingError):
-            untyped_process_audio(DummyAudio())  # ty: ignore[invalid-argument-type]
+            mod.process_audio(None)
 
     wav_8bit = b"RIFF\x26\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x44\xac\x00\x00\x01\x00\x08\x00data\x02\x00\x00\x00\x80\xff"
     res_8bit = mod._parse_wav_samples(wav_8bit)
@@ -102,12 +105,24 @@ def test_process_audio_jax_and_lazy_import(monkeypatch: pytest.MonkeyPatch) -> N
     res_no_jnp = mod.process_audio(wav_header)
     assert len(res_no_jnp["spectrogram"]) == res_no_jnp["num_frames"]
 
-    monkeypatch.setattr(mod, "optional_import", lambda _name: None)  # pyright: ignore[reportUnknownLambdaType]
+    def _none_import(_name: str) -> None:
+        """Return None for optional_import."""
+        return
+
+    def _raw_bytes(_x: mod.AudioInput) -> bytes:
+        """Return b'raw'."""
+        return b"raw"
+
+    def _zero_wav(_x: bytes) -> tuple[list[float], int]:
+        """Return `([0.0], 16000)`."""
+        return ([0.0], 16000)
+
+    monkeypatch.setattr(mod, "optional_import", _none_import)
     monkeypatch.setattr(mod, "jnp", None)
     mock_logger = MagicMock()
     monkeypatch.setattr(mod, "logger", mock_logger)
-    monkeypatch.setattr(mod, "load_audio_bytes", lambda _x: b"raw")  # pyright: ignore[reportUnknownLambdaType]
-    monkeypatch.setattr(mod, "_parse_wav_samples", lambda _x: ([0.0], 16000))  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(mod, "load_audio_bytes", _raw_bytes)
+    monkeypatch.setattr(mod, "_parse_wav_samples", _zero_wav)
     mod.process_audio(b"fake")
     assert any("Failed to import jax.numpy" in str(c) for c in mock_logger.debug.call_args_list)
 

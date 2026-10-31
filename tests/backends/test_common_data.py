@@ -37,8 +37,12 @@ def test_create_base_format_transform() -> None:
 
     BaseFormatTransform = _create_base_format_transform(DummyBaseMap)
 
+    def _encode_len(x: str) -> list[int]:
+        """Return 1-element list with string length."""
+        return [len(x)]
+
     mock_tokenizer = MagicMock()
-    mock_tokenizer.encode.side_effect = lambda x: [len(x)]  # pyright: ignore[reportUnknownLambdaType]
+    mock_tokenizer.encode.side_effect = _encode_len
 
     transform = BaseFormatTransform(mock_tokenizer)
 
@@ -68,26 +72,18 @@ def test_create_base_format_transform() -> None:
 
 def test_get_grain_classes() -> None:
     """Test get_grain_classes."""
-
-    class CustomDS:
-        """Custom data source base class."""
-
-    class CustomMap:
-        """Custom map transform base class."""
+    from gemma_4_sql.backends.common_data import BaseFormatTransform, HFDataSource
 
     mock_module = MagicMock()
-    mock_module.RandomAccessDataSource = CustomDS
-    mock_module.MapTransform = CustomMap
-
     DataSource, MapTransform = get_grain_classes(mock_module)
-    assert issubclass(DataSource, CustomDS)
-    assert issubclass(MapTransform, CustomMap)
+    assert issubclass(DataSource, HFDataSource)
+    assert issubclass(MapTransform, BaseFormatTransform)
 
     # Test without attributes
     mock_module2 = MagicMock(spec=[])
     DataSource2, MapTransform2 = get_grain_classes(mock_module2)
-    assert isinstance(DataSource2, type)
-    assert isinstance(MapTransform2, type)
+    assert issubclass(DataSource2, HFDataSource)
+    assert issubclass(MapTransform2, BaseFormatTransform)
 
 
 class _MockDuckDBModule:

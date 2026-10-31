@@ -65,6 +65,12 @@ def test_serve_model_jax_missing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_serve_model_jax_other_status(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `serve_model` returns failed status when app creation raises an operational error."""
-    monkeypatch.setattr(srv, "create_backend_serve_app", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("init fail")))  # pyright: ignore[reportUnknownLambdaType]
+    from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONValue
+
+    def _raise_init_fail(**_kwargs: JSONValue) -> FastAPIAppProtocol:
+        """Raise RuntimeError."""
+        raise RuntimeError("init fail")
+
+    monkeypatch.setattr(srv, "create_backend_serve_app", _raise_init_fail)
     res = srv.serve_model("foo")
     assert res["status"] == "failed: init fail"

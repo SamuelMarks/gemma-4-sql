@@ -30,6 +30,11 @@ def _restore_serve_mod(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(serve_module, "AsyncLLMEngine", serve_module.AsyncLLMEngine)
 
 
+def _wrap_json_response(content: JSONDict) -> dict[str, JSONDict]:
+    """Wrap content dict in `{'response': content}`."""
+    return {"response": content}
+
+
 @pytest.mark.asyncio
 async def test_create_vllm_app(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _create_vllm_app registers /generate, streams vLLM outputs, and handles disconnects."""
@@ -41,7 +46,7 @@ async def test_create_vllm_app(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(serve_module, "FastAPI", mock_fastapi)
     monkeypatch.setattr(serve_module, "AsyncEngineArgs", MagicMock())
     monkeypatch.setattr(serve_module, "AsyncLLMEngine", MagicMock())
-    monkeypatch.setattr(serve_module, "JSONResponse", MagicMock(side_effect=lambda content: {"response": content}))  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(serve_module, "JSONResponse", MagicMock(side_effect=_wrap_json_response))
 
     def mock_decorator(_path: str) -> Callable[[RouteHandler], RouteHandler]:
         """Capture registered route function."""
@@ -176,7 +181,7 @@ async def test_create_vllm_app_empty_generator(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(serve_module, "FastAPI", MagicMock(return_value=mock_app))
     monkeypatch.setattr(serve_module, "AsyncEngineArgs", MagicMock())
     monkeypatch.setattr(serve_module, "AsyncLLMEngine", MagicMock())
-    monkeypatch.setattr(serve_module, "JSONResponse", MagicMock(side_effect=lambda content: {"response": content}))  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(serve_module, "JSONResponse", MagicMock(side_effect=_wrap_json_response))
 
     def mock_decorator(_path: str) -> Callable[[RouteHandler], RouteHandler]:
         """Capture route handler."""

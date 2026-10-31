@@ -57,9 +57,13 @@ def test_duckdb_real_integration(
 
     import gemma_4_sql.sdk.agent as ag
 
+    def _get_mock_duckdb_backend(_name: str) -> MockBackendForDuckDB:
+        """Return MockBackendForDuckDB instance."""
+        return MockBackendForDuckDB()
+
     monkeypatch.setattr("gemma_4_sql.sdk.duckdb_extension.duckdb", real_duckdb)
     monkeypatch.setattr("gemma_4_sql.sdk.adapters.duckdb_adapter.duckdb", real_duckdb)
-    monkeypatch.setattr(ag, "get_backend", lambda _name: MockBackendForDuckDB())  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(ag, "get_backend", _get_mock_duckdb_backend)
 
     in_memory_duckdb.execute("CREATE TABLE test (a INT);")
     in_memory_duckdb.execute("INSERT INTO test VALUES (1), (2), (3);")
@@ -108,9 +112,13 @@ def test_duckdb_udf_error_handling(
             """
             raise RuntimeError("Model generation failed")
 
+    def _get_bad_backend(_name: str) -> BadBackend:
+        """Return BadBackend instance."""
+        return BadBackend()
+
     monkeypatch.setattr("gemma_4_sql.sdk.duckdb_extension.duckdb", real_duckdb)
     monkeypatch.setattr("gemma_4_sql.sdk.adapters.duckdb_adapter.duckdb", real_duckdb)
-    monkeypatch.setattr(ag, "get_backend", lambda _name: BadBackend())  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(ag, "get_backend", _get_bad_backend)
 
     embed_in_duckdb(in_memory_duckdb, model_name="bad-model", backend="test-backend")
 

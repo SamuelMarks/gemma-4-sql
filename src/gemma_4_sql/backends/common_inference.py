@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import logging
 import math
@@ -62,7 +63,7 @@ class IndexableSequence2DProtocol(Protocol):
 
 @runtime_checkable
 class BeamSequenceArrayProtocol(SupportsFloat, Protocol):
-    """Protocol for 2D token ID sequence arrays indexed by `(row, col)`."""
+    """Protocol for 2D token ID sequence arrays indexed by `(row, col)` or an index array."""
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -71,7 +72,7 @@ class BeamSequenceArrayProtocol(SupportsFloat, Protocol):
 
     def __getitem__(
         self,
-        item: int | slice | types.EllipsisType | tuple[int | slice | types.EllipsisType, ...],
+        item: int | slice | types.EllipsisType | Self | tuple[int | slice | types.EllipsisType, ...],
         /,
     ) -> Self:
         """Index into the sequence array."""
@@ -120,6 +121,20 @@ class JaxNumpyBeamProtocol[ArrayT](Protocol):
 
     def concatenate(self, arrays: Sequence[ArrayT], axis: int = -1) -> ArrayT:
         """Join a sequence of arrays along an existing axis."""
+        ...
+
+
+@runtime_checkable
+class JaxJitBeamModuleProtocol(Protocol):
+    """Protocol for a `jax` module exposing `.jit` for beam step probability compilation."""
+
+    def jit[ArrayT: BeamSequenceArrayProtocol](
+        self,
+        fun: Callable[[ArrayT, int], tuple[ArrayT, ArrayT]],
+        *,
+        static_argnums: tuple[int, ...],
+    ) -> Callable[[ArrayT, int], tuple[ArrayT, ArrayT]]:
+        """JIT-compile a step probability function."""
         ...
 
 
@@ -333,7 +348,7 @@ def compute_jax_step_probs[ArrayT: BeamSequenceArrayProtocol](
     sorted_indices: ArrayT = jnp_mod.argsort(log_probs)
     top_tail: ArrayT = sorted_indices[-beam_width:]
     top_indices: ArrayT = top_tail[::-1]
-    top_probs: ArrayT = log_probs[top_indices]  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type]
+    top_probs: ArrayT = log_probs[top_indices]
     return (top_indices, top_probs)
 
 
@@ -369,6 +384,41 @@ def expand_jax_beams[ArrayT: BeamSequenceArrayProtocol](
         new_score = score + prob_val
         new_beams.append((new_seq, new_score))
     return new_beams
+
+
+def run_jax_beam_search_step[ArrayT: BeamSequenceArrayProtocol](
+    seq: ArrayT,
+    score: float,
+    logits: ArrayT,
+    beam_width: int,
+    jax_mod: JaxModuleBeamProtocol[ArrayT],
+    jnp_mod: JaxNumpyBeamProtocol[ArrayT],
+) -> list[tuple[ArrayT, float]]:
+    """Compute top-k log probabilities (using `jax.jit` when available) and expand `seq` into `beam_width` beams.
+
+    Args:
+        seq: Current token ID sequence array of shape `(1, seq_len)`.
+        score: Cumulative log-probability score of `seq`.
+        logits: Vocabulary logits array evaluated for `seq`.
+        beam_width: Number of beams to expand.
+        jax_mod: Loaded `jax` module.
+        jnp_mod: Loaded `jax.numpy` module.
+
+    Returns:
+        List of `(expanded_sequence, new_score)` tuples.
+
+    """
+
+    def _step_probs(l_arr: ArrayT, bw: int) -> tuple[ArrayT, ArrayT]:
+        """Compute step probabilities for optional JIT compilation."""
+        return compute_jax_step_probs(l_arr, bw, jax_mod, jnp_mod)
+
+    if isinstance(jax_mod, JaxJitBeamModuleProtocol):
+        step_fn = jax_mod.jit(_step_probs, static_argnums=(1,))
+        (top_indices, top_probs) = step_fn(logits, beam_width)
+    else:
+        (top_indices, top_probs) = _step_probs(logits, beam_width)
+    return expand_jax_beams(seq, score, top_indices, top_probs, beam_width, jnp_mod)
 
 
 def run_inference_wrapper(
@@ -436,6 +486,36 @@ def run_inference_wrapper(
     return result
 
 
+_SIGNATURE_TRAITS_CACHE: dict[int, tuple[bool, bool, frozenset[str]]] = {}
+
+
+def _get_callable_signature_traits[OutT](model: Callable[..., OutT]) -> tuple[bool, bool, frozenset[str]]:
+    """Inspect or retrieve cached `(accepts_positions, has_var_kw, param_names)` for `model`.
+
+    Args:
+        model: Callable JAX/Flax NNX model or function.
+
+    Returns:
+        Tuple of `(accepts_positions, has_var_kw, accepted_param_names)`.
+
+    """
+    model_id = id(model)
+    cached = _SIGNATURE_TRAITS_CACHE.get(model_id)
+    if cached is not None:
+        return cached
+    sig = inspect.signature(model)
+    params = list(sig.parameters.values())
+    has_var_pos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
+    has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
+    pos_params = [p for p in params if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+    accepts_positions = has_var_pos or len(pos_params) >= 2 or "positions" in sig.parameters
+    traits = (accepts_positions, has_var_kw, frozenset(sig.parameters.keys()))
+    with contextlib.suppress(TypeError):
+        weakref.finalize(model, _SIGNATURE_TRAITS_CACHE.pop, model_id, None)
+        _SIGNATURE_TRAITS_CACHE[model_id] = traits
+    return traits
+
+
 def call_jax_causal_lm[OutT](
     model: Callable[..., OutT],
     inputs: ForwardArg,
@@ -444,8 +524,8 @@ def call_jax_causal_lm[OutT](
 ) -> OutT:
     """Invoke a JAX causal language model with signature-aware positional and keyword argument forwarding.
 
-    Inspects `inspect.signature(model)` instead of catching broad `TypeError` during execution,
-    ensuring internal `TypeError` bugs inside `model.__call__` are never masked.
+    Inspects and caches `inspect.signature(model)` traits instead of catching broad `TypeError`
+    during execution, ensuring internal `TypeError` bugs inside `model.__call__` are never masked.
 
     Args:
         model: Callable JAX/Flax NNX model or function.
@@ -457,13 +537,8 @@ def call_jax_causal_lm[OutT](
         Model output logits array.
 
     """
-    sig = inspect.signature(model)
-    params = list(sig.parameters.values())
-    has_var_pos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params)
-    has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
-    pos_params = [p for p in params if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]
-    accepts_positions = has_var_pos or len(pos_params) >= 2 or "positions" in sig.parameters
-    accepted_kwargs = extra_kwargs if has_var_kw else {k: v for k, v in extra_kwargs.items() if k in sig.parameters}
+    accepts_positions, has_var_kw, param_names = _get_callable_signature_traits(model)
+    accepted_kwargs = extra_kwargs if has_var_kw else {k: v for k, v in extra_kwargs.items() if k in param_names}
 
     if positions is not None and accepts_positions:
         return model(inputs, positions, **accepted_kwargs)
@@ -476,6 +551,7 @@ __all__ = [
     "CacheConfigInput",
     "CacheFingerprintProtocol",
     "CacheableRoutineProtocol",
+    "JaxJitBeamModuleProtocol",
     "JaxModuleBeamProtocol",
     "JaxNNBeamNamespaceProtocol",
     "JaxNumpyBeamProtocol",
@@ -488,4 +564,5 @@ __all__ = [
     "normalize_logprob_confidence",
     "run_array_beam_search",
     "run_inference_wrapper",
+    "run_jax_beam_search_step",
 ]

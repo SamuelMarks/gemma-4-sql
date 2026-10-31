@@ -21,14 +21,12 @@ class SummaryWriterInstanceProtocol(Protocol):
         """Record a scalar metric at `global_step`."""
         ...
 
-
-@runtime_checkable
-class ClosableSummaryWriterProtocol(SummaryWriterInstanceProtocol, Protocol):
-    """Protocol for a TensorBoard `SummaryWriter` instance supporting `.close()`."""
-
     def close(self) -> None:
         """Flush and close the summary writer."""
         ...
+
+
+ClosableSummaryWriterProtocol = SummaryWriterInstanceProtocol
 
 
 type SummaryWriterFactory = Callable[..., SummaryWriterInstanceProtocol] | type
@@ -93,7 +91,7 @@ def log_metrics_wrapper(
                 writer.add_scalar(k, v, step)
         finally:
             with contextlib.suppress(AttributeError):
-                writer.close()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                writer.close()
         status = "success"
     else:
         status = "backend_unavailable"

@@ -12,7 +12,7 @@ import contextlib
 import logging
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
@@ -53,8 +53,41 @@ class _KerasLayersContainerProtocol(Protocol):
         ...
 
 
+type _QuantizeLayerInput = KerasLayerProtocol | _KerasLayersContainerProtocol | CausalLMProtocol | str | None
+
+
+def _is_keras_layer(layer: _QuantizeLayerInput) -> TypeGuard[KerasLayerProtocol]:
+    """Narrow `layer` to `KerasLayerProtocol` for `.weights` access.
+
+    Args:
+        layer: Candidate Keras layer object.
+
+    Returns:
+        `True` so `.weights` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = layer
+    return True
+
+
+def _is_keras_model(
+    model: BackendKwargValue | KerasCausalLMProtocol | KerasLayerProtocol | _KerasLayersContainerProtocol | None,
+) -> TypeGuard[KerasCausalLMProtocol]:
+    """Narrow `model` to `KerasCausalLMProtocol` for `.layers` and `.save(...)` access.
+
+    Args:
+        model: Candidate Keras model object.
+
+    Returns:
+        `True` so `.layers` and `.save(...)` can be accessed inside `contextlib.suppress`.
+
+    """
+    _ = model
+    return True
+
+
 def quantize_layer_weights(
-    layer: KerasLayerProtocol | _KerasLayersContainerProtocol | CausalLMProtocol | str | None,
+    layer: _QuantizeLayerInput,
     method: str = "int8",
 ) -> int:
     """Quantize kernel weights of a Keras layer using symmetric scaling factors.
@@ -80,7 +113,8 @@ def quantize_layer_weights(
 
     weights = ()
     with contextlib.suppress(AttributeError):
-        weights = layer.weights  # pyright: ignore[reportOptionalMemberAccess,reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+        assert _is_keras_layer(layer)
+        weights = layer.weights
     for w in weights:
         try:
             val = ops.stop_gradient(w)
@@ -98,7 +132,7 @@ def quantize_layer_weights(
 
     if quantized_count > 0:
         register_quantized_artifact(
-            layer,  # pyright: ignore[reportArgumentType]
+            layer,
             method=method,
             scales={f"w_{i}": s for i, s in enumerate(layer_scales)},
         )
@@ -113,8 +147,9 @@ def _get_current_keras_policy() -> DTypeProtocol | str | None:
         Current Keras dtype policy object or string name, or `None` if unavailable.
 
     """
+    assert keras is not None
     with contextlib.suppress(AttributeError, TypeError):
-        res: DTypeProtocol | str | None = keras.config.dtype_policy()  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        res: DTypeProtocol | str | None = keras.config.dtype_policy()
         return res
     return None
 
@@ -126,13 +161,14 @@ def _set_keras_policy(policy: DTypeProtocol | str) -> None:
         policy: Policy string or `DTypePolicy` object.
 
     """
+    assert keras is not None
     try:
-        keras.config.set_dtype_policy(policy)  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        keras.config.set_dtype_policy(policy)
         return
     except (AttributeError, TypeError):
         pass
     with contextlib.suppress(AttributeError, TypeError):
-        keras.dtype_policies.set_dtype_policy(policy)  # pyright: ignore[reportOptionalMemberAccess]  # ty: ignore[unresolved-attribute]
+        keras.dtype_policies.set_dtype_policy(policy)
 
 
 def quantize_model(
@@ -195,12 +231,13 @@ def quantize_model(
                     logger.debug("Preset loading skipped during Keras quantization: %s", err)
 
             if model is not None:
-                layers = ()
+                assert _is_keras_model(model)
+                layers: Sequence[KerasLayerProtocol] = ()
                 with contextlib.suppress(AttributeError):
-                    layers = model.layers  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                    layers = model.layers
                 for layer in layers:
                     quantized_layers_count += quantize_layer_weights(layer, method=method)
-                register_quantized_artifact(model, method=method)  # pyright: ignore[reportArgumentType]
+                register_quantized_artifact(model, method=method)
 
                 raw_export_path = kwargs.get("export_path")
                 if raw_export_path:
@@ -208,7 +245,7 @@ def quantize_model(
                     export_dir.mkdir(parents=True, exist_ok=True)
                     export_file = export_dir / f"{Path(model_name).name or 'model'}_{method}.keras"
                     with contextlib.suppress(AttributeError):
-                        model.save(str(export_file))  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]
+                        model.save(str(export_file))
                         logger.info("Saved quantized Keras model artifact to %s", export_file)
 
             return (memory_reduction, f"quantized_{method}")

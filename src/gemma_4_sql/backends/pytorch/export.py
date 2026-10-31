@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -23,10 +23,34 @@ class _ClonableTensorProtocol(TorchTensorProtocol, Protocol):
         ...
 
 
+@runtime_checkable
+class _SafetensorsSaveFileProtocol(Protocol):
+    """Protocol for `safetensors.torch.save_file`."""
+
+    def __call__(
+        self,
+        tensors: Mapping[str, TorchTensorProtocol | TensorProtocol],
+        filename: str,
+        /,
+    ) -> None:
+        """Serialize `tensors` to a safetensors file at `filename`."""
+        ...
+
+
+@runtime_checkable
+class _SavePretrainedModelProtocol(TorchCausalLMProtocol, Protocol):
+    """Protocol for a PyTorch model supporting `.save_pretrained(export_path)`."""
+
+    def save_pretrained(self, save_directory: str, /) -> str | None:
+        """Persist model or adapter weights to `save_directory`."""
+        ...
+
+
 torch = optional_import("torch")
-_raw_save_file = optional_attr("safetensors.torch", "save_file")
-save_file: Callable[[Mapping[str, TorchTensorProtocol | TensorProtocol], str], None] | None = (  # ty: ignore[invalid-assignment]
-    _raw_save_file if callable(_raw_save_file) else None
+save_file: _SafetensorsSaveFileProtocol | None = optional_attr(
+    "safetensors.torch",
+    "save_file",
+    _SafetensorsSaveFileProtocol,
 )
 
 
@@ -81,7 +105,7 @@ def _save_real_model(
 
             raw_cfg = kwargs.get("config")
             cfg = raw_cfg if isinstance(raw_cfg, NativeGemma4Config) else Gemma4Config.from_preset(model_name)
-            model: TorchCausalLMProtocol = NativeGemma4(cfg)
+            model: _SavePretrainedModelProtocol = NativeGemma4(cfg)
             tensors: dict[str, TorchTensorProtocol | TensorProtocol] = {k: v.clone() if k == "lm_head.weight" and isinstance(v, _ClonableTensorProtocol) else v for k, v in model.state_dict().items()}
         else:
             from transformers.models.gemma4 import Gemma4ForCausalLM
@@ -97,7 +121,7 @@ def _save_real_model(
     out_dir.mkdir(parents=True, exist_ok=True)
     file_path = out_dir / "model.safetensors"
     if kwargs.get("export_type") == "adapter":
-        model.save_pretrained(export_path)  # pyright: ignore[reportAttributeAccessIssue]
+        model.save_pretrained(export_path)
         file_path = out_dir / "adapter_model.safetensors"
     elif is_rank_zero and save_file is not None:
         save_file(tensors, str(file_path))

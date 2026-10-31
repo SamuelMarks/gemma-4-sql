@@ -254,7 +254,11 @@ def test_quantize_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None
     # 2. End-to-end INT8 and INT4 quantization on tiny PyTorch model
     from gemma_4_sql.type_hints import get_quantized_artifact
 
-    monkeypatch.setattr(quantize_module, "BitsAndBytesConfig", lambda **kw: kw)  # pyright: ignore[reportUnknownLambdaType]
+    def _bnb_cfg(**kw: bool) -> dict[str, bool]:
+        """Return kwargs dict."""
+        return kw
+
+    monkeypatch.setattr(quantize_module, "BitsAndBytesConfig", _bnb_cfg)
     res_int8 = quantize_module.quantize_model("tiny-gemma4", "int8", model=tiny_model)
     assert res_int8["status"] == "quantized_int8"
     assert res_int8["memory_reduction_factor"] == 0.5

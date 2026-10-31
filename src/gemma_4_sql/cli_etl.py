@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 from collections.abc import Callable
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.cli_misc import print_cli_error
 from gemma_4_sql.exceptions import GemmaSQLError, is_failed_status
@@ -13,6 +14,26 @@ from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
 from gemma_4_sql.type_hints import DataloaderResultDict, ETLConfig
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class ETLMultimodalCLIArgsProtocol(Protocol):
+    """Protocol for parsed ETL CLI arguments carrying multimodal column flags."""
+
+    @property
+    def image_column(self) -> str | None:
+        """Provide optional image column name."""
+        ...
+
+    @property
+    def audio_column(self) -> str | None:
+        """Provide optional audio column name."""
+        ...
+
+    @property
+    def modality(self) -> str | None:
+        """Provide explicit modality selector."""
+        ...
 
 
 def _print_etl_result(res: DataloaderResultDict) -> None:
@@ -66,9 +87,9 @@ def _run_etl_stage(args: argparse.Namespace, stage_fn: Callable[..., DataloaderR
         tokenizer_name=args.tokenizer,
         duckdb_path=args.duckdb_path,
         duckdb_table=args.duckdb_table,
-        image_column=args.image_column if "image_column" in vars(args) else None,
-        audio_column=args.audio_column if "audio_column" in vars(args) else None,
-        modality=str((args.modality if "modality" in vars(args) else "text") or "text"),
+        image_column=args.image_column if isinstance(args, ETLMultimodalCLIArgsProtocol) else None,
+        audio_column=args.audio_column if isinstance(args, ETLMultimodalCLIArgsProtocol) else None,
+        modality=str((args.modality if isinstance(args, ETLMultimodalCLIArgsProtocol) else "text") or "text"),
     )
     try:
         res = stage_fn(config, backend=args.backend)

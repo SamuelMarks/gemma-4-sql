@@ -125,10 +125,16 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
                     """Return a nullcontext scope."""
                     return nullcontext()
 
+    from gemma_4_sql.type_hints import ETLConfig
+
+    def _keras_train_loader(_cfg: ETLConfig) -> dict[str, list[dict[str, list[list[int]]]]]:
+        """Return 1-batch Keras training loader."""
+        return {"loader": [{"inputs": [[1, 2]], "targets": [[2, 3]]}]}
+
     monkeypatch.setattr(ktrain, "keras", DummyKerasMod)
     monkeypatch.setattr(ktrain, "tf", DummyTF)
     monkeypatch.setattr(ktrain, "GemmaCausalLM", DummyGemmaCausalLM)
-    monkeypatch.setattr(ktrain, "build_dataloader", lambda _cfg: {"loader": [{"inputs": [[1, 2]], "targets": [[2, 3]]}]})  # pyright: ignore[reportUnknownLambdaType]
+    monkeypatch.setattr(ktrain, "build_dataloader", _keras_train_loader)
 
     res_k = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
     assert res_k["backend"] == "keras"
@@ -157,7 +163,12 @@ def test_pretrain_model_error() -> None:
 def test_models_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `pretrain_model`, `train_from_scratch`, `sft_model`, and `posttrain_model` populate default configs without mutating caller configs."""
     recording_double = RecordingBackendDouble("jax")
-    monkeypatch.setattr(models, "get_backend", lambda _b: recording_double)  # pyright: ignore[reportUnknownLambdaType]
+
+    def _get_recording_double(_b: str) -> RecordingBackendDouble:
+        """Return `recording_double`."""
+        return recording_double
+
+    monkeypatch.setattr(models, "get_backend", _get_recording_double)
 
     res0 = pretrain_model()
     assert res0["action"] == "pretrain"
@@ -180,22 +191,24 @@ def test_models_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_sft_and_train_from_scratch_real_tiny_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `sft_model` and `train_from_scratch` execute a real 1-step JAX training loop on a tiny Gemma 4 model."""
+    import jax
     import jax.numpy as jnp
 
     import gemma_4_sql.backends.jax.train as jax_train
+    from gemma_4_sql.type_hints import ETLConfig
 
-    monkeypatch.setattr(
-        jax_train,
-        "build_dataloader",
-        lambda _cfg: {  # pyright: ignore[reportUnknownLambdaType]
+    def _jax_train_loader(_cfg: ETLConfig) -> dict[str, list[dict[str, jax.Array]]]:
+        """Return 1-batch JAX training loader."""
+        return {
             "loader": [
                 {
                     "inputs": jnp.array([[1, 2, 3, 4]], dtype=jnp.int32),
                     "targets": jnp.array([[2, 3, 4, 5]], dtype=jnp.int32),
                 }
             ]
-        },
-    )
+        }
+
+    monkeypatch.setattr(jax_train, "build_dataloader", _jax_train_loader)
     res_sft = sft_model(
         TrainingConfig(
             action="sft",
