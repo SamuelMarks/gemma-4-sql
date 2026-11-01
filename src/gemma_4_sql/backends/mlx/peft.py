@@ -5,12 +5,9 @@ from __future__ import annotations
 import contextlib
 import logging
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, MutableMapping, MutableSequence, Sequence
 from pathlib import Path
-from typing import Protocol, TypeGuard, runtime_checkable
-
-import mlx.core as _mlx_core_types
-import mlx.nn as _mlx_nn_types
+from typing import Protocol, Self, TypeGuard, runtime_checkable
 
 from gemma_4_sql._types_models import MlxLMLoadProtocol
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper, compute_lora_scale, matches_target_module
@@ -26,8 +23,53 @@ from gemma_4_sql.type_hints import (
 
 logger = logging.getLogger(__name__)
 
+type _MlxListOrScalar = bool | int | float | complex | list[_MlxListOrScalar]
 
-type MlxTensorLike = _mlx_core_types.array | MlxArrayProtocol
+
+@runtime_checkable
+class _MlxTensorProtocol(Protocol):
+    """Structural protocol satisfied by both `mlx.core.array` and `MlxArrayProtocol`."""
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Provide the shape dimensions of the array."""
+        ...
+
+    @property
+    def T(self) -> Self:
+        """Provide the transpose of the array."""
+        ...
+
+    def flatten(self) -> Self:
+        """Return a 1D flattened array view."""
+        ...
+
+    def tolist(self) -> Sequence[float] | _MlxListOrScalar:
+        """Convert the array into a Python list or scalar."""
+        ...
+
+    def __add__(self, other: Self | float, /) -> Self:
+        """Add an array or scalar to this array."""
+        ...
+
+    def __radd__(self, other: Self | float, /) -> Self:
+        """Right-add an array or scalar to this array."""
+        ...
+
+    def __mul__(self, other: Self | float, /) -> Self:
+        """Multiply this array by an array or scalar."""
+        ...
+
+    def __rmul__(self, other: Self | float, /) -> Self:
+        """Right-multiply this array by an array or scalar."""
+        ...
+
+    def __matmul__(self, other: Self, /) -> Self:
+        """Matrix-multiply two arrays."""
+        ...
+
+
+type MlxTensorLike = _MlxTensorProtocol
 
 
 def _as_mlx_array(val: MlxTensorLike) -> TypeGuard[MlxArrayProtocol]:
@@ -178,7 +220,7 @@ load: MlxLMLoadProtocol | None = optional_attr(
 )
 
 
-class MLXLoRALinear(_mlx_nn_types.Module):
+class MLXLoRALinear:
     """Low-rank adaptation (LoRA) linear module for MLX.
 
     Decomposes weight updates into low-rank matrices:
@@ -227,7 +269,6 @@ class MLXLoRALinear(_mlx_nn_types.Module):
         if nn is None or mx is None:
             raise DependencyMissingError("MLX dependencies are missing.")
         self.scale = compute_lora_scale(lora_alpha, r)
-        super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.r = r
@@ -281,6 +322,31 @@ class MLXLoRALinear(_mlx_nn_types.Module):
 
         """
         return self.lora_b
+
+    def parameters(self) -> dict[str, MlxTensorLike]:
+        """Return all parameters (`weight`, optional `bias`, `lora_a`, `lora_b`) of this LoRA layer.
+
+        Returns:
+            Dictionary mapping parameter names to tensors.
+
+        """
+        params: dict[str, MlxTensorLike] = {
+            "weight": self.weight,
+            "lora_a": self.lora_a,
+            "lora_b": self.lora_b,
+        }
+        if self.bias is not None:
+            params["bias"] = self.bias
+        return params
+
+    def trainable_parameters(self) -> dict[str, MlxTensorLike]:
+        """Return the trainable LoRA adapter parameters (`lora_a`, `lora_b`).
+
+        Returns:
+            Dictionary mapping trainable adapter names to tensors.
+
+        """
+        return {"lora_a": self.lora_a, "lora_b": self.lora_b}
 
     @classmethod
     def from_linear(
@@ -394,6 +460,92 @@ class MLXLoRALinear(_mlx_nn_types.Module):
 MlxLoRALinear = MLXLoRALinear
 
 
+def _is_mutable_mapping(
+    obj: _MlxTargetObjectProtocol,
+) -> TypeGuard[MutableMapping[str, _MlxTargetObjectProtocol]]:
+    """Narrow `obj` to `MutableMapping[str, _MlxTargetObjectProtocol]`.
+
+    Args:
+        obj: Candidate MLX module (`dict` subclass) or container.
+
+    Returns:
+        `True` when `obj` is a mutable mapping.
+
+    """
+    return isinstance(obj, MutableMapping)
+
+
+def _is_mutable_sequence(
+    obj: _MlxTargetObjectProtocol,
+) -> TypeGuard[MutableSequence[_MlxTargetObjectProtocol]]:
+    """Narrow `obj` to `MutableSequence[_MlxTargetObjectProtocol]`.
+
+    Args:
+        obj: Candidate list container of MLX submodules.
+
+    Returns:
+        `True` when `obj` is a mutable sequence.
+
+    """
+    return isinstance(obj, MutableSequence)
+
+
+def _set_mlx_submodule(
+    root: _MlxTargetObjectProtocol,
+    dotted_path: str,
+    lora_mod: MLXLoRALinear,
+) -> None:
+    """Replace a submodule at `dotted_path` inside `root` using dictionary/sequence indexing.
+
+    Args:
+        root: Root MLX model (`dict` or `list` container).
+        dotted_path: Dot-delimited submodule path from `named_modules()`.
+        lora_mod: Replacement `MLXLoRALinear` instance.
+
+    """
+    parts = dotted_path.split(".")
+    curr: _MlxTargetObjectProtocol = root
+    for part in parts[:-1]:
+        if _is_mutable_mapping(curr):
+            curr = curr[part]
+        else:
+            assert _is_mutable_sequence(curr)
+            curr = curr[int(part)]
+    last = parts[-1]
+    if _is_mutable_mapping(curr):
+        curr[last] = lora_mod
+    elif _is_mutable_sequence(curr):
+        curr[int(last)] = lora_mod
+    else:
+        assert _is_mlx_trainable(curr)
+        curr.update_modules({last: lora_mod})
+
+
+def _iter_lora_layers(
+    node: _MlxTargetObjectProtocol,
+    prefix: str = "",
+) -> Iterator[tuple[str, MLXLoRALinear]]:
+    """Yield `(dotted_prefix, lora_layer)` pairs across a nested MLX model hierarchy.
+
+    Args:
+        node: Root or child MLX module, mapping, sequence, or `MLXLoRALinear`.
+        prefix: Current dot-delimited path prefix.
+
+    Yields:
+        Tuples of `(dotted_prefix, lora_layer)`.
+
+    """
+    if isinstance(node, MLXLoRALinear):
+        yield (prefix, node)
+    elif isinstance(node, Mapping):
+        for k, v in node.items():
+            child_key = f"{prefix}.{k}" if prefix else str(k)
+            yield from _iter_lora_layers(v, child_key)
+    elif isinstance(node, (list, tuple)):
+        for idx, item in enumerate(node):
+            yield from _iter_lora_layers(item, f"{prefix}.{idx}")
+
+
 def inject_lora[ModelT: _MlxTargetObjectProtocol](
     model: ModelT,
     target_modules: list[str],
@@ -403,8 +555,8 @@ def inject_lora[ModelT: _MlxTargetObjectProtocol](
 ) -> tuple[ModelT, int]:
     """Inject LoRA adapters into designated projection modules of an MLX model.
 
-    Uses `model.update_modules(tree_unflatten(replacements))` to replace matching
-    `mlx.nn.Linear` submodules with `MLXLoRALinear` without reflection (`getattr`/`setattr`).
+    Replaces matching `mlx.nn.Linear` submodules with `MLXLoRALinear` via
+    container indexing without reflection (`getattr`/`setattr`).
 
     Args:
         model: Target MLX neural network model.
@@ -440,26 +592,10 @@ def inject_lora[ModelT: _MlxTargetObjectProtocol](
                 lora_alpha=lora_alpha,
                 lora_dropout=lora_dropout,
             )
-            lora_ref: _MlxTargetObjectProtocol = lora_module
-            assert _is_mlx_trainable(lora_ref)
-            lora_ref.freeze()
-            lora_ref.unfreeze(keys=["lora_a", "lora_b"])
             replacements.append((name, lora_module))
 
-    if replacements:
-        import mlx.utils as _mlx_utils
-
-        with contextlib.suppress(AttributeError, TypeError):
-            m_upd: _MlxTargetObjectProtocol = model
-            assert _is_mlx_trainable(m_upd)
-            m_upd.update_modules(_mlx_utils.tree_unflatten(replacements))
-        if isinstance(model, list):
-            for name, lora_mod in replacements:
-                if "." in name:
-                    idx_str, child_key = name.split(".", 1)
-                    model[int(idx_str)].update_modules({child_key: lora_mod})
-                else:
-                    model[int(name)] = lora_mod
+    for name, lora_mod in replacements:
+        _set_mlx_submodule(model, name, lora_mod)
 
     return model, len(replacements)
 
@@ -483,14 +619,17 @@ def save_adapter_weights(
     """
     if mx is None:
         raise DependencyMissingError("MLX dependencies are missing.")
-    import mlx.utils as _mlx_utils
 
     raw_path = Path(save_path)
     path = (raw_path / "adapter.safetensors") if (raw_path.is_dir() or raw_path.suffix != ".safetensors") else raw_path
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    assert _is_mlx_trainable(model)
-    trainable_dict: dict[str, MlxArrayProtocol] = dict(_mlx_utils.tree_flatten(model.trainable_parameters()))
+    trainable_dict: dict[str, MlxTensorLike] = {}
+    for prefix, lora_mod in _iter_lora_layers(model):
+        key_a = f"{prefix}.lora_a" if prefix else "lora_a"
+        key_b = f"{prefix}.lora_b" if prefix else "lora_b"
+        trainable_dict[key_a] = lora_mod.lora_a
+        trainable_dict[key_b] = lora_mod.lora_b
     mx.save_safetensors(str(path), trainable_dict)
 
 
@@ -514,13 +653,17 @@ def load_adapter_weights(
     path = Path(load_path)
     if not path.exists():
         raise FileNotFoundError(f"Adapter weights not found at {load_path}")
-    assert _is_mlx_trainable(model)
-    try:
-        model.load_weights(str(path), strict=False)
-    except AttributeError:
-        with contextlib.suppress(AttributeError, TypeError):
-            weights = mx.load(str(path))
-            model.update(weights)
+    weights = mx.load(str(path))
+    found_lora = False
+    for prefix, lora_mod in _iter_lora_layers(model):
+        found_lora = True
+        key_a = f"{prefix}.lora_a" if prefix else "lora_a"
+        key_b = f"{prefix}.lora_b" if prefix else "lora_b"
+        lora_mod.lora_a = weights[key_a]
+        lora_mod.lora_b = weights[key_b]
+    if not found_lora:
+        assert _is_mlx_trainable(model)
+        model.update(weights)
 
 
 def apply_lora(

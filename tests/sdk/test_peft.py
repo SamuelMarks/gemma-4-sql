@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 import pytest
 
 from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
@@ -133,7 +131,105 @@ def test_apply_peft_keras(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify apply_peft routes custom target_modules through MLX apply_lora and injects real MLXLoRALinear modules."""
+    from typing import Self
+
     import gemma_4_sql.backends.mlx.peft as mpeft
+    from gemma_4_sql.backends.mlx.peft import MLXLoRALinear
+
+    class _TinyMlxArray:
+        """Minimal 2D/3D tensor double satisfying `_MlxTensorProtocol` for cross-platform `MLXLoRALinear` tests."""
+
+        def __init__(self, shape: tuple[int, ...]) -> None:
+            """Initialize with target shape."""
+            self._shape = shape
+
+        @property
+        def shape(self) -> tuple[int, ...]:
+            """Provide tensor shape."""
+            return self._shape
+
+        @property
+        def T(self) -> Self:
+            """Provide transposed 2D shape."""
+            return type(self)((self._shape[1], self._shape[0]))
+
+        def flatten(self) -> Self:
+            """Return 1D flattened shape."""
+            total = 1
+            for d in self._shape:
+                total *= d
+            return type(self)((total,))
+
+        def tolist(self) -> list[float]:
+            """Return zero-filled float list."""
+            return [0.0]
+
+        def __add__(self, _other: Self | float, /) -> Self:
+            """Return array of same shape under addition."""
+            return type(self)(self._shape)
+
+        def __radd__(self, _other: Self | float, /) -> Self:
+            """Return array of same shape under right-addition."""
+            return type(self)(self._shape)
+
+        def __mul__(self, _other: Self | float, /) -> Self:
+            """Return array of same shape under multiplication."""
+            return type(self)(self._shape)
+
+        def __rmul__(self, _other: Self | float, /) -> Self:
+            """Return array of same shape under right-multiplication."""
+            return type(self)(self._shape)
+
+        def __matmul__(self, other: Self, /) -> Self:
+            """Return matrix product shape `(..., other.shape[-1])`."""
+            return type(self)((*self._shape[:-1], other.shape[-1]))
+
+    class _TinyMlxRandom:
+        """Minimal `mx.random` namespace providing `uniform`."""
+
+        def uniform(self, low: float, high: float, shape: tuple[int, ...]) -> _TinyMlxArray:
+            """Return a `_TinyMlxArray` with the requested shape."""
+            _ = (low, high)
+            return _TinyMlxArray(shape)
+
+    class _TinyMlxCore:
+        """Minimal `mlx.core` double providing `zeros` and `random.uniform`."""
+
+        def __init__(self) -> None:
+            """Initialize random namespace."""
+            self.random = _TinyMlxRandom()
+
+        def zeros(self, shape: tuple[int, ...]) -> _TinyMlxArray:
+            """Return a zero-initialized `_TinyMlxArray`."""
+            return _TinyMlxArray(shape)
+
+    class _TinyLinear:
+        """Minimal `mlx.nn.Linear` double exposing `weight` and `bias`."""
+
+        def __init__(self, in_dims: int, out_dims: int) -> None:
+            """Initialize weight matrix and `None` bias."""
+            self.weight = _TinyMlxArray((out_dims, in_dims))
+            self.bias: _TinyMlxArray | None = None
+
+        def __call__(self, x: _TinyMlxArray) -> _TinyMlxArray:
+            """Project `x` by `weight.T`."""
+            return x @ self.weight.T
+
+    class _TinyIdentity:
+        """Minimal `mlx.nn.Identity` pass-through callable."""
+
+        def __call__(self, x: _TinyMlxArray) -> _TinyMlxArray:
+            """Return `x` unchanged."""
+            return x
+
+    class _TinyMlxNN:
+        """Minimal `mlx.nn` namespace exposing `Linear` and `Identity`."""
+
+        Linear = _TinyLinear
+        Identity = _TinyIdentity
+
+    monkeypatch.setattr(mpeft, "mx", _TinyMlxCore())
+    monkeypatch.setattr(mpeft, "nn", _TinyMlxNN())
 
     class DummyMlxModel:
         """Minimal MLX model stub."""
@@ -166,41 +262,45 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res["injected_modules"] == 1
     assert injected_targets == ["k_proj"]
 
-    import mlx.core as mx
-    from mlx import nn
-
-    from gemma_4_sql.backends.mlx.peft import MLXLoRALinear
-
     monkeypatch.setattr(mpeft, "inject_lora", orig_inject_lora)
 
-    class _TinyMlxAttn(nn.Module):
-        """Tiny MLX attention block with q_proj and v_proj Linear layers."""
+    class _TinyMlxAttn(dict[str, _TinyLinear | MLXLoRALinear]):
+        """Tiny MLX attention block (`dict` subclass matching `mlx.nn.Module`) with `q_proj` and `v_proj`."""
 
         def __init__(self) -> None:
             """Initialize linear projections."""
             super().__init__()
-            self.q_proj = nn.Linear(8, 8)
-            self.v_proj = nn.Linear(8, 8)
+            self["q_proj"] = _TinyLinear(8, 8)
+            self["v_proj"] = _TinyLinear(8, 8)
 
-        def __call__(self, x: mx.array) -> mx.array:
-            """Compute sum of q_proj and v_proj."""
-            q_fn: Callable[[mx.array], mx.array] = self.q_proj
-            v_fn: Callable[[mx.array], mx.array] = self.v_proj
-            return q_fn(x) + v_fn(x)
+        def __call__(self, x: _TinyMlxArray) -> _TinyMlxArray:
+            """Compute sum of `q_proj` and `v_proj`."""
+            return self["q_proj"](x) + self["v_proj"](x)
 
-    class _TinyMlxModel(nn.Module):
-        """Tiny MLX model wrapping _TinyMlxAttn."""
+    class _TinyMlxModel(dict[str, _TinyMlxAttn]):
+        """Tiny MLX model wrapping `_TinyMlxAttn` and exposing `named_modules()`."""
 
         def __init__(self) -> None:
             """Initialize nested attention block."""
             super().__init__()
-            self.attn = _TinyMlxAttn()
+            self["attn"] = _TinyMlxAttn()
 
-        def __call__(self, x: mx.array) -> mx.array:
+        def named_modules(self) -> list[tuple[str, _TinyLinear | MLXLoRALinear]]:
+            """Yield dotted module paths for `q_proj` and `v_proj`."""
+            attn = self["attn"]
+            return [("attn.q_proj", attn["q_proj"]), ("attn.v_proj", attn["v_proj"])]
+
+        def __call__(self, x: _TinyMlxArray) -> _TinyMlxArray:
             """Forward through nested attention block."""
-            return self.attn(x)
+            return self["attn"](x)
 
     tiny_mlx = _TinyMlxModel()
+    pre_linear = _TinyLinear(8, 8)
+    assert pre_linear(_TinyMlxArray((1, 3, 8))).shape == (1, 3, 8)
+    assert pre_linear.weight.flatten().tolist() == [0.0]
+    assert (_TinyMlxArray((2, 2)) + 1.0).shape == (2, 2)
+    assert (1.0 + _TinyMlxArray((2, 2))).shape == (2, 2)
+    assert (_TinyMlxArray((2, 2)) * 2.0).shape == (2, 2)
 
     def _load_tiny_mlx(_name: str) -> tuple[_TinyMlxModel, None]:
         """Return `(tiny_mlx, None)`."""
@@ -217,10 +317,16 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert res_real["backend"] == "mlx"
     assert res_real["injected_modules"] == 2
-    assert isinstance(tiny_mlx.attn.q_proj, MLXLoRALinear)
-    assert isinstance(tiny_mlx.attn.v_proj, MLXLoRALinear)
-    sample_out = tiny_mlx(mx.ones((1, 3, 8)))
-    assert tuple(sample_out.shape) == (1, 3, 8)
+    q_lora = tiny_mlx["attn"]["q_proj"]
+    v_lora = tiny_mlx["attn"]["v_proj"]
+    assert isinstance(q_lora, MLXLoRALinear)
+    assert isinstance(v_lora, MLXLoRALinear)
+    assert set(q_lora.parameters()) == {"weight", "lora_a", "lora_b"}
+    assert set(q_lora.trainable_parameters()) == {"lora_a", "lora_b"}
+    biased_lora = MLXLoRALinear(in_features=8, out_features=8, r=2, lora_alpha=4.0, lora_dropout=0.0, bias=True)
+    assert set(biased_lora.parameters()) == {"weight", "bias", "lora_a", "lora_b"}
+    sample_out = tiny_mlx(_TinyMlxArray((1, 3, 8)))
+    assert sample_out.shape == (1, 3, 8)
 
 
 def test_apply_peft_maxtext() -> None:

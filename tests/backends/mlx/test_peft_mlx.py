@@ -9,6 +9,7 @@ import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
 from tests.conftest import requires_mlx
+from tests.utils.tensor_helpers import assert_tensors_close
 
 pytestmark = requires_mlx
 
@@ -28,6 +29,8 @@ def test_mlx_lora_linear_forward_and_validation() -> None:
     assert layer.A.shape == (4, 2)
     assert layer.B.shape == (2, 3)
     assert layer.bias is not None
+    assert set(layer.parameters()) == {"weight", "bias", "lora_a", "lora_b"}
+    assert set(layer.trainable_parameters()) == {"lora_a", "lora_b"}
 
     x = mx.ones((2, 4))
     out_zero = layer(x)
@@ -42,6 +45,8 @@ def test_mlx_lora_linear_forward_and_validation() -> None:
 
     layer_drop = MLXLoRALinear(in_features=4, out_features=3, r=2, lora_alpha=4.0, lora_dropout=0.1, bias=False)
     assert layer_drop.bias is None
+    assert set(layer_drop.parameters()) == {"weight", "lora_a", "lora_b"}
+    assert set(layer_drop.trainable_parameters()) == {"lora_a", "lora_b"}
     out_drop = layer_drop(x)
     assert out_drop.shape == (2, 3)
 
@@ -149,8 +154,7 @@ def test_inject_lora_and_model_adapter_persistence(tmp_path: Path) -> None:
 
     model.attn.q_proj.lora_b = mx.zeros((2, 4))
     load_adapter_weights(model, expected_file)
-    restored_b = mx.array(model.attn.q_proj.lora_b)
-    assert bool(mx.allclose(restored_b, mx.ones((2, 4)) * 0.5).item())
+    assert_tensors_close(model.attn.q_proj.lora_b, mx.ones((2, 4)) * 0.5, backend="mlx")
 
     with pytest.raises(FileNotFoundError):
         load_adapter_weights(model, tmp_path / "nonexistent.safetensors")
@@ -246,3 +250,56 @@ def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, t
         peft_module.inject_lora(toy_mod, ["q_proj"])
     with pytest.raises(DependencyMissingError):
         peft_module.apply_lora("model", ["q_proj"])
+
+
+def test_mlx_peft_sdk_integration_and_standalone_save(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Verify SDK apply_peft with real MLX nn.Module and standalone MLXLoRALinear adapter persistence."""
+    import mlx.core as mx
+    from mlx import nn
+
+    import gemma_4_sql.backends.mlx.peft as peft_module
+    from gemma_4_sql.backends.mlx.peft import MLXLoRALinear, load_adapter_weights, save_adapter_weights
+    from gemma_4_sql.sdk.peft import apply_peft
+
+    class _RealMlxBlock(nn.Module):
+        """Real MLX module block with `q_proj` and `v_proj` Linear layers."""
+
+        def __init__(self) -> None:
+            """Initialize `q_proj` and `v_proj`."""
+            super().__init__()
+            self.q_proj: nn.Linear | MLXLoRALinear = nn.Linear(8, 8)
+            self.v_proj: nn.Linear | MLXLoRALinear = nn.Linear(8, 8)
+
+        def __call__(self, x: mx.array) -> mx.array:
+            """Compute sum of `q_proj` and `v_proj`."""
+            return self.q_proj(x) + self.v_proj(x)
+
+    block = _RealMlxBlock()
+
+    def _load_block(_name: str) -> tuple[_RealMlxBlock, None]:
+        """Return `(block, None)`."""
+        return (block, None)
+
+    monkeypatch.setattr(peft_module, "load", _load_block)
+    res = apply_peft(
+        model_name="gemma-4-mlx",
+        target_modules=["q_proj", "v_proj"],
+        lora_r=4,
+        lora_alpha=8,
+        lora_dropout=0.0,
+        backend="mlx",
+    )
+    assert res["backend"] == "mlx"
+    assert res["injected_modules"] == 2
+    assert isinstance(block.q_proj, MLXLoRALinear)
+    assert isinstance(block.v_proj, MLXLoRALinear)
+    out = block(mx.ones((1, 3, 8)))
+    assert tuple(out.shape) == (1, 3, 8)
+
+    standalone_file = tmp_path / "standalone_lora.safetensors"
+    block.q_proj.lora_b = mx.ones((4, 8)) * 0.75
+    save_adapter_weights(block.q_proj, standalone_file)
+    assert standalone_file.exists()
+    block.q_proj.lora_b = mx.zeros((4, 8))
+    load_adapter_weights(block.q_proj, standalone_file)
+    assert_tensors_close(block.q_proj.lora_b, mx.ones((4, 8)) * 0.75, backend="mlx")

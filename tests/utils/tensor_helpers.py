@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
+
+type _NestedTensorScalar = bool | int | float | complex | Sequence[_NestedTensorScalar]
 
 
 @runtime_checkable
@@ -20,7 +22,7 @@ class FlattenableTensorProtocol(Protocol):
         """Return a 1D flattened tensor view."""
         ...
 
-    def tolist(self) -> list[float] | Sequence[float]:
+    def tolist(self) -> _NestedTensorScalar:
         """Convert flattened tensor to a list of floats."""
         ...
 
@@ -100,10 +102,26 @@ def compute_snr(original: Sequence[float], reconstructed: Sequence[float]) -> fl
     return 10.0 * math.log10(signal_power / noise_power)
 
 
+def _is_float_seq(val: _NestedTensorScalar) -> TypeGuard[Sequence[float]]:
+    """Narrow `val` from `.flatten().tolist()` to `Sequence[float]`.
+
+    Args:
+        val: Flattened list returned by `.tolist()`.
+
+    Returns:
+        `True` for 1D flattened tensor lists.
+
+    """
+    _ = val
+    return True
+
+
 def _extract_shape_and_flat(tensor: ComparableTensor) -> tuple[list[int], list[float]]:
     """Extract dimensions and flattened float values from a tensor or sequence."""
     if isinstance(tensor, FlattenableTensorProtocol):
-        return list(tensor.shape), [float(x) for x in tensor.flatten().tolist()]
+        flat_list = tensor.flatten().tolist()
+        assert _is_float_seq(flat_list)
+        return list(tensor.shape), [float(x) for x in flat_list]
     if tensor and isinstance(tensor[0], Sequence):
         rows: list[Sequence[float]] = [r for r in tensor if isinstance(r, Sequence)]
         return [len(rows), len(rows[0])], [float(x) for row in rows for x in row]
