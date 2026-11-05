@@ -65,17 +65,20 @@ def test_configure_beam_sampler(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_generate_sql_and_output_variants(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify generate_sql handles string, dict, tuple, and integer generation outputs and missing dependencies."""
+    real_keras = inf.keras
     monkeypatch.setattr(inf, "keras", None)
     monkeypatch.setattr(inf, "tf", None)
     with pytest.raises(DependencyMissingError, match="Keras dependencies are missing"):
         inf.generate_sql("m", "p")
 
-    monkeypatch.setattr(inf, "keras", MagicMock())
-    monkeypatch.setattr(inf, "tf", MagicMock())
+    monkeypatch.setattr(inf, "keras", real_keras)
+    monkeypatch.setattr(inf, "tf", real_keras)
     monkeypatch.setattr(inf, "configure_beam_sampler", MagicMock())
+    inf._MODEL_CACHE.clear_cache()
 
     def setup_mock(ret_val: str | int | dict[str, str | float] | tuple[str, float]) -> None:
         """Install a GemmaCausalLM mock returning `ret_val` on `.generate()`."""
+        inf._MODEL_CACHE.clear_cache()
         mock_cls = MagicMock()
         mock_model = MagicMock()
         mock_model.generate.return_value = ret_val

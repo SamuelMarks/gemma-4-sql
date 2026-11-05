@@ -60,7 +60,6 @@ class _OptaxTransformProtocol(Protocol):
         ...
 
 
-@runtime_checkable
 class _SizedLeafProtocol(Protocol):
     """Protocol for a tensor or array leaf exposing `.size`."""
 
@@ -81,11 +80,10 @@ def _is_jax_array_leaf(val: MaxTextParamDict | MaxTextParamLeaf) -> TypeGuard[Ja
         val: Parameter leaf value.
 
     Returns:
-        `True` when `val` is a JAX array leaf.
+        `True` when `val` is not a `dict` or `str`.
 
     """
-    _ = val
-    return True
+    return not isinstance(val, (dict, str))
 
 
 def _has_size_attr(val: MaxTextParamLeaf) -> TypeGuard[_SizedLeafProtocol]:
@@ -95,11 +93,10 @@ def _has_size_attr(val: MaxTextParamLeaf) -> TypeGuard[_SizedLeafProtocol]:
         val: Parameter leaf value.
 
     Returns:
-        `True` so `.size` can be accessed inside `contextlib.suppress`.
+        `True` if `val` is not a primitive `str`, `int`, or `float`.
 
     """
-    _ = val
-    return True
+    return not isinstance(val, (str, int, float))
 
 
 def _is_maxtext_param_dict(
@@ -483,7 +480,7 @@ def count_maxtext_parameters(params: MaxTextParamDict | MaxTextParamLeaf) -> tup
             if isinstance(v, dict):
                 _count(v)
             else:
-                with contextlib.suppress(AttributeError, TypeError, ValueError):
+                with contextlib.suppress(AttributeError, TypeError, ValueError, AssertionError):
                     assert _has_size_attr(v)
                     size = int(v.size)
                     total_count += size

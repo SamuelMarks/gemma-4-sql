@@ -32,37 +32,42 @@ def test_maxtext_serve_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_maxtext_create_app(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test maxtext create app."""
+    """Test maxtext _create_app with real FastAPI TestClient and direct execution."""
+    from fastapi.testclient import TestClient
+
+    from gemma_4_sql.backends.common_serve import DirectRunnableAppProtocol
+
     mock_jax = MagicMock()
+    mock_jax.distributed.initialize.side_effect = [None, RuntimeError("already initialized")]
     monkeypatch.setattr(serve_module, "jax", mock_jax)
     monkeypatch.setattr(serve_module, "gemma4", MagicMock())
 
-    with patch("gemma_4_sql.backends.common_serve.create_common_app") as mock_create:
-        serve_module._create_app("model")
-        mock_create.assert_called_once()
-        kwargs = mock_create.call_args[1]
+    app = serve_module._create_app("model")
+    assert isinstance(app, DirectRunnableAppProtocol)
+    app_error_startup = serve_module._create_app("model")
+    assert app_error_startup is not None
 
-        startup = kwargs["startup_callback"]
-        startup()
-        mock_jax.distributed.initialize.assert_called_once()
+    with patch("gemma_4_sql.backends.maxtext.inference.generate_sql") as mock_generate_sql:
+        mock_generate_sql.return_value = {"sql": "SELECT 1", "status": "success"}
+        assert app.run_direct("prompt") == "SELECT 1"
 
-        mock_jax.distributed.initialize.side_effect = RuntimeError("error")
-        startup()
+        with TestClient(app) as client:
+            health_resp = client.get("/health")
+            assert health_resp.status_code == 200
+            assert health_resp.json()["backend"] == "maxtext"
 
-        generate = kwargs["generate_logic"]
+            gen_resp = client.post("/generate", json={"prompt": "Count users"})
+            assert gen_resp.status_code == 200
+            assert gen_resp.json()["sql"] == "SELECT 1"
 
-        with patch("gemma_4_sql.backends.maxtext.inference.generate_sql") as mock_generate_sql:
-            mock_generate_sql.return_value = {"sql": "SELECT 1"}
-            assert generate("prompt") == "SELECT 1"
+        mock_generate_sql.return_value = {"sql": "", "status": "failed: empty"}
+        with pytest.raises(InferenceError, match="empty"):
+            app.run_direct("prompt")
 
-            mock_generate_sql.return_value = {"sql": ""}
-            with pytest.raises(InferenceError, match="returned empty SQL"):
-                generate("prompt")
+        mock_generate_sql.side_effect = RuntimeError("test error")
+        with pytest.raises(InferenceError, match="MaxText generation failed"):
+            app.run_direct("prompt")
 
-            mock_generate_sql.side_effect = RuntimeError("test error")
-            with pytest.raises(InferenceError, match="MaxText generation failed"):
-                generate("prompt")
-
-            mock_generate_sql.side_effect = InferenceError("test error")
-            with pytest.raises(InferenceError, match="test error"):
-                generate("prompt")
+        mock_generate_sql.side_effect = InferenceError("test error")
+        with pytest.raises(InferenceError, match="test error"):
+            app.run_direct("prompt")

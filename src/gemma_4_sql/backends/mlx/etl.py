@@ -43,8 +43,7 @@ def _is_int_list_seq(val: list[TokenizedElementValue]) -> TypeGuard[list[list[in
         `True` for 1D integer token list batches.
 
     """
-    _ = val
-    return True
+    return not isinstance(val, (str, bytes))
 
 
 def _extract_token_lists(items: list[TokenizedElementDict], key: str) -> list[list[int]]:
@@ -72,11 +71,10 @@ def _as_batch_mapping(
         batch: Collated MLX batch dictionary.
 
     Returns:
-        `True` for dataloader iteration.
+        `True` when `batch` is a non-string mapping.
 
     """
-    _ = batch
-    return True
+    return not isinstance(batch, (str, bytes))
 
 
 def _is_iterable_dataset(
@@ -88,11 +86,10 @@ def _is_iterable_dataset(
         ds: Dataset sequence or iterable of records.
 
     Returns:
-        `True` for dataset iteration.
+        `True` when `ds` is not a plain `str`.
 
     """
-    _ = ds
-    return True
+    return not isinstance(ds, (str, bytes))
 
 
 class MLXDataLoader:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+from collections.abc import Callable
 from typing import Protocol, TypeGuard, runtime_checkable
 
 from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
@@ -93,15 +94,6 @@ def _get_device_str(hardware: str) -> str:
 
 
 @runtime_checkable
-class _KerasBenchmarkTargetProtocol(Protocol):
-    """Protocol satisfied by any Keras model or benchmark test double."""
-
-    def __repr__(self) -> str:
-        """Return string representation."""
-        ...
-
-
-@runtime_checkable
 class _KerasExecutableModelProtocol(Protocol):
     """Protocol for a Keras model supporting forward calls and `.generate(...)`."""
 
@@ -114,8 +106,11 @@ class _KerasExecutableModelProtocol(Protocol):
         ...
 
 
+type KerasBenchmarkModel = KerasCausalLMProtocol | _KerasExecutableModelProtocol | Callable[..., ForwardOutput | str]
+
+
 def _is_executable_keras_model(
-    model: KerasCausalLMProtocol | _KerasBenchmarkTargetProtocol,
+    model: KerasBenchmarkModel,
 ) -> TypeGuard[_KerasExecutableModelProtocol]:
     """Narrow `model` to `_KerasExecutableModelProtocol`.
 
@@ -123,15 +118,14 @@ def _is_executable_keras_model(
         model: Target Keras model or benchmark double.
 
     Returns:
-        `True` so `model(...)` and `model.generate(...)` can be called.
+        `True` if `model` is callable.
 
     """
-    _ = model
-    return True
+    return callable(model)
 
 
 def _run_benchmark_pass(
-    model: KerasCausalLMProtocol | _KerasBenchmarkTargetProtocol,
+    model: KerasBenchmarkModel,
     batch_size: int,
     num_runs: int,
     warmup_steps: int,

@@ -26,6 +26,7 @@ from gemma_4_sql.type_hints import (
     MlxArrayProtocol,
     MlxCausalLMProtocol,
     NDArrayProtocol,
+    QuantizableModelProtocol,
     QuantizeResultDict,
     TensorType,
     ToListArrayProtocol,
@@ -35,14 +36,12 @@ from gemma_4_sql.type_hints import (
 logger = logging.getLogger(__name__)
 
 
-@runtime_checkable
 class _WeightLayerProtocol(Protocol):
     """Protocol for an MLX layer exposing a mutable `.weight` attribute."""
 
     weight: MlxArrayProtocol
 
 
-@runtime_checkable
 class _NamedModulesModelProtocol(Protocol):
     """Protocol for an MLX model exposing `.named_modules()`."""
 
@@ -71,14 +70,20 @@ def _has_shape_attr(val: _CalibMatrixInput) -> TypeGuard[_ShapeHolderProtocol]:
         val: Candidate weight matrix.
 
     Returns:
-        `True` so `.shape` can be accessed inside `contextlib.suppress`.
+        `True` if `val` conforms to `_ShapeHolderProtocol`.
 
     """
-    _ = val
-    return True
+    return isinstance(val, _ShapeHolderProtocol)
 
 
 mlx = optional_import("mlx.core")
+
+
+def _mlx_array_to_2d_list(arr: MlxArrayProtocol) -> list[list[float]]:
+    """Convert a 2D MLX array into `list[list[float]]` via `.tolist()`."""
+    raw = arr.tolist()
+    assert isinstance(raw, list)
+    return [[float(val) for val in row] for row in raw if isinstance(row, list)]
 
 
 def calibrate_awq_scales(
@@ -108,19 +113,19 @@ def calibrate_awq_scales(
 
     if mlx is None:
         shape: Sequence[int] | int | None = (1, 1)
-        with contextlib.suppress(AttributeError, TypeError):
+        with contextlib.suppress(AttributeError, TypeError, AssertionError):
             assert _has_shape_attr(weight_matrix)
             shape = weight_matrix.shape
         cols = int(shape[1]) if isinstance(shape, (tuple, list)) and len(shape) >= 2 else 1
         return [1.0] * cols
 
-    w = mlx.array(weight_matrix, dtype=mlx.float32)
-    x = mlx.array(activations, dtype=mlx.float32)
+    w: MlxArrayProtocol = mlx.array(weight_matrix, dtype=mlx.float32)
+    x: MlxArrayProtocol = mlx.array(activations, dtype=mlx.float32)
     if len(x.shape) == 1:
         x = mlx.reshape(x, (1, -1))
 
-    w_2d = [[float(w[r, c].item()) for c in range(int(w.shape[1]))] for r in range(int(w.shape[0]))]
-    x_2d = [[float(x[r, c].item()) for c in range(int(x.shape[1]))] for r in range(int(x.shape[0]))]
+    w_2d = _mlx_array_to_2d_list(w)
+    x_2d = _mlx_array_to_2d_list(x)
     scales_1d = compute_awq_channel_scales(w_2d, x_2d, alpha_range=alpha_range)
     best_scales: MlxArrayProtocol = mlx.array(scales_1d, dtype=mlx.float32)
     return best_scales
@@ -145,13 +150,13 @@ def calibrate_gptq_weights(
     if mlx is None:
         return weight_matrix
 
-    w = mlx.array(weight_matrix, dtype=mlx.float32)
-    x = mlx.array(activations, dtype=mlx.float32)
+    w: MlxArrayProtocol = mlx.array(weight_matrix, dtype=mlx.float32)
+    x: MlxArrayProtocol = mlx.array(activations, dtype=mlx.float32)
     if len(x.shape) == 1:
         x = mlx.reshape(x, (1, -1))
 
-    w_2d = [[float(w[r, c].item()) for c in range(int(w.shape[1]))] for r in range(int(w.shape[0]))]
-    x_2d = [[float(x[r, c].item()) for c in range(int(x.shape[1]))] for r in range(int(x.shape[0]))]
+    w_2d = _mlx_array_to_2d_list(w)
+    x_2d = _mlx_array_to_2d_list(x)
     q_2d = compute_gptq_compensated_weights(w_2d, x_2d, bits=4, damp_percent=damp_percent)
     res: MlxArrayProtocol = mlx.array(q_2d, dtype=mlx.float32)
     return res
@@ -162,16 +167,7 @@ def _is_2d_shape(shape: Sequence[int] | int | None) -> bool:
     return isinstance(shape, Sequence) and len(shape) == 2
 
 
-@runtime_checkable
-class _MlxModelInstanceProtocol(Protocol):
-    """Protocol satisfied by any MLX model instance or test double."""
-
-    def __repr__(self) -> str:
-        """Return string representation."""
-        ...
-
-
-type _MlxQuantizeModelInput = MlxCausalLMProtocol | _WeightLayerProtocol | _NamedModulesModelProtocol | _MlxModelInstanceProtocol | str | None
+type _MlxQuantizeModelInput = MlxCausalLMProtocol | QuantizableModelProtocol | _WeightLayerProtocol | _NamedModulesModelProtocol | str | None
 
 
 def _is_weight_layer(obj: _MlxQuantizeModelInput) -> TypeGuard[_WeightLayerProtocol]:
@@ -181,11 +177,10 @@ def _is_weight_layer(obj: _MlxQuantizeModelInput) -> TypeGuard[_WeightLayerProto
         obj: Candidate MLX layer or model.
 
     Returns:
-        `True` so `.weight` can be accessed inside `contextlib.suppress`.
+        `True` if `obj` is not `None` and not a `str`.
 
     """
-    _ = obj
-    return True
+    return obj is not None and not isinstance(obj, str)
 
 
 def _is_quantize_model_input(
@@ -197,23 +192,27 @@ def _is_quantize_model_input(
         obj: Model resolved from `kwargs['model']` or `mlx_lm.load`.
 
     Returns:
-        `True` for `_iter_2d_weight_layers`.
+        `True` when `obj` is not a plain sequence of strings.
 
     """
-    _ = obj
-    return True
+    return not isinstance(obj, (list, tuple))
 
 
 def _get_layer_weight(
     obj: _MlxQuantizeModelInput,
 ) -> MlxArrayProtocol | TensorType | SupportsFloat | None:
     """Return the 2D `.weight` attribute of `obj` if present."""
-    with contextlib.suppress(AttributeError):
+    with contextlib.suppress(AttributeError, AssertionError):
         assert _is_weight_layer(obj)
         w = obj.weight
         if _is_2d_shape(w.shape):
             return w
     return None
+
+
+def _has_named_modules(obj: _MlxQuantizeModelInput) -> TypeGuard[_NamedModulesModelProtocol]:
+    """Check whether `obj` is a potential MLX module container with `.named_modules()`."""
+    return obj is not None and not isinstance(obj, str)
 
 
 def _iter_2d_weight_layers(
@@ -231,9 +230,9 @@ def _iter_2d_weight_layers(
     layers: list[_WeightLayerProtocol] = []
     seen: set[int] = set()
     candidates: list[_MlxQuantizeModelInput] = [model]
-    if isinstance(model, _NamedModulesModelProtocol):
-        with contextlib.suppress(AttributeError, TypeError):
-            candidates.extend(child for _name, child in model.named_modules())
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
+        assert _has_named_modules(model)
+        candidates.extend(child for _name, child in model.named_modules())
     for child in candidates:
         if id(child) not in seen and _get_layer_weight(child) is not None:
             assert _is_weight_layer(child)

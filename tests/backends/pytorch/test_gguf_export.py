@@ -370,25 +370,17 @@ def test_gguf_write_metadata_types_and_payloads(tmp_path: Path) -> None:
         None.
 
     """
-
-    class _CustomObj:
-        """Custom object fallback for GGUF string metadata serialization."""
-
-        def __str__(self) -> str:
-            """Return string representation."""
-            return "custom"
-
     from gemma_4_sql.backends.pytorch.gguf import GGUFMetadataValue, TensorInput
 
     target_file = tmp_path / "metadata_test.gguf"
-    metadata: dict[str, GGUFMetadataValue | _CustomObj] = {
+    metadata: dict[str, GGUFMetadataValue] = {
         "float_val": math.pi,
         "list_val": ["a", "b", "c"],
         "tuple_val": (1, 2),
         "int_val": 42,
         "bool_val": True,
         "str_val": "hello",
-        "custom_obj": _CustomObj(),
+        "custom_obj": Path("custom/path"),
     }
     tensors: dict[str, TensorInput] = {
         "raw_tensor": b"\x00" * 32,

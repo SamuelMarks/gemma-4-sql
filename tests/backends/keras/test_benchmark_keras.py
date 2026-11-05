@@ -28,6 +28,10 @@ def _identity_tf_function[FnT](*_args: bool, **_kwargs: bool) -> Callable[[FnT],
 class _DummySentinel:
     """Empty sentinel object lacking `.generate()`."""
 
+    def __call__(self, *_args: int | str) -> str:
+        """Return sentinel string when called."""
+        return "sentinel"
+
 
 class _MockDeviceCtx:
     """No-op TensorFlow device context manager."""
@@ -136,8 +140,7 @@ def test_run_benchmark_pass_missing_attrs(monkeypatch: pytest.MonkeyPatch) -> No
     mock_tf.device = _MockDeviceCtx
     monkeypatch.setattr(bm, "tf", mock_tf)
 
-    mock_model = MagicMock(return_value=_DummySentinel())
-    res1 = bm._run_benchmark_pass(mock_model, 1, 1, 1, "prefill", 1, "cpu")
+    res1 = bm._run_benchmark_pass(_DummySentinel(), 1, 1, 1, "prefill", 1, "cpu")
     assert res1[2] > 0.0
 
     res2 = bm._run_benchmark_pass(_DummySentinel(), 1, 1, 1, "generate", 1, "cpu")

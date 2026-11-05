@@ -8,6 +8,7 @@ import pytest
 
 from gemma_4_sql.backends.keras.peft import (
     KerasLoRADense,
+    _KerasTensorInputProtocol,
     apply_lora,
     count_parameters,
     get_keras_lora_adapter,
@@ -122,9 +123,15 @@ def test_inject_and_merge_lora_on_model() -> None:
 
         def __init__(self) -> None:
             """Initialize composite model."""
-            self.layers = [q_layer, k_layer, SubBlock(), q_layer]
+            self.layers: list[keras.layers.Dense | KerasLoRADense | SubBlock] = [q_layer, k_layer, SubBlock(), q_layer]
             self.weights = [*q_layer.weights, *k_layer.weights, *v_layer.weights]
             self.trainable_weights = [w for w in self.weights if w.trainable]
+
+        def __call__[InputT: _KerasTensorInputProtocol](self, inputs: InputT) -> InputT:
+            """Apply the first layer (`q_proj` slot) in `self.layers`."""
+            first_layer = self.layers[0]
+            assert isinstance(first_layer, (keras.layers.Dense, KerasLoRADense))
+            return first_layer(inputs)
 
     model = CompositeModel()
     _, injected_zero = inject_lora(model, target_modules=[], lora_r=2)
@@ -136,16 +143,18 @@ def test_inject_and_merge_lora_on_model() -> None:
     assert adapter is not None
     assert len(adapter.layers) == 2
     assert k_layer.trainable is False
+    assert isinstance(adapted_model.layers[0], KerasLoRADense)
+    assert isinstance(adapted_model.layers[3], KerasLoRADense)
 
-    # Verify forward pass through injected LoRA layers: when lora_b == 0, output matches base layer output
+    # Verify forward pass through adapted_model(x) and injected LoRA layers: when lora_b == 0, output matches base layer output
     q_lora = adapter.layers["q_proj"].lora_layer
     v_lora = adapter.layers["v_proj"].lora_layer
-    assert bool(ops.all(ops.isclose(ops.stop_gradient(q_lora(x)), base_q_out, rtol=1e-5, atol=1e-5)))
+    assert bool(ops.all(ops.isclose(ops.stop_gradient(adapted_model(x)), base_q_out, rtol=1e-5, atol=1e-5)))
     assert bool(ops.all(ops.isclose(ops.stop_gradient(v_lora(x)), base_v_out, rtol=1e-5, atol=1e-5)))
 
-    # When lora_b is non-zero, forward-pass output changes
+    # When lora_b is non-zero, calling adapted_model(x) directly reflects the LoRA update
     q_lora.lora_b.assign(ops.full(q_lora.lora_b.shape, 0.5, dtype="float32"))
-    q_out_nonzero = ops.stop_gradient(q_lora(x))
+    q_out_nonzero = ops.stop_gradient(adapted_model(x))
     assert not bool(ops.all(ops.isclose(q_out_nonzero, base_q_out)))
 
     artifact = get_quantized_artifact(adapted_model)
@@ -156,13 +165,17 @@ def test_inject_and_merge_lora_on_model() -> None:
     assert total_p > 0
     assert trainable_p == 0
 
-    # Also test list/tuple input to inject_lora
-    _, list_count = inject_lora([q_layer, k_layer], target_modules=["k_proj"], lora_r=2)
-    assert list_count == 1
+    # Also test list/tuple input to inject_lora and get_keras_lora_adapter
+    tuple_input = (q_layer, k_layer)
+    _, tuple_count = inject_lora(tuple_input, target_modules=["k_proj"], lora_r=2)
+    assert tuple_count == 1
+    assert get_keras_lora_adapter(tuple_input) is not None
 
-    # Merge weights via adapter registry
+    # Merge weights via adapter registry and verify base Dense layer is restored in model.layers
     merge_lora_weights(adapted_model)
-    assert bool(ops.all(ops.isclose(ops.stop_gradient(q_layer(x)), q_out_nonzero, rtol=1e-5, atol=1e-5)))
+    assert adapted_model.layers[0] is q_layer
+    assert adapted_model.layers[3] is q_layer
+    assert bool(ops.all(ops.isclose(ops.stop_gradient(adapted_model(x)), q_out_nonzero, rtol=1e-5, atol=1e-5)))
 
     # Also test merge_lora_weights when model.layers directly contains KerasLoRADense
     direct_lora = KerasLoRADense(dense=k_layer, r=2)
@@ -172,9 +185,20 @@ def test_inject_and_merge_lora_on_model() -> None:
 
         def __init__(self) -> None:
             """Initialize DirectContainer."""
-            self.layers = [direct_lora]
+            self.layers: list[KerasLayerProtocol] = [direct_lora]
 
-    merge_lora_weights(DirectContainer())
+    direct_container = DirectContainer()
+    merge_lora_weights(direct_container)
+    assert direct_container.layers[0] is k_layer
+
+    class TupleDirectContainer:
+        """Model container holding an immutable tuple of layers."""
+
+        def __init__(self) -> None:
+            """Initialize TupleDirectContainer."""
+            self.layers: tuple[KerasLayerProtocol, ...] = (KerasLoRADense(dense=k_layer, r=2),)
+
+    merge_lora_weights(TupleDirectContainer())
 
 
 def test_apply_lora_backbone_and_custom_model(monkeypatch: pytest.MonkeyPatch) -> None:

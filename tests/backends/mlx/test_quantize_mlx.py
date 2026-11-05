@@ -166,6 +166,10 @@ def test_quantize_model_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
 
         __slots__ = ()
 
+        def named_modules(self) -> list[tuple[str, quantize_module._WeightLayerProtocol]]:
+            """Return empty module list."""
+            return []
+
     with patch.object(mlx_nn, "quantize"):
         res_slot_awq = quantize_module.quantize_model("model", "awq", model=SlottedModel())
         assert res_slot_awq["status"] == "quantized_awq"

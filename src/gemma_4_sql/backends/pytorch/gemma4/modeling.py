@@ -73,7 +73,7 @@ def merge_modality_embeddings(
 
 
 class Gemma4MultiModalProjector(nn.Module):
-    """Multimodal projector for Gemma 4."""
+    """Multimodal projector for Gemma 4 with RMSNorm pre-normalization."""
 
     def __init__(self, config: Gemma4Config) -> None:
         """Initialize Gemma4MultiModalProjector.
@@ -83,6 +83,7 @@ class Gemma4MultiModalProjector(nn.Module):
 
         """
         super().__init__()
+        self.mm_soft_emb_norm = Gemma4RMSNorm(config.vision_config.hidden_size, eps=config.vision_config.layer_norm_eps)
         self.linear_1 = nn.Linear(config.vision_config.hidden_size, config.hidden_size, bias=True)
         self.act = nn.GELU(approximate="tanh")
         self.linear_2 = nn.Linear(config.hidden_size, config.hidden_size, bias=True)
@@ -97,7 +98,8 @@ class Gemma4MultiModalProjector(nn.Module):
             Projected multimodal features.
 
         """
-        hidden_states = self.linear_1(image_features)
+        normed = self.mm_soft_emb_norm(image_features)
+        hidden_states = self.linear_1(normed)
         hidden_states = self.act(hidden_states)
         res: torch.Tensor = self.linear_2(hidden_states)
         return res

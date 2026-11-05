@@ -47,13 +47,12 @@ class QuantizableConfigHolderProtocol(Protocol):
     quantization_config: JSONValue | None
 
 
-@runtime_checkable
 class ModelWithQuantizableConfigProtocol(Protocol):
-    """Protocol for a model instance exposing a `.config` attribute that can store `quantization_config`."""
+    """Protocol for a model exposing a `.config` attribute conforming to `QuantizableConfigHolderProtocol`."""
 
     @property
     def config(self) -> QuantizableConfigHolderProtocol:
-        """Provide the model configuration object."""
+        """Provide the model's configuration object."""
         ...
 
 
@@ -61,7 +60,7 @@ def _is_config_model(
     model: ModelType | QuantizableModelProtocol | ModelWithQuantizableConfigProtocol | None,
 ) -> TypeGuard[ModelWithQuantizableConfigProtocol]:
     """Narrow `model` to `ModelWithQuantizableConfigProtocol`."""
-    return model is not None
+    return model is not None and not isinstance(model, (str, int, float, bool))
 
 
 type BitsAndBytesFactory = BitsAndBytesConfigProtocol | Callable[..., JSONValue] | type

@@ -85,35 +85,53 @@ def test_dpo_loss_missing_torch(monkeypatch: pytest.MonkeyPatch) -> None:
         dpo_module.dpo_loss(1.0, 1.0, 1.0, 1.0, 0.1)
 
 
-def test_run_dpo_step_fallback_branches(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify _run_dpo_step handles non-tensor stubs and objects without zero_grad/backward/step."""
+def test_run_dpo_step_fallback_branches() -> None:
+    """Verify _run_dpo_step handles 1D tensor logits and objects without zero_grad/backward/step."""
+    import torch
+
     import gemma_4_sql.backends.pytorch.dpo as dpo_module
 
-    mock_policy = MagicMock()
-    mock_ref = MagicMock()
+    def _one_d_policy(_inputs: dpo_module.TorchDPOBatchValue) -> torch.Tensor:
+        """Return 1D tensor so `_compute_pytorch_logps` takes the `.mean(dim=-1)` fallback."""
+        return torch.tensor([-1.2, -0.8], requires_grad=True)
+
+    class _ZeroDimTensorStub:
+        """Tensor stub without `.mean()` that supports `SupportsFloat` and arithmetic with `torch.Tensor`."""
+
+        def __float__(self) -> float:
+            """Return `-1.0`."""
+            return -1.0
+
+        def __sub__(self, other: torch.Tensor) -> torch.Tensor:
+            """Subtract `other` from `-1.0`."""
+            return torch.tensor(-1.0) - other
+
+        def __rsub__(self, other: torch.Tensor) -> torch.Tensor:
+            """Subtract `-1.0` from `other`."""
+            return other - torch.tensor(-1.0)
+
+    def _scalar_ref(_inputs: dpo_module.TorchDPOBatchValue) -> _ZeroDimTensorStub:
+        """Return `_ZeroDimTensorStub` so `_compute_pytorch_logps` takes the non-mean fallback."""
+        return _ZeroDimTensorStub()
+
     mock_optim = MagicMock()
+    batch: dict[str, dpo_module.TorchDPOBatchValue] = {
+        "chosen_inputs": torch.tensor([[1, 2]]),
+        "rejected_inputs": torch.tensor([[1, 3]]),
+    }
 
-    mock_policy.return_value.mean.return_value = "mean"
-    mock_ref.return_value = "no_mean"
+    assert float(_ZeroDimTensorStub()) == -1.0
+    assert float(_ZeroDimTensorStub() - torch.tensor(0.0)) == -1.0
+    res = dpo_module._run_dpo_step(_one_d_policy, _scalar_ref, mock_optim, batch, 0.1)
+    assert float(res) > 0.0
+    mock_optim.zero_grad.assert_called_once()
+    mock_optim.step.assert_called_once()
 
-    batch: dict[str, dpo_module.TorchDPOBatchValue] = {"chosen_inputs": "c", "rejected_inputs": "r"}
+    del mock_optim.zero_grad
+    del mock_optim.step
 
-    with patch("gemma_4_sql.backends.pytorch.dpo.dpo_loss") as mock_loss:
-        mock_l = MagicMock()
-        mock_loss.return_value = (mock_l, 0, 0)
-
-        res = dpo_module._run_dpo_step(mock_policy, mock_ref, mock_optim, batch, 0.1)
-        assert res == mock_l
-        mock_optim.zero_grad.assert_called_once()
-        mock_l.backward.assert_called_once()
-        mock_optim.step.assert_called_once()
-
-        del mock_optim.zero_grad
-        del mock_l.backward
-        del mock_optim.step
-
-        res2 = dpo_module._run_dpo_step(mock_policy, mock_ref, mock_optim, batch, 0.1)
-        assert res2 == mock_l
+    res2 = dpo_module._run_dpo_step(_one_d_policy, _scalar_ref, mock_optim, batch, 0.1)
+    assert float(res2) > 0.0
 
 
 def test_run_training_epochs() -> None:

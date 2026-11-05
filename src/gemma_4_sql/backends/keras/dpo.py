@@ -118,11 +118,11 @@ def _is_callable_dpo_model[TensorT](
         _sample: Sample input tensor for type binding.
 
     Returns:
-        `True` so `model(inputs)` can be invoked.
+        `True` if `model` is callable.
 
     """
-    _ = (model, _sample)
-    return True
+    _ = _sample
+    return callable(model)
 
 
 def _has_trainable_variables[TensorT](
@@ -134,11 +134,10 @@ def _has_trainable_variables[TensorT](
         model: Policy model callable or `KerasCausalLMProtocol` instance.
 
     Returns:
-        `True` so `.trainable_variables` can be accessed inside `contextlib.suppress`.
+        `True` if `model` is callable or a `KerasCausalLMProtocol`.
 
     """
-    _ = model
-    return True
+    return callable(model)
 
 
 def _as_var_seq[TensorT, VarT](
@@ -152,11 +151,11 @@ def _as_var_seq[TensorT, VarT](
         _opt: Optimizer carrying type parameter `VarT`.
 
     Returns:
-        `True` for `optimizer.apply_gradients`.
+        `True` if `vars_seq` is a non-string `Sequence`.
 
     """
-    _ = (vars_seq, _opt)
-    return True
+    _ = _opt
+    return not isinstance(vars_seq, (str, bytes))
 
 
 def _compute_logps[TensorT: TfTensorProtocol | SupportsFloat](

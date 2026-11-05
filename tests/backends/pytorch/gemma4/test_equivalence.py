@@ -283,3 +283,18 @@ def test_vision_and_audio_encoder_parity_jax_vs_pytorch() -> None:
     jax_aud_out = JaxAudioModel(jax_a_cfg, rngs=nnx.Rngs(0))(jnp.ones((2, 16, 8)))
     pt_aud_out = PtAudioModel(pt_full_cfg)(torch.ones((2, 16, 8)))
     assert jax_aud_out.shape == tuple(pt_aud_out.shape) == (2, 4, 16)
+
+    # 4. Multimodal token splicing equivalence between JAX batched_merge_modalities and PyTorch merge_modality_embeddings
+    from gemma_4_sql.backends.jax.gemma4.multimodal import batched_merge_modalities
+    from gemma_4_sql.backends.pytorch.gemma4.modeling import merge_modality_embeddings
+
+    text_jax = jnp.ones((2, 4, 16), dtype=jnp.float32)
+    mod_jax = jnp.full((2, 2, 16), 5.0, dtype=jnp.float32)
+    mask_jax = jnp.array([[False, True, False, True], [True, False, True, False]])
+    merged_jax = batched_merge_modalities(mod_jax, text_jax, mask_jax)
+
+    text_pt = torch.ones((2, 4, 16), dtype=torch.float32)
+    mod_pt = torch.full((2, 2, 16), 5.0, dtype=torch.float32)
+    mask_pt = torch.tensor([[False, True, False, True], [True, False, True, False]], dtype=torch.bool)
+    merged_pt = merge_modality_embeddings(mod_pt, text_pt, mask_pt)
+    assert jnp.allclose(jnp.array(merged_pt.tolist()), merged_jax, atol=1e-5)

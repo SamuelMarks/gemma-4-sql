@@ -57,11 +57,10 @@ def _is_mlx_loss_and_grad(
         res: Output from `loss_and_grad_fn`.
 
     Returns:
-        `True` for `(loss, grads)` tuples.
+        `True` for `(loss, grads)` 2-tuples.
 
     """
-    _ = res
-    return True
+    return isinstance(res, tuple) and len(res) == 2
 
 
 def _is_mlx_item_loss(
@@ -73,11 +72,10 @@ def _is_mlx_item_loss(
         val: Loss tensor or scalar.
 
     Returns:
-        `True` so `.item()` can be attempted inside `try`.
+        `True` if `val` conforms to `ScalarItemExtractorProtocol`.
 
     """
-    _ = val
-    return True
+    return isinstance(val, ScalarItemExtractorProtocol)
 
 
 def _is_mlx_float_loss(
@@ -89,11 +87,10 @@ def _is_mlx_float_loss(
         val: Loss tensor or scalar.
 
     Returns:
-        `True` so `float(val)` can be invoked.
+        `True` if `val` is a `float`, `int`, or `SupportsFloat`.
 
     """
-    _ = val
-    return True
+    return isinstance(val, (float, int, SupportsFloat))
 
 
 mx = optional_import("mlx.core")
@@ -144,7 +141,7 @@ def _run_training_epochs[
             raw_loss = loss
             assert _is_mlx_item_loss(raw_loss)
             return float(raw_loss.item())
-        except (AttributeError, TypeError, ValueError):
+        except (AttributeError, TypeError, ValueError, AssertionError):
             assert _is_mlx_float_loss(loss)
             return float(loss)
 

@@ -46,17 +46,8 @@ GGUF_TYPE_FLOAT64: int = 12
 GGUF_ALIGNMENT: int = 32
 
 
-@runtime_checkable
-class _StringRepresentableProtocol(Protocol):
-    """Protocol for custom metadata values convertible to string via `__str__`."""
-
-    def __str__(self) -> str:
-        """Return string representation."""
-        ...
-
-
 type GGUFMetadataScalar = str | int | float | bool
-type GGUFMetadataValue = GGUFMetadataScalar | Sequence[GGUFMetadataScalar] | _StringRepresentableProtocol
+type GGUFMetadataValue = GGUFMetadataScalar | Sequence[GGUFMetadataScalar] | Path | Mapping[str, GGUFMetadataScalar] | None
 type TensorInput = TensorProtocol | _FlattenableArrayProtocol | ToListArrayProtocol | SupportsFloat | bytes | bytearray | float | int | Sequence[float] | Sequence[Sequence[float]]
 
 

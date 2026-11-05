@@ -48,7 +48,7 @@ class _PretrainedCausalLMLoaderProtocol(Protocol):
 
 
 def _is_torch_tensor(
-    val: TorchTensorProtocol | ForwardOutput | ArithmeticTensorProtocol | SupportsFloat | str,
+    val: TorchTensorProtocol | ForwardOutput | ArithmeticTensorProtocol | SupportsFloat | str | None,
 ) -> TypeGuard[TorchTensorProtocol]:
     """Narrow `val` to `TorchTensorProtocol` for attribute-guarded method calls.
 
@@ -56,11 +56,10 @@ def _is_torch_tensor(
         val: Candidate tensor or scalar output.
 
     Returns:
-        `True` so tensor methods can be invoked inside `contextlib.suppress` blocks.
+        `True` if `val` is not `None`.
 
     """
-    _ = val
-    return True
+    return val is not None
 
 
 torch = optional_import("torch")

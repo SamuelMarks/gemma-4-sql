@@ -347,6 +347,14 @@ def test_common_inference_and_peft_utilities() -> None:
     kw_logits2, _ = call_jax_causal_lm(_kw_model, [3], positions=[0])
     assert kw_logits2[0] == [3]
 
-    pos_logits, pos_cache = call_jax_causal_lm(_pos_model, [1, 2], pixel_values="px")
+    pos_logits, pos_cache = call_jax_causal_lm(_pos_model, [1, 2], positions=[0], pixel_values="px")
     assert pos_logits == [1, 2]
     assert pos_cache is None
+
+    def _buggy_model(seq: Sequence[int], positions: Sequence[int] | None = None) -> Sequence[int]:
+        """Raise an internal TypeError inside the model forward body."""
+        _ = (seq, positions)
+        raise TypeError("internal layer bug")
+
+    with pytest.raises(TypeError, match="internal layer bug"):
+        call_jax_causal_lm(_buggy_model, [1, 2], positions=[0])

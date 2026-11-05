@@ -56,11 +56,10 @@ def _is_mlx_tokenizer(
         tok: Candidate tokenizer instance.
 
     Returns:
-        `True` so `.encode`, `.decode`, and `.eos_token_id` can be invoked inside `contextlib.suppress`.
+        `True` if `tok` is not `None` and not a plain `str`.
 
     """
-    _ = tok
-    return True
+    return tok is not None and not isinstance(tok, str)
 
 
 def _is_sequence_output(
@@ -142,7 +141,7 @@ def mlx_beam_search(
         raise InferenceError("Valid model instance is required for MLX beam search.")
 
     input_ids: list[int] | None = None
-    with contextlib.suppress(AttributeError, TypeError):
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
         assert _is_mlx_tokenizer(tokenizer)
         encoded = tokenizer.encode(prompt)
         input_ids = [int(x) for x in encoded]
@@ -155,7 +154,7 @@ def mlx_beam_search(
     if eos_token_id is not None:
         eos_id = eos_token_id
     else:
-        with contextlib.suppress(AttributeError, TypeError, ValueError):
+        with contextlib.suppress(AttributeError, TypeError, ValueError, AssertionError):
             assert _is_mlx_tokenizer(tokenizer)
             eos_id = int(tokenizer.eos_token_id)
 
@@ -219,7 +218,7 @@ def mlx_beam_search(
         raise InferenceError("MLX beam search yielded only an EOS token.")
 
     decoded_sql: str | None = None
-    with contextlib.suppress(AttributeError, TypeError):
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
         assert _is_mlx_tokenizer(tokenizer)
         decoded_sql = tokenizer.decode(output_tokens).strip()
     if decoded_sql is None:

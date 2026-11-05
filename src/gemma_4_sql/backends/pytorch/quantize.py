@@ -51,15 +51,6 @@ logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
-class _QuantizeTargetObjectProtocol(Protocol):
-    """Protocol satisfied by any PyTorch tensor or calibratable weight object."""
-
-    def __str__(self) -> str:
-        """Return string representation."""
-        ...
-
-
-@runtime_checkable
 class _CalibratableTensorProtocol(TorchTensorProtocol, Protocol):
     """Protocol for a 2D PyTorch tensor supporting `.detach()`, `.to(...)`, `.clone()`, `.T`, and `.device`."""
 
@@ -107,8 +98,26 @@ class _CalibratableTensorProtocol(TorchTensorProtocol, Protocol):
         ...
 
 
+@runtime_checkable
+class _TensorShapeDtypeProtocol(Protocol):
+    """Protocol for any PyTorch tensor exposing `.shape` and `.dtype`."""
+
+    @property
+    def shape(self) -> Sequence[int]:
+        """Provide the tensor shape dimensions."""
+        ...
+
+    @property
+    def dtype(self) -> DTypeProtocol | DTypeSpec | None:
+        """Provide the tensor data type."""
+        ...
+
+
+type PyTorchQuantizeTensor = _TensorShapeDtypeProtocol | TorchTensorProtocol | _CalibratableTensorProtocol
+
+
 def _as_calibratable_tensor(
-    val: _QuantizeTargetObjectProtocol,
+    val: PyTorchQuantizeTensor,
 ) -> TypeGuard[_CalibratableTensorProtocol]:
     """Narrow `val` to `_CalibratableTensorProtocol` for calibration math.
 
@@ -116,14 +125,13 @@ def _as_calibratable_tensor(
         val: Calibratable tensor instance.
 
     Returns:
-        `True` for internal calibration arithmetic.
+        `True` if `val` is not a primitive `str`, `int`, or `float`.
 
     """
-    _ = val
-    return True
+    return not isinstance(val, (str, int, float))
 
 
-def _as_tensor_t[TensorT: _QuantizeTargetObjectProtocol](
+def _as_tensor_t[TensorT: PyTorchQuantizeTensor](
     val: _CalibratableTensorProtocol,
     _sample: TensorT,
 ) -> TypeGuard[TensorT]:
@@ -134,11 +142,11 @@ def _as_tensor_t[TensorT: _QuantizeTargetObjectProtocol](
         _sample: Input weight tensor of type `TensorT`.
 
     Returns:
-        `True` so calibration functions preserve `TensorT`.
+        `True` if `val` is not a primitive `str`, `int`, or `float`.
 
     """
-    _ = (val, _sample)
-    return True
+    _ = _sample
+    return not isinstance(val, (str, int, float))
 
 
 @runtime_checkable
@@ -167,7 +175,14 @@ AutoModelForCausalLM = optional_attr("transformers", "AutoModelForCausalLM")
 AutoTokenizer = optional_attr("transformers", "AutoTokenizer")
 
 
-def calibrate_pytorch_awq_scales[TensorT: _QuantizeTargetObjectProtocol](
+def _tensor_to_2d_list(tensor: _CalibratableTensorProtocol) -> list[list[float]]:
+    """Convert a 2D PyTorch tensor into `list[list[float]]` via `.tolist()`."""
+    raw = tensor.tolist()
+    assert isinstance(raw, list)
+    return [[float(val) for val in row if isinstance(val, (int, float))] for row in raw if isinstance(row, list)]
+
+
+def calibrate_pytorch_awq_scales[TensorT: PyTorchQuantizeTensor](
     weight: TensorT,
     activations: TensorT | None = None,
     n_grid: int = 20,
@@ -188,16 +203,16 @@ def calibrate_pytorch_awq_scales[TensorT: _QuantizeTargetObjectProtocol](
     """
     if torch is None:
         raise DependencyMissingError("PyTorch is required for native AWQ calibration.")
-    w_ref: _QuantizeTargetObjectProtocol = weight
+    w_ref: PyTorchQuantizeTensor = weight
     assert _as_calibratable_tensor(w_ref)
     w = w_ref.detach().to(torch.float32)
-    w_2d = [[float(w[r, c].item()) for c in range(int(w.shape[1]))] for r in range(int(w.shape[0]))]
+    w_2d = _tensor_to_2d_list(w)
     acts_2d: list[list[float]] | None = None
     if activations is not None:
-        act_ref: _QuantizeTargetObjectProtocol = activations
+        act_ref: PyTorchQuantizeTensor = activations
         assert _as_calibratable_tensor(act_ref)
         act_t = act_ref.detach().to(torch.float32)
-        acts_2d = [[float(act_t[r, c].item()) for c in range(int(act_t.shape[1]))] for r in range(int(act_t.shape[0]))]
+        acts_2d = _tensor_to_2d_list(act_t)
     grid = [i / float(max(1, n_grid)) for i in range(max(1, n_grid))]
     scales_1d = compute_awq_channel_scales(w_2d, acts_2d, alpha_range=grid)
     best_scales: _CalibratableTensorProtocol = torch.tensor([scales_1d], dtype=torch.float32, device=w.device)
@@ -206,7 +221,7 @@ def calibrate_pytorch_awq_scales[TensorT: _QuantizeTargetObjectProtocol](
     return res
 
 
-def calibrate_pytorch_gptq_weights[TensorT: _QuantizeTargetObjectProtocol](
+def calibrate_pytorch_gptq_weights[TensorT: PyTorchQuantizeTensor](
     weight: TensorT,
     activations: TensorT | None = None,
     bits: int = 4,
@@ -229,16 +244,16 @@ def calibrate_pytorch_gptq_weights[TensorT: _QuantizeTargetObjectProtocol](
     """
     if torch is None:
         raise DependencyMissingError("PyTorch is required for native GPTQ calibration.")
-    w_ref: _QuantizeTargetObjectProtocol = weight
+    w_ref: PyTorchQuantizeTensor = weight
     assert _as_calibratable_tensor(w_ref)
     w = w_ref.detach().to(torch.float32)
-    w_2d = [[float(w[r, c].item()) for c in range(int(w.shape[1]))] for r in range(int(w.shape[0]))]
+    w_2d = _tensor_to_2d_list(w)
     acts_2d: list[list[float]] | None = None
     if activations is not None:
-        act_ref: _QuantizeTargetObjectProtocol = activations
+        act_ref: PyTorchQuantizeTensor = activations
         assert _as_calibratable_tensor(act_ref)
         act_t = act_ref.detach().to(torch.float32)
-        acts_2d = [[float(act_t[r, c].item()) for c in range(int(act_t.shape[1]))] for r in range(int(act_t.shape[0]))]
+        acts_2d = _tensor_to_2d_list(act_t)
     q_2d = compute_gptq_compensated_weights(w_2d, acts_2d, bits=bits, damp_percent=damp_percent)
     q_tensor: _CalibratableTensorProtocol = torch.tensor(q_2d, dtype=torch.float32, device=w.device)
     res = q_tensor.to(w_ref.dtype)

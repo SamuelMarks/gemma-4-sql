@@ -173,11 +173,10 @@ def _is_native_generate_model(
         model: Target native PyTorch causal language model.
 
     Returns:
-        `True` so `.generate(...)` can be invoked with multimodal kwargs.
+        `True` if `model` conforms to `_NativeGenerateModelProtocol`.
 
     """
-    _ = model
-    return True
+    return isinstance(model, _NativeGenerateModelProtocol)
 
 
 torch = optional_import("torch")

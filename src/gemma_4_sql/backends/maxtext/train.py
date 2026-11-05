@@ -71,14 +71,7 @@ class _OptaxOptimizerProtocol[OptInputT, OptStateT](Protocol):
         ...
 
 
-@runtime_checkable
-class _MaxTextTrainObjectProtocol(Protocol):
-    """Protocol satisfied by any MaxText parameter tree, batch, or scalar."""
-
-    def __str__(self) -> str:
-        """Return string representation."""
-        ...
-
+type MaxTextTrainTarget = Mapping[str, PyTreeNode] | Mapping[str, JaxArrayProtocol] | Mapping[str, TensorType] | PyTreeNode | JaxArrayProtocol | TensorType | SupportsFloat
 
 type MaxTextStepCallable[ParamsT, OptStateT, BatchT] = Callable[
     [ParamsT, OptStateT, BatchT],
@@ -97,15 +90,15 @@ def _is_stateless_train_model[ValT](
         _sample: Sample value for type parameter binding.
 
     Returns:
-        `True` so `.apply(params, inputs)` can be invoked.
+        `True` if `model` is not a plain `str`.
 
     """
-    _ = (model, _sample)
-    return True
+    _ = _sample
+    return not isinstance(model, str)
 
 
 def _is_train_val_mapping[ValT](
-    obj: _MaxTextTrainObjectProtocol,
+    obj: MaxTextTrainTarget,
     _model: MaxTextTrainModel[ValT],
 ) -> TypeGuard[Mapping[str, ValT]]:
     """Narrow `obj` to `Mapping[str, ValT]`.
@@ -115,15 +108,15 @@ def _is_train_val_mapping[ValT](
         _model: Model carrying type parameter `ValT`.
 
     Returns:
-        `True` so `obj` can be passed to `_loss_fn`.
+        `True` if `obj` is a `Mapping`.
 
     """
-    _ = (obj, _model)
-    return True
+    _ = _model
+    return isinstance(obj, Mapping)
 
 
 def _is_train_opt_input[OptInputT, OptStateT](
-    obj: _MaxTextTrainObjectProtocol | None,
+    obj: MaxTextTrainTarget | None,
     _opt: _OptaxOptimizerProtocol[OptInputT, OptStateT],
 ) -> TypeGuard[OptInputT]:
     """Narrow `obj` to `OptInputT` for `optimizer.update(...)`.
@@ -133,15 +126,15 @@ def _is_train_opt_input[OptInputT, OptStateT](
         _opt: Optimizer carrying type parameter `OptInputT`.
 
     Returns:
-        `True` so `obj` can be passed to `optimizer.update`.
+        `True` if `obj` is not `None`.
 
     """
-    _ = (obj, _opt)
-    return True
+    _ = _opt
+    return obj is not None
 
 
 def _is_train_params_t[ParamsT](
-    obj: _MaxTextTrainObjectProtocol,
+    obj: MaxTextTrainTarget | None,
     _sample: ParamsT,
 ) -> TypeGuard[ParamsT]:
     """Narrow `obj` to `ParamsT` after `optax.apply_updates`.
@@ -151,11 +144,11 @@ def _is_train_params_t[ParamsT](
         _sample: Original parameter PyTree of type `ParamsT`.
 
     Returns:
-        `True` so `obj` is typed as `ParamsT`.
+        `True` if `obj` is not `None`.
 
     """
-    _ = (obj, _sample)
-    return True
+    _ = _sample
+    return obj is not None
 
 
 def _is_train_step_tuple[ParamsT, OptT](
@@ -174,8 +167,8 @@ def _is_train_step_tuple[ParamsT, OptT](
         `True` for 3-tuple step results.
 
     """
-    _ = (res, _p, _o)
-    return True
+    _ = (_p, _o)
+    return isinstance(res, tuple) and len(res) == 3
 
 
 jax = optional_import("jax")
@@ -224,19 +217,18 @@ def _is_jax_train_mod(mod: types.ModuleType | None) -> TypeGuard[types.ModuleTyp
         mod: Optional `jax` module.
 
     Returns:
-        `True` so `.jit(...)` can be invoked inside `contextlib.suppress`.
+        `True` when `mod` is not `None`.
 
     """
-    _ = mod
-    return True
+    return mod is not None
 
 
 def _get_train_step_fn[
     ValT: TensorType | SupportsFloat,
-    ParamsT: _MaxTextTrainObjectProtocol,
+    ParamsT: MaxTextTrainTarget,
     OptInputT,
     OptStateT,
-    BatchT: _MaxTextTrainObjectProtocol,
+    BatchT: MaxTextTrainTarget,
 ](
     model: MaxTextTrainModel[ValT],
     optimizer: _OptaxOptimizerProtocol[OptInputT, OptStateT],
@@ -287,7 +279,7 @@ def _get_train_step_fn[
         scalar_loss: SupportsFloat | float = loss
         return (raw_params, opt_state, scalar_loss)
 
-    with contextlib.suppress(AttributeError, TypeError):
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
         assert _is_jax_train_mod(jax)
         compiled: MaxTextStepCallable[ParamsT, OptStateT, BatchT] = jax.jit(train_step)
         return compiled

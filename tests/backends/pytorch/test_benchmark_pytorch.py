@@ -153,7 +153,7 @@ def test_benchmark_model_behavioral(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_real_pytorch_tiny_gemma4_benchmark_cpu() -> None:
-    """Verify _run_benchmark_pass executes against a real tiny Gemma4ForCausalLM on CPU."""
+    """Verify _run_benchmark_pass executes against a real tiny Gemma4ForCausalLM on CPU in both prefill and decode modes."""
     from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
     from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM
 
@@ -172,6 +172,11 @@ def test_real_pytorch_tiny_gemma4_benchmark_cpu() -> None:
     assert tps > 0.0
     assert lat > 0.0
     assert mem > 0.0
+
+    tps_dec, lat_dec, mem_dec = benchmark_module._run_benchmark_pass(model, "cpu", 1, 1, 1, "decode", 2)
+    assert tps_dec > 0.0
+    assert lat_dec > 0.0
+    assert mem_dec > 0.0
 
 
 def test_torch_runtime_adapter_edge_cases() -> None:

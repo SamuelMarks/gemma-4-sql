@@ -31,7 +31,7 @@ def _is_export_weights_tree(
     val: BackendKwargValue | ModelConfig | JaxCausalLMProtocol | ExportWeightsTree | nnx.State[str | int, Array] | None,
 ) -> TypeGuard[ExportWeightsTree]:
     """Narrow a mapping or PyTree state object to `ExportWeightsTree`."""
-    return isinstance(val, Mapping) or val is not None
+    return isinstance(val, Mapping)
 
 
 def export_model(

@@ -16,6 +16,7 @@ from gemma_4_sql._types_extractors import (
     extract_status_kwargs,
     extract_str_kwarg,
     run_coroutine_sync,
+    shutdown_sync_coro_executor,
 )
 
 JSONPrimitive = Union[str, int, float, bool, None]
@@ -38,4 +39,5 @@ __all__ = [
     "extract_status_kwargs",
     "extract_str_kwarg",
     "run_coroutine_sync",
+    "shutdown_sync_coro_executor",
 ]

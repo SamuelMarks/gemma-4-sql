@@ -219,6 +219,24 @@ def test_type_hints_dataclasses_and_defaults() -> None:
     assert extract_bool_kwarg(kw_map, "b_str_false", True) is False
     assert extract_bool_kwarg(kw_map, "b_bool", False) is True
 
+    from gemma_4_sql.type_hints import run_coroutine_sync, shutdown_sync_coro_executor
+
+    async def _sample_coro() -> int:
+        """Return sample integer from async coroutine."""
+        return 7
+
+    shutdown_sync_coro_executor()
+    assert run_coroutine_sync(_sample_coro) == 7
+
+    async def _nested_caller() -> int:
+        """Invoke run_coroutine_sync while an event loop is already running."""
+        return run_coroutine_sync(_sample_coro)
+
+    assert asyncio.run(_nested_caller()) == 7
+    assert asyncio.run(_nested_caller()) == 7
+    shutdown_sync_coro_executor()
+    shutdown_sync_coro_executor()
+
 
 def test_runtime_checkable_protocols_with_real_components() -> None:
     """Verify runtime_checkable protocols match real domain classes and reject non-conforming objects."""

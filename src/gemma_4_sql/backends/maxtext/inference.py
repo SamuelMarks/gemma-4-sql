@@ -47,8 +47,8 @@ def _is_jax_beam_mod[ArrayT: BeamSequenceArrayProtocol](
         `True` when `mod` is loaded.
 
     """
-    _ = (mod, _sample)
-    return True
+    _ = _sample
+    return mod is not None
 
 
 def _is_jnp_beam_mod[ArrayT: BeamSequenceArrayProtocol](
@@ -65,8 +65,8 @@ def _is_jnp_beam_mod[ArrayT: BeamSequenceArrayProtocol](
         `True` when `mod` is loaded.
 
     """
-    _ = (mod, _sample)
-    return True
+    _ = _sample
+    return mod is not None
 
 
 jax = optional_import("jax")

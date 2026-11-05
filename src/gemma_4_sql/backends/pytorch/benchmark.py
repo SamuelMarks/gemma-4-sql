@@ -127,18 +127,17 @@ def _get_device(hardware: str) -> str:
     return _runtime().get_device(hardware)
 
 
-def _is_device_movable(model: TorchCausalLMProtocol) -> TypeGuard[_DeviceMovableModelProtocol]:
+def _is_device_movable(model: TorchCausalLMProtocol | None) -> TypeGuard[_DeviceMovableModelProtocol]:
     """Narrow `model` to `_DeviceMovableModelProtocol`.
 
     Args:
         model: Target PyTorch causal language model.
 
     Returns:
-        `True` so `.to(...)` can be invoked inside an attribute-safe block.
+        `True` if `model` is not `None`.
 
     """
-    _ = model
-    return True
+    return model is not None
 
 
 def _move_and_eval(
@@ -154,7 +153,7 @@ def _move_and_eval(
         torch_dtype: Optional resolved torch dtype.
 
     """
-    with contextlib.suppress(AttributeError, TypeError):
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
         assert _is_device_movable(model)
         if torch_dtype is not None:
             model.to(torch_dtype)
@@ -236,11 +235,10 @@ def _has_config_attr(model: _BenchmarkModelInput) -> TypeGuard[_HasConfigProtoco
         model: Target PyTorch causal language model.
 
     Returns:
-        `True` so `.config` can be inspected inside an attribute-safe block.
+        `True` if `model` is not `None` and not a `str`.
 
     """
-    _ = model
-    return True
+    return model is not None and not isinstance(model, str)
 
 
 def _resolve_vocab_bound(model: _BenchmarkModelInput) -> int:
@@ -253,7 +251,7 @@ def _resolve_vocab_bound(model: _BenchmarkModelInput) -> int:
         Positive integer vocabulary upper bound for dummy input sampling.
 
     """
-    with contextlib.suppress(AttributeError, TypeError, ValueError):
+    with contextlib.suppress(AttributeError, TypeError, ValueError, AssertionError):
         assert _has_config_attr(model)
         if model.config is not None:
             raw_vocab = model.config.vocab_size
@@ -269,11 +267,10 @@ def _is_generate_capable(model: _BenchmarkModelInput) -> TypeGuard[_GenerateCapa
         model: Benchmark model instance.
 
     Returns:
-        `True` so `.generate(...)` can be invoked inside an attribute-safe block.
+        `True` if `model` is not `None` and not a `str`.
 
     """
-    _ = model
-    return True
+    return model is not None and not isinstance(model, str)
 
 
 def _call_decode_generate(
@@ -289,7 +286,7 @@ def _call_decode_generate(
         tokens: Number of tokens to generate.
 
     """
-    with contextlib.suppress(AttributeError, TypeError):
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
         assert _is_generate_capable(model)
         _ = model.generate(dummy_inputs, max_new_tokens=tokens, min_new_tokens=tokens)
 

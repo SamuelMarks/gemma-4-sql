@@ -63,11 +63,10 @@ def _is_keras_layer(layer: _QuantizeLayerInput) -> TypeGuard[KerasLayerProtocol]
         layer: Candidate Keras layer object.
 
     Returns:
-        `True` so `.weights` can be accessed inside `contextlib.suppress`.
+        `True` when `layer` is not `None` and not a `str`.
 
     """
-    _ = layer
-    return True
+    return layer is not None and not isinstance(layer, str)
 
 
 def _is_keras_model(
@@ -79,11 +78,10 @@ def _is_keras_model(
         model: Candidate Keras model object.
 
     Returns:
-        `True` so `.layers` and `.save(...)` can be accessed inside `contextlib.suppress`.
+        `True` when `model` is not `None` and not a primitive scalar.
 
     """
-    _ = model
-    return True
+    return model is not None and not isinstance(model, (str, int, float, bool))
 
 
 def quantize_layer_weights(
@@ -112,7 +110,7 @@ def quantize_layer_weights(
     layer_scales: list[float] = []
 
     weights = ()
-    with contextlib.suppress(AttributeError):
+    with contextlib.suppress(AttributeError, AssertionError):
         assert _is_keras_layer(layer)
         weights = layer.weights
     for w in weights:

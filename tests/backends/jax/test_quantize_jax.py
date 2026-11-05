@@ -206,15 +206,8 @@ def test_quantize_jax_model_error_handling(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_set_param_metadata_fallback() -> None:
     """Test _set_param_metadata safely ignores objects without set_metadata method."""
-
-    class DummyParam:
-        """Dummy parameter object without set_metadata method."""
-
-        __slots__ = ()
-
-    dummy = DummyParam()
-    qt._set_param_metadata(dummy, "custom_key", "custom_val")
-    assert isinstance(dummy, DummyParam)
+    qt._set_param_metadata(None, "custom_key", "custom_val")
+    qt._set_param_metadata("no_metadata", "custom_key", "custom_val")
 
 
 def test_set_param_metadata_native() -> None:

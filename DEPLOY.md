@@ -1,6 +1,6 @@
 # `gemma-4-sql` Deployment & Operations Guide
 
-This comprehensive guide details the exact steps to create, adapt, and post-train a Gemma-4 model tailored exclusively for Text-to-SQL tasks. It also covers how to benchmark these models across varying hardware topologies (GPU, TPU, CPU) using different backends: **JAX**, **JAX (MaxText)**, **Keras**, and **PyTorch**.
+This comprehensive guide details the exact steps to create, adapt, and post-train a Gemma-4 model tailored exclusively for Text-to-SQL tasks. It also covers how to benchmark these models across varying hardware topologies (GPU, TPU, Apple Silicon Metal, CPU) using all supported backends: **JAX**, **JAX (MaxText)**, **Keras**, **PyTorch** (`pytorch_hf` / `pytorch_native`), and **MLX**.
 
 ---
 
@@ -74,6 +74,17 @@ torchrun --nproc_per_node=8 -m gemma_4_sql.cli train \
     --distributed-strategy fsdp
 ```
 
+#### Using MLX (Apple Silicon)
+*Recommended for local training and rapid iteration on Apple Silicon Macs (M1/M2/M3/M4).*
+```bash
+gemma-4-sql train \
+    --model gemma-4 \
+    --dataset my-custom-dataset \
+    --epochs 10 \
+    --learning-rate 1e-4 \
+    --backend mlx
+```
+
 ---
 
 ## 1. Create a Pretrained `gemma-4` for SQL
@@ -107,6 +118,11 @@ gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backen
 **PyTorch:**
 ```bash
 gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend pytorch
+```
+
+**MLX (Apple Silicon):**
+```bash
+gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend mlx
 ```
 
 ---
@@ -146,6 +162,11 @@ gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset my-custom-sft-datase
 gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset my-custom-sft-dataset --backend pytorch
 ```
 
+**MLX (Apple Silicon):**
+```bash
+gemma-4-sql sft --model my-sql-pretrained-gemma-4 --dataset my-custom-sft-dataset --backend mlx
+```
+
 ### Step 3: Direct Preference Optimization (DPO)
 
 Once SFT is complete, align the model using DPO to prevent destructive queries (e.g., DROP TABLE) and favor efficient JOINs.
@@ -156,6 +177,9 @@ gemma-4-sql dpo --model my-sft-gemma-4 --dataset my_custom_dpo_dataset --beta 0.
 
 # Apply DPO using MaxText
 gemma-4-sql dpo --model my-sft-gemma-4 --dataset my_custom_dpo_dataset --beta 0.1 --backend maxtext
+
+# Apply DPO using MLX
+gemma-4-sql dpo --model my-sft-gemma-4 --dataset my_custom_dpo_dataset --beta 0.1 --backend mlx
 ```
 
 ---
@@ -229,7 +253,7 @@ gemma-4-sql benchmark --model my-sft-gemma-4 --hardware cpu --batch-size 1 --bac
 
 ## 4. Monitoring with TensorBoard
 
-Throughout training, pretraining, and post-training phases, you should monitor your cluster's progress. `gemma-4-sql` integrates cleanly with TensorBoard across all backend topologies (JAX, MaxText, Keras, and PyTorch).
+Throughout training, pretraining, and post-training phases, you should monitor your cluster's progress. `gemma-4-sql` integrates cleanly with TensorBoard across all backend topologies (JAX, MaxText, Keras, PyTorch, and MLX).
 
 Metrics are written by default to the `logs` directory.
 

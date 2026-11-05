@@ -49,11 +49,10 @@ def _is_tolist_capable(val: KerasScoreInput) -> TypeGuard[ToListArrayProtocol]:
         val: Candidate score tensor or array.
 
     Returns:
-        `True` so `.tolist()` can be invoked inside `contextlib.suppress`.
+        `True` if `val` is not `None` and not a primitive or sequence.
 
     """
-    _ = val
-    return True
+    return val is not None and not isinstance(val, (int, float, list, tuple))
 
 
 keras = optional_import("keras")
@@ -107,7 +106,7 @@ def compute_keras_confidence(scores: KerasScoreInput, num_tokens: int) -> float:
     if num_tokens <= 0:
         return 0.0
     resolved: KerasScoreInput = scores
-    with contextlib.suppress(AttributeError, TypeError):
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
         assert _is_tolist_capable(resolved)
         resolved = resolved.tolist()
 

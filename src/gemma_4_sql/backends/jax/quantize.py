@@ -207,17 +207,8 @@ def dequantize_awq(
     return res
 
 
-@runtime_checkable
-class _AnyParamObjProtocol(Protocol):
-    """Protocol satisfied by any parameter or mock parameter object."""
-
-    def __repr__(self) -> str:
-        """Return string representation."""
-        ...
-
-
 def _set_param_metadata(
-    param: nnx.Param[Array] | _MetadataParamProtocol | _AnyParamObjProtocol | str | None,
+    param: nnx.Param[Array] | _MetadataParamProtocol | JaxArrayProtocol | str | None,
     key: str,
     value: float | str | Array,
 ) -> None:

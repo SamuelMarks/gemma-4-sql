@@ -16,15 +16,15 @@ pytestmark = requires_mlx
 
 
 def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify MLX export_model writes safetensors and config.json without sys.modules deletion."""
-    mock_mx = MagicMock()
-    monkeypatch.setattr(export_module, "mx", mock_mx)
+    """Verify MLX export_model writes real safetensors with mlx.core.save_safetensors and config.json."""
+    import mlx.core as mx
 
     export_dir = tmp_path / "export"
+    expected_weight = mx.array([1.25, 2.5, 3.75], dtype=mx.float32)
 
     mock_load_fn = MagicMock()
     mock_model = MagicMock()
-    mock_model.parameters.return_value = {"w": 1}.items()
+    mock_model.parameters.return_value = {"w": expected_weight}.items()
     mock_model.config = {"k": "v"}
     mock_load_fn.return_value = (mock_model, "tok")
     monkeypatch.setattr(export_module, "mlx_load", mock_load_fn)
@@ -34,8 +34,11 @@ def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert res["backend"] == "mlx"
     assert res["status"] == "exported_with_safetensors"
     assert res["format"] == "safetensors"
-    assert (export_dir / "model.safetensors").parent.exists()
-    mock_mx.save_safetensors.assert_called_once()
+    sf_file = export_dir / "model.safetensors"
+    assert sf_file.is_file()
+    loaded_tensors = mx.load(str(sf_file))
+    assert isinstance(loaded_tensors, dict)
+    assert bool(mx.allclose(loaded_tensors["w"], expected_weight))
 
     config_path = export_dir / "config.json"
     assert config_path.exists()

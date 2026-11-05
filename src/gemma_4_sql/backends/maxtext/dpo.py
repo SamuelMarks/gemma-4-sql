@@ -73,14 +73,7 @@ class _OptaxOptimizerProtocol[OptInputT, OptStateT](Protocol):
         ...
 
 
-@runtime_checkable
-class _MaxTextTargetObjectProtocol(Protocol):
-    """Protocol satisfied by any MaxText parameter tree, batch, or scalar."""
-
-    def __str__(self) -> str:
-        """Return string representation."""
-        ...
-
+type MaxTextDPOTarget = Mapping[str, PyTreeNode] | Mapping[str, JaxArrayProtocol] | Mapping[str, TensorType] | Mapping[str, ArithmeticTensorProtocol] | PyTreeNode | JaxArrayProtocol | TensorType | ArithmeticTensorProtocol | SupportsFloat
 
 type MaxTextDPOStepCallable[ParamsT, OptStateT, BatchT] = Callable[
     [
@@ -104,11 +97,11 @@ def _is_stateless_model[ValT](
         _sample: Sample value for type parameter binding.
 
     Returns:
-        `True` so `.apply(params, inputs)` can be invoked.
+        `True` if `model` is not a plain `str`.
 
     """
-    _ = (model, _sample)
-    return True
+    _ = _sample
+    return not isinstance(model, str)
 
 
 def _is_jnn_gather(
@@ -123,8 +116,7 @@ def _is_jnn_gather(
         `True` when `mod` is loaded.
 
     """
-    _ = mod
-    return True
+    return mod is not None
 
 
 def _is_jnp_gather(
@@ -139,8 +131,7 @@ def _is_jnp_gather(
         `True` when `mod` is loaded.
 
     """
-    _ = mod
-    return True
+    return mod is not None
 
 
 def _is_arithmetic_val(
@@ -152,15 +143,14 @@ def _is_arithmetic_val(
         val: Candidate tensor or numeric scalar.
 
     Returns:
-        `True` for array multiplication.
+        `True` if `val` is not a plain `str`.
 
     """
-    _ = val
-    return True
+    return not isinstance(val, str)
 
 
 def _as_val_t[ValT](
-    val: _MaxTextTargetObjectProtocol,
+    val: MaxTextDPOTarget,
     _sample: ValT,
 ) -> TypeGuard[ValT]:
     """Narrow `val` to `ValT`.
@@ -170,15 +160,15 @@ def _as_val_t[ValT](
         _sample: Sample value of type `ValT`.
 
     Returns:
-        `True` so `val` is typed as `ValT`.
+        `True` if `val` is not a plain `str`.
 
     """
-    _ = (val, _sample)
-    return True
+    _ = _sample
+    return not isinstance(val, str)
 
 
 def _is_val_mapping[ValT](
-    obj: _MaxTextTargetObjectProtocol,
+    obj: MaxTextDPOTarget,
     _model: MaxTextDPOModel[ValT],
 ) -> TypeGuard[Mapping[str, ValT]]:
     """Narrow `obj` to `Mapping[str, ValT]`.
@@ -188,15 +178,15 @@ def _is_val_mapping[ValT](
         _model: Model carrying type parameter `ValT`.
 
     Returns:
-        `True` so `obj` can be passed to `_dpo_step_loss`.
+        `True` if `obj` is a `Mapping`.
 
     """
-    _ = (obj, _model)
-    return True
+    _ = _model
+    return isinstance(obj, Mapping)
 
 
 def _is_opt_input[OptInputT, OptStateT](
-    obj: _MaxTextTargetObjectProtocol | None,
+    obj: MaxTextDPOTarget | None,
     _opt: _OptaxOptimizerProtocol[OptInputT, OptStateT],
 ) -> TypeGuard[OptInputT]:
     """Narrow `obj` to `OptInputT` for `optimizer.update(...)`.
@@ -206,15 +196,15 @@ def _is_opt_input[OptInputT, OptStateT](
         _opt: Optimizer carrying type parameter `OptInputT`.
 
     Returns:
-        `True` so `obj` can be passed to `optimizer.update`.
+        `True` if `obj` is not `None`.
 
     """
-    _ = (obj, _opt)
-    return True
+    _ = _opt
+    return obj is not None
 
 
 def _is_params_t[ParamsT](
-    obj: _MaxTextTargetObjectProtocol,
+    obj: MaxTextDPOTarget | None,
     _sample: ParamsT,
 ) -> TypeGuard[ParamsT]:
     """Narrow `obj` to `ParamsT` after `optax.apply_updates`.
@@ -224,11 +214,11 @@ def _is_params_t[ParamsT](
         _sample: Original parameter PyTree of type `ParamsT`.
 
     Returns:
-        `True` so `obj` is typed as `ParamsT`.
+        `True` if `obj` is not `None`.
 
     """
-    _ = (obj, _sample)
-    return True
+    _ = _sample
+    return obj is not None
 
 
 def _is_dpo_step_tuple[ParamsT, OptT](
@@ -247,8 +237,8 @@ def _is_dpo_step_tuple[ParamsT, OptT](
         `True` for 3-tuple step results.
 
     """
-    _ = (res, _p, _o)
-    return True
+    _ = (_p, _o)
+    return isinstance(res, tuple) and len(res) == 3
 
 
 def _is_item_extractor(
@@ -260,11 +250,10 @@ def _is_item_extractor(
         val: Loss tensor or float scalar.
 
     Returns:
-        `True` so `.item()` can be attempted inside `try`.
+        `True` if `val` conforms to `ScalarItemExtractorProtocol`.
 
     """
-    _ = val
-    return True
+    return isinstance(val, ScalarItemExtractorProtocol)
 
 
 def _is_supports_float(
@@ -276,11 +265,10 @@ def _is_supports_float(
         val: Loss tensor or float scalar.
 
     Returns:
-        `True` so `float(val)` can be called.
+        `True` if `val` is a `float`, `int`, or `SupportsFloat`.
 
     """
-    _ = val
-    return True
+    return isinstance(val, (float, int, SupportsFloat))
 
 
 jax = optional_import("jax")
@@ -324,11 +312,10 @@ def _is_jax_mod(mod: types.ModuleType | None) -> TypeGuard[types.ModuleType]:
         mod: Optional `jax` module.
 
     Returns:
-        `True` so `.jit(...)` can be invoked inside `contextlib.suppress`.
+        `True` when `mod` is not `None`.
 
     """
-    _ = mod
-    return True
+    return mod is not None
 
 
 def _compute_logps[ValT: TensorType | SupportsFloat](
@@ -403,10 +390,10 @@ def _dpo_step_loss[ValT: ArithmeticTensorProtocol](
 
 def _get_train_step_fn[
     ValT: ArithmeticTensorProtocol,
-    ParamsT: _MaxTextTargetObjectProtocol,
+    ParamsT: MaxTextDPOTarget,
     OptInputT,
     OptStateT,
-    BatchT: _MaxTextTargetObjectProtocol,
+    BatchT: MaxTextDPOTarget,
 ](
     policy_model: MaxTextDPOModel[ValT],
     ref_model: MaxTextDPOModel[ValT],
@@ -472,7 +459,7 @@ def _get_train_step_fn[
         scalar_loss: SupportsFloat | float = loss
         return (raw_updated, new_opt_state, scalar_loss)
 
-    with contextlib.suppress(AttributeError, TypeError):
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
         assert _is_jax_mod(jax)
         jit_fn: MaxTextDPOStepCallable[ParamsT, OptStateT, BatchT] = jax.jit(train_step)
         return jit_fn
@@ -520,7 +507,7 @@ def _run_training_epochs[ModelT, ParamsT, OptT, BatchT](
             raw_loss = loss
             assert _is_item_extractor(raw_loss)
             return float(raw_loss.item())
-        except (AttributeError, TypeError, ValueError):
+        except (AttributeError, TypeError, ValueError, AssertionError):
             assert _is_supports_float(loss)
             return float(loss)
 

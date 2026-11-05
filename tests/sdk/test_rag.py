@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from typing import NoReturn
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -144,7 +144,7 @@ def test_rag_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test semantic search when similarity is lower than MIN_SIMILARITY.
+    """Test semantic search with real 2D embeddings and cosine similarity when similarity is below threshold.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
@@ -152,78 +152,54 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     import gemma_4_sql.sdk.rag as rg
 
-    monkeypatch.setattr(rg, "MIN_SIMILARITY", 100.0)
-    schema = {"users": ["id"], "orders": ["id"]}
+    schema = {"users": ["id", "email"], "orders": ["order_id", "total"]}
 
-    class MockModel:
-        """Mock SentenceTransformer model."""
+    class _EmbedderStub:
+        """Deterministic SentenceTransformer stub returning orthogonal 2D embeddings."""
 
-        def encode(self, _x: Sequence[str]) -> list[list[float]]:
-            """Return mock embedding.
+        def encode(self, texts: Sequence[str]) -> torch.Tensor:
+            """Return 2D tensor of embeddings for `texts`."""
+            rows: list[list[float]] = []
+            for idx, _t in enumerate(texts):
+                if len(texts) == 1:
+                    rows.append([1.0, 0.0])
+                elif idx == 0:
+                    rows.append([0.9, 0.1])
+                else:
+                    rows.append([0.0, 1.0])
+            return torch.tensor(rows, dtype=torch.float32)
 
-            Args:
-                _x: Input object.
+    def _real_cosine_similarity(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        """Compute exact cosine similarity matrix between 2D tensors `a` and `b`."""
+        a_norm = a / torch.linalg.norm(a, dim=-1, keepdim=True)
+        b_norm = b / torch.linalg.norm(b, dim=-1, keepdim=True)
+        return a_norm @ b_norm.T
 
-            Returns:
-                Mock embedding list.
+    def _make_embedder(*_a: str, **_k: str) -> _EmbedderStub:
+        """Return a new `_EmbedderStub` instance."""
+        return _EmbedderStub()
 
-            """
-            return [[1.0]]
-
-    def _create_mock_model(*_a: str, **_k: str) -> MockModel:
-        """Return MockModel instance."""
-        return MockModel()
-
-    monkeypatch.setattr(rg, "SentenceTransformer", _create_mock_model)
-
-    class MockSim:
-        """Mock similarity array."""
-
-        def argsort(self) -> list[int]:
-            """Return sort order.
-
-            Returns:
-                Index list.
-
-            """
-            return [0, 1]
-
-        def __getitem__(self, _i: int) -> float:
-            """Return similarity score.
-
-            Args:
-                _i: Index.
-
-            Returns:
-                Similarity float.
-
-            """
-            return 0.5
-
-    def _mock_cos_sim(_a: Sequence[Sequence[float]], _b: Sequence[Sequence[float]]) -> list[MockSim]:
-        """Return list containing MockSim."""
-        return [MockSim()]
-
-    monkeypatch.setattr(rg, "cosine_similarity", _mock_cos_sim)
-    res = rg._semantic_search("hi", schema, ["users", "orders"], 2, min_similarity=0.9)
-    assert len(res) == 2
-    assert res == ["users", "orders"]
-
-
-def test_rag_semantic_no_relevant() -> None:
-    """Test rag semantic when all similarity scores are below threshold."""
-    mock_st = MagicMock()
-    mock_st.return_value.encode.return_value = torch.tensor([[1.0]])
-
-    def _zero_cos(_a: torch.Tensor, _b: torch.Tensor) -> torch.Tensor:
-        """Return zero cosine similarity tensor."""
+    def _zero_cosine(_a: Sequence[Sequence[float]] | torch.Tensor, _b: Sequence[Sequence[float]] | torch.Tensor) -> torch.Tensor:
+        """Return a zero cosine similarity matrix."""
         return torch.tensor([[0.0, 0.0]])
 
-    with patch("gemma_4_sql.sdk.rag.SentenceTransformer", mock_st), patch("gemma_4_sql.sdk.rag.cosine_similarity", _zero_cos):
-        schema = {"t1": ["c1"], "t2": ["c2"]}
-        res = retrieve_relevant_schema("prompt", schema)
-        assert "Table: t1" in res
-        assert "Table: t2" in res
+    monkeypatch.setattr(rg, "SentenceTransformer", _make_embedder)
+    monkeypatch.setattr(rg, "cosine_similarity", _real_cosine_similarity)
+    rg.clear_rag_model_cache()
+
+    # 1. With normal threshold (0.2), only 'users' (~0.994 similarity) is above threshold
+    above = rg._semantic_search("find user email", schema, ["users", "orders"], 2, min_similarity=0.5)
+    assert above == ["users"]
+
+    # 2. When min_similarity is higher than all similarities, falls back to top_k tables
+    fallback = rg._semantic_search("find user email", schema, ["users", "orders"], 2, min_similarity=0.9999)
+    assert fallback == ["users", "orders"]
+
+    # 3. Also verify retrieve_relevant_schema when all cosine similarities are 0.0
+    monkeypatch.setattr(rg, "cosine_similarity", _zero_cosine)
+    ctx = retrieve_relevant_schema("prompt", schema)
+    assert "Table: users" in ctx
+    assert "Table: orders" in ctx
 
 
 def test_extract_schema_entities_complex() -> None:

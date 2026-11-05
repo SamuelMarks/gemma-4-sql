@@ -44,11 +44,10 @@ def _is_tolist_item(val: TokenSequenceItem) -> TypeGuard[ToListArrayProtocol]:
         val: Candidate token sequence or tensor.
 
     Returns:
-        `True` so `.tolist()` can be invoked inside `contextlib.suppress` or `try`.
+        `True` if `val` is not `None`.
 
     """
-    _ = val
-    return True
+    return val is not None
 
 
 def _is_int_iterable(val: TokenSequenceItem) -> TypeGuard[Iterable[int | float | str]]:
@@ -58,11 +57,10 @@ def _is_int_iterable(val: TokenSequenceItem) -> TypeGuard[Iterable[int | float |
         val: Candidate 1D token sequence.
 
     Returns:
-        `True` for elementwise `int(x)` conversion.
+        `True` if `val` is an `Iterable`.
 
     """
-    _ = val
-    return True
+    return isinstance(val, Iterable)
 
 
 def _is_row_iterable(val: TokenSequenceItem) -> TypeGuard[Iterable[TokenSequenceItem]]:
@@ -72,11 +70,10 @@ def _is_row_iterable(val: TokenSequenceItem) -> TypeGuard[Iterable[TokenSequence
         val: Candidate 2D token sequence.
 
     Returns:
-        `True` for `list(val)` conversion.
+        `True` if `val` is an `Iterable`.
 
     """
-    _ = val
-    return True
+    return isinstance(val, Iterable)
 
 
 def _is_int_list(
@@ -91,8 +88,7 @@ def _is_int_list(
         `True` for 1D integer sequences.
 
     """
-    _ = val
-    return True
+    return bool(val) and isinstance(val[0], int)
 
 
 def _as_json_value(
@@ -104,11 +100,10 @@ def _as_json_value(
         val: Multimodal pixel or audio values from batch.
 
     Returns:
-        `True` for forwarding to `backend_impl.generate_sql`.
+        `True` when `val` is not a plain `bytes` object.
 
     """
-    _ = val
-    return True
+    return not isinstance(val, bytes)
 
 
 def normalize_sql(sql: str) -> str:
@@ -228,7 +223,7 @@ def _to_int_seq(seq: TokenSequenceItem) -> list[int]:
 
     """
     raw: TokenSequenceItem = seq
-    with contextlib.suppress(AttributeError, TypeError):
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
         assert _is_tolist_item(seq)
         raw = seq.tolist()
     if isinstance(raw, int):
@@ -251,11 +246,11 @@ def _normalize_id_matrix(raw_item: TokenSequenceItem) -> list[list[int]]:
         item_ref = raw_item
         assert _is_tolist_item(item_ref)
         seq_list: TokenSequenceItem | list[TokenSequenceItem] = item_ref.tolist()
-    except (AttributeError, TypeError):
+    except (AttributeError, TypeError, AssertionError):
         try:
             assert _is_row_iterable(raw_item)
             seq_list = list(raw_item)
-        except TypeError:
+        except (TypeError, AssertionError):
             return [[]]
     if not isinstance(seq_list, list) or not seq_list:
         return [[]]

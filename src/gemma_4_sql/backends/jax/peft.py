@@ -253,17 +253,8 @@ class LoRALinearAdapter(nnx.Module):
 NNXLoRALinear = LoRALinearAdapter
 
 
-@runtime_checkable
-class _AnyLayerObjProtocol(Protocol):
-    """Protocol satisfied by any JAX layer, model, or test double."""
-
-    def __repr__(self) -> str:
-        """Return string representation."""
-        ...
-
-
 def inject_lora_to_layer(
-    layer: LoRAInjectableProtocol | Gemma4DecoderLayer | nnx.Module | _AnyLayerObjProtocol | str,
+    layer: LoRAInjectableProtocol | Gemma4DecoderLayer | nnx.Module | str,
     target_modules: list[str],
     lora_r: int = 8,
     lora_alpha: float = 16.0,
@@ -332,7 +323,7 @@ def inject_lora[ModelT](
         raise DependencyMissingError("JAX PEFT dependencies are missing.")
 
     resolved_rngs = rngs if rngs is not None else nnx.Rngs(0)
-    if not target_modules:
+    if not target_modules or not isinstance(model, LoRAInjectableProtocol):
         return model, 0
 
     injected = inject_lora_to_layer(

@@ -98,10 +98,27 @@ def test_batch_generate_queries(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_app_factory(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify app factory behavior."""
+    """Verify _app_factory serves real HTTP /health and /generate requests through FastAPI TestClient."""
+    from fastapi.testclient import TestClient
+
+    import gemma_4_sql.backends.mlx.inference as mlx_inf
+
+    def _stub_generate_sql(**_kw: str | int) -> dict[str, str]:
+        """Return deterministic SQL dictionary."""
+        return {"sql": "SELECT 42", "status": "success"}
+
     monkeypatch.setattr(mlx_serve, "_load_mlx_model", _load_dummy_mlx)
+    monkeypatch.setattr(mlx_inf, "generate_sql", _stub_generate_sql)
     app = _app_factory("dummy_model")
     assert app is not None
+    with TestClient(app) as client:
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["backend"] == "mlx"
+
+        gen = client.post("/generate", json={"prompt": "Answer"})
+        assert gen.status_code == 200
+        assert gen.json()["sql"] == "SELECT 42"
 
 
 def test_load_mlx_model_cache_and_branches(monkeypatch: pytest.MonkeyPatch) -> None:

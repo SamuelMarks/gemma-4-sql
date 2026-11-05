@@ -79,11 +79,10 @@ def _as_mlx_array(val: MlxTensorLike) -> TypeGuard[MlxArrayProtocol]:
         val: MLX array or `MlxArrayProtocol` instance.
 
     Returns:
-        `True` for array arithmetic.
+        `True` if `val` is not a plain `str`, `int`, or `float`.
 
     """
-    _ = val
-    return True
+    return not isinstance(val, (str, int, float))
 
 
 def _as_array_t[ArrayT: MlxTensorLike](val: MlxArrayProtocol, _sample: ArrayT) -> TypeGuard[ArrayT]:
@@ -94,11 +93,11 @@ def _as_array_t[ArrayT: MlxTensorLike](val: MlxArrayProtocol, _sample: ArrayT) -
         _sample: Input array of type `ArrayT`.
 
     Returns:
-        `True` so `__call__` preserves `ArrayT`.
+        `True` if `val` is not a plain `str`, `int`, or `float`.
 
     """
-    _ = (val, _sample)
-    return True
+    _ = _sample
+    return not isinstance(val, (str, int, float))
 
 
 @runtime_checkable
@@ -144,15 +143,6 @@ class _MlxWeightUpdateProtocol(Protocol):
 
 
 @runtime_checkable
-class _MlxTargetObjectProtocol(Protocol):
-    """Protocol satisfied by any MLX model or module container."""
-
-    def __str__(self) -> str:
-        """Return string representation."""
-        ...
-
-
-@runtime_checkable
 class _MlxTrainableModuleProtocol(Protocol):
     """Protocol for an `mlx.nn.Module` supporting freeze, unfreeze, update_modules, and weight IO."""
 
@@ -164,7 +154,7 @@ class _MlxTrainableModuleProtocol(Protocol):
         """Unfreeze selected module keys."""
         ...
 
-    def update_modules(self, modules: Mapping[str, _MlxTargetObjectProtocol] | _MlxTargetObjectProtocol) -> None:
+    def update_modules(self, modules: Mapping[str, MlxPEFTTarget] | MlxPEFTTarget) -> None:
         """Replace submodules in-place."""
         ...
 
@@ -181,22 +171,24 @@ class _MlxTrainableModuleProtocol(Protocol):
         ...
 
 
-def _is_mlx_trainable(obj: _MlxTargetObjectProtocol) -> TypeGuard[_MlxTrainableModuleProtocol]:
+type MlxPEFTTarget = MlxCausalLMProtocol | _MlxModuleHierarchyProtocol | _MlxWeightUpdateProtocol | _MlxTrainableModuleProtocol | _MlxLinearProtocol | MLXLoRALinear | MutableMapping[str, "MlxPEFTTarget"] | MutableSequence["MlxPEFTTarget"] | Mapping[str, "MlxPEFTTarget"] | Sequence["MlxPEFTTarget"]
+
+
+def _is_mlx_trainable(obj: MlxPEFTTarget) -> TypeGuard[_MlxTrainableModuleProtocol]:
     """Narrow `obj` to `_MlxTrainableModuleProtocol` for attribute-guarded method calls.
 
     Args:
         obj: Target MLX module or test double.
 
     Returns:
-        `True` so module methods can be invoked inside `contextlib.suppress`.
+        `True` if `obj` is not a plain `list` or `tuple`.
 
     """
-    _ = obj
-    return True
+    return not isinstance(obj, (list, tuple))
 
 
 def _is_mlx_causal_lm_input(
-    obj: BackendKwargValue | MlxCausalLMProtocol | _MlxModuleHierarchyProtocol,
+    obj: BackendKwargValue | MlxPEFTTarget,
 ) -> TypeGuard[MlxCausalLMProtocol]:
     """Narrow `obj` to `MlxCausalLMProtocol`.
 
@@ -204,11 +196,10 @@ def _is_mlx_causal_lm_input(
         obj: Candidate MLX model passed via `kwargs['model']`.
 
     Returns:
-        `True` when `obj` is provided.
+        `True` when `obj` is provided and not a primitive scalar.
 
     """
-    _ = obj
-    return True
+    return obj is not None and not isinstance(obj, (str, int, float, bool))
 
 
 mx = optional_import("mlx.core")
@@ -461,9 +452,9 @@ MlxLoRALinear = MLXLoRALinear
 
 
 def _is_mutable_mapping(
-    obj: _MlxTargetObjectProtocol,
-) -> TypeGuard[MutableMapping[str, _MlxTargetObjectProtocol]]:
-    """Narrow `obj` to `MutableMapping[str, _MlxTargetObjectProtocol]`.
+    obj: MlxPEFTTarget,
+) -> TypeGuard[MutableMapping[str, MlxPEFTTarget]]:
+    """Narrow `obj` to `MutableMapping[str, MlxPEFTTarget]`.
 
     Args:
         obj: Candidate MLX module (`dict` subclass) or container.
@@ -476,9 +467,9 @@ def _is_mutable_mapping(
 
 
 def _is_mutable_sequence(
-    obj: _MlxTargetObjectProtocol,
-) -> TypeGuard[MutableSequence[_MlxTargetObjectProtocol]]:
-    """Narrow `obj` to `MutableSequence[_MlxTargetObjectProtocol]`.
+    obj: MlxPEFTTarget,
+) -> TypeGuard[MutableSequence[MlxPEFTTarget]]:
+    """Narrow `obj` to `MutableSequence[MlxPEFTTarget]`.
 
     Args:
         obj: Candidate list container of MLX submodules.
@@ -491,7 +482,7 @@ def _is_mutable_sequence(
 
 
 def _set_mlx_submodule(
-    root: _MlxTargetObjectProtocol,
+    root: MlxPEFTTarget,
     dotted_path: str,
     lora_mod: MLXLoRALinear,
 ) -> None:
@@ -504,7 +495,7 @@ def _set_mlx_submodule(
 
     """
     parts = dotted_path.split(".")
-    curr: _MlxTargetObjectProtocol = root
+    curr: MlxPEFTTarget = root
     for part in parts[:-1]:
         if _is_mutable_mapping(curr):
             curr = curr[part]
@@ -522,7 +513,7 @@ def _set_mlx_submodule(
 
 
 def _iter_lora_layers(
-    node: _MlxTargetObjectProtocol,
+    node: MlxPEFTTarget,
     prefix: str = "",
 ) -> Iterator[tuple[str, MLXLoRALinear]]:
     """Yield `(dotted_prefix, lora_layer)` pairs across a nested MLX model hierarchy.
@@ -546,7 +537,7 @@ def _iter_lora_layers(
             yield from _iter_lora_layers(item, f"{prefix}.{idx}")
 
 
-def inject_lora[ModelT: _MlxTargetObjectProtocol](
+def inject_lora[ModelT: MlxPEFTTarget](
     model: ModelT,
     target_modules: list[str],
     lora_r: int = 8,
@@ -575,8 +566,8 @@ def inject_lora[ModelT: _MlxTargetObjectProtocol](
     if nn is None:
         raise DependencyMissingError("MLX dependencies are missing.")
 
-    with contextlib.suppress(AttributeError, TypeError):
-        m_freeze = model
+    with contextlib.suppress(AttributeError, TypeError, AssertionError):
+        m_freeze: MlxPEFTTarget = model
         assert _is_mlx_trainable(m_freeze)
         m_freeze.freeze()
 
@@ -601,7 +592,7 @@ def inject_lora[ModelT: _MlxTargetObjectProtocol](
 
 
 def save_adapter_weights(
-    model: MlxCausalLMProtocol | _MlxModuleHierarchyProtocol | _MlxWeightUpdateProtocol | _MlxTargetObjectProtocol,
+    model: MlxPEFTTarget,
     save_path: str | Path,
 ) -> None:
     """Save all LoRA adapter weights from an MLX model to a safetensors file.
@@ -634,7 +625,7 @@ def save_adapter_weights(
 
 
 def load_adapter_weights(
-    model: MlxCausalLMProtocol | _MlxModuleHierarchyProtocol | _MlxWeightUpdateProtocol | _MlxTargetObjectProtocol,
+    model: MlxPEFTTarget,
     load_path: str | Path,
 ) -> None:
     """Load LoRA adapter weights into an MLX model from a safetensors file.

@@ -846,6 +846,11 @@ ModelType = Union[
 class JaxShardingProtocol(Protocol):
     """Protocol for JAX sharding objects such as `NamedSharding`."""
 
+    @property
+    def device_set(self) -> set[str | int | None] | Sequence[str | int | None] | None:
+        """Provide the set of devices covered by this sharding."""
+        ...
+
     def __repr__(self) -> str:
         """Return the string representation of the sharding."""
         ...
@@ -861,7 +866,7 @@ type StepResult = TensorProtocol | ScalarItemExtractorProtocol | SupportsFloat |
 
 @dataclass
 class TrainingLoopState(Generic[TModel, TOpt, TBatch]):
-    """Strongly-typed state container for standard supervised training loops."""
+    """Strongly-typed state container for standard stateful supervised training loops."""
 
     dataloader: Iterable[TBatch] | None = None
     epochs: int = 1
@@ -886,6 +891,42 @@ class DPOLoopState(Generic[TModel, TOpt, TBatch]):
 
 
 @dataclass
+class MaxTextTrainerState(Generic[TParams, TOpt, TBatch]):
+    """Strongly-typed state container for stateless JAX/MaxText parameter and optimizer PyTree loops."""
+
+    dataloader: Iterable[TBatch] | None = None
+    epochs: int = 1
+    train_step: Callable[..., StepResult | tuple[TParams, TOpt, StepResult]] | None = None
+    params: TParams | None = None
+    opt_state: TOpt | None = None
+    policy_params: TParams | None = None
+    ref_params: TParams | None = None
+
+
+@dataclass
+class TorchTrainerState(Generic[TModel, TOpt, TBatch]):
+    """Strongly-typed state container for PyTorch models, optimizers, and loss criteria."""
+
+    dataloader: Iterable[TBatch] | None = None
+    epochs: int = 1
+    model: TModel | None = None
+    optimizer: TOpt | None = None
+    criterion: Callable[..., TensorProtocol | float] | None = None
+    device: str | None = "cpu"
+
+
+@dataclass
+class KerasTrainerState(Generic[TModel, TOpt, TBatch]):
+    """Strongly-typed state container for Keras / TensorFlow compiled step execution."""
+
+    dataloader: Iterable[TBatch] | None = None
+    epochs: int = 1
+    train_step: Callable[..., StepResult] | None = None
+    model: TModel | None = None
+    optimizer: TOpt | None = None
+
+
+@dataclass
 class TrainerState(Generic[TModel, TParams, TOpt, TBatch]):
     """Unified generic state container for training and DPO epoch runners across all backends."""
 
@@ -904,18 +945,6 @@ class TrainerState(Generic[TModel, TParams, TOpt, TBatch]):
     criterion: Callable[..., TensorProtocol | float] | None = None
     device: str | None = "cpu"
     beta: float = 0.1
-
-
-class MaxTextTrainerState(TrainerState[ModelType, TParams, TOpt, TBatch], Generic[TParams, TOpt, TBatch]):
-    """Typed trainer state subclass of `TrainerState` for stateless JAX/MaxText parameter and optimizer PyTrees."""
-
-
-class TorchTrainerState(TrainerState[TModel, Mapping[str, TensorProtocol], TOpt, TBatch], Generic[TModel, TOpt, TBatch]):
-    """Typed trainer state subclass of `TrainerState` for PyTorch models, optimizers, and loss criteria."""
-
-
-class KerasTrainerState(TrainerState[TModel, Mapping[str, TensorProtocol], TOpt, TBatch], Generic[TModel, TOpt, TBatch]):
-    """Typed trainer state subclass of `TrainerState` for Keras / TensorFlow compiled step execution."""
 
 
 __all__ = [

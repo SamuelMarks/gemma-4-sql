@@ -360,6 +360,29 @@ def test_cli_real_end_to_end_unmocked(monkeypatch: pytest.MonkeyPatch, capsys: p
     assert exec_out["success"] is True
     assert exec_out["results"] == [[0]]
 
+    # 4. Real build_few_shot_prompt through `cli(["few-shot", ...])`
+    from gemma_4_sql.sdk.few_shot import build_few_shot_prompt
+
+    monkeypatch.setattr("gemma_4_sql.cli_serve.build_few_shot_prompt", build_few_shot_prompt)
+    examples_json = json.dumps([{"input": "count users", "output": "SELECT COUNT(*) FROM users"}])
+    assert cli(["few-shot", "--prompt", "count users", "--examples", examples_json]) == 0
+    fs_out = capsys.readouterr().out
+    assert "SELECT COUNT(*) FROM users" in fs_out
+
+    # 5. Real chat_turn through `cli(["chat", ...])` with a registered backend double
+    from gemma_4_sql.sdk.chat import chat_turn
+    from tests.utils.test_utils import RecordingBackendDouble
+
+    def _get_recording_backend(name: str) -> RecordingBackendDouble:
+        """Return a RecordingBackendDouble for `name`."""
+        return RecordingBackendDouble(name)
+
+    monkeypatch.setattr("gemma_4_sql.cli_serve.chat_turn", chat_turn)
+    monkeypatch.setattr("gemma_4_sql.sdk.chat.get_backend", _get_recording_backend)
+    assert cli(["chat", "--model", "gemma-4-tiny", "--prompt", "List all users", "--backend", "jax"]) == 0
+    chat_out = capsys.readouterr().out
+    assert "SELECT * FROM jax_table" in chat_out
+
 
 def test_cli_if_main(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Verify running src/gemma_4_sql/cli.py as __main__ with real CLI arguments exits with code 0."""

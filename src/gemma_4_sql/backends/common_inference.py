@@ -27,7 +27,9 @@ from gemma_4_sql.type_hints import (
     ForwardArg,
     InferenceResultDict,
     JSONValue,
+    KerasCausalLMProtocol,
     ModelConfigProtocol,
+    ModelType,
 )
 
 logger = logging.getLogger(__name__)
@@ -226,15 +228,15 @@ def _fingerprint_config(config: CacheConfigInput) -> str:
 
 
 @runtime_checkable
-class _CacheFactoryItemProtocol(Protocol):
-    """Protocol satisfied by any factory callable, class, or object passed to `make_model_cache_key`."""
+class CacheFactoryProtocol(Protocol):
+    """Protocol for a model or tokenizer factory class exposing `from_preset`."""
 
-    def __repr__(self) -> str:
-        """Return string representation."""
+    def from_preset(self, model_name: str, /) -> KerasCausalLMProtocol | ModelType | None:
+        """Load a model or tokenizer from a preset name."""
         ...
 
 
-def make_model_cache_key(
+def make_model_cache_key[FactoryReturnT](
     model_name: str,
     *,
     backend_name: str = "",
@@ -242,7 +244,7 @@ def make_model_cache_key(
     quant_method: str = "",
     adapter_path: str = "",
     config: CacheConfigInput = None,
-    factories: tuple[_CacheFactoryItemProtocol | str | int | None, ...] = (),
+    factories: Sequence[Callable[..., FactoryReturnT] | CacheFactoryProtocol | type | str | int | None] = (),
 ) -> str:
     """Build a canonical cache key scoped by backend, model name, dtype, quantization method, adapter, and factories.
 

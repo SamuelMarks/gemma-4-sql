@@ -19,28 +19,32 @@ pip install ".[mlx]"
 
 ## Development
 
-To contribute to `gemma-4-sql` or modify its logic, install the development dependencies. This project uses `hatch` for package management, `ruff` for linting and formatting, `mypy` for strict type-checking, and `pytest` for testing.
+To contribute to `gemma-4-sql` or modify its logic, install the development dependencies. This project uses `uv` / `hatch` for package management, `ruff` for linting and formatting, `interrogate` for 100% docstring coverage verification, `pyright`, `ty`, and `mypy` for strict static type-checking, and `pytest` for 100% line and branch coverage testing.
 
 1. **Install Dev Dependencies:**
    ```bash
    pip install -e ".[dev]"
-   # Or directly: pip install -r requirements-dev.txt
+   # Or via uv: uv sync --extra dev --extra mlx
    ```
 
-2. **Run Linting & Formatting (`ruff`):**
+2. **Run Linting, Formatting & Docstring Checks (`ruff` & `interrogate`):**
    ```bash
    ruff check .
    ruff format .
+   interrogate -v src/gemma_4_sql tests scripts
    ```
 
-3. **Run Type Checking (`mypy`):**
+3. **Run Strict Type Checking (`pyright`, `ty`, `mypy`):**
    ```bash
+   pyright
+   ty check
    mypy src/gemma_4_sql
    ```
 
-4. **Run Tests with Coverage (`pytest`):**
+4. **Run Tests with 100% Branch Coverage (`pytest` / `pre-commit`):**
    ```bash
-   pytest --cov=src/gemma_4_sql tests/
+   pytest --cov=src/gemma_4_sql --cov-branch --cov-fail-under=100 tests/
+   pre-commit run --all-files
    ```
 
 ---
@@ -154,9 +158,10 @@ print(f"Exported to: {result['path']}")
 To save compute and memory footprints, you can inject LoRA adapters (PEFT) and quantize models.
 
 *   **JAX (`--backend jax`)**: Injects object-oriented `nnx.LoRALinear` adapters into Flax NNX modules; supports Activation-aware Weight Quantization (`--method awq`) and uniform INT8 (`--method int8`).
-*   **MaxText (`--backend maxtext`)**: Performs functional parameter PyTree surgery decomposing projection matrices; supports Google AQT (`aqt.jax.v2`) numerical INT8 and INT4 quantization (`--method int8`).
-*   **PyTorch (`--backend pytorch`)**: Interfaces with Hugging Face `peft` and AWQ / BitsAndBytes / GGUF.
-*   **MLX (`--backend mlx`)**: Utilizes MLX LoRA layers and 4-bit / 8-bit group quantization.
+*   **MaxText (`--backend maxtext`)**: Performs functional parameter PyTree surgery decomposing projection matrices; supports Google AQT (`aqt.jax.v2`) numerical INT8 and INT4 quantization (`--method int8`, `--method int4`).
+*   **Keras (`--backend keras`)**: Enables native KerasNLP LoRA (`enable_lora` / `KerasLoRALayer`) and supports INT8 / INT4 global dtype policies and layer weight quantization (`--method int8`, `--method int4`).
+*   **PyTorch (`--backend pytorch` / `pytorch_hf` / `pytorch_native`)**: Interfaces with Hugging Face `peft` and `NativeLoRALinear`, supporting INT8, INT4, AWQ, GPTQ, and native GGUF binary export.
+*   **MLX (`--backend mlx`)**: Utilizes `MLXLoRALinear` layers and Metal-accelerated INT8, INT4, AWQ, and GPTQ quantization.
 
 ### CLI
 

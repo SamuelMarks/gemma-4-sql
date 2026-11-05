@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import time
+import types
 from collections.abc import Mapping
 from typing import Protocol, TypeGuard, runtime_checkable
 
@@ -44,11 +45,10 @@ def _has_memory_stats(
         device: JAX device object or string.
 
     Returns:
-        `True` so `.memory_stats()` can be invoked inside `try`.
+        `True` if `device` conforms to `_MemoryStatsDeviceProtocol`.
 
     """
-    _ = device
-    return True
+    return isinstance(device, _MemoryStatsDeviceProtocol)
 
 
 jax = optional_import("jax")
@@ -102,8 +102,34 @@ def _get_device(hardware: str) -> _MemoryStatsDeviceProtocol | str | None:
 type _MaxTextBenchmarkParams = Mapping[str, PyTreeNode] | Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]] | dict[str, TensorType]
 
 
+@runtime_checkable
+class _MaxTextLogitsProtocol(Protocol):
+    """Protocol for a 3D logits array supporting `[..., -1, :]` slicing."""
+
+    def __getitem__(
+        self,
+        idx: tuple[types.EllipsisType, int, slice],
+        /,
+    ) -> JaxArrayProtocol | TensorType:
+        """Slice the last sequence position logits."""
+        ...
+
+
+@runtime_checkable
+class _MaxTextBenchmarkModelProtocol(Protocol):
+    """Protocol for a stateless MaxText model supporting `apply(params, inputs)`."""
+
+    def apply(
+        self,
+        params: _MaxTextBenchmarkParams,
+        inputs: TensorType,
+    ) -> _MaxTextLogitsProtocol:
+        """Apply model parameters to `inputs`."""
+        ...
+
+
 def _run_benchmark_pass(
-    model: MaxTextCausalLMProtocol,
+    model: MaxTextCausalLMProtocol | _MaxTextBenchmarkModelProtocol,
     params: _MaxTextBenchmarkParams,
     batch_size: int,
     num_runs: int,
@@ -131,7 +157,7 @@ def _run_benchmark_pass(
     assert jax is not None
     assert jnp is not None
 
-    def forward_pass(params: _MaxTextBenchmarkParams, inputs: TensorType) -> ForwardOutput:
+    def forward_pass(params: _MaxTextBenchmarkParams, inputs: TensorType) -> ForwardOutput | _MaxTextLogitsProtocol:
         """Execute model forward pass.
 
         Args:
@@ -158,7 +184,7 @@ def _run_benchmark_pass(
         assert jnp is not None
         seq = inputs
         for _ in range(max_new_tokens):
-            logits: JaxArrayProtocol = model.apply(params, seq)
+            logits = model.apply(params, seq)
             token = jnp.argmax(logits[..., -1, :], axis=-1, keepdims=True)
             seq = jnp.concatenate([seq, token], axis=-1)
         return seq

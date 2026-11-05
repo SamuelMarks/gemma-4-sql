@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import concurrent.futures
+import threading
 from collections.abc import Callable, Coroutine, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, TypeVar, Union, runtime_checkable
@@ -129,8 +130,31 @@ def extract_status_kwargs[ValT](kwargs: Mapping[str, ValT]) -> dict[str, StatusS
 
 
 TResult = TypeVar("TResult")
-_SYNC_COROUTINE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="gemma4sql-sync")
-atexit.register(_SYNC_COROUTINE_EXECUTOR.shutdown, wait=False)
+_EXECUTOR_LOCK = threading.Lock()
+_sync_coro_executor_state: dict[str, concurrent.futures.ThreadPoolExecutor | None] = {"executor": None}
+
+
+def shutdown_sync_coro_executor() -> None:
+    """Shut down and reset the shared synchronous coroutine `ThreadPoolExecutor` if active."""
+    with _EXECUTOR_LOCK:
+        executor = _sync_coro_executor_state["executor"]
+        _sync_coro_executor_state["executor"] = None
+    if executor is not None:
+        executor.shutdown(wait=False)
+
+
+def _get_sync_coro_executor() -> concurrent.futures.ThreadPoolExecutor:
+    """Return or lazily initialize the shared synchronous coroutine `ThreadPoolExecutor`."""
+    with _EXECUTOR_LOCK:
+        executor = _sync_coro_executor_state["executor"]
+        if executor is None:
+            executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=2,
+                thread_name_prefix="gemma4sql-sync",
+            )
+            _sync_coro_executor_state["executor"] = executor
+            atexit.register(shutdown_sync_coro_executor)
+        return executor
 
 
 def run_coroutine_sync(coro_factory: Callable[[], Coroutine[None, None, TResult]]) -> TResult:
@@ -151,7 +175,7 @@ def run_coroutine_sync(coro_factory: Callable[[], Coroutine[None, None, TResult]
         running_loop = None
 
     if running_loop is not None and running_loop.is_running():
-        return _SYNC_COROUTINE_EXECUTOR.submit(lambda: asyncio.run(coro_factory())).result()
+        return _get_sync_coro_executor().submit(lambda: asyncio.run(coro_factory())).result()
     return asyncio.run(coro_factory())
 
 
@@ -166,4 +190,5 @@ __all__ = [
     "extract_status_kwargs",
     "extract_str_kwarg",
     "run_coroutine_sync",
+    "shutdown_sync_coro_executor",
 ]

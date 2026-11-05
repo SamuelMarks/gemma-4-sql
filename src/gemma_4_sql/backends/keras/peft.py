@@ -6,7 +6,7 @@ import contextlib
 import logging
 import math
 import weakref
-from collections.abc import Sequence
+from collections.abc import MutableSequence, Sequence
 from dataclasses import dataclass
 from typing import Protocol, TypeGuard, runtime_checkable
 
@@ -57,47 +57,6 @@ def _typed_ops() -> _KerasOpsMatmulProtocol:
 
 
 @runtime_checkable
-class _KerasTargetObjectProtocol(Protocol):
-    """Protocol satisfied by any Keras model, layer, tensor, or container instance."""
-
-    def __str__(self) -> str:
-        """Return string representation."""
-        ...
-
-
-def _is_keras_tensor_input(val: _KerasTargetObjectProtocol) -> TypeGuard[TensorType]:
-    """Narrow `val` to `TensorType` for `KerasLoRADense` shape and forward call.
-
-    Args:
-        val: Input tensor passed to `KerasLoRADense`.
-
-    Returns:
-        `True` for `KerasLoRADense` execution.
-
-    """
-    _ = val
-    return True
-
-
-def _as_keras_input_t[InputT: _KerasTargetObjectProtocol](
-    val: TfTensorProtocol,
-    _sample: InputT,
-) -> TypeGuard[InputT]:
-    """Narrow `val` back to `InputT` for `KerasLoRADense.__call__`.
-
-    Args:
-        val: Output tensor from `KerasLoRADense.call`.
-        _sample: Input tensor of type `InputT`.
-
-    Returns:
-        `True` so `__call__` preserves `InputT`.
-
-    """
-    _ = (val, _sample)
-    return True
-
-
-@runtime_checkable
 class KerasDenseLayerProtocol(KerasLayerProtocol, Protocol):
     """Protocol for a Keras `Dense` layer supporting `.kernel`, `.bias`, `.built`, and `.build(...)`."""
 
@@ -130,6 +89,59 @@ class _BackboneModelProtocol(Protocol):
     def backbone(self) -> KerasBackboneProtocol:
         """Provide the underlying `KerasBackboneProtocol`."""
         ...
+
+
+@runtime_checkable
+class _KerasTensorInputProtocol(Protocol):
+    """Protocol for any Keras tensor or symbolic `OpenVINOKerasTensor` exposing `.shape`."""
+
+    @property
+    def shape(self) -> Sequence[int | None] | None:
+        """Provide the tensor shape dimensions."""
+        ...
+
+
+class _LayersContainerProtocol(Protocol):
+    """Protocol for any Keras model or container exposing `.layers`."""
+
+    @property
+    def layers(self) -> Sequence[KerasLayerProtocol | _LayersContainerProtocol]:
+        """Provide the contained layers."""
+        ...
+
+
+type KerasPEFTTarget = KerasCausalLMProtocol | KerasLayerProtocol | KerasDenseLayerProtocol | _BackboneModelProtocol | _LayersContainerProtocol | Sequence[KerasLayerProtocol | _LayersContainerProtocol]
+
+
+def _is_keras_tensor_input(val: TensorType | _KerasTensorInputProtocol) -> TypeGuard[TensorType]:
+    """Narrow `val` to `TensorType` for `KerasLoRADense` shape and forward call.
+
+    Args:
+        val: Input tensor passed to `KerasLoRADense`.
+
+    Returns:
+        `True` if `val` is a tensor-like object with `.shape`.
+
+    """
+    return not isinstance(val, (str, int, float))
+
+
+def _as_keras_input_t[InputT: TensorType | _KerasTensorInputProtocol](
+    val: TfTensorProtocol,
+    _sample: InputT,
+) -> TypeGuard[InputT]:
+    """Narrow `val` back to `InputT` for `KerasLoRADense.__call__`.
+
+    Args:
+        val: Output tensor from `KerasLoRADense.call`.
+        _sample: Input tensor of type `InputT`.
+
+    Returns:
+        `True` if `val` is not a plain `str` or `int`.
+
+    """
+    _ = _sample
+    return not isinstance(val, (str, int))
 
 
 @runtime_checkable
@@ -239,9 +251,9 @@ class KerasLoRADense(keras.layers.Layer):
         self._lora_built = True
         super().build(input_shape)
 
-    def __call__[InputT: _KerasTargetObjectProtocol](self, inputs: InputT, training: bool | None = None) -> InputT:
+    def __call__[InputT: TensorType | _KerasTensorInputProtocol](self, inputs: InputT, training: bool | None = None) -> InputT:
         """Invoke the layer forward pass, building LoRA weights lazily if needed."""
-        in_ref: _KerasTargetObjectProtocol = inputs
+        in_ref: TensorType | _KerasTensorInputProtocol = inputs
         assert _is_keras_tensor_input(in_ref)
         if not self._lora_built:
             self.build(tuple(in_ref.shape))
@@ -315,6 +327,9 @@ class KerasLoRADense(keras.layers.Layer):
         return self.dense
 
 
+type _LayerSlotSequence = MutableSequence[KerasLayerProtocol | _LayersContainerProtocol]
+
+
 @dataclass(frozen=True)
 class KerasLoRALayerState:
     """State record for a single Keras `Dense` layer adapted by `KerasLoRAAdapter`."""
@@ -322,6 +337,7 @@ class KerasLoRALayerState:
     layer_name: str
     base_layer: KerasDenseLayerProtocol
     lora_layer: KerasLoRADense
+    container_slots: tuple[tuple[_LayerSlotSequence, int], ...] = ()
 
 
 @dataclass
@@ -334,14 +350,16 @@ class KerasLoRAAdapter:
     dropout: float
 
     def merge_all(self) -> int:
-        """Merge all tracked `KerasLoRADense` layers back into their underlying `Dense` kernels.
+        """Merge all tracked `KerasLoRADense` layers back into their underlying `Dense` kernels and restore container slots.
 
         Returns:
             Count of merged adapter layers.
 
         """
         for state in self.layers.values():
-            state.lora_layer.merge_weights()
+            merged_dense = state.lora_layer.merge_weights()
+            for seq, idx in state.container_slots:
+                seq[idx] = merged_dense
         return len(self.layers)
 
 
@@ -349,60 +367,47 @@ _KERAS_LORA_REGISTRY: weakref.WeakKeyDictionary[KerasCausalLMProtocol | KerasLay
 _KERAS_LORA_ID_FALLBACK: dict[int, KerasLoRAAdapter] = {}
 
 
-@runtime_checkable
-class _LayersContainerProtocol(Protocol):
-    """Protocol for any Keras model or container exposing `.layers`."""
-
-    @property
-    def layers(self) -> Sequence[KerasLayerProtocol]:
-        """Provide the contained layers."""
-        ...
-
-
-def _is_registry_key(model: _KerasTargetObjectProtocol) -> TypeGuard[KerasCausalLMProtocol | KerasLayerProtocol]:
+def _is_registry_key(model: KerasPEFTTarget) -> TypeGuard[KerasCausalLMProtocol | KerasLayerProtocol]:
     """Narrow `model` to a weakref-compatible `KerasCausalLMProtocol | KerasLayerProtocol` key.
 
     Args:
         model: Target Keras model or container.
 
     Returns:
-        `True` so `_KERAS_LORA_REGISTRY` lookup can be attempted inside `contextlib.suppress(TypeError)`.
+        `True` if `model` is not a plain `list` or `tuple`.
 
     """
-    _ = model
-    return True
+    return not isinstance(model, (list, tuple))
 
 
-def _has_layers(obj: _KerasTargetObjectProtocol) -> TypeGuard[_LayersContainerProtocol]:
+def _has_layers(obj: KerasPEFTTarget) -> TypeGuard[_LayersContainerProtocol]:
     """Narrow `obj` to `_LayersContainerProtocol` for `.layers` traversal.
 
     Args:
         obj: Target Keras model or layer.
 
     Returns:
-        `True` so `.layers` can be accessed inside `contextlib.suppress`.
+        `True` if `obj` is not a plain `list` or `tuple`.
 
     """
-    _ = obj
-    return True
+    return not isinstance(obj, (list, tuple))
 
 
-def _has_backbone(model: _KerasTargetObjectProtocol) -> TypeGuard[_BackboneModelProtocol]:
+def _has_backbone(model: KerasPEFTTarget) -> TypeGuard[_BackboneModelProtocol]:
     """Narrow `model` to `_BackboneModelProtocol` for `.backbone` access.
 
     Args:
         model: Target Keras model.
 
     Returns:
-        `True` so `.backbone` can be accessed inside `contextlib.suppress`.
+        `True` if `model` conforms to `_BackboneModelProtocol`.
 
     """
-    _ = model
-    return True
+    return isinstance(model, _BackboneModelProtocol)
 
 
 def get_keras_lora_adapter(
-    model: _KerasTargetObjectProtocol,
+    model: KerasPEFTTarget,
 ) -> KerasLoRAAdapter | None:
     """Look up the registered `KerasLoRAAdapter` for a model instance.
 
@@ -413,7 +418,7 @@ def get_keras_lora_adapter(
         Registered `KerasLoRAAdapter` or `None` if no LoRA adapters were injected.
 
     """
-    with contextlib.suppress(TypeError):
+    with contextlib.suppress(TypeError, AssertionError):
         assert _is_registry_key(model)
         found = _KERAS_LORA_REGISTRY.get(model)
         if found is not None:
@@ -421,46 +426,51 @@ def get_keras_lora_adapter(
     return _KERAS_LORA_ID_FALLBACK.get(id(model))
 
 
-def _collect_dense_layers(
-    model: _KerasTargetObjectProtocol,
-) -> list[KerasDenseLayerProtocol]:
-    """Collect all `keras.layers.Dense` layers from `model.layers` or a sequence of layers.
+def _is_mutable_layer_seq(
+    seq: Sequence[KerasLayerProtocol | _LayersContainerProtocol],
+) -> TypeGuard[_LayerSlotSequence]:
+    """Check whether `seq` is a mutable sequence supporting item assignment."""
+    return isinstance(seq, MutableSequence)
+
+
+def _collect_dense_layers_with_slots(
+    model: KerasPEFTTarget,
+) -> list[tuple[KerasDenseLayerProtocol, list[tuple[_LayerSlotSequence, int]]]]:
+    """Collect all `keras.layers.Dense` layers and their mutable container index slots from `model`.
 
     Args:
         model: Keras model or layer container exposing `.layers`.
 
     Returns:
-        Deduplicated list of `keras.layers.Dense` instances.
+        Deduplicated list of `(dense_layer, mutable_container_slots)` pairs.
 
     """
-    seen: set[int] = set()
-    collected: list[KerasDenseLayerProtocol] = []
+    seen: dict[int, tuple[KerasDenseLayerProtocol, list[tuple[_LayerSlotSequence, int]]]] = {}
 
-    def _visit_seq(seq: Sequence[KerasLayerProtocol]) -> None:
-        """Visit a sequence of Keras layers and collect `Dense` instances."""
-        for item in seq:
+    def _visit_seq(seq: Sequence[KerasLayerProtocol | _LayersContainerProtocol]) -> None:
+        """Visit a sequence of Keras layers and record `Dense` instances and mutable slots."""
+        mutable_seq = seq if _is_mutable_layer_seq(seq) else None
+        for idx, item in enumerate(seq):
             item_id = id(item)
-            if item_id in seen:
-                continue
-            seen.add(item_id)
             if isinstance(item, keras.layers.Dense):
-                collected.append(item)
+                if item_id not in seen:
+                    seen[item_id] = (item, [])
+                if mutable_seq is not None:
+                    seen[item_id][1].append((mutable_seq, idx))
             with contextlib.suppress(AttributeError, TypeError):
                 assert _has_layers(item)
-                sub_layers = item.layers
-                _visit_seq(sub_layers)
+                _visit_seq(item.layers)
 
     if isinstance(model, (list, tuple)):
         _visit_seq(model)
     else:
         with contextlib.suppress(AttributeError, TypeError):
             assert _has_layers(model)
-            top_layers = model.layers
-            _visit_seq(top_layers)
-    return collected
+            _visit_seq(model.layers)
+    return list(seen.values())
 
 
-def inject_lora[ModelT: _KerasTargetObjectProtocol](
+def inject_lora[ModelT: KerasPEFTTarget](
     model: ModelT,
     target_modules: list[str],
     lora_r: int = 8,
@@ -469,8 +479,9 @@ def inject_lora[ModelT: _KerasTargetObjectProtocol](
 ) -> tuple[ModelT, int]:
     """Inject `KerasLoRADense` adapter wrappers into target `Dense` layers of a Keras model.
 
-    Tracks adapted layers in a typed `KerasLoRAAdapter` (`dict[str, KerasLoRALayerState]`)
-    and registers metadata via `register_quantized_artifact` and `get_keras_lora_adapter`.
+    Replaces matching `Dense` layers in-place inside mutable `.layers` containers so that
+    forward passes through `model` route directly through `KerasLoRADense`, and tracks adapted
+    layers in a typed `KerasLoRAAdapter` (`dict[str, KerasLoRALayerState]`).
 
     Args:
         model: Target Keras model or layer container exposing `.layers`.
@@ -492,10 +503,10 @@ def inject_lora[ModelT: _KerasTargetObjectProtocol](
     if not target_modules:
         return model, 0
 
-    dense_layers = _collect_dense_layers(model)
+    dense_entries = _collect_dense_layers_with_slots(model)
     adapted_states: dict[str, KerasLoRALayerState] = {}
 
-    for dense in dense_layers:
+    for dense, slots in dense_entries:
         layer_name = str(dense.name)
         if matches_target_module(layer_name, target_modules):
             lora_layer = KerasLoRADense(
@@ -504,10 +515,16 @@ def inject_lora[ModelT: _KerasTargetObjectProtocol](
                 lora_alpha=lora_alpha,
                 lora_dropout=lora_dropout,
             )
+            recorded_slots: list[tuple[_LayerSlotSequence, int]] = []
+            for seq, idx in slots:
+                with contextlib.suppress(TypeError, ValueError, AttributeError):
+                    seq[idx] = lora_layer
+                    recorded_slots.append((seq, idx))
             adapted_states[layer_name] = KerasLoRALayerState(
                 layer_name=layer_name,
                 base_layer=dense,
                 lora_layer=lora_layer,
+                container_slots=tuple(recorded_slots),
             )
         else:
             dense.trainable = False
@@ -519,7 +536,7 @@ def inject_lora[ModelT: _KerasTargetObjectProtocol](
         dropout=lora_dropout,
     )
     model_id = id(model)
-    with contextlib.suppress(TypeError):
+    with contextlib.suppress(TypeError, AssertionError):
         assert _is_registry_key(model)
         _KERAS_LORA_REGISTRY[model] = adapter
     _KERAS_LORA_ID_FALLBACK[model_id] = adapter
@@ -532,7 +549,7 @@ def inject_lora[ModelT: _KerasTargetObjectProtocol](
     return model, len(adapted_states)
 
 
-def merge_lora_weights[ModelT: _KerasTargetObjectProtocol](model: ModelT) -> ModelT:
+def merge_lora_weights[ModelT: KerasPEFTTarget](model: ModelT) -> ModelT:
     """Fold all tracked `KerasLoRADense` adapter weights back into base `Dense` kernels on `model`.
 
     Args:
@@ -549,8 +566,12 @@ def merge_lora_weights[ModelT: _KerasTargetObjectProtocol](model: ModelT) -> Mod
 
     with contextlib.suppress(AttributeError, TypeError):
         assert _has_layers(model)
-        for layer in (l for l in model.layers if isinstance(l, KerasLoRADense)):
-            layer.merge_weights()
+        layers_seq = model.layers
+        mutable_seq = layers_seq if _is_mutable_layer_seq(layers_seq) else None
+        for idx, layer in ((i, l) for i, l in enumerate(layers_seq) if isinstance(l, KerasLoRADense)):
+            merged = layer.merge_weights()
+            if mutable_seq is not None:
+                mutable_seq[idx] = merged
     return model
 
 
@@ -571,6 +592,13 @@ def count_parameters(model: KerasLayerProtocol | KerasCausalLMProtocol) -> tuple
     with contextlib.suppress(AttributeError, TypeError):
         trainable = sum(math.prod(int(d) for d in w.shape) for w in model.trainable_weights)
     return total, trainable
+
+
+def _is_keras_peft_target(
+    val: BackendKwargValue | KerasPEFTTarget,
+) -> TypeGuard[KerasPEFTTarget]:
+    """Check whether `val` is a valid `KerasPEFTTarget` model or layer container."""
+    return val is not None and not isinstance(val, (str, int, float, bool))
 
 
 def apply_lora(
@@ -605,8 +633,8 @@ def apply_lora(
     def _inject() -> int:
         """Load or reuse Keras model and inject or merge LoRA weights."""
         provided_model = kwargs.get("model")
-        if provided_model is not None:
-            model = provided_model
+        if provided_model is not None and _is_keras_peft_target(provided_model):
+            model: KerasPEFTTarget = provided_model
         else:
             gemma_causal_lm_cls = optional_attr(
                 "keras_nlp.models",
@@ -617,10 +645,7 @@ def apply_lora(
                 raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
             model = gemma_causal_lm_cls.from_preset(model_name)
 
-        backbone: KerasBackboneProtocol | None = None
-        with contextlib.suppress(AttributeError):
-            assert _has_backbone(model)
-            backbone = model.backbone
+        backbone: KerasBackboneProtocol | None = model.backbone if _has_backbone(model) else None
 
         if backbone is not None:
             backbone.enable_lora(rank=lora_r)

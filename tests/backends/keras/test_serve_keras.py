@@ -214,3 +214,36 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(InferenceError, match="Keras generation failed"):
         app_none.batch_generate(["prompt1", "prompt2"])
+
+
+def test_keras_serve_real_fastapi_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify Keras create_app serves HTTP /health and /generate requests through a real FastAPI TestClient."""
+    from fastapi.testclient import TestClient
+
+    import gemma_4_sql.backends.keras.serve as srv
+
+    class _RealBatchModel:
+        """Deterministic Keras causal LM stub supporting single and batch generation."""
+
+        def generate(self, prompt: str | list[str], **_kwargs: int) -> list[str]:
+            """Return deterministic SQL for single or batch prompts."""
+            return [f"SELECT '{p}'" for p in ([prompt] if isinstance(prompt, str) else prompt)]
+
+    class _PresetLoader:
+        """Preset loader returning `_RealBatchModel`."""
+
+        @classmethod
+        def from_preset(cls, _model_name: str) -> _RealBatchModel:
+            """Return a `_RealBatchModel` instance."""
+            return _RealBatchModel()
+
+    monkeypatch.setattr(srv, "GemmaCausalLM", _PresetLoader)
+    app = srv.create_app("gemma4-keras", max_batch_size=8)
+    with TestClient(app) as client:
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["backend"] == "keras"
+
+        resp = client.post("/generate", json={"prompt": "users"})
+        assert resp.status_code == 200
+        assert resp.json()["sql"] == "SELECT 'users'"

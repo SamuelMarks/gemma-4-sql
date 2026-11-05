@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from gemma_4_sql.backends.common_quantize import (
+    _is_config_model,
     apply_bits_and_bytes_quantization,
     compute_awq_channel_scales,
     compute_gptq_compensated_weights,
@@ -72,6 +73,8 @@ def test_apply_bits_and_bytes_quantization_with_model() -> None:
     mock_model_no_cfg.config = None
     apply_bits_and_bytes_quantization("int8", mock_cls, model=mock_model_no_cfg)
     assert get_quantized_artifact(mock_model_no_cfg) is not None
+    assert _is_config_model(mock_model) is True
+    assert _is_config_model(None) is False
 
 
 def test_quantize_model_wrapper() -> None:

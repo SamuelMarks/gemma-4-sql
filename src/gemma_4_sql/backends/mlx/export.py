@@ -42,11 +42,10 @@ def _has_model_config(model: MlxCausalLMProtocol) -> TypeGuard[_MlxConfigModelPr
         model: Loaded MLX model instance.
 
     Returns:
-        `True` so `.config` can be accessed inside `contextlib.suppress`.
+        `True` if `model` conforms to `_MlxConfigModelProtocol`.
 
     """
-    _ = model
-    return True
+    return isinstance(model, _MlxConfigModelProtocol)
 
 
 @runtime_checkable
@@ -106,7 +105,7 @@ def export_model(model_name: str, export_path: str, **_kwargs: StatusValue) -> E
 
         config_path = export_dir / "config.json"
         cfg_dict: dict[str, JSONValue] = {"model_type": "gemma4", "model_name": model_name}
-        with contextlib.suppress(AttributeError, TypeError):
+        with contextlib.suppress(AttributeError, TypeError, AssertionError):
             assert _has_model_config(model)
             raw_cfg = model.config
             cfg_dict = dict(raw_cfg) if isinstance(raw_cfg, Mapping) else dataclasses.asdict(raw_cfg)

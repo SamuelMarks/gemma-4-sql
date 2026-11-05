@@ -43,11 +43,10 @@ def _is_aqt_tensor(val: AQTParamDict | AQTParamLeaf) -> TypeGuard[TensorType | S
         val: Candidate kernel entry.
 
     Returns:
-        `True` when `val` is a tensor or numeric leaf.
+        `True` when `val` is not a `dict` or `str`.
 
     """
-    _ = val
-    return True
+    return not isinstance(val, (dict, str))
 
 
 def _is_aqt_param_dict(

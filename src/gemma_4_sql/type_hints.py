@@ -30,6 +30,7 @@ from gemma_4_sql._types_json import (
     extract_status_kwargs,
     extract_str_kwarg,
     run_coroutine_sync,
+    shutdown_sync_coro_executor,
 )
 from gemma_4_sql._types_models import (
     CausalLMProtocol,
@@ -278,4 +279,5 @@ __all__ = [
     "get_quantized_artifact",
     "register_quantized_artifact",
     "run_coroutine_sync",
+    "shutdown_sync_coro_executor",
 ]

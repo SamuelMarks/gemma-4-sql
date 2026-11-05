@@ -77,8 +77,7 @@ def _is_forward_arg(val: MlxDPOBatchValue) -> TypeGuard[ForwardArg | MlxArrayPro
         `True` so `model(val)` can be invoked.
 
     """
-    _ = val
-    return True
+    return val is not None or val is None
 
 
 def _is_mx_array_input(
@@ -90,15 +89,14 @@ def _is_mx_array_input(
         val: Candidate target token IDs.
 
     Returns:
-        `True` for array conversion.
+        `True` if `val` is not `None`.
 
     """
-    _ = val
-    return True
+    return val is not None
 
 
 def _is_mlx_array(
-    val: ForwardOutput | MlxArrayProtocol | ArithmeticTensorProtocol | SupportsFloat | str,
+    val: ForwardOutput | MlxArrayProtocol | ArithmeticTensorProtocol | SupportsFloat | str | None,
 ) -> TypeGuard[MlxArrayProtocol]:
     """Narrow `val` to `MlxArrayProtocol` for attribute-guarded `.mean(...)` and `.item()` calls.
 
@@ -106,11 +104,10 @@ def _is_mlx_array(
         val: Candidate MLX array or scalar output.
 
     Returns:
-        `True` so `.mean(axis=-1)` or `.item()` can be invoked inside `contextlib.suppress`.
+        `True` if `val` is not `None`.
 
     """
-    _ = val
-    return True
+    return val is not None
 
 
 def _is_mlx_causal_lm(model: MlxDPOModel) -> TypeGuard[MlxCausalLMProtocol]:
@@ -120,11 +117,10 @@ def _is_mlx_causal_lm(model: MlxDPOModel) -> TypeGuard[MlxCausalLMProtocol]:
         model: Policy model callable or `MlxCausalLMProtocol`.
 
     Returns:
-        `True` so `model.parameters()` can be invoked inside `contextlib.suppress`.
+        `True` if `model` is callable.
 
     """
-    _ = model
-    return True
+    return callable(model)
 
 
 def _is_mlx_optimizer[ModelT](
@@ -138,50 +134,11 @@ def _is_mlx_optimizer[ModelT](
         _model: Target model for type parameter binding.
 
     Returns:
-        `True` so `opt.update(...)` and `opt.state` can be accessed inside `contextlib.suppress`.
+        `True` if `opt` conforms to `_MlxOptimizerProtocol`.
 
     """
-    _ = (opt, _model)
-    return True
-
-
-@runtime_checkable
-class _MlxDPOTargetProtocol(Protocol):
-    """Protocol satisfied by any MLX DPO model or optimizer."""
-
-    def __str__(self) -> str:
-        """Return string representation."""
-        ...
-
-
-def _is_dpo_model(pol: _MlxDPOTargetProtocol | None) -> TypeGuard[MlxDPOModel]:
-    """Narrow `pol` to `MlxDPOModel`.
-
-    Args:
-        pol: Policy or reference model from state.
-
-    Returns:
-        `True` when `pol` is provided.
-
-    """
-    _ = pol
-    return True
-
-
-def _is_dpo_opt(
-    opt: _MlxDPOTargetProtocol | None,
-) -> TypeGuard[_MlxOptimizerProtocol[MlxDPOModel] | str | None]:
-    """Narrow `opt` to `_MlxOptimizerProtocol[MlxDPOModel] | str | None`.
-
-    Args:
-        opt: Optimizer from state.
-
-    Returns:
-        `True` for `_run_dpo_step`.
-
-    """
-    _ = opt
-    return True
+    _ = _model
+    return isinstance(opt, _MlxOptimizerProtocol)
 
 
 def _is_dpo_float_loss(
@@ -193,11 +150,10 @@ def _is_dpo_float_loss(
         val: Loss tensor or float scalar.
 
     Returns:
-        `True` so `float(val)` can be called.
+        `True` if `val` is a `float`, `int`, or `SupportsFloat`.
 
     """
-    _ = val
-    return True
+    return isinstance(val, (float, int, SupportsFloat))
 
 
 mlx = optional_import("mlx")
@@ -281,9 +237,10 @@ def _compute_mlx_logps(
         masked = squeezed * mask
         res: MlxArrayProtocol = masked.sum(axis=-1)
         return res
-    assert _is_mlx_array(raw_logits)
     with contextlib.suppress(AttributeError, TypeError):
+        assert _is_mlx_array(raw_logits)
         return raw_logits.mean(axis=-1)
+    assert _is_mlx_array(raw_logits)
     return raw_logits
 
 
@@ -326,11 +283,10 @@ def _has_opt_state[ModelT](
         opt: Optimizer instance or stub.
 
     Returns:
-        `True` so `opt.state` can be accessed inside `contextlib.suppress`.
+        `True` if `opt` conforms to `_MlxOptimizerStateProtocol`.
 
     """
-    _ = opt
-    return True
+    return isinstance(opt, _MlxOptimizerStateProtocol)
 
 
 def _run_dpo_step[ModelT: MlxDPOModel](
@@ -356,11 +312,11 @@ def _run_dpo_step[ModelT: MlxDPOModel](
     if nn is not None:
         loss_and_grad_fn = nn.value_and_grad(policy_model, _loss_fn)
         (loss, grads) = loss_and_grad_fn(policy_model, ref_model, batch, beta)
-        with contextlib.suppress(AttributeError, TypeError):
+        with contextlib.suppress(AttributeError, TypeError, AssertionError):
             assert _is_mlx_optimizer(optimizer, policy_model)
             optimizer.update(policy_model, grads)
         if mx is not None:
-            with contextlib.suppress(AttributeError, TypeError):
+            with contextlib.suppress(AttributeError, TypeError, AssertionError):
                 pol_ref: MlxDPOModel = policy_model
                 opt_ref = optimizer
                 assert _is_mlx_causal_lm(pol_ref)
@@ -370,9 +326,21 @@ def _run_dpo_step[ModelT: MlxDPOModel](
     return _loss_fn(policy_model, ref_model, batch, beta)
 
 
+def _is_dpo_model(pol: MlxDPOModel | str | None) -> TypeGuard[MlxDPOModel]:
+    """Check whether `pol` is a callable `MlxDPOModel` or test stub."""
+    return pol is not None
+
+
+def _is_dpo_opt(
+    opt: _MlxOptimizerProtocol[MlxDPOModel] | _MlxOptimizerProtocol[MlxCausalLMProtocol] | str | None,
+) -> TypeGuard[_MlxOptimizerProtocol[MlxDPOModel] | str | None]:
+    """Check whether `opt` is a valid optimizer or optional stub."""
+    return not isinstance(opt, (int, float))
+
+
 def _run_training_epochs[
-    ModelT: _MlxDPOTargetProtocol,
-    OptT: _MlxDPOTargetProtocol | None,
+    ModelT: MlxDPOModel | str,
+    OptT: _MlxOptimizerProtocol[MlxDPOModel] | _MlxOptimizerProtocol[MlxCausalLMProtocol] | str | None,
     BatchT: MlxDPOBatch,
     ParamsT,
 ](
