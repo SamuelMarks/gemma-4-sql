@@ -17,7 +17,9 @@ __all__ = [
 ]
 
 
-def _clone_training_config(config: TrainingConfig | None, *, action: str, default_backend: str = DEFAULT_BACKEND) -> TrainingConfig:
+def _clone_training_config(
+    config: TrainingConfig | None, *, action: str, default_backend: str = DEFAULT_BACKEND
+) -> TrainingConfig:
     """Deep-copy a TrainingConfig or create a default one with the specified action.
 
     Args:

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Protocol, TypeVar, runtime_checkable
+from collections.abc import Callable, Iterable, Mapping
+from typing import TypeVar
 
+from gemma_4_sql._types_results import ETLBatchValue
 from gemma_4_sql.exceptions import (
     OPERATIONAL_EXCEPTIONS,
     ConfigurationError,
@@ -17,7 +18,7 @@ from gemma_4_sql.exceptions import (
     is_failed_status,
     resolve_raise_on_error,
 )
-from gemma_4_sql.type_hints import ETLResultDict, TensorType, TrainingConfig, TrainResultDict
+from gemma_4_sql.type_hints import ETLResultDict, TrainingConfig, TrainResultDict
 
 T_Batch = TypeVar("T_Batch")
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def resolve_training_dataloader[BatchT](
     *,
     allow_synthetic_fallback: bool = False,
     strict_dataset: bool = False,
-) -> tuple[Iterable[BatchT | Mapping[str, TensorType | Sequence[int]]], str]:
+) -> tuple[Iterable[BatchT | Mapping[str, ETLBatchValue]], str]:
     """Load a training/DPO dataloader or fall back to synthetic batches when explicitly permitted.
 
     Args:
@@ -40,7 +41,8 @@ def resolve_training_dataloader[BatchT](
         build_loader_fn: Callable invoking backend `build_dataloader(...)`.
         synthetic_fallback_fn: Callable returning a synthetic batch iterable.
         allow_synthetic_fallback: Whether fallback to synthetic data is explicitly enabled.
-        strict_dataset: When `True`, propagate `ETLError` / `DependencyMissingError` even for synthetic names if `build_loader_fn` fails.
+        strict_dataset: When `True`, propagate `ETLError` / `DependencyMissingError` even for
+            synthetic names if `build_loader_fn` fails.
 
     Returns:
         Tuple of `(dataloader, dataset_source)` where `dataset_source` is `"loaded"` or `"synthetic_fallback"`.
@@ -67,64 +69,6 @@ def resolve_training_dataloader[BatchT](
         raise
 
 
-@runtime_checkable
-class NNXOptimizerProtocol[ModelT, GradsT](Protocol):
-    """Protocol for a Flax NNX Optimizer supporting `.update(model, grads)`."""
-
-    def update(self, model: ModelT, grads: GradsT, /) -> None:
-        """Apply gradients to model parameters."""
-        ...
-
-
-@runtime_checkable
-class NNXModuleNamespaceProtocol[ModelT, TxT, OptT](Protocol):
-    """Protocol for the `flax.nnx` module providing `Optimizer` and `Param`."""
-
-    @property
-    def Param(self) -> type | str:
-        """Provide the `nnx.Param` variable filter type."""
-        ...
-
-    def Optimizer(self, model: ModelT, tx: TxT, *, wrt: type | str) -> OptT:
-        """Construct an `nnx.Optimizer`."""
-        ...
-
-
-def create_nnx_optimizer[ModelT, TxT, OptT](
-    nnx_module: NNXModuleNamespaceProtocol[ModelT, TxT, OptT],
-    model: ModelT,
-    tx: TxT,
-) -> OptT:
-    """Create a Flax NNX Optimizer (`nnx.Optimizer(model, tx, wrt=nnx.Param)`).
-
-    Args:
-        nnx_module: Loaded `flax.nnx` module.
-        model: Flax NNX module to optimize.
-        tx: Optax gradient transformation.
-
-    Returns:
-        Configured `nnx.Optimizer` instance.
-
-    """
-    return nnx_module.Optimizer(model, tx, wrt=nnx_module.Param)
-
-
-def apply_nnx_optimizer_update[ModelT, GradsT](
-    optimizer: NNXOptimizerProtocol[ModelT, GradsT],
-    model: ModelT,
-    grads: GradsT,
-) -> None:
-    """Apply gradient updates on an `nnx.Optimizer` (`optimizer.update(model, grads)`).
-
-    Args:
-        optimizer: Flax NNX optimizer instance.
-        model: Flax NNX module being optimized.
-        grads: Computed gradient PyTree.
-
-    """
-    optimizer.update(model, grads)
-
-
 def run_train_wrapper(
     backend_name: str,
     config: TrainingConfig,
@@ -143,6 +87,8 @@ def run_train_wrapper(
         Structured `TrainResultDict` containing training status and final loss.
 
     Raises:
+        DependencyMissingError: Re-raised if raised by `execute_fn`.
+        ConfigurationError: Re-raised if raised by `execute_fn`.
         TrainingError: If `execute_fn` raises an exception and `raise_on_error` is True.
 
     """
@@ -184,7 +130,10 @@ def run_train_wrapper(
         "status": status,
         "status_code": status_code,
         "final_loss": float(final_loss),
-        "dataset_source": str(kwargs.get("dataset_source") or ("synthetic_fallback" if dataset.strip().lower() in SYNTHETIC_DATASET_NAMES else "loaded")),
+        "dataset_source": str(
+            kwargs.get("dataset_source")
+            or ("synthetic_fallback" if dataset.strip().lower() in SYNTHETIC_DATASET_NAMES else "loaded")
+        ),
     }
     if error_message is not None:
         result["error_message"] = error_message

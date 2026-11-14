@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
 
@@ -38,7 +38,7 @@ class _GemmaCausalLMLoaderProtocol(Protocol):
 
 keras = optional_import("keras")
 tf = optional_import("tensorflow")
-GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = optional_attr(
+GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = import_optional_symbol(
     "keras_nlp.models",
     "GemmaCausalLM",
     _GemmaCausalLMLoaderProtocol,
@@ -59,11 +59,20 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
     loaded_model: _KerasBatchGenerateModelProtocol | None = None
 
     def _startup() -> None:
-        """Initialize Keras model on server startup."""
+        """Initialize Keras model on server startup.
+
+        Raises:
+            ImportError: Internally caught if `keras_nlp.models.GemmaCausalLM` is unavailable.
+
+        """
         nonlocal loaded_model
         logger.info("Pre-loading Keras model %s for continuous batching server...", model_name)
         try:
-            gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM", _GemmaCausalLMLoaderProtocol)
+            gemma_causal_lm_cls = (
+                GemmaCausalLM
+                if GemmaCausalLM is not None
+                else import_optional_symbol("keras_nlp.models", "GemmaCausalLM", _GemmaCausalLMLoaderProtocol)
+            )
             if gemma_causal_lm_cls is None:
                 raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
             loaded_model = gemma_causal_lm_cls.from_preset(model_name)
@@ -71,7 +80,16 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
             logger.warning("Could not pre-load Keras model %s: %s", model_name, e)
 
     def _call_keras_generate(model_name: str, prompt: str) -> JSONDict:
-        """Generate SQL using pre-loaded Keras model or fallback to `keras.inference.generate_sql`."""
+        """Generate SQL using pre-loaded Keras model or fallback to `keras.inference.generate_sql`.
+
+        Args:
+            model_name: Target model name.
+            prompt: Input SQL prompt string.
+
+        Returns:
+            JSON-compatible dictionary containing generated SQL output.
+
+        """
         from gemma_4_sql.backends.keras.inference import generate_sql
 
         if loaded_model is not None:
@@ -85,7 +103,24 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
         return {k: v for k, v in res.items() if isinstance(v, (str, int, float, bool)) or v is None}
 
     def _batch_generate(prompts: list[str]) -> list[str]:
-        """Generate SQL queries for a batch of prompts using pre-loaded Keras model or per-prompt fallback."""
+        """Generate SQL queries for a batch of prompts using pre-loaded Keras model or per-prompt fallback.
+
+        Args:
+            prompts: List of input SQL prompt strings.
+
+        Returns:
+            List of generated SQL strings corresponding to `prompts`.
+
+        Raises:
+            InferenceError: If SQL generation fails or returns an empty SQL string.
+            RuntimeError: Internally caught and wrapped into `InferenceError`.
+            ValueError: Internally caught and wrapped into `InferenceError`.
+            TypeError: Internally caught and wrapped into `InferenceError`.
+            KeyError: Internally caught and wrapped into `InferenceError`.
+            AttributeError: Internally caught and wrapped into `InferenceError`.
+            OSError: Internally caught and wrapped into `InferenceError`.
+
+        """
         from gemma_4_sql.exceptions import InferenceError
 
         if loaded_model is not None:

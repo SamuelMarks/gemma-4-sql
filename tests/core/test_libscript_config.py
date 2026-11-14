@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import re
+import runpy
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -42,8 +44,8 @@ def test_libscript_json_valid_and_complete() -> None:
 
     # Unified declarative .ml block
     ml_block = data["ml"]
-    assert ml_block["backend"] in ("jax", "maxtext", "pytorch", "keras", "mlx")
-    assert ml_block["target"] in ("local", "gcp-tpu-vm", "gcp-gpu-vm", "gke-xpk")
+    assert ml_block["backend"] in {"jax", "maxtext", "pytorch", "keras", "mlx"}
+    assert ml_block["target"] in {"local", "gcp-tpu-vm", "gcp-gpu-vm", "gke-xpk"}
     assert "gemma-4-sql" in ml_block["train_command"]
     assert "gemma-4-sql" in ml_block["infer_command"]
     assert "gemma-4-sql" in ml_block["etl_command"]
@@ -190,13 +192,26 @@ def test_update_badges_all_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             self.stderr = stderr
 
     def _fake_interrogate(_args: Sequence[str]) -> None:
-        """Write interrogate output and raise SystemExit."""
+        """Write interrogate output and raise SystemExit.
+
+        Raises:
+            SystemExit: Always raised with code 0 to mimic interrogate CLI exit.
+
+        """
         print("actual: 100.0%")
         raise SystemExit(0)
 
-    monkeypatch.setattr(update_badges, "interrogate_main", _FakeCompletedProcess)
     monkeypatch.setattr(update_badges, "interrogate_main", _fake_interrogate)
     monkeypatch.setattr(sys, "argv", ["update_badges.py"])
+    with patch.object(
+        subprocess,
+        "run",
+        return_value=_FakeCompletedProcess("TOTAL      100      0     20      0   100%\n"),
+    ):
+        assert update_badges.main() == 0
+    assert "Test%20coverage-100%25-brightgreen" in readme.read_text(encoding="utf-8")
+
+    # Execute __main__ entrypoint genuinely via runpy.run_path
     with (
         patch.object(
             subprocess,
@@ -205,11 +220,30 @@ def test_update_badges_all_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         ),
         pytest.raises(SystemExit) as exc_info,
     ):
-        update_badges.run_if_main("__main__")
+        runpy.run_path(str(REPO_ROOT / "scripts" / "update_badges.py"), run_name="__main__")
     assert exc_info.value.code == 0
-    assert "Test%20coverage-100%25-brightgreen" in readme.read_text(encoding="utf-8")
 
-    # 2. Existing .coverage branch + 3-column TOTAL fallback + interrogate_main=None + README unchanged + non-zero returncode warning
+    # Cover _load_interrogate_main ImportError and non-conforming module branches
+    from tests.utils.test_utils import FakeModuleNamespace
+
+    def _raise_import_error(_name: str) -> FakeModuleNamespace:
+        """Raise ImportError to exercise missing interrogate fallback.
+
+        Raises:
+            ImportError: Always raised to simulate missing interrogate package.
+
+        """
+        raise ImportError("missing interrogate")
+
+    with patch.object(importlib, "import_module", side_effect=_raise_import_error):
+        assert update_badges._load_interrogate_main() is None
+
+    empty_mod = FakeModuleNamespace("interrogate.cli")
+    with patch.object(importlib, "import_module", return_value=empty_mod):
+        assert update_badges._load_interrogate_main() is None
+
+    # 2. Existing .coverage branch + 3-column TOTAL fallback + interrogate_main=None
+    #    + README unchanged + non-zero returncode warning
     (tox_dir / ".coverage").unlink()
     (tmp_path / ".coverage").write_text("cov", encoding="utf-8")
     monkeypatch.setattr(update_badges, "interrogate_main", None)
@@ -220,11 +254,8 @@ def test_update_badges_all_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPa
             return _FakeCompletedProcess("actual: 100.0%\n", returncode=1, stderr="warn")
         return _FakeCompletedProcess("TOTAL      100      0   100%\n")
 
-    with (
-        patch.object(subprocess, "run", side_effect=_fake_run_branch_2),
-        pytest.raises(SystemExit),
-    ):
-        update_badges.main()
+    with patch.object(subprocess, "run", side_effect=_fake_run_branch_2):
+        assert update_badges.main() == 0
 
     assert update_badges.parse_coverage_percentage("TOTAL      100      0   98%\n") == 98
     assert not update_badges.update_readme_badges(readme, 100, 100)
@@ -234,19 +265,10 @@ def test_update_badges_all_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     (tmp_path / "tests" / "backends").mkdir(parents=True)
     (tmp_path / "tests" / "backends" / "test_sample.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["update_badges.py", "--force-run"])
-    with (
-        patch.object(subprocess, "run", return_value=_FakeCompletedProcess("no match\n")),
-        pytest.raises(SystemExit),
-    ):
-        update_badges.main()
+    with patch.object(subprocess, "run", return_value=_FakeCompletedProcess("no match\n")):
+        assert update_badges.main() == 0
     assert not (tmp_path / ".coverage.extra").exists()
 
     # 4. Also cover the branch where .coverage does not exist when entering full batch run
-    with (
-        patch.object(subprocess, "run", return_value=_FakeCompletedProcess("no match\n")),
-        pytest.raises(SystemExit),
-    ):
-        update_badges.main()
-
-    # Non-main module guard is a no-op
-    update_badges.run_if_main("scripts.update_badges")
+    with patch.object(subprocess, "run", return_value=_FakeCompletedProcess("no match\n")):
+        assert update_badges.main() == 0

@@ -8,12 +8,13 @@ from collections.abc import Callable, Sequence
 from typing import Protocol, runtime_checkable
 
 import jax
-import jax.numpy as jnp
 import optax
 from flax import nnx
 from jax import Array
 
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper, compute_lora_scale
+from gemma_4_sql.backends.jax._protocols import is_jnp_missing
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.gemma4.config import JaxDTypeLike, ModelConfig, resolve_gemma4_config
 from gemma_4_sql.backends.jax.gemma4.decoder_layer import Gemma4DecoderLayer
 from gemma_4_sql.backends.jax.gemma4.layers import LinearLayerProtocol
@@ -110,7 +111,7 @@ class LoRALinearAdapter(nnx.Module):
             ValueError: If rank `r` is less than or equal to 0.
 
         """
-        if nnx is None or jax is None or jnp is None:
+        if nnx is None or jax is None or is_jnp_missing(jnp):
             raise DependencyMissingError("JAX PEFT dependencies are missing.")
         self.scale = compute_lora_scale(lora_alpha, r)
         self.in_features = in_features
@@ -168,10 +169,7 @@ class LoRALinearAdapter(nnx.Module):
         """
         _ = attributes
         if self.dropout is not None:
-            if mode:
-                self.dropout.train()
-            else:
-                self.dropout.eval()
+            self.dropout.deterministic = not mode
 
     def eval(self, **attributes: bool) -> None:
         """Set module to evaluation/inference mode disabling LoRA dropout.
@@ -242,7 +240,7 @@ class LoRALinearAdapter(nnx.Module):
         """
         base = jnp.dot(x, self.kernel[...])
         if self.bias is not None:
-            base = base + self.bias[...]
+            base += self.bias[...]
 
         dropped_x = self.dropout(x, deterministic=deterministic) if self.dropout is not None else x
         lora_term = jnp.dot(jnp.dot(dropped_x, self.lora_a[...]), self.lora_b[...])
@@ -281,7 +279,15 @@ def inject_lora_to_layer(
         return 0
 
     def _make_adapter(linear: nnx.Linear) -> LinearLayerProtocol:
-        """Wrap an `nnx.Linear` projection with `LoRALinearAdapter`."""
+        """Wrap an `nnx.Linear` projection with `LoRALinearAdapter`.
+
+        Args:
+            linear: Base Flax NNX `Linear` projection module.
+
+        Returns:
+            Configured `LoRALinearAdapter` wrapping `linear`.
+
+        """
         return LoRALinearAdapter.from_linear(
             linear,
             r=lora_r,
@@ -377,9 +383,18 @@ def count_parameters(model: nnx.Module) -> tuple[int, int]:
     if nnx is None or jax is None:
         raise DependencyMissingError("JAX PEFT dependencies are missing.")
 
-    _, lora_state, base_state = nnx.split(model, LoRAParam, ...)
-    lora_count = sum(int(x.size) for x in jax.tree.leaves(lora_state))
-    base_count = sum(int(x.size) for x in jax.tree.leaves(base_state))
+    from types import EllipsisType
+
+    from gemma_4_sql.type_hints import PyTreeNode
+
+    split_fn: Callable[
+        [nnx.Module, type[LoRAParam], EllipsisType],
+        tuple[nnx.GraphDef[nnx.Module], PyTreeNode, PyTreeNode],
+    ] = vars(nnx)["split"]
+    leaves_fn: Callable[[PyTreeNode], list[Array]] = vars(jax.tree)["leaves"]
+    _, lora_state, base_state = split_fn(model, LoRAParam, ...)
+    lora_count = sum(int(x.size) for x in leaves_fn(lora_state))
+    base_count = sum(int(x.size) for x in leaves_fn(base_state))
     return lora_count + base_count, lora_count
 
 
@@ -418,7 +433,12 @@ def apply_lora(
     raise_on_error = bool(kwargs.get("raise_on_error"))
 
     def _inject() -> int:
-        """Instantiate or reuse JAX model and inject LoRA layers."""
+        """Instantiate or reuse JAX model and inject LoRA layers.
+
+        Returns:
+            Total count of injected LoRA adapter modules.
+
+        """
         if isinstance(raw_model, Gemma4ForCausalLM):
             model_obj = raw_model
         else:
@@ -433,7 +453,15 @@ def apply_lora(
             lora_dropout=lora_dropout,
             rngs=resolved_rngs,
         )
-        _ = nnx.split(model, LoRAParam, ...)
+        from types import EllipsisType
+
+        from gemma_4_sql.type_hints import PyTreeNode
+
+        split_fn: Callable[
+            [Gemma4ForCausalLM, type[LoRAParam], EllipsisType],
+            tuple[nnx.GraphDef[Gemma4ForCausalLM], PyTreeNode, PyTreeNode],
+        ] = vars(nnx)["split"]
+        _ = split_fn(model, LoRAParam, ...)
         _MODEL_CACHE.put_model(model_name, model)
         logger.info("Injected LoRA into %d targets", injected_count)
         return injected_count

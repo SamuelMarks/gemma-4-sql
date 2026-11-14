@@ -1,7 +1,8 @@
-"""Keras backend approach."""
+"""Keras backend approach with explicit backend initialization."""
 
 from __future__ import annotations
 
+from . import _env as _keras_env
 from .benchmark import benchmark_model
 from .dpo import run_dpo
 from .etl import build_dataloader
@@ -13,7 +14,21 @@ from .quantize import quantize_model
 from .serve import serve_model
 from .train import train_model
 
-__all__ = ["apply_lora", "benchmark_model", "build_dataloader", "export_model", "generate_sql", "get_trainer", "log_metrics", "quantize_model", "run_dpo", "serve_model", "train_model"]
+_ = _keras_env.ACTIVE_KERAS_BACKEND
+
+__all__ = [
+    "apply_lora",
+    "benchmark_model",
+    "build_dataloader",
+    "export_model",
+    "generate_sql",
+    "get_trainer",
+    "log_metrics",
+    "quantize_model",
+    "run_dpo",
+    "serve_model",
+    "train_model",
+]
 
 
 def get_trainer() -> str:

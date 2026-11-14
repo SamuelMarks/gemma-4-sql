@@ -12,7 +12,7 @@ from gemma_4_sql.backends.common_serve import (
     create_backend_serve_app,
     serve_model_wrapper,
 )
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import (
     FastAPIAppProtocol,
@@ -75,27 +75,27 @@ class _RandomUUIDProtocol(Protocol):
 
 
 torch = optional_import("torch")
-FastAPI: _VLLMFastAPIConstructorProtocol | None = optional_attr(
+FastAPI: _VLLMFastAPIConstructorProtocol | None = import_optional_symbol(
     "fastapi",
     "FastAPI",
     _VLLMFastAPIConstructorProtocol,
 )
-JSONResponse: JSONResponseConstructorProtocol | None = optional_attr(
+JSONResponse: JSONResponseConstructorProtocol | None = import_optional_symbol(
     "fastapi.responses",
     "JSONResponse",
     JSONResponseConstructorProtocol,
 )
-AsyncEngineArgs: _VLLMEngineArgsConstructorProtocol | None = optional_attr(
+AsyncEngineArgs: _VLLMEngineArgsConstructorProtocol | None = import_optional_symbol(
     "vllm",
     "AsyncEngineArgs",
     _VLLMEngineArgsConstructorProtocol,
 )
-AsyncLLMEngine: _VLLMEngineLoaderProtocol | None = optional_attr(
+AsyncLLMEngine: _VLLMEngineLoaderProtocol | None = import_optional_symbol(
     "vllm",
     "AsyncLLMEngine",
     _VLLMEngineLoaderProtocol,
 )
-random_uuid: _RandomUUIDProtocol | None = optional_attr(
+random_uuid: _RandomUUIDProtocol | None = import_optional_symbol(
     "vllm.utils",
     "random_uuid",
     _RandomUUIDProtocol,
@@ -179,7 +179,16 @@ def _create_native_app(model_name: str, max_batch_size: int) -> FastAPIAppProtoc
     """
 
     def _call_pytorch_generate(model_name: str, prompt: str) -> JSONDict:
-        """Delegate single-prompt generation to `pytorch.inference.generate_sql`."""
+        """Delegate single-prompt generation to `pytorch.inference.generate_sql`.
+
+        Args:
+            model_name: Target model name.
+            prompt: Input SQL prompt string.
+
+        Returns:
+            JSON-compatible dictionary containing generated SQL metadata.
+
+        """
         from gemma_4_sql.backends.pytorch.inference import generate_sql
 
         res = generate_sql(model_name=model_name, prompt=prompt)
@@ -219,13 +228,23 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
     if use_native:
 
         def app_factory() -> FastAPIAppProtocol:
-            """Create FastAPI app backed by native PyTorch model inference."""
+            """Create FastAPI app backed by native PyTorch model inference.
+
+            Returns:
+                Configured `FastAPIAppProtocol` instance.
+
+            """
             return _create_native_app(model_name, max_batch_size)
 
     else:
 
         def app_factory() -> FastAPIAppProtocol:
-            """Create FastAPI app backed by vLLM async engine."""
+            """Create FastAPI app backed by vLLM async engine.
+
+            Returns:
+                Configured `FastAPIAppProtocol` instance.
+
+            """
             vllm_app = _create_vllm_app(model_name, max_batch_size)
             assert vllm_app is not None
             return vllm_app
@@ -244,8 +263,7 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
 
         if result["status"] == "running_vllm":
             logger.info("Starting vLLM server on port %d", port)
-    else:
-        if result["status"] == "running_pytorch_serve":
-            logger.info("Starting native PyTorch server on port %d", port)
+    elif result["status"] == "running_pytorch_serve":
+        logger.info("Starting native PyTorch server on port %d", port)
 
     return result

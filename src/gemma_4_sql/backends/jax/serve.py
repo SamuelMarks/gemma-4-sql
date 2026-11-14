@@ -49,7 +49,16 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
                 logger.debug("Warmup generation skipped or deferred: %s", exc)
 
         def _call_jax_generate(model_name: str, prompt: str) -> JSONDict:
-            """Delegate single-prompt generation to `jax.inference.generate_sql`."""
+            """Delegate single-prompt generation to `jax.inference.generate_sql`.
+
+            Args:
+                model_name: Target model name.
+                prompt: Input SQL prompt string.
+
+            Returns:
+                JSON-compatible dictionary containing generated SQL metadata.
+
+            """
             from gemma_4_sql.backends.jax.inference import generate_sql
 
             res = generate_sql(model_name=model_name, prompt=prompt)

@@ -1,4 +1,4 @@
-# Text-to-SQL Training Datasets Analysis (2024-2025)
+# Text-to-SQL Training Datasets Analysis (2024-2026)
 
 Based on the latest trends in the open-source community, the text-to-SQL landscape has shifted from small academic benchmarks to large-scale synthetic corpora and complex enterprise-level datasets. 
 
@@ -36,3 +36,18 @@ If you want to train your model for "industrial-strength" SQL, data analysis wor
 *   **For Pretraining/Continual Pretraining:** Use **SynSQL-2.5M** mixed with your standard code/text data.
 *   **For Supervised Fine-Tuning (SFT):** Use a blend of **Gretel's synthetic data** and **SQaLe** to get high-quality instruction following over realistic schemas.
 *   **For Post-Training / RLHF:** Use **Spider 2.0** and **BIRD-Critic** to teach the model how to handle enterprise dialect complexity and fix its own errors.
+
+## 4. Ingesting Datasets with `gemma-4-sql`
+
+`gemma-4-sql`'s ETL pipeline (`backends/common_data.py`) natively resolves standard Text-to-SQL column conventions (`sql_prompt` / `question` / `prompt` for inputs, `sql` / `query` for targets, and `chosen` / `chosen_sql` + `rejected` / `rejected_sql` for DPO preference pairs) into aligned causal LM sequences (`input_ids`, `labels`, `loss_mask`):
+
+```bash
+# Continual Pretraining ETL on SynSQL-2.5M
+gemma-4-sql etl pretrain --dataset seeklhy/SynSQL-2.5M --batch-size 64 --backend maxtext
+
+# Supervised Fine-Tuning (SFT) ETL on Gretel Synthetic Text-to-SQL
+gemma-4-sql etl sft --dataset gretelai/synthetic_text_to_sql --batch-size 32 --backend jax
+
+# Post-Training / DPO ETL on preference pairs
+gemma-4-sql etl posttrain --dataset birdsql/bird-critic-1.0-open --batch-size 16 --backend pytorch
+```

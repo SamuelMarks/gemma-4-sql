@@ -14,19 +14,19 @@ The system is composed of several key modules:
 This is the entry point. The CLI maps shell commands directly to Python SDK functions. The SDK exposes high-level orchestration abstractions:
 *   `train_from_scratch`, `pretrain_model`, `sft_model`, `posttrain_model`, `run_dpo`
 *   `evaluate`, `export_model`, `generate` (and `generate_sql`), `benchmark`
-*   `run_agentic_loop`, `chat_turn`, `serve_model`, `apply_peft`, `quantize_model`, `log_metrics`
-*   `build_rag_prompt`, `extract_schema_entities`, `retrieve_relevant_schema`, `build_few_shot_prompt`, `generate_few_shot_sql`, `etl_pretrain`, `etl_sft`, `etl_posttrain`, `embed_in_duckdb`
+*   `run_agentic_loop` (and `run_agentic_loop_async`), `chat_turn`, `serve_model`, `serve_model_handle`, `apply_peft`, `quantize_model`, `log_metrics`
+*   `build_rag_prompt`, `extract_schema_entities`, `retrieve_relevant_schema`, `build_few_shot_prompt`, `generate_few_shot_sql`, `etl_pretrain`, `etl_sft`, `etl_posttrain`, `embed_in_duckdb`, `LiveDatabaseEngine`, `SQLTokenizer`
 
-### 1.2 The Backend Registry & Dispatcher (`sdk/registry.py`, `sdk/models.py`, and `backends/base_adapter.py`)
-All SDK operations route through `get_backend(name)` in `src/gemma_4_sql/sdk/registry.py`. Based on the `--backend` flag or configuration (`jax`, `keras`, `maxtext`, `pytorch`, `pytorch_hf`, `pytorch_native`, `mlx`), the registry resolves the backend's `adapter.py` module (`ADAPTER_CLASS: type[BackendProtocol]`), instantiates its `ModuleDelegatedBackend` adapter, and caches the validated `BackendProtocol` instance thread-safely.
+### 1.2 The Backend Registry & Dispatcher (`sdk/registry.py`, `sdk/protocols.py`, `sdk/models.py`, and `backends/base_adapter.py`)
+ML-backed SDK operations route through `get_backend(name)` in `src/gemma_4_sql/sdk/registry.py`. Based on the `--backend` flag or configuration (`jax`, `keras`, `maxtext`, `pytorch`, `pytorch_hf`, `pytorch_native`, `mlx`), the registry resolves the backend's `adapter.py` module (`ADAPTER_CLASS`), instantiates its `ModuleDelegatedBackend` adapter via `from_alias(name)`, and thread-safely caches the validated `BackendProtocol` instance (composed from 11 segregated capability protocols in `sdk/protocols.py`). Pure-SQL and prompt-formatting utilities (`LiveDatabaseEngine`, `sql_lexer`, `rag`, `SQLTokenizer`, and `build_few_shot_prompt` via lightweight `validate_backend_name`) avoid loading heavy ML runtimes unnecessarily.
 
 ### 1.3 Swappable Execution Backends (`backends/`)
-Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`, `mlx`) implements `BackendProtocol` across training, DPO, ETL, PEFT, quantization, exporting, logging, benchmarking, serving, and inference. Shared orchestration, numerical calibration, continuous batching, and configuration schemas live in `backends/common_*.py` (`common_train.py`, `common_dpo.py`, `common_data.py`, `common_inference.py`, `common_quantize.py`, `common_serve.py`, `common_benchmark.py`, `common_export.py`, `common_logging.py`, `common_multimodal.py`, `common_peft.py`, `common_gemma4_config.py`), while framework-idiomatic execution remains native to each backend:
+Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`, `mlx`) implements `BackendProtocol` across training, DPO, ETL, PEFT, quantization, exporting, logging, benchmarking, serving, and inference. Shared orchestration, numerical calibration, continuous batching, JAX helpers, and configuration schemas live in `backends/common_*.py` and `backends/_jax_common.py` (`common_train.py`, `common_dpo.py`, `common_data.py`, `common_inference.py`, `common_quantize.py`, `common_serve.py`, `common_benchmark.py`, `common_export.py`, `common_logging.py`, `common_multimodal.py`, `common_peft.py`, `common_gemma4_config.py`, `_jax_common.py`), while framework-idiomatic execution remains native to each backend:
 
 *   **JAX (`backends/jax`)**: Built on the modern **Flax NNX** object-oriented paradigm. Houses a custom, from-scratch implementation of Gemma 4 (`backends/jax/gemma4/`) across text, vision, audio, and MoE architectures. Employs `@nnx.jit` compiled loops, `nnx.value_and_grad`, dynamic KV caching, `nnx.LoRALinear` adapters, and native Activation-aware Weight Quantization (AWQ) and uniform INT8.
 *   **MaxText (`backends/maxtext`)**: Integrates directly with Google's **MaxText** AI-Hypercomputer distributed training framework (`maxtext.train` and `maxtext.models.gemma4`). Rather than Flax NNX, it operates on functional Linen/JAX parameter PyTrees, generates Gin configuration files dynamically, orchestrates multi-host TPU Pod training across multi-dimensional device meshes (`data`, `fsdp`, `tensor`), uses `MaxTextFormatTransform`, and applies Google **AQT** (`aqt.jax.v2`) for INT8/INT4 quantization.
-*   **Keras (`backends/keras`)**: Integrates with `keras_nlp` (using `GemmaCausalLM`) and leverages Keras 3 core abstractions (`keras.Model.fit`, `keras.ops`, dtype policies, and `.keras` v3 serialization).
-*   **PyTorch (`backends/pytorch`)**: Supports both the standard Hugging Face `transformers` stack (`pytorch` / `pytorch_hf` via `Gemma4ForCausalLM`) and a standalone pure Native PyTorch implementation (`pytorch_native` in `backends/pytorch/gemma4/` covering text, vision, audio, MoE, RoPE, and `DynamicCache` KV caching), plus native GGUF binary serialization (`backends/pytorch/gguf.py`) and `safetensors` export.
+*   **Keras (`backends/keras`)**: Integrates with `keras_nlp` / `keras-hub` (using `GemmaCausalLM`) and leverages Keras 3 core abstractions (`keras.Model.fit`, `keras.ops`, dtype policies, and `.keras` v3 serialization).
+*   **PyTorch (`backends/pytorch`)**: Supports both the standard Hugging Face `transformers` stack (`pytorch` / `pytorch_hf` via `Gemma4ForCausalLM`) and a standalone pure Native PyTorch implementation (`pytorch_native` in `backends/pytorch/gemma4/` covering text, vision, audio, MoE, proportional RoPE, and both `DynamicCache` and hybrid global/sliding-window `StaticCache` KV caching), plus native GGUF v3 binary serialization (`backends/pytorch/gguf.py`) and `safetensors` export.
 *   **MLX (`backends/mlx`)**: Tailored for Apple Silicon hardware, providing compiled Metal-accelerated training (`mx.compile`), DPO, LoRA (`MLXLoRALinear`), 4-bit/8-bit/AWQ/GPTQ quantization, and continuous batching serving via FastAPI.
 
 ### 1.4 MaxText Exclusive vs. JAX (Flax NNX) Stack
@@ -41,7 +41,7 @@ While both backends run on top of JAX and XLA, they represent distinct architect
 | **Configuration** | Typed Python dataclasses (`ModelConfig`, `TrainingConfig`) | Dynamic Gin configuration generator (`.gin` files & CLI args) |
 | **Cluster Orchestration** | Local accelerators or JAX distributed host initialization | Multi-host TPU Pod orchestration via `maxtext.train.main` & device meshes |
 | **Device Mesh Topology** | JAX default device placement / sharding | Multi-dimensional mesh axes (`data`, `fsdp`, `tensor`) |
-| **ETL Format Transform** | Grain `BaseFormatTransform` (`inputs`, `targets`) | `MaxTextFormatTransform` (injects Seq2Seq segment IDs & positions) |
+| **ETL Format Transform** | Grain `BaseFormatTransform` (`input_ids`, `labels`, `loss_mask`) | `MaxTextFormatTransform` (injects `segment_ids` & `positions`) |
 | **PEFT / LoRA** | Object-oriented `nnx.LoRALinear` module adaptation | Functional PyTree surgery on raw parameter dictionaries (`"kernel"`) |
 | **Quantization** | Native JAX uniform INT8 and Activation-aware Weight Quantization (AWQ) | Google **AQT** (`aqt.jax.v2`) targeting attention & MLP projection matrices |
 | **Checkpoints & Export** | Orbax checkpointing over `nnx.state(model)` | Orbax checkpointing over MaxText parameter PyTrees |
@@ -54,24 +54,24 @@ While both backends run on top of JAX and XLA, they represent distinct architect
 Data loading at scale is a massive bottleneck. We use **Google Grain**, a high-performance dataloader built for distributed training, alongside native framework loaders.
 1.  **Datasets:** Connects to Hugging Face datasets (e.g., `my-custom-dataset`, `my-custom-dpo-dataset`) or directly to DuckDB tables (`duckdb_path`, `duckdb_table`).
 2.  **Transformations:** Datasets pass through composable `BaseFormatTransform` and `MaxTextFormatTransform` pipelines in `backends/common_data.py`.
-3.  **Target Formats:** The pipeline normalizes the text (and optional multimodal image/audio inputs) into integer sequences and produces dataset shards tailored to the specific backend:
-    *   **JAX / Keras:** Utilizes Grain's `BaseFormatTransform` to yield standard `inputs` and `targets` dictionaries.
-    *   **MaxText:** Utilizes `MaxTextFormatTransform` to inject additional Seq2Seq features like `segment_ids` and `positions` expected by the MaxText architecture, with distributed sharding via `JAXDistributedSharding`.
-    *   **PyTorch / MLX:** Yields standard `inputs` and `targets` dictionaries via native PyTorch `DataLoader` or MLX batching streams.
+3.  **Target Formats:** The pipeline normalizes the text (and optional multimodal image/audio inputs) into aligned causal LM integer sequences (`[BOS] + prompt_ids + sql_ids + [EOS]`) and produces dataset batches tailored to the specific backend:
+    *   **JAX / Keras:** Utilizes Grain's `BaseFormatTransform` to yield aligned `input_ids`, `labels`, and `loss_mask` sequences (alongside `inputs`/`targets` aliases, DPO `chosen_*`/`rejected_*` pairs, and optional `pixel_values`/`audio_values`).
+    *   **MaxText:** Utilizes `MaxTextFormatTransform` to inject additional features like `segment_ids` and `positions` expected by the MaxText architecture, with distributed sharding via `JAXDistributedSharding` / `sharding_by_jax_process`.
+    *   **PyTorch / MLX:** Yields aligned causal token dictionaries via native PyTorch `DataLoader` or MLX batching streams.
     *   **Configurable Batch Size:** Every training and DPO pipeline accepts unified `batch_size` settings across CLI and SDK configurations.
 
 ### 2.2 Live Database Execution Engine (`sdk/db_engine.py` & `sdk/adapters/`)
-Unlike standard NLP generation where BLEU/ROUGE are sufficient, Text-to-SQL must be measured by **Execution Accuracy (EX)**. We developed `LiveDatabaseEngine` backed by pluggable synchronous and asynchronous adapters in `src/gemma_4_sql/sdk/adapters/`:
+Unlike standard NLP generation where BLEU/ROUGE are sufficient, Text-to-SQL must be measured by **Execution Accuracy (EX)**. We developed `LiveDatabaseEngine` (with configurable `float_tol` and `max_rows` safeguards) backed by pluggable lazy-connecting synchronous and asynchronous adapters in `src/gemma_4_sql/sdk/adapters/`:
 *   **Multi-Dialect Sync & Async Support:**
-    *   **SQLite (`sqlite_adapter.py`):** Synchronous `sqlite3` and asynchronous `aiosqlite` with thread/async locking for shared in-memory URIs.
-    *   **PostgreSQL (`postgres_adapter.py`):** Synchronous `psycopg2` and asynchronous `asyncpg`.
+    *   **SQLite (`sqlite_adapter.py`):** Synchronous `sqlite3` and asynchronous `aiosqlite` with thread/async locking, URI `?mode=ro` + `PRAGMA query_only = ON` enforcement, and extension-loading disabled.
+    *   **PostgreSQL (`postgres_adapter.py`):** Synchronous `psycopg2` and asynchronous `asyncpg` with lexer-safe positional placeholder normalization and `SET DEFAULT_TRANSACTION_READ_ONLY = ON` enforcement.
     *   **Snowflake (`snowflake_adapter.py`):** `snowflake-connector-python` with async worker offloading.
-    *   **DuckDB (`duckdb_adapter.py`):** In-process `duckdb` with thread-safe execution.
-*   **Read-Only Lexer Validation (`sdk/sql_lexer.py`):** Validates queries in read-only mode to block destructive statements, writable CTEs (`WITH ... DELETE/UPDATE/INSERT`), `SELECT ... INTO`, and file/extension commands (`COPY`, `EXPORT`, `INSTALL`, `LOAD`).
+    *   **DuckDB (`duckdb_adapter.py`):** In-process `duckdb` with thread-safe execution and `SET enable_external_access = false` / `READ_ONLY` enforcement.
+*   **Read-Only Lexer Validation (`sdk/sql_lexer.py`):** Performs dialect-aware lexical scanning (ANSI `'...'`, PostgreSQL `E'...'` and `$tag$...$tag$` dollar-quoting, nested block comments) and statement-level validation to block destructive DDL/DML, writable CTEs (`WITH ... DELETE/UPDATE/INSERT`), `EXPLAIN ANALYZE`, `SELECT ... INTO`, and side-effecting file/extension commands (`COPY`, `EXPORT`, `INSTALL`, `LOAD`, `LOAD_EXTENSION`, `WRITE_CSV`, `WRITE_PARQUET`).
 *   **Execution with Feedback:** Executes SQL dynamically and captures database exceptions (e.g., `Syntax Error`, `Missing Column`) for self-correction.
 
 ### 2.3 Agentic Loop / Self-Correction (`sdk/agent.py`)
-Because models hallucinate schema names or misapply joins, `run_agentic_loop` (and `run_agentic_loop_async`) utilizes `LiveDatabaseEngine` iteratively:
+Because models hallucinate schema names or misapply joins, `run_agentic_loop` (and non-blocking `run_agentic_loop_async` offloading generation via `asyncio.to_thread`) utilizes `LiveDatabaseEngine` iteratively:
 1.  Model generates SQL (incorporating text prompt, DDL, and optional vision/audio context).
 2.  `LiveDatabaseEngine` attempts execution.
 3.  If an error occurs, the exact SQL exception is appended to the agent's prompt history.
@@ -79,8 +79,8 @@ Because models hallucinate schema names or misapply joins, `run_agentic_loop` (a
 
 ### 2.4 RAG Contextualization & Few-Shot Building (`sdk/rag.py`, `sdk/few_shot.py`)
 Providing pure prompts is insufficient:
-*   **RAG Engine:** Parses SQL `DDL` (Data Definition Language) strings, extracts table structures, column names, and types, and selects the relevant schema elements based on token overlap with the user's prompt.
-*   **Few-Shot Builder:** Dynamically selects and embeds relevant `(input -> SQL)` examples into the model's instruction prompt prior to generation.
+*   **RAG Engine:** Masks comments and string literals via `sql_lexer`, parses SQL `DDL` strings with a balanced-parenthesis scanner (supporting schema-qualified and quoted identifiers) into `table -> column names` mappings, and retrieves the top-`k` relevant tables using `SentenceTransformer` cosine similarity—falling back deterministically to keyword overlap, Okapi BM25, and 64-D SHA-256 character 3-gram L2-normalized embeddings.
+*   **Few-Shot Builder:** Dynamically selects and embeds token-budgeted `(input -> SQL)` demonstration examples (plus optional multimodal placeholders) into the model's instruction prompt prior to generation.
 
 ### 2.5 DuckDB UDF Support (`sdk/duckdb_extension.py`)
 A unique architectural feature of `gemma-4-sql` is its ability to embed the LLM natively into an analytics database pipeline.

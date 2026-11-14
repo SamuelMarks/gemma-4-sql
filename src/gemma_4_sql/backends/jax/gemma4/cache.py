@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import math
 
-import jax.numpy as jnp
 from flax import nnx
 from jax.sharding import PartitionSpec
 
 from gemma_4_sql.backends.common_gemma4_config import GEMMA4_ATTENTION_PATTERN
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 from .config import AttentionType, JaxDTypeLike, ModelConfig
 
@@ -24,7 +24,9 @@ class LayerCache(nnx.Module):
 
     """
 
-    def __init__(self, cache_shape: tuple[int, int, int, int], dtype: JaxDTypeLike, _shd: PartitionSpec | None = None) -> None:
+    def __init__(
+        self, cache_shape: tuple[int, int, int, int], dtype: JaxDTypeLike, _shd: PartitionSpec | None = None
+    ) -> None:
         """Initialize zero-filled key/value cache buffers for a single decoder layer.
 
         Args:
@@ -61,7 +63,11 @@ def init_cache(config: ModelConfig, batch_size: int, max_seq_len: int) -> Cache:
     for i in range(config.num_hidden_layers):
         attn_type = GEMMA4_ATTENTION_PATTERN[i % len(GEMMA4_ATTENTION_PATTERN)]
         if attn_type == AttentionType.GLOBAL:
-            num_kv = config.num_global_key_value_heads if config.num_global_key_value_heads is not None else config.num_key_value_heads
+            num_kv = (
+                config.num_global_key_value_heads
+                if config.num_global_key_value_heads is not None
+                else config.num_key_value_heads
+            )
             hd = config.global_head_dim if config.global_head_dim is not None else config.head_dim
         else:
             num_kv = config.num_key_value_heads

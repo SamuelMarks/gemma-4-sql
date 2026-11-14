@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
 from jax import Array
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 from .config import ModelConfig
 from .layers import Gemma4MLP, Gemma4RMSNorm, LinearLayerProtocol, make_linear
@@ -92,14 +93,30 @@ class Gemma4MoE(nnx.Module):
         shared_dim = config.intermediate_size * config.num_shared_experts
         self.shared_experts = Gemma4MLP(config.hidden_size, shared_dim, rngs=rngs, dtype=config.dtype, shd=shd)
         self.pre_forward_scale_2 = nnx.Param(jnp.ones(config.hidden_size, dtype=config.weight_dtype))
-        self.gate_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
+        self.gate_norm = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs
+        )
         gate_dtype = jnp.float32 if config.float32_gate_logits else config.dtype
-        self.gate = make_linear(config.hidden_size, config.num_experts, use_bias=False, dtype=gate_dtype, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.gate = make_linear(
+            config.hidden_size,
+            config.num_experts,
+            use_bias=False,
+            dtype=gate_dtype,
+            kernel_metadata={},
+            bias_metadata={},
+            rngs=rngs,
+        )
         self.per_expert_scale = nnx.Param(jnp.ones(config.num_experts, dtype=config.weight_dtype))
         self.routed_experts = Gemma4RoutedExperts(config, rngs=rngs)
-        self.pre_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
-        self.post_feedforward_layernorm_1 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
-        self.post_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
+        self.pre_feedforward_layernorm_2 = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs
+        )
+        self.post_feedforward_layernorm_1 = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs
+        )
+        self.post_feedforward_layernorm_2 = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs
+        )
 
     def inject_lora_projections(
         self,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import random
 from collections.abc import Callable
 
 from gemma_4_sql.exceptions import (
@@ -60,7 +61,9 @@ def compute_lora_matrices(
     lora_r: int,
     seed: int = 0,
 ) -> tuple[list[list[float]], list[list[float]]]:
-    """Compute Kaiming-initialized `lora_a` `(in_features, lora_r)` and zero-initialized `lora_b` `(lora_r, out_features)`.
+    """Compute Kaiming-initialized `lora_a` and zero-initialized `lora_b` matrices.
+
+    Produces `lora_a` of shape `(in_features, lora_r)` and `lora_b` of shape `(lora_r, out_features)`.
 
     Mathematical Formulation (Hu et al., 2021):
         - `A ~ Uniform(-bound, bound)` where `bound = 1 / sqrt(in_features)`
@@ -73,7 +76,8 @@ def compute_lora_matrices(
         seed: Deterministic integer seed offset for reproducible initialization.
 
     Returns:
-        A 2-tuple of `(lora_a, lora_b)` nested float lists of shapes `(in_features, lora_r)` and `(lora_r, out_features)`.
+        A 2-tuple of `(lora_a, lora_b)` nested float lists of shapes `(in_features, lora_r)`
+        and `(lora_r, out_features)`.
 
     Raises:
         ValueError: If `in_features <= 0`, `out_features <= 0`, or `lora_r <= 0`.
@@ -83,14 +87,8 @@ def compute_lora_matrices(
         msg = f"Invalid LoRA dimensions: in_features={in_features}, out_features={out_features}, lora_r={lora_r}"
         raise ValueError(msg)
     bound = 1.0 / math.sqrt(float(in_features))
-    lora_a: list[list[float]] = []
-    for i in range(in_features):
-        row: list[float] = []
-        for j in range(lora_r):
-            phase = float((i * 131 + j * 17 + seed * 31) % 1009) / 1009.0
-            val = (2.0 * phase - 1.0) * bound
-            row.append(val)
-        lora_a.append(row)
+    rng = random.Random(seed)
+    lora_a: list[list[float]] = [[rng.uniform(-bound, bound) for _ in range(lora_r)] for _ in range(in_features)]
     lora_b: list[list[float]] = [[0.0 for _ in range(out_features)] for _ in range(lora_r)]
     return (lora_a, lora_b)
 
@@ -126,7 +124,9 @@ def build_peft_result(
         Populated `PEFTResultDict`.
 
     """
-    resolved_code = status_code or (ExecutionStatus.FAILED.value if is_failed_status(status) else ExecutionStatus.COMPLETED.value)
+    resolved_code = status_code or (
+        ExecutionStatus.FAILED.value if is_failed_status(status) else ExecutionStatus.COMPLETED.value
+    )
     res: PEFTResultDict = {
         "backend": backend_name,
         "action": "apply_lora",
@@ -176,7 +176,9 @@ def apply_lora_wrapper(
 
     """
     if lora_r <= 0:
-        raise ConfigurationError(f"lora_r must be > 0, got {lora_r}", backend=backend_name, model_name=model_name, operation="apply_lora")
+        raise ConfigurationError(
+            f"lora_r must be > 0, got {lora_r}", backend=backend_name, model_name=model_name, operation="apply_lora"
+        )
     if not (0.0 <= lora_dropout < 1.0):
         raise ConfigurationError(
             f"lora_dropout must be in [0.0, 1.0), got {lora_dropout}",

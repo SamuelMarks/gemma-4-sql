@@ -2,15 +2,114 @@
 
 from __future__ import annotations
 
+import types
+from typing import Protocol, Self, runtime_checkable
+
 from gemma_4_sql.backends.common_logging import SummaryWriterFactory, log_metrics_wrapper
-from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol, optional_import
 from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
-tf = optional_import("tensorflow")
+
+@runtime_checkable
+class _WriterDefaultContextProtocol(Protocol):
+    """Protocol for the context manager returned by `SummaryWriter.as_default()`."""
+
+    def __enter__(self) -> Self | None:
+        """Enter the summary writer context.
+
+        Returns:
+            Entered context manager or `None`.
+
+        """
+        ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+        /,
+    ) -> bool | None:
+        """Exit the summary writer context.
+
+        Args:
+            exc_type: Exception type if raised, else `None`.
+            exc_val: Exception instance if raised, else `None`.
+            exc_tb: Traceback if raised, else `None`.
+
+        Returns:
+            Suppression flag or `None`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TFFileWriterProtocol(Protocol):
+    """Protocol for a TensorFlow `SummaryWriter` returned by `tf.summary.create_file_writer`."""
+
+    def as_default(self) -> _WriterDefaultContextProtocol:
+        """Return a context manager activating this summary writer as default.
+
+        Returns:
+            Active summary writer context manager.
+
+        """
+        ...
+
+    def close(self) -> None:
+        """Flush and close the summary writer."""
+        ...
+
+
+@runtime_checkable
+class _TFSummaryNamespaceProtocol(Protocol):
+    """Protocol for `tf.summary` exposing `create_file_writer` and `scalar`."""
+
+    def create_file_writer(self, logdir: str, /) -> _TFFileWriterProtocol:
+        """Create a summary file writer for `logdir`.
+
+        Args:
+            logdir: Output directory path.
+
+        Returns:
+            Initialized `_TFFileWriterProtocol`.
+
+        """
+        ...
+
+    def scalar(self, name: str, data: float, *, step: int) -> bool | None:
+        """Record a scalar summary metric value.
+
+        Args:
+            name: Metric tag name.
+            data: Scalar float value.
+            step: Global step index.
+
+        Returns:
+            Optional boolean write indicator or `None`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TFSummaryHolderProtocol(Protocol):
+    """Protocol for a `tensorflow` module exposing `.summary`."""
+
+    @property
+    def summary(self) -> _TFSummaryNamespaceProtocol:
+        """Provide `tf.summary` namespace."""
+        ...
+
+
+tf: _TFSummaryHolderProtocol | ModuleNamespaceProtocol | None = optional_import("tensorflow")
 
 
 class _TFSummaryWriterAdapter:
     """Adapter wrapping `tf.summary.create_file_writer` to satisfy `SummaryWriter` protocol."""
+
+    _writer: _TFFileWriterProtocol
 
     def __init__(self, log_dir: str = "logs") -> None:
         """Initialize the TensorFlow file writer for `log_dir`.
@@ -19,7 +118,7 @@ class _TFSummaryWriterAdapter:
             log_dir: Directory path where TensorFlow event files are written.
 
         """
-        assert tf is not None
+        assert isinstance(tf, _TFSummaryHolderProtocol)
         self._writer = tf.summary.create_file_writer(log_dir)
 
     def add_scalar(self, key: str, val: float, step: int) -> None:
@@ -31,7 +130,7 @@ class _TFSummaryWriterAdapter:
             step: Training step index.
 
         """
-        assert tf is not None
+        assert isinstance(tf, _TFSummaryHolderProtocol)
         with self._writer.as_default():
             tf.summary.scalar(key, val, step=step)
 
@@ -66,12 +165,7 @@ def log_metrics(
 
         raise DependencyMissingError("TensorFlow dependencies are missing.", backend="keras")
 
-    try:
-        _ = tf.summary
-        has_summary = True
-    except AttributeError:
-        has_summary = False
-
+    has_summary = isinstance(tf, _TFSummaryHolderProtocol)
     writer_cls: SummaryWriterFactory | None = _TFSummaryWriterAdapter if has_summary else None
     res = log_metrics_wrapper(
         backend_name="keras",

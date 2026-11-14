@@ -1,21 +1,22 @@
-"""Unit and behavioral tests for MLX Direct Preference Optimization (DPO)."""
+"""Unit and behavioral tests for MLX Direct Preference Optimization (DPO) without MagicMock."""
 
 from __future__ import annotations
 
 import math
-from unittest.mock import MagicMock, patch
+from typing import Self
+from unittest.mock import patch
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, TrainerState
+from gemma_4_sql.exceptions import DependencyMissingError, ETLError, TrainingError
+from gemma_4_sql.type_hints import DPOConfig, DPOLoopState
 from tests.conftest import requires_mlx
 
 pytestmark = requires_mlx
 
 
-def test_real_mlx_dpo_loss_logps_and_step() -> None:
-    """Verify MLX dpo_loss, _compute_mlx_logps, and _run_dpo_step execute with real MLX arrays and nn.Module."""
+def test_real_mlx_dpo_loss_logps_and_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify MLX dpo_loss, _compute_mlx_logps, _run_dpo_step, and run_dpo with real MLX arrays."""
     import mlx.core as mx
     import mlx.nn as mlx_nn
     import mlx.optimizers as optim
@@ -32,12 +33,18 @@ def test_real_mlx_dpo_loss_logps_and_step() -> None:
             self.head = mlx_nn.Linear(8, 32)
 
         def __call__(self, x: mx.array) -> mx.array:
-            """Compute vocabulary logits from token IDs."""
+            """Compute vocabulary logits from token IDs.
+
+            Returns:
+                Vocabulary logits array.
+            """
             return self.head(self.embed(x))
+
+    from tests.utils.tensor_helpers import mx_eval, mx_eval_model
 
     policy_model = TinyMLXPolicy()
     ref_model = TinyMLXPolicy()
-    mx.eval(policy_model.parameters(), ref_model.parameters())
+    mx_eval_model(policy_model, ref_model)
 
     optimizer = optim.AdamW(learning_rate=1e-2)
     chosen_inputs = mx.array([[1, 2, 3]], dtype=mx.int32)
@@ -52,23 +59,39 @@ def test_real_mlx_dpo_loss_logps_and_step() -> None:
     }
 
     logps = dpo_module._compute_mlx_logps(policy_model, chosen_inputs, chosen_labels)
-    mx.eval(logps)
+    assert isinstance(logps, dpo_module.MlxArrayProtocol)
+    mx_eval(logps)
     assert logps.shape == (1,)
     assert float(logps) < 0.0
 
-    # Also test _compute_mlx_logps when labels is a Python list or omitted (shifted input token IDs)
     logps_list = dpo_module._compute_mlx_logps(policy_model, chosen_inputs, [[2, 3, 0]])
-    mx.eval(logps_list)
+    assert isinstance(logps_list, dpo_module.MlxArrayProtocol)
+    mx_eval(logps_list)
     assert logps_list.shape == (1,)
 
     logps_shifted = dpo_module._compute_mlx_logps(policy_model, chosen_inputs, None)
-    mx.eval(logps_shifted)
+    assert isinstance(logps_shifted, dpo_module.MlxArrayProtocol)
+    mx_eval(logps_shifted)
     assert logps_shifted.shape == (1,)
+
+    # Also test MlxCausalLMProtocol with None input -> 0.0 fallback
+    assert dpo_module._compute_mlx_logps(policy_model, None, None) == 0.0
 
     loss_step_1 = float(dpo_module._run_dpo_step(policy_model, ref_model, optimizer, batch, 0.5))
     loss_step_2 = float(dpo_module._run_dpo_step(policy_model, ref_model, optimizer, batch, 0.5))
     assert loss_step_1 > 0.0
     assert loss_step_2 < loss_step_1
+
+    # Full run_dpo end-to-end execution with real TinyMLXPolicy
+    def _load_tiny(_m: str) -> tuple[TinyMLXPolicy, str]:
+        """Return `(TinyMLXPolicy(), 'tok')`."""
+        return (TinyMLXPolicy(), "tok")
+
+    monkeypatch.setattr(dpo_module, "load", _load_tiny)
+    with patch.object(dpo_module, "build_dataloader", side_effect=ETLError("offline fallback")):
+        res_e2e = dpo_module.run_dpo(DPOConfig(model_name="tiny", dataset="synthetic-dpo", epochs=1))
+        assert res_e2e["status"] == "completed"
+        assert res_e2e["final_loss"] > 0.0
 
 
 def test_dpo_loss_and_fallback_log_sigmoid(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,14 +100,12 @@ def test_dpo_loss_and_fallback_log_sigmoid(monkeypatch: pytest.MonkeyPatch) -> N
 
     import gemma_4_sql.backends.mlx.dpo as dpo_module
 
-    # (b) Equal policy and reference logps -> loss == log(2.0), rewards == 0.0
     eq_logp = mx.array([-1.5])
     eq_loss, eq_ch_r, eq_re_r = dpo_module.dpo_loss(eq_logp, eq_logp, eq_logp, eq_logp, 0.1)
     assert float(eq_loss) == pytest.approx(math.log(2.0), rel=1e-5)
     assert float(eq_ch_r) == pytest.approx(0.0)
     assert float(eq_re_r) == pytest.approx(0.0)
 
-    # (a) Policy favors chosen over reference -> chosen_rewards > rejected_rewards
     real_loss, chosen_r, rejected_r = dpo_module.dpo_loss(
         mx.array([-1.0]),
         mx.array([-3.0]),
@@ -101,100 +122,169 @@ def test_dpo_loss_and_fallback_log_sigmoid(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_run_dpo_step_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify _run_dpo_step and _compute_mlx_logps fallback branches when value_and_grad or 2D logits are absent."""
+    """Verify _run_dpo_step and _compute_mlx_logps fallback branches without MagicMock."""
+    import mlx.core as mx
+
     import gemma_4_sql.backends.mlx.dpo as dpo_module
 
-    mock_policy = MagicMock()
-    mock_policy.return_value = MagicMock(ndim=1)
-    mock_policy.return_value.mean.return_value = "mean_logps"
+    class _ArithMeanStub:
+        """Minimal `ArithmeticTensorProtocol` stub."""
 
-    mock_ref = MagicMock()
-    mock_ref.return_value = "scalar_logits"
+        def __float__(self) -> float:
+            """Return `1.0`."""
+            return 1.0
+
+        def __sub__(self, _other: Self | float, /) -> Self:
+            """Return self."""
+            return self
+
+        def __rsub__(self, _other: Self | float, /) -> Self:
+            """Return self."""
+            return self
+
+        def __mul__(self, _other: Self | float, /) -> Self:
+            """Return self."""
+            return self
+
+        def __rmul__(self, _other: Self | float, /) -> Self:
+            """Return self."""
+            return self
+
+        def __neg__(self) -> Self:
+            """Return self."""
+            return self
+
+    arith_inst = _ArithMeanStub()
+    assert float(arith_inst) == 1.0 and (arith_inst - 1.0) is arith_inst and (1.0 - arith_inst) is arith_inst
+    assert (arith_inst * 1.0) is arith_inst and (1.0 * arith_inst) is arith_inst and (-arith_inst) is arith_inst
+
+    def _one_d_mlx_model(_x: dpo_module.MlxDPOBatchValue) -> mx.array:
+        """Return 1D MLX array to exercise `raw_logits.mean(axis=-1)`."""
+        return mx.array([1.0, 3.0])
+
+    def _arith_model(_x: dpo_module.MlxDPOBatchValue) -> _ArithMeanStub:
+        """Return `arith_inst`."""
+        return arith_inst
+
+    class _PureSupportsFloat:
+        """Pure `SupportsFloat` stub without arithmetic operators."""
+
+        def __float__(self) -> float:
+            """Return `0.5`."""
+            return 0.5
+
+    def _float_model(_x: dpo_module.MlxDPOBatchValue) -> _PureSupportsFloat:
+        """Return `_PureSupportsFloat()`."""
+        return _PureSupportsFloat()
+
+    def _str_model(_x: dpo_module.MlxDPOBatchValue) -> str:
+        """Return `'str_logits'`."""
+        return "str_logits"
+
+    assert float(dpo_module._compute_mlx_logps(_one_d_mlx_model, None)) == pytest.approx(2.0)
+    assert dpo_module._compute_mlx_logps(_arith_model, None) is arith_inst
+    assert dpo_module._compute_mlx_logps(_float_model, None) == pytest.approx(0.5)
+    assert dpo_module._compute_mlx_logps(_str_model, None) == 0.0
 
     monkeypatch.setattr(dpo_module, "nn", None)
     batch: dpo_module.MlxDPOBatch = {"chosen_inputs": "ci", "rejected_inputs": "ri"}
 
     with patch.object(dpo_module, "dpo_loss", return_value=(0.75, 0.0, 0.0)):
-        res = dpo_module._run_dpo_step(mock_policy, mock_ref, None, batch, 0.1)
+        res = dpo_module._run_dpo_step(_float_model, _str_model, None, batch, 0.1)
         assert res == 0.75
 
-    def _val_and_grad(*_a: MagicMock) -> tuple[float, str]:
-        """Return `(0.5, 'grads')`."""
-        return (0.5, "grads")
+    class _TypedNNStub:
+        """Typed `mlx.nn` stub without `object`."""
 
-    mock_nn = MagicMock()
-    mock_nn.value_and_grad.return_value = _val_and_grad
-    monkeypatch.setattr(dpo_module, "nn", mock_nn)
+        @staticmethod
+        def value_and_grad(
+            _m: dpo_module.MlxDPOModel,
+            _fn: dpo_module.Callable[..., float],
+        ) -> dpo_module.Callable[..., tuple[float, dict[str, mx.array]]]:
+            """Return callable yielding `(0.5, {})`."""
+
+            def _inner(
+                *_args: dpo_module.MlxDPOModel | dpo_module.MlxDPOBatch | float,
+            ) -> tuple[float, dict[str, mx.array]]:
+                """Return `(0.5, {})`."""
+                return (0.5, {})
+
+            return _inner
+
+    monkeypatch.setattr(dpo_module, "nn", _TypedNNStub())
     monkeypatch.setattr(dpo_module, "mx", None)
-    res_no_opt = dpo_module._run_dpo_step(MagicMock(spec=[]), mock_ref, MagicMock(spec=[]), batch, 0.1)
+    res_no_opt = dpo_module._run_dpo_step(_float_model, _str_model, "no_update_opt", batch, 0.1)
     assert res_no_opt == 0.5
 
 
-def test_run_training_epochs() -> None:
-    """Verify _run_training_epochs averages step losses across multiple epochs."""
+def test_run_training_epochs_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify _run_training_epochs and run_dpo error handling without MagicMock."""
+    import mlx.core as mx
+    import mlx.nn as mlx_nn
+
     import gemma_4_sql.backends.mlx.dpo as dpo_module
 
-    state: TrainerState[str, None, str, dict[str, int]] = TrainerState(
+    def _dummy_policy(_x: dpo_module.MlxDPOBatchValue) -> float:
+        """Return `0.0`."""
+        return 0.0
+
+    assert _dummy_policy(None) == 0.0
+
+    state: DPOLoopState[dpo_module.MlxDPOModel, str, dict[str, int]] = DPOLoopState(
         dataloader=[{"chosen_inputs": 1}, {"chosen_inputs": 2}],
         epochs=2,
-        policy_model="p",
-        ref_model="r",
+        policy_model=_dummy_policy,
+        ref_model=_dummy_policy,
         optimizer="o",
         beta=0.1,
     )
 
-    with patch.object(dpo_module, "_run_dpo_step") as mock_step:
-        mock_step.return_value = MagicMock(item=lambda: 0.5)
+    calls = 0
+
+    def _step_arr(*_a: dpo_module.MlxDPOModel | str | dict[str, int] | float | None) -> mx.array:
+        """Increment `calls` and return `mx.array(0.5)`.
+
+        Returns:
+            Scalar MLX loss array of `0.5`.
+        """
+        nonlocal calls
+        calls += 1
+        return mx.array(0.5)
+
+    with patch.object(dpo_module, "_run_dpo_step", side_effect=_step_arr):
         loss = dpo_module._run_training_epochs(state)
         assert loss == 0.5
-        assert mock_step.call_count == 4
+        assert calls == 4
 
+    with patch.object(dpo_module, "_run_dpo_step", return_value=0.375):
+        assert dpo_module._run_training_epochs(state) == 0.375
 
-def test_run_dpo_lifecycle_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify run_dpo handles model loading, dataloader validation, runtime errors, and missing dependencies."""
-    import gemma_4_sql.backends.mlx.dpo as dpo_module
+    with patch.object(dpo_module, "_run_dpo_step", return_value="non_float"):
+        assert dpo_module._run_training_epochs(state) == 0.0
 
-    monkeypatch.setattr(dpo_module, "mlx", MagicMock())
-    monkeypatch.setattr(dpo_module, "mx", MagicMock())
-    monkeypatch.setattr(dpo_module, "nn", MagicMock())
-    monkeypatch.setattr(dpo_module, "optim", MagicMock())
-    monkeypatch.setattr(dpo_module, "load", MagicMock(return_value=("model1", "tok1")))
+    lin = mlx_nn.Linear(4, 4)
 
+    def _load_lin(_m: str) -> tuple[mlx_nn.Linear, str]:
+        """Return `(lin, 'tok1')`."""
+        return (lin, "tok1")
+
+    monkeypatch.setattr(dpo_module, "load", _load_lin)
     config = DPOConfig(model_name="model", dataset="dataset")
 
-    with patch.object(dpo_module, "build_dataloader") as mock_build_dataloader:
-        mock_build_dataloader.return_value = {"loader": [1, 2]}
-
-        with patch.object(dpo_module, "_run_training_epochs") as mock_run_epochs:
-            mock_run_epochs.return_value = 0.5
-            res = dpo_module.run_dpo(config)
-            assert res["status"] == "completed"
-            assert res["final_loss"] == 0.5
-
-            mock_run_epochs.side_effect = RuntimeError("error")
+    with patch.object(dpo_module, "build_dataloader", return_value={"loader": [{"chosen_inputs": [1]}]}):
+        with patch.object(dpo_module, "_run_training_epochs", side_effect=RuntimeError("error")):
             res2 = dpo_module.run_dpo(config)
             assert "failed: error" in res2["status"]
             with pytest.raises(TrainingError, match="error"):
                 dpo_module.run_dpo(config, raise_on_error=True)
 
-        mock_build_dataloader.return_value = {}
+    with patch.object(dpo_module, "build_dataloader", return_value={}):
         res3 = dpo_module.run_dpo(config)
         assert "failed: Invalid dataloader" in res3["status"]
 
-        mock_build_dataloader.return_value = {"loader": MagicMock(spec=[])}
+    with patch.object(dpo_module, "build_dataloader", return_value={"loader": 123}):
         res4 = dpo_module.run_dpo(config)
         assert "failed: Invalid dataloader" in res4["status"]
-
-    with patch.object(dpo_module, "_run_dpo_step", return_value=0.375):
-        state_float: DPOLoopState[MagicMock, MagicMock, dict[str, list[int]]] = DPOLoopState(
-            dataloader=[{"chosen_inputs": [1], "rejected_inputs": [2]}],
-            epochs=1,
-            policy_model=MagicMock(),
-            ref_model=MagicMock(),
-            optimizer=MagicMock(),
-            beta=0.1,
-        )
-        assert dpo_module._run_training_epochs(state_float) == 0.375
 
     monkeypatch.setattr(dpo_module, "mlx", None)
     with pytest.raises(DependencyMissingError):

@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import argparse
-
 from gemma_4_sql.cli_benchmark import benchmark_cmd
 from gemma_4_sql.cli_misc import log_metrics_cmd, rag_cmd, tokenize_cmd
 from gemma_4_sql.cli_parsers.db_parser import add_db_parsers
+from gemma_4_sql.cli_parsers.protocols import SubparserCollectionProtocol
+from gemma_4_sql.tokenization import DEFAULT_BYTE_VOCAB_SIZE
 
-type SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
 
-
-def add_tokenize_parser(subparsers: SubParsersType) -> None:
+def add_tokenize_parser(subparsers: SubparserCollectionProtocol) -> None:
     """Register tokenization inspection subparser.
 
     Args:
@@ -22,11 +20,11 @@ def add_tokenize_parser(subparsers: SubParsersType) -> None:
     parser_tokenize.add_argument("--encode", type=str, help="Text to encode.")
     parser_tokenize.add_argument("--decode", type=str, help="Comma-separated tokens to decode.")
     parser_tokenize.add_argument("--hf-model", type=str, default=None, help="Hugging Face model name.")
-    parser_tokenize.add_argument("--vocab-size", type=int, default=256, help="Vocabulary size.")
+    parser_tokenize.add_argument("--vocab-size", type=int, default=DEFAULT_BYTE_VOCAB_SIZE, help="Vocabulary size.")
     parser_tokenize.set_defaults(func=tokenize_cmd)
 
 
-def add_rag_log_parsers(subparsers: SubParsersType) -> None:
+def add_rag_log_parsers(subparsers: SubparserCollectionProtocol) -> None:
     """Register RAG prompt builder and metric logging subparsers.
 
     Args:
@@ -34,12 +32,21 @@ def add_rag_log_parsers(subparsers: SubParsersType) -> None:
 
     """
     parser_rag = subparsers.add_parser("rag", help="Build a RAG prompt or extract schema context.")
-    parser_rag.add_argument("--action", default="build", choices=["build", "extract", "retrieve"], help="Action to perform.")
+    parser_rag.add_argument(
+        "--action", default="build", choices=["build", "extract", "retrieve"], help="Action to perform."
+    )
     parser_rag.add_argument("--prompt", default="", help="Natural language prompt.")
     parser_rag.add_argument("--ddl", required=True, help="DDL string to extract schema context from.")
-    parser_rag.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or table screenshot.")
+    parser_rag.add_argument(
+        "--image-path", default=None, help="Path to schema diagram, ERD image, or table screenshot."
+    )
     parser_rag.add_argument("--audio-path", default=None, help="Path to recorded natural language query audio file.")
-    parser_rag.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_rag.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser_rag.set_defaults(func=rag_cmd)
 
     parser_log = subparsers.add_parser("log", help="Log metrics to the backend.")
@@ -50,7 +57,7 @@ def add_rag_log_parsers(subparsers: SubParsersType) -> None:
     parser_log.set_defaults(func=log_metrics_cmd)
 
 
-def add_benchmark_parser(subparsers: SubParsersType) -> None:
+def add_benchmark_parser(subparsers: SubparserCollectionProtocol) -> None:
     """Register hardware throughput and latency benchmark subparser.
 
     Args:
@@ -63,16 +70,27 @@ def add_benchmark_parser(subparsers: SubParsersType) -> None:
     parser_benchmark.add_argument("--batch-size", type=int, default=1, help="Batch size for benchmark.")
     parser_benchmark.add_argument("--backend", default="jax", help="Backend to use.")
     parser_benchmark.add_argument("--dtype", default="bfloat16", help="Precision to use.")
-    parser_benchmark.add_argument("--mode", default="prefill", choices=["prefill", "decode", "end-to-end"], help="Benchmark mode.")
+    parser_benchmark.add_argument(
+        "--mode", default="prefill", choices=["prefill", "decode", "end-to-end"], help="Benchmark mode."
+    )
     parser_benchmark.add_argument("--max-new-tokens", type=int, default=128, help="Max new tokens for generation.")
     parser_benchmark.add_argument("--warmup-steps", type=int, default=5, help="Number of warmup steps.")
-    parser_benchmark.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or table screenshot.")
-    parser_benchmark.add_argument("--audio-path", default=None, help="Path to recorded natural language query audio file.")
-    parser_benchmark.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_benchmark.add_argument(
+        "--image-path", default=None, help="Path to schema diagram, ERD image, or table screenshot."
+    )
+    parser_benchmark.add_argument(
+        "--audio-path", default=None, help="Path to recorded natural language query audio file."
+    )
+    parser_benchmark.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser_benchmark.set_defaults(func=benchmark_cmd)
 
 
-def add_misc_parsers(subparsers: SubParsersType) -> None:
+def add_misc_parsers(subparsers: SubparserCollectionProtocol) -> None:
     """Register tokenization, database, benchmark, RAG, and logging subparsers.
 
     Args:

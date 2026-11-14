@@ -114,11 +114,19 @@ def test_pytorch_inference_multimodal_native(
 
         @classmethod
         def from_pretrained(cls, *_args: str | None, **_kwargs: str | None) -> MockNativeModel:
-            """Instantiate mock model."""
+            """Instantiate mock model.
+
+            Returns:
+                New `MockNativeModel` instance.
+            """
             return cls()
 
         def generate(self, input_ids: torch.Tensor, **kwargs: torch.Tensor | int | bool | None) -> torch.Tensor:
-            """Simulate generation and capture kwargs."""
+            """Simulate generation and capture kwargs.
+
+            Returns:
+                Concatenated prompt and generated token tensor.
+            """
             passed_kwargs.update(kwargs)
             gen = torch.tensor([[65, 66, 67]], dtype=torch.long)
             return torch.cat([input_ids, gen], dim=-1)
@@ -179,12 +187,20 @@ def test_pytorch_inference_multimodal_hf(
             return cls()
 
         def __call__(self, _prompt: str, return_tensors: str = "pt") -> MockTokOut:
-            """Tokenize prompt."""
+            """Tokenize prompt.
+
+            Returns:
+                Tokenized `MockTokOut` mapping.
+            """
             _ = return_tensors
             return MockTokOut()
 
         def decode(self, _ids: torch.Tensor | Sequence[int], skip_special_tokens: bool = True) -> str:
-            """Decode token IDs."""
+            """Decode token IDs.
+
+            Returns:
+                Decoded SQL string.
+            """
             _ = skip_special_tokens
             return "SELECT * FROM customers;"
 
@@ -207,7 +223,11 @@ def test_pytorch_inference_multimodal_hf(
             return cls()
 
         def generate(self, **kwargs: torch.Tensor | int | bool | None) -> GenOut:
-            """Record kwargs and return sequences and scores."""
+            """Record kwargs and return sequences and scores.
+
+            Returns:
+                Simulated `GenOut` generation output.
+            """
             captured_gen_kwargs.update(kwargs)
             return GenOut()
 

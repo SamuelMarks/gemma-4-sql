@@ -17,9 +17,16 @@ from gemma_4_sql.type_hints import DPOConfig, ETLConfig, JSONDict, JSONValue, Tr
 
 
 def _make_status_stub(status: str) -> Callable[..., dict[str, str]]:
-    """Create a typed callable returning `{'status': status}`."""
+    """Create a typed callable returning `{'status': status}`.
 
-    def _stub(*_a: TrainingConfig | DPOConfig | ETLConfig | dict[str, float] | list[str] | str | float, **_k: JSONValue) -> dict[str, str]:
+    Returns:
+        Stub callable returning the configured status dictionary.
+
+    """
+
+    def _stub(
+        *_a: TrainingConfig | DPOConfig | ETLConfig | dict[str, float] | list[str] | str | float, **_k: JSONValue
+    ) -> dict[str, str]:
         """Return status dict."""
         return {"status": status}
 
@@ -83,7 +90,12 @@ def test_backend_adapter(
     captured_kw: JSONDict = {}
 
     def _aliased_gen(*_a: str | int, **kw: JSONValue) -> dict[str, str]:
-        """Record kwargs and return aliased status."""
+        """Record kwargs and return aliased status.
+
+        Returns:
+            Status dictionary with `'aliased'` status.
+
+        """
         captured_kw.update(kw)
         return {"status": "aliased"}
 

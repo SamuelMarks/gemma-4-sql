@@ -7,7 +7,7 @@ import math
 import torch
 from torch import nn
 
-from gemma_4_sql.type_hints import JSONValue
+from gemma_4_sql.type_hints import JSONValue, TorchTensorProtocol
 
 from .audio import Gemma4AudioModel
 from .cache import Cache, DynamicCache
@@ -73,35 +73,50 @@ def merge_modality_embeddings(
 
 
 class Gemma4MultiModalProjector(nn.Module):
-    """Multimodal projector for Gemma 4 with RMSNorm pre-normalization."""
+    """Multimodal projector for Gemma 4 with RMSNorm, spatial patch pooling, and linear projection."""
 
     def __init__(self, config: Gemma4Config) -> None:
         """Initialize Gemma4MultiModalProjector.
 
         Args:
-            config: Gemma 4 configuration object.
+            config: Gemma 4 configuration instance.
 
         """
         super().__init__()
-        self.mm_soft_emb_norm = Gemma4RMSNorm(config.vision_config.hidden_size, eps=config.vision_config.layer_norm_eps)
-        self.linear_1 = nn.Linear(config.vision_config.hidden_size, config.hidden_size, bias=True)
-        self.act = nn.GELU(approximate="tanh")
-        self.linear_2 = nn.Linear(config.hidden_size, config.hidden_size, bias=True)
+        vhs = int(config.vision_config.hidden_size)
+        ths = int(config.hidden_size)
+        self.patches_per_img = max(
+            1, int(config.vision_config.image_size) // max(1, int(config.vision_config.patch_size))
+        )
+        self.tokens_per_side = max(1, math.isqrt(max(1, int(config.mm_tokens_per_image))))
+        self.kernel_size = max(1, self.patches_per_img // self.tokens_per_side)
+        self.num_output_tokens = self.tokens_per_side * self.tokens_per_side
+        self.mm_soft_emb_norm = Gemma4RMSNorm(vhs, eps=config.vision_config.layer_norm_eps)
+        self.mm_input_projection_weight = nn.Parameter(torch.empty((vhs, ths)))
+        nn.init.normal_(self.mm_input_projection_weight, mean=0.0, std=vhs ** (-0.5))
 
     def forward(self, image_features: torch.Tensor) -> torch.Tensor:
-        """Forward pass for multimodal projector.
+        """Pool and project vision patch embeddings into the language model hidden space.
 
         Args:
-            image_features: Tensor of vision model outputs.
+            image_features: Vision patch embeddings of shape `(batch, num_patches, vision_hidden_size)`.
 
         Returns:
-            Projected multimodal features.
+            Projected image token embeddings of shape `(batch, num_output_tokens, hidden_size)`.
 
         """
-        normed = self.mm_soft_emb_norm(image_features)
-        hidden_states = self.linear_1(normed)
-        hidden_states = self.act(hidden_states)
-        res: torch.Tensor = self.linear_2(hidden_states)
+        bsz, num_patches, vhs = image_features.shape
+        expected_patches = self.patches_per_img * self.patches_per_img
+        if self.kernel_size > 1 and num_patches == expected_patches:
+            grid = image_features.view(
+                bsz, self.tokens_per_side, self.kernel_size, self.tokens_per_side, self.kernel_size, vhs
+            )
+            pooled = grid.mean(dim=(2, 4)).reshape(bsz, self.num_output_tokens, vhs)
+        else:
+            pooled = image_features
+        pooled = pooled * math.sqrt(float(vhs))
+        normed = self.mm_soft_emb_norm(pooled)
+        res: torch.Tensor = torch.matmul(normed, self.mm_input_projection_weight.to(normed.dtype))
         return res
 
 
@@ -111,13 +126,16 @@ class Gemma4ForCausalLM(nn.Module):
     embed_tokens_per_layer: nn.Embedding | None
     per_layer_model_projection: nn.Linear | None
     per_layer_projection_norm: Gemma4RMSNorm | None
+    vision_model: Gemma4VisionModel | None
+    multi_modal_projector: Gemma4MultiModalProjector | None
+    audio_model: Gemma4AudioModel | None
     last_aux_loss: torch.Tensor | None
 
     def __init__(self, config: Gemma4Config) -> None:
         """Initialize Gemma4ForCausalLM.
 
         Args:
-            config: Gemma 4 configuration object.
+            config: Gemma 4 configuration instance.
 
         """
         super().__init__()
@@ -133,7 +151,9 @@ class Gemma4ForCausalLM(nn.Module):
         if ple_dim:
             vocab_ple = config.vocab_size_per_layer_input or config.vocab_size
             self.embed_tokens_per_layer = nn.Embedding(int(vocab_ple), config.num_hidden_layers * int(ple_dim))
-            self.per_layer_model_projection = nn.Linear(config.hidden_size, config.num_hidden_layers * int(ple_dim), bias=False)
+            self.per_layer_model_projection = nn.Linear(
+                config.hidden_size, config.num_hidden_layers * int(ple_dim), bias=False
+            )
             self.per_layer_projection_norm = Gemma4RMSNorm(int(ple_dim), eps=config.rms_norm_eps)
         else:
             self.embed_tokens_per_layer = None
@@ -141,14 +161,22 @@ class Gemma4ForCausalLM(nn.Module):
             self.per_layer_projection_norm = None
 
         # Multimodal sub-models
-        self.vision_model = Gemma4VisionModel(config.vision_config)
-        self.multi_modal_projector = Gemma4MultiModalProjector(config)
-        self.audio_model = Gemma4AudioModel(config)
+        if config.enable_multimodal:
+            self.vision_model = Gemma4VisionModel(config.vision_config)
+            self.multi_modal_projector = Gemma4MultiModalProjector(config)
+            self.audio_model = Gemma4AudioModel(config)
+        else:
+            self.vision_model = None
+            self.multi_modal_projector = None
+            self.audio_model = None
 
-        self.layers = nn.ModuleList([Gemma4DecoderLayer(config, layer_idx=idx) for idx in range(config.num_hidden_layers)])
+        self.layers = nn.ModuleList([
+            Gemma4DecoderLayer(config, layer_idx=idx) for idx in range(config.num_hidden_layers)
+        ])
         self.norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-        self.embed_tokens.weight = self.lm_head.weight  # Tie weights
+        if config.tie_word_embeddings:
+            self.embed_tokens.weight = self.lm_head.weight
 
     def get_per_layer_inputs(self, input_ids: torch.Tensor) -> torch.Tensor | None:
         """Compute token-identity Per-Layer Embeddings (PLE) when enabled.
@@ -223,7 +251,7 @@ class Gemma4ForCausalLM(nn.Module):
         """
         hidden_states = self.embed_tokens(input_ids) * self.embed_scale
 
-        if pixel_values is not None:
+        if pixel_values is not None and self.vision_model is not None and self.multi_modal_projector is not None:
             vision_outputs = self.vision_model(pixel_values)
             image_features = self.multi_modal_projector(vision_outputs)
             if image_token_mask is None:
@@ -236,7 +264,7 @@ class Gemma4ForCausalLM(nn.Module):
                 token_mask=image_token_mask,
             )
 
-        if audio_values is not None:
+        if audio_values is not None and self.audio_model is not None:
             audio_features = self.audio_model(audio_values)
             if audio_token_mask is None:
                 audio_token_id = self.config.audio_token_id if self.config.audio_token_id is not None else 255998
@@ -249,13 +277,30 @@ class Gemma4ForCausalLM(nn.Module):
             )
 
         curr_seq_len = hidden_states.shape[1]
+        past_seen = 0
+        if past_key_values is not None:
+            if isinstance(past_key_values, Cache):
+                past_seen = past_key_values.get_seq_length(0)
+            elif len(past_key_values) > 0:
+                past_seen = int(past_key_values[0][0].shape[-2])
         if position_ids is None or position_ids.shape[-1] != curr_seq_len:
-            position_ids = torch.arange(0, curr_seq_len, dtype=torch.long, device=hidden_states.device).unsqueeze(0).expand(hidden_states.shape[0], -1)
+            position_ids = (
+                torch
+                .arange(past_seen, past_seen + curr_seq_len, dtype=torch.long, device=hidden_states.device)
+                .unsqueeze(0)
+                .expand(hidden_states.shape[0], -1)
+            )
 
-        if attention_mask is not None and attention_mask.dim() == 2 and attention_mask.shape[1] != curr_seq_len:
-            diff = curr_seq_len - attention_mask.shape[1]
+        if (
+            attention_mask is not None
+            and attention_mask.dim() == 2
+            and attention_mask.shape[1] != (past_seen + curr_seq_len)
+        ):
+            diff = (past_seen + curr_seq_len) - attention_mask.shape[1]
             if diff > 0:
-                prefix_mask = torch.ones((attention_mask.shape[0], diff), dtype=attention_mask.dtype, device=attention_mask.device)
+                prefix_mask = torch.ones(
+                    (attention_mask.shape[0], diff), dtype=attention_mask.dtype, device=attention_mask.device
+                )
                 attention_mask = torch.cat([prefix_mask, attention_mask], dim=1)
 
         ple_tokens = self.get_per_layer_inputs(input_ids)
@@ -268,17 +313,18 @@ class Gemma4ForCausalLM(nn.Module):
         pivot = max(1, num_layers - kv_shared) if kv_shared > 0 else num_layers
 
         for idx, decoder_layer in enumerate(self.layers):
+            is_kv_shared_layer = bool(kv_shared > 0 and idx >= pivot and len(next_decoder_cache) > (idx % pivot))
+            layer_shared_kv: tuple[torch.Tensor, torch.Tensor] | None = None
             layer_past_key_value: tuple[torch.Tensor, torch.Tensor] | Cache | None
-            if past_key_values is None:
-                if kv_shared > 0 and idx >= pivot and len(next_decoder_cache) > (idx % pivot):
-                    layer_past_key_value = next_decoder_cache[idx % pivot]
-                else:
-                    layer_past_key_value = None
+            if is_kv_shared_layer:
+                layer_shared_kv = next_decoder_cache[idx % pivot]
+                layer_past_key_value = None
+            elif past_key_values is None:
+                layer_past_key_value = None
             elif isinstance(past_key_values, Cache):
                 layer_past_key_value = past_key_values
             else:
-                cache_idx = (idx % pivot) if (kv_shared > 0 and idx >= pivot) else idx
-                layer_past_key_value = past_key_values[cache_idx]
+                layer_past_key_value = past_key_values[idx]
 
             layer_ple = per_layer_inputs[:, :, idx, :] if per_layer_inputs is not None else None
             hidden_states, present_key_value, router_logits = decoder_layer(
@@ -287,6 +333,7 @@ class Gemma4ForCausalLM(nn.Module):
                 position_ids=position_ids,
                 past_key_value=layer_past_key_value,
                 per_layer_input=layer_ple,
+                shared_kv=layer_shared_kv,
             )
             next_decoder_cache.append(present_key_value)
             if router_logits is not None:
@@ -298,7 +345,11 @@ class Gemma4ForCausalLM(nn.Module):
                     )
                 )
 
-        self.last_aux_loss = torch.stack(aux_losses).mean() if aux_losses else None
+        if aux_losses:
+            aux_mean = torch.stack(aux_losses).mean()
+            self.last_aux_loss = aux_mean if torch.is_grad_enabled() else aux_mean.detach()
+        else:
+            self.last_aux_loss = None
         hidden_states = self.norm(hidden_states)
         logits = self.lm_head(hidden_states)
         softcap = self.config.final_logit_softcapping
@@ -312,10 +363,10 @@ class Gemma4ForCausalLM(nn.Module):
 
     def generate(
         self,
-        input_ids: torch.Tensor,
+        input_ids: torch.Tensor | TorchTensorProtocol,
         max_new_tokens: int = 128,
         min_new_tokens: int = 0,
-        **kwargs: float | bool | str | None,
+        **kwargs: float | bool | str | torch.Tensor | TorchTensorProtocol | None,
     ) -> torch.Tensor:
         """Generate text using autoregressive generation with DynamicCache KV caching.
 
@@ -329,11 +380,14 @@ class Gemma4ForCausalLM(nn.Module):
             Tensor of generated token IDs including prompt tokens.
 
         """
+        cur_ids = (
+            input_ids if isinstance(input_ids, torch.Tensor) else torch.as_tensor(input_ids.tolist(), dtype=torch.long)
+        )
         gen_cache: Cache | tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = DynamicCache()
         raw_eos = kwargs.get("eos_token_id", self.config.eos_token_id)
         eos_token_id = int(raw_eos) if isinstance(raw_eos, (int, float, str)) else None
         for i in range(max_new_tokens):
-            curr_input = input_ids if i == 0 else input_ids[:, -1:]
+            curr_input = cur_ids if i == 0 else cur_ids[:, -1:]
             call_res = self(
                 curr_input,
                 past_key_values=gen_cache,
@@ -345,10 +399,10 @@ class Gemma4ForCausalLM(nn.Module):
                 next_token_logits = next_token_logits.clone()
                 next_token_logits[:, eos_token_id] = float("-inf")
             next_tokens = torch.argmax(next_token_logits, dim=-1).unsqueeze(-1)
-            input_ids = torch.cat([input_ids, next_tokens], dim=-1)
+            cur_ids = torch.cat([cur_ids, next_tokens], dim=-1)
             if eos_token_id is not None and i >= min_new_tokens and bool((next_tokens == eos_token_id).all()):
                 break
-        return input_ids
+        return cur_ids
 
     @classmethod
     def from_pretrained(
@@ -375,9 +429,30 @@ class Gemma4ForCausalLM(nn.Module):
 
         """
         from pathlib import Path
+        from typing import Protocol, runtime_checkable
 
         from safetensors import SafetensorError
-        from safetensors.torch import load_file
+
+        from gemma_4_sql.backends.lazy_loader import import_optional_symbol
+
+        @runtime_checkable
+        class _SafetensorsLoadFileProtocol(Protocol):
+            """Protocol for `safetensors.torch.load_file(filename)`."""
+
+            def __call__(self, filename: str, /) -> dict[str, torch.Tensor]:
+                """Load a state dict from a `.safetensors` file.
+
+                Args:
+                    filename: Path to `.safetensors` file.
+
+                Returns:
+                    Mapping of parameter names to `torch.Tensor` values.
+
+                """
+                ...
+
+        load_file = import_optional_symbol("safetensors.torch", "load_file", _SafetensorsLoadFileProtocol)
+        assert load_file is not None
 
         _ = kwargs
         path = Path(str(model_name_or_path))
@@ -386,7 +461,7 @@ class Gemma4ForCausalLM(nn.Module):
             if config_json_path.is_file():
                 import json
 
-                with open(config_json_path) as f:
+                with open(config_json_path, encoding="utf-8") as f:
                     config_dict = json.load(f)
                 config = Gemma4Config(**config_dict)
             else:
@@ -412,7 +487,9 @@ class Gemma4ForCausalLM(nn.Module):
                 if strict:
                     from gemma_4_sql.exceptions import ExportError
 
-                    raise ExportError(f"Failed to load safetensors from '{weights_file}': {exc}", backend="pytorch", cause=exc) from exc
+                    raise ExportError(
+                        f"Failed to load safetensors from '{weights_file}': {exc}", backend="pytorch", cause=exc
+                    ) from exc
 
         return model
 
@@ -427,8 +504,26 @@ class Gemma4ForCausalLM(nn.Module):
 
         """
         from pathlib import Path
+        from typing import Protocol, runtime_checkable
 
-        from safetensors.torch import save_file
+        from gemma_4_sql.backends.lazy_loader import import_optional_symbol
+
+        @runtime_checkable
+        class _SafetensorsSaveFileProtocol(Protocol):
+            """Protocol for `safetensors.torch.save_file(tensors, filename)`."""
+
+            def __call__(self, tensors: dict[str, torch.Tensor], filename: str, /) -> None:
+                """Save a state dict to a `.safetensors` file.
+
+                Args:
+                    tensors: Mapping of parameter names to `torch.Tensor` values.
+                    filename: Destination `.safetensors` path.
+
+                """
+                ...
+
+        save_file = import_optional_symbol("safetensors.torch", "save_file", _SafetensorsSaveFileProtocol)
+        assert save_file is not None
 
         save_path = Path(save_directory)
         save_path.mkdir(parents=True, exist_ok=True)

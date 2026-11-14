@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pathlib
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -23,17 +22,39 @@ def test_keras_export_missing_dependency(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_export_model_keras_success(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
-    """Verify `export_model` saves a real Keras model to `model.keras` on disk and raises `ExportError` on load failure."""
-    import keras
-    from keras import ops
+    """Verify `export_model` saves a real Keras model to `model.keras` and raises `ExportError` on load failure."""
+    from tests.utils.tensor_helpers import TypedKerasModelInstanceProtocol, get_typed_keras, get_typed_keras_ops
+
+    keras = get_typed_keras()
+    ops = get_typed_keras_ops()
 
     real_model = keras.Sequential([keras.layers.Input(shape=(4,)), keras.layers.Dense(2)])
     x_sample = ops.ones((1, 4), dtype="float32")
     expected_out = ops.stop_gradient(real_model(x_sample))
 
-    mock_cls = MagicMock()
-    mock_cls.from_preset.return_value = real_model
-    monkeypatch.setattr(mod, "GemmaCausalLM", mock_cls)
+    preset_calls: list[str] = []
+    should_fail = False
+
+    class _PresetLoader:
+        """Typed `GemmaCausalLM` preset loader double."""
+
+        @classmethod
+        def from_preset(cls, model_name: str) -> TypedKerasModelInstanceProtocol:
+            """Record preset name and return `real_model` or raise `ValueError`.
+
+            Returns:
+                The prebuilt `real_model` Sequential instance.
+
+            Raises:
+                ValueError: If `should_fail` is True.
+
+            """
+            preset_calls.append(model_name)
+            if should_fail:
+                raise ValueError("fake error")
+            return real_model
+
+    monkeypatch.setattr(mod, "GemmaCausalLM", _PresetLoader)
 
     export_dir = tmp_path / "keras_export"
     res = mod.export_model("my_model", str(export_dir))
@@ -41,24 +62,24 @@ def test_export_model_keras_success(monkeypatch: pytest.MonkeyPatch, tmp_path: p
     assert res["format"] == "keras_v3/keras_tensor"
     saved_file = export_dir / "model.keras"
     assert saved_file.is_file()
-    mock_cls.from_preset.assert_called_with("my_model")
+    assert preset_calls == ["my_model"]
 
     reloaded_model = keras.saving.load_model(saved_file)
     assert callable(reloaded_model)
     reloaded_out = ops.stop_gradient(reloaded_model(x_sample))
     assert bool(ops.all(ops.isclose(reloaded_out, expected_out, atol=1e-5)))
 
-    # ValueError during preset loading raises ExportError (a ValueError & RuntimeError subclass)
-    mock_cls.from_preset.side_effect = ValueError("fake error")
+    # ValueError during preset loading raises ExportError
+    should_fail = True
     with pytest.raises(ExportError, match="Failed to load model my_model"):
         mod.export_model("my_model", str(export_dir))
 
     def _none_attr(*_a: str, **_k: str) -> None:
-        """Return None for optional_attr."""
+        """Return None for import_optional_symbol."""
         return
 
     # Missing GemmaCausalLM class raises ExportError
     monkeypatch.setattr(mod, "GemmaCausalLM", None)
-    monkeypatch.setattr(mod, "optional_attr", _none_attr)
+    monkeypatch.setattr(mod, "import_optional_symbol", _none_attr)
     with pytest.raises(ExportError, match="Failed to load model my_model"):
         mod.export_model("my_model", str(export_dir))

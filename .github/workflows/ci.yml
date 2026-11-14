@@ -7,6 +7,29 @@ on:
     branches: [master]
 
 jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install dependencies
+        run: uv sync --extra dev --extra duckdb --extra jax --extra keras --extra maxtext --extra pytorch
+      - name: Run Ruff lint check
+        run: uv run --no-sync ruff check src tests scripts
+      - name: Run Ruff format check
+        run: uv run --no-sync ruff format --check src tests scripts
+      - name: Check 100% docstring coverage
+        run: uv run --no-sync interrogate -v src/gemma_4_sql tests scripts --fail-under=100
+      - name: Run strict Pyright type checking
+        run: uv run --no-sync pyright
+      - name: Run ty type checking
+        run: uv run --no-sync ty check
+
   tox-matrix:
     strategy:
       matrix:
@@ -25,9 +48,9 @@ jobs:
             os: macos-latest
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install uv
@@ -35,7 +58,7 @@ jobs:
       - name: Run tests
         run: uvx --with tox-uv tox run -e ${{ matrix.env }}
       - name: Upload coverage slice
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: coverage-slice-${{ matrix.env }}
           path: .tox/.coverage.${{ matrix.env }}
@@ -43,16 +66,16 @@ jobs:
           if-no-files-found: error
 
   tox-coverage-aggregate:
-    needs: [tox-matrix]
+    needs: [lint-and-typecheck, tox-matrix]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - name: Set up Python 3.12
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Download coverage slices
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           pattern: coverage-slice-*
           path: .tox/

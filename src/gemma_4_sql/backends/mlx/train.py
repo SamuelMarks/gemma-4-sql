@@ -1,29 +1,84 @@
-"""MLX-specific training pipeline."""
+"""MLX-specific training pipeline without fake TypeGuards."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
-from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Protocol, SupportsFloat, runtime_checkable
 
-from gemma_4_sql._types_models import MlxLMLoadProtocol, StepResult
+from gemma_4_sql._types_models import MlxLMLoadProtocol, MlxNNLossesProtocol, ScalarItemExtractorProtocol, StepResult
+from gemma_4_sql._types_results import ETLBatchValue
 from gemma_4_sql.backends.common_train import (
     generic_run_training_epochs,
     resolve_training_dataloader,
     run_train_wrapper,
 )
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.backends.mlx.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
 from gemma_4_sql.type_hints import (
     ETLConfig,
+    JSONValue,
     MlxArrayProtocol,
     MlxCausalLMProtocol,
-    ScalarItemExtractorProtocol,
-    TensorType,
+    MlxTrainerState,
+    TensorProtocol,
     TrainingConfig,
-    TrainingLoopState,
     TrainResultDict,
 )
+
+type MlxGradTree = Mapping[str, "MlxArrayProtocol | MlxGradTree"]
+
+
+def _to_mlx_grad_tree(
+    node: StepResult | MlxGradTree | Mapping[str, TensorProtocol] | JSONValue,
+) -> dict[str, MlxArrayProtocol | MlxGradTree] | None:
+    """Recursively extract `MlxArrayProtocol` leaves and nested submodule dictionaries from a gradient tree.
+
+    Args:
+        node: Raw gradient mapping or leaf returned by `mlx.nn.value_and_grad`.
+
+    Returns:
+        Normalized nested `MlxGradTree` dictionary, or `None` when `node` is not a `Mapping`.
+
+    """
+    if isinstance(
+        node,
+        (MlxArrayProtocol, TensorProtocol, ScalarItemExtractorProtocol, SupportsFloat, Sequence),
+    ) or not isinstance(node, Mapping):
+        return None
+    out: dict[str, MlxArrayProtocol | MlxGradTree] = {}
+    for k, v in node.items():
+        if isinstance(v, MlxArrayProtocol):
+            out[str(k)] = v
+        else:
+            sub = _to_mlx_grad_tree(v)
+            if sub is not None:
+                out[str(k)] = sub
+    return out
+
+
+@runtime_checkable
+class _MlxParamLeafProtocol(Protocol):
+    """Structural protocol for MLX parameter tensors exposing `.shape`."""
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Provide tensor shape dimensions."""
+        ...
+
+
+@runtime_checkable
+class _MlxTrainModelProtocol(Protocol):
+    """Protocol for an MLX model exposing `.parameters()`."""
+
+    def parameters(
+        self,
+    ) -> Mapping[
+        str,
+        MlxArrayProtocol | _MlxParamLeafProtocol | Mapping[str, MlxArrayProtocol] | Sequence[MlxArrayProtocol],
+    ]:
+        """Return parameter dictionary."""
+        ...
 
 
 @runtime_checkable
@@ -31,72 +86,114 @@ class _MlxOptimizerProtocol(Protocol):
     """Protocol for an `mlx.optimizers` optimizer supporting `.update(model, grads)` and `.state`."""
 
     @property
-    def state(self) -> Mapping[str, MlxArrayProtocol]:
+    def state(self) -> Mapping[str, MlxArrayProtocol] | Sequence[MlxArrayProtocol]:
         """Provide the optimizer state dictionary."""
         ...
 
     def update(
         self,
-        model: MlxCausalLMProtocol,
-        grads: Mapping[str, MlxArrayProtocol],
+        model: MlxCausalLMProtocol | _MlxTrainModelProtocol,
+        grads: MlxGradTree,
         /,
     ) -> None:
-        """Apply gradients to `model` parameters."""
+        """Apply gradients to `model` parameters.
+
+        Args:
+            model: Trainable MLX model.
+            grads: Parameter gradient dictionary.
+
+        """
         ...
 
 
-type MlxTrainBatch = Mapping[str, TensorType | Sequence[int] | Sequence[Sequence[int]] | MlxArrayProtocol]
+type MlxTrainBatch = Mapping[str, ETLBatchValue | MlxArrayProtocol]
+type _MlxEvalArg = (
+    MlxArrayProtocol
+    | Mapping[str, MlxArrayProtocol | TensorProtocol | Mapping[str, MlxArrayProtocol | TensorProtocol]]
+    | Mapping[
+        str,
+        MlxArrayProtocol | _MlxParamLeafProtocol | Mapping[str, MlxArrayProtocol] | Sequence[MlxArrayProtocol],
+    ]
+    | Sequence[MlxArrayProtocol]
+    | None
+)
 
 
-def _is_mlx_loss_and_grad(
-    res: StepResult,
-) -> TypeGuard[tuple[MlxArrayProtocol | ScalarItemExtractorProtocol | SupportsFloat | float, Mapping[str, MlxArrayProtocol]]]:
-    """Narrow `loss_and_grad_fn` return value to `(loss, grads)`.
+@runtime_checkable
+class _MlxTrainCoreProtocol(Protocol):
+    """Protocol for `mlx.core` exposing `array` and `eval` in MLX training."""
 
-    Args:
-        res: Output from `loss_and_grad_fn`.
+    def array(self, val: ETLBatchValue | MlxArrayProtocol, /) -> MlxArrayProtocol:
+        """Convert batch sequences or arrays into an `MlxArrayProtocol`.
 
-    Returns:
-        `True` for `(loss, grads)` 2-tuples.
+        Args:
+            val: Batch token sequences or array.
 
-    """
-    return isinstance(res, tuple) and len(res) == 2
+        Returns:
+            Constructed `MlxArrayProtocol`.
 
+        """
+        ...
 
-def _is_mlx_item_loss(
-    val: MlxArrayProtocol | ScalarItemExtractorProtocol | SupportsFloat | float,
-) -> TypeGuard[ScalarItemExtractorProtocol]:
-    """Narrow `val` to `ScalarItemExtractorProtocol` for `.item()` extraction.
+    def eval(self, *args: _MlxEvalArg) -> None:
+        """Evaluate lazy MLX parameter and optimizer state graphs.
 
-    Args:
-        val: Loss tensor or scalar.
+        Args:
+            *args: Parameter trees, optimizer states, or arrays to materialize.
 
-    Returns:
-        `True` if `val` conforms to `ScalarItemExtractorProtocol`.
-
-    """
-    return isinstance(val, ScalarItemExtractorProtocol)
+        """
+        ...
 
 
-def _is_mlx_float_loss(
-    val: MlxArrayProtocol | ScalarItemExtractorProtocol | SupportsFloat | float,
-) -> TypeGuard[SupportsFloat | float]:
-    """Narrow `val` to `SupportsFloat | float`.
+@runtime_checkable
+class _MlxTrainNNProtocol(Protocol):
+    """Protocol for `mlx.nn` exposing `.losses` and `.value_and_grad`."""
 
-    Args:
-        val: Loss tensor or scalar.
+    @property
+    def losses(self) -> MlxNNLossesProtocol:
+        """Provide `mlx.nn.losses` namespace."""
+        ...
 
-    Returns:
-        `True` if `val` is a `float`, `int`, or `SupportsFloat`.
+    def value_and_grad[LossReturnT](
+        self,
+        model: MlxCausalLMProtocol | _MlxTrainModelProtocol,
+        fn: Callable[..., LossReturnT],
+        /,
+    ) -> Callable[..., tuple[LossReturnT, dict[str, MlxArrayProtocol]]]:
+        """Create a value-and-gradient callable with respect to `model`.
 
-    """
-    return isinstance(val, (float, int, SupportsFloat))
+        Args:
+            model: Trainable MLX model.
+            fn: Scalar loss function.
+
+        Returns:
+            Callable returning `(loss, grads)`.
+
+        """
+        ...
 
 
-mx = optional_import("mlx.core")
-nn = optional_import("mlx.nn")
-optim = optional_import("mlx.optimizers")
-load: MlxLMLoadProtocol | None = optional_attr(
+@runtime_checkable
+class _MlxTrainOptimModuleProtocol(Protocol):
+    """Protocol for `mlx.optimizers` exposing `AdamW`."""
+
+    def AdamW(self, *, learning_rate: float) -> _MlxOptimizerProtocol:
+        """Construct an `AdamW` MLX optimizer.
+
+        Args:
+            learning_rate: Optimizer learning rate.
+
+        Returns:
+            Configured `_MlxOptimizerProtocol`.
+
+        """
+        ...
+
+
+mx: _MlxTrainCoreProtocol | None = optional_import("mlx.core", _MlxTrainCoreProtocol)
+nn: _MlxTrainNNProtocol | None = optional_import("mlx.nn", _MlxTrainNNProtocol)
+optim: _MlxTrainOptimModuleProtocol | None = optional_import("mlx.optimizers", _MlxTrainOptimModuleProtocol)
+load: MlxLMLoadProtocol | None = import_optional_symbol(
     "mlx_lm",
     "load",
     MlxLMLoadProtocol,
@@ -104,46 +201,53 @@ load: MlxLMLoadProtocol | None = optional_attr(
 
 
 def _run_training_epochs[
-    ModelT: MlxCausalLMProtocol,
-    OptT: _MlxOptimizerProtocol,
+    ModelT: MlxCausalLMProtocol | _MlxTrainModelProtocol,
+    OptT,
     BatchT: MlxTrainBatch,
 ](
-    state: TrainingLoopState[ModelT, OptT, BatchT],
+    state: MlxTrainerState[ModelT, OptT, BatchT],
 ) -> float:
     """Run MLX supervised training epochs over the dataloader.
 
     Args:
-        state: `TrainingLoopState` holding model, optimizer, dataloader, and `value_and_grad` function.
+        state: `MlxTrainerState` holding model, optimizer, dataloader, and `loss_and_grad_fn` function.
 
     Returns:
         Mean batch loss from the final epoch.
 
     """
-    dataloader: Iterable[BatchT] = state.dataloader or ()
+    dataloader: Iterable[BatchT] = state.dataloader
     model = state.model
     optimizer = state.optimizer
-    loss_and_grad_fn = state.train_step
+    loss_and_grad_fn = state.loss_and_grad_fn
 
     def _step(batch: BatchT) -> float:
-        """Execute a single MLX supervised training step and return scalar float loss."""
+        """Execute a single MLX supervised training step and return scalar float loss.
+
+        Args:
+            batch: Supervised training batch mapping containing `'inputs'` and `'targets'`.
+
+        Returns:
+            Scalar float cross-entropy loss for the batch.
+
+        """
         assert mx is not None
-        assert model is not None
-        assert optimizer is not None
-        assert loss_and_grad_fn is not None
+        assert isinstance(optimizer, _MlxOptimizerProtocol)
         inputs = mx.array(batch["inputs"])
         targets = mx.array(batch["targets"])
         raw_out = loss_and_grad_fn(model, inputs, targets)
-        assert _is_mlx_loss_and_grad(raw_out)
-        (loss, grads) = raw_out
-        optimizer.update(model, grads)
+        assert isinstance(raw_out, tuple)
+        assert len(raw_out) == 2
+        loss, raw_grads = raw_out
+        grads_map: MlxGradTree = _to_mlx_grad_tree(raw_grads) or {}
+        optimizer.update(model, grads_map)
         mx.eval(model.parameters(), optimizer.state)
-        try:
-            raw_loss = loss
-            assert _is_mlx_item_loss(raw_loss)
-            return float(raw_loss.item())
-        except (AttributeError, TypeError, ValueError, AssertionError):
-            assert _is_mlx_float_loss(loss)
+        if isinstance(loss, MlxArrayProtocol):
+            raw_item = loss.item()
+            return float(raw_item.real) if isinstance(raw_item, complex) else float(raw_item)
+        if isinstance(loss, SupportsFloat):
             return float(loss)
+        return 0.0
 
     return generic_run_training_epochs(state.epochs, dataloader, _step)
 
@@ -213,12 +317,13 @@ def _execute_train(
         lambda: [{"inputs": [[1, 2, 3, 4]], "targets": [[2, 3, 4, 5]]}],
     )
     final_loss = _run_training_epochs(
-        TrainingLoopState(
+        MlxTrainerState(
             dataloader=dataloader,
             epochs=epochs,
             model=model,
             optimizer=optimizer,
-            train_step=loss_and_grad_fn,
+            loss_and_grad_fn=loss_and_grad_fn,
+            learning_rate=learning_rate,
         )
     )
     return "completed", float(final_loss)

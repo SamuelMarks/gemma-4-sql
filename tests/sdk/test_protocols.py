@@ -35,5 +35,7 @@ def test_registered_backends_conform_to_protocol(backend_name: str) -> None:
     for method in methods:
         assert callable(method)
         sig = inspect.signature(method)
-        assert "kwargs" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+        assert "kwargs" in sig.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
         assert sig.return_annotation != inspect.Signature.empty

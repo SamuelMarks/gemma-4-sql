@@ -16,7 +16,12 @@ def test_sdk_benchmark(monkeypatch: pytest.MonkeyPatch) -> None:
     requested_backends: list[str] = []
 
     def mock_get_backend(name: str) -> RecordingBackendDouble:
-        """Record backend name and return RecordingBackendDouble."""
+        """Record backend name and return RecordingBackendDouble.
+
+        Returns:
+            Configured `RecordingBackendDouble` instance.
+
+        """
         requested_backends.append(name)
         return double
 

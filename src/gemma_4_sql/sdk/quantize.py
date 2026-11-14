@@ -6,7 +6,9 @@ from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.type_hints import JSONValue, QuantizeResultDict
 
 
-def quantize_model(model_name: str, method: str = "int8", backend: str = "pytorch", **kwargs: JSONValue) -> QuantizeResultDict:
+def quantize_model(
+    model_name: str, method: str = "int8", backend: str = "pytorch", **kwargs: JSONValue
+) -> QuantizeResultDict:
     """Quantize a model using the specified quantization scheme and backend framework.
 
     Args:
@@ -16,7 +18,8 @@ def quantize_model(model_name: str, method: str = "int8", backend: str = "pytorc
         **kwargs: Additional backend-specific quantization options (e.g., `export_path`, `calibration_data`).
 
     Returns:
-        Structured `QuantizeResultDict` containing `backend`, `model`, `method`, `status`, and `memory_reduction_factor`.
+        Structured `QuantizeResultDict` containing `backend`, `model`, `method`, `status`,
+        and `memory_reduction_factor`.
 
     """
     return get_backend(backend).quantize_model(model_name, method, **kwargs)

@@ -42,7 +42,7 @@ def test_apply_peft_jax(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_apply_peft_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify apply_peft injects real NativeLoRALinear layers on pytorch_native and raises DependencyMissingError when HF peft is unavailable."""
+    """Verify apply_peft injects NativeLoRALinear on pytorch_native and checks missing HF peft."""
     import torch
 
     from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
@@ -65,13 +65,19 @@ def test_apply_peft_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res_native["status"] == "completed"
     assert int(res_native.get("injected_modules", 0)) >= 2
 
-    injected_count = inject_native_pytorch_lora(tiny_model, ["q_proj", "v_proj"], lora_r=4, lora_alpha=8, lora_dropout=0.0)
+    injected_count = inject_native_pytorch_lora(
+        tiny_model, ["q_proj", "v_proj"], lora_r=4, lora_alpha=8, lora_dropout=0.0
+    )
     assert injected_count >= 2
     lora_param_count = sum(p.numel() for p in tiny_model.parameters())
     assert lora_param_count > base_param_count
-    assert any(type(m).__name__ == "NativeLoRALinear" for _, m in tiny_model.named_modules())
-    out = tiny_model(torch.tensor([[1, 2, 3]], dtype=torch.long))
-    logits = out[0] if isinstance(out, tuple) else out
+    from collections.abc import Callable, Iterable
+
+    named_mods_fn: Callable[[torch.nn.Module], Iterable[tuple[str, torch.nn.Module]]] = vars(torch.nn.Module)[
+        "named_modules"
+    ]
+    assert any(type(m).__name__ == "NativeLoRALinear" for _, m in named_mods_fn(tiny_model))
+    logits, _ = tiny_model(torch.tensor([[1, 2, 3]], dtype=torch.long))
     assert logits.shape == (1, 3, tiny_cfg.vocab_size)
 
     monkeypatch.setattr("gemma_4_sql.backends.pytorch.peft.peft", None)
@@ -120,12 +126,12 @@ def test_apply_peft_keras(monkeypatch: pytest.MonkeyPatch) -> None:
         return FakeGemmaCausalLM
 
     monkeypatch.setattr(kpeft, "keras", DummyKerasSentinel())
-    monkeypatch.setattr(kpeft, "optional_attr", _resolve_fake_causal_lm)
+    monkeypatch.setattr(kpeft, "import_optional_symbol", _resolve_fake_causal_lm)
     res = apply_peft(model_name="test-model", backend="keras", lora_r=12)
     assert res["backend"] == "keras"
     assert res["target_modules"] == ["q_proj", "v_proj"]
     assert res["lora_r"] == 12
-    assert res["injected_modules"] == 2
+    assert res.get("injected_modules") == 2
     assert backbone_holder.backbone.enabled_rank == 12
 
 
@@ -193,11 +199,15 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
             return _TinyMlxArray(shape)
 
     class _TinyMlxCore:
-        """Minimal `mlx.core` double providing `zeros` and `random.uniform`."""
+        """Minimal `mlx.core` double providing `array`, `zeros`, and `random.uniform`."""
 
         def __init__(self) -> None:
             """Initialize random namespace."""
             self.random = _TinyMlxRandom()
+
+        def array(self, val: _TinyMlxArray) -> _TinyMlxArray:
+            """Return `val` unchanged."""
+            return val
 
         def zeros(self, shape: tuple[int, ...]) -> _TinyMlxArray:
             """Return a zero-initialized `_TinyMlxArray`."""
@@ -212,7 +222,12 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
             self.bias: _TinyMlxArray | None = None
 
         def __call__(self, x: _TinyMlxArray) -> _TinyMlxArray:
-            """Project `x` by `weight.T`."""
+            """Project `x` by `weight.T`.
+
+            Returns:
+                Projected `_TinyMlxArray`.
+
+            """
             return x @ self.weight.T
 
     class _TinyIdentity:
@@ -243,7 +258,12 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
         lora_alpha: float = 16.0,
         lora_dropout: float = 0.05,
     ) -> tuple[DummyMlxModel, int]:
-        """Record target modules and return injected count."""
+        """Record target modules and return injected count.
+
+        Returns:
+            Tuple of `(model, injected_count)`.
+
+        """
         _ = (lora_r, lora_alpha, lora_dropout)
         injected_targets.extend(target_modules)
         return (model, len(target_modules))
@@ -259,7 +279,7 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
     res = apply_peft(model_name="test-model", target_modules=["k_proj"], backend="mlx")
     assert res["backend"] == "mlx"
     assert res["target_modules"] == ["k_proj"]
-    assert res["injected_modules"] == 1
+    assert res.get("injected_modules") == 1
     assert injected_targets == ["k_proj"]
 
     monkeypatch.setattr(mpeft, "inject_lora", orig_inject_lora)
@@ -274,7 +294,12 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
             self["v_proj"] = _TinyLinear(8, 8)
 
         def __call__(self, x: _TinyMlxArray) -> _TinyMlxArray:
-            """Compute sum of `q_proj` and `v_proj`."""
+            """Compute sum of `q_proj` and `v_proj`.
+
+            Returns:
+                Combined projection output array.
+
+            """
             return self["q_proj"](x) + self["v_proj"](x)
 
     class _TinyMlxModel(dict[str, _TinyMlxAttn]):
@@ -286,12 +311,22 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
             self["attn"] = _TinyMlxAttn()
 
         def named_modules(self) -> list[tuple[str, _TinyLinear | MLXLoRALinear]]:
-            """Yield dotted module paths for `q_proj` and `v_proj`."""
+            """Collect dotted module paths for `q_proj` and `v_proj`.
+
+            Returns:
+                List of `(module_path, layer)` pairs.
+
+            """
             attn = self["attn"]
             return [("attn.q_proj", attn["q_proj"]), ("attn.v_proj", attn["v_proj"])]
 
         def __call__(self, x: _TinyMlxArray) -> _TinyMlxArray:
-            """Forward through nested attention block."""
+            """Forward through nested attention block.
+
+            Returns:
+                Attention output array.
+
+            """
             return self["attn"](x)
 
     tiny_mlx = _TinyMlxModel()
@@ -316,7 +351,7 @@ def test_apply_peft_mlx(monkeypatch: pytest.MonkeyPatch) -> None:
         backend="mlx",
     )
     assert res_real["backend"] == "mlx"
-    assert res_real["injected_modules"] == 2
+    assert res_real.get("injected_modules") == 2
     q_lora = tiny_mlx["attn"]["q_proj"]
     v_lora = tiny_mlx["attn"]["v_proj"]
     assert isinstance(q_lora, MLXLoRALinear)

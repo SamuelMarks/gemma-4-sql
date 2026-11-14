@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import jax.numpy as jnp
 import pytest
 from flax import nnx
 
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
@@ -24,7 +24,12 @@ from gemma_4_sql.backends.jax.gemma4.vision import (
 
 
 def _make_vision_config() -> VisionConfig:
-    """Construct a small VisionConfig for unit tests."""
+    """Construct a small VisionConfig for unit tests.
+
+    Returns:
+        A minimal `VisionConfig` instance.
+
+    """
     return VisionConfig(
         image_size=32,
         patch_size=16,
@@ -38,7 +43,12 @@ def _make_vision_config() -> VisionConfig:
 
 
 def _make_audio_config() -> AudioConfig:
-    """Construct a small AudioConfig for unit tests."""
+    """Construct a small AudioConfig for unit tests.
+
+    Returns:
+        A minimal `AudioConfig` instance.
+
+    """
     return AudioConfig(
         hidden_size=16,
         output_proj_dims=16,
@@ -52,7 +62,12 @@ def _make_model_config(
     with_audio: bool = True,
     mm_tokens_per_image: int = 4,
 ) -> ModelConfig:
-    """Construct a small ModelConfig with optional vision and audio configs."""
+    """Construct a small ModelConfig with optional vision and audio configs.
+
+    Returns:
+        A minimal `ModelConfig` configured with the requested modalities.
+
+    """
     cfg = ModelConfig(
         hidden_size=16,
         dtype=jnp.float32,

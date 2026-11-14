@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.cli_misc import print_cli_error
+from gemma_4_sql.cli_protocols import ETLArgsProtocol
 from gemma_4_sql.exceptions import GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
 from gemma_4_sql.type_hints import DataloaderResultDict, ETLConfig
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 @runtime_checkable
 class ETLMultimodalCLIArgsProtocol(Protocol):
-    """Protocol for parsed ETL CLI arguments carrying multimodal column flags."""
+    """Protocol for parsed ETL CLI arguments carrying multimodal column and file path flags."""
 
     @property
     def image_column(self) -> str | None:
@@ -33,6 +34,21 @@ class ETLMultimodalCLIArgsProtocol(Protocol):
     @property
     def modality(self) -> str | None:
         """Provide explicit modality selector."""
+        ...
+
+
+@runtime_checkable
+class ETLMediaPathsCLIArgsProtocol(Protocol):
+    """Protocol for parsed ETL CLI arguments carrying `--image-path` and `--audio-path` flags."""
+
+    @property
+    def image_path(self) -> str | None:
+        """Provide optional image file path."""
+        ...
+
+    @property
+    def audio_path(self) -> str | None:
+        """Provide optional audio file path."""
         ...
 
 
@@ -68,7 +84,7 @@ def _format_etl_error(err: GemmaSQLError, config: ETLConfig, backend: str) -> in
     )
 
 
-def _run_etl_stage(args: argparse.Namespace, stage_fn: Callable[..., DataloaderResultDict]) -> int:
+def _run_etl_stage(args: ETLArgsProtocol | argparse.Namespace, stage_fn: Callable[..., DataloaderResultDict]) -> int:
     """Construct an `ETLConfig` from CLI args, invoke `stage_fn`, and print the JSON result.
 
     Args:
@@ -79,6 +95,9 @@ def _run_etl_stage(args: argparse.Namespace, stage_fn: Callable[..., DataloaderR
         Exit code `0` on success, or `1` if ETL fails.
 
     """
+    modality = str((args.modality if isinstance(args, ETLMultimodalCLIArgsProtocol) else "text") or "text")
+    raw_img_path = args.image_path if isinstance(args, ETLMediaPathsCLIArgsProtocol) else None
+    raw_aud_path = args.audio_path if isinstance(args, ETLMediaPathsCLIArgsProtocol) else None
     config = ETLConfig(
         dataset_name=args.dataset,
         split=args.split,
@@ -89,7 +108,9 @@ def _run_etl_stage(args: argparse.Namespace, stage_fn: Callable[..., DataloaderR
         duckdb_table=args.duckdb_table,
         image_column=args.image_column if isinstance(args, ETLMultimodalCLIArgsProtocol) else None,
         audio_column=args.audio_column if isinstance(args, ETLMultimodalCLIArgsProtocol) else None,
-        modality=str((args.modality if isinstance(args, ETLMultimodalCLIArgsProtocol) else "text") or "text"),
+        image_path=None if modality == "audio" else raw_img_path,
+        audio_path=None if modality == "vision" else raw_aud_path,
+        modality=modality,
     )
     try:
         res = stage_fn(config, backend=args.backend)
@@ -99,7 +120,7 @@ def _run_etl_stage(args: argparse.Namespace, stage_fn: Callable[..., DataloaderR
     return 1 if is_failed_status(res) else 0
 
 
-def etl_pretrain_cmd(args: argparse.Namespace) -> int:
+def etl_pretrain_cmd(args: ETLArgsProtocol | argparse.Namespace) -> int:
     """Run ETL for pretraining.
 
     Args:
@@ -112,7 +133,7 @@ def etl_pretrain_cmd(args: argparse.Namespace) -> int:
     return _run_etl_stage(args, etl_pretrain)
 
 
-def etl_sft_cmd(args: argparse.Namespace) -> int:
+def etl_sft_cmd(args: ETLArgsProtocol | argparse.Namespace) -> int:
     """Run ETL for SFT.
 
     Args:
@@ -125,7 +146,7 @@ def etl_sft_cmd(args: argparse.Namespace) -> int:
     return _run_etl_stage(args, etl_sft)
 
 
-def etl_posttrain_cmd(args: argparse.Namespace) -> int:
+def etl_posttrain_cmd(args: ETLArgsProtocol | argparse.Namespace) -> int:
     """Run ETL for post-training.
 
     Args:

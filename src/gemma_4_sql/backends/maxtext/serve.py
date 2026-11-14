@@ -6,12 +6,13 @@ import logging
 
 from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
 from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.backends.maxtext._protocols import JaxDistributedHolderProtocol
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
 
 logger = logging.getLogger(__name__)
 
-jax = optional_import("jax")
+jax: JaxDistributedHolderProtocol | None = optional_import("jax", JaxDistributedHolderProtocol)
 gemma4 = optional_import("maxtext.models.gemma4")
 
 
@@ -36,7 +37,16 @@ def _create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol
             logger.warning("jax.distributed.initialize() failed: %s", e)
 
     def _call_maxtext_generate(model_name: str, prompt: str) -> JSONDict:
-        """Delegate single-prompt generation to `maxtext.inference.generate_sql`."""
+        """Delegate single-prompt generation to `maxtext.inference.generate_sql`.
+
+        Args:
+            model_name: Target model name.
+            prompt: Input SQL prompt string.
+
+        Returns:
+            JSON-compatible dictionary containing generated SQL metadata.
+
+        """
         from gemma_4_sql.backends.maxtext.inference import generate_sql
 
         res = generate_sql(model_name=model_name, prompt=prompt)

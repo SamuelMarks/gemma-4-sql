@@ -6,9 +6,10 @@ import math
 from collections.abc import Callable
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
 from jax import Array
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 from .attention import Gemma4Attention
 from .audio import (
@@ -27,13 +28,40 @@ from .audio import (
     rel_shift,
 )
 from .cache import GEMMA4_ATTENTION_PATTERN, Cache
-from .config import AttentionType, AudioConfig, ModelConfig, ModelConfigPresets, ShardConfig, ShardMode, VisionConfig, VisionShardConfig
+from .config import (
+    AttentionType,
+    AudioConfig,
+    ModelConfig,
+    ModelConfigPresets,
+    ShardConfig,
+    ShardMode,
+    VisionConfig,
+    VisionShardConfig,
+)
 from .decoder_layer import Gemma4DecoderLayer
-from .layers import ConstVar, Gemma4ClippableLinear, Gemma4MLP, Gemma4RMSNorm, LinearLayerProtocol, StatVar, make_embed, make_linear
+from .layers import (
+    ConstVar,
+    Gemma4ClippableLinear,
+    Gemma4MLP,
+    Gemma4RMSNorm,
+    LinearLayerProtocol,
+    StatVar,
+    make_embed,
+    make_linear,
+)
 from .moe import Gemma4MoE, Gemma4RoutedExperts
 from .multimodal import MultimodalInputs, batched_merge_modalities
 from .params import create_gemma4_from_pretrained
-from .vision import Gemma4MultimodalEmbedder, Gemma4MultiModalProjector, SiglipAttention, SiglipEncoderLayer, SiglipMLP, SiglipVisionEmbeddings, SiglipVisionTransformer, avg_pool_vision_outputs
+from .vision import (
+    Gemma4MultimodalEmbedder,
+    Gemma4MultiModalProjector,
+    SiglipAttention,
+    SiglipEncoderLayer,
+    SiglipMLP,
+    SiglipVisionEmbeddings,
+    SiglipVisionTransformer,
+    avg_pool_vision_outputs,
+)
 
 __all__ = [
     "AttentionType",
@@ -100,14 +128,41 @@ class Gemma4Model(nnx.Module):
         self.embed_tokens = make_embed(config.vocab_size, config.hidden_size, embedding_metadata={}, rngs=rngs)
         self.embed_scale = float(math.sqrt(config.hidden_size))
         if config.hidden_size_per_layer_input:
-            vocab_size_per_layer = config.vocab_size_per_layer_input if config.vocab_size_per_layer_input is not None else config.vocab_size
-            self.embed_tokens_per_layer = make_embed(vocab_size_per_layer, config.num_hidden_layers * config.hidden_size_per_layer_input, embedding_metadata={}, rngs=rngs)
+            vocab_size_per_layer = (
+                config.vocab_size_per_layer_input
+                if config.vocab_size_per_layer_input is not None
+                else config.vocab_size
+            )
+            self.embed_tokens_per_layer = make_embed(
+                vocab_size_per_layer,
+                config.num_hidden_layers * config.hidden_size_per_layer_input,
+                embedding_metadata={},
+                rngs=rngs,
+            )
             self.per_layer_input_scale = 2.0 ** (-0.5)
-            self.per_layer_model_projection = make_linear(config.hidden_size, config.num_hidden_layers * config.hidden_size_per_layer_input, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+            self.per_layer_model_projection = make_linear(
+                config.hidden_size,
+                config.num_hidden_layers * config.hidden_size_per_layer_input,
+                use_bias=False,
+                kernel_metadata={},
+                bias_metadata={},
+                rngs=rngs,
+            )
             self.per_layer_model_projection_scale = config.hidden_size ** (-0.5)
-            self.per_layer_projection_norm = Gemma4RMSNorm(config.hidden_size_per_layer_input, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
-        self.layers = nnx.List([Gemma4DecoderLayer(config, GEMMA4_ATTENTION_PATTERN[i % len(GEMMA4_ATTENTION_PATTERN)], rngs=rngs) for i in range(config.num_hidden_layers)])
-        self.norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
+            self.per_layer_projection_norm = Gemma4RMSNorm(
+                config.hidden_size_per_layer_input,
+                eps=config.rms_norm_eps,
+                dtype=config.dtype,
+                _shd=shd.norm,
+                rngs=rngs,
+            )
+        self.layers = nnx.List([
+            Gemma4DecoderLayer(config, GEMMA4_ATTENTION_PATTERN[i % len(GEMMA4_ATTENTION_PATTERN)], rngs=rngs)
+            for i in range(config.num_hidden_layers)
+        ])
+        self.norm = Gemma4RMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs
+        )
 
     def inject_lora_projections(
         self,
@@ -143,7 +198,9 @@ class Gemma4Model(nnx.Module):
             return input_ids
         ple = self.embed_tokens_per_layer(input_ids) * float(self.config.hidden_size_per_layer_input) ** 0.5
         (batch_size, seq_len, _) = ple.shape
-        res: Array = ple.reshape(batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input)
+        res: Array = ple.reshape(
+            batch_size, seq_len, self.config.num_hidden_layers, self.config.hidden_size_per_layer_input
+        )
         return res
 
     def project_per_layer_inputs(self, inputs_embeds: Array, per_layer_inputs: Array | None = None) -> Array:
@@ -197,11 +254,21 @@ class Gemma4Model(nnx.Module):
         num_layers = len(self.layers)
         kv_shared = int(self.config.num_kv_shared_layers or 0)
         pivot = max(1, num_layers - kv_shared) if kv_shared > 0 else num_layers
+        layer_kvs: list[tuple[Array, Array]] = []
         for i, layer in enumerate(self.layers):
-            cache_idx = (i % pivot) if (kv_shared > 0 and i >= pivot) else i
-            layer_cache = cache[cache_idx] if cache is not None else None
+            is_kv_shared = bool(kv_shared > 0 and i >= pivot and len(layer_kvs) > (i % pivot))
+            layer_shared_kv = layer_kvs[i % pivot] if is_kv_shared else None
+            layer_cache = None if is_kv_shared else (cache[i] if cache is not None else None)
             layer_ple = per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
-            x = layer(x, positions, layer_cache, attention_mask=attention_mask, per_layer_input=layer_ple)
+            (x, present_kv) = layer.forward_with_kv(
+                x,
+                positions,
+                layer_cache,
+                attention_mask=attention_mask,
+                per_layer_input=layer_ple,
+                shared_kv=layer_shared_kv,
+            )
+            layer_kvs.append(present_kv)
         return self.norm(x)
 
 
@@ -216,10 +283,25 @@ def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = 
         Instantiated `Gemma4ForCausalLM` model with loaded weights.
 
     Raises:
+        ImportError: If `huggingface_hub` is not installed.
         ValueError: If `model_name` is unknown and `config` is not provided.
 
     """
-    from huggingface_hub import snapshot_download
+    from typing import Protocol, runtime_checkable
+
+    from gemma_4_sql.backends.lazy_loader import optional_import
+
+    @runtime_checkable
+    class _HuggingFaceHubProtocol(Protocol):
+        """Protocol for `huggingface_hub` exposing `snapshot_download`."""
+
+        def snapshot_download(self, *, repo_id: str, allow_patterns: str) -> str:
+            """Download repository snapshot and return local path."""
+            ...
+
+    hf_hub = optional_import("huggingface_hub", _HuggingFaceHubProtocol)
+    if hf_hub is None:
+        raise ImportError("huggingface_hub.snapshot_download is not available.")
 
     if config is None:
         config_map: dict[str, Callable[[], ModelConfig]] = {
@@ -238,13 +320,14 @@ def _download_and_load_pretrained(model_name: str, config: ModelConfig | None = 
         resolved_config = config_map[model_name]()
     else:
         resolved_config = config
-    model_ckpt_path = snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
+    model_ckpt_path = hf_hub.snapshot_download(repo_id=model_name, allow_patterns="*.safetensors")
     return create_gemma4_from_pretrained(model_ckpt_path, resolved_config)
 
 
 class Gemma4ForCausalLM(nnx.Module):
     """Gemma 4 model with a language modeling head and optional vision/audio towers."""
 
+    lm_head: LinearLayerProtocol
     vision_tower: SiglipVisionTransformer | None
     multi_modal_projector: Gemma4MultiModalProjector | None
     audio_tower: Gemma4AudioModel | None
@@ -274,7 +357,13 @@ class Gemma4ForCausalLM(nnx.Module):
         """
         self.config = config
         self.model = Gemma4Model(config, rngs=rngs)
-        self.lm_head = make_linear(config.hidden_size, config.vocab_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.lm_head = make_linear(
+            config.hidden_size, config.vocab_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs
+        )
+        if config.tie_word_embeddings:
+            self.lm_head.kernel.value = self.model.embed_tokens.embedding.value.T.astype(
+                self.lm_head.kernel.value.dtype
+            )
         self.vision_tower = SiglipVisionTransformer(config.vision_config, rngs=rngs) if config.vision_config else None
         self.multi_modal_projector = Gemma4MultiModalProjector(config, rngs=rngs) if config.vision_config else None
         self.audio_tower = Gemma4AudioModel(config.audio_config, rngs=rngs) if config.audio_config else None
@@ -288,7 +377,7 @@ class Gemma4ForCausalLM(nnx.Module):
         target_modules: list[str],
         adapter_factory: Callable[[nnx.Linear], LinearLayerProtocol],
     ) -> int:
-        """Delegate LoRA projection wrapping to the inner `Gemma4Model` trunk.
+        """Delegate linear projection wrapping to the inner `Gemma4Model` trunk and optional `lm_head`.
 
         Args:
             target_modules: List of target projection names to wrap.
@@ -298,7 +387,11 @@ class Gemma4ForCausalLM(nnx.Module):
             Total number of projections wrapped across the model.
 
         """
-        return self.model.inject_lora_projections(target_modules, adapter_factory)
+        injected = self.model.inject_lora_projections(target_modules, adapter_factory)
+        if "lm_head" in target_modules and isinstance(self.lm_head, nnx.Linear):
+            self.lm_head = adapter_factory(self.lm_head)
+            injected += 1
+        return injected
 
     @staticmethod
     def _merge_multimodal_features(
@@ -342,10 +435,20 @@ class Gemma4ForCausalLM(nnx.Module):
         inputs_embeds = self.model.embed_tokens(inputs.input_ids) * self.model.embed_scale
         image_features = None
         audio_features = None
-        if has_vision and self.vision_tower is not None and self.multi_modal_projector is not None and inputs.pixel_values is not None:
+        if (
+            has_vision
+            and self.vision_tower is not None
+            and self.multi_modal_projector is not None
+            and inputs.pixel_values is not None
+        ):
             vision_outputs = self.vision_tower(inputs.pixel_values)
             image_features = self.multi_modal_projector(vision_outputs)
-        if has_audio and self.audio_tower is not None and self.embed_audio is not None and inputs.input_features is not None:
+        if (
+            has_audio
+            and self.audio_tower is not None
+            and self.embed_audio is not None
+            and inputs.input_features is not None
+        ):
             audio_outputs = self.audio_tower(inputs.input_features, inputs.input_features_mask)
             audio_features = self.embed_audio(audio_outputs)
         inputs_embeds = self._merge_multimodal_features(inputs_embeds, image_features, audio_features, inputs)
@@ -380,11 +483,21 @@ class Gemma4ForCausalLM(nnx.Module):
         num_layers = len(self.model.layers)
         kv_shared = int(self.config.num_kv_shared_layers or 0)
         pivot = max(1, num_layers - kv_shared) if kv_shared > 0 else num_layers
+        layer_kvs: list[tuple[Array, Array]] = []
         for i, layer in enumerate(self.model.layers):
-            cache_idx = (i % pivot) if (kv_shared > 0 and i >= pivot) else i
-            layer_cache = cache[cache_idx] if cache is not None else None
+            is_kv_shared = bool(kv_shared > 0 and i >= pivot and len(layer_kvs) > (i % pivot))
+            layer_shared_kv = layer_kvs[i % pivot] if is_kv_shared else None
+            layer_cache = None if is_kv_shared else (cache[i] if cache is not None else None)
             layer_ple = per_layer_inputs[:, :, i, :] if per_layer_inputs is not None else None
-            hidden_states = layer(hidden_states, positions, layer_cache, attention_mask=attention_mask, per_layer_input=layer_ple)
+            (hidden_states, present_kv) = layer.forward_with_kv(
+                hidden_states,
+                positions,
+                layer_cache,
+                attention_mask=attention_mask,
+                per_layer_input=layer_ple,
+                shared_kv=layer_shared_kv,
+            )
+            layer_kvs.append(present_kv)
         return self.model.norm(hidden_states)
 
     @jax.named_scope("gemma4_causal_lm")
@@ -430,7 +543,11 @@ class Gemma4ForCausalLM(nnx.Module):
             attention_mask=attention_mask,
         )
         (inputs_embeds, is_multimodal) = self._process_multimodal(mm_inputs)
-        hidden_states = self._apply_layers_multimodal(inputs_embeds, mm_inputs, positions, cache) if is_multimodal and inputs_embeds is not None else self.model(input_ids, positions, cache, attention_mask=attention_mask)
+        hidden_states = (
+            self._apply_layers_multimodal(inputs_embeds, mm_inputs, positions, cache)
+            if is_multimodal and inputs_embeds is not None
+            else self.model(input_ids, positions, cache, attention_mask=attention_mask)
+        )
         logits = self.lm_head(hidden_states)
         if self.config.final_logit_softcapping is not None:
             logits /= self.config.final_logit_softcapping
@@ -452,7 +569,21 @@ def _default_jit[FnT](x: FnT) -> FnT:
     return x
 
 
-@nnx.jit
+def _nnx_jit_decorator[FnT](fn: FnT) -> FnT:
+    """Apply `nnx.jit` to `fn` while preserving its static signature.
+
+    Args:
+        fn: Function to compile with `nnx.jit`.
+
+    Returns:
+        `nnx.jit`-compiled function.
+
+    """
+    jit_fn: Callable[[FnT], FnT] = vars(nnx)["jit"]
+    return jit_fn(fn)
+
+
+@_nnx_jit_decorator
 def forward(
     model: Gemma4ForCausalLM,
     cache: Cache,

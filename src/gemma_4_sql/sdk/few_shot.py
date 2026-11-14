@@ -1,10 +1,11 @@
-"""SDK Few-Shot module for dynamic prompting."""
+"""SDK Few-Shot module for dynamic prompting and multimodal few-shot SQL generation."""
 
 from __future__ import annotations
 
 import logging
 
 from gemma_4_sql.constants import DEFAULT_BACKEND
+from gemma_4_sql.sdk.registry import get_backend, validate_backend_name
 from gemma_4_sql.sdk.sql_lexer import extract_word_tokens
 from gemma_4_sql.type_hints import (
     FewShotPromptResultDict,
@@ -15,6 +16,8 @@ from gemma_4_sql.type_hints import (
 )
 
 logger = logging.getLogger(__name__)
+_NL = """
+"""
 
 
 def select_relevant_examples(
@@ -30,7 +33,7 @@ def select_relevant_examples(
 
     Args:
         prompt: Target natural language question.
-        example_pool: Candidate pool of demonstration examples with 'input' and 'output' keys.
+        example_pool: Candidate pool of demonstration examples with `'input'` and `'output'` keys.
         top_k: Maximum number of examples to select.
         max_tokens: Approximate maximum token budget (1 token ~= 4 chars).
 
@@ -44,7 +47,15 @@ def select_relevant_examples(
     prompt_words = set(extract_word_tokens(prompt))
 
     def _score(ex: dict[str, str]) -> float:
-        """Compute keyword overlap fraction between example input and prompt."""
+        """Compute keyword overlap fraction between example input and prompt.
+
+        Args:
+            ex: Demonstration example dictionary.
+
+        Returns:
+            Normalized overlap score in `[0.0, 1.0]`.
+
+        """
         ex_words = set(extract_word_tokens(ex.get("input", "")))
         overlap = len(prompt_words.intersection(ex_words))
         return float(overlap) / max(1.0, float(len(ex_words)))
@@ -72,26 +83,34 @@ def build_few_shot_prompt(
     *,
     top_k: int | None = None,
     max_tokens: int = 2048,
+    image_path: str | None = None,
+    audio_path: str | None = None,
+    modality: str = "text",
     **_kwargs: JSONValue,
 ) -> FewShotPromptResultDict:
-    """Build a dynamic few-shot prompt with optional example selection.
+    """Build a dynamic few-shot prompt with lightweight backend validation and multimodal placeholders.
 
     Args:
         model_name: The name of the target model.
         prompt: The input text prompt.
-        examples: A sequence of examples.
-        backend: The backend framework to use.
+        examples: A sequence of demonstration examples.
+        backend: The backend framework identifier.
         top_k: Optional maximum number of examples to select.
         max_tokens: Approximate token budget for examples.
-        **_kwargs: Optional parameters for prompt formatting.
+        image_path: Optional path to a schema diagram or ERD image.
+        audio_path: Optional path to a recorded query audio file.
+        modality: Explicit modality selector (`'text'`, `'vision'`, `'audio'`, `'multimodal'`).
+        **_kwargs: Optional parameters reserved for forward compatibility.
 
     Returns:
         A structured `FewShotPromptResultDict` containing the formatted prompt.
 
-    """
-    from gemma_4_sql.sdk.registry import get_backend
+    Raises:
+        ConfigurationError: If `backend` is not a registered backend identifier.
 
-    get_backend(backend)
+    """
+    validate_backend_name(backend)
+    active_examples: list[dict[str, str]]
     if top_k is not None and top_k > 0:
         active_examples = select_relevant_examples(prompt, examples, top_k=top_k, max_tokens=max_tokens)
     elif examples:
@@ -107,12 +126,25 @@ def build_few_shot_prompt(
         active_examples = []
 
     status = f"success_{backend}_few_shot"
-    nl = chr(10)
-    formatted_examples = nl.join([f"Input: {ex.get('input', '')}{nl}Output: {ex.get('output', '')}" for ex in active_examples])
+    formatted_examples = _NL.join([
+        f"Input: {ex.get('input', '')}{_NL}Output: {ex.get('output', '')}" for ex in active_examples
+    ])
     if formatted_examples:
-        full_prompt = f"{formatted_examples}{nl}Input: {prompt}{nl}Output: "
+        full_prompt = f"{formatted_examples}{_NL}Input: {prompt}{_NL}Output: "
     else:
-        full_prompt = f"Input: {prompt}{nl}Output: "
+        full_prompt = f"Input: {prompt}{_NL}Output: "
+
+    effective_img = None if modality == "audio" else image_path
+    effective_aud = None if modality == "vision" else audio_path
+    if effective_img is not None or effective_aud is not None:
+        from gemma_4_sql.backends.common_multimodal import format_multimodal_prompt
+
+        mm = format_multimodal_prompt(
+            full_prompt,
+            has_image=effective_img is not None,
+            has_audio=effective_aud is not None,
+        )
+        full_prompt = str(mm.get("prompt", full_prompt))
 
     return {
         "backend": backend,
@@ -147,6 +179,14 @@ def generate_few_shot_sql(
         Dictionary containing generation output, confidence score, and used prompt.
 
     """
+    call_kwargs = dict(kwargs)
+    raw_img = call_kwargs.get("image_path")
+    raw_aud = call_kwargs.get("audio_path")
+    raw_mod = call_kwargs.get("modality")
+    img_path = str(raw_img) if isinstance(raw_img, str) else None
+    aud_path = str(raw_aud) if isinstance(raw_aud, str) else None
+    mod_str = str(raw_mod) if isinstance(raw_mod, str) else "text"
+
     prompt_res = build_few_shot_prompt(
         model_name=model_name,
         prompt=prompt,
@@ -154,13 +194,13 @@ def generate_few_shot_sql(
         backend=backend,
         top_k=top_k,
         max_tokens=max_tokens,
+        image_path=img_path,
+        audio_path=aud_path,
+        modality=mod_str,
     )
     few_shot_prompt = str(prompt_res["few_shot_prompt"])
 
-    from gemma_4_sql.sdk.registry import get_backend
-
     backend_impl = get_backend(backend)
-    call_kwargs = dict(kwargs)
     beam_width = extract_int_kwarg(call_kwargs, "beam_width", 3)
     max_length = extract_int_kwarg(call_kwargs, "max_length", 50)
     call_kwargs.pop("beam_width", None)

@@ -7,33 +7,37 @@ from typing import Protocol, SupportsFloat, runtime_checkable
 
 import jax
 import jax.nn as jnn
-import jax.numpy as jnp
 import optax
 from flax import nnx
 from jax import Array
 
+from gemma_4_sql._types_tensors import extract_scalar_float
+from gemma_4_sql.backends._jax_common import (
+    NNXOptimizerProtocol,
+    call_jax_causal_lm,
+    gather_jax_sequence_logps,
+)
+from gemma_4_sql.backends._jax_common import (
+    apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
+)
 from gemma_4_sql.backends.common_dpo import (
     ArithmeticTensorProtocol,
     ScalarItemProtocol,
-    gather_jax_sequence_logps,
     generic_dpo_loss,
     run_dpo_wrapper,
 )
-from gemma_4_sql.backends.common_inference import call_jax_causal_lm
 from gemma_4_sql.backends.common_train import (
-    NNXOptimizerProtocol,
     generic_run_training_epochs,
     resolve_training_dataloader,
 )
-from gemma_4_sql.backends.common_train import (
-    apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
-)
+from gemma_4_sql.backends.jax._protocols import is_jnp_missing
 from gemma_4_sql.backends.jax.etl import build_dataloader
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.gemma4.config import ModelConfig, resolve_gemma4_config
 from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM
 from gemma_4_sql.backends.jax.inference import MODEL_CACHE as _MODEL_CACHE
 from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
-from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, DPOResultDict, ETLConfig, JaxCausalLMProtocol, TensorType, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, DPOResultDict, ETLConfig, JaxCausalLMProtocol, JaxDPOState, TensorType
 
 Gemma4Config = ModelConfig
 type JaxDPOBatch = Mapping[str, Array | TensorType | Sequence[int]]
@@ -93,7 +97,7 @@ def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
         DependencyMissingError: If JAX DPO dependencies are missing.
 
     """
-    if jnp is None or jnn is None:
+    if is_jnp_missing(jnp) or jnn is None:
         raise DependencyMissingError("JAX DPO dependencies are missing.", backend="jax")
     return generic_dpo_loss(
         policy_chosen_logps,
@@ -180,10 +184,10 @@ def _get_train_step_fn(beta: float) -> JaxDPOStepFn:
             backend="jax",
         )
 
-    def train_step(
+    def train_step[OptOutT](
         policy_model: JaxCausalLMProtocol,
         ref_model: JaxCausalLMProtocol,
-        optimizer: NNXOptimizerProtocol[JaxCausalLMProtocol, Array],
+        optimizer: NNXOptimizerProtocol[JaxCausalLMProtocol, Array, OptOutT],
         batch: Mapping[str, Array],
     ) -> Array:
         """Execute a single JAX-compiled DPO training step.
@@ -204,7 +208,17 @@ def _get_train_step_fn(beta: float) -> JaxDPOStepFn:
             r: JaxCausalLMProtocol,
             b: Mapping[str, Array],
         ) -> Array:
-            """Evaluate `_dpo_step_loss` for gradient transformation."""
+            """Evaluate `_dpo_step_loss` for gradient transformation.
+
+            Args:
+                p: Trainable policy model.
+                r: Frozen reference model.
+                b: Preference batch mapping.
+
+            Returns:
+                Scalar JAX loss array.
+
+            """
             return _dpo_step_loss(p, r, b, beta)
 
         (loss, grads) = nnx.value_and_grad(_loss_wrapper)(policy_model, ref_model, batch)
@@ -214,32 +228,37 @@ def _get_train_step_fn(beta: float) -> JaxDPOStepFn:
     return nnx.jit(train_step)
 
 
-def _run_training_epochs[ModelT, OptT, BatchT, ParamsT](
-    state: DPOLoopState[ModelT, OptT, BatchT] | TrainerState[ModelT, ParamsT, OptT, BatchT],
+def _run_training_epochs[ModelT, OptT, BatchT](
+    state: JaxDPOState[ModelT, OptT, BatchT],
 ) -> float:
     """Run DPO training epochs over the preference dataloader.
 
     Args:
-        state: `DPOLoopState` holding models, optimizer, dataloader, and step function.
+        state: `JaxDPOState` holding models, optimizer, dataloader, and step function.
 
     Returns:
         Mean batch loss from the final epoch.
 
     """
-    dataloader: Iterable[BatchT] = state.dataloader or ()
+    dataloader: Iterable[BatchT] = state.dataloader
     policy_model = state.policy_model
     ref_model = state.ref_model
     optimizer = state.optimizer
     train_step = state.train_step
 
     def _step(batch: BatchT) -> float:
-        """Execute a single JAX DPO step and extract scalar float loss."""
-        assert train_step is not None
+        """Execute a single JAX DPO step and extract scalar float loss.
+
+        Args:
+            batch: Preference batch item.
+
+        Returns:
+            Scalar step loss as a Python `float`.
+
+        """
         loss = train_step(policy_model, ref_model, optimizer, batch)
-        if isinstance(loss, ScalarItemProtocol):
-            return float(loss.item())
-        if isinstance(loss, (int, float, SupportsFloat)):
-            return float(loss)
+        if isinstance(loss, (ScalarItemProtocol, int, float, SupportsFloat)):
+            return extract_scalar_float(loss)
         return 0.0
 
     return generic_run_training_epochs(state.epochs, dataloader, _step)
@@ -284,7 +303,7 @@ def _execute_dpo(
         ValueError: If dataloader is invalid.
 
     """
-    if jax is None or jnp is None or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
+    if jax is None or is_jnp_missing(jnp) or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
         raise DependencyMissingError("JAX dependencies are missing for DPO.")
 
     resolved_cfg = _resolve_gemma4_config(model_name)
@@ -306,13 +325,14 @@ def _execute_dpo(
     )
 
     final_loss = _run_training_epochs(
-        DPOLoopState(
+        JaxDPOState(
             dataloader=dataloader,
             epochs=epochs,
             policy_model=policy_model,
             ref_model=ref_model,
             optimizer=optimizer,
             train_step=train_step,
+            beta=beta,
         )
     )
     _MODEL_CACHE.put_model(model_name, policy_model)
@@ -334,7 +354,7 @@ def run_dpo(config: DPOConfig, **kwargs: StatusValue) -> DPOResultDict:
         TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
-    if jax is None or jnp is None or jnn is None or optax is None or not callable(Gemma4ForCausalLM):
+    if jax is None or is_jnp_missing(jnp) or jnn is None or optax is None or not callable(Gemma4ForCausalLM):
         raise DependencyMissingError("JAX DPO dependencies are missing.", backend="jax")
 
     return run_dpo_wrapper(

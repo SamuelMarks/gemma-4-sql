@@ -21,6 +21,7 @@ class PyTorchBackend(ModuleDelegatedBackend):
     serve_module = serve
     benchmark_module = benchmark
     trainer_name = "pytorch_trainer"
+    uses_backend_alias = True
 
 
 ADAPTER_CLASS = PyTorchBackend

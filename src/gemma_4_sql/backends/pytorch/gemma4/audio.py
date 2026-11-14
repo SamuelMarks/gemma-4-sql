@@ -12,12 +12,19 @@ from .config import Gemma4Config
 class Gemma4AudioModel(nn.Module):
     """Audio model for Gemma 4."""
 
-    def __init__(self, config: Gemma4Config):
-        """Initialize Gemma4AudioModel."""
+    def __init__(self, config: Gemma4Config) -> None:
+        """Initialize Gemma4AudioModel.
+
+        Args:
+            config: Gemma 4 model configuration.
+
+        """
         super().__init__()
         self.config = config
         self.feature_extractor = Gemma4AudioFeatureExtractor(config.audio_config)
-        self.layers = nn.ModuleList([Gemma4AudioEncoderBlock(config.audio_config) for _ in range(config.audio_config.num_hidden_layers)])
+        self.layers = nn.ModuleList([
+            Gemma4AudioEncoderBlock(config.audio_config) for _ in range(config.audio_config.num_hidden_layers)
+        ])
         self.audio_projector = nn.Linear(config.audio_config.hidden_size, config.hidden_size, bias=False)
 
     def forward(self, audio_values: torch.Tensor) -> torch.Tensor:

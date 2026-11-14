@@ -9,13 +9,13 @@ pytestmark = requires_jax
 from collections.abc import Callable
 
 import jax
-import jax.numpy as jnp
 import optax
 import pytest
 from flax import nnx
 
 import gemma_4_sql.backends.jax.peft as pt
 from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.gemma4.layers import LinearLayerProtocol
 from gemma_4_sql.backends.jax.peft import (
     LoRALinearAdapter,
@@ -94,7 +94,7 @@ def test_nnx_lora_linear_invalid_rank() -> None:
 
 
 def test_inject_lora_into_gemma4_model_and_forward_pass() -> None:
-    """Verify inject_lora replaces target linear layers, preserves base forward output when B=0, and modifies it when B!=0."""
+    """Verify inject_lora replaces target linears, preserves output when B=0, and modifies it when B!=0."""
     config = _make_tiny_config(use_moe=False)
     rngs = nnx.Rngs(0)
     model = Gemma4ForCausalLM(config, rngs=rngs)
@@ -181,7 +181,12 @@ def test_lora_parameter_freezing_and_gradient_step() -> None:
     positions = jnp.arange(4)[None, :]
 
     def loss_fn(m: Gemma4ForCausalLM) -> jax.Array:
-        """Compute mean squared logits loss for gradient verification."""
+        """Compute mean squared logits loss for gradient verification.
+
+        Returns:
+            Scalar mean squared logits array.
+
+        """
         logits = m(tokens, positions)
         return jnp.mean(logits**2)
 
@@ -189,7 +194,9 @@ def test_lora_parameter_freezing_and_gradient_step() -> None:
     loss, grads = grad_fn(model)
     assert loss.shape == ()
 
-    optimizer.update(model, grads)
+    from gemma_4_sql.backends._jax_common import apply_nnx_optimizer_update
+
+    apply_nnx_optimizer_update(optimizer, model, grads)
 
     # Base weights must remain completely unchanged (frozen)
     assert jnp.array_equal(q0.kernel[...], initial_q_kernel)
@@ -220,7 +227,7 @@ def test_apply_lora_entrypoint() -> None:
     assert res["action"] == "apply_lora"
     assert res["model"] == "gemma-4-tiny"
     assert res["lora_r"] == 4
-    assert res["injected_modules"] == 14
+    assert res.get("injected_modules") == 14
     assert res["status"] == "completed"
 
 
@@ -286,7 +293,7 @@ def test_jax_peft_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pt, "resolve_gemma4_config", _resolve_tiny)
     res_new = apply_lora("test-tiny-jax", ["q_proj"], lora_r=2)
     assert res_new["status"] == "completed"
-    assert res_new["injected_modules"] == 2
+    assert res_new.get("injected_modules") == 2
 
     # Error handling in apply_lora
     from gemma_4_sql.exceptions import ConfigurationError
@@ -294,8 +301,15 @@ def test_jax_peft_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ConfigurationError, match="lora_r must be > 0"):
         apply_lora("test-err", ["q_proj"], lora_r=0)
 
-    def _fail_inject(*_a: Gemma4ForCausalLM | list[str] | float, **_k: nnx.Rngs | None) -> tuple[Gemma4ForCausalLM, int]:
-        """Raise RuntimeError."""
+    def _fail_inject(
+        *_a: Gemma4ForCausalLM | list[str] | float, **_k: nnx.Rngs | None
+    ) -> tuple[Gemma4ForCausalLM, int]:
+        """Raise RuntimeError.
+
+        Raises:
+            RuntimeError: Always raised to test error wrapping in `apply_lora`.
+
+        """
         raise RuntimeError("inject boom")
 
     with monkeypatch.context() as monkeypatch_ctx:

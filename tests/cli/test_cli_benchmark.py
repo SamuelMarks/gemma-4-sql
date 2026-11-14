@@ -17,7 +17,12 @@ def test_benchmark_cmd(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFi
     captured_kwargs: JSONDict = {}
 
     def _fake_benchmark(**kwargs: JSONValue) -> BenchmarkResultDict:
-        """Capture forwarded benchmark arguments and return a structured result."""
+        """Capture forwarded benchmark arguments and return a structured result.
+
+        Returns:
+            Simulated benchmark result dictionary.
+
+        """
         captured_kwargs.update(kwargs)
         return {
             "backend": str(kwargs["backend"]),
@@ -64,7 +69,12 @@ def test_benchmark_cmd(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFi
     assert parsed["backend"] == "jax"
 
     def _fail_benchmark(**_kwargs: JSONValue) -> BenchmarkResultDict:
-        """Raise BenchmarkError to verify CLI error formatting."""
+        """Raise BenchmarkError to verify CLI error formatting.
+
+        Raises:
+            BenchmarkError: Always raised to test CLI error handling.
+
+        """
         raise BenchmarkError("tpu benchmark error", backend="jax", model_name="gemma-4")
 
     monkeypatch.setattr("gemma_4_sql.cli_benchmark.benchmark", _fail_benchmark)

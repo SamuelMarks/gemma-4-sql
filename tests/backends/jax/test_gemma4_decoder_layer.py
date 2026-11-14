@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import jax.numpy as jnp
 from flax import nnx
 
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax

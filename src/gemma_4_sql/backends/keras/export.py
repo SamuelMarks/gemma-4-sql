@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_export import run_export_wrapper
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError, StatusValue
 from gemma_4_sql.type_hints import ExportResultDict, KerasCausalLMProtocol
 
@@ -21,7 +21,7 @@ class _GemmaCausalLMLoaderProtocol(Protocol):
 
 
 keras = optional_import("keras")
-GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = optional_attr(
+GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = import_optional_symbol(
     "keras_nlp.models",
     "GemmaCausalLM",
     _GemmaCausalLMLoaderProtocol,
@@ -48,11 +48,20 @@ def export_model(model_name: str, export_path: str, **_kwargs: StatusValue) -> E
         raise DependencyMissingError("Keras dependencies are missing for export.", backend="keras")
 
     def _execute() -> tuple[Path, str]:
-        """Load the Keras model and save it to `model.keras`."""
+        """Load the Keras model and save it to `model.keras`.
+
+        Returns:
+            Tuple of `(saved_keras_file_path, export_status_message)`.
+
+        Raises:
+            ImportError: Internally raised and wrapped if `keras_nlp.models.GemmaCausalLM` is unavailable.
+            ExportError: If loading the Keras model fails.
+
+        """
         try:
             gemma_causal_lm_cls = GemmaCausalLM
             if gemma_causal_lm_cls is None:
-                gemma_causal_lm_cls = optional_attr(
+                gemma_causal_lm_cls = import_optional_symbol(
                     "keras_nlp.models",
                     "GemmaCausalLM",
                     _GemmaCausalLMLoaderProtocol,

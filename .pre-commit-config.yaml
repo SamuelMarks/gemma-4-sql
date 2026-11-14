@@ -3,37 +3,38 @@ repos:
     rev: v0.17.0
     hooks:
       - id: ruff
-        args: [ --fix ]
+        args: []
       - id: ruff-format
+        args: [ --check ]
   - repo: local
     hooks:
       - id: interrogate
         name: Check 100% docstring coverage
-        entry: bash -c "uv run --extra dev --extra mlx interrogate -v src/gemma_4_sql tests scripts"
+        entry: bash -c "uv run --extra all --extra dev interrogate -v src/gemma_4_sql tests scripts"
         language: system
         pass_filenames: false
         always_run: true
       - id: pyright
         name: Run strict pyright type checking
-        entry: bash -c "uv run --extra dev --extra mlx pyright"
+        entry: bash -c "uv run --extra all --extra dev pyright"
         language: system
         pass_filenames: false
         always_run: true
       - id: ty
         name: Run ty type checking
-        entry: bash -c "uv run --extra dev --extra mlx ty check"
+        entry: bash -c "uv run --extra all --extra dev ty check"
         language: system
         pass_filenames: false
         always_run: true
       - id: pytest-cov
         name: Run pytest with 100% line and branch coverage
-        entry: bash -c "uv run --extra dev --extra mlx pytest --cov=src/gemma_4_sql --cov=tests --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=100"
+        entry: bash -c "uv run --extra all --extra dev pytest --cov=src/gemma_4_sql --cov=tests --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=100"
         language: system
         pass_filenames: false
         always_run: true
       - id: update-badges
         name: Update doc and test coverage badges
-        entry: bash -c "uv run --extra dev --extra mlx python scripts/update_badges.py"
+        entry: bash -c "uv run --extra all --extra dev python scripts/update_badges.py"
         language: system
         pass_filenames: false
         always_run: true

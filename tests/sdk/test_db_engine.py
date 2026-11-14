@@ -137,7 +137,19 @@ def test_db_engine_has_top_level_order_by_and_normalization() -> None:
 
     from decimal import Decimal
 
-    row = (None, float("nan"), 0.0, -0.0, 1.23456789, "string", float("inf"), float("-inf"), 1e-310, Decimal("3.1415926"), Decimal("NaN"))
+    row = (
+        None,
+        float("nan"),
+        0.0,
+        -0.0,
+        1.23456789,
+        "string",
+        float("inf"),
+        float("-inf"),
+        1e-310,
+        Decimal("3.1415926"),
+        Decimal("NaN"),
+    )
     norm = engine.normalize_row(row)
     assert norm[0] is None
     assert norm[1] is None
@@ -178,7 +190,37 @@ async def test_db_engine_context_managers() -> None:
         rows_async = await async_engine.execute_query_async("SELECT 2")
         assert rows_async == [(2,)]
 
+    from collections.abc import Awaitable, Callable
+
     from gemma_4_sql.sdk.adapters.base import DatabaseAdapter
 
     engine_base_close = LiveDatabaseEngine(":memory:")
-    await DatabaseAdapter.close_async(engine_base_close.adapter)
+    base_close_async: Callable[..., Awaitable[None]] = vars(DatabaseAdapter)["close_async"]
+    await base_close_async(engine_base_close.adapter)
+
+
+@pytest.mark.asyncio
+async def test_db_engine_float_boundary_tolerance_row_cap_and_lazy_connect() -> None:
+    """Verify `float_tol` boundary floats, `max_rows` result cap, and `defer_ddl` lazy connection."""
+    engine = LiveDatabaseEngine(":memory:", float_tol=1e-4, max_rows=2, read_only=False)
+    engine.setup_schema("CREATE TABLE nums (v REAL); INSERT INTO nums VALUES (1.0), (2.0), (3.0);")
+
+    # 0.00004999 and 0.00005001 straddle 4-digit rounding boundary (0.0 vs 0.0001) yet differ by only 2e-8 < 1e-4!
+    assert engine.compare_results([(0.00004999,), (2.0,)], [(2.0,), (0.00005001,)], strict_order=False) is True
+    assert engine.compare_results([(0.00004999,)], [(0.009,)], strict_order=False) is False
+    assert engine.compare_results([(1, 2)], [(1,)], strict_order=True) is False
+
+    # `max_rows=2` caps both sync and async result fetches
+    assert len(engine.execute_query("SELECT v FROM nums ORDER BY v")) == 2
+    assert len(await engine.execute_query_async("SELECT v FROM nums ORDER BY v")) == 2
+    engine.close()
+
+    # `defer_ddl=True` defers initial sync connection until `.conn` or `connect_async`
+    deferred = LiveDatabaseEngine(":memory:", ddl="CREATE TABLE d (x INT);", defer_ddl=True, max_rows=0)
+    assert deferred.max_rows is None
+    assert deferred.adapter._conn is None
+    _ = deferred.conn
+    assert deferred.adapter._conn is not None
+    deferred.reset_connection()
+    assert deferred.adapter._conn is None
+    await deferred.close_async()

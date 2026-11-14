@@ -2,23 +2,26 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
+import types
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
+from typing import Protocol, Self, SupportsFloat, runtime_checkable
 
 from gemma_4_sql.backends.common_dpo import ArithmeticTensorProtocol, generic_dpo_loss, run_dpo_wrapper
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.keras.etl import build_dataloader
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol, import_optional_symbol, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
 from gemma_4_sql.type_hints import (
     DPOConfig,
     DPOResultDict,
+    DTypeProtocol,
     ETLConfig,
+    ForwardOutput,
     KerasCausalLMProtocol,
     KerasTrainerState,
     KerasVariableProtocol,
+    TensorProtocol,
     TfTensorProtocol,
 )
 
@@ -30,7 +33,15 @@ class _GemmaCausalLMLoaderProtocol(Protocol):
     """Protocol for `keras_nlp.models.GemmaCausalLM` exposing `.from_preset(model_name)`."""
 
     def from_preset(self, model_name: str, /) -> KerasCausalLMProtocol:
-        """Load a `GemmaCausalLM` model from a preset identifier."""
+        """Load a `GemmaCausalLM` model from a preset identifier.
+
+        Args:
+            model_name: Preset identifier string.
+
+        Returns:
+            Loaded `KerasCausalLMProtocol`.
+
+        """
         ...
 
 
@@ -43,13 +54,301 @@ class _KerasOptimizerProtocol[TensorT, VarT](Protocol):
         grads_and_vars: Iterable[tuple[TensorT, VarT]],
         /,
     ) -> None:
-        """Apply gradients to variables."""
+        """Apply gradients to variables.
+
+        Args:
+            grads_and_vars: Iterable of `(gradient, variable)` pairs.
+
+        """
         ...
 
 
-tf = optional_import("tensorflow")
-keras = optional_import("keras")
-GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = optional_attr(
+type KerasDPOVar = KerasVariableProtocol | TfTensorProtocol | ArithmeticTensorProtocol | SupportsFloat | float | str
+
+
+@runtime_checkable
+class _TrainableVarsModelProtocol(Protocol):
+    """Protocol for a Keras model exposing `.trainable_variables`."""
+
+    @property
+    def trainable_variables(self) -> Sequence[KerasDPOVar]:
+        """Provide the model's trainable variables.
+
+        Returns:
+            Sequence of trainable variables.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TFMathNamespaceProtocol(Protocol):
+    """Protocol for `tf.math` exposing `log_sigmoid` and `multiply`."""
+
+    def log_sigmoid[TensorT: ArithmeticTensorProtocol | float](self, x: TensorT, /) -> TensorT:
+        """Compute elementwise `log(sigmoid(x))`.
+
+        Args:
+            x: Logits margin tensor or float.
+
+        Returns:
+            Log-sigmoid output.
+
+        """
+        ...
+
+    def multiply[TensorT: ArithmeticTensorProtocol | float](self, x: TensorT, y: TensorT, /) -> TensorT:
+        """Compute elementwise product `x * y`.
+
+        Args:
+            x: Left-hand tensor operand.
+            y: Right-hand tensor operand.
+
+        Returns:
+            Elementwise product tensor.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TFDTypesNamespaceProtocol(Protocol):
+    """Protocol for `tf.dtypes` exposing `cast`."""
+
+    def cast[TensorT](self, x: TensorT | bool, dtype: DTypeProtocol, /) -> TensorT:
+        """Cast tensor `x` to `dtype`.
+
+        Args:
+            x: Input tensor or boolean mask.
+            dtype: Target TensorFlow dtype.
+
+        Returns:
+            Cast tensor.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TFNNNamespaceProtocol(Protocol):
+    """Protocol for `tf.nn` exposing `log_softmax`."""
+
+    def log_softmax[TensorT](self, logits: TensorT, *, axis: int = -1) -> TensorT:
+        """Compute log-softmax along `axis`.
+
+        Args:
+            logits: Unnormalized logits tensor.
+            axis: Vocabulary dimension index.
+
+        Returns:
+            Log-probability tensor.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TFGradientTapeProtocol(Protocol):
+    """Protocol for `tf.GradientTape` context manager and `.gradient(...)`."""
+
+    def __enter__(self) -> Self:
+        """Enter gradient recording context.
+
+        Returns:
+            Active tape instance.
+
+        """
+        ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+        /,
+    ) -> bool | None:
+        """Exit gradient recording context.
+
+        Args:
+            exc_type: Exception type if raised, else `None`.
+            exc_val: Exception instance if raised, else `None`.
+            exc_tb: Traceback if raised, else `None`.
+
+        Returns:
+            Suppression flag or `None`.
+
+        """
+        ...
+
+    def gradient[TensorT, VarT](
+        self,
+        target: TensorT | ArithmeticTensorProtocol | float,
+        sources: Sequence[VarT],
+        /,
+    ) -> Sequence[TensorT]:
+        """Compute gradients of `target` with respect to `sources`.
+
+        Args:
+            target: Differentiable scalar loss.
+            sources: Sequence of trainable variables.
+
+        Returns:
+            Sequence of gradient tensors.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TFDPOModuleProtocol(Protocol):
+    """Protocol for `tensorflow` math, gather, tape, and `tf.function` ops in Keras DPO."""
+
+    @property
+    def int32(self) -> DTypeProtocol:
+        """Provide `tf.int32` dtype."""
+        ...
+
+    @property
+    def float32(self) -> DTypeProtocol:
+        """Provide `tf.float32` dtype."""
+        ...
+
+    @property
+    def math(self) -> _TFMathNamespaceProtocol:
+        """Provide `tf.math` namespace."""
+        ...
+
+    @property
+    def dtypes(self) -> _TFDTypesNamespaceProtocol:
+        """Provide `tf.dtypes` namespace."""
+        ...
+
+    @property
+    def nn(self) -> _TFNNNamespaceProtocol:
+        """Provide `tf.nn` namespace."""
+        ...
+
+    def reduce_mean[TensorT: ArithmeticTensorProtocol | float](self, input_tensor: TensorT, /) -> TensorT:
+        """Compute scalar mean across all elements of `input_tensor`.
+
+        Args:
+            input_tensor: Per-example DPO loss tensor.
+
+        Returns:
+            Mean scalar loss.
+
+        """
+        ...
+
+    def expand_dims[TensorT](self, input_tensor: TensorT, *, axis: int) -> TensorT:
+        """Insert a length-1 dimension at `axis`.
+
+        Args:
+            input_tensor: Input tensor.
+            axis: Dimension index to insert.
+
+        Returns:
+            Expanded tensor.
+
+        """
+        ...
+
+    def gather[TensorT](self, params: TensorT | ForwardOutput, indices: TensorT, *, batch_dims: int = 0) -> TensorT:
+        """Gather slices from `params` at `indices`.
+
+        Args:
+            params: Source log-probability tensor.
+            indices: Expanded target token ID tensor.
+            batch_dims: Number of leading batch dimensions.
+
+        Returns:
+            Gathered log-probabilities tensor.
+
+        """
+        ...
+
+    def squeeze[TensorT](self, input_tensor: TensorT, *, axis: int) -> TensorT:
+        """Remove length-1 dimension at `axis`.
+
+        Args:
+            input_tensor: Input tensor.
+            axis: Singleton dimension index.
+
+        Returns:
+            Squeezed tensor.
+
+        """
+        ...
+
+    def reduce_sum[TensorT](self, input_tensor: TensorT, *, axis: int) -> TensorT:
+        """Sum tensor elements along `axis`.
+
+        Args:
+            input_tensor: Masked token log-probabilities tensor.
+            axis: Sequence axis index.
+
+        Returns:
+            Summed per-sequence log-probabilities tensor.
+
+        """
+        ...
+
+    def GradientTape(self) -> _TFGradientTapeProtocol:
+        """Construct a `GradientTape` differentiation context.
+
+        Returns:
+            New `_TFGradientTapeProtocol` instance.
+
+        """
+        ...
+
+    def function[FnT](self, func: FnT, /) -> FnT:
+        """Compile `func` into a TensorFlow graph callable.
+
+        Args:
+            func: Python step function.
+
+        Returns:
+            Compiled graph callable with matching signature.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _KerasDPOOptimizersProtocol(Protocol):
+    """Protocol for `keras.optimizers` exposing `AdamW`."""
+
+    def AdamW(
+        self,
+        *,
+        learning_rate: float,
+    ) -> _KerasOptimizerProtocol[TensorProtocol, KerasDPOVar]:
+        """Construct an `AdamW` Keras optimizer.
+
+        Args:
+            learning_rate: Optimizer learning rate.
+
+        Returns:
+            Configured `_KerasOptimizerProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _KerasDPOModuleProtocol(Protocol):
+    """Protocol for `keras` module exposing `.optimizers`."""
+
+    @property
+    def optimizers(self) -> _KerasDPOOptimizersProtocol:
+        """Provide `keras.optimizers` namespace."""
+        ...
+
+
+tf: _TFDPOModuleProtocol | ModuleNamespaceProtocol | None = optional_import("tensorflow", _TFDPOModuleProtocol)
+keras: _KerasDPOModuleProtocol | None = optional_import("keras", _KerasDPOModuleProtocol)
+GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = import_optional_symbol(
     "keras_nlp.models",
     "GemmaCausalLM",
     _GemmaCausalLMLoaderProtocol,
@@ -81,6 +380,7 @@ def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
     """
     if tf is None:
         raise DependencyMissingError("Keras DPO dependencies are missing.", backend="keras")
+    assert isinstance(tf, _TFDPOModuleProtocol)
     (losses, chosen_rewards, rejected_rewards) = generic_dpo_loss(
         policy_chosen_logps,
         policy_rejected_logps,
@@ -89,9 +389,7 @@ def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
         beta,
         tf.math.log_sigmoid,
     )
-    mean_loss: TensorT | ArithmeticTensorProtocol | float = losses
-    with contextlib.suppress(AttributeError, TypeError):
-        mean_loss = tf.reduce_mean(losses)
+    mean_loss: TensorT | ArithmeticTensorProtocol | float = tf.reduce_mean(losses)
     return (mean_loss, chosen_rewards, rejected_rewards)
 
 
@@ -99,66 +397,23 @@ def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
 class _KerasDPOCallableProtocol[TensorT](Protocol):
     """Protocol for any callable Keras DPO model."""
 
-    def __call__(self, inputs: TensorT, /) -> TensorT:
-        """Evaluate forward logits on `inputs`."""
+    def __call__(self, inputs: TensorT, /) -> TensorT | ForwardOutput:
+        """Evaluate forward logits on `inputs`.
+
+        Args:
+            inputs: Input token ID tensor.
+
+        Returns:
+            Output vocabulary logits tensor.
+
+        """
         ...
 
 
-type KerasDPOModel[TensorT] = _KerasDPOCallableProtocol[TensorT] | Callable[[TensorT], TensorT] | KerasCausalLMProtocol
+type KerasDPOModel[TensorT] = _KerasDPOCallableProtocol[TensorT] | Callable[[TensorT], TensorT | ForwardOutput]
 
 
-def _is_callable_dpo_model[TensorT](
-    model: KerasDPOModel[TensorT],
-    _sample: TensorT,
-) -> TypeGuard[_KerasDPOCallableProtocol[TensorT]]:
-    """Narrow `model` to `_KerasDPOCallableProtocol[TensorT]`.
-
-    Args:
-        model: Policy or reference model callable.
-        _sample: Sample input tensor for type binding.
-
-    Returns:
-        `True` if `model` is callable.
-
-    """
-    _ = _sample
-    return callable(model)
-
-
-def _has_trainable_variables[TensorT](
-    model: KerasDPOModel[TensorT],
-) -> TypeGuard[KerasCausalLMProtocol]:
-    """Narrow `model` to `KerasCausalLMProtocol` for `.trainable_variables` access.
-
-    Args:
-        model: Policy model callable or `KerasCausalLMProtocol` instance.
-
-    Returns:
-        `True` if `model` is callable or a `KerasCausalLMProtocol`.
-
-    """
-    return callable(model)
-
-
-def _as_var_seq[TensorT, VarT](
-    vars_seq: Sequence[KerasVariableProtocol | TfTensorProtocol],
-    _opt: _KerasOptimizerProtocol[TensorT, VarT],
-) -> TypeGuard[Sequence[VarT]]:
-    """Narrow `vars_seq` to `Sequence[VarT]` for `optimizer.apply_gradients`.
-
-    Args:
-        vars_seq: Sequence of trainable variables from `policy_model`.
-        _opt: Optimizer carrying type parameter `VarT`.
-
-    Returns:
-        `True` if `vars_seq` is a non-string `Sequence`.
-
-    """
-    _ = _opt
-    return not isinstance(vars_seq, (str, bytes))
-
-
-def _compute_logps[TensorT: TfTensorProtocol | SupportsFloat](
+def _compute_logps[TensorT: ArithmeticTensorProtocol | float](
     model: KerasDPOModel[TensorT],
     inputs: TensorT,
     labels: TensorT,
@@ -179,22 +434,25 @@ def _compute_logps[TensorT: TfTensorProtocol | SupportsFloat](
     """
     if tf is None:
         raise DependencyMissingError("Keras DPO dependencies are missing.", backend="keras")
+    assert isinstance(tf, _TFDPOModuleProtocol)
     tf_cast = tf.dtypes.cast
-    assert _is_callable_dpo_model(model, inputs)
-    logits = model(inputs)
+    raw_logits = model(inputs)
+    assert isinstance(raw_logits, (TfTensorProtocol, ArithmeticTensorProtocol))
+    logits = tf_cast(raw_logits, tf.float32)
     log_probs = tf.nn.log_softmax(logits, axis=-1)
-    labels_expanded = tf.expand_dims(tf_cast(labels, tf.int32), axis=-1)
-    selected_log_probs = tf.gather(log_probs, labels_expanded, batch_dims=2)
+    labels_expanded: TensorT = tf.expand_dims(tf_cast(labels, tf.int32), axis=-1)
+    selected_log_probs: TensorT = tf.gather(log_probs, labels_expanded, batch_dims=2)
     selected_log_probs = tf.squeeze(selected_log_probs, axis=-1)
-    mask = tf_cast(labels != 0, tf.float32)
-    res: TensorT = tf.reduce_sum(selected_log_probs * mask, axis=-1)
+    ne_mask: TensorT | bool = labels != 0
+    mask: TensorT = tf_cast(ne_mask, tf.float32)
+    res: TensorT = tf.reduce_sum(tf.math.multiply(selected_log_probs, mask), axis=-1)
     return res
 
 
-def _get_train_step_fn[TensorT: ArithmeticTensorProtocol, VarT](
-    policy_model: KerasDPOModel[TensorT],
+def _get_train_step_fn[TensorT: ArithmeticTensorProtocol](
+    policy_model: _TrainableVarsModelProtocol | KerasDPOModel[TensorT],
     ref_model: KerasDPOModel[TensorT],
-    optimizer: _KerasOptimizerProtocol[TensorT, VarT],
+    optimizer: _KerasOptimizerProtocol[TensorT, KerasDPOVar],
     beta: float,
 ) -> Callable[[Mapping[str, TensorT]], TensorT | ArithmeticTensorProtocol | float]:
     """Return a `tf.function` compiled DPO train step function.
@@ -214,6 +472,7 @@ def _get_train_step_fn[TensorT: ArithmeticTensorProtocol, VarT](
     """
     if tf is None:
         raise DependencyMissingError("Keras DPO dependencies are missing.", backend="keras")
+    assert isinstance(tf, _TFDPOModuleProtocol)
 
     def train_step(
         batch: Mapping[str, TensorT],
@@ -227,19 +486,17 @@ def _get_train_step_fn[TensorT: ArithmeticTensorProtocol, VarT](
             Scalar step loss tensor.
 
         """
-        assert tf is not None
+        assert isinstance(tf, _TFDPOModuleProtocol)
+        trainable_vars: Sequence[KerasDPOVar] = (
+            policy_model.trainable_variables if isinstance(policy_model, _TrainableVarsModelProtocol) else ()
+        )
+        assert isinstance(policy_model, _KerasDPOCallableProtocol)
         with tf.GradientTape() as tape:
             pi_ch_logps = _compute_logps(policy_model, batch["chosen_inputs"], batch["chosen_labels"])
             pi_re_logps = _compute_logps(policy_model, batch["rejected_inputs"], batch["rejected_labels"])
             ref_ch_logps = _compute_logps(ref_model, batch["chosen_inputs"], batch["chosen_labels"])
             ref_re_logps = _compute_logps(ref_model, batch["rejected_inputs"], batch["rejected_labels"])
             (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
-        trainable_vars: Sequence[VarT] = ()
-        with contextlib.suppress(AttributeError):
-            assert _has_trainable_variables(policy_model)
-            raw_vars = policy_model.trainable_variables
-            assert _as_var_seq(raw_vars, optimizer)
-            trainable_vars = raw_vars
         grads: Sequence[TensorT] = tape.gradient(loss, trainable_vars)
         optimizer.apply_gradients(zip(grads, trainable_vars, strict=False))
         return loss
@@ -264,7 +521,15 @@ def _run_training_epochs[ModelT, OptT, BatchT](
     train_step = state.train_step
 
     def _step(batch: BatchT) -> float:
-        """Execute a single Keras DPO step and extract scalar float loss."""
+        """Execute a single Keras DPO step and extract scalar float loss.
+
+        Args:
+            batch: Preference batch item.
+
+        Returns:
+            Scalar step loss as a Python `float`.
+
+        """
         assert train_step is not None
         loss = train_step(batch)
         if isinstance(loss, (int, float, SupportsFloat)):
@@ -297,6 +562,7 @@ def _execute_dpo(
 
     Raises:
         DependencyMissingError: If Keras dependencies are missing.
+        ImportError: Internally raised and wrapped if `keras_nlp.models.GemmaCausalLM` is unavailable.
         ValueError: If model loading or dataloader fails.
 
     """
@@ -304,7 +570,11 @@ def _execute_dpo(
         raise DependencyMissingError("Keras dependencies are missing.")
 
     try:
-        gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM", _GemmaCausalLMLoaderProtocol)
+        gemma_causal_lm_cls = (
+            GemmaCausalLM
+            if GemmaCausalLM is not None
+            else import_optional_symbol("keras_nlp.models", "GemmaCausalLM", _GemmaCausalLMLoaderProtocol)
+        )
         if gemma_causal_lm_cls is None:
             raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
         policy_model: KerasCausalLMProtocol = gemma_causal_lm_cls.from_preset(model_name)
@@ -312,7 +582,9 @@ def _execute_dpo(
     except (ImportError, ValueError) as e:
         raise ValueError(f"Failed to load Keras model {model_name}") from e
 
-    optimizer: _KerasOptimizerProtocol[TfTensorProtocol, KerasVariableProtocol] = keras.optimizers.AdamW(learning_rate=learning_rate)
+    optimizer: _KerasOptimizerProtocol[TensorProtocol, KerasDPOVar] = keras.optimizers.AdamW(
+        learning_rate=learning_rate
+    )
     train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
@@ -321,7 +593,15 @@ def _execute_dpo(
     if not has_loader:
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
-    final_loss = _run_training_epochs(KerasTrainerState(dataloader=dataloader, epochs=epochs, train_step=train_step))
+    final_loss = _run_training_epochs(
+        KerasTrainerState(
+            dataloader=dataloader,
+            model=policy_model,
+            optimizer=optimizer,
+            epochs=epochs,
+            train_step=train_step,
+        )
+    )
     return "completed", final_loss
 
 

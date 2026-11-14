@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import jax
-import jax.numpy as jnp
 import pytest
 
 from gemma_4_sql.backends.common_data import _create_base_format_transform
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.inference import generate_sql
 from gemma_4_sql.tokenization import SQLTokenizer
 from tests.conftest import MockPILImage, requires_jax
@@ -73,7 +73,12 @@ def test_jax_inference_multimodal(
             _positions: jax.Array | None = None,
             **_kwargs: jax.Array | str | float | bool | None,
         ) -> jax.Array:
-            """Execute callable test stub."""
+            """Execute callable test stub.
+
+            Returns:
+                A uniform float32 logits tensor of shape `(batch, seq, 100)`.
+
+            """
             batch, seq = input_ids.shape
             return jnp.ones((batch, seq, 100), dtype=jnp.float32)
 

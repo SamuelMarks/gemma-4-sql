@@ -1,14 +1,14 @@
 """Unit and behavioral tests for gemma4 cache."""
 
-from unittest.mock import MagicMock
+from __future__ import annotations
 
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
 
-import jax.numpy as jnp
-
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.gemma4.cache import LayerCache, init_cache
+from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
 
 
 def test_layer_cache() -> None:
@@ -22,15 +22,14 @@ def test_layer_cache() -> None:
 
 def test_init_cache() -> None:
     """Verify init cache behavior."""
-    config = MagicMock()
-    config.num_hidden_layers = 2
-    # attention patterns have GLOBAL at index 5. so index 0 and 1 are LOCAL_SLIDING
-    config.num_key_value_heads = 2
-    config.head_dim = 16
-    config.dtype = jnp.float32
-    config.shd_cfg.cache = None
+    config = ModelConfig(
+        num_hidden_layers=2,
+        num_key_value_heads=2,
+        head_dim=16,
+        dtype=jnp.float32,
+    )
 
-    caches = init_cache(config, 2, 5)  # max_seq_len=5 -> cache_size=8 (next power of 2)
+    caches = init_cache(config, 2, 5)
     assert len(caches) == 2
     assert caches[0].size == 8
     assert caches[0].k_cache.value.shape == (2, 8, 2, 16)
@@ -38,14 +37,14 @@ def test_init_cache() -> None:
 
 def test_init_cache_global() -> None:
     """Verify init cache global behavior."""
-    config = MagicMock()
-    config.num_hidden_layers = 6  # 6th is global
-    config.num_key_value_heads = 2
-    config.head_dim = 16
-    config.num_global_key_value_heads = 4
-    config.global_head_dim = 32
-    config.dtype = jnp.float32
-    config.shd_cfg.cache = None
+    config = ModelConfig(
+        num_hidden_layers=6,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_global_key_value_heads=4,
+        global_head_dim=32,
+        dtype=jnp.float32,
+    )
 
     caches = init_cache(config, 2, 5)
     assert len(caches) == 6
@@ -54,14 +53,14 @@ def test_init_cache_global() -> None:
 
 def test_init_cache_global_fallback() -> None:
     """Verify init cache global fallback behavior."""
-    config = MagicMock()
-    config.num_hidden_layers = 6  # 6th is global
-    config.num_key_value_heads = 2
-    config.head_dim = 16
-    config.num_global_key_value_heads = None
-    config.global_head_dim = None
-    config.dtype = jnp.float32
-    config.shd_cfg.cache = None
+    config = ModelConfig(
+        num_hidden_layers=6,
+        num_key_value_heads=2,
+        head_dim=16,
+        num_global_key_value_heads=None,
+        global_head_dim=None,
+        dtype=jnp.float32,
+    )
 
     caches = init_cache(config, 2, 5)
     assert len(caches) == 6

@@ -16,28 +16,223 @@ import struct
 import types
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol, Self, TypedDict, TypeGuard, runtime_checkable
+from typing import Protocol, Self, TypedDict, runtime_checkable
 
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_submodule, optional_import
 from gemma_4_sql.exceptions import MultimodalProcessingError
 from gemma_4_sql.type_hints import (
     AudioInput,
     BackendKwargValue,
+    DTypeProtocol,
     ImageInput,
-    MlxArrayProtocol,
     MultimodalInput,
     NDArrayProtocol,
-    TensorProtocol,
-    TfTensorProtocol,
     TokenizerProtocol,
-    ToListArrayProtocol,
-    TorchTensorProtocol,
 )
 
 logger = logging.getLogger(__name__)
 
-jnp = optional_import("jax.numpy")
-Image = optional_attr("PIL", "Image")
+
+@runtime_checkable
+class _PowCapableArrayProtocol(NDArrayProtocol, Protocol):
+    """Protocol for an `NDArrayProtocol` supporting `**` integer exponentiation."""
+
+    def __pow__(self, exponent: int, /) -> NDArrayProtocol:
+        """Raise array elements to `exponent`.
+
+        Args:
+            exponent: Integer power exponent.
+
+        Returns:
+            Exponentiated `NDArrayProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _JnpFFTNamespaceProtocol(Protocol):
+    """Protocol for `jax.numpy.fft` exposing `rfft`."""
+
+    def rfft(self, a: NDArrayProtocol, *, n: int) -> NDArrayProtocol:
+        """Compute 1D real-input discrete Fourier transform.
+
+        Args:
+            a: Real-valued 1D signal frame array.
+            n: FFT window length.
+
+        Returns:
+            Complex frequency-bin array.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _JnpMultimodalModuleProtocol(Protocol):
+    """Protocol for `jax.numpy` array creation and spectral math operations in multimodal preprocessing."""
+
+    @property
+    def uint8(self) -> DTypeProtocol:
+        """Provide `uint8` dtype descriptor."""
+        ...
+
+    @property
+    def float32(self) -> DTypeProtocol:
+        """Provide `float32` dtype descriptor."""
+        ...
+
+    @property
+    def fft(self) -> _JnpFFTNamespaceProtocol:
+        """Provide `jax.numpy.fft` namespace."""
+        ...
+
+    def frombuffer(self, buffer: bytes, *, dtype: DTypeProtocol) -> NDArrayProtocol:
+        """Interpret raw byte buffer as a 1D array.
+
+        Args:
+            buffer: Raw byte sequence.
+            dtype: Element dtype descriptor.
+
+        Returns:
+            1D `NDArrayProtocol` view.
+
+        """
+        ...
+
+    def array(
+        self,
+        obj: Sequence[float] | Sequence[Sequence[float]],
+        *,
+        dtype: DTypeProtocol,
+    ) -> NDArrayProtocol:
+        """Construct an `NDArrayProtocol` from nested float sequences.
+
+        Args:
+            obj: 1D or 2D sequence of float values.
+            dtype: Target dtype descriptor.
+
+        Returns:
+            Constructed `NDArrayProtocol` instance.
+
+        """
+        ...
+
+    def transpose(self, a: NDArrayProtocol, axes: tuple[int, ...], /) -> NDArrayProtocol:
+        """Permute array dimensions according to `axes`.
+
+        Args:
+            a: Input array.
+            axes: Permutation of axis indices.
+
+        Returns:
+            Transposed `NDArrayProtocol`.
+
+        """
+        ...
+
+    def arange(self, stop: int, /) -> NDArrayProtocol:
+        """Return evenly spaced integer indices in `[0, stop)`.
+
+        Args:
+            stop: Exclusive upper bound.
+
+        Returns:
+            1D index `NDArrayProtocol`.
+
+        """
+        ...
+
+    def cos(self, x: NDArrayProtocol, /) -> NDArrayProtocol:
+        """Compute elementwise cosine.
+
+        Args:
+            x: Radian angle array.
+
+        Returns:
+            Cosine array.
+
+        """
+        ...
+
+    def zeros(self, shape: int, *, dtype: DTypeProtocol) -> NDArrayProtocol:
+        """Construct a zero-filled 1D array of length `shape`.
+
+        Args:
+            shape: 1D array length.
+            dtype: Target dtype descriptor.
+
+        Returns:
+            Zero-initialized `NDArrayProtocol`.
+
+        """
+        ...
+
+    def concatenate(self, arrays: Sequence[NDArrayProtocol], /) -> NDArrayProtocol:
+        """Concatenate a sequence of arrays along axis 0.
+
+        Args:
+            arrays: Sequence of arrays to join.
+
+        Returns:
+            Concatenated `NDArrayProtocol`.
+
+        """
+        ...
+
+    def abs(self, x: NDArrayProtocol, /) -> _PowCapableArrayProtocol:
+        """Compute elementwise magnitude/absolute value.
+
+        Args:
+            x: Input real or complex array.
+
+        Returns:
+            Real magnitude `_PowCapableArrayProtocol`.
+
+        """
+        ...
+
+    def matmul(self, a: NDArrayProtocol, b: NDArrayProtocol, /) -> NDArrayProtocol:
+        """Compute matrix-vector or matrix-matrix product.
+
+        Args:
+            a: Left-hand matrix array.
+            b: Right-hand vector or matrix array.
+
+        Returns:
+            Product `NDArrayProtocol`.
+
+        """
+        ...
+
+    def log(self, x: NDArrayProtocol, /) -> NDArrayProtocol:
+        """Compute elementwise natural logarithm.
+
+        Args:
+            x: Positive input array.
+
+        Returns:
+            Natural-logarithm `NDArrayProtocol`.
+
+        """
+        ...
+
+    def stack(self, arrays: Sequence[NDArrayProtocol], *, axis: int = 0) -> NDArrayProtocol:
+        """Stack a sequence of arrays along a new `axis`.
+
+        Args:
+            arrays: Sequence of frame arrays.
+            axis: Axis index to insert.
+
+        Returns:
+            Stacked `NDArrayProtocol`.
+
+        """
+        ...
+
+
+jnp: _JnpMultimodalModuleProtocol | None = optional_import("jax.numpy", _JnpMultimodalModuleProtocol)
+Image = import_optional_submodule("PIL", "Image")
 
 
 @runtime_checkable
@@ -117,8 +312,8 @@ class PILResamplingEnumProtocol(Protocol):
 class ProcessedImageDict(TypedDict):
     """Structured dictionary returned by `process_image`."""
 
-    pixel_values: NDArrayProtocol
-    patches: NDArrayProtocol
+    pixel_values: NDArrayProtocol | list[list[list[float]]]
+    patches: NDArrayProtocol | list[list[float]]
     num_patches: int
     shape: tuple[int, int, int]
 
@@ -176,7 +371,7 @@ def load_image_bytes(image_input: ImageInput | SavablePILImageProtocol) -> bytes
         return base64.b64decode(image_input[5:])
 
     if isinstance(image_input, SavablePILImageProtocol):
-        pil_image = Image if Image is not None else optional_attr("PIL", "Image")
+        pil_image = Image if Image is not None else import_optional_submodule("PIL", "Image")
         if pil_image is None:
             logger.debug("Failed to import PIL: %s", "PIL.Image is unavailable")
         else:
@@ -209,6 +404,8 @@ def process_image(
 
     Raises:
         MultimodalProcessingError: If `target_size` or `patch_size` are invalid or image is corrupted.
+        TypeError: Internally raised and wrapped if `PIL.Image.open` is not callable.
+        ValueError: Internally raised and wrapped if the decoded RGB buffer is truncated.
 
     """
     (target_h, target_w) = target_size
@@ -221,9 +418,9 @@ def process_image(
 
     img_bytes = load_image_bytes(image_input)
 
-    if Image is None or jnp is None:
+    if Image is None:
         raise MultimodalProcessingError(
-            "Corrupted or unreadable image: Pillow and JAX libraries are required.",
+            "Corrupted or unreadable image: Pillow library is required.",
             operation="process_image",
         )
     bilinear = int(Image.Resampling.BILINEAR) if isinstance(Image, PILResamplingHolderProtocol) else 2
@@ -233,7 +430,9 @@ def process_image(
         with Image.open(io.BytesIO(img_bytes)) as pil_img:
             pil_resized = pil_img.convert("RGB").resize((target_w, target_h), bilinear)
             raw_rgb = pil_resized.tobytes()
-            rgb_array = jnp.frombuffer(raw_rgb, dtype=jnp.uint8).reshape((target_h, target_w, 3)).astype(jnp.float32) / 255.0
+            expected_len = target_h * target_w * 3
+            if len(raw_rgb) < expected_len:
+                raise ValueError(f"Decoded RGB byte buffer length {len(raw_rgb)} < expected {expected_len}")
     except (OSError, ValueError, TypeError, RuntimeError, AttributeError) as e:
         raise MultimodalProcessingError(
             f"Corrupted or unreadable image: {e}",
@@ -241,21 +440,51 @@ def process_image(
             cause=e,
         ) from e
 
-    # Standard ImageNet normalization: (x - mean) / std
-    mean = jnp.array([0.485, 0.456, 0.406], dtype=jnp.float32)
-    std = jnp.array([0.229, 0.224, 0.225], dtype=jnp.float32)
-
-    norm_img = (rgb_array - mean) / std
-    pixel_values: NDArrayProtocol = jnp.transpose(norm_img, (2, 0, 1)).astype(jnp.float32)
-
     num_patches_h = target_h // patch_size
     num_patches_w = target_w // patch_size
     num_patches = num_patches_h * num_patches_w
     patch_dim = 3 * patch_size * patch_size
 
-    reshaped = pixel_values.reshape(3, num_patches_h, patch_size, num_patches_w, patch_size)
-    transposed = jnp.transpose(reshaped, (1, 3, 0, 2, 4))
-    patches: NDArrayProtocol = transposed.reshape((num_patches, patch_dim)).astype(jnp.float32)
+    if jnp is not None:
+        rgb_array = (
+            jnp.frombuffer(raw_rgb[:expected_len], dtype=jnp.uint8).reshape((target_h, target_w, 3)).astype(jnp.float32)
+            / 255.0
+        )
+        mean = jnp.array([0.485, 0.456, 0.406], dtype=jnp.float32)
+        std = jnp.array([0.229, 0.224, 0.225], dtype=jnp.float32)
+
+        norm_img = (rgb_array - mean) / std
+        pixel_values: NDArrayProtocol | list[list[list[float]]] = jnp.transpose(norm_img, (2, 0, 1)).astype(jnp.float32)
+        assert isinstance(pixel_values, NDArrayProtocol)
+        reshaped = pixel_values.reshape(3, num_patches_h, patch_size, num_patches_w, patch_size)
+        transposed = jnp.transpose(reshaped, (1, 3, 0, 2, 4))
+        patches: NDArrayProtocol | list[list[float]] = transposed.reshape((num_patches, patch_dim)).astype(jnp.float32)
+    else:
+        means = (0.485, 0.456, 0.406)
+        stds = (0.229, 0.224, 0.225)
+        py_pixels: list[list[list[float]]] = [[[0.0] * target_w for _ in range(target_h)] for _ in range(3)]
+        for row_idx in range(target_h):
+            row_base = row_idx * target_w * 3
+            for col_idx in range(target_w):
+                px_offset = row_base + col_idx * 3
+                for ch in range(3):
+                    val = float(raw_rgb[px_offset + ch]) / 255.0
+                    py_pixels[ch][row_idx][col_idx] = (val - means[ch]) / stds[ch]
+
+        py_patches: list[list[float]] = []
+        for ph in range(num_patches_h):
+            r_start = ph * patch_size
+            for pw in range(num_patches_w):
+                c_start = pw * patch_size
+                flat_patch: list[float] = [
+                    py_pixels[ch][r_start + dr][c_start + dc]
+                    for ch in range(3)
+                    for dr in range(patch_size)
+                    for dc in range(patch_size)
+                ]
+                py_patches.append(flat_patch)
+        pixel_values = py_pixels
+        patches = py_patches
 
     return {
         "pixel_values": pixel_values,
@@ -385,7 +614,9 @@ def _parse_wav_samples(wav_bytes: bytes) -> tuple[list[float], int]:
             sample_rate = int(struct.unpack("<I", wav_bytes[24:28])[0])
             bits_per_sample = struct.unpack("<H", wav_bytes[34:36])[0]
         except struct.error as exc:
-            raise MultimodalProcessingError("Corrupted WAV fmt chunk header.", operation="_parse_wav_samples", cause=exc) from exc
+            raise MultimodalProcessingError(
+                "Corrupted WAV fmt chunk header.", operation="_parse_wav_samples", cause=exc
+            ) from exc
 
         data_offset = 12
         while data_offset <= len(wav_bytes) - 8:
@@ -393,7 +624,9 @@ def _parse_wav_samples(wav_bytes: bytes) -> tuple[list[float], int]:
             try:
                 chunk_size = struct.unpack("<I", wav_bytes[data_offset + 4 : data_offset + 8])[0]
             except struct.error as exc:
-                raise MultimodalProcessingError("Corrupted WAV subchunk header.", operation="_parse_wav_samples", cause=exc) from exc
+                raise MultimodalProcessingError(
+                    "Corrupted WAV subchunk header.", operation="_parse_wav_samples", cause=exc
+                ) from exc
             if chunk_id == b"data":
                 data_bytes = wav_bytes[data_offset + 8 : data_offset + 8 + chunk_size]
                 mono = _decode_pcm_bytes(data_bytes, bits_per_sample, audio_format, num_channels)
@@ -508,14 +741,18 @@ def process_audio(
     jnp_mod = jnp
     if isinstance(audio_input, NDArrayProtocol):
         flat_vals = audio_input.flatten().tolist()
-        samples = [float(x) for x in flat_vals if isinstance(x, (int, float))] if isinstance(flat_vals, list) else [float(flat_vals)]
+        samples = (
+            [float(x) for x in flat_vals if isinstance(x, (int, float))]
+            if isinstance(flat_vals, list)
+            else [float(flat_vals)]
+        )
         orig_rate = sample_rate
     elif isinstance(audio_input, (list, tuple)):
         samples = [float(x) for x in audio_input]
         orig_rate = sample_rate
     else:
         if jnp_mod is None:
-            jnp_mod = optional_import("jax.numpy")
+            jnp_mod = optional_import("jax.numpy", _JnpMultimodalModuleProtocol)
             if jnp_mod is None:
                 logger.debug("Failed to import jax.numpy: %s", "jax.numpy is unavailable")
         raw_bytes = load_audio_bytes(audio_input)
@@ -571,7 +808,9 @@ def process_audio(
     num_fft_bins = n_fft // 2 + 1
     for f in range(num_frames):
         start = f * frame_shift
-        frame_vals = [(samples[start + n] if (start + n) < len(samples) else 0.0) * hann_pure[n] for n in range(frame_length)]
+        frame_vals = [
+            (samples[start + n] if (start + n) < len(samples) else 0.0) * hann_pure[n] for n in range(frame_length)
+        ]
         power_bins = [0.0] * num_fft_bins
         stride = max(1, frame_length // 32)
         for k in range(num_fft_bins):
@@ -583,7 +822,9 @@ def process_audio(
                 re_sum += frame_vals[n] * math.cos(angle)
                 im_sum -= frame_vals[n] * math.sin(angle)
             power_bins[k] = re_sum * re_sum + im_sum * im_sum
-        mel_row = [math.log(sum(fb_weights[m][k] * power_bins[k] for k in range(num_fft_bins)) + 1e-6) for m in range(n_mels)]
+        mel_row = [
+            math.log(sum(fb_weights[m][k] * power_bins[k] for k in range(num_fft_bins)) + 1e-6) for m in range(n_mels)
+        ]
         spectrogram_list.append(mel_row)
 
     return {
@@ -661,35 +902,25 @@ def format_multimodal_prompt(
     }
 
 
-def _is_image_or_audio_source(
-    val: BackendKwargValue | None,
-) -> TypeGuard[str | Path | bytes | Sequence[float] | NDArrayProtocol]:
-    """Narrow `BackendKwargValue` to a valid `process_image` / `process_audio` input."""
-    return isinstance(val, (str, Path, bytes, Sequence, NDArrayProtocol))
-
-
-def _is_passthrough_tensor[TOut](
-    val: BackendKwargValue | None,
-    _target_fn: Callable[[NDArrayProtocol | Sequence[float]], TOut],
-) -> TypeGuard[TOut]:
-    """Check whether `val` is an already-converted tensor/array object."""
-    return isinstance(
-        val,
-        (TensorProtocol, TorchTensorProtocol, TfTensorProtocol, MlxArrayProtocol, NDArrayProtocol, ToListArrayProtocol),
-    )
+type _ConvertibleFeatureInput = (
+    NDArrayProtocol | Sequence[float] | Sequence[Sequence[float]] | Sequence[Sequence[Sequence[float]]]
+)
 
 
 def prepare_multimodal_inputs[TOut](
     prompt: str,
     kwargs: Mapping[str, BackendKwargValue],
-    tensor_convert_fn: Callable[[NDArrayProtocol | Sequence[float]], TOut],
+    tensor_convert_fn: Callable[[_ConvertibleFeatureInput], TOut],
+    passthrough_fn: Callable[[BackendKwargValue | None], TOut | None] | None = None,
 ) -> tuple[str, TOut | None, TOut | None]:
     """Format multimodal prompt and convert image/audio inputs into backend tensors.
 
     Args:
         prompt: Input natural language prompt.
-        kwargs: Generation keyword arguments containing optional `image_path`, `audio_path`, `pixel_values`, `audio_values`.
+        kwargs: Generation keyword arguments containing optional `image_path`, `audio_path`,
+            `pixel_values`, `audio_values`.
         tensor_convert_fn: Backend callable converting raw feature arrays into batched backend tensors.
+        passthrough_fn: Optional backend callable extracting pre-converted `TOut` tensors from `kwargs`.
 
     Returns:
         A 3-tuple of `(formatted_prompt, pixel_values, audio_values)`.
@@ -700,8 +931,12 @@ def prepare_multimodal_inputs[TOut](
     raw_px = kwargs.get("pixel_values")
     raw_au = kwargs.get("audio_values")
 
-    pixel_values: TOut | None = raw_px if _is_passthrough_tensor(raw_px, tensor_convert_fn) else None
-    audio_values: TOut | None = raw_au if _is_passthrough_tensor(raw_au, tensor_convert_fn) else None
+    if passthrough_fn is not None:
+        pixel_values = passthrough_fn(raw_px)
+        audio_values = passthrough_fn(raw_au)
+    else:
+        pixel_values = tensor_convert_fn(raw_px) if isinstance(raw_px, NDArrayProtocol) else None
+        audio_values = tensor_convert_fn(raw_au) if isinstance(raw_au, NDArrayProtocol) else None
 
     if image_path is not None or audio_path is not None:
         formatted = format_multimodal_prompt(
@@ -711,11 +946,11 @@ def prepare_multimodal_inputs[TOut](
         )
         prompt = str(formatted.get("prompt", prompt))
 
-        if image_path is not None and raw_px is None and _is_image_or_audio_source(image_path):
+        if image_path is not None and raw_px is None and isinstance(image_path, (str, Path, bytes, NDArrayProtocol)):
             img_res = process_image(image_path)
             pixel_values = tensor_convert_fn(img_res["pixel_values"])
 
-        if audio_path is not None and raw_au is None and _is_image_or_audio_source(audio_path):
+        if audio_path is not None and raw_au is None and isinstance(audio_path, (str, Path, bytes, NDArrayProtocol)):
             aud_res = process_audio(audio_path)
             audio_values = tensor_convert_fn(aud_res["audio_values"])
 

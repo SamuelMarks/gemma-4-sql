@@ -10,10 +10,10 @@ from tests.conftest import requires_jax
 pytestmark = requires_jax
 
 import jax
-import jax.numpy as jnp
 import pytest
 
 import gemma_4_sql.backends.jax.quantize as qt
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.type_hints import JaxArrayProtocol, JaxCausalLMProtocol
 
@@ -95,15 +95,21 @@ def test_quantize_awq_and_dequantize() -> None:
 def test_quantize_awq_fallback_activations() -> None:
     """Test AWQ when channel_activations is None or multi-dimensional."""
     tensor = jnp.array([[10.0, 20.0], [1.0, 2.0]], dtype=jnp.float32)
-    _q_tensor, _scale, _salient_weights, salient_mask = qt.quantize_awq(tensor, channel_activations=None, salient_ratio=0.5)
+    _q_tensor, _scale, _salient_weights, salient_mask = qt.quantize_awq(
+        tensor, channel_activations=None, salient_ratio=0.5
+    )
     assert salient_mask.shape == (2,)
 
     acts = jnp.ones((2, 3, 2), dtype=jnp.float32)
-    _q_tensor2, _scale2, _salient_weights2, salient_mask2 = qt.quantize_awq(tensor, channel_activations=acts, salient_ratio=0.5)
+    _q_tensor2, _scale2, _salient_weights2, salient_mask2 = qt.quantize_awq(
+        tensor, channel_activations=acts, salient_ratio=0.5
+    )
     assert salient_mask2.shape == (2,)
 
     acts_1d_wrong = jnp.ones((4,), dtype=jnp.float32)
-    _q_tensor3, _scale3, _salient_weights3, salient_mask3 = qt.quantize_awq(tensor, channel_activations=acts_1d_wrong, salient_ratio=0.5)
+    _q_tensor3, _scale3, _salient_weights3, salient_mask3 = qt.quantize_awq(
+        tensor, channel_activations=acts_1d_wrong, salient_ratio=0.5
+    )
     assert salient_mask3.shape == (2,)
 
     zero_tensor = jnp.zeros((2, 2), dtype=jnp.float32)
@@ -183,6 +189,27 @@ def test_quantize_jax_model_int8_and_awq() -> None:
     with pytest.raises(UnsupportedQuantizationMethodError):
         qt.quantize_model("test_gemma", "unsupported_method", strict_method=True)
 
+    from gemma_4_sql.type_hints import ForwardArg
+
+    class _StubJaxLM:
+        """Minimal `JaxCausalLMProtocol` test double."""
+
+        config = None
+        model = None
+
+        def __call__(self, *_a: ForwardArg, **_kw: ForwardArg) -> float:
+            """Return 0.0."""
+            return 0.0
+
+    stub_lm = _StubJaxLM()
+    assert stub_lm() == 0.0
+    assert qt._resolve_quantize_target("m", stub_lm) is stub_lm
+    assert qt._apply_quantization_to_model(stub_lm, "int8")[2] == 0
+    assert qt._apply_quantization_to_model(stub_lm, "awq")[2] == 0
+    qt._MODEL_CACHE.put_model("cached_stub_lm", stub_lm)
+    assert qt._resolve_quantize_target("cached_stub_lm", None) is stub_lm
+    qt._MODEL_CACHE.pop("cached_stub_lm", None)
+
 
 @pytest.mark.usefixtures("_mock_jax_quantize_env")
 def test_quantize_jax_model_error_handling(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,7 +221,12 @@ def test_quantize_jax_model_error_handling(monkeypatch: pytest.MonkeyPatch) -> N
         calibration_samples: Sequence[jax.Array | JaxArrayProtocol] | None = None,
         salient_ratio: float = 0.01,
     ) -> NoReturn:
-        """Provide raise runtime err test helper."""
+        """Provide raise runtime err test helper.
+
+        Raises:
+            RuntimeError: Always raised to simulate model graph iteration failure.
+
+        """
         _ = (calibration_samples, salient_ratio)
         raise RuntimeError("Mock graph iteration failure")
 
@@ -230,7 +262,7 @@ def test_set_param_metadata_native() -> None:
 
 
 def test_quantize_real_tiny_jax_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify quantize_model runs AWQ quantization on a real tiny Gemma4ForCausalLM."""
+    """Verify quantize_model replaces linears with QuantizedLinear/AWQLinear and preserves forward logit scale."""
     from flax import nnx
 
     from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
@@ -243,14 +275,42 @@ def test_quantize_real_tiny_jax_model(monkeypatch: pytest.MonkeyPatch) -> None:
         num_attention_heads=2,
         num_key_value_heads=1,
         head_dim=8,
-        num_experts=2,
-        num_experts_per_tok=1,
+        num_experts=1,
     )
     monkeypatch.setattr(qt.Gemma4Config, "gemma4_e2b", staticmethod(lambda: cfg))
     monkeypatch.setattr(qt, "Gemma4ForCausalLM", Gemma4ForCausalLM)
     monkeypatch.setattr(qt, "nnx", nnx)
 
-    res = qt.quantize_model("tiny-jax", "awq", salient_ratio=0.25)
+    input_ids = jnp.array([[1, 2, 3]], dtype=jnp.int32)
+    base_model_int8 = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(7))
+    logits_fp_int8 = base_model_int8(input_ids)
+    qt._MODEL_CACHE.put_model("tiny-jax-int8", base_model_int8)
+    res_int8 = qt.quantize_model("tiny-jax-int8", "int8")
+    assert res_int8["status"] == "quantized_int8"
+    assert isinstance(base_model_int8.lm_head, qt.QuantizedLinear)
+    logits_q_int8 = base_model_int8(input_ids)
+    assert bool(jnp.all(jnp.isfinite(logits_q_int8)))
+    assert float(jnp.max(jnp.abs(logits_q_int8 - logits_fp_int8))) < 0.25
+
+    base_model_awq = Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(7))
+    logits_fp_awq = base_model_awq(input_ids)
+    qt._MODEL_CACHE.put_model("tiny-jax-awq", base_model_awq)
+    res = qt.quantize_model("tiny-jax-awq", "awq", salient_ratio=0.25)
     assert res["backend"] == "jax"
     assert res["status"] == "quantized_awq"
     assert res["memory_reduction_factor"] == pytest.approx(0.7)
+    assert isinstance(base_model_awq.lm_head, qt.AWQLinear)
+    logits_q_awq = base_model_awq(input_ids)
+    assert bool(jnp.all(jnp.isfinite(logits_q_awq)))
+    assert float(jnp.max(jnp.abs(logits_q_awq - logits_fp_awq))) < 0.25
+
+    # Also verify biased nnx.Linear wrapping for both QuantizedLinear and AWQLinear
+    biased_lin = nnx.Linear(4, 3, use_bias=True, rngs=nnx.Rngs(0))
+    assert biased_lin.bias is not None
+    biased_lin.bias[...] = jnp.array([0.5, -0.5, 1.0], dtype=jnp.float32)
+    sample_x = jnp.ones((2, 4), dtype=jnp.float32)
+    fp_out = biased_lin(sample_x)
+    q_lin, _ = qt.QuantizedLinear.from_linear(biased_lin)
+    awq_lin, _ = qt.AWQLinear.from_linear(biased_lin, salient_ratio=0.5)
+    assert jnp.allclose(q_lin(sample_x), fp_out, atol=0.05)
+    assert jnp.allclose(awq_lin(sample_x), fp_out, atol=0.05)

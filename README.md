@@ -36,13 +36,13 @@ flowchart TD
     end
 
     subgraph DISPATCH["Unified Dispatcher Layer"]
-        DISPATCHER["Backend Dispatcher<br/>(`models.py`)"]
+        DISPATCHER["Backend Registry & Dispatcher<br/>(`registry.py` / `models.py`)"]
     end
 
     subgraph BACKENDS["Swappable Execution Backends"]
         direction TB
         PT_HF["PyTorch (HF Transformers)"]
-        PT_NAT["PyTorch (Native DynamicCache)"]
+        PT_NAT["PyTorch (Native Dynamic/StaticCache)"]
         KERAS["Keras 3 Backend"]
         JAX_NNX["JAX (Flax NNX)"]
         MAXTEXT["MaxText (AI-Hypercomputer TPU)"]
@@ -70,7 +70,7 @@ flowchart TD
 
 We explicitly integrate with and support the following Gemma 4 model architectures across different ecosystems:
 *   **PyTorch (HF)**: Directly imports and uses [`Gemma4ForCausalLM`](https://github.com/huggingface/transformers/tree/main/src/transformers/models/gemma4) from **[Hugging Face Transformers](https://github.com/huggingface/transformers/tree/main/src/transformers/models/gemma4)**;
-*   **PyTorch (Native)**: A custom, from-scratch implementation of Gemma 4 built with **Native PyTorch** ([`torch.nn`](https://pytorch.org/docs/stable/nn.html)) featuring [`DynamicCache`](https://huggingface.co/docs/transformers/internal/generation_utils#transformers.DynamicCache) KV generation and direct [`safetensors`](https://huggingface.co/docs/safetensors/index) serialization;
+*   **PyTorch (Native)**: A custom, from-scratch implementation of Gemma 4 built with **Native PyTorch** ([`torch.nn`](https://pytorch.org/docs/stable/nn.html)) featuring `DynamicCache` and hybrid global/sliding-window `StaticCache` KV generation, native GGUF v3 binary serialization, and direct [`safetensors`](https://huggingface.co/docs/safetensors/index) serialization;
 *   **MaxText**: Integrates with Google's **[AI-Hypercomputer MaxText](https://github.com/AI-Hypercomputer/maxtext)** framework; dynamically generates [Gin configs](https://github.com/google/gin-config), orchestrates multi-host TPU Pod training ([`maxtext.train`](https://github.com/AI-Hypercomputer/maxtext)) over multi-dimensional device meshes, uses Google **AQT** ([`aqt.jax.v2`](https://github.com/google/aqt)) for INT8/INT4 quantization, and operates on functional [Linen](https://flax.readthedocs.io/en/latest/api_reference/flax.linen/index.html)/[JAX](https://jax.readthedocs.io/en/latest/) parameter [PyTrees](https://jax.readthedocs.io/en/latest/pytrees.html);
 *   **JAX**: A custom, from-scratch implementation of the full Gemma 4 architecture built with **[Flax NNX](https://flax.readthedocs.io/en/latest/api_reference/flax.nnx/index.html)** featuring [`@nnx.jit`](https://flax.readthedocs.io/en/latest/api_reference/flax.nnx/transforms.html#flax.nnx.jit) execution, [`nnx.value_and_grad`](https://flax.readthedocs.io/en/latest/api_reference/flax.nnx/transforms.html#flax.nnx.value_and_grad), dynamic KV caching, [`nnx.LoRALinear`](https://flax.readthedocs.io/en/latest/api_reference/flax.nnx/nn/linear.html) adapters, and native [Activation-aware Weight Quantization (AWQ)](https://github.com/casper-hansen/AutoAWQ) and uniform INT8;
 *   **Keras**: Directly imports and uses [`GemmaCausalLM`](https://keras.io/api/keras_nlp/models/gemma/gemma_causal_lm/) from **[KerasNLP](https://keras.io/keras_nlp/)**;
@@ -89,7 +89,7 @@ We explicitly integrate with and support the following Gemma 4 model architectur
 | **Export (Ckpt)** | ✅ [`safetensors`](https://huggingface.co/docs/safetensors/index) | ✅ [`safetensors`](https://huggingface.co/docs/safetensors/index) | ✅ [`.keras` v3 format](https://keras.io/api/models/model_saving_apis/) | ✅ [`orbax`](https://orbax.readthedocs.io/en/latest/) Checkpointer | ✅ [`orbax`](https://orbax.readthedocs.io/en/latest/) Checkpointer | ✅ [`safetensors`](https://huggingface.co/docs/safetensors/index) |
 | **Agentic Loop** | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction | ✅ Self-Correction |
 
-*Note on ETL differences:* JAX, MaxText, and Keras all leverage Google's [`grain`](https://github.com/google/grain) library. While JAX and Keras use a shared `BaseFormatTransform` yielding standard `inputs` and `targets`, MaxText uses `MaxTextFormatTransform` to inject additional Seq2Seq features like `segment_ids` and `positions` expected by the MaxText architecture. Distributed environments use [`JAXDistributedSharding`](https://github.com/google/grain). All training commands support configurable `--batch-size` arguments.
+*Note on ETL differences:* JAX, MaxText, and Keras all leverage Google's [`grain`](https://github.com/google/grain) library. While JAX and Keras use a shared `BaseFormatTransform` yielding aligned causal LM `input_ids`, `labels`, and `loss_mask` (with `inputs` and `targets` aliases, DPO preference pairs, and multimodal `pixel_values` / `audio_values`), MaxText uses `MaxTextFormatTransform` to inject additional features like `segment_ids` and `positions` expected by the MaxText architecture. Distributed environments use [`JAXDistributedSharding`](https://github.com/google/grain) / `sharding_by_jax_process`. All training commands support configurable `--batch-size` arguments.
 
 ### CLI Output & Interaction
 
@@ -99,15 +99,15 @@ All CLI commands support direct standard output (stdout) reporting:
 *   `gemma-4-sql peft --model "..."`: Applies LoRA adapters to target projection modules.
 *   `gemma-4-sql quantize --model "..." --method "..."`: Quantizes model weights (`int8`, `int4`, `awq`, `gptq`, `gguf`).
 *   `gemma-4-sql export --model "..." --path "..."`: Exports model checkpoints (`safetensors`, `.keras`, `orbax`).
-*   `gemma-4-sql serve --model "..." --port 8000`: Launches the FastAPI continuous-batching inference server.
+*   `gemma-4-sql serve --model "..." --port 8000 --run-server`: Launches the FastAPI/Uvicorn continuous-batching inference server (omit `--run-server` to initialize and validate the app bundle without blocking).
 *   `gemma-4-sql benchmark --model "..." --hardware "..."`: Reports throughput (`tokens/sec`), latency percentiles, and memory footprint.
 *   `gemma-4-sql generate --prompt "..."`: Prints clean SQL directly to stdout.
 *   `gemma-4-sql agent --prompt "..."`: Emits JSON execution status, retry count, and final verified SQL.
 *   `gemma-4-sql chat --prompt "..."`: Prints multi-turn conversational SQL assistant response.
-*   `gemma-4-sql evaluate --dataset "..."`: Displays formatted evaluation metrics table.
+*   `gemma-4-sql evaluate --dataset "..."`: Emits JSON evaluation metrics (`exact_match`, `execution_accuracy`).
 *   `gemma-4-sql tokenize --encode "..."`: Emits JSON token IDs array.
 *   `gemma-4-sql execute --query "..."`: Outputs query execution results and error status.
-*   `gemma-4-sql few-shot --prompt "..." --examples "..."`: Generates few-shot prompt or SQL response.
+*   `gemma-4-sql few-shot --prompt "..." --examples "..."`: Builds and prints a token-budgeted few-shot prompt.
 *   `gemma-4-sql rag --prompt "..." --ddl "..."`: Formats retrieved schema context and RAG prompt.
 *   `gemma-4-sql embed-duckdb --prompt "..."`: Registers and queries the native `ask_gemma` UDF.
 *   `gemma-4-sql log --step 100 --metrics "..."`: Emits training metrics to TensorBoard logs.

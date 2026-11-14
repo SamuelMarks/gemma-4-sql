@@ -1,10 +1,10 @@
-"""Tests for MLX export."""
+"""Tests for MLX export without MagicMock."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,12 +22,37 @@ def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     export_dir = tmp_path / "export"
     expected_weight = mx.array([1.25, 2.5, 3.75], dtype=mx.float32)
 
-    mock_load_fn = MagicMock()
-    mock_model = MagicMock()
-    mock_model.parameters.return_value = {"w": expected_weight}.items()
-    mock_model.config = {"k": "v"}
-    mock_load_fn.return_value = (mock_model, "tok")
-    monkeypatch.setattr(export_module, "mlx_load", mock_load_fn)
+    @dataclass
+    class _DataclassConfig:
+        """Dataclass config for MLX export testing."""
+
+        k2: str = "v2"
+
+    class _ModelWithConfig:
+        """Typed MLX model double exposing `.parameters()` and `.config`."""
+
+        def __init__(self, cfg: dict[str, str] | _DataclassConfig | type[_DataclassConfig]) -> None:
+            """Store config."""
+            self.config = cfg
+
+        def parameters(self) -> dict[str, mx.array]:
+            """Return parameter dictionary."""
+            return {"w": expected_weight}
+
+    class _ModelWithoutConfig:
+        """Typed MLX model double exposing `.parameters()` without `.config`."""
+
+        def parameters(self) -> dict[str, mx.array]:
+            """Return parameter dictionary."""
+            return {"w": expected_weight}
+
+    current_model: _ModelWithConfig | _ModelWithoutConfig = _ModelWithConfig({"k": "v"})
+
+    def _fake_load(_name: str) -> tuple[_ModelWithConfig | _ModelWithoutConfig, str]:
+        """Return `(current_model, 'tok')`."""
+        return (current_model, "tok")
+
+    monkeypatch.setattr(export_module, "mlx_load", _fake_load)
 
     res = export_module.export_model("model", str(export_dir))
 
@@ -46,32 +71,29 @@ def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = json.load(f)
         assert cfg == {"k": "v"}
 
-    from dataclasses import dataclass
-
-    @dataclass
-    class _DataclassConfig:
-        """Dataclass config for MLX export testing."""
-
-        k2: str = "v2"
-
-    mock_model.config = _DataclassConfig()
+    current_model = _ModelWithConfig(_DataclassConfig())
     export_module.export_model("model", str(export_dir))
     with open(config_path, encoding="utf-8") as f:
         cfg = json.load(f)
         assert cfg == {"k2": "v2"}
 
-    del mock_model.config
+    current_model = _ModelWithConfig(_DataclassConfig)
     export_module.export_model("model", str(export_dir))
     with open(config_path, encoding="utf-8") as f:
         cfg = json.load(f)
         assert cfg == {"model_type": "gemma4", "model_name": "model"}
 
-    def _none_attr(*_a: str, **_k: str) -> None:
-        """Return None for optional_attr."""
-        return
+    current_model = _ModelWithoutConfig()
+    export_module.export_model("model", str(export_dir))
+    with open(config_path, encoding="utf-8") as f:
+        cfg = json.load(f)
+        assert cfg == {"model_type": "gemma4", "model_name": "model"}
+
+    def _none_attr(*_a: str | type) -> None:
+        """Return None for import_optional_symbol."""
 
     monkeypatch.setattr(export_module, "mlx_load", None)
-    monkeypatch.setattr(export_module, "optional_attr", _none_attr)
+    monkeypatch.setattr(export_module, "import_optional_symbol", _none_attr)
     with pytest.raises(ExportError, match="Failed to load MLX model"):
         export_module.export_model("model", str(export_dir))
 

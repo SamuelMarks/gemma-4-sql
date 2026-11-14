@@ -2,23 +2,26 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
-import types
 from collections.abc import Callable, Iterable, Mapping
-from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
+from typing import Protocol, SupportsFloat, runtime_checkable
 
-from gemma_4_sql._types_models import MaxTextModelConstructorProtocol, StepResult
-from gemma_4_sql.backends.common_dpo import (
-    ArithmeticTensorProtocol,
+from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
+from gemma_4_sql._types_tensors import extract_scalar_float
+from gemma_4_sql.backends._jax_common import (
     JaxNNLogSoftmaxProtocol,
     JaxNumpyLogpOpsProtocol,
+    JaxSliceableTensorProtocol,
     gather_jax_sequence_logps,
+)
+from gemma_4_sql.backends.common_dpo import (
+    ArithmeticTensorProtocol,
     run_dpo_wrapper,
 )
 from gemma_4_sql.backends.common_train import generic_run_training_epochs
 from gemma_4_sql.backends.jax.dpo import dpo_loss as jax_dpo_loss
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
+from gemma_4_sql.backends.maxtext._protocols import JaxDistributedAndPRNGProtocol, JnpZerosInt32Protocol
 from gemma_4_sql.backends.maxtext.etl import build_dataloader
 from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
 from gemma_4_sql.type_hints import (
@@ -26,12 +29,13 @@ from gemma_4_sql.type_hints import (
     DPOResultDict,
     ETLConfig,
     JaxArrayProtocol,
-    MaxTextCausalLMProtocol,
-    MaxTextTrainerState,
+    MaxTextDPOState,
+    MlxArrayProtocol,
     PyTreeNode,
-    ScalarItemExtractorProtocol,
+    TensorProtocol,
     TensorType,
-    TrainerState,
+    TfTensorProtocol,
+    TorchTensorProtocol,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,33 +51,118 @@ class _StatelessApplyModelProtocol[ValT](Protocol):
         inputs: ValT,
         /,
     ) -> ValT:
-        """Apply model parameters to `inputs`."""
+        """Apply model parameters to `inputs`.
+
+        Args:
+            params: Parameter PyTree mapping.
+            inputs: Input token ID tensor.
+
+        Returns:
+            Output vocabulary logits tensor.
+
+        """
         ...
 
 
-type MaxTextDPOModel[ValT] = _StatelessApplyModelProtocol[ValT] | MaxTextCausalLMProtocol | str
+type MaxTextDPOModel[ValT] = _StatelessApplyModelProtocol[ValT] | str
 
 
 @runtime_checkable
-class _OptaxOptimizerProtocol[OptInputT, OptStateT](Protocol):
+class _OptaxOptimizerProtocol[GradInT, GradOutT, OptStateT](Protocol):
     """Protocol for an Optax `GradientTransformation` supporting `.init(...)` and `.update(...)`."""
 
-    def init(self, params: OptInputT, /) -> OptStateT:
-        """Initialize optimizer state from parameters."""
+    def init(self, params: GradInT) -> OptStateT:
+        """Initialize optimizer state from parameters.
+
+        Args:
+            params: Model parameter PyTree.
+
+        Returns:
+            Initial optimizer state.
+
+        """
         ...
 
     def update(
         self,
-        updates: OptInputT,
+        updates: GradInT,
         state: OptStateT,
-        params: OptInputT | None = None,
-        /,
-    ) -> tuple[OptInputT, OptStateT]:
-        """Compute parameter updates and next optimizer state."""
+        params: GradInT | None = None,
+    ) -> tuple[GradOutT, OptStateT]:
+        """Compute parameter updates and next optimizer state.
+
+        Args:
+            updates: Gradient PyTree.
+            state: Current optimizer state.
+            params: Optional current parameter PyTree.
+
+        Returns:
+            Tuple of `(updates, next_state)`.
+
+        """
         ...
 
 
-type MaxTextDPOTarget = Mapping[str, PyTreeNode] | Mapping[str, JaxArrayProtocol] | Mapping[str, TensorType] | Mapping[str, ArithmeticTensorProtocol] | PyTreeNode | JaxArrayProtocol | TensorType | ArithmeticTensorProtocol | SupportsFloat
+@runtime_checkable
+class _JaxJitProtocol(Protocol):
+    """Protocol for a `jax` module exposing `.jit(...)`."""
+
+    def jit[StepFnT](self, fun: StepFnT, /) -> StepFnT:
+        """JIT-compile a step callable.
+
+        Args:
+            fun: Pure step function to compile.
+
+        Returns:
+            Compiled step callable.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _JaxValueAndGrad3Protocol(Protocol):
+    """Protocol for a `jax` module exposing 3-argument `.value_and_grad(...)`."""
+
+    def value_and_grad[P1, R1, B1, L1](
+        self,
+        fun: Callable[[P1, R1, B1], L1],
+        /,
+    ) -> Callable[[P1, R1, B1], tuple[L1, P1]]:
+        """Differentiate `fun(policy_params, ref_params, batch)` with respect to `policy_params`.
+
+        Args:
+            fun: Scalar loss callable.
+
+        Returns:
+            Callable returning `(loss, policy_grads)`.
+
+        """
+        ...
+
+
+type _OptaxUpdatesTree = (
+    PyTreeNode | Iterable[_OptaxUpdatesTree] | Mapping[str, _OptaxUpdatesTree] | complex | bytes | None
+)
+
+
+@runtime_checkable
+class _OptaxApplyUpdatesProtocol(Protocol):
+    """Protocol for `optax` providing `.apply_updates(params, updates)`."""
+
+    def apply_updates[ParamsT](self, params: ParamsT, updates: _OptaxUpdatesTree, /) -> ParamsT:
+        """Apply parameter updates.
+
+        Args:
+            params: Current parameter PyTree.
+            updates: Optimizer updates PyTree.
+
+        Returns:
+            Updated parameter PyTree.
+
+        """
+        ...
+
 
 type MaxTextDPOStepCallable[ParamsT, OptStateT, BatchT] = Callable[
     [
@@ -86,196 +175,49 @@ type MaxTextDPOStepCallable[ParamsT, OptStateT, BatchT] = Callable[
 ]
 
 
-def _is_stateless_model[ValT](
-    model: MaxTextDPOModel[ValT],
-    _sample: ValT,
-) -> TypeGuard[_StatelessApplyModelProtocol[ValT]]:
-    """Narrow `model` to `_StatelessApplyModelProtocol[ValT]`.
+@runtime_checkable
+class _JnpDPOModuleProtocol(JnpZerosInt32Protocol, Protocol):
+    """Protocol for `jax.numpy` exposing `int32`, `zeros`, and `sum` in MaxText DPO."""
 
-    Args:
-        model: Target stateless model instance.
-        _sample: Sample value for type parameter binding.
+    def sum(self, a: JaxArrayProtocol | float, /) -> SupportsFloat:
+        """Sum elements of `a`.
 
-    Returns:
-        `True` if `model` is not a plain `str`.
+        Args:
+            a: Input array or scalar product.
 
-    """
-    _ = _sample
-    return not isinstance(model, str)
+        Returns:
+            Scalar sum convertible via `float(...)`.
 
-
-def _is_jnn_gather(
-    mod: types.ModuleType | None,
-) -> TypeGuard[JaxNNLogSoftmaxProtocol[JaxArrayProtocol]]:
-    """Narrow `mod` to `JaxNNLogSoftmaxProtocol[JaxArrayProtocol]`.
-
-    Args:
-        mod: Loaded `jax.nn` module.
-
-    Returns:
-        `True` when `mod` is loaded.
-
-    """
-    return mod is not None
+        """
+        ...
 
 
-def _is_jnp_gather(
-    mod: types.ModuleType | None,
-) -> TypeGuard[JaxNumpyLogpOpsProtocol[JaxArrayProtocol]]:
-    """Narrow `mod` to `JaxNumpyLogpOpsProtocol[JaxArrayProtocol]`.
+@runtime_checkable
+class _OptaxDPOModuleProtocol(Protocol):
+    """Protocol for `optax` exposing `adamw` in MaxText DPO."""
 
-    Args:
-        mod: Loaded `jax.numpy` module.
+    def adamw(
+        self,
+        learning_rate: float,
+        /,
+    ) -> _OptaxOptimizerProtocol[dict[str, JaxArrayProtocol], dict[str, JaxArrayProtocol], dict[str, PyTreeNode]]:
+        """Construct an `adamw` gradient transformation.
 
-    Returns:
-        `True` when `mod` is loaded.
+        Args:
+            learning_rate: Optimizer learning rate.
 
-    """
-    return mod is not None
+        Returns:
+            Configured `_OptaxOptimizerProtocol`.
 
-
-def _is_arithmetic_val(
-    val: TensorType | SupportsFloat,
-) -> TypeGuard[JaxArrayProtocol]:
-    """Narrow `val` to `JaxArrayProtocol` for elementwise multiplication.
-
-    Args:
-        val: Candidate tensor or numeric scalar.
-
-    Returns:
-        `True` if `val` is not a plain `str`.
-
-    """
-    return not isinstance(val, str)
+        """
+        ...
 
 
-def _as_val_t[ValT](
-    val: MaxTextDPOTarget,
-    _sample: ValT,
-) -> TypeGuard[ValT]:
-    """Narrow `val` to `ValT`.
-
-    Args:
-        val: Candidate result tensor.
-        _sample: Sample value of type `ValT`.
-
-    Returns:
-        `True` if `val` is not a plain `str`.
-
-    """
-    _ = _sample
-    return not isinstance(val, str)
-
-
-def _is_val_mapping[ValT](
-    obj: MaxTextDPOTarget,
-    _model: MaxTextDPOModel[ValT],
-) -> TypeGuard[Mapping[str, ValT]]:
-    """Narrow `obj` to `Mapping[str, ValT]`.
-
-    Args:
-        obj: Parameter dictionary or batch mapping.
-        _model: Model carrying type parameter `ValT`.
-
-    Returns:
-        `True` if `obj` is a `Mapping`.
-
-    """
-    _ = _model
-    return isinstance(obj, Mapping)
-
-
-def _is_opt_input[OptInputT, OptStateT](
-    obj: MaxTextDPOTarget | None,
-    _opt: _OptaxOptimizerProtocol[OptInputT, OptStateT],
-) -> TypeGuard[OptInputT]:
-    """Narrow `obj` to `OptInputT` for `optimizer.update(...)`.
-
-    Args:
-        obj: Gradient or parameter PyTree.
-        _opt: Optimizer carrying type parameter `OptInputT`.
-
-    Returns:
-        `True` if `obj` is not `None`.
-
-    """
-    _ = _opt
-    return obj is not None
-
-
-def _is_params_t[ParamsT](
-    obj: MaxTextDPOTarget | None,
-    _sample: ParamsT,
-) -> TypeGuard[ParamsT]:
-    """Narrow `obj` to `ParamsT` after `optax.apply_updates`.
-
-    Args:
-        obj: Updated parameter PyTree.
-        _sample: Original parameter PyTree of type `ParamsT`.
-
-    Returns:
-        `True` if `obj` is not `None`.
-
-    """
-    _ = _sample
-    return obj is not None
-
-
-def _is_dpo_step_tuple[ParamsT, OptT](
-    res: StepResult | tuple[ParamsT, OptT, StepResult] | tuple[ParamsT | None, OptT | None, SupportsFloat | float],
-    _p: ParamsT | None,
-    _o: OptT | None,
-) -> TypeGuard[tuple[ParamsT | None, OptT | None, ScalarItemExtractorProtocol | SupportsFloat | float]]:
-    """Narrow `step_fn` output to `(policy_params, opt_state, loss)`.
-
-    Args:
-        res: Raw output from `step_fn`.
-        _p: Policy parameters reference for type inference.
-        _o: Optimizer state reference for type inference.
-
-    Returns:
-        `True` for 3-tuple step results.
-
-    """
-    _ = (_p, _o)
-    return isinstance(res, tuple) and len(res) == 3
-
-
-def _is_item_extractor(
-    val: ScalarItemExtractorProtocol | SupportsFloat | float,
-) -> TypeGuard[ScalarItemExtractorProtocol]:
-    """Narrow `val` to `ScalarItemExtractorProtocol` for `.item()` extraction.
-
-    Args:
-        val: Loss tensor or float scalar.
-
-    Returns:
-        `True` if `val` conforms to `ScalarItemExtractorProtocol`.
-
-    """
-    return isinstance(val, ScalarItemExtractorProtocol)
-
-
-def _is_supports_float(
-    val: ScalarItemExtractorProtocol | SupportsFloat | float,
-) -> TypeGuard[SupportsFloat | float]:
-    """Narrow `val` to `SupportsFloat | float`.
-
-    Args:
-        val: Loss tensor or float scalar.
-
-    Returns:
-        `True` if `val` is a `float`, `int`, or `SupportsFloat`.
-
-    """
-    return isinstance(val, (float, int, SupportsFloat))
-
-
-jax = optional_import("jax")
+jax: JaxDistributedAndPRNGProtocol | None = optional_import("jax", JaxDistributedAndPRNGProtocol)
 jnn = optional_import("jax.nn")
-jnp = optional_import("jax.numpy")
-optax = optional_import("optax")
-Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+jnp: _JnpDPOModuleProtocol | None = optional_import("jax.numpy", _JnpDPOModuleProtocol)
+optax: _OptaxDPOModuleProtocol | None = optional_import("optax", _OptaxDPOModuleProtocol)
+Gemma4Model: MaxTextModelConstructorProtocol | None = import_optional_symbol(
     "maxtext.models.gemma4",
     "Gemma4Model",
     MaxTextModelConstructorProtocol,
@@ -305,30 +247,17 @@ def dpo_loss[TensorT: ArithmeticTensorProtocol | float](
     return jax_dpo_loss(policy_chosen_logps, policy_rejected_logps, ref_chosen_logps, ref_rejected_logps, beta)
 
 
-def _is_jax_mod(mod: types.ModuleType | None) -> TypeGuard[types.ModuleType]:
-    """Narrow `mod` to `types.ModuleType` for attribute-guarded `.jit(...)` calls.
-
-    Args:
-        mod: Optional `jax` module.
-
-    Returns:
-        `True` when `mod` is not `None`.
-
-    """
-    return mod is not None
-
-
-def _compute_logps[ValT: TensorType | SupportsFloat](
+def _compute_logps[ValT: TensorType | ArithmeticTensorProtocol | float](
     model: MaxTextDPOModel[ValT],
     params: Mapping[str, ValT],
     inputs: ValT,
     labels: ValT,
-) -> ValT:
+) -> ValT | JaxSliceableTensorProtocol | float:
     """Compute sequence log probabilities from logits and target labels.
 
-    Applies `jax.nn.log_softmax` over the vocabulary dimension, gathers log-probabilities
-    at the target token indices via `jnp.take_along_axis`, masks out padding tokens
-    (`labels != 0`), and sums along the sequence axis.
+    Applies `jax.nn.log_softmax` over the vocabulary dimension, gathers shifted next-token
+    log-probabilities via `gather_jax_sequence_logps`, masks out padding/prompt tokens,
+    and sums along the sequence axis.
 
     Args:
         model: Stateless Flax/MaxText neural network model instance.
@@ -340,25 +269,23 @@ def _compute_logps[ValT: TensorType | SupportsFloat](
         Summed non-padding log probability per sequence.
 
     """
-    assert _is_stateless_model(model, inputs)
+    assert isinstance(model, _StatelessApplyModelProtocol)
     logits = model.apply(params, inputs)
-    if jnn is not None and jnp is not None and isinstance(logits, JaxArrayProtocol) and logits.ndim >= 2:
-        with contextlib.suppress(AttributeError, TypeError):
-            assert _is_jnn_gather(jnn)
-            assert _is_jnp_gather(jnp)
-            lbl_arr = labels
-            assert _is_arithmetic_val(lbl_arr)
-            raw_gathered = gather_jax_sequence_logps(jnn, jnp, logits, lbl_arr)
-            assert _as_val_t(raw_gathered, inputs)
-            return raw_gathered
-    assert _is_arithmetic_val(logits)
-    assert _is_arithmetic_val(labels)
-    raw_sum = jnp.sum(logits * labels, axis=-1) if jnp is not None else logits
-    assert _as_val_t(raw_sum, inputs)
-    return raw_sum
+    if (
+        isinstance(jnn, JaxNNLogSoftmaxProtocol)
+        and isinstance(jnp, JaxNumpyLogpOpsProtocol)
+        and isinstance(logits, JaxSliceableTensorProtocol)
+        and isinstance(labels, JaxSliceableTensorProtocol)
+        and len(logits.shape) >= 2
+    ):
+        return gather_jax_sequence_logps(jnn, jnp, logits, labels)
+    if jnp is not None and isinstance(logits, (int, float)) and isinstance(labels, (int, float)):
+        sum_val: float = float(jnp.sum(logits * labels))
+        return sum_val
+    return logits
 
 
-def _dpo_step_loss[ValT: ArithmeticTensorProtocol](
+def _dpo_step_loss[ValT: TensorType | float](
     policy_model: MaxTextDPOModel[ValT],
     policy_params: Mapping[str, ValT],
     ref_model: MaxTextDPOModel[ValT],
@@ -380,26 +307,28 @@ def _dpo_step_loss[ValT: ArithmeticTensorProtocol](
         Calculated step loss tensor.
 
     """
-    pi_ch_logps = _compute_logps(policy_model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])
-    pi_re_logps = _compute_logps(policy_model, policy_params, batch["rejected_inputs"], batch["rejected_labels"])
-    ref_ch_logps = _compute_logps(ref_model, ref_params, batch["chosen_inputs"], batch["chosen_labels"])
-    ref_re_logps = _compute_logps(ref_model, ref_params, batch["rejected_inputs"], batch["rejected_labels"])
-    (loss, _, _) = dpo_loss(pi_ch_logps, pi_re_logps, ref_ch_logps, ref_re_logps, beta)
+    pi_ch_raw = _compute_logps(policy_model, policy_params, batch["chosen_inputs"], batch["chosen_labels"])
+    pi_re_raw = _compute_logps(policy_model, policy_params, batch["rejected_inputs"], batch["rejected_labels"])
+    ref_ch_raw = _compute_logps(ref_model, ref_params, batch["chosen_inputs"], batch["chosen_labels"])
+    ref_re_raw = _compute_logps(ref_model, ref_params, batch["rejected_inputs"], batch["rejected_labels"])
+    assert isinstance(pi_ch_raw, (ArithmeticTensorProtocol, float))
+    assert isinstance(pi_re_raw, (ArithmeticTensorProtocol, float))
+    assert isinstance(ref_ch_raw, (ArithmeticTensorProtocol, float))
+    assert isinstance(ref_re_raw, (ArithmeticTensorProtocol, float))
+    (loss, _, _) = dpo_loss(pi_ch_raw, pi_re_raw, ref_ch_raw, ref_re_raw, beta)
     return loss
 
 
 def _get_train_step_fn[
-    ValT: ArithmeticTensorProtocol,
-    ParamsT: MaxTextDPOTarget,
-    OptInputT,
+    ValT: (TensorProtocol | TorchTensorProtocol | TfTensorProtocol | MlxArrayProtocol | float),
+    UpdatesT: _OptaxUpdatesTree,
     OptStateT,
-    BatchT: MaxTextDPOTarget,
 ](
     policy_model: MaxTextDPOModel[ValT],
     ref_model: MaxTextDPOModel[ValT],
-    optimizer: _OptaxOptimizerProtocol[OptInputT, OptStateT],
+    optimizer: _OptaxOptimizerProtocol[dict[str, ValT], UpdatesT, OptStateT],
     beta: float,
-) -> MaxTextDPOStepCallable[ParamsT, OptStateT, BatchT]:
+) -> MaxTextDPOStepCallable[dict[str, ValT], OptStateT, Mapping[str, ValT]]:
     """Create a JIT-compiled train step function.
 
     Args:
@@ -414,12 +343,12 @@ def _get_train_step_fn[
     """
 
     def train_step(
-        policy_params: ParamsT,
-        ref_params: ParamsT,
+        policy_params: dict[str, ValT],
+        ref_params: dict[str, ValT],
         opt_state: OptStateT,
-        batch: BatchT,
+        batch: Mapping[str, ValT],
     ) -> tuple[
-        ParamsT,
+        dict[str, ValT],
         OptStateT,
         SupportsFloat | float,
     ]:
@@ -437,42 +366,43 @@ def _get_train_step_fn[
         """
 
         def _wrapper(
-            p: ParamsT,
-            r: ParamsT,
-            b: BatchT,
-        ) -> TensorType | ArithmeticTensorProtocol | float:
-            """Compute DPO step loss for gradient differentiation."""
-            assert _is_val_mapping(p, policy_model)
-            assert _is_val_mapping(r, ref_model)
-            assert _is_val_mapping(b, policy_model)
+            p: dict[str, ValT],
+            r: dict[str, ValT],
+            b: Mapping[str, ValT],
+        ) -> ValT | ArithmeticTensorProtocol | float:
+            """Compute DPO step loss for gradient differentiation.
+
+            Args:
+                p: Policy parameter mapping.
+                r: Reference parameter mapping.
+                b: Batch mapping.
+
+            Returns:
+                Scalar DPO step loss.
+
+            """
             return _dpo_step_loss(policy_model, p, ref_model, r, b, beta)
 
-        assert jax is not None
-        assert optax is not None
+        assert isinstance(jax, _JaxValueAndGrad3Protocol)
+        assert isinstance(optax, _OptaxApplyUpdatesProtocol)
         (loss, grads) = jax.value_and_grad(_wrapper)(policy_params, ref_params, batch)
-        opt_policy_params = policy_params
-        assert _is_opt_input(grads, optimizer)
-        assert _is_opt_input(opt_policy_params, optimizer)
-        (updates, new_opt_state) = optimizer.update(grads, opt_state, opt_policy_params)
-        raw_updated = optax.apply_updates(opt_policy_params, updates)
-        assert _is_params_t(raw_updated, policy_params)
+        (updates, new_opt_state) = optimizer.update(grads, opt_state, policy_params)
+        updated_params: dict[str, ValT] = optax.apply_updates(policy_params, updates)
         scalar_loss: SupportsFloat | float = loss
-        return (raw_updated, new_opt_state, scalar_loss)
+        return (updated_params, new_opt_state, scalar_loss)
 
-    with contextlib.suppress(AttributeError, TypeError, AssertionError):
-        assert _is_jax_mod(jax)
-        jit_fn: MaxTextDPOStepCallable[ParamsT, OptStateT, BatchT] = jax.jit(train_step)
-        return jit_fn
+    if isinstance(jax, _JaxJitProtocol):
+        return jax.jit(train_step)
     return train_step
 
 
-def _run_training_epochs[ModelT, ParamsT, OptT, BatchT](
-    state: MaxTextTrainerState[ParamsT, OptT, BatchT] | TrainerState[ModelT, ParamsT, OptT, BatchT],
-) -> tuple[ParamsT | None, OptT | None, float]:
+def _run_training_epochs[ParamsT, OptT, BatchT](
+    state: MaxTextDPOState[ParamsT, OptT, BatchT],
+) -> tuple[ParamsT, OptT, float]:
     """Run DPO training epochs for MaxText.
 
     Args:
-        state: `MaxTextTrainerState` containing dataloader and parameters.
+        state: `MaxTextDPOState` containing dataloader and parameters.
 
     Returns:
         A 3-tuple of `(policy_params, opt_state, final_loss)`.
@@ -481,7 +411,7 @@ def _run_training_epochs[ModelT, ParamsT, OptT, BatchT](
     policy_params = state.policy_params
     opt_state = state.opt_state
     step_fn = state.train_step
-    dataloader: Iterable[BatchT] = state.dataloader or ()
+    dataloader: Iterable[BatchT] = state.dataloader
 
     def process_batch(batch: BatchT) -> float:
         """Process a single training batch.
@@ -494,22 +424,13 @@ def _run_training_epochs[ModelT, ParamsT, OptT, BatchT](
 
         """
         nonlocal policy_params, opt_state
-        assert step_fn is not None
-        raw_step = step_fn(
+        policy_params, opt_state, loss = step_fn(
             policy_params,
             state.ref_params,
             opt_state,
             batch,
         )
-        assert _is_dpo_step_tuple(raw_step, policy_params, opt_state)
-        policy_params, opt_state, loss = raw_step
-        try:
-            raw_loss = loss
-            assert _is_item_extractor(raw_loss)
-            return float(raw_loss.item())
-        except (AttributeError, TypeError, ValueError, AssertionError):
-            assert _is_supports_float(loss)
-            return float(loss)
+        return extract_scalar_float(loss)
 
     final_loss = generic_run_training_epochs(state.epochs, dataloader, process_batch)
     return (policy_params, opt_state, final_loss)
@@ -552,14 +473,23 @@ def _execute_dpo(
     ref_model = Gemma4Model(model_name)
     rng = jax.random.PRNGKey(0)
     dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-    policy_params = policy_model.init(rng, dummy_input)
-    ref_params = ref_model.init(rng, dummy_input)
+    policy_params: dict[str, JaxArrayProtocol] = {
+        str(k): v for k, v in dict(policy_model.init(rng, dummy_input)).items() if isinstance(v, JaxArrayProtocol)
+    }
+    ref_params: dict[str, JaxArrayProtocol] = {
+        str(k): v for k, v in dict(ref_model.init(rng, dummy_input)).items() if isinstance(v, JaxArrayProtocol)
+    }
     optimizer: _OptaxOptimizerProtocol[
-        dict[str, PyTreeNode],
+        dict[str, JaxArrayProtocol],
+        dict[str, JaxArrayProtocol],
         dict[str, PyTreeNode],
     ] = optax.adamw(learning_rate)
     opt_state = optimizer.init(policy_params)
-    train_step = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
+    train_step: MaxTextDPOStepCallable[
+        dict[str, JaxArrayProtocol],
+        dict[str, PyTreeNode],
+        Mapping[str, JaxArrayProtocol],
+    ] = _get_train_step_fn(policy_model, ref_model, optimizer, beta)
     data_dict = build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size))
     dataloader = data_dict.get("loader", None)
     has_loader = isinstance(dataloader, Iterable)
@@ -568,13 +498,14 @@ def _execute_dpo(
         raise ValueError(f"Invalid dataloader for dataset: {dataset}")
 
     (policy_params, opt_state, final_loss) = _run_training_epochs(
-        MaxTextTrainerState(
+        MaxTextDPOState(
             dataloader=dataloader,
             epochs=epochs,
             train_step=train_step,
             policy_params=policy_params,
             ref_params=ref_params,
             opt_state=opt_state,
+            beta=beta,
         )
     )
     return "completed", final_loss

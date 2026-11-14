@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
-import time
-import types
-from collections.abc import Mapping
-from typing import Protocol, TypeGuard, runtime_checkable
+from collections.abc import Mapping, Sequence
+from contextlib import AbstractContextManager
+from types import EllipsisType
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
-from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.common_benchmark import (
+    execute_timed_benchmark_loop,
+    get_current_rss_mb,
+    run_benchmark_wrapper,
+)
+from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol, import_optional_symbol, optional_import
+from gemma_4_sql.backends.maxtext._protocols import JaxDistributedHolderProtocol
 from gemma_4_sql.type_hints import (
     BenchmarkResultDict,
     DTypeProtocol,
@@ -32,28 +36,200 @@ class _MemoryStatsDeviceProtocol(Protocol):
     """Protocol for a JAX device exposing `.memory_stats()`."""
 
     def memory_stats(self) -> Mapping[str, int] | None:
-        """Return memory usage statistics for the device."""
+        """Return memory usage statistics for the device.
+
+        Returns:
+            Mapping of memory stat names to byte counts, or `None`.
+
+        """
         ...
 
 
-def _has_memory_stats(
-    device: _MemoryStatsDeviceProtocol | str | None,
-) -> TypeGuard[_MemoryStatsDeviceProtocol]:
-    """Narrow `device` to `_MemoryStatsDeviceProtocol` for `.memory_stats()` access.
+@runtime_checkable
+class _JaxJitAndSyncProtocol(Protocol):
+    """Protocol for a `jax` module providing `.jit(...)` and `.block_until_ready(...)`."""
+
+    def jit[FnT](self, fun: FnT, /) -> FnT:
+        """JIT-compile a function.
+
+        Args:
+            fun: Callable to compile.
+
+        Returns:
+            Compiled callable.
+
+        """
+        ...
+
+    def block_until_ready[OutT](self, x: OutT, /) -> OutT:
+        """Block until asynchronous device computation completes.
+
+        Args:
+            x: Output PyTree or array.
+
+        Returns:
+            Synchronized output.
+
+        """
+        ...
+
+
+def _as_jit_sync(
+    mod: _JaxBenchmarkModuleProtocol | ModuleNamespaceProtocol,
+) -> _JaxJitAndSyncProtocol | None:
+    """Return `mod` narrowed to `_JaxJitAndSyncProtocol` when `.jit` and `.block_until_ready` are present.
 
     Args:
-        device: JAX device object or string.
+        mod: Loaded `jax` module.
 
     Returns:
-        `True` if `device` conforms to `_MemoryStatsDeviceProtocol`.
+        `_JaxJitAndSyncProtocol` instance or `None`.
 
     """
-    return isinstance(device, _MemoryStatsDeviceProtocol)
+    return mod if isinstance(mod, _JaxJitAndSyncProtocol) else None
 
 
-jax = optional_import("jax")
-jnp = optional_import("jax.numpy")
-Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+@runtime_checkable
+class _JaxBenchmarkRandomProtocol(Protocol):
+    """Protocol for `jax.random` exposing `PRNGKey` and `randint`."""
+
+    def PRNGKey(self, seed: int, /) -> JaxArrayProtocol:
+        """Create a JAX PRNG key.
+
+        Args:
+            seed: Integer seed.
+
+        Returns:
+            PRNG key `JaxArrayProtocol`.
+
+        """
+        ...
+
+    def randint(
+        self,
+        key: JaxArrayProtocol,
+        shape: tuple[int, int],
+        minval: int,
+        maxval: int,
+        *,
+        dtype: DTypeProtocol,
+    ) -> JaxArrayProtocol:
+        """Sample uniform random integer token IDs.
+
+        Args:
+            key: JAX PRNG key.
+            shape: `(batch_size, seq_len)` shape tuple.
+            minval: Inclusive minimum token ID.
+            maxval: Exclusive maximum token ID.
+            dtype: Target integer dtype.
+
+        Returns:
+            Sampled token ID `JaxArrayProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _JaxBenchmarkModuleProtocol(JaxDistributedHolderProtocol, Protocol):
+    """Protocol for `jax` device discovery, placement, and random token generation in benchmarking."""
+
+    @property
+    def random(self) -> _JaxBenchmarkRandomProtocol:
+        """Provide `jax.random` namespace."""
+        ...
+
+    def devices(self, backend: str | None = None, /) -> Sequence[_MemoryStatsDeviceProtocol]:
+        """List visible JAX devices for `backend`.
+
+        Args:
+            backend: Optional accelerator platform (`'tpu'`, `'gpu'`, `'cpu'`).
+
+        Returns:
+            Sequence of `_MemoryStatsDeviceProtocol` devices.
+
+        """
+        ...
+
+    def default_device(self, device: _MemoryStatsDeviceProtocol | str | None, /) -> AbstractContextManager[None]:
+        """Return a context manager scoping default JAX device placement.
+
+        Args:
+            device: Target JAX device descriptor.
+
+        Returns:
+            Device placement context manager.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _JnpBenchmarkModuleProtocol(Protocol):
+    """Protocol for `jax.numpy` dtypes, `argmax`, and `concatenate` in MaxText benchmarking."""
+
+    @property
+    def bfloat16(self) -> DTypeProtocol:
+        """Provide `jnp.bfloat16` dtype."""
+        ...
+
+    @property
+    def float16(self) -> DTypeProtocol:
+        """Provide `jnp.float16` dtype."""
+        ...
+
+    @property
+    def float32(self) -> DTypeProtocol:
+        """Provide `jnp.float32` dtype."""
+        ...
+
+    @property
+    def int32(self) -> DTypeProtocol:
+        """Provide `jnp.int32` dtype."""
+        ...
+
+    def argmax(
+        self,
+        a: JaxArrayProtocol | TensorType,
+        *,
+        axis: int = -1,
+        keepdims: bool = False,
+    ) -> JaxArrayProtocol:
+        """Return argmax token indices along `axis`.
+
+        Args:
+            a: Last-step vocabulary logits slice.
+            axis: Vocabulary dimension index.
+            keepdims: Whether to keep reduced dimension of size 1.
+
+        Returns:
+            Selected token `JaxArrayProtocol`.
+
+        """
+        ...
+
+    def concatenate(
+        self,
+        arrays: Sequence[JaxArrayProtocol | TensorType],
+        *,
+        axis: int = -1,
+    ) -> JaxArrayProtocol:
+        """Concatenate `arrays` along `axis`.
+
+        Args:
+            arrays: Sequence of token arrays.
+            axis: Sequence axis index.
+
+        Returns:
+            Concatenated `JaxArrayProtocol`.
+
+        """
+        ...
+
+
+jax: _JaxBenchmarkModuleProtocol | None = optional_import("jax", _JaxBenchmarkModuleProtocol)
+jnp: _JnpBenchmarkModuleProtocol | None = optional_import("jax.numpy", _JnpBenchmarkModuleProtocol)
+Gemma4Model: MaxTextModelConstructorProtocol | None = import_optional_symbol(
     "maxtext.models.gemma4",
     "Gemma4Model",
     MaxTextModelConstructorProtocol,
@@ -99,7 +275,9 @@ def _get_device(hardware: str) -> _MemoryStatsDeviceProtocol | str | None:
     return jax.devices("cpu")[0] if jax is not None else None
 
 
-type _MaxTextBenchmarkParams = Mapping[str, PyTreeNode] | Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]] | dict[str, TensorType]
+type _MaxTextBenchmarkParams = (
+    Mapping[str, PyTreeNode] | Mapping[str, TensorProtocol | Mapping[str, TensorProtocol]] | dict[str, TensorType]
+)
 
 
 @runtime_checkable
@@ -108,10 +286,18 @@ class _MaxTextLogitsProtocol(Protocol):
 
     def __getitem__(
         self,
-        idx: tuple[types.EllipsisType, int, slice],
+        idx: tuple[EllipsisType, int, slice],
         /,
     ) -> JaxArrayProtocol | TensorType:
-        """Slice the last sequence position logits."""
+        """Slice the last sequence position logits.
+
+        Args:
+            idx: Ellipsis slice tuple `(..., -1, slice(None))`.
+
+        Returns:
+            Last-position vocabulary logits.
+
+        """
         ...
 
 
@@ -124,7 +310,16 @@ class _MaxTextBenchmarkModelProtocol(Protocol):
         params: _MaxTextBenchmarkParams,
         inputs: TensorType,
     ) -> _MaxTextLogitsProtocol:
-        """Apply model parameters to `inputs`."""
+        """Apply model parameters to `inputs`.
+
+        Args:
+            params: Parameter PyTree dictionary.
+            inputs: Input token ID array.
+
+        Returns:
+            Output vocabulary logits.
+
+        """
         ...
 
 
@@ -189,40 +384,33 @@ def _run_benchmark_pass(
             seq = jnp.concatenate([seq, token], axis=-1)
         return seq
 
-    with contextlib.suppress(AttributeError, TypeError):
-        forward_pass = jax.jit(forward_pass)
-        generate_pass = jax.jit(generate_pass)
+    jit_sync = _as_jit_sync(jax)
+    if jit_sync is not None:
+        forward_pass = jit_sync.jit(forward_pass)
+        generate_pass = jit_sync.jit(generate_pass)
 
     with jax.default_device(device):
         dummy_inputs = jax.random.randint(jax.random.PRNGKey(42), (batch_size, 32), 1, 256000, dtype=jnp.int32)
 
-        for _ in range(warmup_steps):
+        def _step() -> None:
+            """Execute one MaxText forward or generate step and synchronize."""
             out = forward_pass(params, dummy_inputs) if mode == "prefill" else generate_pass(params, dummy_inputs)
-            with contextlib.suppress(AttributeError, TypeError):
-                jax.block_until_ready(out)
+            if jit_sync is not None:
+                jit_sync.block_until_ready(out)
 
-        start_time = time.time()
-        for _ in range(num_runs):
-            out = forward_pass(params, dummy_inputs) if mode == "prefill" else generate_pass(params, dummy_inputs)
-            with contextlib.suppress(AttributeError, TypeError):
-                jax.block_until_ready(out)
-        end_time = time.time()
+        tokens_per_sec, latency_ms = execute_timed_benchmark_loop(
+            _step,
+            warmup_steps=warmup_steps,
+            num_runs=num_runs,
+            tokens_per_iter=32 if mode == "prefill" else max_new_tokens,
+            batch_size=batch_size,
+        )
 
-        total_time_ms = (end_time - start_time) * 1000.0
-        latency_ms = total_time_ms / max(1, num_runs)
-
-        if mode == "prefill":
-            tokens_per_sec = 32 * batch_size * num_runs / max(end_time - start_time, 1e-09)
-        else:
-            tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
-
-        try:
-            assert _has_memory_stats(device)
+        memory_mb = get_current_rss_mb()
+        if isinstance(device, _MemoryStatsDeviceProtocol):
             stats = device.memory_stats()
-            assert stats is not None
-            memory_mb = float(stats.get("peak_bytes_in_use", int(get_current_rss_mb() * 1024 * 1024))) / (1024 * 1024)
-        except (AssertionError, AttributeError, KeyError, RuntimeError, TypeError):
-            memory_mb = get_current_rss_mb()
+            if stats is not None:
+                memory_mb = float(stats.get("peak_bytes_in_use", int(memory_mb * 1024 * 1024))) / (1024 * 1024)
 
     return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
 

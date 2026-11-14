@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_train import (
@@ -10,9 +10,10 @@ from gemma_4_sql.backends.common_train import (
     resolve_training_dataloader,
     run_train_wrapper,
 )
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.backends.pytorch.distributed import (
     TorchDistModuleProtocol,
+    TorchDistributedSetupModuleProtocol,
     cleanup_distributed,
     setup_distributed,
     wrap_model_distributed,
@@ -21,10 +22,13 @@ from gemma_4_sql.backends.pytorch.etl import build_dataloader
 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
 from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
 from gemma_4_sql.type_hints import (
+    DTypeProtocol,
     ETLConfig,
     ForwardOutput,
+    TensorProtocol,
     TorchCausalLMProtocol,
     TorchOptimizerProtocol,
+    TorchParameterProtocol,
     TorchTensorProtocol,
     TorchTrainerState,
     TrainingConfig,
@@ -77,10 +81,70 @@ class _ReshapableLogitsProtocol(TorchTensorProtocol, Protocol):
         ...
 
 
-torch = optional_import("torch")
-nn = optional_import("torch.nn")
-optim = optional_import("torch.optim")
-Gemma4ForCausalLM: _PretrainedCausalLMLoaderProtocol | None = optional_attr(
+@runtime_checkable
+class _TorchTrainNNProtocol(Protocol):
+    """Protocol for `torch.nn` exposing `CrossEntropyLoss`."""
+
+    def CrossEntropyLoss(self) -> Callable[..., TensorProtocol | float]:
+        """Construct a `CrossEntropyLoss` criterion callable.
+
+        Returns:
+            Cross-entropy loss callable.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TorchTrainOptimProtocol(Protocol):
+    """Protocol for `torch.optim` exposing `AdamW`."""
+
+    def AdamW(
+        self,
+        params: Iterable[TorchParameterProtocol] | Iterable[TorchTensorProtocol],
+        *,
+        lr: float,
+    ) -> TorchOptimizerProtocol:
+        """Construct an `AdamW` optimizer.
+
+        Args:
+            params: Trainable model parameters.
+            lr: Optimizer learning rate.
+
+        Returns:
+            Configured `TorchOptimizerProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TorchTrainModuleProtocol(TorchDistributedSetupModuleProtocol, Protocol):
+    """Protocol for `torch` tensor construction and distributed device setup in PyTorch training."""
+
+    @property
+    def long(self) -> DTypeProtocol:
+        """Provide `torch.long` (`int64`) dtype."""
+        ...
+
+    def tensor(self, data: list[list[int]], *, dtype: DTypeProtocol) -> TorchTensorProtocol:
+        """Construct a 2D integer token ID tensor.
+
+        Args:
+            data: 2D list of integer token IDs.
+            dtype: Target integer dtype.
+
+        Returns:
+            Constructed `TorchTensorProtocol`.
+
+        """
+        ...
+
+
+torch: _TorchTrainModuleProtocol | None = optional_import("torch", _TorchTrainModuleProtocol)
+nn: _TorchTrainNNProtocol | None = optional_import("torch.nn", _TorchTrainNNProtocol)
+optim: _TorchTrainOptimProtocol | None = optional_import("torch.optim", _TorchTrainOptimProtocol)
+Gemma4ForCausalLM: _PretrainedCausalLMLoaderProtocol | None = import_optional_symbol(
     "transformers.models.gemma4",
     "Gemma4ForCausalLM",
     _PretrainedCausalLMLoaderProtocol,
@@ -131,7 +195,8 @@ def _run_training_epochs[
     OptT: TorchOptimizerProtocol,
     BatchValT,
 ](
-    state: TorchTrainerState[ModelT, OptT, Mapping[str, BatchValT]] | TorchTrainerState[ModelT, OptT, dict[str, BatchValT]],
+    state: TorchTrainerState[ModelT, OptT, Mapping[str, BatchValT]]
+    | TorchTrainerState[ModelT, OptT, dict[str, BatchValT]],
 ) -> float:
     """Run PyTorch supervised training epochs over the dataloader.
 
@@ -149,7 +214,15 @@ def _run_training_epochs[
     device = state.device
 
     def _step(batch: Mapping[str, BatchValT]) -> float:
-        """Execute a single PyTorch supervised training step and return scalar float loss."""
+        """Execute a single PyTorch supervised training step and return scalar float loss.
+
+        Args:
+            batch: Supervised training batch mapping containing `'inputs'` and `'targets'`.
+
+        Returns:
+            Scalar float cross-entropy loss for the batch.
+
+        """
         assert isinstance(model, TorchCausalLMProtocol)
         assert optimizer is not None
         assert criterion is not None
@@ -240,8 +313,15 @@ def _execute_train(
         criterion = nn.CrossEntropyLoss()
         dataloader, _ = resolve_training_dataloader(
             dataset,
-            lambda: build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size, distributed=is_distributed)),
-            lambda: [{"inputs": torch_mod.tensor([[1, 2, 3, 4]], dtype=torch_mod.long), "targets": torch_mod.tensor([[2, 3, 4, 5]], dtype=torch_mod.long)}],
+            lambda: build_dataloader(
+                ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size, distributed=is_distributed)
+            ),
+            lambda: [
+                {
+                    "inputs": torch_mod.tensor([[1, 2, 3, 4]], dtype=torch_mod.long),
+                    "targets": torch_mod.tensor([[2, 3, 4, 5]], dtype=torch_mod.long),
+                }
+            ],
         )
         model.train()
         final_loss = _run_training_epochs(
@@ -284,15 +364,26 @@ def train_model(
     batch_size = config.batch_size
     raw_dist = kwargs.get("distributed_strategy")
     distributed_strategy = str(raw_dist) if isinstance(raw_dist, str) and raw_dist else config.distributed_strategy
-    raw_alias = kwargs.get("backend_alias") or kwargs.get("backend") or ("pytorch_native" if config.backend == "pytorch_native" else "pytorch")
+    raw_alias = (
+        kwargs.get("backend_alias")
+        or kwargs.get("backend")
+        or ("pytorch_native" if config.backend == "pytorch_native" else "pytorch")
+    )
     backend_alias = str(raw_alias)
 
-    if torch is None or optim is None or nn is None or (backend_alias != "pytorch_native" and Gemma4ForCausalLM is None):
+    if (
+        torch is None
+        or optim is None
+        or nn is None
+        or (backend_alias != "pytorch_native" and Gemma4ForCausalLM is None)
+    ):
         raise DependencyMissingError("PyTorch dependencies are missing.", backend=backend_alias)
 
     raw_cfg = kwargs.get("model_config") or kwargs.get("config")
     resolved_model_cfg = raw_cfg if isinstance(raw_cfg, Gemma4Config) else None
-    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    wrapper_kwargs: dict[str, StatusValue] = {
+        k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None
+    }
     wrapper_kwargs["distributed_strategy"] = distributed_strategy
     return run_train_wrapper(
         backend_alias,

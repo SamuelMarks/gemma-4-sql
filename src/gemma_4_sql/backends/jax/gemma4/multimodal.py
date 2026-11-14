@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import jax
-import jax.numpy as jnp
 from jax import Array
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 
 def batched_merge_modalities(img_emb: Array, text_emb: Array, token_mask: Array) -> Array:

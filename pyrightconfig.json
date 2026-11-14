@@ -1,4 +1,5 @@
 {
+  "pythonVersion": "3.12",
   "typeCheckingMode": "strict",
   "venvPath": ".",
   "venv": ".venv",
@@ -7,25 +8,27 @@
   "reportMissingImports": "none",
   "reportMissingModuleSource": "none",
   "reportMissingTypeStubs": "none",
-  "reportUnknownMemberType": "none",
-  "reportUnknownVariableType": "none",
-  "reportUnknownArgumentType": "none",
+  "reportUnknownMemberType": "error",
+  "reportUnknownVariableType": "error",
+  "reportUnknownArgumentType": "error",
   "reportUnknownParameterType": "error",
   "reportUnknownLambdaType": "error",
   "reportMissingParameterType": "error",
   "reportPrivateUsage": "none",
-  "reportTypedDictNotRequiredAccess": "none",
+  "reportTypedDictNotRequiredAccess": "error",
   "reportUntypedBaseClass": "error",
-  "reportUntypedFunctionDecorator": "none",
+  "reportUntypedFunctionDecorator": "error",
+  "reportUnnecessaryIsInstance": "warning",
+  "reportUnnecessaryTypeIgnoreComment": "error",
   "executionEnvironments": [
     {
-      "root": "src/gemma_4_sql/cli_parsers",
+      "root": "src/gemma_4_sql",
       "reportUnknownLambdaType": "error",
       "reportUntypedBaseClass": "error",
-      "reportPrivateUsage": "none"
+      "reportPrivateUsage": "error"
     },
     {
-      "root": "src/gemma_4_sql",
+      "root": "scripts",
       "reportUnknownLambdaType": "error",
       "reportUntypedBaseClass": "error",
       "reportPrivateUsage": "error"

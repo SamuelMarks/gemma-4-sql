@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 [project]
 name = "gemma-4-sql"
 version = "0.0.1"
-description = "Natural text to SQL with Gemma 4; with DuckDB support and swappable-backends: PyTorch; Keras ; JAX; JAX / MaxText "
+description = "Natural text to SQL with Gemma 4, with DuckDB support and swappable backends: PyTorch, Keras, JAX, MaxText, and MLX."
 readme = "README.md"
 license = "Apache-2.0 OR MIT"
 requires-python = ">=3.12"
@@ -76,26 +76,45 @@ default = [
     "requirements-mlx.txt",
 ]
 
-[tool.pydocstyle]
-convention = "pep257"
-add_ignore = "D202"
-
 [tool.ruff]
-unsafe-fixes = true
+unsafe-fixes = false
 preview = true
-line-length = 320
+line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
-extend-select = [
-    "ANN401",
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "N",
     "D",
-    "TID251",
+    "DOC",
+    "UP",
+    "ANN",
+    "ASYNC",
+    "S",
+    "BLE",
+    "B",
+    "A",
+    "C4",
+    "DTZ",
+    "T20",
+    "PT",
+    "RET",
+    "SIM",
+    "TID",
+    "ARG",
+    "PTH",
+    "ERA",
+    "PL",
+    "TRY",
+    "PERF",
+    "FURB",
+    "RUF",
 ]
 extend-safe-fixes = [
-    "ALL",
-]
-extend-unsafe-fixes = [
     "ALL",
 ]
 ignore = [
@@ -105,6 +124,38 @@ ignore = [
     "missing-trailing-comma",
     "single-line-implicit-string-concatenation",
     "too-many-statements",
+    "too-many-locals",
+    "too-many-branches",
+    "too-many-arguments",
+    "too-many-return-statements",
+    "too-many-positional-arguments",
+    "too-many-public-methods",
+    "too-many-boolean-expressions",
+    "magic-value-comparison",
+    "non-augmented-assignment",
+    "literal-membership",
+    "no-self-use",
+    "global-statement",
+    "import-outside-top-level",
+    "relative-imports",
+    "raise-vanilla-args",
+    "raise-within-try",
+    "try-consider-else",
+    "assert",
+    "hardcoded-bind-all-interfaces",
+    "hardcoded-password-default",
+    "hardcoded-temp-file",
+    "hardcoded-sql-expression",
+    "suspicious-non-cryptographic-random-usage",
+    "invalid-function-name",
+    "invalid-class-name",
+    "constant-imported-as-non-constant",
+    "lowercase-imported-as-non-lowercase",
+    "builtin-open",
+    "builtin-argument-shadowing",
+    "abstract-base-class-without-abstract-method",
+    "unused-async",
+    "falsy-dict-get-fallback",
     "non-pep604-annotation-union",
     "too-many-statements-in-try-clause",
     "float-equality-comparison",
@@ -112,18 +163,35 @@ ignore = [
     "non-pep695-generic-class",
     "non-pep695-generic-function",
     "overload-with-docstring",
+    "suppressible-exception",
+    "docstring-extraneous-exception",
+    "docstring-extraneous-returns",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = [
+"src/gemma_4_sql/cli*.py" = [
+    "print",
+]
+"scripts/*" = [
+    "print",
+    "suspicious-subprocess-import",
+    "subprocess-without-shell-equals-true",
+    "start-process-with-partial-path",
+]
+"tests/**" = [
     "assert",
+    "print",
+    "module-import-not-at-top-of-file",
+    "suspicious-subprocess-import",
+    "subprocess-without-shell-equals-true",
+    "start-process-with-partial-path",
+    "async-busy-wait",
+    "pytest-raises-with-multiple-statements",
     "no-self-use",
     "unused-function-argument",
     "unused-method-argument",
     "unused-class-method-argument",
     "unused-async",
-    "docstring-missing-exception",
-    "docstring-missing-returns",
     "pytest-composite-assertion",
     "compare-to-empty-string",
     "too-many-statements-in-try-clause",
@@ -142,8 +210,6 @@ ignore = [
     "unused-method-argument",
     "unused-class-method-argument",
     "unused-async",
-    "docstring-missing-exception",
-    "docstring-missing-returns",
     "pytest-composite-assertion",
     "compare-to-empty-string",
     "too-many-statements-in-try-clause",
@@ -173,7 +239,18 @@ known-first-party = [
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "typing.Any".msg = "Do not use typing.Any; use explicit Protocols, TypedDicts, or TypeVars instead."
 "typing.cast".msg = "Do not use typing.cast; use runtime-checkable Protocols or type guards instead."
-"builtins.__import__".msg = "Do not use __import__; use LazyLoader / optional_import / optional_attr or standard imports instead."
+"builtins.object".msg = "Do not annotate with builtins.object; use narrow Protocols, TypeVars, or Unions instead."
+"builtins.getattr".msg = "Avoid dynamic attribute reflection (getattr); use explicit Protocols and typed attributes."
+"builtins.setattr".msg = "Avoid dynamic attribute mutation (setattr); use explicit typed attributes or constructors."
+"builtins.hasattr".msg = "Avoid hasattr; use narrow runtime-checkable Protocols with isinstance()."
+"builtins.delattr".msg = "Avoid delattr; use explicit typed state transitions."
+"builtins.__import__".msg = "Do not use __import__; use LazyLoader / optional_import / import_optional_symbol or standard imports instead."
+"unittest.mock.MagicMock".msg = "Do not use untyped mocks (which erase types to Any); use explicit typed test doubles implementing Protocols."
+"unittest.mock.AsyncMock".msg = "Do not use untyped mocks (which erase types to Any); use explicit typed test doubles implementing Protocols."
+"unittest.mock.Mock".msg = "Do not use untyped mocks (which erase types to Any); use explicit typed test doubles implementing Protocols."
+"unittest.mock.NonCallableMagicMock".msg = "Do not use untyped mocks (which erase types to Any); use explicit typed test doubles implementing Protocols."
+"types.SimpleNamespace".msg = "Do not use SimpleNamespace (which erases types to Any); use explicit typed classes or dataclasses."
+"types.ModuleType".msg = "Do not use types.ModuleType (which erases member types to Any); use ModuleNamespaceProtocol or explicit module Protocols."
 "numpy".msg = "Do not use numpy directly; use the backend-specific library (jax.numpy, torch, keras.ops, mlx.core) instead."
 
 [tool.mypy]
@@ -213,7 +290,7 @@ partial_branches_always = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--cov-report=term-missing --cov-fail-under=0 --cov-branch"
+addopts = "--cov-report=term-missing --cov-fail-under=100 --cov-branch"
 markers = [
     "torch: Tests requiring PyTorch (torch, torchvision, torchaudio)",
     "jax: Tests requiring JAX and Flax (jax, jaxlib, flax)",
@@ -248,4 +325,12 @@ python = ".venv"
 
 [tool.ty.rules]
 unresolved-import = "ignore"
-invalid-mutable-override = "ignore"
+invalid-mutable-override = "error"
+
+[[tool.ty.overrides]]
+include = [
+    "src/gemma_4_sql/backends/pytorch/gemma4/**",
+    "src/gemma_4_sql/backends/pytorch/peft.py",
+    "tests/backends/pytorch/**",
+]
+rules.invalid-mutable-override = "ignore"

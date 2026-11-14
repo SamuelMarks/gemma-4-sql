@@ -70,6 +70,7 @@ class Gemma4DecoderLayer(nn.Module):
         position_ids: torch.Tensor | None = None,
         past_key_value: tuple[torch.Tensor, torch.Tensor] | Cache | None = None,
         per_layer_input: torch.Tensor | None = None,
+        shared_kv: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor], torch.Tensor | None]:
         """Forward pass for decoder layer.
 
@@ -79,6 +80,7 @@ class Gemma4DecoderLayer(nn.Module):
             position_ids: Optional token position index tensor.
             past_key_value: Optional KV cache tuple or `Cache` instance.
             per_layer_input: Optional per-layer embedding input tensor of shape `(batch, seq_len, ple_dim)`.
+            shared_kv: Optional precomputed `(key_states, value_states)` from an earlier KV-anchor layer.
 
         Returns:
             Tuple of `(hidden_states, present_key_value, router_logits)`.
@@ -91,6 +93,7 @@ class Gemma4DecoderLayer(nn.Module):
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_value=past_key_value,
+            shared_kv=shared_kv,
         )
         if self.use_post_norms:
             hidden_states = self.post_attention_layernorm(hidden_states)
@@ -113,7 +116,12 @@ class Gemma4DecoderLayer(nn.Module):
 
         hidden_states = residual + mlp_out
 
-        if per_layer_input is not None and self.per_layer_input_gate is not None and self.per_layer_projection is not None and self.post_per_layer_input_norm is not None:
+        if (
+            per_layer_input is not None
+            and self.per_layer_input_gate is not None
+            and self.per_layer_projection is not None
+            and self.post_per_layer_input_norm is not None
+        ):
             ple_residual = hidden_states
             gated = torch.sigmoid(self.per_layer_input_gate(hidden_states)) * per_layer_input
             proj = self.per_layer_projection(gated)

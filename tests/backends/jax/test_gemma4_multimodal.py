@@ -1,7 +1,6 @@
 """Unit and behavioral tests for gemma4 multimodal."""
 
-import jax.numpy as jnp
-
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
@@ -24,7 +23,15 @@ def test_batched_merge_modalities() -> None:
 
 def test_multimodal_inputs() -> None:
     """Verify multimodal inputs behavior."""
-    inputs = MultimodalInputs(input_ids=jnp.array([1, 2, 3]), pixel_values=jnp.array([1.0]), image_token_mask=jnp.array([True]), input_features=None, input_features_mask=None, audio_token_mask=None, attention_mask=None)
+    inputs = MultimodalInputs(
+        input_ids=jnp.array([1, 2, 3]),
+        pixel_values=jnp.array([1.0]),
+        image_token_mask=jnp.array([True]),
+        input_features=None,
+        input_features_mask=None,
+        audio_token_mask=None,
+        attention_mask=None,
+    )
     assert inputs.input_ids.shape == (3,)
     assert inputs.pixel_values is not None and inputs.pixel_values.shape == (1,)
     assert inputs.image_token_mask is not None and inputs.image_token_mask[0]

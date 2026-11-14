@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import argparse
-
 from gemma_4_sql.cli_db import db_execute_cmd, embed_duckdb_cmd
+from gemma_4_sql.cli_parsers.protocols import SubparserCollectionProtocol
 
-type SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
 
-
-def add_db_parsers(subparsers: SubParsersType) -> None:
+def add_db_parsers(subparsers: SubparserCollectionProtocol) -> None:
     """Register database query execution and DuckDB embedding subparsers.
 
     Args:

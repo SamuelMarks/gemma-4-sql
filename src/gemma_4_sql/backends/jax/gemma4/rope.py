@@ -6,9 +6,10 @@ from collections.abc import Callable
 from functools import partial
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
 from jax import Array
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 
 def segment_ids_to_positions(segment_ids: Array) -> Array:
@@ -24,23 +25,38 @@ def segment_ids_to_positions(segment_ids: Array) -> Array:
     return jnp.cumsum(segment_ids, axis=-1)
 
 
-def default_rope_params(_positions: Array, head_dim: int, rope_theta: int = 1000000, factor: float = 1.0) -> tuple[Array, float]:
-    """Compute default inverse rotational frequencies and scaling factor for RoPE.
+def default_rope_params(
+    _positions: Array,
+    head_dim: int,
+    rope_theta: int = 1000000,
+    factor: float = 1.0,
+    proportion: float = 1.0,
+) -> tuple[Array, float]:
+    """Compute inverse rotational frequencies with optional linear scaling and proportional partial rotation.
 
     Args:
         _positions: Token position tensor (unused for static frequency computation).
         head_dim: Attention head dimension.
         rope_theta: Base period for rotary frequencies.
-        factor: Proportional scaling factor for frequencies.
+        factor: Linear context scaling divisor applied to rotary frequencies.
+        proportion: Fraction `(0.0, 1.0]` of `head_dim` dimensions receiving rotary rotation;
+            remaining dimensions receive zero frequency (`cos=1, sin=0`, pass-through).
 
     Returns:
         Tuple of `(rotational_frequency, attention_factor)`.
 
     """
-    fraction = jnp.arange(0, head_dim, 2, dtype=jnp.float32) / head_dim
+    half_dim = head_dim // 2
+    rotary_half_dim = max(0, min(half_dim, round(proportion * half_dim)))
+    if rotary_half_dim == 0:
+        return (jnp.zeros((half_dim,), dtype=jnp.float32), 1.0)
+    rotary_dim = rotary_half_dim * 2
+    fraction = jnp.arange(0, rotary_dim, 2, dtype=jnp.float32) / float(rotary_dim)
     timescale = float(rope_theta) ** fraction
-    rotational_frequency = 1.0 / timescale
-    rotational_frequency /= factor
+    rotational_frequency = (1.0 / timescale) / float(factor)
+    if rotary_half_dim < half_dim:
+        pad_zeros = jnp.zeros((half_dim - rotary_half_dim,), dtype=jnp.float32)
+        rotational_frequency = jnp.concatenate([rotational_frequency, pad_zeros], axis=0)
     attention_factor = 1.0
     return (rotational_frequency, attention_factor)
 
@@ -72,14 +88,14 @@ def apply_rope(x: Array, sin: Array, cos: Array) -> Array:
 
 
 class RoPE(nnx.Module):
-    """Implementation of RoPE."""
+    """Rotary Position Embedding module supporting linear scaling and proportional partial rotation."""
 
     def __init__(self, *, rope_type: str, **rope_kwargs: float) -> None:
-        """Initialize the instance parameters.
+        """Initialize the RoPE module.
 
         Args:
-            rope_type: The rope_type parameter required for this operation.
-            **rope_kwargs: Additional configuration for RoPE embeddings.
+            rope_type: Registered key in `rope_functions` (e.g., `'default'`).
+            **rope_kwargs: Static parameters forwarded to the registered frequency builder.
 
         """
         self.rope_kwargs = rope_kwargs

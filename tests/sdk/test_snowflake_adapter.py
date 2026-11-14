@@ -1,130 +1,231 @@
-"""Unit tests for the Snowflake database adapter."""
+"""Unit tests for `SnowflakeAdapter` using strongly-typed protocol test doubles."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Self
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 import gemma_4_sql.sdk.adapters.snowflake_adapter as sa
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
-from gemma_4_sql.type_hints import CursorProtocol, JSONPrimitive, JSONValue
+from gemma_4_sql.sdk.adapters.base import DBKwargValue, MinimalCursorProtocol
+from gemma_4_sql.type_hints import DatabaseConnectionProtocol, JSONPrimitive
 from tests.utils.test_utils import FakeDBConnection
 
 
+class _SnowflakeError(Exception):
+    """Simulated Snowflake connector error."""
+
+
+class _SnowflakeErrorsNS:
+    """Typed `snowflake.connector.errors` namespace."""
+
+    def __init__(self, err_val: type[Exception] | int = _SnowflakeError) -> None:
+        """Store `Error` attribute.
+
+        Args:
+            err_val: Exception class or invalid sentinel value.
+
+        """
+        self.Error = err_val
+
+
+class _SnowflakeConnectorSubmod:
+    """Typed `snowflake.connector` submodule double."""
+
+    def __init__(self, conn: FakeDBConnection) -> None:
+        """Initialize with `FakeDBConnection` and call counter.
+
+        Args:
+            conn: Underlying fake connection.
+
+        """
+        self._conn = conn
+        self.connect_calls = 0
+        self.errors = _SnowflakeErrorsNS(_SnowflakeError)
+
+    def connect(self, **kwargs: DBKwargValue) -> DatabaseConnectionProtocol:
+        """Increment `connect_calls` and return `self._conn`.
+
+        Args:
+            **kwargs: Connection parameters.
+
+        Returns:
+            `FakeDBConnection` instance.
+
+        """
+        _ = kwargs
+        self.connect_calls += 1
+        return self._conn
+
+
+class _SnowflakeRootPkg:
+    """Typed top-level `snowflake` package double."""
+
+    def __init__(self, conn: FakeDBConnection) -> None:
+        """Initialize with `_SnowflakeConnectorSubmod`.
+
+        Args:
+            conn: Underlying fake connection.
+
+        """
+        self.connector = _SnowflakeConnectorSubmod(conn)
+
+
+class _DirectSnowflakeModule:
+    """Typed direct `snowflake.connector` module exposing `.connect(...)`."""
+
+    def __init__(self, conn: FakeDBConnection) -> None:
+        """Store `FakeDBConnection`.
+
+        Args:
+            conn: Underlying fake connection.
+
+        """
+        self._conn = conn
+
+    def connect(self, **kwargs: DBKwargValue) -> DatabaseConnectionProtocol:
+        """Return `self._conn`.
+
+        Args:
+            **kwargs: Connection parameters.
+
+        Returns:
+            `FakeDBConnection` instance.
+
+        """
+        _ = kwargs
+        return self._conn
+
+
+class _EmptySnowflakeObject:
+    """Module stub with neither `.connector` nor `.connect`."""
+
+    __name__: str = "snowflake"
+
+
 @pytest.fixture
-def fake_snowflake_module() -> tuple[MagicMock, FakeDBConnection, type[Exception]]:
-    """Create a mocked snowflake.connector module backed by FakeDBConnection.
+def fake_snowflake_bundle() -> tuple[_SnowflakeRootPkg, FakeDBConnection]:
+    """Provide typed `snowflake` package double and `FakeDBConnection`.
 
     Returns:
-        Tuple of `(mock_snowflake, fake_conn, SnowflakeError)`.
+        Tuple of `(snowflake_pkg, fake_conn)`.
 
     """
-    mock_snowflake = MagicMock()
-
-    class SnowflakeError(Exception):
-        """Simulated Snowflake connector error."""
-
-    mock_snowflake.connector.errors.Error = SnowflakeError
-
     conn = FakeDBConnection()
-    mock_snowflake.connector.connect.return_value = conn
-    return mock_snowflake, conn, SnowflakeError
+    return (_SnowflakeRootPkg(conn), conn)
 
 
 @pytest.mark.asyncio
-async def test_snowflake_adapter_execution(
-    fake_snowflake_module: tuple[MagicMock, FakeDBConnection, type[Exception]],
+async def test_snowflake_adapter_execution_and_no_async_leak(
+    fake_snowflake_bundle: tuple[_SnowflakeRootPkg, FakeDBConnection],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify SnowflakeAdapter connection, query execution, and error propagation."""
-    mock_snowflake, conn, snowflake_error_cls = fake_snowflake_module
+    """Verify `SnowflakeAdapter` execution, error propagation, and leak-free `connect_async`."""
+    sf_pkg, conn = fake_snowflake_bundle
 
-    monkeypatch.setattr(sa, "snowflake", mock_snowflake)
+    adapter = sa.SnowflakeAdapter("account", {}, snowflake_module=sf_pkg)
+    assert sf_pkg.connector.connect_calls == 1
+    # `connect_async()` reuses the already-established `self._conn` without leaking a duplicate connection!
+    c_async = await adapter.connect_async()
+    assert c_async is conn
+    assert sf_pkg.connector.connect_calls == 1
 
-    with patch.dict("sys.modules", {"snowflake": mock_snowflake, "snowflake.connector": mock_snowflake.connector}):
-        adapter = sa.SnowflakeAdapter("account", {})
+    # Lazy adapter connects on first `connect_async()` call
+    lazy_sf = sa.SnowflakeAdapter("account", {}, lazy_connect=True, snowflake_module=sf_pkg)
+    assert sf_pkg.connector.connect_calls == 1
+    assert await lazy_sf.connect_async() is conn
+    assert sf_pkg.connector.connect_calls == 2
 
-        c1 = adapter.connect()
-        assert c1 == conn
+    assert _SnowflakeError in adapter.error_classes
+    sf_pkg.connector.errors = _SnowflakeErrorsNS(123)
+    assert DatabaseExecutionError in adapter.error_classes
+    sf_pkg.connector.errors = _SnowflakeErrorsNS(_SnowflakeError)
 
-        c2 = await adapter.connect_async()
-        assert c2 == conn
+    # Direct `SnowflakeModuleProtocol` fallback (`sf_mod.connect`) and unresolvable module error
+    class _NoErrorsRootPkg:
+        """Package stub with `.connector` lacking `.errors`."""
 
-        assert snowflake_error_cls in adapter.error_classes
+        __name__: str = "snowflake"
+        connector = _DirectSnowflakeModule(conn)
 
-        mock_snowflake.connector.errors.Error = 123
-        assert DatabaseExecutionError in adapter.error_classes
+    no_err_adapter = sa.SnowflakeAdapter("account", {}, lazy_connect=True, snowflake_module=_NoErrorsRootPkg())
+    assert DatabaseExecutionError in no_err_adapter.error_classes
+    direct_adapter = sa.SnowflakeAdapter(
+        "account", {}, lazy_connect=True, snowflake_module=_DirectSnowflakeModule(conn)
+    )
+    assert direct_adapter.connect() is conn
+    empty_sf_adapter = sa.SnowflakeAdapter("account", {}, lazy_connect=True, snowflake_module=_EmptySnowflakeObject())
+    with pytest.raises(DependencyMissingError, match="snowflake connect function could not be resolved"):
+        empty_sf_adapter.connect()
 
-        original_connector = mock_snowflake.connector
-        del mock_snowflake.connector
+    conn.set_results([[(1, "apple")]])
+    assert await adapter.execute_query_async("SELECT") == [(1, "apple")]
 
-        def _connect_fallback(**_kw: JSONValue) -> FakeDBConnection:
-            """Return `conn`."""
-            return conn
+    conn.set_results([[(1, "apple")]])
+    suc, rows, err = await adapter.execute_with_feedback_async("SELECT")
+    assert suc is True and rows == [(1, "apple")] and err is None
 
-        mock_snowflake.connect = _connect_fallback
-        assert adapter.connect() == conn
-        mock_snowflake.connect = None
-        with pytest.raises(DependencyMissingError, match="snowflake connect function could not be resolved"):
-            adapter.connect()
-        mock_snowflake.connector = original_connector
+    class _FailingCursor:
+        """Cursor double raising `_SnowflakeError`."""
 
-        conn.set_results([[(1, "apple")]])
-        res = await adapter.execute_query_async("SELECT")
-        assert res == [(1, "apple")]
+        description: Sequence[Sequence[str | int | None]] | bool | None = None
 
-        conn.set_results([[(1, "apple")]])
-        suc, res, err = await adapter.execute_with_feedback_async("SELECT")
-        assert suc is True
-        assert res == [(1, "apple")]
-        assert err is None
+        def execute(
+            self,
+            _q: str,
+            _p: Sequence[JSONPrimitive] | Mapping[str, JSONPrimitive] | None = None,
+            /,
+        ) -> Self:
+            """Raise `_SnowflakeError`.
 
-        mock_snowflake.connector.errors.Error = snowflake_error_cls
+            Raises:
+                _SnowflakeError: Always raised to simulate Snowflake execution failure.
 
-        def mock_fail(*_a: str | Sequence[JSONPrimitive], **_k: JSONValue) -> None:
-            """Raise simulated SnowflakeError."""
-            msg = "Simulated"
-            raise snowflake_error_cls(msg)
+            """
+            raise _SnowflakeError("Simulated")
 
-        mock_cur_fn = MagicMock()
-        mock_cur_fn.return_value.execute = mock_fail
-        monkeypatch.setattr(conn, "cursor", mock_cur_fn)
-        suc, res, err = await adapter.execute_with_feedback_async("FAIL")
-        assert suc is False
-        assert "Simulated" in str(err)
+        def fetchall(self) -> Sequence[Sequence[JSONPrimitive]]:
+            """Return empty rows."""
+            return []
 
-        with pytest.raises(DatabaseExecutionError, match="Simulated"):
-            await adapter.execute_query_async("FAIL")
+        def close(self) -> None:
+            """No-op close."""
+
+    assert _FailingCursor().fetchall() == []
+    monkeypatch.setattr(conn, "cursor", _FailingCursor)
+    suc_f, _, err_f = await adapter.execute_with_feedback_async("FAIL")
+    assert suc_f is False and "Simulated" in str(err_f)
+    with pytest.raises(DatabaseExecutionError, match="Simulated"):
+        await adapter.execute_query_async("FAIL")
 
 
-@pytest.mark.asyncio
-async def test_snowflake_adapter_missing_deps(
-    fake_snowflake_module: tuple[MagicMock, FakeDBConnection, type[Exception]],
+def test_snowflake_adapter_missing_deps_and_lazy_loader(
+    fake_snowflake_bundle: tuple[_SnowflakeRootPkg, FakeDBConnection],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify SnowflakeAdapter raises DependencyMissingError when snowflake-connector-python is missing."""
-    mock_snowflake, _, _ = fake_snowflake_module
-    monkeypatch.setattr(sa, "snowflake", mock_snowflake)
+    """Verify `SnowflakeAdapter` raises `DependencyMissingError` when Snowflake is uninstalled."""
+    monkeypatch.setattr(sa, "snowflake", sa._LoaderSentinel.UNRESOLVED)
+    _ = sa._resolve_snowflake()
+
+    sf_pkg, _ = fake_snowflake_bundle
+    monkeypatch.setattr(sa, "snowflake", sf_pkg)
     adapter = sa.SnowflakeAdapter("path", {})
 
     monkeypatch.setattr(sa, "snowflake", None)
     with pytest.raises(DependencyMissingError, match="snowflake-connector-python is required"):
         sa.SnowflakeAdapter("path", {})
-
     assert DatabaseExecutionError in adapter.error_classes
 
 
 def test_snowflake_adapter_schema(
-    fake_snowflake_module: tuple[MagicMock, FakeDBConnection, type[Exception]],
+    fake_snowflake_bundle: tuple[_SnowflakeRootPkg, FakeDBConnection],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify SnowflakeAdapter.setup_schema commits on success and wraps errors in DatabaseExecutionError."""
-    mock_snowflake, conn, _ = fake_snowflake_module
-
-    monkeypatch.setattr(sa, "snowflake", mock_snowflake)
+    """Verify `SnowflakeAdapter.setup_schema` commits on success and wraps errors in `DatabaseExecutionError`."""
+    sf_pkg, conn = fake_snowflake_bundle
+    monkeypatch.setattr(sa, "snowflake", sf_pkg)
 
     adapter = sa.SnowflakeAdapter("path", {})
     adapter.setup_schema("CREATE TABLE t (a INT)")
@@ -138,12 +239,26 @@ def test_snowflake_adapter_schema(
     class StatelessCursorConn:
         """Connection stub without commit/rollback methods."""
 
-        def __init__(self, should_fail: bool = False) -> None:
+        def __init__(self, *, should_fail: bool = False) -> None:
             """Initialize with optional failure flag."""
             self.should_fail = should_fail
 
-        def cursor(self) -> CursorProtocol:
-            """Return a minimal cursor."""
+        def execute(
+            self,
+            _q: str,
+            _p: Sequence[JSONPrimitive] | Mapping[str, JSONPrimitive] | None = None,
+            /,
+        ) -> MinimalCursorProtocol:
+            """Delegate to cursor.
+
+            Returns:
+                Minimal cursor instance.
+
+            """
+            return self.cursor()
+
+        def cursor(self) -> MinimalCursorProtocol:
+            """Return a minimal cursor without `.close()`."""
             outer = self
 
             class _Cur:
@@ -157,7 +272,15 @@ def test_snowflake_adapter_schema(
                     _params: Sequence[JSONPrimitive] | Mapping[str, JSONPrimitive] | None = None,
                     /,
                 ) -> Self:
-                    """Execute DDL or raise RuntimeError."""
+                    """Execute DDL or raise `RuntimeError`.
+
+                    Returns:
+                        `self`.
+
+                    Raises:
+                        RuntimeError: When `outer.should_fail` is enabled.
+
+                    """
                     if outer.should_fail:
                         raise RuntimeError("Mock error")
                     return self
@@ -166,19 +289,16 @@ def test_snowflake_adapter_schema(
                     """Return empty result set."""
                     return []
 
-                def close(self) -> None:
-                    """Close cursor no-op."""
-
             return _Cur()
 
         def close(self) -> None:
             """Close connection no-op."""
 
     sf_ok = StatelessCursorConn(should_fail=False)
-    assert sf_ok.cursor().fetchall() == []
-    monkeypatch.setattr(adapter, "conn", sf_ok)
+    assert sf_ok.execute("SELECT 1").fetchall() == []
+    adapter.conn = sf_ok
     adapter.setup_schema("CREATE TABLE t2 (a INT)")
 
-    monkeypatch.setattr(adapter, "conn", StatelessCursorConn(should_fail=True))
+    adapter.conn = StatelessCursorConn(should_fail=True)
     with pytest.raises(DatabaseExecutionError, match="Mock error"):
         adapter.setup_schema("FAIL2")

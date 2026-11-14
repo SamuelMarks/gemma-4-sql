@@ -14,7 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Self
 
 from gemma_4_sql.exceptions import ConfigurationError, SQLSafetyViolationError
-from gemma_4_sql.sdk.adapters.base import DatabaseAdapter, DBKwargValue
+from gemma_4_sql.sdk.adapters.base import AsyncAdapterConnection, DatabaseAdapter, DBKwargValue, SyncAdapterConnection
 from gemma_4_sql.sdk.adapters.duckdb_adapter import DuckDBAdapter
 from gemma_4_sql.sdk.adapters.postgres_adapter import PostgresAdapter
 from gemma_4_sql.sdk.adapters.snowflake_adapter import SnowflakeAdapter
@@ -33,7 +33,13 @@ from gemma_4_sql.type_hints import (
 )
 
 logger = logging.getLogger(__name__)
-type _DialectAdapterType = type[SQLiteAdapter | PostgresAdapter | SnowflakeAdapter | DuckDBAdapter | DatabaseAdapter[DatabaseConnectionProtocol, AsyncDatabaseConnectionProtocol]]
+type _DialectAdapterType = type[
+    SQLiteAdapter
+    | PostgresAdapter
+    | SnowflakeAdapter
+    | DuckDBAdapter
+    | DatabaseAdapter[SyncAdapterConnection, AsyncAdapterConnection]
+]
 
 _ADAPTERS: dict[str, _DialectAdapterType] = {
     "sqlite": SQLiteAdapter,
@@ -41,6 +47,53 @@ _ADAPTERS: dict[str, _DialectAdapterType] = {
     "snowflake": SnowflakeAdapter,
     "duckdb": DuckDBAdapter,
 }
+
+DEFAULT_FLOAT_TOLERANCE = 1e-4
+DEFAULT_MAX_COMPARE_ROWS = 100_000
+
+
+def _cells_equivalent(a: tuple[str, JSONPrimitive], b: tuple[str, JSONPrimitive], float_tol: float) -> bool:
+    """Compare two type-tagged normalized SQL cells using relative/absolute tolerance for numbers.
+
+    Args:
+        a: First `(type_tag, value)` cell tuple.
+        b: Second `(type_tag, value)` cell tuple.
+        float_tol: Relative and absolute tolerance for numeric comparisons.
+
+    Returns:
+        `True` if both cells share the same type tag and equivalent value.
+
+    """
+    if a[0] != b[0]:
+        return False
+    if a[0] == "num" and isinstance(a[1], (int, float)) and isinstance(b[1], (int, float)):
+        fa = float(a[1])
+        fb = float(b[1])
+        if fa == fb:
+            return True
+        return math.isclose(fa, fb, rel_tol=float_tol, abs_tol=float_tol)
+    return a[1] == b[1]
+
+
+def _rows_equivalent(
+    row_a: tuple[tuple[str, JSONPrimitive], ...],
+    row_b: tuple[tuple[str, JSONPrimitive], ...],
+    float_tol: float,
+) -> bool:
+    """Compare two type-tagged result rows element-by-element under `float_tol`.
+
+    Args:
+        row_a: First tagged row tuple.
+        row_b: Second tagged row tuple.
+        float_tol: Relative and absolute numeric tolerance.
+
+    Returns:
+        `True` if the rows have equal arity and every column pair is equivalent.
+
+    """
+    if len(row_a) != len(row_b):
+        return False
+    return all(_cells_equivalent(ca, cb, float_tol) for ca, cb in zip(row_a, row_b, strict=True))
 
 
 class LiveDatabaseEngine:
@@ -63,7 +116,8 @@ class LiveDatabaseEngine:
             db_path: The file path or URI to the database.
             ddl: Optional Data Definition Language (DDL) string to initialize schema.
             db_type: The database dialect (`'sqlite'`, `'postgresql'`, `'snowflake'`, `'duckdb'`).
-            **kwargs: Optional keyword arguments (`db_kwargs`, `read_only`, `defer_ddl`).
+            **kwargs: Optional keyword arguments (`db_kwargs`, `read_only`, `defer_ddl`,
+                `lazy_connect`, `float_tol`, `max_rows`).
 
         Raises:
             ConfigurationError: If an unsupported `db_type` is provided.
@@ -72,19 +126,49 @@ class LiveDatabaseEngine:
         self.db_path = db_path
         self.db_type = db_type.lower()
         raw_db_kwargs = kwargs.get("db_kwargs")
-        self.db_kwargs: dict[str, DBKwargValue] = dict(raw_db_kwargs) if isinstance(raw_db_kwargs, collections.abc.Mapping) else {}
+        self.db_kwargs: dict[str, DBKwargValue] = (
+            dict(raw_db_kwargs) if isinstance(raw_db_kwargs, collections.abc.Mapping) else {}
+        )
         self.read_only: bool = bool(kwargs.get("read_only", True))
+        raw_tol = kwargs.get("float_tol")
+        self.float_tol: float = (
+            float(raw_tol)
+            if isinstance(raw_tol, (int, float)) and not isinstance(raw_tol, bool)
+            else DEFAULT_FLOAT_TOLERANCE
+        )
+        raw_max_rows = kwargs.get("max_rows", DEFAULT_MAX_COMPARE_ROWS)
+        self.max_rows: int | None = (
+            int(raw_max_rows)
+            if isinstance(raw_max_rows, int) and not isinstance(raw_max_rows, bool) and raw_max_rows > 0
+            else None
+        )
+
         adapter_cls = _ADAPTERS.get(self.db_type)
         if adapter_cls is None:
             msg = f"Unsupported db_type: {self.db_type}"
             raise ConfigurationError(msg)
-        self.adapter = adapter_cls(self.db_path, self.db_kwargs, read_only=self.read_only)
-        self.conn = self.adapter.conn
-        self._pending_ddl: str | None = ddl if kwargs.get("defer_ddl") else None
-        if ddl and not kwargs.get("defer_ddl"):
+        defer_ddl = bool(kwargs.get("defer_ddl", False))
+        lazy_connect = bool(kwargs.get("lazy_connect", False)) or defer_ddl
+        self.adapter = adapter_cls(self.db_path, self.db_kwargs, read_only=self.read_only, lazy_connect=lazy_connect)
+        self._pending_ddl: str | None = ddl if defer_ddl else None
+        if ddl and not defer_ddl:
             self.setup_schema(ddl)
 
-    def connect(self) -> DatabaseConnectionProtocol | sqlite3.Connection:
+    @property
+    def conn(self) -> SyncAdapterConnection | sqlite3.Connection:
+        """Provide the underlying synchronous connection, connecting lazily if deferred.
+
+        Returns:
+            Active synchronous database connection.
+
+        """
+        return self.adapter.conn
+
+    def reset_connection(self) -> None:
+        """Clear any cached synchronous connection without closing externally owned handles."""
+        self.adapter.reset_connection()
+
+    def connect(self) -> SyncAdapterConnection | sqlite3.Connection:
         """Connect to the underlying database synchronously.
 
         Returns:
@@ -93,7 +177,7 @@ class LiveDatabaseEngine:
         """
         return self.adapter.connect()
 
-    async def connect_async(self) -> AsyncDatabaseConnectionProtocol | DatabaseConnectionProtocol:
+    async def connect_async(self) -> AsyncAdapterConnection:
         """Asynchronously connect to the underlying database and apply any deferred DDL.
 
         Returns:
@@ -117,6 +201,20 @@ class LiveDatabaseEngine:
 
         """
         validate_readonly_sql(query, read_only=self.read_only)
+
+    def _apply_row_cap(self, rows: list[tuple[JSONPrimitive, ...]]) -> list[tuple[JSONPrimitive, ...]]:
+        """Enforce `self.max_rows` upper bound on fetched result sets to prevent unbounded memory growth.
+
+        Args:
+            rows: Fetched result rows.
+
+        Returns:
+            Capped list of result rows.
+
+        """
+        if self.max_rows is not None and len(rows) > self.max_rows:
+            return rows[: self.max_rows]
+        return rows
 
     def setup_schema(self, ddl: str) -> None:
         """Execute DDL statements to construct the database schema.
@@ -153,7 +251,8 @@ class LiveDatabaseEngine:
         """
         try:
             self._validate_safety(query)
-            return self.adapter.execute_with_feedback(query, params)
+            ok, rows, err = self.adapter.execute_with_feedback(query, params)
+            return (ok, self._apply_row_cap(rows), err)
         except SQLSafetyViolationError as e:
             return (False, [], str(e))
 
@@ -174,7 +273,8 @@ class LiveDatabaseEngine:
         """
         try:
             self._validate_safety(query)
-            return await self.adapter.execute_with_feedback_async(query, params)
+            ok, rows, err = await self.adapter.execute_with_feedback_async(query, params)
+            return (ok, self._apply_row_cap(rows), err)
         except SQLSafetyViolationError as e:
             return (False, [], str(e))
 
@@ -198,7 +298,7 @@ class LiveDatabaseEngine:
 
         """
         self._validate_safety(query)
-        return self.adapter.execute_query(query, params)
+        return self._apply_row_cap(self.adapter.execute_query(query, params))
 
     async def execute_query_async(
         self,
@@ -220,7 +320,7 @@ class LiveDatabaseEngine:
 
         """
         self._validate_safety(query)
-        return await self.adapter.execute_query_async(query, params)
+        return self._apply_row_cap(await self.adapter.execute_query_async(query, params))
 
     def has_top_level_order_by(self, query: str) -> bool:
         """Detect presence of a top-level `ORDER BY` clause outside parentheses.
@@ -235,7 +335,7 @@ class LiveDatabaseEngine:
         return _has_top_level_order_by_lexer(query)
 
     def normalize_row(self, row: tuple[JSONPrimitive | decimal.Decimal, ...]) -> tuple[JSONPrimitive, ...]:
-        """Normalize row values to handle float/Decimal tolerance and `NULL`/`NaN` equivalents.
+        """Normalize row values to handle float/Decimal conversion and `NULL`/`NaN` equivalents.
 
         Args:
             row: A tuple of raw database column values.
@@ -260,13 +360,40 @@ class LiveDatabaseEngine:
                 normalized.append(val)
         return tuple(normalized)
 
+    def _tag_raw_row(
+        self, row: tuple[JSONPrimitive | decimal.Decimal, ...], *, bucket_floats: bool
+    ) -> tuple[tuple[str, JSONPrimitive], ...]:
+        """Tag each cell in `row` with its canonical type category (`null`, `bool`, `num`, `str`).
+
+        Args:
+            row: Raw database result row.
+            bucket_floats: Whether to apply significant-digit rounding for O(N) multiset hashing.
+
+        Returns:
+            Tuple of `(type_tag, value)` pairs.
+
+        """
+        source = self.normalize_row(row) if bucket_floats else row
+        tagged: list[tuple[str, JSONPrimitive]] = []
+        for raw_cell in source:
+            cell: JSONPrimitive = float(raw_cell) if isinstance(raw_cell, decimal.Decimal) else raw_cell
+            if cell is None or (isinstance(cell, float) and math.isnan(cell)):
+                tagged.append(("null", None))
+            elif isinstance(cell, bool):
+                tagged.append(("bool", cell))
+            elif isinstance(cell, (int, float)):
+                tagged.append(("num", 0.0 if float(cell) == 0.0 else float(cell)))
+            else:
+                tagged.append(("str", str(cell)))
+        return tuple(tagged)
+
     def compare_results(
         self,
         pred_results: Sequence[tuple[JSONPrimitive, ...]],
         truth_results: Sequence[tuple[JSONPrimitive, ...]],
         strict_order: bool,
     ) -> bool:
-        """Compare two sets of database result rows.
+        """Compare two sets of database result rows using relative/absolute float tolerance.
 
         Args:
             pred_results: Result rows from the predicted SQL query.
@@ -274,38 +401,38 @@ class LiveDatabaseEngine:
             strict_order: Whether row ordering must match exactly.
 
         Returns:
-            True if the result sets match under the specified ordering rule.
+            True if the result sets match under `self.float_tol` and `strict_order`.
 
         """
+        if len(pred_results) != len(truth_results):
+            return False
 
-        def _tag_row(row: tuple[JSONPrimitive, ...]) -> tuple[tuple[str, JSONPrimitive], ...]:
-            """Tag each normalized cell with its canonical type category to prevent cross-type collisions."""
-            norm = self.normalize_row(row)
-            tagged: list[tuple[str, JSONPrimitive]] = []
-            for cell in norm:
-                if cell is None:
-                    tagged.append(("null", None))
-                elif isinstance(cell, bool):
-                    tagged.append(("bool", cell))
-                elif isinstance(cell, (int, float)):
-                    tagged.append(("num", float(cell)))
-                else:
-                    tagged.append(("str", str(cell)))
-            return tuple(tagged)
-
-        norm_pred = [_tag_row(r) for r in pred_results]
-        norm_truth = [_tag_row(r) for r in truth_results]
+        raw_pred = [self._tag_raw_row(r, bucket_floats=False) for r in pred_results]
+        raw_truth = [self._tag_raw_row(r, bucket_floats=False) for r in truth_results]
 
         if strict_order:
-            return norm_pred == norm_truth
+            return all(_rows_equivalent(rp, rt, self.float_tol) for rp, rt in zip(raw_pred, raw_truth, strict=True))
 
-        return collections.Counter(norm_pred) == collections.Counter(norm_truth)
+        bucket_pred = [self._tag_raw_row(r, bucket_floats=True) for r in pred_results]
+        bucket_truth = [self._tag_raw_row(r, bucket_floats=True) for r in truth_results]
+        if collections.Counter(bucket_pred) == collections.Counter(bucket_truth):
+            return True
+
+        # Fallback tolerance matching for floats straddling rounding boundaries (e.g. 0.00004999 vs 0.00005001)
+        unmatched = list(raw_truth)
+        for rp in raw_pred:
+            matched_idx = -1
+            for idx, rt in enumerate(unmatched):
+                if _rows_equivalent(rp, rt, self.float_tol):
+                    matched_idx = idx
+                    break
+            if matched_idx == -1:
+                return False
+            unmatched.pop(matched_idx)
+        return True
 
     def compare_queries(self, predicted_sql: str, ground_truth_sql: str) -> bool:
         """Compare the execution results of two SQL queries synchronously.
-
-        If either the predicted query or the ground-truth query fails to execute,
-        returns `False`.
 
         Args:
             predicted_sql: The generated SQL query.
@@ -324,9 +451,6 @@ class LiveDatabaseEngine:
 
     async def compare_queries_async(self, predicted_sql: str, ground_truth_sql: str) -> bool:
         """Asynchronously compare the execution results of two SQL queries.
-
-        If either the predicted query or the ground-truth query fails to execute,
-        returns `False`.
 
         Args:
             predicted_sql: The generated SQL query.
@@ -354,7 +478,12 @@ class LiveDatabaseEngine:
         self.adapter.close()
 
     def __enter__(self) -> Self:
-        """Enter synchronous context manager."""
+        """Enter synchronous context manager.
+
+        Returns:
+            `self` engine instance.
+
+        """
         return self
 
     def __exit__(
@@ -363,11 +492,23 @@ class LiveDatabaseEngine:
         _exc_val: BaseException | None,
         _exc_tb: types.TracebackType | None,
     ) -> None:
-        """Exit synchronous context manager and close database connection."""
+        """Exit synchronous context manager and close database connection.
+
+        Args:
+            _exc_type: Exception class if raised within `with` block.
+            _exc_val: Exception instance if raised within `with` block.
+            _exc_tb: Traceback if raised within `with` block.
+
+        """
         self.close()
 
     async def __aenter__(self) -> Self:
-        """Enter asynchronous context manager."""
+        """Enter asynchronous context manager.
+
+        Returns:
+            `self` engine instance.
+
+        """
         return self
 
     async def __aexit__(
@@ -376,8 +517,15 @@ class LiveDatabaseEngine:
         _exc_val: BaseException | None,
         _exc_tb: types.TracebackType | None,
     ) -> None:
-        """Exit asynchronous context manager and close database connection."""
+        """Exit asynchronous context manager and close database connection.
+
+        Args:
+            _exc_type: Exception class if raised within `async with` block.
+            _exc_val: Exception instance if raised within `async with` block.
+            _exc_tb: Traceback if raised within `async with` block.
+
+        """
         await self.close_async()
 
 
-__all__ = ["LiveDatabaseEngine"]
+__all__ = ["DEFAULT_FLOAT_TOLERANCE", "DEFAULT_MAX_COMPARE_ROWS", "LiveDatabaseEngine"]

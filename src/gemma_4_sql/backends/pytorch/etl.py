@@ -8,24 +8,121 @@ from typing import Protocol, runtime_checkable
 from gemma_4_sql.backends.common_data import (
     DatasetSequenceProtocol,
     HFDatasetsModuleProtocol,
+    TokenizedElementValue,
     load_duckdb_dataset,
     load_hf_or_duckdb_dataset,
     resolve_duckdb_options,
     tokenize_dataset_element,
 )
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import (
     DataLoaderProtocol,
     DataloaderResultDict,
+    DTypeProtocol,
     ETLConfig,
     JSONDict,
     JSONValue,
+    NDArrayProtocol,
+    NestedScalarList,
     TorchTensorProtocol,
 )
 
 type PyTorchItemDict = dict[str, TorchTensorProtocol]
+
+
+@runtime_checkable
+class _TorchRNNNamespaceProtocol(Protocol):
+    """Protocol for `torch.nn.utils.rnn` exposing `pad_sequence`."""
+
+    def pad_sequence[TensorT](
+        self,
+        sequences: Sequence[TensorT],
+        *,
+        batch_first: bool = False,
+    ) -> TorchTensorProtocol:
+        """Pad a list of variable-length tensors into a batch tensor.
+
+        Args:
+            sequences: Sequence of per-example tensors.
+            batch_first: Whether batch dimension comes first.
+
+        Returns:
+            Zero-padded batch `TorchTensorProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _TorchNNUtilsNamespaceProtocol(Protocol):
+    """Protocol for `torch.nn.utils` exposing `.rnn`."""
+
+    @property
+    def rnn(self) -> _TorchRNNNamespaceProtocol:
+        """Provide `torch.nn.utils.rnn` namespace."""
+        ...
+
+
+@runtime_checkable
+class _TorchNNNamespaceProtocol(Protocol):
+    """Protocol for `torch.nn` exposing `.utils`."""
+
+    @property
+    def utils(self) -> _TorchNNUtilsNamespaceProtocol:
+        """Provide `torch.nn.utils` namespace."""
+        ...
+
+
+@runtime_checkable
+class _TorchETLModuleProtocol(Protocol):
+    """Protocol for `torch` tensor construction, padding, and stacking in PyTorch ETL."""
+
+    @property
+    def long(self) -> DTypeProtocol:
+        """Provide `torch.long` (`int64`) dtype."""
+        ...
+
+    @property
+    def float32(self) -> DTypeProtocol:
+        """Provide `torch.float32` dtype."""
+        ...
+
+    @property
+    def nn(self) -> _TorchNNNamespaceProtocol:
+        """Provide `torch.nn` namespace."""
+        ...
+
+    def tensor(
+        self,
+        data: TokenizedElementValue | Sequence[int] | NDArrayProtocol | NestedScalarList,
+        *,
+        dtype: DTypeProtocol,
+    ) -> TorchTensorProtocol:
+        """Construct a PyTorch tensor from tokenized IDs or multimodal arrays.
+
+        Args:
+            data: Token ID sequence or multimodal feature array.
+            dtype: Target PyTorch dtype.
+
+        Returns:
+            Constructed `TorchTensorProtocol`.
+
+        """
+        ...
+
+    def stack[TensorT](self, tensors: Sequence[TensorT], /) -> TorchTensorProtocol:
+        """Stack a sequence of tensors along dimension 0.
+
+        Args:
+            tensors: Sequence of equal-shaped tensors.
+
+        Returns:
+            Stacked batch `TorchTensorProtocol`.
+
+        """
+        ...
 
 
 @runtime_checkable
@@ -60,14 +157,16 @@ class _DataLoaderConstructorProtocol(Protocol):
 
 
 _raw_datasets = optional_import("datasets")
-datasets: HFDatasetsModuleProtocol | None = _raw_datasets if isinstance(_raw_datasets, HFDatasetsModuleProtocol) else None
-torch = optional_import("torch")
-DataLoader: _DataLoaderConstructorProtocol | None = optional_attr(
+datasets: HFDatasetsModuleProtocol | None = (
+    _raw_datasets if isinstance(_raw_datasets, HFDatasetsModuleProtocol) else None
+)
+torch: _TorchETLModuleProtocol | None = optional_import("torch", _TorchETLModuleProtocol)
+DataLoader: _DataLoaderConstructorProtocol | None = import_optional_symbol(
     "torch.utils.data",
     "DataLoader",
     _DataLoaderConstructorProtocol,
 )
-Dataset = optional_attr("torch.utils.data", "Dataset")
+Dataset = import_optional_symbol("torch.utils.data", "Dataset", type)
 
 
 class PyTorchDataset:
@@ -173,7 +272,7 @@ def _get_sampler(source: PyTorchDataset | str, distributed: bool) -> _Distribute
     """
     if distributed:
         try:
-            sampler_cls = optional_attr(
+            sampler_cls = import_optional_symbol(
                 "torch.utils.data.distributed",
                 "DistributedSampler",
                 _DistributedSamplerConstructorProtocol,

@@ -8,23 +8,29 @@ Implements:
     * INT4: `[-8, 7]` with clipping bound `7.0` (75% memory reduction).
 - Selective projection targeting across attention (`q_proj`, `k_proj`, `v_proj`, `o_proj`)
   and feed-forward layers (`gate_proj`, `up_proj`, `down_proj`).
+- Explicit `QuantizedModelArtifact` storage and optional Orbax persistence so quantized
+  PyTrees are preserved for downstream `export_model` and `generate_sql` execution.
 """
 
 from __future__ import annotations
 
-import contextlib
 import logging
-from collections.abc import Sequence
-from typing import SupportsFloat, TypeGuard, overload
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Protocol, SupportsFloat, overload, runtime_checkable
 
+from gemma_4_sql._types_configs import QuantizedModelArtifact, register_quantized_artifact
 from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
+from gemma_4_sql.backends.common_inference import BoundedLRUCache
 from gemma_4_sql.backends.common_quantize import quantize_model_wrapper
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol, import_optional_symbol, optional_import
+from gemma_4_sql.backends.maxtext._protocols import JaxPRNGHolderProtocol, JnpZerosInt32Protocol
 from gemma_4_sql.exceptions import DependencyMissingError, UnsupportedQuantizationMethodError
 from gemma_4_sql.type_hints import (
     BackendKwargValue,
+    DTypeProtocol,
     JaxArrayProtocol,
     JSONDict,
+    MaxTextCausalLMProtocol,
     PyTreeNode,
     QuantizeResultDict,
     TensorType,
@@ -36,38 +42,190 @@ type AQTParamLeaf = JaxArrayProtocol | TensorType | SupportsFloat | str
 type AQTParamDict = dict[str, "AQTParamDict | AQTParamLeaf"]
 
 
-def _is_aqt_tensor(val: AQTParamDict | AQTParamLeaf) -> TypeGuard[TensorType | SupportsFloat]:
-    """Narrow `val` to `TensorType | SupportsFloat` for `quantize_tensor_aqt`.
+@runtime_checkable
+class _StringableProtocol(Protocol):
+    """Protocol for any value supporting `str(...)`."""
+
+    def __str__(self) -> str:
+        """Format value as string.
+
+        Returns:
+            String representation.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _AQTConfigNamespaceProtocol(Protocol):
+    """Protocol for `aqt.jax.v2.config` exposing `.fully_quantized(...)`."""
+
+    def fully_quantized(self, *, fwd_bits: int, bwd_bits: int) -> _StringableProtocol:
+        """Create an AQT dot-general configuration for `fwd_bits` and `bwd_bits`.
+
+        Args:
+            fwd_bits: Forward quantization bit width.
+            bwd_bits: Backward quantization bit width.
+
+        Returns:
+            AQT configuration object.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _AQTModuleProtocol(Protocol):
+    """Protocol for `aqt.jax.v2` exposing `.config`."""
+
+    @property
+    def config(self) -> _AQTConfigNamespaceProtocol:
+        """Provide the AQT configuration namespace.
+
+        Returns:
+            `_AQTConfigNamespaceProtocol` object.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _AQTItemsMappingProtocol(Protocol):
+    """Non-generic protocol for iterating `(key, value)` pairs of AQT parameter mappings."""
+
+    def items(self) -> Iterable[tuple[str, BackendKwargValue | AQTParamDict | PyTreeNode | None]]:
+        """Yield `(key, value)` pairs."""
+        ...
+
+
+def _coerce_aqt_param_dict(
+    raw: BackendKwargValue | AQTParamDict | Sequence[str] | PyTreeNode | None,
+) -> AQTParamDict | None:
+    """Recursively coerce a mapping into a typed `AQTParamDict`.
 
     Args:
-        val: Candidate kernel entry.
+        raw: Candidate parameter dictionary or scalar.
 
     Returns:
-        `True` when `val` is not a `dict` or `str`.
+        Coerced `AQTParamDict`, or `None` when `raw` is not a `Mapping`.
 
     """
-    return not isinstance(val, (dict, str))
+    if not isinstance(raw, Mapping):
+        return None
+    assert isinstance(raw, _AQTItemsMappingProtocol)
+    out: AQTParamDict = {}
+    for k, v in raw.items():
+        key_s = str(k)
+        sub = _coerce_aqt_param_dict(v)
+        if sub is not None:
+            out[key_s] = sub
+        elif isinstance(v, (JaxArrayProtocol, SupportsFloat, str, int, float)):
+            out[key_s] = v
+    return out
 
 
-def _is_aqt_param_dict(
-    val: BackendKwargValue | AQTParamDict | Sequence[str] | dict[str, PyTreeNode] | None,
-) -> TypeGuard[AQTParamDict]:
-    """Narrow `val` to `AQTParamDict`.
+@runtime_checkable
+class _JnpQuantizeModuleProtocol(JnpZerosInt32Protocol, Protocol):
+    """Protocol for `jax.numpy` symmetric integer quantization and dtype operations."""
 
-    Args:
-        val: Candidate parameter dictionary.
+    @property
+    def int8(self) -> DTypeProtocol:
+        """Provide `jnp.int8` dtype."""
+        ...
 
-    Returns:
-        `True` when `val` is a `dict`.
+    @property
+    def int16(self) -> DTypeProtocol:
+        """Provide `jnp.int16` dtype."""
+        ...
 
-    """
-    return isinstance(val, dict)
+    def abs(self, x: JaxArrayProtocol | TensorType | SupportsFloat, /) -> JaxArrayProtocol:
+        """Compute elementwise absolute value.
+
+        Args:
+            x: Input tensor.
+
+        Returns:
+            Magnitude `JaxArrayProtocol`.
+
+        """
+        ...
+
+    def max(self, a: JaxArrayProtocol, *, axis: int = -1, keepdims: bool = False) -> JaxArrayProtocol:
+        """Compute maximum along `axis`.
+
+        Args:
+            a: Input tensor.
+            axis: Reduction axis index.
+            keepdims: Whether to keep reduced dimension of size 1.
+
+        Returns:
+            Reduced maximum `JaxArrayProtocol`.
+
+        """
+        ...
+
+    def maximum(self, x1: JaxArrayProtocol, x2: float, /) -> JaxArrayProtocol:
+        """Compute elementwise `max(x1, x2)`.
+
+        Args:
+            x1: Input scale array.
+            x2: Minimum epsilon bound.
+
+        Returns:
+            Clamped scale `JaxArrayProtocol`.
+
+        """
+        ...
+
+    def divide(
+        self,
+        x1: JaxArrayProtocol | TensorType | SupportsFloat,
+        x2: JaxArrayProtocol,
+        /,
+    ) -> JaxArrayProtocol:
+        """Divide `x1` by `x2` elementwise.
+
+        Args:
+            x1: Numerator tensor.
+            x2: Scale denominator tensor.
+
+        Returns:
+            Scaled `JaxArrayProtocol`.
+
+        """
+        ...
+
+    def clip(self, a: JaxArrayProtocol, a_min: float, a_max: float, /) -> JaxArrayProtocol:
+        """Clamp `a` into `[a_min, a_max]`.
+
+        Args:
+            a: Scaled tensor.
+            a_min: Lower bound.
+            a_max: Upper bound.
+
+        Returns:
+            Clamped `JaxArrayProtocol`.
+
+        """
+        ...
+
+    def round(self, a: JaxArrayProtocol, /) -> JaxArrayProtocol:
+        """Round elements to nearest integers.
+
+        Args:
+            a: Clamped floating-point tensor.
+
+        Returns:
+            Rounded `JaxArrayProtocol`.
+
+        """
+        ...
 
 
-jax = optional_import("jax")
-jnp = optional_import("jax.numpy")
-aqt = optional_import("aqt.jax.v2")
-Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+jax: JaxPRNGHolderProtocol | None = optional_import("jax", JaxPRNGHolderProtocol)
+jnp: _JnpQuantizeModuleProtocol | None = optional_import("jax.numpy", _JnpQuantizeModuleProtocol)
+aqt: _AQTModuleProtocol | ModuleNamespaceProtocol | None = optional_import("aqt.jax.v2")
+Gemma4Model: MaxTextModelConstructorProtocol | None = import_optional_symbol(
     "maxtext.models.gemma4",
     "Gemma4Model",
     MaxTextModelConstructorProtocol,
@@ -82,6 +240,21 @@ DEFAULT_AQT_TARGETS: tuple[str, ...] = (
     "up_proj",
     "down_proj",
 )
+
+_QUANTIZED_ARTIFACT_CACHE: BoundedLRUCache[QuantizedModelArtifact[AQTParamDict]] = BoundedLRUCache(maxsize=8)
+
+
+def get_quantized_maxtext_artifact(model_name: str) -> QuantizedModelArtifact[AQTParamDict] | None:
+    """Retrieve the cached `QuantizedModelArtifact` for `model_name` if available.
+
+    Args:
+        model_name: Model identifier passed to `quantize_model`.
+
+    Returns:
+        Cached `QuantizedModelArtifact[AQTParamDict]`, or `None` if absent.
+
+    """
+    return _QUANTIZED_ARTIFACT_CACHE.get_model(model_name)
 
 
 def quantize_tensor_aqt(
@@ -203,14 +376,22 @@ def apply_aqt_quantization(
     targets = tuple(quant_targets) if quant_targets is not None else DEFAULT_AQT_TARGETS
 
     aqt_native_cfg: str | None = None
-    if aqt is not None:
-        with contextlib.suppress(AttributeError, TypeError):
-            aqt_native_cfg = str(aqt.config.fully_quantized(fwd_bits=bits, bwd_bits=bits))
+    if isinstance(aqt, _AQTModuleProtocol):
+        aqt_native_cfg = str(aqt.config.fully_quantized(fwd_bits=bits, bwd_bits=bits))
 
     injected_count = 0
 
     def _traverse(curr: AQTParamDict | AQTParamLeaf, current_path: str = "") -> AQTParamDict | AQTParamLeaf:
-        """Traverse parameters recursively to quantize targeted kernels."""
+        """Traverse parameters recursively to quantize targeted kernels.
+
+        Args:
+            curr: Current parameter dictionary or leaf.
+            current_path: Dotted key path prefix.
+
+        Returns:
+            Quantized parameter dictionary or leaf.
+
+        """
         nonlocal injected_count
         if not isinstance(curr, dict):
             return curr
@@ -219,10 +400,13 @@ def apply_aqt_quantization(
             sub_path = f"{current_path}.{k}" if current_path else k
             if isinstance(v, dict):
                 v_dict: AQTParamDict = v
-                if "kernel" in v_dict and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in targets):
-                    kernel = v_dict["kernel"]
-                    assert _is_aqt_tensor(kernel)
-                    q_kernel, scale = quantize_tensor_aqt(kernel, bits=bits)
+                raw_kernel = v_dict.get("kernel")
+                if (
+                    raw_kernel is not None
+                    and not isinstance(raw_kernel, (dict, str))
+                    and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in targets)
+                ):
+                    q_kernel, scale = quantize_tensor_aqt(raw_kernel, bits=bits)
                     new_v: AQTParamDict = dict(v_dict)
                     new_v["kernel"] = q_kernel
                     new_v["kernel_scale"] = scale
@@ -260,12 +444,12 @@ def quantize_model(
     method: str = "int8",
     **kwargs: BackendKwargValue | AQTParamDict | Sequence[str],
 ) -> QuantizeResultDict:
-    """Quantize a MaxText Gemma 4 model using Google AQT numerical quantization.
+    """Quantize a MaxText Gemma 4 model using Google AQT, caching and optionally exporting the quantized PyTree.
 
     Args:
         model_name: The name or preset path of the target model.
         method: Quantization method (`'int8'`, `'int4'`, `'aqt'`).
-        **kwargs: Optional parameters including `'params'` and `'quant_targets'`.
+        **kwargs: Optional parameters including `'params'`, `'quant_targets'`, and `'export_path'`.
 
     Returns:
         A dictionary containing quantization results, status, and metadata.
@@ -289,29 +473,60 @@ def quantize_model(
 
     default_reduction = 0.75 if method == "int4" else 0.5
     metadata: JSONDict = {}
+    exported_ckpt_path: str | None = None
 
     def _apply() -> tuple[float, str]:
-        """Resolve MaxText model parameters and apply AQT quantization."""
+        """Resolve MaxText model parameters, apply AQT quantization, and persist/cache quantized PyTree.
+
+        Returns:
+            Tuple of `(memory_reduction_factor, quantization_status)`.
+
+        """
+        nonlocal exported_ckpt_path
+        from gemma_4_sql.backends.maxtext.export import export_model
+        from gemma_4_sql.backends.maxtext.inference import cache_maxtext_params, get_cached_maxtext_params
+
         assert jax is not None
         assert jnp is not None
+        loaded_model: MaxTextCausalLMProtocol | None = None
         if has_params:
-            params = kwargs["params"]
+            raw_params = kwargs["params"]
         else:
-            assert Gemma4Model is not None
-            model = Gemma4Model(model_name)
-            rng = jax.random.PRNGKey(0)
-            dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-            params = model.init(rng, dummy_input)
+            cached_params = get_cached_maxtext_params(model_name)
+            if cached_params is not None:
+                raw_params = cached_params
+            else:
+                assert Gemma4Model is not None
+                cand_model = Gemma4Model(model_name)
+                rng = jax.random.PRNGKey(0)
+                dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
+                raw_params = dict(cand_model.init(rng, dummy_input))
+                loaded_model = cand_model
 
-        if _is_aqt_param_dict(params):
-            params_dict: AQTParamDict = params
+        params_dict = _coerce_aqt_param_dict(raw_params)
+        if params_dict is not None:
             quant_targets = kwargs.get("quant_targets")
-            targets_list: list[str] | None = [str(t) for t in quant_targets] if isinstance(quant_targets, (list, tuple)) else None
-            _quantized_params, meta, count = apply_aqt_quantization(
+            targets_list: list[str] | None = (
+                [str(t) for t in quant_targets] if isinstance(quant_targets, (list, tuple)) else None
+            )
+            quantized_params, meta, count = apply_aqt_quantization(
                 params=params_dict,
                 method=method,
                 quant_targets=targets_list,
             )
+            artifact = register_quantized_artifact(
+                quantized_params,
+                method=method,
+                scales={"quantized_modules_count": float(count)},
+            )
+            _QUANTIZED_ARTIFACT_CACHE.put_model(model_name, artifact)
+            cache_maxtext_params(model_name, quantized_params, model=loaded_model)
+
+            raw_export_path = kwargs.get("export_path")
+            if isinstance(raw_export_path, str) and raw_export_path:
+                exp_res = export_model(model_name, raw_export_path, params=quantized_params)
+                exported_ckpt_path = str(exp_res.get("file_path", raw_export_path))
+
             metadata.update(meta)
             raw_red = meta.get("memory_reduction_factor", default_reduction)
             reduction = float(raw_red) if isinstance(raw_red, (int, float)) else default_reduction
@@ -331,6 +546,8 @@ def quantize_model(
     )
     if metadata:
         wrapped["metadata"] = metadata
+    if exported_ckpt_path is not None:
+        wrapped["export_path"] = exported_ckpt_path
     return wrapped
 
 
@@ -341,6 +558,7 @@ __all__ = [
     "Gemma4Model",
     "PyTreeNode",
     "apply_aqt_quantization",
+    "get_quantized_maxtext_artifact",
     "quantize_model",
     "quantize_tensor_aqt",
 ]

@@ -6,13 +6,12 @@ import argparse
 from collections.abc import Callable
 
 from gemma_4_sql.cli_etl import etl_posttrain_cmd, etl_pretrain_cmd, etl_sft_cmd
+from gemma_4_sql.cli_parsers.protocols import SubparserCollectionProtocol
 from gemma_4_sql.constants import DEFAULT_POSTTRAIN_DATASET, DEFAULT_PRETRAIN_DATASET, DEFAULT_SFT_DATASET
-
-type SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
 
 
 def add_etl_subparser(
-    subparsers: SubParsersType,
+    subparsers: SubparserCollectionProtocol,
     name: str,
     help_text: str,
     default_dataset: str,
@@ -44,12 +43,17 @@ def add_etl_subparser(
     parser.add_argument("--audio-column", default=None, help="Optional dataset column name for audio.")
     parser.add_argument("--image-path", default=None, help="Optional path to schema image or directory.")
     parser.add_argument("--audio-path", default=None, help="Optional path to audio query file or directory.")
-    parser.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser.set_defaults(func=cmd_func)
     return parser
 
 
-def add_etl_parsers(subparsers: SubParsersType) -> argparse.ArgumentParser:
+def add_etl_parsers(subparsers: SubparserCollectionProtocol) -> argparse.ArgumentParser:
     """Register the root ETL parser and all associated subcommands.
 
     Args:
@@ -61,7 +65,15 @@ def add_etl_parsers(subparsers: SubParsersType) -> argparse.ArgumentParser:
     """
     parser_etl = subparsers.add_parser("etl", help="Run ETL to prepare SQL training datasets.")
     etl_subparsers = parser_etl.add_subparsers(dest="etl_command", required=True)
-    add_etl_subparser(etl_subparsers, "pretrain", "Run ETL for pretraining SQL datasets.", DEFAULT_PRETRAIN_DATASET, etl_pretrain_cmd)
+    add_etl_subparser(
+        etl_subparsers, "pretrain", "Run ETL for pretraining SQL datasets.", DEFAULT_PRETRAIN_DATASET, etl_pretrain_cmd
+    )
     add_etl_subparser(etl_subparsers, "sft", "Run ETL for SFT SQL datasets.", DEFAULT_SFT_DATASET, etl_sft_cmd)
-    add_etl_subparser(etl_subparsers, "posttrain", "Run ETL for post-training SQL datasets.", DEFAULT_POSTTRAIN_DATASET, etl_posttrain_cmd)
+    add_etl_subparser(
+        etl_subparsers,
+        "posttrain",
+        "Run ETL for post-training SQL datasets.",
+        DEFAULT_POSTTRAIN_DATASET,
+        etl_posttrain_cmd,
+    )
     return parser_etl

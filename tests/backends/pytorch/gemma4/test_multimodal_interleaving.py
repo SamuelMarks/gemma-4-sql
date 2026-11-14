@@ -52,9 +52,12 @@ def test_merge_modality_embeddings_exact_splicing() -> None:
     assert torch.all(merged[1, 1, :] == 30.0)
     assert torch.all(merged[1, 3, :] == 40.0)
 
+    from collections.abc import Callable
+
     # Verify backward pass and gradient flow
     loss = merged.sum()
-    loss.backward()
+    backward_fn: Callable[[torch.Tensor], None] = vars(torch.Tensor)["backward"]
+    backward_fn(loss)
     assert text_emb.grad is not None
     assert modal_features.grad is not None
     assert text_emb.grad.shape == text_emb.shape
@@ -133,9 +136,12 @@ def test_gemma4_causal_lm_multimodal_interleaving_forward() -> None:
     )
     assert logits2.shape == (2, 6, 100)
 
+    from collections.abc import Callable
+
     # Test backward pass
     loss = logits.sum()
-    loss.backward()
+    backward_fn: Callable[[torch.Tensor], None] = vars(torch.Tensor)["backward"]
+    backward_fn(loss)
     assert model.embed_tokens.weight.grad is not None
 
 
@@ -143,7 +149,7 @@ def test_gemma4_causal_lm_from_pretrained(tmp_path: Path) -> None:
     """Test Gemma4ForCausalLM.from_pretrained with config=None and safetensors file."""
     import json
 
-    from safetensors.torch import save_file
+    from tests.utils.tensor_helpers import torch_save_safetensors as save_file
 
     cfg_data = {
         "vocab_size": 10,

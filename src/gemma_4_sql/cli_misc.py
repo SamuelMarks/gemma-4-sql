@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Protocol, runtime_checkable
 
+from gemma_4_sql.cli_protocols import RagArgsProtocol
 from gemma_4_sql.exceptions import ExecutionStatus, GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk.export import export_model
 from gemma_4_sql.sdk.logging import log_metrics
@@ -43,7 +44,7 @@ class MultimodalCLIArgsProtocol(ModalityCLIArgsProtocol, Protocol):
         ...
 
 
-def extract_multimodal_cli_kwargs(args: argparse.Namespace) -> dict[str, JSONValue]:
+def extract_multimodal_cli_kwargs(args: MultimodalCLIArgsProtocol | argparse.Namespace) -> dict[str, JSONValue]:
     """Extract optional multimodal arguments (`image_path`, `audio_path`, `modality`) from CLI args.
 
     Args:
@@ -111,7 +112,7 @@ def parse_db_kwargs(raw_db_kwargs: str | None) -> dict[str, JSONValue] | None:
     if not raw_db_kwargs:
         return {}
     try:
-        parsed = json.loads(raw_db_kwargs)
+        parsed: JSONValue = json.loads(raw_db_kwargs)
     except json.JSONDecodeError as exc:
         logger.warning("Invalid JSON provided in --db-kwargs: %s", exc)
         return None
@@ -122,24 +123,33 @@ def parse_db_kwargs(raw_db_kwargs: str | None) -> dict[str, JSONValue] | None:
 
 
 def parse_json_list(raw_json: str | None, context_label: str) -> list[dict[str, str]] | None:
-    """Parse an optional JSON string into a list of string dictionaries.
+    """Parse an optional JSON string into a validated list of `dict[str, str]` objects.
 
     Args:
-        raw_json: Raw JSON string or None.
+        raw_json: Raw JSON string or `None`.
         context_label: Command label for warning logs on invalid JSON.
 
     Returns:
-        Parsed list of dictionaries, or `None` if JSON decoding fails.
+        Parsed list of `dict[str, str]` dictionaries, or `None` if JSON decoding or schema validation fails.
 
     """
     if not raw_json:
         return []
     try:
-        parsed = json.loads(raw_json)
+        parsed: JSONValue = json.loads(raw_json)
     except json.JSONDecodeError as exc:
         logger.warning("Invalid JSON %s: %s", context_label, exc)
         return None
-    return list(parsed) if isinstance(parsed, list) else []
+    if not isinstance(parsed, list):
+        logger.warning("Expected a JSON list for %s, got %s", context_label, type(parsed).__name__)
+        return None
+    validated: list[dict[str, str]] = []
+    for item in parsed:
+        if not isinstance(item, dict) or not all(isinstance(v, str) for v in item.values()):
+            logger.warning("Expected dict[str, str] entries in %s", context_label)
+            return None
+        validated.append({k: str(v) for k, v in item.items()})
+    return validated
 
 
 def tokenize_cmd(args: argparse.Namespace) -> int:
@@ -162,7 +172,7 @@ def tokenize_cmd(args: argparse.Namespace) -> int:
             logger.warning("Invalid decode tokens: %s", e)
             return 1
     elif args.encode:
-        encoded = tokenizer.encode(args.encode)
+        encoded: list[int] = tokenizer.encode(str(args.encode))
         print(json.dumps(encoded))
     return 0
 
@@ -203,31 +213,38 @@ def export_cmd(args: argparse.Namespace) -> int:
     return 1 if is_failed_status(res) else 0
 
 
-def rag_cmd(args: argparse.Namespace) -> None:
+def rag_cmd(args: RagArgsProtocol | argparse.Namespace) -> int:
     """Build a RAG-augmented prompt or extract schema context.
 
     Args:
         args: Parsed command-line arguments containing command-specific options.
 
+    Returns:
+        Exit code `0` on success, or `1` if schema extraction or prompt building fails.
+
     """
-    if args.action == "extract":
-        schema = extract_schema_entities(args.ddl)
-        print(json.dumps(schema, indent=2))
-    elif args.action == "retrieve":
-        schema = extract_schema_entities(args.ddl)
-        retrieved = retrieve_relevant_schema(args.prompt, schema)
-        print(str(retrieved))
-    else:
-        modality = str((args.modality if isinstance(args, ModalityCLIArgsProtocol) else "text") or "text")
-        image_path = None if modality == "audio" else args.image_path
-        audio_path = None if modality == "vision" else args.audio_path
-        rag_prompt = build_rag_prompt(
-            prompt=args.prompt,
-            ddl=args.ddl,
-            image_path=image_path,
-            audio_path=audio_path,
-        )
-        print(str(rag_prompt))
+    try:
+        if args.action == "extract":
+            schema = extract_schema_entities(args.ddl)
+            print(json.dumps(schema, indent=2))
+        elif args.action == "retrieve":
+            schema = extract_schema_entities(args.ddl)
+            retrieved = retrieve_relevant_schema(args.prompt, schema)
+            print(str(retrieved))
+        else:
+            modality = str((args.modality if isinstance(args, ModalityCLIArgsProtocol) else "text") or "text")
+            image_path = None if modality == "audio" else args.image_path
+            audio_path = None if modality == "vision" else args.audio_path
+            rag_prompt = build_rag_prompt(
+                prompt=args.prompt,
+                ddl=args.ddl,
+                image_path=image_path,
+                audio_path=audio_path,
+            )
+            print(str(rag_prompt))
+    except GemmaSQLError as err:
+        return print_cli_error(err, "rag", action=str(args.action))
+    return 0
 
 
 def log_metrics_cmd(args: argparse.Namespace) -> int:

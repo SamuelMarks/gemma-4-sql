@@ -6,11 +6,27 @@ MaxText-compatible Gin configuration files and CLI argument lists.
 
 from __future__ import annotations
 
+import atexit
+import itertools
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from gemma_4_sql.type_hints import JSONValue, TrainingConfig
+
+_MANAGED_GIN_TEMP_DIRS: list[Path] = []
+_GIN_FILE_COUNTER = itertools.count(1)
+
+
+def cleanup_temp_gin_configs() -> None:
+    """Remove all managed temporary Gin configuration directories created during this process."""
+    while _MANAGED_GIN_TEMP_DIRS:
+        temp_dir = _MANAGED_GIN_TEMP_DIRS.pop()
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+atexit.register(cleanup_temp_gin_configs)
 
 
 @dataclass
@@ -18,7 +34,8 @@ class MaxTextHyperparameters:
     """Hyperparameters and distributed topology settings for MaxText training.
 
     Attributes:
-        model_architecture: Target model architecture identifier (e.g., `'gemma4_2b'`, `'gemma4_7b'`).
+        model_architecture: Target Gemma 4 model architecture identifier
+            (`'gemma4_e2b'`, `'gemma4_e4b'`, `'gemma4_26b_a4b'`, or `'gemma4_31b'`).
         per_device_batch_size: Batch size allocated per individual accelerator device.
         global_batch_size: Global effective batch size across all participating devices.
         learning_rate: Base peak learning rate for optimizer.
@@ -34,7 +51,7 @@ class MaxTextHyperparameters:
 
     """
 
-    model_architecture: str = "gemma4_2b"
+    model_architecture: str = "gemma4_e2b"
     per_device_batch_size: float = 2.0
     global_batch_size: int = 8
     learning_rate: float = 1e-4
@@ -86,26 +103,32 @@ def _to_int(val: JSONValue, default: int) -> int:
 
 
 def normalize_model_architecture(model_name: str) -> str:
-    """Normalize user model identifier into a supported MaxText model architecture.
+    """Normalize user model identifier into a supported Gemma 4 MaxText model architecture.
 
     Args:
-        model_name: Raw model identifier (e.g., `'gemma-4'`, `'gemma-4-7b'`, `'gemma4_2b'`).
+        model_name: Raw model identifier (e.g., `'gemma-4-e2b'`, `'gemma-4-e4b'`,
+            `'gemma-4-26b-a4b'`, `'gemma-4-31b'`).
 
     Returns:
-        Canonical MaxText model architecture string (`'gemma4_2b'` or `'gemma4_7b'`).
+        Canonical MaxText Gemma 4 architecture string (`'gemma4_e2b'`, `'gemma4_e4b'`,
+        `'gemma4_26b_a4b'`, or `'gemma4_31b'`).
 
     Raises:
-        ValueError: If `model_name` is empty or cannot be parsed.
+        ValueError: If `model_name` is empty or whitespace-only.
 
     """
     if not model_name or not model_name.strip():
         msg = "model_name must be a non-empty string."
         raise ValueError(msg)
 
-    cleaned = model_name.strip().lower()
-    if "7b" in cleaned:
-        return "gemma4_7b"
-    return "gemma4_2b"
+    cleaned = model_name.strip().lower().replace("-", "_")
+    if "26b" in cleaned or "a4b" in cleaned or "moe" in cleaned:
+        return "gemma4_26b_a4b"
+    if "31b" in cleaned:
+        return "gemma4_31b"
+    if "e4b" in cleaned or "_4b" in cleaned or cleaned.endswith("4b"):
+        return "gemma4_e4b"
+    return "gemma4_e2b"
 
 
 def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: JSONValue) -> MaxTextHyperparameters:
@@ -122,10 +145,12 @@ def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: JSONValue) -
         ValueError: If any hyperparameter violates numerical or structural constraints.
 
     """
-    extra: dict[str, JSONValue] = {k: v for k, v in (config.extra_kwargs or {}).items() if isinstance(v, (str, int, float, bool)) or v is None}
+    extra: dict[str, JSONValue] = {
+        k: v for k, v in (config.extra_kwargs or {}).items() if isinstance(v, (str, int, float, bool)) or v is None
+    }
     merged: dict[str, JSONValue] = {**extra, **kwargs}
 
-    raw_arch = str(merged.get("model_architecture") or config.model_name or "gemma4_2b")
+    raw_arch = str(merged.get("model_architecture") or config.model_name or "gemma4_e2b")
     model_architecture = normalize_model_architecture(raw_arch)
 
     per_device = _to_float(merged.get("per_device_batch_size"), float(config.batch_size))
@@ -266,9 +291,14 @@ def save_maxtext_gin_config(gin_content: str, output_path: str | Path | None = N
         target_path.write_text(gin_content, encoding="utf-8")
         return target_path
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".gin", delete=False, encoding="utf-8") as temp_file:
-        temp_file.write(gin_content)
-        return Path(temp_file.name).resolve()
+    if not _MANAGED_GIN_TEMP_DIRS or not _MANAGED_GIN_TEMP_DIRS[-1].exists():
+        managed_dir = Path(tempfile.mkdtemp(prefix="gemma4_maxtext_gin_")).resolve()
+        _MANAGED_GIN_TEMP_DIRS.append(managed_dir)
+    else:
+        managed_dir = _MANAGED_GIN_TEMP_DIRS[-1]
+    target_path = (managed_dir / f"maxtext_config_{next(_GIN_FILE_COUNTER)}.gin").resolve()
+    target_path.write_text(gin_content, encoding="utf-8")
+    return target_path
 
 
 def build_maxtext_cli_args(

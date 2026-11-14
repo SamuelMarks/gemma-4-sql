@@ -43,7 +43,9 @@ def build_export_result(
         Populated `ExportResultDict`.
 
     """
-    resolved_code = status_code or (ExecutionStatus.FAILED.value if is_failed_status(status) else ExecutionStatus.COMPLETED.value)
+    resolved_code = status_code or (
+        ExecutionStatus.FAILED.value if is_failed_status(status) else ExecutionStatus.COMPLETED.value
+    )
     result: ExportResultDict = {
         "backend": backend_name,
         "model": model_name,
@@ -84,6 +86,7 @@ def run_export_wrapper(
         DependencyMissingError: Re-raised if raised by `execute_fn`.
         ConfigurationError: Re-raised if raised by `execute_fn`.
         ExportError: If `execute_fn` raises an operational exception and `raise_on_error` is True.
+        OPERATIONAL_EXCEPTIONS: Re-raised directly when `e` is already an `ExportError` and `raise_on_error` is True.
 
     """
     Path(export_path).mkdir(parents=True, exist_ok=True)

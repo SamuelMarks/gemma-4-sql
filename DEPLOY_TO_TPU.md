@@ -2,7 +2,7 @@
 
 This document provides a comprehensive guide to deploying, training, and serving the `gemma-4-sql` Large Language Model on Google Cloud TPUs utilizing the `libscript` infrastructure automation ecosystem. 
 
-Because `gemma-4-sql` natively supports multiple backends (`jax`, `maxtext`, `pytorch`, `keras`) and data sources (HuggingFace datasets, DuckDB), this guide details how to leverage `libscript` to orchestrate both single-node and multi-node (distributed) training architectures.
+Because `gemma-4-sql` natively supports multiple backends (`jax`, `maxtext`, `pytorch`, `pytorch_hf`, `pytorch_native`, `keras`, plus local `mlx` on Apple Silicon) and data sources (HuggingFace datasets, DuckDB), this guide details how to leverage `libscript` to orchestrate both single-node and multi-node (distributed) TPU training architectures.
 
 ---
 
@@ -14,8 +14,8 @@ Before running the commands in this guide, export the following environment vari
 # HuggingFace Token (Required for gated models like Gemma)
 export HF_TOKEN="your_huggingface_token_here"
 
-# Model & Dataset Configuration
-export MODEL_NAME="google/gemma-4"
+# Model & Dataset Configuration (official presets: google/gemma-4-E2B, google/gemma-4-E4B, google/gemma-4-26B-A4B, google/gemma-4-31B, plus -it variants)
+export MODEL_NAME="google/gemma-4-E4B"
 export DATASET_NAME="my-custom-dataset"
 export DUCKDB_URL="https://example.com/my_dataset.duckdb"
 export DUCKDB_PATH="analytics.duckdb"
@@ -135,8 +135,8 @@ You can now dispatch native `gemma-4-sql` CLI commands using `./_lib/ml-training
 **Example 1: ETL from DuckDB for JAX**
 ```bash
 ./libscript.sh gcp-tpu-vm ssh "$TPU_NAME" "
-  # Install the framework
-  pip install gemma-4-sql[all]
+  # Install the synced workspace checkout (or published package) with all extras
+  pip install -e ~/workspace'[all]' || pip install 'gemma-4-sql[all]'
   
   # Download DuckDB dataset
   curl -o \$DUCKDB_PATH \$DUCKDB_URL
@@ -282,6 +282,9 @@ export TPU_NAME="$SERVE_TPU_NAME"
 # Or directly via _lib/ai-serving:
 ./_lib/ai-serving/setup.sh
 ./_lib/ai-serving/deploy.sh
+
+# Or run the native gemma-4-sql FastAPI continuous-batching server directly on the TPU VM:
+# ./libscript.sh gcp-tpu-vm ssh "$SERVE_TPU_NAME" "gemma-4-sql serve --model /mnt/ml_data/gemma-4-sql-finetuned --port 8000 --max-batch-size 256 --run-server --backend jax"
 
 # OR Deploy to the GKE Cluster via XPK (Tier 4 Payload; honors TPU_TENSOR_PARALLEL_SIZE)
 export WORKLOAD_NAME="gemma-serve-api"

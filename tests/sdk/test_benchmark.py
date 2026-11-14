@@ -56,7 +56,7 @@ def test_benchmark_maxtext_routing(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_benchmark_pytorch_routing_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify benchmark executes real PyTorch benchmark_model on a tiny Gemma 4 model and raises when torch is missing."""
+    """Verify benchmark executes PyTorch benchmark_model on gemma-4-tiny and raises when torch is missing."""
     import torch
 
     import gemma_4_sql.backends.pytorch.benchmark as bm

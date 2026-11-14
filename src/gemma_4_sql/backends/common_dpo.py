@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from typing import Protocol, Self, SupportsFloat, overload, runtime_checkable
 
+from gemma_4_sql._types_tensors import ScalarItemExtractorProtocol, extract_scalar_float
 from gemma_4_sql.exceptions import (
     OPERATIONAL_EXCEPTIONS,
     ConfigurationError,
@@ -16,7 +17,7 @@ from gemma_4_sql.exceptions import (
     is_failed_status,
     resolve_raise_on_error,
 )
-from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, DPOResultDict, TrainerState
+from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, DPOResultDict
 
 logger = logging.getLogger(__name__)
 
@@ -64,47 +65,7 @@ class MeanReducibleTensorProtocol(Protocol):
         ...
 
 
-@runtime_checkable
-class ScalarItemProtocol(Protocol):
-    """Protocol for scalar tensors supporting `.item()` extraction."""
-
-    def item(self) -> float | int | bool:
-        """Extract a Python scalar value."""
-        ...
-
-
-@runtime_checkable
-class JaxNNLogSoftmaxProtocol[ArrayT](Protocol):
-    """Protocol for `jax.nn` providing `log_softmax`."""
-
-    def log_softmax(self, x: ArrayT, axis: int = -1) -> ArrayT:
-        """Compute log-softmax along `axis`."""
-        ...
-
-
-@runtime_checkable
-class JaxNumpyLogpOpsProtocol[ArrayT](Protocol):
-    """Protocol for `jax.numpy` array operations used in `gather_jax_sequence_logps`."""
-
-    def expand_dims(self, a: ArrayT, axis: int) -> ArrayT:
-        """Expand the shape of an array at `axis`."""
-        ...
-
-    def take_along_axis(self, arr: ArrayT, indices: ArrayT, axis: int) -> ArrayT:
-        """Take values from the input array by matching 1D index and data slices."""
-        ...
-
-    def squeeze(self, a: ArrayT, axis: int) -> ArrayT:
-        """Remove single-dimensional entries from the shape of an array."""
-        ...
-
-    def sum(self, a: ArrayT, axis: int = -1) -> ArrayT:
-        """Sum of array elements over a given axis."""
-        ...
-
-    def not_equal(self, x1: ArrayT, x2: int, /) -> ArrayT:
-        """Return `(x1 != x2)` elementwise."""
-        ...
+ScalarItemProtocol = ScalarItemExtractorProtocol
 
 
 def run_dpo_wrapper(
@@ -125,6 +86,8 @@ def run_dpo_wrapper(
         Structured `DPOResultDict` containing DPO execution status and final loss.
 
     Raises:
+        DependencyMissingError: If required backend DPO dependencies are missing.
+        ConfigurationError: If DPO configuration parameters are invalid.
         TrainingError: If `execute_fn` raises an exception and `raise_on_error` is True.
 
     """
@@ -198,11 +161,22 @@ def _sub_dpo(
     *,
     scale: float = 1.0,
 ) -> ArithmeticTensorProtocol | float:
-    """Compute `a - b` for either `ArithmeticTensorProtocol` tensors or `float` scalars."""
-    _ = scale
+    """Compute `(a - b) * scale` for either `ArithmeticTensorProtocol` tensors or `float` scalars.
+
+    Args:
+        a: Left-hand tensor or float operand.
+        b: Right-hand tensor or float operand.
+        scale: Multiplicative scale factor (defaults to `1.0`).
+
+    Returns:
+        Scaled difference `(a - b) * scale`.
+
+    """
     if isinstance(a, (int, float)):
-        return float(a) - float(b)
-    return a - b
+        diff_f = float(a) - float(b)
+        return diff_f * scale if scale != 1.0 else diff_f
+    diff_t = a - b
+    return diff_t * scale if scale != 1.0 else diff_t
 
 
 @overload
@@ -221,11 +195,21 @@ def _mul_dpo(
     *,
     scale: float = 1.0,
 ) -> ArithmeticTensorProtocol | float:
-    """Compute `beta * x` for either `ArithmeticTensorProtocol` tensors or `float` scalars."""
-    _ = scale
+    """Compute `beta * x * scale` for either `ArithmeticTensorProtocol` tensors or `float` scalars.
+
+    Args:
+        beta: Scalar scaling factor.
+        x: Tensor or float operand.
+        scale: Optional secondary multiplicative scale factor (defaults to `1.0`).
+
+    Returns:
+        Scaled value `beta * x * scale`.
+
+    """
+    eff_scale = beta * scale if scale != 1.0 else beta
     if isinstance(x, (int, float)):
-        return beta * float(x)
-    return beta * x
+        return eff_scale * float(x)
+    return eff_scale * x
 
 
 def generic_dpo_loss[TensorT: ArithmeticTensorProtocol | float](
@@ -262,40 +246,14 @@ def generic_dpo_loss[TensorT: ArithmeticTensorProtocol | float](
     return (mean_loss, chosen_rewards, rejected_rewards)
 
 
-def gather_jax_sequence_logps[ArrayT: ArithmeticTensorProtocol](
-    jnn_mod: JaxNNLogSoftmaxProtocol[ArrayT],
-    jnp_mod: JaxNumpyLogpOpsProtocol[ArrayT],
-    logits: ArrayT,
-    labels: ArrayT,
-) -> ArrayT:
-    """Gather and sum non-padding token log-probabilities along the vocabulary dimension in JAX.
-
-    Args:
-        jnn_mod: The `jax.nn` module providing `log_softmax`.
-        jnp_mod: The `jax.numpy` module providing `expand_dims`, `take_along_axis`, `squeeze`, and `sum`.
-        logits: Model output logits tensor of shape `(batch_size, seq_len, vocab_size)`.
-        labels: Target token IDs tensor of shape `(batch_size, seq_len)`.
-
-    Returns:
-        Summed non-padding token log probabilities per sequence of shape `(batch_size,)`.
-
-    """
-    log_probs = jnn_mod.log_softmax(logits, axis=-1)
-    labels_expanded = jnp_mod.expand_dims(labels, axis=-1)
-    selected_log_probs = jnp_mod.squeeze(jnp_mod.take_along_axis(log_probs, labels_expanded, axis=-1), axis=-1)
-    mask = jnp_mod.not_equal(labels, 0)
-    weighted: ArrayT = selected_log_probs * mask
-    return jnp_mod.sum(weighted, axis=-1)
-
-
-def generic_run_training_epochs[ModelT, OptT, BatchT, ParamsT](
-    state: DPOLoopState[ModelT, OptT, BatchT] | TrainerState[ModelT, ParamsT, OptT, BatchT],
+def generic_run_training_epochs[ModelT, OptT, BatchT](
+    state: DPOLoopState[ModelT, OptT, BatchT],
     step_fn: Callable[..., ScalarItemProtocol | SupportsFloat | float | int],
 ) -> float:
     """Run DPO training epochs abstracting backend-specific step execution.
 
     Args:
-        state: The trainer state containing dataloader, policy/reference models, optimizer, and beta.
+        state: `DPOLoopState` containing dataloader, policy/reference models, optimizer, and beta.
         step_fn: Backend-specific callable executing a single DPO optimization step.
 
     Returns:
@@ -303,8 +261,6 @@ def generic_run_training_epochs[ModelT, OptT, BatchT, ParamsT](
 
     """
     dataloader = state.dataloader
-    if dataloader is None:
-        return 0.0
     epochs = state.epochs
     policy_model = state.policy_model
     ref_model = state.ref_model
@@ -316,7 +272,7 @@ def generic_run_training_epochs[ModelT, OptT, BatchT, ParamsT](
         num_batches = 0
         for batch in dataloader:
             loss = step_fn(policy_model, ref_model, optimizer, batch, beta)
-            loss_val = float(loss.item()) if isinstance(loss, ScalarItemProtocol) else float(loss)
+            loss_val = extract_scalar_float(loss)
             epoch_loss += loss_val
             num_batches += 1
         final_loss = epoch_loss / max(1, num_batches)

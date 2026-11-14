@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
-import time
-from typing import Protocol, Self, TypeGuard, runtime_checkable
+from typing import Protocol, Self, runtime_checkable
 
-from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
-from gemma_4_sql.backends.pytorch.runtime_adapter import TorchRuntimeAdapter
+from gemma_4_sql.backends.common_benchmark import (
+    execute_timed_benchmark_loop,
+    get_current_rss_mb,
+    run_benchmark_wrapper,
+)
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
+from gemma_4_sql.backends.pytorch.runtime_adapter import (
+    TorchModuleInput,
+    TorchRandintProtocol,
+    TorchRuntimeAdapter,
+)
 from gemma_4_sql.type_hints import (
     BenchmarkResultDict,
     CausalLMProtocol,
@@ -30,7 +36,16 @@ class _BenchmarkCallableProtocol(Protocol):
     """Protocol for a callable benchmark model."""
 
     def __call__(self, *args: ForwardArg, **kwargs: ForwardArg) -> ForwardOutput:
-        """Execute a forward pass."""
+        """Execute a forward pass.
+
+        Args:
+            *args: Positional forward arguments.
+            **kwargs: Keyword forward arguments.
+
+        Returns:
+            Model forward output.
+
+        """
         ...
 
 
@@ -40,7 +55,12 @@ class _ConfigVocabProtocol(Protocol):
 
     @property
     def vocab_size(self) -> int | str | None:
-        """Provide the vocabulary size."""
+        """Provide the vocabulary size.
+
+        Returns:
+            Integer or string vocabulary size.
+
+        """
         ...
 
 
@@ -50,7 +70,12 @@ class _HasConfigProtocol(Protocol):
 
     @property
     def config(self) -> _ConfigVocabProtocol | ModelConfigProtocol | None:
-        """Provide the model configuration object."""
+        """Provide the model configuration object.
+
+        Returns:
+            Model configuration or `None`.
+
+        """
         ...
 
 
@@ -65,20 +90,48 @@ class _GenerateCapableProtocol(Protocol):
         max_new_tokens: int = 20,
         min_new_tokens: int = 0,
     ) -> TorchTensorProtocol | ForwardOutput:
-        """Generate token sequences autoregressively."""
+        """Generate token sequences autoregressively.
+
+        Args:
+            input_ids: Prompt token ID tensor.
+            max_new_tokens: Maximum new tokens to decode.
+            min_new_tokens: Minimum new tokens to decode.
+
+        Returns:
+            Generated token sequence tensor.
+
+        """
         ...
 
 
 @runtime_checkable
-class _DeviceMovableModelProtocol(Protocol):
-    """Protocol for a PyTorch model supporting `.to(...)` and `.eval()`."""
+class _DeviceMovableOnlyProtocol(Protocol):
+    """Protocol for a PyTorch model supporting `.to(...)`."""
 
     def to(self, device_or_dtype: DTypeProtocol | str, /) -> Self:
-        """Move or cast the model to `device_or_dtype`."""
+        """Move or cast the model to `device_or_dtype`.
+
+        Args:
+            device_or_dtype: Target device string or dtype.
+
+        Returns:
+            Self after device/dtype placement.
+
+        """
         ...
 
+
+@runtime_checkable
+class _EvalOnlyProtocol(Protocol):
+    """Protocol for models exposing `.eval()`."""
+
     def eval(self) -> Self:
-        """Set the PyTorch model to evaluation mode."""
+        """Set evaluation mode.
+
+        Returns:
+            Self in evaluation mode.
+
+        """
         ...
 
 
@@ -92,12 +145,22 @@ class _HFAutoModelLoaderProtocol(Protocol):
         *,
         torch_dtype: DTypeProtocol | str | None = None,
     ) -> TorchCausalLMProtocol:
-        """Load a pretrained Hugging Face causal language model."""
+        """Load a pretrained Hugging Face causal language model.
+
+        Args:
+            model_name: Pretrained model identifier or path.
+            torch_dtype: Optional loading dtype.
+
+        Returns:
+            Loaded `TorchCausalLMProtocol` instance.
+
+        """
         ...
 
 
-torch = optional_import("torch")
-AutoModelForCausalLM: _HFAutoModelLoaderProtocol | None = optional_attr(
+_raw_torch = optional_import("torch")
+torch: TorchModuleInput | None = _raw_torch if isinstance(_raw_torch, TorchRandintProtocol) else None
+AutoModelForCausalLM: _HFAutoModelLoaderProtocol | None = import_optional_symbol(
     "transformers",
     "AutoModelForCausalLM",
     _HFAutoModelLoaderProtocol,
@@ -127,21 +190,8 @@ def _get_device(hardware: str) -> str:
     return _runtime().get_device(hardware)
 
 
-def _is_device_movable(model: TorchCausalLMProtocol | None) -> TypeGuard[_DeviceMovableModelProtocol]:
-    """Narrow `model` to `_DeviceMovableModelProtocol`.
-
-    Args:
-        model: Target PyTorch causal language model.
-
-    Returns:
-        `True` if `model` is not `None`.
-
-    """
-    return model is not None
-
-
 def _move_and_eval(
-    model: TorchCausalLMProtocol,
+    model: TorchCausalLMProtocol | _BenchmarkCallableProtocol,
     device: str,
     torch_dtype: DTypeProtocol | str | None = None,
 ) -> None:
@@ -153,12 +203,11 @@ def _move_and_eval(
         torch_dtype: Optional resolved torch dtype.
 
     """
-    with contextlib.suppress(AttributeError, TypeError, AssertionError):
-        assert _is_device_movable(model)
+    if isinstance(model, _DeviceMovableOnlyProtocol) and callable(model.to):
         if torch_dtype is not None:
             model.to(torch_dtype)
         model.to(device)
-    with contextlib.suppress(AttributeError, TypeError):
+    if isinstance(model, _EvalOnlyProtocol) and callable(model.eval):
         model.eval()
 
 
@@ -228,19 +277,6 @@ def _get_memory_mb(model: _BenchmarkModelInput, device: str) -> float:
     return _runtime().max_memory_mb(device, get_current_rss_mb())
 
 
-def _has_config_attr(model: _BenchmarkModelInput) -> TypeGuard[_HasConfigProtocol]:
-    """Narrow `model` to `_HasConfigProtocol`.
-
-    Args:
-        model: Target PyTorch causal language model.
-
-    Returns:
-        `True` if `model` is not `None` and not a `str`.
-
-    """
-    return model is not None and not isinstance(model, str)
-
-
 def _resolve_vocab_bound(model: _BenchmarkModelInput) -> int:
     """Extract positive integer `vocab_size` from `model.config` or default to `256000`.
 
@@ -251,26 +287,13 @@ def _resolve_vocab_bound(model: _BenchmarkModelInput) -> int:
         Positive integer vocabulary upper bound for dummy input sampling.
 
     """
-    with contextlib.suppress(AttributeError, TypeError, ValueError, AssertionError):
-        assert _has_config_attr(model)
-        if model.config is not None:
-            raw_vocab = model.config.vocab_size
+    if isinstance(model, _HasConfigProtocol):
+        cfg = model.config
+        if isinstance(cfg, _ConfigVocabProtocol):
+            raw_vocab = cfg.vocab_size
             if isinstance(raw_vocab, int) and raw_vocab > 1:
                 return raw_vocab
     return 256000
-
-
-def _is_generate_capable(model: _BenchmarkModelInput) -> TypeGuard[_GenerateCapableProtocol]:
-    """Narrow `model` to `_GenerateCapableProtocol`.
-
-    Args:
-        model: Benchmark model instance.
-
-    Returns:
-        `True` if `model` is not `None` and not a `str`.
-
-    """
-    return model is not None and not isinstance(model, str)
 
 
 def _call_decode_generate(
@@ -286,8 +309,7 @@ def _call_decode_generate(
         tokens: Number of tokens to generate.
 
     """
-    with contextlib.suppress(AttributeError, TypeError, AssertionError):
-        assert _is_generate_capable(model)
+    if isinstance(model, _GenerateCapableProtocol) and callable(model.generate):
         _ = model.generate(dummy_inputs, max_new_tokens=tokens, min_new_tokens=tokens)
 
 
@@ -322,31 +344,24 @@ def _run_benchmark_pass(
     dummy_inputs = adapter.randint(1, vocab_bound, (batch_size, 32), device)
     adapter.reset_peak_memory_stats(device)
 
-    for _ in range(warmup_steps):
+    def _run_pt_step(gen_tokens: int) -> None:
+        """Execute one PyTorch prefill or decode step under `no_grad`."""
         with adapter.no_grad():
             if mode == "prefill":
                 _ = model(dummy_inputs)
             else:
-                _call_decode_generate(model, dummy_inputs, 2)
-    _sync_cuda(device)
+                _call_decode_generate(model, dummy_inputs, gen_tokens)
 
-    start_time = time.time()
-    for _ in range(num_runs):
-        with adapter.no_grad():
-            if mode == "prefill":
-                _ = model(dummy_inputs)
-            else:
-                _call_decode_generate(model, dummy_inputs, max_new_tokens)
-    _sync_cuda(device)
-    end_time = time.time()
-
-    total_time_ms = (end_time - start_time) * 1000.0
-    latency_ms = total_time_ms / max(1, num_runs)
-
-    if mode == "prefill":
-        tokens_per_sec = 32 * batch_size * num_runs / max(end_time - start_time, 1e-09)
-    else:
-        tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
+    tokens_per_sec, latency_ms = execute_timed_benchmark_loop(
+        lambda: _run_pt_step(max_new_tokens),
+        warmup_steps=warmup_steps,
+        num_runs=num_runs,
+        tokens_per_iter=32 if mode == "prefill" else max_new_tokens,
+        batch_size=batch_size,
+        warmup_step_fn=lambda: _run_pt_step(2),
+        post_warmup_fn=lambda: _sync_cuda(device),
+        post_runs_fn=lambda: _sync_cuda(device),
+    )
 
     memory_mb = _get_memory_mb(model, device)
     return (float(tokens_per_sec), float(latency_ms), float(memory_mb))

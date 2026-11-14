@@ -8,14 +8,15 @@ from __future__ import annotations
 import logging
 import os
 import re
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
 
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
+from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 
 from . import modeling as model_lib
@@ -32,8 +33,61 @@ from .utils_params import (
 
 logger = logging.getLogger(__name__)
 
+
+@runtime_checkable
+class _EPathProtocol(Protocol):
+    """Protocol for an `etils.epath.Path` path object supporting `expanduser`, `glob`, and `os.PathLike`."""
+
+    def __fspath__(self) -> str:
+        """Return filesystem path string representation.
+
+        Returns:
+            Filesystem path string.
+
+        """
+        ...
+
+    def expanduser(self) -> _EPathProtocol:
+        """Expand leading `~` user home directory.
+
+        Returns:
+            Expanded `_EPathProtocol` path instance.
+
+        """
+        ...
+
+    def glob(self, pattern: str, /) -> Iterable[_EPathProtocol]:
+        """Yield matching child paths for `pattern`.
+
+        Args:
+            pattern: Glob pattern string.
+
+        Returns:
+            Iterable of matching `_EPathProtocol` paths.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _EPathModuleProtocol(Protocol):
+    """Protocol for `etils.epath` exposing `Path`."""
+
+    def Path(self, path: str, /) -> _EPathProtocol:
+        """Construct an `_EPathProtocol` path object.
+
+        Args:
+            path: Filesystem directory or file path string.
+
+        Returns:
+            Constructed `_EPathProtocol` instance.
+
+        """
+        ...
+
+
 safetensors = optional_import("safetensors")
-epath = optional_attr("etils", "epath")
+epath: _EPathModuleProtocol | None = optional_import("etils.epath", _EPathModuleProtocol)
 
 
 def _get_text_mappings(transform_cls: type[TransformKind]) -> dict[str, KeyMapType]:
@@ -49,43 +103,145 @@ def _get_text_mappings(transform_cls: type[TransformKind]) -> dict[str, KeyMapTy
     return {
         r"^model\.embed_tokens\.weight$": (r"model\.embed_tokens\.embedding", transform_cls.EMBED),
         r"^model\.embed_tokens_per_layer\.weight$": (r"model\.embed_tokens_per_layer\.embedding", transform_cls.EMBED),
-        r"^model\.per_layer_model_projection\.weight$": (r"model\.per_layer_model_projection\.kernel", transform_cls.LINEAR),
-        r"^model\.per_layer_projection_norm\.weight$": (r"model\.per_layer_projection_norm\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.per_layer_input_gate\.weight$": (r"model\.layers\.\1\.per_layer_input_gate\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.per_layer_projection\.weight$": (r"model\.layers\.\1\.per_layer_projection\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.post_per_layer_input_norm\.weight$": (r"model\.layers\.\1\.post_per_layer_input_norm\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.input_layernorm\.weight$": (r"model\.layers\.\1\.pre_self_attention_norm\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.post_attention_layernorm\.weight$": (r"model\.layers\.\1\.post_self_attention_norm\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.pre_feedforward_layernorm\.weight$": (r"model\.layers\.\1\.pre_ffw_norm\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.post_feedforward_layernorm\.weight$": (r"model\.layers\.\1\.post_ffw_norm\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.self_attn\.q_norm\.weight$": (r"model\.layers\.\1\.self_attention\.q_norm\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.self_attn\.k_norm\.weight$": (r"model\.layers\.\1\.self_attention\.k_norm\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.self_attn\.v_norm\.weight$": (r"model\.layers\.\1\.self_attention\.v_norm\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.self_attn\.q_proj\.weight$": (r"model\.layers\.\1\.self_attention\.q_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.self_attn\.k_proj\.weight$": (r"model\.layers\.\1\.self_attention\.k_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.self_attn\.v_proj\.weight$": (r"model\.layers\.\1\.self_attention\.v_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.self_attn\.o_proj\.weight$": (r"model\.layers\.\1\.self_attention\.o_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.mlp\.gate_proj\.weight$": (r"model\.layers\.\1\.mlp\.gate_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.mlp\.up_proj\.weight$": (r"model\.layers\.\1\.mlp\.up_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.mlp\.down_proj\.weight$": (r"model\.layers\.\1\.mlp\.down_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.block_sparse_moe\.gate\.weight$": (r"model\.layers\.\1\.mlp\.gate\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.mlp\.routed_experts\.gate_proj\.weight$": (r"model\.layers\.\1\.mlp\.routed_experts\.gate_proj_kernel", transform_cls.LINEAR_3D),
-        r"^model\.layers\.(\d+)\.mlp\.routed_experts\.up_proj\.weight$": (r"model\.layers\.\1\.mlp\.routed_experts\.up_proj_kernel", transform_cls.LINEAR_3D),
-        r"^model\.layers\.(\d+)\.mlp\.routed_experts\.down_proj\.weight$": (r"model\.layers\.\1\.mlp\.routed_experts\.down_proj_kernel", transform_cls.LINEAR_3D),
-        r"^model\.layers\.(\d+)\.shared_expert\.gate_proj\.weight$": (r"model\.layers\.\1\.mlp\.shared_experts\.gate_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.shared_expert\.up_proj\.weight$": (r"model\.layers\.\1\.mlp\.shared_experts\.up_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.shared_expert\.down_proj\.weight$": (r"model\.layers\.\1\.mlp\.shared_experts\.down_proj\.kernel", transform_cls.LINEAR),
-        r"^model\.layers\.(\d+)\.block_sparse_moe\.pre_forward_scale_2\.weight$": (r"model\.layers\.\1\.mlp\.pre_forward_scale_2", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.block_sparse_moe\.pre_feedforward_layernorm_2\.weight$": (r"model\.layers\.\1\.mlp\.pre_feedforward_layernorm_2\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.block_sparse_moe\.post_feedforward_layernorm_1\.weight$": (r"model\.layers\.\1\.mlp\.post_feedforward_layernorm_1\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.block_sparse_moe\.post_feedforward_layernorm_2\.weight$": (r"model\.layers\.\1\.mlp\.post_feedforward_layernorm_2\.scale", transform_cls.DEFAULT),
-        r"^model\.layers\.(\d+)\.block_sparse_moe\.per_expert_scale$": (r"model\.layers\.\1\.mlp\.per_expert_scale", transform_cls.DEFAULT),
+        r"^model\.per_layer_model_projection\.weight$": (
+            r"model\.per_layer_model_projection\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.per_layer_projection_norm\.weight$": (
+            r"model\.per_layer_projection_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.per_layer_input_gate\.weight$": (
+            r"model\.layers\.\1\.per_layer_input_gate\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.per_layer_projection\.weight$": (
+            r"model\.layers\.\1\.per_layer_projection\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.post_per_layer_input_norm\.weight$": (
+            r"model\.layers\.\1\.post_per_layer_input_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.input_layernorm\.weight$": (
+            r"model\.layers\.\1\.pre_self_attention_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.post_attention_layernorm\.weight$": (
+            r"model\.layers\.\1\.post_self_attention_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.pre_feedforward_layernorm\.weight$": (
+            r"model\.layers\.\1\.pre_ffw_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.post_feedforward_layernorm\.weight$": (
+            r"model\.layers\.\1\.post_ffw_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.self_attn\.q_norm\.weight$": (
+            r"model\.layers\.\1\.self_attention\.q_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.self_attn\.k_norm\.weight$": (
+            r"model\.layers\.\1\.self_attention\.k_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.self_attn\.v_norm\.weight$": (
+            r"model\.layers\.\1\.self_attention\.v_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.self_attn\.q_proj\.weight$": (
+            r"model\.layers\.\1\.self_attention\.q_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.self_attn\.k_proj\.weight$": (
+            r"model\.layers\.\1\.self_attention\.k_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.self_attn\.v_proj\.weight$": (
+            r"model\.layers\.\1\.self_attention\.v_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.self_attn\.o_proj\.weight$": (
+            r"model\.layers\.\1\.self_attention\.o_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.mlp\.gate_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.gate_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.mlp\.up_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.up_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.mlp\.down_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.down_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.block_sparse_moe\.gate\.weight$": (
+            r"model\.layers\.\1\.mlp\.gate\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.mlp\.routed_experts\.gate_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.routed_experts\.gate_proj_kernel",
+            transform_cls.LINEAR_3D,
+        ),
+        r"^model\.layers\.(\d+)\.mlp\.routed_experts\.up_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.routed_experts\.up_proj_kernel",
+            transform_cls.LINEAR_3D,
+        ),
+        r"^model\.layers\.(\d+)\.mlp\.routed_experts\.down_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.routed_experts\.down_proj_kernel",
+            transform_cls.LINEAR_3D,
+        ),
+        r"^model\.layers\.(\d+)\.shared_expert\.gate_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.shared_experts\.gate_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.shared_expert\.up_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.shared_experts\.up_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.shared_expert\.down_proj\.weight$": (
+            r"model\.layers\.\1\.mlp\.shared_experts\.down_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^model\.layers\.(\d+)\.block_sparse_moe\.pre_forward_scale_2\.weight$": (
+            r"model\.layers\.\1\.mlp\.pre_forward_scale_2",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.block_sparse_moe\.pre_feedforward_layernorm_2\.weight$": (
+            r"model\.layers\.\1\.mlp\.pre_feedforward_layernorm_2\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.block_sparse_moe\.post_feedforward_layernorm_1\.weight$": (
+            r"model\.layers\.\1\.mlp\.post_feedforward_layernorm_1\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.block_sparse_moe\.post_feedforward_layernorm_2\.weight$": (
+            r"model\.layers\.\1\.mlp\.post_feedforward_layernorm_2\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^model\.layers\.(\d+)\.block_sparse_moe\.per_expert_scale$": (
+            r"model\.layers\.\1\.mlp\.per_expert_scale",
+            transform_cls.DEFAULT,
+        ),
         r"^model\.layers\.(\d+)\.layer_scalar\.weight$": (r"model\.layers\.\1\.layer_scalar", transform_cls.DEFAULT),
         r"^model\.norm\.weight$": (r"model\.norm\.scale", transform_cls.DEFAULT),
         r"^lm_head\.weight$": (r"lm_head\.kernel", transform_cls.LINEAR),
-        r"^embed_audio\.embedding_projection\.weight$": (r"embed_audio\.embedding_projection\.kernel", transform_cls.LINEAR),
-        r"^multi_modal_projector\.mm_input_projection_weight$": (r"multi_modal_projector\.mm_input_projection_weight", transform_cls.DEFAULT),
-        r"^multi_modal_projector\.mm_soft_emb_norm\.weight$": (r"multi_modal_projector\.mm_soft_emb_norm\.scale", transform_cls.DEFAULT),
+        r"^embed_audio\.embedding_projection\.weight$": (
+            r"embed_audio\.embedding_projection\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^multi_modal_projector\.mm_input_projection_weight$": (
+            r"multi_modal_projector\.mm_input_projection_weight",
+            transform_cls.DEFAULT,
+        ),
+        r"^multi_modal_projector\.mm_soft_emb_norm\.weight$": (
+            r"multi_modal_projector\.mm_soft_emb_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
     }
 
 
@@ -100,19 +256,58 @@ def _get_audio_mappings(transform_cls: type[TransformKind]) -> dict[str, KeyMapT
 
     """
     return {
-        r"^audio_tower\.subsample_conv_projection\.layer(\d+)\.conv\.weight$": (r"audio_tower\.subsample_conv_projection\.layer\1\.conv\.kernel", transform_cls.CONV2D),
-        r"^audio_tower\.subsample_conv_projection\.layer(\d+)\.norm\.weight$": (r"audio_tower\.subsample_conv_projection\.layer\1\.norm\.scale", transform_cls.DEFAULT),
-        r"^audio_tower\.subsample_conv_projection\.layer(\d+)\.norm\.bias$": (r"audio_tower\.subsample_conv_projection\.layer\1\.norm\.bias", transform_cls.BIAS),
-        r"^audio_tower\.subsample_conv_projection\.input_proj_linear\.weight$": (r"audio_tower\.subsample_conv_projection\.input_proj_linear\.kernel", transform_cls.LINEAR),
-        r"^audio_tower\.layers\.(\d+)\.feed_forward(\d+)\.ffw_layer_(\d+)\.linear\.weight$": (r"audio_tower\.layers\.\1\.feed_forward\2\.ffw_layer_\3\.linear\.kernel", transform_cls.LINEAR),
-        r"^audio_tower\.layers\.(\d+)\.feed_forward(\d+)\.(pre|post)_layer_norm\.weight$": (r"audio_tower\.layers\.\1\.feed_forward\2\.\3_layer_norm\.scale", transform_cls.DEFAULT),
-        r"^audio_tower\.layers\.(\d+)\.self_attn\.(q_proj|k_proj|v_proj|post)\.linear\.weight$": (r"audio_tower\.layers\.\1\.self_attn\.\2\.linear\.kernel", transform_cls.LINEAR),
-        r"^audio_tower\.layers\.(\d+)\.self_attn\.relative_k_proj\.weight$": (r"audio_tower\.layers\.\1\.self_attn\.relative_k_proj\.kernel", transform_cls.LINEAR),
-        r"^audio_tower\.layers\.(\d+)\.self_attn\.per_dim_scale$": (r"audio_tower\.layers\.\1\.self_attn\.per_dim_scale", transform_cls.DEFAULT),
-        r"^audio_tower\.layers\.(\d+)\.lconv1d\.(linear_start|linear_end)\.linear\.weight$": (r"audio_tower\.layers\.\1\.lconv1d\.\2\.linear\.kernel", transform_cls.LINEAR),
-        r"^audio_tower\.layers\.(\d+)\.lconv1d\.depthwise_conv1d\.weight$": (r"audio_tower\.layers\.\1\.lconv1d\.depthwise_conv1d\.conv\.kernel", ((2, 1, 0), None, False)),
-        r"^audio_tower\.layers\.(\d+)\.lconv1d\.(pre_layer_norm|conv_norm)\.weight$": (r"audio_tower\.layers\.\1\.lconv1d\.\2\.scale", transform_cls.DEFAULT),
-        r"^audio_tower\.layers\.(\d+)\.norm_(pre_attn|post_attn|out)\.weight$": (r"audio_tower\.layers\.\1\.norm_\2\.scale", transform_cls.DEFAULT),
+        r"^audio_tower\.subsample_conv_projection\.layer(\d+)\.conv\.weight$": (
+            r"audio_tower\.subsample_conv_projection\.layer\1\.conv\.kernel",
+            transform_cls.CONV2D,
+        ),
+        r"^audio_tower\.subsample_conv_projection\.layer(\d+)\.norm\.weight$": (
+            r"audio_tower\.subsample_conv_projection\.layer\1\.norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^audio_tower\.subsample_conv_projection\.layer(\d+)\.norm\.bias$": (
+            r"audio_tower\.subsample_conv_projection\.layer\1\.norm\.bias",
+            transform_cls.BIAS,
+        ),
+        r"^audio_tower\.subsample_conv_projection\.input_proj_linear\.weight$": (
+            r"audio_tower\.subsample_conv_projection\.input_proj_linear\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^audio_tower\.layers\.(\d+)\.feed_forward(\d+)\.ffw_layer_(\d+)\.linear\.weight$": (
+            r"audio_tower\.layers\.\1\.feed_forward\2\.ffw_layer_\3\.linear\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^audio_tower\.layers\.(\d+)\.feed_forward(\d+)\.(pre|post)_layer_norm\.weight$": (
+            r"audio_tower\.layers\.\1\.feed_forward\2\.\3_layer_norm\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^audio_tower\.layers\.(\d+)\.self_attn\.(q_proj|k_proj|v_proj|post)\.linear\.weight$": (
+            r"audio_tower\.layers\.\1\.self_attn\.\2\.linear\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^audio_tower\.layers\.(\d+)\.self_attn\.relative_k_proj\.weight$": (
+            r"audio_tower\.layers\.\1\.self_attn\.relative_k_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^audio_tower\.layers\.(\d+)\.self_attn\.per_dim_scale$": (
+            r"audio_tower\.layers\.\1\.self_attn\.per_dim_scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^audio_tower\.layers\.(\d+)\.lconv1d\.(linear_start|linear_end)\.linear\.weight$": (
+            r"audio_tower\.layers\.\1\.lconv1d\.\2\.linear\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^audio_tower\.layers\.(\d+)\.lconv1d\.depthwise_conv1d\.weight$": (
+            r"audio_tower\.layers\.\1\.lconv1d\.depthwise_conv1d\.conv\.kernel",
+            ((2, 1, 0), None, False),
+        ),
+        r"^audio_tower\.layers\.(\d+)\.lconv1d\.(pre_layer_norm|conv_norm)\.weight$": (
+            r"audio_tower\.layers\.\1\.lconv1d\.\2\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^audio_tower\.layers\.(\d+)\.norm_(pre_attn|post_attn|out)\.weight$": (
+            r"audio_tower\.layers\.\1\.norm_\2\.scale",
+            transform_cls.DEFAULT,
+        ),
         r"^audio_tower\.output_proj\.weight$": (r"audio_tower\.output_proj\.kernel", transform_cls.LINEAR),
         r"^audio_tower\.output_proj\.bias$": (r"audio_tower\.output_proj\.bias", transform_cls.BIAS),
     }
@@ -129,21 +324,66 @@ def _get_vision_mappings(transform_cls: type[TransformKind]) -> dict[str, KeyMap
 
     """
     return {
-        r"^vision_tower\.vision_model\.embeddings\.patch_embedding\.bias$": (r"vision_tower\.embeddings\.patch_embedding\.bias", transform_cls.BIAS),
-        r"^vision_tower\.vision_model\.embeddings\.patch_embedding\.weight$": (r"vision_tower\.embeddings\.patch_embedding\.kernel", transform_cls.CONV2D),
-        r"^vision_tower\.vision_model\.embeddings\.position_embedding\.weight$": (r"vision_tower\.embeddings\.position_embedding\.embedding", transform_cls.EMBED),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.layer_norm(\d+)\.weight$": (r"vision_tower\.layers\.\1\.layer_norm\2\.scale", transform_cls.DEFAULT),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.mlp\.fc(\d+)\.bias$": (r"vision_tower\.layers\.\1\.mlp\.fc\2\.bias", transform_cls.BIAS),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.mlp\.fc(\d+)\.weight$": (r"vision_tower\.layers\.\1\.mlp\.fc\2\.kernel", transform_cls.LINEAR),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.k_proj\.bias$": (r"vision_tower\.layers\.\1\.self_attn\.k_proj\.bias", transform_cls.BIAS),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.k_proj\.weight$": (r"vision_tower\.layers\.\1\.self_attn\.k_proj\.kernel", transform_cls.LINEAR),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.out_proj\.bias$": (r"vision_tower\.layers\.\1\.self_attn\.out_proj\.bias", transform_cls.BIAS),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.out_proj\.weight$": (r"vision_tower\.layers\.\1\.self_attn\.out_proj\.kernel", transform_cls.LINEAR),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.q_proj\.bias$": (r"vision_tower\.layers\.\1\.self_attn\.q_proj\.bias", transform_cls.BIAS),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.q_proj\.weight$": (r"vision_tower\.layers\.\1\.self_attn\.q_proj\.kernel", transform_cls.LINEAR),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.v_proj\.bias$": (r"vision_tower\.layers\.\1\.self_attn\.v_proj\.bias", transform_cls.BIAS),
-        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.v_proj\.weight$": (r"vision_tower\.layers\.\1\.self_attn\.v_proj\.kernel", transform_cls.LINEAR),
-        r"^vision_tower\.vision_model\.post_layernorm\.weight$": (r"vision_tower\.post_layernorm\.scale", transform_cls.DEFAULT),
+        r"^vision_tower\.vision_model\.embeddings\.patch_embedding\.bias$": (
+            r"vision_tower\.embeddings\.patch_embedding\.bias",
+            transform_cls.BIAS,
+        ),
+        r"^vision_tower\.vision_model\.embeddings\.patch_embedding\.weight$": (
+            r"vision_tower\.embeddings\.patch_embedding\.kernel",
+            transform_cls.CONV2D,
+        ),
+        r"^vision_tower\.vision_model\.embeddings\.position_embedding\.weight$": (
+            r"vision_tower\.embeddings\.position_embedding\.embedding",
+            transform_cls.EMBED,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.layer_norm(\d+)\.weight$": (
+            r"vision_tower\.layers\.\1\.layer_norm\2\.scale",
+            transform_cls.DEFAULT,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.mlp\.fc(\d+)\.bias$": (
+            r"vision_tower\.layers\.\1\.mlp\.fc\2\.bias",
+            transform_cls.BIAS,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.mlp\.fc(\d+)\.weight$": (
+            r"vision_tower\.layers\.\1\.mlp\.fc\2\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.k_proj\.bias$": (
+            r"vision_tower\.layers\.\1\.self_attn\.k_proj\.bias",
+            transform_cls.BIAS,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.k_proj\.weight$": (
+            r"vision_tower\.layers\.\1\.self_attn\.k_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.out_proj\.bias$": (
+            r"vision_tower\.layers\.\1\.self_attn\.out_proj\.bias",
+            transform_cls.BIAS,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.out_proj\.weight$": (
+            r"vision_tower\.layers\.\1\.self_attn\.out_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.q_proj\.bias$": (
+            r"vision_tower\.layers\.\1\.self_attn\.q_proj\.bias",
+            transform_cls.BIAS,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.q_proj\.weight$": (
+            r"vision_tower\.layers\.\1\.self_attn\.q_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.v_proj\.bias$": (
+            r"vision_tower\.layers\.\1\.self_attn\.v_proj\.bias",
+            transform_cls.BIAS,
+        ),
+        r"^vision_tower\.vision_model\.encoder\.layers\.(\d+)\.self_attn\.v_proj\.weight$": (
+            r"vision_tower\.layers\.\1\.self_attn\.v_proj\.kernel",
+            transform_cls.LINEAR,
+        ),
+        r"^vision_tower\.vision_model\.post_layernorm\.weight$": (
+            r"vision_tower\.post_layernorm\.scale",
+            transform_cls.DEFAULT,
+        ),
     }
 
 
@@ -161,7 +401,12 @@ def _get_key_and_transform_mapping() -> dict[str, KeyMapType]:
     return mapping
 
 
-def _process_moe_tensor(match: re.Match[str], sf: SafeOpenFileProtocol, torch_key: str, expert_tensors: dict[int, dict[str, dict[int, jax.Array]]]) -> None:
+def _process_moe_tensor(
+    match: re.Match[str],
+    sf: SafeOpenFileProtocol,
+    torch_key: str,
+    expert_tensors: dict[int, dict[str, dict[int, jax.Array]]],
+) -> None:
     """Process an MoE expert tensor."""
     (l_idx_str, e_idx_str, proj_type) = match.groups()
     (l_idx, e_idx) = (int(l_idx_str), int(e_idx_str))
@@ -172,7 +417,9 @@ def _process_moe_tensor(match: re.Match[str], sf: SafeOpenFileProtocol, torch_ke
     expert_tensors[l_idx][proj_type][e_idx] = jnp.array(sf.get_tensor(torch_key))
 
 
-def process_standard_tensor(sf: SafeOpenFileProtocol, torch_key: str, jax_state: StateNode, mapping: Mapping[str, KeyMapType]) -> None:
+def process_standard_tensor(
+    sf: SafeOpenFileProtocol, torch_key: str, jax_state: StateNode, mapping: Mapping[str, KeyMapType]
+) -> None:
     """Process a standard tensor.
 
     Raises:
@@ -197,7 +444,9 @@ def process_standard_tensor(sf: SafeOpenFileProtocol, torch_key: str, jax_state:
         raise
 
 
-def _stack_and_assign_expert_tensors(expert_tensors: dict[int, dict[str, dict[int, jax.Array]]], mapping: Mapping[str, KeyMapType], jax_state: StateNode) -> None:
+def _stack_and_assign_expert_tensors(
+    expert_tensors: dict[int, dict[str, dict[int, jax.Array]]], mapping: Mapping[str, KeyMapType], jax_state: StateNode
+) -> None:
     """Stack expert tensors and assign them to the jax state."""
     for l_idx, projs in expert_tensors.items():
         for proj_type, e_dict in projs.items():
@@ -217,8 +466,26 @@ def _process_safetensors_file(
     jax_state: StateNode,
     mapping: Mapping[str, KeyMapType],
 ) -> None:
-    """Process a single safetensors file."""
-    from safetensors import safe_open as st_safe_open
+    """Process a single safetensors file into `jax_state` and `expert_tensors`.
+
+    Args:
+        f: Path to the `.safetensors` file.
+        moe_pattern: Compiled regex matching MoE expert weight keys.
+        expert_tensors: Accumulator mapping layer, projection, and expert indices to arrays.
+        jax_state: Mutable NNX parameter state dictionary.
+        mapping: Key and tensor transformation mapping.
+
+    Raises:
+        DependencyMissingError: If `safetensors` is not installed.
+
+    """
+    from gemma_4_sql.backends.lazy_loader import import_optional_symbol
+
+    from .utils_params import SafeOpenCallableProtocol
+
+    st_safe_open = import_optional_symbol("safetensors", "safe_open", SafeOpenCallableProtocol)
+    if st_safe_open is None:
+        raise DependencyMissingError("safetensors dependency missing")
 
     with st_safe_open(os.fspath(f), framework="flax") as sf:
         for torch_key in list(sf.keys()):
@@ -229,7 +496,9 @@ def _process_safetensors_file(
                 process_standard_tensor(sf, torch_key, jax_state, mapping)
 
 
-def _fix_jax_state_embeddings(jax_state: StateNode, _gemma4: model_lib.Gemma4ForCausalLM | None, cfg: model_lib.ModelConfig) -> None:
+def _fix_jax_state_embeddings(
+    jax_state: StateNode, _gemma4: model_lib.Gemma4ForCausalLM | None, cfg: model_lib.ModelConfig
+) -> None:
     """Fix uninitialized state embeddings that evaluation shape might leave empty."""
     model_sub = jax_state.get("model")
     embed_scale = model_sub.get("embed_scale") if isinstance(model_sub, MutableMapping) else None
@@ -270,15 +539,29 @@ def create_gemma4_from_pretrained(file_dir: str, cfg: model_lib.ModelConfig) -> 
     if not files:
         msg = f"No safetensors found in {file_dir}"
         raise ValueError(msg)
+    from collections.abc import Callable
+
+    from .utils_params import FlatDictStateProtocol, PureDictStateProtocol
+
     gemma4 = nnx.eval_shape(lambda: model_lib.Gemma4ForCausalLM(cfg, rngs=nnx.Rngs(0)))
-    (graph_def, abs_state) = nnx.split(gemma4)
+    split_fn: Callable[
+        [model_lib.Gemma4ForCausalLM],
+        tuple[nnx.GraphDef[model_lib.Gemma4ForCausalLM], PureDictStateProtocol | FlatDictStateProtocol | StateNode],
+    ] = vars(nnx)["split"]
+    (graph_def, abs_state) = split_fn(gemma4)
     jax_state = state_to_mutable_dict(abs_state)
     mapping = _get_key_and_transform_mapping()
-    moe_pattern = re.compile(r"^model\.layers\.(\d+)\.block_sparse_moe\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$")
+    moe_pattern = re.compile(
+        r"^model\.layers\.(\d+)\.block_sparse_moe\.experts\.(\d+)\.(gate_proj|up_proj|down_proj)\.weight$"
+    )
     expert_tensors: dict[int, dict[str, dict[int, jax.Array]]] = {}
     for f in files:
         _process_safetensors_file(f, moe_pattern, expert_tensors, jax_state, mapping)
         gc.collect()
     _stack_and_assign_expert_tensors(expert_tensors, mapping, jax_state)
     _fix_jax_state_embeddings(jax_state, gemma4, cfg)
-    return nnx.merge(graph_def, abs_state)
+    merge_fn: Callable[
+        [nnx.GraphDef[model_lib.Gemma4ForCausalLM], PureDictStateProtocol | FlatDictStateProtocol | StateNode],
+        model_lib.Gemma4ForCausalLM,
+    ] = vars(nnx)["merge"]
+    return merge_fn(graph_def, abs_state)

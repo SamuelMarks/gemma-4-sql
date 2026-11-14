@@ -6,19 +6,202 @@ into binary GGUF v3 containers for high-performance llama.cpp inference.
 
 from __future__ import annotations
 
+import io
 import logging
 import struct
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, SupportsFloat, TypedDict, runtime_checkable
 
-from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.backends.lazy_loader import catch_optional_imports, optional_import
 from gemma_4_sql.exceptions import ExportError
 from gemma_4_sql.type_hints import TensorProtocol, ToListArrayProtocol, TorchCausalLMProtocol
 
+with catch_optional_imports():
+    import torch as _torch_types
+
 logger = logging.getLogger(__name__)
 
-torch = optional_import("torch")
+
+@runtime_checkable
+class _TorchGGUFModuleProtocol(Protocol):
+    """Protocol for `torch` tensor creation and block-quantization ops in GGUF serialization."""
+
+    @property
+    def float16(self) -> _torch_types.dtype:
+        """Provide `torch.float16` dtype."""
+        ...
+
+    @property
+    def float32(self) -> _torch_types.dtype:
+        """Provide `torch.float32` dtype."""
+        ...
+
+    @property
+    def int8(self) -> _torch_types.dtype:
+        """Provide `torch.int8` dtype."""
+        ...
+
+    @property
+    def uint8(self) -> _torch_types.dtype:
+        """Provide `torch.uint8` dtype."""
+        ...
+
+    def tensor(self, data: Sequence[float], *, dtype: _torch_types.dtype) -> _torch_types.Tensor:
+        """Construct a 1D tensor from `data`.
+
+        Args:
+            data: Sequence of scalar floats.
+            dtype: Target PyTorch dtype.
+
+        Returns:
+            Constructed `torch.Tensor`.
+
+        """
+        ...
+
+    def zeros(self, size: int | tuple[int, ...], *, dtype: _torch_types.dtype) -> _torch_types.Tensor:
+        """Construct a zero-filled tensor.
+
+        Args:
+            size: 1D length or shape tuple.
+            dtype: Target PyTorch dtype.
+
+        Returns:
+            Zero-initialized `torch.Tensor`.
+
+        """
+        ...
+
+    def empty(self, size: tuple[int, ...], *, dtype: _torch_types.dtype) -> _torch_types.Tensor:
+        """Allocate an uninitialized tensor buffer.
+
+        Args:
+            size: Shape tuple.
+            dtype: Target PyTorch dtype.
+
+        Returns:
+            Allocated `torch.Tensor`.
+
+        """
+        ...
+
+    def ones_like(self, input_tensor: _torch_types.Tensor, /) -> _torch_types.Tensor:
+        """Construct a ones tensor matching `input_tensor` shape and dtype.
+
+        Args:
+            input_tensor: Reference tensor.
+
+        Returns:
+            Ones `torch.Tensor`.
+
+        """
+        ...
+
+    def cat(self, tensors: Sequence[_torch_types.Tensor], dim: int = 0) -> _torch_types.Tensor:
+        """Concatenate `tensors` along `dim`.
+
+        Args:
+            tensors: Sequence of tensors to join.
+            dim: Concatenation dimension index.
+
+        Returns:
+            Concatenated `torch.Tensor`.
+
+        """
+        ...
+
+    def abs(self, input_tensor: _torch_types.Tensor, /) -> _torch_types.Tensor:
+        """Compute elementwise absolute value.
+
+        Args:
+            input_tensor: Input tensor.
+
+        Returns:
+            Elementwise magnitude tensor.
+
+        """
+        ...
+
+    def amax(self, input_tensor: _torch_types.Tensor, dim: int) -> _torch_types.Tensor:
+        """Compute maximum values along `dim`.
+
+        Args:
+            input_tensor: Input tensor.
+            dim: Reduction dimension index.
+
+        Returns:
+            Reduced maximum tensor.
+
+        """
+        ...
+
+    def amin(self, input_tensor: _torch_types.Tensor, dim: int) -> _torch_types.Tensor:
+        """Compute minimum values along `dim`.
+
+        Args:
+            input_tensor: Input tensor.
+            dim: Reduction dimension index.
+
+        Returns:
+            Reduced minimum tensor.
+
+        """
+        ...
+
+    def where(
+        self,
+        condition: _torch_types.Tensor,
+        x: _torch_types.Tensor,
+        y: _torch_types.Tensor,
+        /,
+    ) -> _torch_types.Tensor:
+        """Select elements from `x` or `y` according to boolean `condition`.
+
+        Args:
+            condition: Boolean mask tensor.
+            x: True-branch tensor.
+            y: False-branch tensor.
+
+        Returns:
+            Elementwise selected tensor.
+
+        """
+        ...
+
+    def round(self, input_tensor: _torch_types.Tensor, /) -> _torch_types.Tensor:
+        """Round tensor elements to nearest integer values.
+
+        Args:
+            input_tensor: Input floating-point tensor.
+
+        Returns:
+            Rounded tensor.
+
+        """
+        ...
+
+    def clamp(
+        self,
+        input_tensor: _torch_types.Tensor,
+        min: float | int | None = None,
+        max: float | int | None = None,
+    ) -> _torch_types.Tensor:
+        """Clamp tensor elements into `[min, max]`.
+
+        Args:
+            input_tensor: Input tensor.
+            min: Optional minimum bound.
+            max: Optional maximum bound.
+
+        Returns:
+            Clamped tensor.
+
+        """
+        ...
+
+
+torch: _TorchGGUFModuleProtocol | None = optional_import("torch", _TorchGGUFModuleProtocol)
 
 # GGML Numerical Quantization Types
 GGML_TYPE_F32: int = 0
@@ -47,12 +230,33 @@ GGUF_ALIGNMENT: int = 32
 
 
 type GGUFMetadataScalar = str | int | float | bool
-type GGUFMetadataValue = GGUFMetadataScalar | Sequence[GGUFMetadataScalar] | Path | Mapping[str, GGUFMetadataScalar] | None
-type TensorInput = TensorProtocol | _FlattenableArrayProtocol | ToListArrayProtocol | SupportsFloat | bytes | bytearray | float | int | Sequence[float] | Sequence[Sequence[float]]
+type GGUFMetadataArray = Sequence["GGUFMetadataScalar | GGUFMetadataArray"]
+type GGUFMetadataValue = GGUFMetadataScalar | GGUFMetadataArray | Path | Mapping[str, GGUFMetadataScalar] | None
+type NestedFloatSeq = float | int | complex | Sequence["NestedFloatSeq"]
+type TensorInput = (
+    TensorProtocol
+    | _FlattenableArrayProtocol
+    | ToListArrayProtocol
+    | SupportsFloat
+    | bytes
+    | bytearray
+    | float
+    | int
+    | complex
+    | NestedFloatSeq
+)
 
 
 class GGUFTensorDescriptor(TypedDict):
-    """Typed dictionary describing a single tensor header entry inside a GGUF file."""
+    """Typed dictionary describing a single tensor header entry inside a GGUF file.
+
+    Attributes:
+        name: Canonical GGML tensor name.
+        shape: GGML column-major tensor dimension list (`ne[0], ne[1], ...`).
+        type: Integer GGML quantization type code.
+        offset: Aligned byte offset from start of tensor payload section.
+
+    """
 
     name: str
     shape: list[int]
@@ -61,7 +265,15 @@ class GGUFTensorDescriptor(TypedDict):
 
 
 class GGUFHeaderInfo(TypedDict):
-    """Typed dictionary returned by `validate_gguf_file` describing a GGUF binary header."""
+    """Typed dictionary returned by `validate_gguf_file` describing a GGUF binary header.
+
+    Attributes:
+        version: GGUF binary container format version (`2` or `3`).
+        tensor_count: Total number of tensor descriptors in the file.
+        metadata: Key-value metadata dictionary parsed from the header.
+        tensors: Ordered list of `GGUFTensorDescriptor` entries.
+
+    """
 
     version: int
     tensor_count: int
@@ -75,15 +287,30 @@ class _FlattenableArrayProtocol(Protocol):
 
     @property
     def shape(self) -> tuple[int, ...]:
-        """Provide the array shape."""
+        """Provide the array shape.
+
+        Returns:
+            N-dimensional integer shape tuple.
+
+        """
         ...
 
     def flatten(self) -> _FlattenableArrayProtocol:
-        """Flatten array to 1D."""
+        """Flatten array to 1D.
+
+        Returns:
+            Flattened 1D array view.
+
+        """
         ...
 
     def tolist(self) -> list[float]:
-        """Convert 1D array to a Python list of floats."""
+        """Convert 1D array to a Python list of floats.
+
+        Returns:
+            Flat list of floating-point values.
+
+        """
         ...
 
 
@@ -92,43 +319,57 @@ class _StateDictModelProtocol(Protocol):
     """Protocol for a model exposing a `.state_dict()` method."""
 
     def state_dict(self) -> Mapping[str, TensorInput]:
-        """Return a mapping of parameter names to tensors."""
+        """Return a mapping of parameter names to tensors.
+
+        Returns:
+            Mapping from layer parameter names to tensors.
+
+        """
         ...
 
 
 def _to_contiguous_float32_1d(arr: TensorInput) -> tuple[list[float], tuple[int, ...]]:
-    """Convert any supported tensor, array, byte buffer, or sequence into a 1D float list and shape tuple.
+    """Convert a tensor, byte buffer, scalar, or nested sequence into flat floats and shape.
 
     Args:
-        arr: Input tensor, array, byte buffer, scalar, or nested sequence.
+        arr: Input tensor, array, byte buffer, scalar, or N-dimensional nested sequence.
 
     Returns:
-        A 2-tuple of `(flat_float_values, shape_tuple)`.
+        A 2-tuple of `(flat_float_values, row_major_shape_tuple)`.
+
+    Raises:
+        TypeError: If `arr` cannot be converted into floating-point elements.
 
     """
     if isinstance(arr, (bytes, bytearray)):
         vals = [float(b) for b in arr]
         return (vals, (len(vals),))
     if isinstance(arr, _FlattenableArrayProtocol):
-        shape = tuple(int(d) for d in arr.shape)
+        raw_shape = tuple(int(d) for d in arr.shape)
+        shape = raw_shape if len(raw_shape) > 0 else (1,)
         vals = [float(x) for x in arr.flatten().tolist()]
         return (vals, shape)
+    if isinstance(arr, ToListArrayProtocol):
+        return _to_contiguous_float32_1d(arr.tolist())
     if isinstance(arr, (list, tuple)):
-        if len(arr) > 0 and isinstance(arr[0], (list, tuple)):
-            first_row = arr[0]
-            shape = (len(arr), len(first_row))
-            flat: list[float] = []
-            for sub in arr:
+        if len(arr) == 0:
+            return ([], (0,))
+        first_elem = arr[0]
+        if isinstance(first_elem, (list, tuple)):
+            first_vals, sub_shape = _to_contiguous_float32_1d(first_elem)
+            flat: list[float] = list(first_vals)
+            for sub in arr[1:]:
                 sub_vals, _ = _to_contiguous_float32_1d(sub)
                 flat.extend(sub_vals)
-            return (flat, shape)
+            return (flat, (len(arr), *sub_shape))
         flat_1d: list[float] = []
         for item in arr:
             item_vals, _ = _to_contiguous_float32_1d(item)
             flat_1d.extend(item_vals)
         return (flat_1d, (len(flat_1d),))
-    assert isinstance(arr, SupportsFloat)
-    return ([float(arr)], (16, 16))
+    assert isinstance(arr, (SupportsFloat, complex))
+    scalar_val = arr.real if isinstance(arr, complex) else float(arr)
+    return ([float(scalar_val)], (1,))
 
 
 def _flatten_values(arr: TensorInput) -> list[float]:
@@ -145,6 +386,21 @@ def _flatten_values(arr: TensorInput) -> list[float]:
     return vals
 
 
+def _uint8_tensor_to_bytes(tensor: ToListArrayProtocol) -> bytes:
+    """Serialize a 1D `uint8` tensor into raw `bytes` via `ToListArrayProtocol`.
+
+    Args:
+        tensor: Flattened `uint8` tensor.
+
+    Returns:
+        Serialized raw `bytes`.
+
+    """
+    raw = tensor.tolist()
+    assert isinstance(raw, list)
+    return bytes(int(b) for b in raw if isinstance(b, int))
+
+
 def quantize_tensor_f16(arr: TensorInput) -> bytes:
     """Quantize an input array or tensor to 16-bit half precision float bytes.
 
@@ -158,7 +414,7 @@ def quantize_tensor_f16(arr: TensorInput) -> bytes:
     flat, _ = _to_contiguous_float32_1d(arr)
     if torch is not None:
         t = torch.tensor(flat, dtype=torch.float16)
-        return bytes(t.view(torch.uint8).tolist())
+        return _uint8_tensor_to_bytes(t.view(torch.uint8))
     return struct.pack(f"<{len(flat)}e", *flat)
 
 
@@ -194,7 +450,7 @@ def quantize_tensor_q8_0(arr: TensorInput, block_size: int = 32) -> bytes:
         qs = torch.clamp(torch.round(blocks / scales.to(torch.float32).unsqueeze(1)), -128, 127).to(torch.int8)
         scale_bytes = scales.view(torch.uint8).reshape(n_blocks, 2)
         qs_bytes = qs.view(torch.uint8)
-        return bytes(torch.cat([scale_bytes, qs_bytes], dim=1).reshape(-1).tolist())
+        return _uint8_tensor_to_bytes(torch.cat([scale_bytes, qs_bytes], dim=1).reshape(-1))
 
     rem = len(flat) % block_size
     if rem != 0:
@@ -250,7 +506,7 @@ def quantize_tensor_q4_0(arr: TensorInput, block_size: int = 32) -> bytes:
         v1 = torch.clamp(torch.round(blocks[:, half_block:] / denom) + 8, 0, 15).to(torch.uint8)
         packed = (v0 & 0x0F) | ((v1 & 0x0F) << 4)
         scale_bytes = scales.view(torch.uint8).reshape(n_blocks, 2)
-        return bytes(torch.cat([scale_bytes, packed], dim=1).reshape(-1).tolist())
+        return _uint8_tensor_to_bytes(torch.cat([scale_bytes, packed], dim=1).reshape(-1))
 
     rem = len(flat) % block_size
     if rem != 0:
@@ -344,8 +600,12 @@ def quantize_tensor_q4_k_m(arr: TensorInput) -> bytes:
 
         d_f32 = d.to(torch.float32).unsqueeze(1)
         dmin_f32 = dmin.to(torch.float32).unsqueeze(1)
-        sc_q = torch.clamp(torch.round(sub_dynamic / torch.where(d_f32 > 0.0, d_f32, torch.ones_like(d_f32))), 0, 63).to(torch.uint8)
-        m_q = torch.clamp(torch.round(sub_mins / torch.where(dmin_f32 > 0.0, dmin_f32, torch.ones_like(dmin_f32))), 0, 63).to(torch.uint8)
+        sc_q = torch.clamp(
+            torch.round(sub_dynamic / torch.where(d_f32 > 0.0, d_f32, torch.ones_like(d_f32))), 0, 63
+        ).to(torch.uint8)
+        m_q = torch.clamp(
+            torch.round(sub_mins / torch.where(dmin_f32 > 0.0, dmin_f32, torch.ones_like(dmin_f32))), 0, 63
+        ).to(torch.uint8)
 
         eff_scale = (d_f32 * sc_q.to(torch.float32)).unsqueeze(2)
         eff_min = (dmin_f32 * m_q.to(torch.float32)).unsqueeze(2)
@@ -364,7 +624,7 @@ def quantize_tensor_q4_k_m(arr: TensorInput) -> bytes:
 
         d_bytes = d.view(torch.uint8).reshape(n_blocks, 2)
         dmin_bytes = dmin.view(torch.uint8).reshape(n_blocks, 2)
-        return bytes(torch.cat([d_bytes, dmin_bytes, meta, packed], dim=1).reshape(-1).tolist())
+        return _uint8_tensor_to_bytes(torch.cat([d_bytes, dmin_bytes, meta, packed], dim=1).reshape(-1))
 
     rem = len(flat) % block_size
     if rem != 0:
@@ -403,8 +663,7 @@ def quantize_tensor_q4_k_m(arr: TensorInput) -> bytes:
             eff_s = d_f * sc_ints[b_idx]
             eff_m = dmin_f * m_ints[b_idx]
             denom_f = eff_s if eff_s > 0.0 else 1.0
-            for x in chunk[b_idx * 32 : (b_idx + 1) * 32]:
-                q_vals.append(max(0, min(15, round((x + eff_m) / denom_f))))
+            q_vals.extend(max(0, min(15, round((x + eff_m) / denom_f))) for x in chunk[b_idx * 32 : (b_idx + 1) * 32])
 
         for j in range(0, block_size, 2):
             out.append((q_vals[j] & 0x0F) | ((q_vals[j + 1] & 0x0F) << 4))
@@ -443,9 +702,77 @@ def dequantize_tensor_q4_k_m(payload: bytes) -> list[float]:
         for b_idx in range(8):
             eff_s = d * sc[b_idx]
             eff_m = dmin * m[b_idx]
-            for q in nibbles[b_idx * 32 : (b_idx + 1) * 32]:
-                reconstructed.append(eff_s * q - eff_m)
+            reconstructed.extend(eff_s * q - eff_m for q in nibbles[b_idx * 32 : (b_idx + 1) * 32])
     return reconstructed
+
+
+def _load_state_dict_from_local_path(p: Path, model_or_name: str) -> dict[str, TensorInput] | None:
+    """Attempt to load a PyTorch state dictionary from a local `.safetensors` file or HF checkpoint directory.
+
+    Args:
+        p: Existing filesystem path to a `.safetensors` file or checkpoint directory.
+        model_or_name: Original model identifier string for diagnostic logging.
+
+    Returns:
+        Extracted dictionary of tensor names to `TensorInput`, or `None` if loading did not succeed.
+
+    """
+    from gemma_4_sql.backends.lazy_loader import import_optional_symbol
+
+    st_file = p if p.is_file() and p.suffix == ".safetensors" else (p / "model.safetensors" if p.is_dir() else None)
+    if st_file is not None and st_file.is_file():
+
+        @runtime_checkable
+        class _GGUFSafetensorsLoadProtocol(Protocol):
+            """Protocol for `safetensors.torch.load_file(filename)`."""
+
+            def __call__(self, filename: str, /) -> Mapping[str, TensorInput]:
+                """Load tensor mapping from `filename`."""
+                ...
+
+        try:
+            from safetensors import SafetensorError
+        except ImportError as e:
+            logger.debug("Safetensors import failed: %s", e)
+        else:
+            load_file = import_optional_symbol("safetensors.torch", "load_file", _GGUFSafetensorsLoadProtocol)
+            if load_file is not None:
+                try:
+                    loaded_st = load_file(str(st_file))
+                    return {str(k): v for k, v in loaded_st.items()}
+                except (SafetensorError, ValueError, RuntimeError, OSError) as e:
+                    logger.debug("Local safetensors load failed for '%s': %s", st_file, e)
+
+    @runtime_checkable
+    class _GGUFStateDictModelProtocol(Protocol):
+        """Protocol for a causal LM exposing `.state_dict()`."""
+
+        def state_dict(self) -> Mapping[str, TensorInput]:
+            """Return parameter state dictionary."""
+            ...
+
+    @runtime_checkable
+    class _GGUFAutoModelProtocol(Protocol):
+        """Protocol for `AutoModelForCausalLM` exposing `.from_pretrained(...)`."""
+
+        def from_pretrained(
+            self,
+            model_path: str,
+            *,
+            local_files_only: bool = False,
+        ) -> _GGUFStateDictModelProtocol:
+            """Load local pretrained model."""
+            ...
+
+    auto_cls = import_optional_symbol("transformers", "AutoModelForCausalLM", _GGUFAutoModelProtocol)
+    if auto_cls is not None:
+        try:
+            mod = auto_cls.from_pretrained(str(p), local_files_only=True)
+            state_dict_res = mod.state_dict()
+            return {str(k): v for k, v in state_dict_res.items()}
+        except (ValueError, RuntimeError, AttributeError, OSError) as e:
+            logger.debug("Local AutoModelForCausalLM load failed for '%s': %s", model_or_name, e)
+    return None
 
 
 def extract_pytorch_state_dict(
@@ -453,14 +780,14 @@ def extract_pytorch_state_dict(
     *,
     allow_dummy_fallback: bool = False,
 ) -> dict[str, TensorInput]:
-    """Extract named weight tensors from a PyTorch model, state dictionary, or preset.
+    """Extract named weight tensors from a PyTorch model, state dictionary, or checkpoint directory.
 
     Maps architecture layer names to canonical GGUF llama.cpp layer identifiers.
 
     Args:
-        model_or_name: Model instance, state dictionary, or preset model string identifier.
+        model_or_name: Model instance, state dictionary, or local checkpoint string identifier.
         allow_dummy_fallback: Whether to fall back to a compact native `Gemma4Config` when
-            `model_or_name` is a preset name that is not found on disk.
+            `model_or_name` is a preset name that is not found on disk (default `False`).
 
     Returns:
         Dictionary mapping canonical GGUF tensor names to tensor or array objects.
@@ -478,21 +805,25 @@ def extract_pytorch_state_dict(
         raw_dict = {str(k): v for k, v in state_dict_res.items()}
     elif isinstance(model_or_name, str):
         loaded = False
-        p = Path(model_or_name)
-        if p.exists() and torch is not None:
-            try:
-                from transformers import AutoModelForCausalLM
+        from gemma_4_sql.backends.pytorch.inference import MODEL_CACHE
 
-                mod = AutoModelForCausalLM.from_pretrained(str(p), local_files_only=True)
-                state_dict_res = mod.state_dict()
-                raw_dict = {str(k): v for k, v in state_dict_res.items()}
+        cached = MODEL_CACHE.get_model(model_or_name)
+        if cached is not None and isinstance(cached[0], _StateDictModelProtocol):
+            raw_dict = {str(k): v for k, v in cached[0].state_dict().items()}
+            loaded = True
+
+        p = Path(model_or_name)
+        if not loaded and p.exists() and torch is not None:
+            local_dict = _load_state_dict_from_local_path(p, model_or_name)
+            if local_dict is not None:
+                raw_dict = local_dict
                 loaded = True
-            except (ImportError, ValueError, RuntimeError, AttributeError, OSError) as e:
-                logger.debug("Local AutoModelForCausalLM load failed for '%s': %s", model_or_name, e)
 
         if not loaded:
             if not allow_dummy_fallback:
-                raise ExportError(f"Failed to load model state dict from '{model_or_name}' and allow_dummy_fallback is False.")
+                raise ExportError(
+                    f"Failed to load model state dict from '{model_or_name}' and allow_dummy_fallback is False."
+                )
             try:
                 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
                 from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM
@@ -552,6 +883,50 @@ def extract_pytorch_state_dict(
     return canonical
 
 
+def _write_gguf_metadata_value(f: io.BufferedWriter, v: GGUFMetadataValue) -> None:
+    """Write a typed GGUF v3 metadata value tag and payload to `f`.
+
+    Args:
+        f: Open binary buffered writer.
+        v: Metadata scalar, sequence, or path-like value.
+
+    """
+    if isinstance(v, str):
+        f.write(struct.pack("<I", GGUF_TYPE_STRING))
+        vb = v.encode("utf-8")
+        f.write(struct.pack("<Q", len(vb)) + vb)
+    elif isinstance(v, bool):
+        f.write(struct.pack("<I", GGUF_TYPE_BOOL))
+        f.write(struct.pack("<B", 1 if v else 0))
+    elif isinstance(v, int):
+        if -0x80000000 <= v <= 0x7FFFFFFF:
+            f.write(struct.pack("<I", GGUF_TYPE_INT32))
+            f.write(struct.pack("<i", v))
+        elif 0 <= v <= 0xFFFFFFFF:
+            f.write(struct.pack("<I", GGUF_TYPE_UINT32))
+            f.write(struct.pack("<I", v))
+        elif v > 0xFFFFFFFF:
+            f.write(struct.pack("<I", GGUF_TYPE_UINT64))
+            f.write(struct.pack("<Q", v))
+        else:
+            f.write(struct.pack("<I", GGUF_TYPE_INT64))
+            f.write(struct.pack("<q", v))
+    elif isinstance(v, float):
+        f.write(struct.pack("<I", GGUF_TYPE_FLOAT32))
+        f.write(struct.pack("<f", v))
+    elif isinstance(v, (list, tuple)):
+        f.write(struct.pack("<I", GGUF_TYPE_ARRAY))
+        f.write(struct.pack("<I", GGUF_TYPE_STRING))
+        f.write(struct.pack("<Q", len(v)))
+        for item in v:
+            ib = str(item).encode("utf-8")
+            f.write(struct.pack("<Q", len(ib)) + ib)
+    else:
+        f.write(struct.pack("<I", GGUF_TYPE_STRING))
+        sb = str(v).encode("utf-8")
+        f.write(struct.pack("<Q", len(sb)) + sb)
+
+
 def write_gguf_v3(
     file_path: str | Path,
     metadata: Mapping[str, GGUFMetadataValue],
@@ -559,6 +934,9 @@ def write_gguf_v3(
     out_type: str = "q4_k_m",
 ) -> None:
     """Serialize metadata and model tensors into a validated GGUF v3 binary file.
+
+    Reverses multi-dimensional row-major PyTorch shapes into GGML little-endian
+    column-major dimension order (`ne[0] = cols, ne[1] = rows, ...`).
 
     Args:
         file_path: Output file path for the `.gguf` file.
@@ -601,37 +979,15 @@ def write_gguf_v3(
         for k, v in meta_dict.items():
             kb = k.encode("utf-8")
             f.write(struct.pack("<Q", len(kb)) + kb)
-            if isinstance(v, str):
-                f.write(struct.pack("<I", GGUF_TYPE_STRING))
-                vb = v.encode("utf-8")
-                f.write(struct.pack("<Q", len(vb)) + vb)
-            elif isinstance(v, bool):
-                f.write(struct.pack("<I", GGUF_TYPE_BOOL))
-                f.write(struct.pack("<B", 1 if v else 0))
-            elif isinstance(v, int):
-                f.write(struct.pack("<I", GGUF_TYPE_INT32))
-                f.write(struct.pack("<i", v))
-            elif isinstance(v, float):
-                f.write(struct.pack("<I", GGUF_TYPE_FLOAT32))
-                f.write(struct.pack("<f", v))
-            elif isinstance(v, (list, tuple)):
-                f.write(struct.pack("<I", GGUF_TYPE_ARRAY))
-                f.write(struct.pack("<I", GGUF_TYPE_STRING))
-                f.write(struct.pack("<Q", len(v)))
-                for item in v:
-                    ib = str(item).encode("utf-8")
-                    f.write(struct.pack("<Q", len(ib)) + ib)
-            else:
-                f.write(struct.pack("<I", GGUF_TYPE_STRING))
-                sb = str(v).encode("utf-8")
-                f.write(struct.pack("<Q", len(sb)) + sb)
+            _write_gguf_metadata_value(f, v)
 
         raw_payloads: list[bytes] = []
         descriptors: list[tuple[str, tuple[int, ...], int, int]] = []
         data_offset = 0
 
         for t_name, arr in tensors.items():
-            flat_vals, shape = _to_contiguous_float32_1d(arr)
+            flat_vals, row_major_shape = _to_contiguous_float32_1d(arr)
+            ggml_shape = tuple(reversed(row_major_shape)) if len(row_major_shape) > 1 else row_major_shape
 
             payload: bytes
             if isinstance(arr, (bytes, bytearray)):
@@ -647,7 +1003,7 @@ def write_gguf_v3(
             else:
                 payload = quantize_tensor_q4_k_m(arr)
 
-            descriptors.append((t_name, shape, ggml_type, data_offset))
+            descriptors.append((t_name, ggml_shape, ggml_type, data_offset))
             raw_payloads.append(payload)
 
             data_offset += len(payload)
@@ -655,11 +1011,11 @@ def write_gguf_v3(
             if rem != 0:
                 data_offset += GGUF_ALIGNMENT - rem
 
-        for t_name, shape, t_type, offset in descriptors:
+        for t_name, ggml_shape, t_type, offset in descriptors:
             tb = t_name.encode("utf-8")
             f.write(struct.pack("<Q", len(tb)) + tb)
-            f.write(struct.pack("<I", len(shape)))
-            f.writelines(struct.pack("<Q", dim) for dim in shape)
+            f.write(struct.pack("<I", len(ggml_shape)))
+            f.writelines(struct.pack("<Q", dim) for dim in ggml_shape)
             f.write(struct.pack("<I", t_type))
             f.write(struct.pack("<Q", offset))
 
@@ -701,6 +1057,54 @@ def _write_gguf_file(
     write_gguf_v3(file_path, metadata=meta, tensors=tensors, out_type=out_type)
 
 
+def _read_gguf_typed_value(
+    f: io.BufferedReader, v_type: int
+) -> GGUFMetadataScalar | list[GGUFMetadataScalar | GGUFMetadataArray]:
+    """Read a single GGUF v3 metadata value of `v_type` using exact spec byte widths and signedness.
+
+    Args:
+        f: Open binary buffered reader positioned at the value payload.
+        v_type: Integer GGUF metadata value type code (`0..12`).
+
+    Returns:
+        Decoded scalar or nested array metadata value.
+
+    Raises:
+        ValueError: If `v_type` is not a valid GGUF v3 metadata value type (`0..12`).
+
+    """
+    if v_type == GGUF_TYPE_UINT8:
+        return int(struct.unpack("<B", f.read(1))[0])
+    if v_type == GGUF_TYPE_INT8:
+        return int(struct.unpack("<b", f.read(1))[0])
+    if v_type == GGUF_TYPE_UINT16:
+        return int(struct.unpack("<H", f.read(2))[0])
+    if v_type == GGUF_TYPE_INT16:
+        return int(struct.unpack("<h", f.read(2))[0])
+    if v_type == GGUF_TYPE_UINT32:
+        return int(struct.unpack("<I", f.read(4))[0])
+    if v_type == GGUF_TYPE_INT32:
+        return int(struct.unpack("<i", f.read(4))[0])
+    if v_type == GGUF_TYPE_FLOAT32:
+        return float(struct.unpack("<f", f.read(4))[0])
+    if v_type == GGUF_TYPE_BOOL:
+        return int(struct.unpack("<B", f.read(1))[0]) != 0
+    if v_type == GGUF_TYPE_STRING:
+        v_len = int(struct.unpack("<Q", f.read(8))[0])
+        return f.read(v_len).decode("utf-8", errors="replace")
+    if v_type == GGUF_TYPE_ARRAY:
+        arr_type = int(struct.unpack("<I", f.read(4))[0])
+        arr_len = int(struct.unpack("<Q", f.read(8))[0])
+        return [_read_gguf_typed_value(f, arr_type) for _ in range(arr_len)]
+    if v_type == GGUF_TYPE_UINT64:
+        return int(struct.unpack("<Q", f.read(8))[0])
+    if v_type == GGUF_TYPE_INT64:
+        return int(struct.unpack("<q", f.read(8))[0])
+    if v_type == GGUF_TYPE_FLOAT64:
+        return float(struct.unpack("<d", f.read(8))[0])
+    raise ValueError(f"Unsupported GGUF metadata value type: {v_type}")
+
+
 def validate_gguf_file(file_path: str | Path) -> GGUFHeaderInfo:
     """Validate a GGUF binary file, inspecting magic bytes, header, and tensor descriptors.
 
@@ -712,7 +1116,7 @@ def validate_gguf_file(file_path: str | Path) -> GGUFHeaderInfo:
 
     Raises:
         FileNotFoundError: If the specified file does not exist.
-        ValueError: If magic bytes or header format are corrupted.
+        ValueError: If magic bytes, metadata value types, or tensor offsets are corrupted.
 
     """
     path = Path(file_path)
@@ -725,7 +1129,7 @@ def validate_gguf_file(file_path: str | Path) -> GGUFHeaderInfo:
             raise ValueError(f"Corrupt GGUF magic header: expected b'GGUF', got {magic!r}")
 
         version = int(struct.unpack("<I", f.read(4))[0])
-        if version not in (2, 3):
+        if version not in {2, 3}:
             raise ValueError(f"Unsupported GGUF version: {version}")
 
         tensor_count = int(struct.unpack("<Q", f.read(8))[0])
@@ -736,38 +1140,7 @@ def validate_gguf_file(file_path: str | Path) -> GGUFHeaderInfo:
             k_len = int(struct.unpack("<Q", f.read(8))[0])
             k = f.read(k_len).decode("utf-8", errors="replace")
             v_type = int(struct.unpack("<I", f.read(4))[0])
-            val: GGUFMetadataValue
-            if v_type == GGUF_TYPE_STRING:
-                v_len = int(struct.unpack("<Q", f.read(8))[0])
-                val = f.read(v_len).decode("utf-8", errors="replace")
-            elif v_type == GGUF_TYPE_BOOL:
-                val = int(struct.unpack("<B", f.read(1))[0]) != 0
-            elif v_type in (GGUF_TYPE_UINT32, GGUF_TYPE_INT32):
-                val = int(struct.unpack("<i", f.read(4))[0])
-            elif v_type == GGUF_TYPE_FLOAT32:
-                val = float(struct.unpack("<f", f.read(4))[0])
-            elif v_type in (GGUF_TYPE_UINT64, GGUF_TYPE_INT64):
-                val = int(struct.unpack("<q", f.read(8))[0])
-            elif v_type == GGUF_TYPE_FLOAT64:
-                val = float(struct.unpack("<d", f.read(8))[0])
-            elif v_type == GGUF_TYPE_ARRAY:
-                arr_type = int(struct.unpack("<I", f.read(4))[0])
-                arr_len = int(struct.unpack("<Q", f.read(8))[0])
-                arr_items: list[GGUFMetadataScalar] = []
-                for _ in range(arr_len):
-                    if arr_type == GGUF_TYPE_STRING:
-                        s_len = int(struct.unpack("<Q", f.read(8))[0])
-                        arr_items.append(f.read(s_len).decode("utf-8", errors="replace"))
-                    elif arr_type in (GGUF_TYPE_UINT32, GGUF_TYPE_INT32):
-                        arr_items.append(int(struct.unpack("<i", f.read(4))[0]))
-                    elif arr_type == GGUF_TYPE_FLOAT32:
-                        arr_items.append(float(struct.unpack("<f", f.read(4))[0]))
-                    else:
-                        arr_items.append("val")
-                val = arr_items
-            else:
-                val = "unknown"
-            metadata[k] = val
+            metadata[k] = _read_gguf_typed_value(f, v_type)
 
         tensors: list[GGUFTensorDescriptor] = []
         for _ in range(tensor_count):
@@ -819,10 +1192,13 @@ __all__ = [
     "GGUF_TYPE_UINT32",
     "GGUF_TYPE_UINT64",
     "GGUFHeaderInfo",
+    "GGUFMetadataArray",
     "GGUFMetadataScalar",
     "GGUFMetadataValue",
     "GGUFTensorDescriptor",
+    "NestedFloatSeq",
     "TensorInput",
+    "_StateDictModelProtocol",
     "_flatten_values",
     "_to_contiguous_float32_1d",
     "_write_gguf_file",

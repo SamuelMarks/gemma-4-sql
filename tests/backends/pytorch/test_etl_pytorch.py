@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from unittest.mock import MagicMock, patch
+from collections.abc import Callable, Iterable
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -22,7 +22,14 @@ def test_pytorch_dataset_and_collate_real_tensors() -> None:
     """Verify PyTorchDataset and _collate_fn produce real padded torch.Tensor batches."""
     records = [
         {"sql_prompt": "SELECT 1", "sql": "SELECT 1;", "chosen": "SELECT 1;", "rejected": "SELECT 2;"},
-        {"question": "Find all users", "query": "SELECT * FROM users;", "chosen": "SELECT * FROM users;", "rejected": "SELECT id;", "image_url": "img.png", "audio_clip": "aud.wav"},
+        {
+            "question": "Find all users",
+            "query": "SELECT * FROM users;",
+            "chosen": "SELECT * FROM users;",
+            "rejected": "SELECT id;",
+            "image_url": "img.png",
+            "audio_clip": "aud.wav",
+        },
     ]
     tok = SQLTokenizer()
     cls = etl_module._get_pytorch_classes()
@@ -62,31 +69,47 @@ def test_get_sampler_and_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> N
     """Verify _get_sampler and _load_hf_or_duckdb handle distributed, DuckDB, and HuggingFace sources."""
     assert etl_module._get_sampler("ds", False) is None
 
-    mock_sampler_cls = MagicMock(return_value="sampler")
+    sampler_fail = False
 
-    def _return_sampler_cls(*_a: str, **_k: str) -> MagicMock:
-        """Return `mock_sampler_cls`."""
-        return mock_sampler_cls
+    def _sampler_cls(_ds: str) -> str:
+        """Return `'sampler'` or raise `RuntimeError`.
 
-    def _none_attr(*_a: str, **_k: str) -> None:
-        """Return None for optional_attr."""
+        Raises:
+            RuntimeError: If `sampler_fail` is True.
+        """
+        if sampler_fail:
+            raise RuntimeError("error")
+        return "sampler"
+
+    def _none_attr(*_a: str | type, **_k: str) -> None:
+        """Return None for import_optional_symbol."""
         return
 
-    monkeypatch.setattr(etl_module, "optional_attr", _return_sampler_cls)
+    def _get_sampler_cls(*_a: str | type, **_k: str) -> Callable[[str], str]:
+        """Return `_sampler_cls`."""
+        return _sampler_cls
+
+    monkeypatch.setattr(etl_module, "import_optional_symbol", _get_sampler_cls)
     assert etl_module._get_sampler("ds", True) == "sampler"
 
-    mock_sampler_cls.side_effect = RuntimeError("error")
+    sampler_fail = True
     assert etl_module._get_sampler("ds", True) is None
 
-    monkeypatch.setattr(etl_module, "optional_attr", _none_attr)
+    monkeypatch.setattr(etl_module, "import_optional_symbol", _none_attr)
     assert etl_module._get_sampler("ds", True) is None
 
     with patch("gemma_4_sql.backends.pytorch.etl.load_duckdb_dataset", return_value="duck"):
         assert etl_module._load_hf_or_duckdb("ds", "split", "path", "table") == "duck"
 
-    mock_datasets = MagicMock()
-    mock_datasets.load_dataset.return_value = "hf"
-    monkeypatch.setattr(etl_module, "datasets", mock_datasets)
+    class _StubHFDatasets:
+        """Typed `datasets` double returning `'hf'`."""
+
+        def load_dataset(self, _path: str, *, split: str = "train") -> str:
+            """Return `'hf'`."""
+            _ = split
+            return "hf"
+
+    monkeypatch.setattr(etl_module, "datasets", _StubHFDatasets())
     assert etl_module._load_hf_or_duckdb("ds", "split", None, None) == "hf"
 
     monkeypatch.setattr(etl_module, "datasets", None)
@@ -96,12 +119,19 @@ def test_get_sampler_and_load_hf_or_duckdb(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_build_dataloader_real_torch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify build_dataloader constructs a real torch.utils.data.DataLoader yielding padded batches."""
-    mock_datasets = MagicMock()
-    mock_datasets.load_dataset.return_value = [
-        {"sql_prompt": "SELECT 1", "sql": "SELECT 1;"},
-        {"sql_prompt": "SELECT 22", "sql": "SELECT 22;"},
-    ]
-    monkeypatch.setattr(etl_module, "datasets", mock_datasets)
+
+    class _RowsDatasets:
+        """Typed `datasets` double returning two SQL training rows."""
+
+        def load_dataset(self, _path: str, *, split: str = "train") -> list[dict[str, str]]:
+            """Return two SQL training rows."""
+            _ = split
+            return [
+                {"sql_prompt": "SELECT 1", "sql": "SELECT 1;"},
+                {"sql_prompt": "SELECT 22", "sql": "SELECT 22;"},
+            ]
+
+    monkeypatch.setattr(etl_module, "datasets", _RowsDatasets())
 
     config = ETLConfig(dataset_name="ds", split="train", batch_size=2)
     res = etl_module.build_dataloader(config)

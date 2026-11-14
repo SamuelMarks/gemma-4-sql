@@ -7,6 +7,7 @@ import json
 from collections.abc import Callable
 
 from gemma_4_sql.cli_misc import extract_multimodal_cli_kwargs, print_cli_error
+from gemma_4_sql.cli_protocols import TrainArgsProtocol
 from gemma_4_sql.exceptions import GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk import (
     TrainingConfig,
@@ -36,11 +37,8 @@ def _format_cli_error(err: GemmaSQLError, action: str, backend: str, model: str)
     return print_cli_error(err, backend, model=model, action=action)
 
 
-_extract_multimodal_kwargs = extract_multimodal_cli_kwargs
-
-
 def _run_training_stage(
-    args: argparse.Namespace,
+    args: TrainArgsProtocol | argparse.Namespace,
     action: str,
     stage_fn: Callable[[TrainingConfig], TrainResultDict],
 ) -> int:
@@ -63,7 +61,7 @@ def _run_training_stage(
         batch_size=args.batch_size,
         backend=args.backend,
         distributed_strategy=args.distributed_strategy,
-        extra_kwargs=_extract_multimodal_kwargs(args),
+        extra_kwargs=extract_multimodal_cli_kwargs(args),
     )
     try:
         res = stage_fn(config)
@@ -135,7 +133,7 @@ def dpo_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if the DPO status indicates failure.
 
     """
-    mm_kwargs = _extract_multimodal_kwargs(args)
+    mm_kwargs = extract_multimodal_cli_kwargs(args)
     try:
         res = run_dpo(
             model_name=args.model,

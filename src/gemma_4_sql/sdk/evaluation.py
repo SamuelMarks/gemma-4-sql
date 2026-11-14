@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import re
 from collections.abc import Iterable, Mapping, Sequence
+from itertools import starmap
 from pathlib import Path
-from typing import TypeGuard
 
+from gemma_4_sql._types_tensors import NestedComplexScalarList
 from gemma_4_sql.constants import DEFAULT_BACKEND
 from gemma_4_sql.exceptions import EvaluationError, GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
@@ -33,81 +33,35 @@ from gemma_4_sql.type_hints import (
 MAX_BATCHES = 10
 _COMPARISON_OP_PATTERN = re.compile(r"\s*(!=|<>|<=|>=|=|<|>)\s*")
 
-type TokenSequenceItem = Sequence[Sequence[int]] | Sequence[int] | Sequence[ToListArrayProtocol] | NestedScalarList | ToListArrayProtocol | TensorProtocol | TensorType | int | float | str | None
-type TokenSequenceBatch = Mapping[str, TokenSequenceItem] | tuple[TokenSequenceItem, TokenSequenceItem] | Sequence[TokenSequenceItem] | int | str | None
-
-
-def _is_tolist_item(val: TokenSequenceItem) -> TypeGuard[ToListArrayProtocol]:
-    """Narrow `val` to `ToListArrayProtocol` for attribute-guarded `.tolist()` calls.
-
-    Args:
-        val: Candidate token sequence or tensor.
-
-    Returns:
-        `True` if `val` is not `None`.
-
-    """
-    return val is not None
-
-
-def _is_int_iterable(val: TokenSequenceItem) -> TypeGuard[Iterable[int | float | str]]:
-    """Narrow `val` to `Iterable[int | float | str]`.
-
-    Args:
-        val: Candidate 1D token sequence.
-
-    Returns:
-        `True` if `val` is an `Iterable`.
-
-    """
-    return isinstance(val, Iterable)
-
-
-def _is_row_iterable(val: TokenSequenceItem) -> TypeGuard[Iterable[TokenSequenceItem]]:
-    """Narrow `val` to `Iterable[TokenSequenceItem]`.
-
-    Args:
-        val: Candidate 2D token sequence.
-
-    Returns:
-        `True` if `val` is an `Iterable`.
-
-    """
-    return isinstance(val, Iterable)
-
-
-def _is_int_list(
-    val: Sequence[TokenSequenceItem | int | float | bool],
-) -> TypeGuard[Sequence[int]]:
-    """Narrow `val` to `Sequence[int]` when `isinstance(val[0], int)` is true.
-
-    Args:
-        val: Non-empty sequence whose first element is an `int`.
-
-    Returns:
-        `True` for 1D integer sequences.
-
-    """
-    return bool(val) and isinstance(val[0], int)
-
-
-def _as_json_value(
-    val: TensorType | Sequence[int] | Sequence[Sequence[int]] | TensorProtocol,
-) -> TypeGuard[JSONValue]:
-    """Narrow multimodal batch value to `JSONValue` for `generate_sql` kwargs.
-
-    Args:
-        val: Multimodal pixel or audio values from batch.
-
-    Returns:
-        `True` when `val` is not a plain `bytes` object.
-
-    """
-    return not isinstance(val, bytes)
+type TokenSequenceItem = (
+    Sequence[Sequence[int]]
+    | Sequence[int]
+    | Sequence[str]
+    | Iterable[int]
+    | Sequence[ToListArrayProtocol]
+    | NestedScalarList
+    | NestedComplexScalarList
+    | ToListArrayProtocol
+    | TensorProtocol
+    | TensorType
+    | int
+    | float
+    | str
+    | bytes
+    | None
+)
+type TokenSequenceBatch = (
+    Mapping[str, TokenSequenceItem]
+    | tuple[TokenSequenceItem, TokenSequenceItem]
+    | Sequence[TokenSequenceItem]
+    | int
+    | str
+    | None
+)
 
 
 def normalize_sql(sql: str) -> str:
-    """Normalize SQL by stripping comments, standardizing punctuation and operator spacing, and lowercasing unquoted text.
+    """Normalize SQL comments, punctuation/operator spacing, and unquoted casing.
 
     Args:
         sql: The string representing the SQL query.
@@ -159,7 +113,16 @@ async def compute_metrics_async(
     exec_matches = 0
 
     async def process_pair(p: str, t: str) -> tuple[int, int, int]:
-        """Process a single prediction and ground truth pair."""
+        """Process a single prediction and ground truth pair.
+
+        Args:
+            p: Predicted SQL query string.
+            t: Ground truth SQL query string.
+
+        Returns:
+            Tuple of `(exact_match, valid_sql, execution_match)` binary flags.
+
+        """
         em = 1 if normalize_sql(p) == normalize_sql(t) else 0
         try:
             (p_success, p_results, _) = await engine.execute_with_feedback_async(p)
@@ -179,7 +142,7 @@ async def compute_metrics_async(
             ex = 0
         return (em, vs, ex)
 
-    results = await asyncio.gather(*[process_pair(p, t) for p, t in zip(preds, truths)])
+    results = await asyncio.gather(*list(starmap(process_pair, zip(preds, truths, strict=False))))
     for em, vs, ex in results:
         exact_matches += em
         valid_sqls += vs
@@ -222,14 +185,17 @@ def _to_int_seq(seq: TokenSequenceItem) -> list[int]:
         List of integer token IDs.
 
     """
-    raw: TokenSequenceItem = seq
-    with contextlib.suppress(AttributeError, TypeError, AssertionError):
-        assert _is_tolist_item(seq)
-        raw = seq.tolist()
-    if isinstance(raw, int):
-        return [raw]
-    assert _is_int_iterable(raw)
-    return [int(x) for x in raw]
+    unwrapped: TokenSequenceItem = seq.tolist() if isinstance(seq, ToListArrayProtocol) else seq
+    if isinstance(unwrapped, (int, float, bool)):
+        return [int(unwrapped)]
+    if isinstance(unwrapped, (str, bytes)) or unwrapped is None or not isinstance(unwrapped, Iterable):
+        return []
+    out: list[int] = [
+        int(elem)
+        for elem in unwrapped
+        if isinstance(elem, (int, float, bool)) or (isinstance(elem, str) and elem.lstrip("-").isdigit())
+    ]
+    return out
 
 
 def _normalize_id_matrix(raw_item: TokenSequenceItem) -> list[list[int]]:
@@ -242,22 +208,69 @@ def _normalize_id_matrix(raw_item: TokenSequenceItem) -> list[list[int]]:
         2D list of integer token ID sequences.
 
     """
-    try:
-        item_ref = raw_item
-        assert _is_tolist_item(item_ref)
-        seq_list: TokenSequenceItem | list[TokenSequenceItem] = item_ref.tolist()
-    except (AttributeError, TypeError, AssertionError):
-        try:
-            assert _is_row_iterable(raw_item)
-            seq_list = list(raw_item)
-        except (TypeError, AssertionError):
-            return [[]]
-    if not isinstance(seq_list, list) or not seq_list:
+    if raw_item is None or isinstance(raw_item, (str, bytes)):
         return [[]]
-    if isinstance(seq_list[0], int):
-        assert _is_int_list(seq_list)
-        return [[int(x) for x in seq_list]]
-    return [_to_int_seq(row) for row in seq_list]
+    unwrapped: TokenSequenceItem | list[TokenSequenceItem]
+    if isinstance(raw_item, ToListArrayProtocol):
+        unwrapped = raw_item.tolist()
+    elif isinstance(raw_item, Iterable):
+        try:
+            unwrapped = list(raw_item)
+        except TypeError:
+            return [[]]
+    else:
+        return [[]]
+
+    if isinstance(unwrapped, (int, float, bool, complex)):
+        scalar_i = int(unwrapped.real) if isinstance(unwrapped, complex) else int(unwrapped)
+        return [[scalar_i]]
+    if isinstance(unwrapped, (str, bytes)) or len(unwrapped) == 0:
+        return [[]]
+    first = unwrapped[0]
+    if isinstance(first, (int, float, bool)):
+        return [[int(x) for x in unwrapped if isinstance(x, (int, float, bool))]]
+    return [_to_int_seq(row) for row in unwrapped]
+
+
+def _coerce_multimodal_json(
+    raw_val: TensorType
+    | Sequence[int]
+    | Sequence[Sequence[int]]
+    | TensorProtocol
+    | ToListArrayProtocol
+    | NestedComplexScalarList
+    | JSONValue
+    | bytes,
+) -> JSONValue:
+    """Convert a batch tensor or nested sequence into a genuine `JSONValue` for `generate_sql`.
+
+    Args:
+        raw_val: Multimodal `pixel_values` or `audio_values` from an evaluation batch.
+
+    Returns:
+        Genuine JSON-compatible nested list or scalar (`None` if unsupported).
+
+    """
+    candidate: _MultimodalCandidateType = raw_val.tolist() if isinstance(raw_val, ToListArrayProtocol) else raw_val
+    if candidate is None or isinstance(candidate, (bool, int, float, str)):
+        return candidate
+    if isinstance(candidate, Mapping):
+        return {str(k): _coerce_multimodal_json(v) for k, v in candidate.items()}
+    if isinstance(candidate, Sequence) and not isinstance(candidate, (str, bytes, bytearray)):
+        return [_coerce_multimodal_json(elem) for elem in candidate]
+    return None
+
+
+type _MultimodalCandidateType = (
+    TensorType
+    | Sequence[int]
+    | Sequence[Sequence[int]]
+    | TensorProtocol
+    | ToListArrayProtocol
+    | NestedComplexScalarList
+    | JSONValue
+    | bytes
+)
 
 
 def _extract_batch_ids(batch: TokenSequenceBatch) -> tuple[list[list[int]], list[list[int]]]:
@@ -358,25 +371,25 @@ def _run_evaluation_inference(
             break
 
         batch_inputs, batch_targets = _extract_batch_ids(batch)
-        for inp_seq, tgt_seq in zip(batch_inputs, batch_targets):
+        for inp_seq, tgt_seq in zip(batch_inputs, batch_targets, strict=False):
             prompt_text = tokenizer.decode(inp_seq)
             truth_text = tokenizer.decode(tgt_seq)
             if prompt_text and truth_text.startswith(prompt_text) and len(truth_text) > len(prompt_text):
                 truth_text = truth_text[len(prompt_text) :].strip()
 
             img_arg: JSONValue = str(image_path) if image_path is not None else None
-            pv_arg: JSONValue = None
-            if image_path is None and isinstance(batch, dict) and "pixel_values" in batch:
-                raw_pv = batch["pixel_values"]
-                assert _as_json_value(raw_pv)
-                pv_arg = raw_pv
+            pv_arg: JSONValue = (
+                _coerce_multimodal_json(batch["pixel_values"])
+                if (image_path is None and "pixel_values" in batch)
+                else None
+            )
 
             aud_arg: JSONValue = str(audio_path) if audio_path is not None else None
-            av_arg: JSONValue = None
-            if audio_path is None and isinstance(batch, dict) and "audio_values" in batch:
-                raw_av = batch["audio_values"]
-                assert _as_json_value(raw_av)
-                av_arg = raw_av
+            av_arg: JSONValue = (
+                _coerce_multimodal_json(batch["audio_values"])
+                if (audio_path is None and "audio_values" in batch)
+                else None
+            )
 
             gen_res = backend_impl.generate_sql(
                 model_name,

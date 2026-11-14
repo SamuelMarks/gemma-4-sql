@@ -37,7 +37,7 @@ def generate(
 
     """
     backend_impl = get_backend(backend)
-    result = backend_impl.generate_sql(
+    return backend_impl.generate_sql(
         model_name,
         prompt,
         beam_width=beam_width,
@@ -47,7 +47,6 @@ def generate(
         modality=modality,
         **kwargs,
     )
-    return result
 
 
 # Alias for generate adhering to backend protocol naming

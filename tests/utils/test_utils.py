@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import types
+from collections.abc import Callable, Mapping, Sequence
+from typing import Protocol, Self, runtime_checkable
 
 import pytest
 
+from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol, SubmoduleNamespaceProtocol
 from gemma_4_sql.sdk.protocols import BackendProtocol
 from gemma_4_sql.type_hints import (
     BenchmarkResultDict,
@@ -14,6 +17,7 @@ from gemma_4_sql.type_hints import (
     DPOResultDict,
     ETLConfig,
     ExportResultDict,
+    FastAPIAppProtocol,
     InferenceResultDict,
     JSONDict,
     JSONPrimitive,
@@ -33,6 +37,97 @@ from tests.utils import (
     get_sample_ddl,
     insert_sample_users,
 )
+
+
+@runtime_checkable
+class TypedHTTPResponseProtocol(Protocol):
+    """Typed HTTP response protocol returned by `TypedTestClientProtocol`."""
+
+    @property
+    def status_code(self) -> int:
+        """Provide HTTP status code."""
+        ...
+
+    @property
+    def text(self) -> str:
+        """Provide decoded body text."""
+        ...
+
+    def json(self) -> JSONDict:
+        """Decode response body as a `JSONDict`."""
+        ...
+
+
+@runtime_checkable
+class TypedTestClientProtocol(Protocol):
+    """Typed ASGI `TestClient` protocol eliminating untyped `httpx` unknown diagnostics."""
+
+    def __enter__(self) -> Self:
+        """Enter `TestClient` lifespan context."""
+        ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: types.TracebackType | None,
+        /,
+    ) -> bool | None:
+        """Exit `TestClient` lifespan context."""
+        ...
+
+    def get(self, url: str, /) -> TypedHTTPResponseProtocol:
+        """Issue an HTTP `GET` request to `url`."""
+        ...
+
+    def post(self, url: str, *, json: Mapping[str, JSONValue] | None = None) -> TypedHTTPResponseProtocol:
+        """Issue an HTTP `POST` request to `url` with an optional JSON payload."""
+        ...
+
+
+def make_test_client(
+    app: FastAPIAppProtocol,
+    *,
+    raise_server_exceptions: bool = True,
+) -> TypedTestClientProtocol:
+    """Construct a FastAPI `TestClient` narrowed to `TypedTestClientProtocol`.
+
+    Args:
+        app: ASGI / FastAPI application bundle under test.
+        raise_server_exceptions: Whether unhandled server exceptions propagate to caller.
+
+    Returns:
+        `TypedTestClientProtocol` client instance.
+
+    """
+    from fastapi import testclient as _tc_mod
+
+    ctor: Callable[..., TypedTestClientProtocol] = vars(_tc_mod)["TestClient"]
+    return ctor(app, raise_server_exceptions=raise_server_exceptions)
+
+
+class FakeModuleNamespace:
+    """Strongly-typed module namespace double implementing `SubmoduleNamespaceProtocol`.
+
+    Attributes:
+        __name__: Fully-qualified dotted module name.
+        __package__: Enclosing package name or `None` for top-level modules.
+
+    """
+
+    __name__: str
+    __package__: str | None
+
+    def __init__(self, name: str, package: str | None = None) -> None:
+        """Initialize the fake module namespace.
+
+        Args:
+            name: Fully-qualified dotted module name.
+            package: Optional enclosing package name (inferred from `name` when omitted).
+
+        """
+        self.__name__ = name
+        self.__package__ = package if package is not None else (name.rpartition(".")[0] or None)
 
 
 class RecordingBackendDouble(BackendProtocol):
@@ -73,7 +168,15 @@ class RecordingBackendDouble(BackendProtocol):
             raise self.error_to_raise
 
     def train_model(self, config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
-        """Validate and record a `train_model` invocation."""
+        """Validate and record a `train_model` invocation.
+
+        Returns:
+            Simulated `TrainResultDict` payload.
+
+        Raises:
+            ValueError: If `config.epochs <= 0`.
+
+        """
         self._check_error()
         if config.epochs <= 0:
             raise ValueError("epochs must be positive")
@@ -91,10 +194,18 @@ class RecordingBackendDouble(BackendProtocol):
         }
 
     def run_dpo(self, config: DPOConfig, **kwargs: JSONValue) -> DPOResultDict:
-        """Validate and record a `run_dpo` invocation."""
+        """Validate and record a `run_dpo` invocation.
+
+        Returns:
+            Simulated `DPOResultDict` payload.
+
+        Raises:
+            ValueError: If `config.epochs <= 0`.
+
+        """
         self._check_error()
-        if config.beta <= 0.0:
-            raise ValueError("beta must be positive")
+        if config.epochs <= 0:
+            raise ValueError("epochs must be positive")
         self.dpo_configs.append(config)
         self.dpo_kwargs.append(dict(kwargs))
         return {
@@ -109,7 +220,12 @@ class RecordingBackendDouble(BackendProtocol):
         }
 
     def build_dataloader(self, config: ETLConfig, **kwargs: JSONValue) -> DataloaderResultDict:
-        """Validate and record a `build_dataloader` invocation."""
+        """Validate and record a `build_dataloader` invocation.
+
+        Returns:
+            Simulated `DataloaderResultDict` payload.
+
+        """
         self._check_error()
         self.etl_configs.append(config)
         self.etl_kwargs.append(dict(kwargs))
@@ -124,7 +240,12 @@ class RecordingBackendDouble(BackendProtocol):
         }
 
     def export_model(self, model_name: str, export_path: str, **kwargs: JSONValue) -> ExportResultDict:
-        """Validate and record an `export_model` invocation."""
+        """Validate and record an `export_model` invocation.
+
+        Returns:
+            Simulated `ExportResultDict` payload.
+
+        """
         self._check_error()
         self.export_calls.append((model_name, export_path, dict(kwargs)))
         return {
@@ -136,15 +257,22 @@ class RecordingBackendDouble(BackendProtocol):
             "status": "exported",
         }
 
-    def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> LogMetricsResultDict:
-        """Validate and record a `log_metrics` invocation."""
+    def log_metrics(
+        self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue
+    ) -> LogMetricsResultDict:
+        """Validate and record a `log_metrics` invocation.
+
+        Returns:
+            Simulated `LogMetricsResultDict` payload.
+
+        """
         self._check_error()
         self.log_calls.append((dict(metrics), step, log_dir, dict(kwargs)))
         return {
             "backend": self.backend_name,
             "status": "logged",
+            "status_code": "success",
             "step": step,
-            "logged_step": step,
             "log_dir": log_dir,
             "metrics": dict(metrics),
         }
@@ -158,7 +286,12 @@ class RecordingBackendDouble(BackendProtocol):
         lora_dropout: float = 0.05,
         **kwargs: JSONValue,
     ) -> PEFTResultDict:
-        """Validate and record an `apply_lora` invocation."""
+        """Validate and record an `apply_lora` invocation.
+
+        Returns:
+            Simulated `PEFTResultDict` payload.
+
+        """
         self._check_error()
         self.lora_calls.append((model_name, list(target_modules), lora_r, lora_alpha, lora_dropout, dict(kwargs)))
         return {
@@ -174,7 +307,12 @@ class RecordingBackendDouble(BackendProtocol):
         }
 
     def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> QuantizeResultDict:
-        """Validate and record a `quantize_model` invocation."""
+        """Validate and record a `quantize_model` invocation.
+
+        Returns:
+            Simulated `QuantizeResultDict` payload.
+
+        """
         self._check_error()
         self.quantize_calls.append((model_name, method, dict(kwargs)))
         return {
@@ -198,7 +336,12 @@ class RecordingBackendDouble(BackendProtocol):
         max_length: int = 50,
         **kwargs: JSONValue,
     ) -> InferenceResultDict:
-        """Validate and record a `generate_sql` invocation."""
+        """Validate and record a `generate_sql` invocation.
+
+        Returns:
+            Simulated `InferenceResultDict` payload.
+
+        """
         self._check_error()
         self.generate_calls.append((model_name, prompt, beam_width, max_length, dict(kwargs)))
         return {
@@ -218,7 +361,12 @@ class RecordingBackendDouble(BackendProtocol):
         max_batch_size: int = 32,
         **kwargs: JSONValue,
     ) -> ServeResultDict:
-        """Validate and record a `serve_model` invocation."""
+        """Validate and record a `serve_model` invocation.
+
+        Returns:
+            Simulated `ServeResultDict` payload.
+
+        """
         self._check_error()
         self.serve_calls.append((model_name, port, max_batch_size, dict(kwargs)))
         return {
@@ -237,7 +385,12 @@ class RecordingBackendDouble(BackendProtocol):
         batch_size: int = 32,
         **kwargs: JSONValue,
     ) -> BenchmarkResultDict:
-        """Validate and record a `benchmark_model` invocation."""
+        """Validate and record a `benchmark_model` invocation.
+
+        Returns:
+            Simulated `BenchmarkResultDict` payload.
+
+        """
         self._check_error()
         self.benchmark_calls.append((model_name, hardware, batch_size, dict(kwargs)))
         return {
@@ -344,6 +497,9 @@ class FakeDBCursor:
         Returns:
             List of result rows.
 
+        Raises:
+            RuntimeError: If the cursor is closed.
+
         """
         if self._closed:
             raise RuntimeError("Cursor closed")
@@ -371,10 +527,31 @@ class FakeDBConnection:
         Returns:
             A FakeDBCursor instance.
 
+        Raises:
+            RuntimeError: If the connection is closed.
+
         """
         if self._closed:
             raise RuntimeError("Connection closed")
         return FakeDBCursor(self)
+
+    def execute(
+        self,
+        operation: str,
+        parameters: Sequence[JSONPrimitive] = (),
+        /,
+    ) -> FakeDBCursor:
+        """Execute a SQL statement via a new `FakeDBCursor`.
+
+        Args:
+            operation: SQL query string.
+            parameters: Positional bind parameters.
+
+        Returns:
+            Executed `FakeDBCursor`.
+
+        """
+        return self.cursor().execute(operation, parameters)
 
     def commit(self) -> None:
         """Commit the current transaction."""
@@ -422,10 +599,14 @@ def test_seed_table() -> None:
 def test_fake_db() -> None:
     """Test fake DB classes."""
     conn = FakeDBConnection()
-    conn.set_results([[("row1",)], [("row2",)]])
+    conn.set_results([[("row1",)], [("row2",)], [("row3",)]])
+    assert conn.execute("SELECT 0").fetchall() == [("row1",)]
     cur = conn.cursor()
     cur.execute("SELECT 1")
-    assert cur.fetchall() == [("row1",)]
+    assert cur.fetchall() == [("row2",)]
+    cur2 = conn.cursor()
+    cur2.execute("SELECT 2")
+    assert cur2.fetchall() == [("row3",)]
     assert cur.rowcount == 1
     conn.commit()
     conn.rollback()
@@ -483,7 +664,9 @@ def test_assert_tensors_close() -> None:
 
 def test_assert_tensors_close_jax_mlx() -> None:
     """Test assert_tensors_close for jax, mlx, and pytorch sequence backends."""
-    from tests.utils.tensor_helpers import assert_tensors_close
+    from tests.utils.tensor_helpers import _flatten_nested_scalars, assert_tensors_close
+
+    assert _flatten_nested_scalars([complex(1.5, 0.0), 2.5]) == [1.5, 2.5]
 
     t1 = [[1.0, 2.0], [3.0, 4.0]]
     t2 = [[1.0, 2.0], [3.0, 4.0]]
@@ -499,16 +682,18 @@ def test_recording_backend_double() -> None:
     double = RecordingBackendDouble("jax")
     assert isinstance(double, BackendProtocol)
     assert double.get_trainer() == "jax_trainer"
-    assert double.train_model(TrainingConfig(action="sft", model_name="m", dataset="d", epochs=2))["status"] == "completed"
+    assert (
+        double.train_model(TrainingConfig(action="sft", model_name="m", dataset="d", epochs=2))["status"] == "completed"
+    )
     with pytest.raises(ValueError, match="epochs must be positive"):
         double.train_model(TrainingConfig(action="sft", model_name="m", dataset="d", epochs=0))
-    assert double.run_dpo(DPOConfig(model_name="m", dataset="d", beta=0.1))["status"] == "completed"
-    with pytest.raises(ValueError, match="beta must be positive"):
-        double.run_dpo(DPOConfig(model_name="m", dataset="d", beta=0.0))
+    assert double.run_dpo(DPOConfig(model_name="m", dataset="d", beta=0.2))["status"] == "completed"
+    with pytest.raises(ValueError, match="epochs must be positive"):
+        double.run_dpo(DPOConfig(model_name="m", dataset="d", epochs=0))
     assert double.build_dataloader(ETLConfig(dataset_name="d", split="train"))["status"] == "ready"
     assert double.export_model("m", "/tmp/out")["status"] == "exported"
     assert double.log_metrics({"loss": 0.5}, 1)["status"] == "logged"
-    assert double.apply_lora("m", ["q_proj"])["injected_modules"] == 1
+    assert double.apply_lora("m", ["q_proj"]).get("injected_modules") == 1
     assert double.quantize_model("m", "int8")["memory_reduction_factor"] == 2.0
     assert double.generate_sql("m", "SELECT 1")["status"] == "success"
     assert double.serve_model("m", 8080, 16)["port"] == 8080
@@ -517,3 +702,12 @@ def test_recording_backend_double() -> None:
     err_double = RecordingBackendDouble("jax", error_to_raise=RuntimeError("boom"))
     with pytest.raises(RuntimeError, match="boom"):
         err_double.get_trainer()
+
+    top_ns = FakeModuleNamespace("top_mod")
+    sub_ns = FakeModuleNamespace("top_mod.child")
+    custom_ns = FakeModuleNamespace("mod_x", package="pkg_x")
+    assert isinstance(top_ns, ModuleNamespaceProtocol)
+    assert isinstance(sub_ns, SubmoduleNamespaceProtocol)
+    assert top_ns.__package__ is None
+    assert sub_ns.__package__ == "top_mod"
+    assert custom_ns.__package__ == "pkg_x"

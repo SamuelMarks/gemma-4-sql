@@ -6,10 +6,11 @@ from collections.abc import Callable, Mapping
 from typing import Protocol, runtime_checkable
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 from jax.sharding import PartitionSpec
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 from .config import JaxDTypeLike, ShardConfig
 
@@ -241,9 +242,30 @@ class Gemma4MLP(nnx.Module):
         fc1_bias_meta = {"out_sharding": resolved_shd.fc1_bias} if resolved_shd.fc1_bias is not None else {}
         fc2_meta = {"out_sharding": resolved_shd.fc2_kernel} if resolved_shd.fc2_kernel is not None else {}
         fc2_bias_meta = {"out_sharding": resolved_shd.fc2_bias} if resolved_shd.fc2_bias is not None else {}
-        self.gate_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata=fc1_meta, bias_metadata=fc1_bias_meta, rngs=rngs)
-        self.up_proj = make_linear(hidden_size, intermediate_size, use_bias=False, kernel_metadata=fc1_meta, bias_metadata=fc1_bias_meta, rngs=rngs)
-        self.down_proj = make_linear(intermediate_size, hidden_size, use_bias=False, kernel_metadata=fc2_meta, bias_metadata=fc2_bias_meta, rngs=rngs)
+        self.gate_proj = make_linear(
+            hidden_size,
+            intermediate_size,
+            use_bias=False,
+            kernel_metadata=fc1_meta,
+            bias_metadata=fc1_bias_meta,
+            rngs=rngs,
+        )
+        self.up_proj = make_linear(
+            hidden_size,
+            intermediate_size,
+            use_bias=False,
+            kernel_metadata=fc1_meta,
+            bias_metadata=fc1_bias_meta,
+            rngs=rngs,
+        )
+        self.down_proj = make_linear(
+            intermediate_size,
+            hidden_size,
+            use_bias=False,
+            kernel_metadata=fc2_meta,
+            bias_metadata=fc2_bias_meta,
+            rngs=rngs,
+        )
         self.dtype: JaxDTypeLike = dtype
 
     def inject_lora_projections(

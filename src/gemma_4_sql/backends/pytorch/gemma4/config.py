@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from gemma_4_sql.backends.common_gemma4_config import (
     DEFAULT_GRADIENT_CLIPPING,
@@ -21,13 +21,13 @@ from gemma_4_sql.type_hints import (
 )
 
 
-@dataclass
+@dataclass(init=False)
 class Gemma4VisionConfig(BaseVisionConfigFields):
     """Configuration for Gemma 4 Vision sub-model."""
 
     image_size: int = 224
     pooling_kernel_size: int = 1
-    extra_attributes: dict[str, JSONValue] = field(default_factory=dict)
+    extra_attributes: dict[str, JSONValue]
 
     def __init__(
         self,
@@ -105,12 +105,12 @@ class Gemma4VisionConfig(BaseVisionConfigFields):
         )
 
 
-@dataclass
+@dataclass(init=False)
 class Gemma4AudioConfig(BaseAudioConfigFields):
     """Configuration for Gemma 4 Audio sub-model."""
 
     num_mel_bins: int = 80
-    extra_attributes: dict[str, JSONValue] = field(default_factory=dict)
+    extra_attributes: dict[str, JSONValue]
 
     def __init__(
         self,
@@ -193,7 +193,7 @@ class Gemma4AudioConfig(BaseAudioConfigFields):
         )
 
 
-@dataclass
+@dataclass(init=False)
 class Gemma4Config(BaseGemma4ConfigFields):
     """Configuration for native PyTorch Gemma 4."""
 
@@ -203,19 +203,21 @@ class Gemma4Config(BaseGemma4ConfigFields):
     audio_token_id: int | None = 255998
     router_jitter_noise: float = 0.0
     sliding_window: int | None = 4096
-    global_attn_layers: Sequence[int] = field(default_factory=list)
+    global_attn_layers: Sequence[int]
     rope_theta: float = 10000.0
     partial_rotary_factor: float = 1.0
     max_position_embeddings: int = 8192
     is_global: bool = False
+    tie_word_embeddings: bool = True
+    enable_multimodal: bool = True
     audio_hidden_size: int = 1024
-    vision_config: Gemma4VisionConfig = field(default_factory=Gemma4VisionConfig)
-    audio_config: Gemma4AudioConfig = field(default_factory=Gemma4AudioConfig)
-    extra_attributes: dict[str, JSONValue] = field(default_factory=dict)
+    vision_config: Gemma4VisionConfig
+    audio_config: Gemma4AudioConfig
+    extra_attributes: dict[str, JSONValue]
 
     def __init__(
         self,
-        vocab_size: int = 256000,
+        vocab_size: int = 262144,
         hidden_size: int = 2048,
         num_hidden_layers: int = 18,
         num_attention_heads: int = 8,
@@ -255,6 +257,8 @@ class Gemma4Config(BaseGemma4ConfigFields):
         attn_logits_soft_cap: float | None = None,
         max_position_embeddings: int = 8192,
         is_global: bool = False,
+        tie_word_embeddings: bool = True,
+        enable_multimodal: bool = True,
         audio_hidden_size: int | None = None,
         **kwargs: JSONValue,
     ) -> None:
@@ -301,11 +305,15 @@ class Gemma4Config(BaseGemma4ConfigFields):
             attn_logits_soft_cap: Optional soft-cap value for attention score logits.
             max_position_embeddings: Maximum sequence length for rotary embeddings.
             is_global: Explicit flag indicating whether attention is global.
+            tie_word_embeddings: Whether `embed_tokens` and `lm_head` share weights.
+            enable_multimodal: Whether to instantiate vision and audio encoder towers.
             audio_hidden_size: Optional override for audio encoder hidden size.
             **kwargs: Additional configuration attributes.
 
         """
         self.vocab_size = vocab_size
+        self.tie_word_embeddings = tie_word_embeddings
+        self.enable_multimodal = enable_multimodal
         self.vocab_size_per_layer_input = vocab_size_per_layer_input
         self.hidden_size = hidden_size
         self.hidden_size_per_layer_input = hidden_size_per_layer_input or None
@@ -336,7 +344,11 @@ class Gemma4Config(BaseGemma4ConfigFields):
         if global_attn_layers is not None:
             self.global_attn_layers = list(global_attn_layers)
         else:
-            self.global_attn_layers = [idx for idx in range(num_hidden_layers) if GEMMA4_ATTENTION_PATTERN[idx % len(GEMMA4_ATTENTION_PATTERN)] == AttentionType.GLOBAL]
+            self.global_attn_layers = [
+                idx
+                for idx in range(num_hidden_layers)
+                if GEMMA4_ATTENTION_PATTERN[idx % len(GEMMA4_ATTENTION_PATTERN)] == AttentionType.GLOBAL
+            ]
 
         self.rope_theta = rope_theta
         self.rope_max_timescale = rope_max_timescale

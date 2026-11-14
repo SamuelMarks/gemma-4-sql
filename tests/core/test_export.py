@@ -45,7 +45,12 @@ def test_export_model_custom_backend_mock(monkeypatch: pytest.MonkeyPatch, tmp_p
     captured_calls: list[tuple[str, str, JSONDict]] = []
 
     def _spy_jax_export(model_name: str, export_path: str, **kwargs: JSONValue) -> ExportResultDict:
-        """Record forwarded export arguments and return structured ExportResultDict."""
+        """Record forwarded export arguments and return structured ExportResultDict.
+
+        Returns:
+            Simulated `ExportResultDict` payload.
+
+        """
         captured_calls.append((model_name, export_path, dict(kwargs)))
         return {
             "backend": "jax",
@@ -65,10 +70,12 @@ def test_export_model_custom_backend_mock(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 
 def test_common_export_wrapper_and_build_result(tmp_path: Path) -> None:
-    """Verify `build_export_result` and `run_export_wrapper` handle error_message, raise_on_error=False, and exception passthrough."""
-    res_err = build_export_result("jax", "m", str(tmp_path), tmp_path / "f", "failed: err", "orbax", error_message="err")
-    assert res_err["status_code"] == "failed"
-    assert res_err["error_message"] == "err"
+    """Verify `build_export_result` and `run_export_wrapper` error and exception handling."""
+    res_err = build_export_result(
+        "jax", "m", str(tmp_path), tmp_path / "f", "failed: err", "orbax", error_message="err"
+    )
+    assert res_err.get("status_code") == "failed"
+    assert res_err.get("error_message") == "err"
 
     res_no_raise = run_export_wrapper(
         "jax",
@@ -79,14 +86,18 @@ def test_common_export_wrapper_and_build_result(tmp_path: Path) -> None:
         raise_on_error=False,
     )
     assert res_no_raise["status"] == "failed: boom"
-    assert res_no_raise["status_code"] == "failed"
-    assert res_no_raise["error_message"] == "boom"
+    assert res_no_raise.get("status_code") == "failed"
+    assert res_no_raise.get("error_message") == "boom"
 
     with pytest.raises(ExportError, match="Failed to export model 'm' on jax: boom"):
-        run_export_wrapper("jax", "m", str(tmp_path / "sub"), "orbax", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        run_export_wrapper(
+            "jax", "m", str(tmp_path / "sub"), "orbax", lambda: (_ for _ in ()).throw(RuntimeError("boom"))
+        )
 
     with pytest.raises(ExportError, match="direct export err"):
-        run_export_wrapper("jax", "m", str(tmp_path / "sub2"), "orbax", lambda: (_ for _ in ()).throw(ExportError("direct export err")))
+        run_export_wrapper(
+            "jax", "m", str(tmp_path / "sub2"), "orbax", lambda: (_ for _ in ()).throw(ExportError("direct export err"))
+        )
 
     with pytest.raises(DependencyMissingError, match="missing export dep"):
         run_export_wrapper(

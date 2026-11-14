@@ -6,7 +6,6 @@ import os
 import sys
 import typing
 from pathlib import Path
-from unittest.mock import MagicMock
 
 from tests.conftest import requires_torch
 
@@ -44,7 +43,11 @@ class _DictDataset(torch.utils.data.Dataset[dict[str, torch.Tensor]]):
 
 
 def mock_build_dataloader(config: ETLConfig, *_args: str | int, **_kwargs: str | int) -> ETLResultDict:
-    """Build a synthetic PyTorch DataLoader with optional DistributedSampler."""
+    """Build a synthetic PyTorch DataLoader with optional DistributedSampler.
+
+    Returns:
+        Synthetic distributed ETL result dictionary.
+    """
     inputs = torch.randint(0, 128, (4, 10))
     targets = torch.randint(0, 128, (4, 10))
 
@@ -80,7 +83,11 @@ def _mock_torch_env(monkeypatch: pytest.MonkeyPatch) -> typing.Iterator[None]:
             self.emb = nn.Embedding(128, 128)
 
         def forward(self, x: torch.Tensor, *_args: torch.Tensor, **_kwargs: torch.Tensor) -> torch.Tensor:
-            """Compute token embeddings."""
+            """Compute token embeddings.
+
+            Returns:
+                Token embedding tensor.
+            """
             return self.emb(x.long())
 
     def _from_pretrained_dummy(*_a: str, **_k: str | None) -> DummyModel:
@@ -129,7 +136,11 @@ def test_train_model_fsdp(monkeypatch: pytest.MonkeyPatch) -> None:
             self.module = module
 
         def forward(self, *args: torch.Tensor, **kwargs: torch.Tensor) -> torch.Tensor:
-            """Forward to wrapped module."""
+            """Forward to wrapped module.
+
+            Returns:
+                Wrapped module output tensor.
+            """
             out: torch.Tensor = self.module(*args, **kwargs)
             return out
 
@@ -170,7 +181,7 @@ def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path:
     dist.init_process_group("gloo", rank=0, world_size=1)
 
     try:
-        res = ex.export_model("test_model", str(tmp_path), backend_alias="pytorch_native")
+        res = ex.export_model("gemma-4-tiny", str(tmp_path), backend_alias="pytorch_native")
         assert res["status"] == "exported_with_safetensors"
         assert len(saved_files) == 1
     finally:
@@ -179,8 +190,15 @@ def test_export_distributed_rank_zero(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify non-rank-0 process skips safetensors export in distributed mode."""
-    mock_save = MagicMock()
-    monkeypatch.setattr(ex, "save_file", mock_save)
+    saved_calls: list[str] = []
+
+    def _record_skip(_tensors: dict[str, torch.Tensor], path: str) -> None:
+        """Append `path` to `saved_calls`."""
+        saved_calls.append(path)
+
+    _record_skip({}, "warmup")
+    saved_calls.clear()
+    monkeypatch.setattr(ex, "save_file", _record_skip)
 
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12357"
@@ -188,9 +206,9 @@ def test_export_distributed_rank_one(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.setattr(dist, "get_rank", lambda: 1)
 
     try:
-        res = ex.export_model("test_model", str(tmp_path), backend_alias="pytorch_native")
+        res = ex.export_model("gemma-4-tiny", str(tmp_path), backend_alias="pytorch_native")
         assert res["status"] == "skipped_non_rank_zero"
-        mock_save.assert_not_called()
+        assert saved_calls == []
     finally:
         dist.destroy_process_group()
 
@@ -201,22 +219,22 @@ def test_etl_distributed(monkeypatch: pytest.MonkeyPatch) -> None:
     os.environ["MASTER_PORT"] = "12358"
     dist.init_process_group("gloo", rank=0, world_size=1)
 
-    def _load_ds(*_a: str, **_k: str) -> list[dict[str, str]]:
-        """Return 1-row SQL dataset."""
-        return [{"question": "SELECT 1", "query": "SELECT 1;"}]
+    class _FakeDatasets:
+        """Typed `datasets` double returning 1-row SQL dataset."""
+
+        def load_dataset(self, _path: str, *, split: str = "train") -> list[dict[str, str]]:
+            """Return 1-row SQL dataset."""
+            _ = split
+            return [{"question": "SELECT 1", "query": "SELECT 1;"}]
 
     try:
-        monkeypatch.setattr(
-            etl,
-            "datasets",
-            MagicMock(load_dataset=_load_ds),
-        )
+        monkeypatch.setattr(etl, "datasets", _FakeDatasets())
         monkeypatch.setattr(etl, "SQLTokenizer", SQLTokenizer)
 
         res = etl.build_dataloader(ETLConfig(dataset_name="ds", split="train", distributed=True))
         assert res.get("distributed") is True
         loader = res.get("loader")
         assert isinstance(loader, DataLoader)
-        assert isinstance(loader.sampler, DistributedSampler)
+        assert isinstance(vars(loader)["sampler"], DistributedSampler)
     finally:
         dist.destroy_process_group()

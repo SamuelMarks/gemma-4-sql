@@ -9,35 +9,35 @@ Supports:
 
 from __future__ import annotations
 
-import contextlib
 import logging
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Protocol, TypeGuard, runtime_checkable
+from typing import Protocol, overload, runtime_checkable
 
 from gemma_4_sql.backends.common_quantize import (
     BitsAndBytesConfigProtocol,
-    QuantizableModelProtocol,
+    ModelWithQuantizableConfigProtocol,
     apply_bits_and_bytes_quantization,
     compute_awq_channel_scales,
     compute_gptq_compensated_weights,
     quantize_model_wrapper,
 )
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.backends.pytorch.gguf import (
     GGUFHeaderInfo,
     GGUFTensorDescriptor,
+    _StateDictModelProtocol,
     _write_gguf_file,
     validate_gguf_file,
 )
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError, QuantizationError
 from gemma_4_sql.type_hints import (
     BackendKwargValue,
     DTypeProtocol,
-    DTypeSpec,
     JSONValue,
     ModelType,
     QuantizeResultDict,
+    ToListArrayProtocol,
     TorchCausalLMProtocol,
     TorchTensorProtocol,
     extract_bool_kwarg,
@@ -51,109 +51,25 @@ logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
-class _CalibratableTensorProtocol(TorchTensorProtocol, Protocol):
-    """Protocol for a 2D PyTorch tensor supporting `.detach()`, `.to(...)`, `.clone()`, `.T`, and `.device`."""
+class _Float16TorchModuleProtocol(Protocol):
+    """Protocol for a `torch` module exposing `.float16`."""
 
     @property
-    def device(self) -> DTypeProtocol | str | int | None:
-        """Provide the device where the tensor resides."""
+    def float16(self) -> DTypeProtocol:
+        """Provide `torch.float16` dtype.
+
+        Returns:
+            `torch.float16` dtype descriptor.
+
+        """
         ...
-
-    @property
-    def T(self) -> _CalibratableTensorProtocol:
-        """Provide the 2D matrix transpose."""
-        ...
-
-    def detach(self) -> _CalibratableTensorProtocol:
-        """Detach tensor from the autograd graph."""
-        ...
-
-    def to(self, dtype: DTypeProtocol | DTypeSpec | None, /) -> _CalibratableTensorProtocol:
-        """Cast tensor to `dtype`."""
-        ...
-
-    def clone(self) -> _CalibratableTensorProtocol:
-        """Return a copy of the tensor."""
-        ...
-
-    def __matmul__(self, other: _CalibratableTensorProtocol, /) -> _CalibratableTensorProtocol:
-        """Matrix-multiply two 2D tensors."""
-        ...
-
-    def __mul__(self, other: _CalibratableTensorProtocol | float, /) -> _CalibratableTensorProtocol:
-        """Elementwise-multiply two tensors or a tensor and scalar."""
-        ...
-
-    def __truediv__(self, other: _CalibratableTensorProtocol | float, /) -> _CalibratableTensorProtocol:
-        """Elementwise-divide two tensors or a tensor and scalar."""
-        ...
-
-    def __setitem__(
-        self,
-        idx: tuple[slice, slice],
-        value: _CalibratableTensorProtocol,
-        /,
-    ) -> None:
-        """In-place slice assignment."""
-        ...
-
-
-@runtime_checkable
-class _TensorShapeDtypeProtocol(Protocol):
-    """Protocol for any PyTorch tensor exposing `.shape` and `.dtype`."""
-
-    @property
-    def shape(self) -> Sequence[int]:
-        """Provide the tensor shape dimensions."""
-        ...
-
-    @property
-    def dtype(self) -> DTypeProtocol | DTypeSpec | None:
-        """Provide the tensor data type."""
-        ...
-
-
-type PyTorchQuantizeTensor = _TensorShapeDtypeProtocol | TorchTensorProtocol | _CalibratableTensorProtocol
-
-
-def _as_calibratable_tensor(
-    val: PyTorchQuantizeTensor,
-) -> TypeGuard[_CalibratableTensorProtocol]:
-    """Narrow `val` to `_CalibratableTensorProtocol` for calibration math.
-
-    Args:
-        val: Calibratable tensor instance.
-
-    Returns:
-        `True` if `val` is not a primitive `str`, `int`, or `float`.
-
-    """
-    return not isinstance(val, (str, int, float))
-
-
-def _as_tensor_t[TensorT: PyTorchQuantizeTensor](
-    val: _CalibratableTensorProtocol,
-    _sample: TensorT,
-) -> TypeGuard[TensorT]:
-    """Narrow `val` back to `TensorT`.
-
-    Args:
-        val: Calibrated tensor result.
-        _sample: Input weight tensor of type `TensorT`.
-
-    Returns:
-        `True` if `val` is not a primitive `str`, `int`, or `float`.
-
-    """
-    _ = _sample
-    return not isinstance(val, (str, int, float))
 
 
 @runtime_checkable
 class _MutableParameterProtocol(Protocol):
     """Protocol for a `torch.nn.Parameter` exposing mutable `.data`."""
 
-    data: _CalibratableTensorProtocol
+    data: TorchTensorProtocol
 
 
 @runtime_checkable
@@ -161,32 +77,78 @@ class _NamedParametersModelProtocol(Protocol):
     """Protocol for an in-memory PyTorch model exposing `.named_parameters()`."""
 
     def named_parameters(self) -> Iterable[tuple[str, _MutableParameterProtocol]]:
-        """Yield `(name, parameter)` pairs across the module."""
+        """Yield `(name, parameter)` pairs across the module.
+
+        Returns:
+            Iterable of `(parameter_name, parameter)` pairs.
+
+        """
         ...
 
 
 torch = optional_import("torch")
-BitsAndBytesConfig: BitsAndBytesConfigProtocol | None = optional_attr(
+BitsAndBytesConfig: BitsAndBytesConfigProtocol | None = import_optional_symbol(
     "transformers",
     "BitsAndBytesConfig",
     BitsAndBytesConfigProtocol,
 )
-AutoModelForCausalLM = optional_attr("transformers", "AutoModelForCausalLM")
-AutoTokenizer = optional_attr("transformers", "AutoTokenizer")
+AutoModelForCausalLM = import_optional_symbol("transformers", "AutoModelForCausalLM", type)
+AutoTokenizer = import_optional_symbol("transformers", "AutoTokenizer", type)
 
 
-def _tensor_to_2d_list(tensor: _CalibratableTensorProtocol) -> list[list[float]]:
-    """Convert a 2D PyTorch tensor into `list[list[float]]` via `.tolist()`."""
+@runtime_checkable
+class _ToListOnlyProtocol(Protocol):
+    """Minimal structural protocol for objects exposing `.tolist()`."""
+
+    def tolist(self) -> list[list[float]] | list[float] | float:
+        """Convert array to nested Python float list or scalar.
+
+        Returns:
+            Nested float list or scalar float.
+
+        """
+        ...
+
+
+def _tensor_to_2d_list(tensor: ToListArrayProtocol | _ToListOnlyProtocol | TorchTensorProtocol) -> list[list[float]]:
+    """Convert a 2D PyTorch tensor into `list[list[float]]` via `.tolist()`.
+
+    Args:
+        tensor: 2D calibratable tensor.
+
+    Returns:
+        Nested 2D Python float list.
+
+    """
     raw = tensor.tolist()
-    assert isinstance(raw, list)
-    return [[float(val) for val in row if isinstance(val, (int, float))] for row in raw if isinstance(row, list)]
+    if isinstance(raw, list):
+        return [[float(val) for val in row if isinstance(val, (int, float))] for row in raw if isinstance(row, list)]
+    return []
 
 
-def calibrate_pytorch_awq_scales[TensorT: PyTorchQuantizeTensor](
+@overload
+def calibrate_pytorch_awq_scales[TensorT: TorchTensorProtocol](
     weight: TensorT,
-    activations: TensorT | None = None,
+    activations: None = None,
     n_grid: int = 20,
 ) -> TensorT:
+    """Compute AWQ channel scales without activation tensor."""
+
+
+@overload
+def calibrate_pytorch_awq_scales[TensorT: TorchTensorProtocol](
+    weight: TensorT,
+    activations: TensorT,
+    n_grid: int = 20,
+) -> TensorT:
+    """Compute AWQ channel scales using calibration `activations`."""
+
+
+def calibrate_pytorch_awq_scales(
+    weight: TorchTensorProtocol,
+    activations: TorchTensorProtocol | None = None,
+    n_grid: int = 20,
+) -> TorchTensorProtocol:
     """Compute activation-aware per-channel optimal scaling factors for a 2D PyTorch weight matrix.
 
     Args:
@@ -203,30 +165,48 @@ def calibrate_pytorch_awq_scales[TensorT: PyTorchQuantizeTensor](
     """
     if torch is None:
         raise DependencyMissingError("PyTorch is required for native AWQ calibration.")
-    w_ref: PyTorchQuantizeTensor = weight
-    assert _as_calibratable_tensor(w_ref)
-    w = w_ref.detach().to(torch.float32)
+    import torch as _torch
+
+    assert isinstance(weight, _torch.Tensor)
+    w = weight.detach().to(_torch.float32)
     w_2d = _tensor_to_2d_list(w)
     acts_2d: list[list[float]] | None = None
     if activations is not None:
-        act_ref: PyTorchQuantizeTensor = activations
-        assert _as_calibratable_tensor(act_ref)
-        act_t = act_ref.detach().to(torch.float32)
+        assert isinstance(activations, _torch.Tensor)
+        act_t = activations.detach().to(_torch.float32)
         acts_2d = _tensor_to_2d_list(act_t)
     grid = [i / float(max(1, n_grid)) for i in range(max(1, n_grid))]
     scales_1d = compute_awq_channel_scales(w_2d, acts_2d, alpha_range=grid)
-    best_scales: _CalibratableTensorProtocol = torch.tensor([scales_1d], dtype=torch.float32, device=w.device)
-    res = best_scales.to(w_ref.dtype)
-    assert _as_tensor_t(res, weight)
+    res: TorchTensorProtocol = _torch.tensor([scales_1d], dtype=_torch.float32, device=weight.device).to(weight.dtype)
     return res
 
 
-def calibrate_pytorch_gptq_weights[TensorT: PyTorchQuantizeTensor](
+@overload
+def calibrate_pytorch_gptq_weights[TensorT: TorchTensorProtocol](
     weight: TensorT,
-    activations: TensorT | None = None,
+    activations: None = None,
     bits: int = 4,
     damp_percent: float = 0.01,
 ) -> TensorT:
+    """Compute GPTQ error-compensated weights without activation tensor."""
+
+
+@overload
+def calibrate_pytorch_gptq_weights[TensorT: TorchTensorProtocol](
+    weight: TensorT,
+    activations: TensorT,
+    bits: int = 4,
+    damp_percent: float = 0.01,
+) -> TensorT:
+    """Compute GPTQ error-compensated weights using calibration `activations`."""
+
+
+def calibrate_pytorch_gptq_weights(
+    weight: TorchTensorProtocol,
+    activations: TorchTensorProtocol | None = None,
+    bits: int = 4,
+    damp_percent: float = 0.01,
+) -> TorchTensorProtocol:
     """Quantize a 2D PyTorch weight matrix using second-order Hessian error compensation (GPTQ).
 
     Args:
@@ -244,20 +224,18 @@ def calibrate_pytorch_gptq_weights[TensorT: PyTorchQuantizeTensor](
     """
     if torch is None:
         raise DependencyMissingError("PyTorch is required for native GPTQ calibration.")
-    w_ref: PyTorchQuantizeTensor = weight
-    assert _as_calibratable_tensor(w_ref)
-    w = w_ref.detach().to(torch.float32)
+    import torch as _torch
+
+    assert isinstance(weight, _torch.Tensor)
+    w = weight.detach().to(_torch.float32)
     w_2d = _tensor_to_2d_list(w)
     acts_2d: list[list[float]] | None = None
     if activations is not None:
-        act_ref: PyTorchQuantizeTensor = activations
-        assert _as_calibratable_tensor(act_ref)
-        act_t = act_ref.detach().to(torch.float32)
+        assert isinstance(activations, _torch.Tensor)
+        act_t = activations.detach().to(_torch.float32)
         acts_2d = _tensor_to_2d_list(act_t)
     q_2d = compute_gptq_compensated_weights(w_2d, acts_2d, bits=bits, damp_percent=damp_percent)
-    q_tensor: _CalibratableTensorProtocol = torch.tensor(q_2d, dtype=torch.float32, device=w.device)
-    res = q_tensor.to(w_ref.dtype)
-    assert _as_tensor_t(res, weight)
+    res: TorchTensorProtocol = _torch.tensor(q_2d, dtype=_torch.float32, device=weight.device).to(weight.dtype)
     return res
 
 
@@ -268,11 +246,9 @@ def _apply_awq_quantization(
     w_bit: int = 4,
     q_group_size: int = 128,
     *,
-    model: _NamedParametersModelProtocol | QuantizableModelProtocol | TorchCausalLMProtocol | None = None,
+    model: _NamedParametersModelProtocol | ModelWithQuantizableConfigProtocol | TorchCausalLMProtocol | None = None,
 ) -> tuple[float, str]:
     """Execute real AWQ quantization using AutoAWQ or native PyTorch tensor AWQ on in-memory models.
-
-    Calibrates salient activations and quantizes weights to 4-bit GEMM format.
 
     Args:
         model_name: The name or Hugging Face path of the model.
@@ -290,25 +266,76 @@ def _apply_awq_quantization(
 
     """
     if model is not None and torch is not None and isinstance(model, _NamedParametersModelProtocol):
+        import torch as _torch
+
         for _name, param in model.named_parameters():
-            if param.data.ndim == 2:
-                scales = calibrate_pytorch_awq_scales(param.data, n_grid=10)
-                w_scaled = param.data.to(torch.float32) * scales.to(torch.float32)
+            pdata = param.data
+            if isinstance(pdata, _torch.Tensor) and pdata.ndim == 2:
+                scales = calibrate_pytorch_awq_scales(pdata, n_grid=10)
+                w_scaled = pdata.to(_torch.float32) * scales.to(_torch.float32)
                 q_max = float((1 << (max(2, w_bit) - 1)) - 1)
-                step = torch.clamp(torch.amax(torch.abs(w_scaled), dim=-1, keepdim=True), min=1e-5) / q_max
-                w_q = torch.clamp(torch.round(w_scaled / step), -q_max - 1.0, q_max) * step
-                param.data = (w_q / scales.to(torch.float32)).to(param.data.dtype)
+                step = _torch.clamp(_torch.amax(_torch.abs(w_scaled), dim=-1, keepdim=True), min=1e-5) / q_max
+                w_q = _torch.clamp(_torch.round(w_scaled / step), -q_max - 1.0, q_max) * step
+                param.data = (w_q / scales.to(_torch.float32)).to(pdata.dtype)
         register_quantized_artifact(model, method="awq")
         return (0.75, "quantized_awq")
 
-    try:
-        import awq
-        from transformers import AutoTokenizer as _AutoTokenizer
+    @runtime_checkable
+    class _QuantSaveTokenizerProtocol(Protocol):
+        """Protocol for a Hugging Face tokenizer supporting `save_pretrained`."""
 
-        tok_cls = _AutoTokenizer
-        awq_cls = awq.AutoAWQForCausalLM
-    except (ImportError, AttributeError) as exc:
-        raise DependencyMissingError(f"AutoAWQ is required for AWQ quantization: {exc!s}") from exc
+        def save_pretrained(self, save_directory: str, /) -> tuple[str, ...] | None:
+            """Save tokenizer files to `save_directory`."""
+            ...
+
+    @runtime_checkable
+    class _QuantAutoTokenizerProtocol(Protocol):
+        """Protocol for `AutoTokenizer` exposing `from_pretrained`."""
+
+        def from_pretrained(self, model_name: str, /) -> _QuantSaveTokenizerProtocol | None:
+            """Load pretrained tokenizer."""
+            ...
+
+    @runtime_checkable
+    class _AWQLoadedModelProtocol(Protocol):
+        """Protocol for an `AutoAWQForCausalLM` instance."""
+
+        def quantize(
+            self,
+            tokenizer: _QuantSaveTokenizerProtocol,
+            *,
+            quant_config: dict[str, str | int | bool],
+            calib_data: list[str],
+        ) -> None:
+            """Run AWQ calibration and quantization."""
+            ...
+
+        def save_quantized(self, save_dir: str, /) -> None:
+            """Persist AWQ quantized model."""
+            ...
+
+    @runtime_checkable
+    class _AWQModelClassProtocol(Protocol):
+        """Protocol for `awq.AutoAWQForCausalLM`."""
+
+        def from_pretrained(self, model_name: str, /) -> _AWQLoadedModelProtocol:
+            """Load model for AWQ quantization."""
+            ...
+
+    @runtime_checkable
+    class _AWQModuleProtocol(Protocol):
+        """Protocol for `awq` module exposing `AutoAWQForCausalLM`."""
+
+        @property
+        def AutoAWQForCausalLM(self) -> _AWQModelClassProtocol:
+            """Provide `AutoAWQForCausalLM` loader."""
+            ...
+
+    awq_mod = optional_import("awq", _AWQModuleProtocol)
+    tok_cls = import_optional_symbol("transformers", "AutoTokenizer", _QuantAutoTokenizerProtocol)
+    if awq_mod is None or tok_cls is None:
+        raise DependencyMissingError("AutoAWQ is required for AWQ quantization: missing awq or transformers")
+    awq_cls = awq_mod.AutoAWQForCausalLM
 
     if calib_data is None:
         calib_data = [
@@ -344,11 +371,9 @@ def _apply_gptq_quantization(
     group_size: int = 128,
     damp_percent: float = 0.01,
     *,
-    model: _NamedParametersModelProtocol | QuantizableModelProtocol | TorchCausalLMProtocol | None = None,
+    model: _NamedParametersModelProtocol | ModelWithQuantizableConfigProtocol | TorchCausalLMProtocol | None = None,
 ) -> tuple[float, str]:
     """Execute real GPTQ quantization using Optimum or native PyTorch Hessian compensation on in-memory models.
-
-    Computes inverse Hessian second-order information to quantize weights with minimal perplexity loss.
 
     Args:
         model_name: The name or Hugging Face path of the model.
@@ -373,16 +398,72 @@ def _apply_gptq_quantization(
         register_quantized_artifact(model, method="gptq")
         return (0.75, "quantized_gptq")
 
-    try:
-        import optimum
-        from transformers import AutoModelForCausalLM as _AutoModelForCausalLM
-        from transformers import AutoTokenizer as _AutoTokenizer
+    @runtime_checkable
+    class _GPTQTokenizerProtocol(Protocol):
+        """Protocol for a Hugging Face tokenizer supporting `save_pretrained`."""
 
-        tok_cls = _AutoTokenizer
-        model_cls = _AutoModelForCausalLM
-        quantizer_cls = optimum.gptq.GPTQQuantizer
-    except (ImportError, AttributeError) as exc:
-        raise DependencyMissingError(f"Optimum is required for GPTQ quantization: {exc!s}") from exc
+        def save_pretrained(self, save_directory: str, /) -> tuple[str, ...] | None:
+            """Save tokenizer files to `save_directory`."""
+            ...
+
+    @runtime_checkable
+    class _GPTQAutoTokenizerProtocol(Protocol):
+        """Protocol for `AutoTokenizer` exposing `from_pretrained`."""
+
+        def from_pretrained(self, model_name: str, /) -> _GPTQTokenizerProtocol | None:
+            """Load pretrained tokenizer."""
+            ...
+
+    @runtime_checkable
+    class _GPTQAutoModelProtocol(Protocol):
+        """Protocol for `AutoModelForCausalLM` exposing `from_pretrained`."""
+
+        def from_pretrained(self, model_name: str, **kwargs: DTypeProtocol | str) -> ModelType:
+            """Load pretrained causal LM."""
+            ...
+
+    @runtime_checkable
+    class _GPTQQuantizerInstanceProtocol(Protocol):
+        """Protocol for an initialized `optimum.gptq.GPTQQuantizer`."""
+
+        def quantize_model(self, model: ModelType, tokenizer: _GPTQTokenizerProtocol, /) -> ModelType:
+            """Quantize `model` using `tokenizer`."""
+            ...
+
+        def save(self, model: ModelType, save_dir: str, /) -> None:
+            """Persist quantized GPTQ model."""
+            ...
+
+    @runtime_checkable
+    class _GPTQNamespaceProtocol(Protocol):
+        """Protocol for `optimum.gptq` exposing `GPTQQuantizer`."""
+
+        def GPTQQuantizer(
+            self,
+            *,
+            bits: int,
+            dataset: str | list[str],
+            group_size: int,
+            damp_percent: float,
+        ) -> _GPTQQuantizerInstanceProtocol:
+            """Construct a `GPTQQuantizer`."""
+            ...
+
+    @runtime_checkable
+    class _OptimumModuleProtocol(Protocol):
+        """Protocol for `optimum` exposing `.gptq`."""
+
+        @property
+        def gptq(self) -> _GPTQNamespaceProtocol:
+            """Provide `optimum.gptq` namespace."""
+            ...
+
+    opt_mod = optional_import("optimum", _OptimumModuleProtocol)
+    tok_cls = import_optional_symbol("transformers", "AutoTokenizer", _GPTQAutoTokenizerProtocol)
+    model_cls = import_optional_symbol("transformers", "AutoModelForCausalLM", _GPTQAutoModelProtocol)
+    if opt_mod is None or tok_cls is None or model_cls is None:
+        raise DependencyMissingError("Optimum is required for GPTQ quantization: missing optimum or transformers")
+    quantizer_cls = opt_mod.gptq.GPTQQuantizer
 
     quantizer = quantizer_cls(
         bits=bits,
@@ -393,9 +474,8 @@ def _apply_gptq_quantization(
 
     tokenizer = tok_cls.from_pretrained(model_name)
     assert tokenizer is not None
-    assert torch is not None
     model_kwargs: dict[str, DTypeProtocol | str] = {}
-    with contextlib.suppress(AttributeError):
+    if isinstance(torch, _Float16TorchModuleProtocol):
         model_kwargs["torch_dtype"] = torch.float16
     hf_model = model_cls.from_pretrained(model_name, **model_kwargs)
 
@@ -413,19 +493,27 @@ def _export_gguf(
     model_name: str,
     export_path: str | None = None,
     out_type: str = "q4_k_m",
+    *,
+    allow_dummy_fallback: bool = False,
+    model: _StateDictModelProtocol | TorchCausalLMProtocol | None = None,
 ) -> tuple[float, str]:
     """Export model to GGUF format for llama.cpp execution and validate binary header.
 
-    Converts model tensors and metadata into a valid GGUF file format and validates
-    output header and tensor descriptors.
+    Fails fast with `QuantizationError` when model weights cannot be resolved unless
+    `allow_dummy_fallback=True` is explicitly passed.
 
     Args:
         model_name: The name or path of the model.
         export_path: Destination directory or `.gguf` file path for GGUF export.
         out_type: Quantization format identifier (e.g. `q4_k_m`, `q8_0`, `f16`).
+        allow_dummy_fallback: Whether to permit synthetic dummy weights if `model_name` cannot be found.
+        model: Optional in-memory model exposing `.state_dict()`.
 
     Returns:
         Tuple of memory reduction factor (`0.6`) and status string (`'quantized_gguf'`).
+
+    Raises:
+        QuantizationError: If model weights cannot be extracted and `allow_dummy_fallback` is `False`.
 
     """
     target_path = Path(export_path) if export_path else Path("./gguf_export")
@@ -439,10 +527,19 @@ def _export_gguf(
     if not gguf_file.exists():
         from gemma_4_sql.backends.pytorch import gguf as _gguf_mod
 
+        source_arg: _StateDictModelProtocol | TorchCausalLMProtocol | str = model if model is not None else model_name
         try:
-            tensors = _gguf_mod.extract_pytorch_state_dict(model_name, allow_dummy_fallback=True)
-        except (ImportError, ValueError, RuntimeError, AttributeError, OSError):
-            tensors = None
+            tensors = _gguf_mod.extract_pytorch_state_dict(
+                source_arg,
+                allow_dummy_fallback=allow_dummy_fallback,
+            )
+        except (ExportError, ImportError, ValueError, RuntimeError, AttributeError, OSError) as exc:
+            raise QuantizationError(
+                f"Failed to extract PyTorch weights for GGUF export of '{model_name}': {exc}",
+                backend="pytorch",
+                model_name=model_name,
+                cause=exc,
+            ) from exc
         _write_gguf_file(gguf_file, model_name=model_name, tensors=tensors, out_type=out_type)
 
     validate_gguf_file(gguf_file)
@@ -450,7 +547,13 @@ def _export_gguf(
     return (0.6, "quantized_gguf")
 
 
-type _QuantizeModelArg = _NamedParametersModelProtocol | QuantizableModelProtocol | TorchCausalLMProtocol | str
+type _QuantizeModelArg = (
+    _NamedParametersModelProtocol
+    | _StateDictModelProtocol
+    | ModelWithQuantizableConfigProtocol
+    | TorchCausalLMProtocol
+    | str
+)
 
 
 def quantize_model(
@@ -475,9 +578,19 @@ def quantize_model(
     if torch is None or (method in {"int8", "int4"} and (BitsAndBytesConfig is None or AutoModelForCausalLM is None)):
         raise DependencyMissingError("PyTorch quantization dependencies are missing.")
 
-    json_kwargs: dict[str, JSONValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    json_kwargs: dict[str, JSONValue] = {
+        k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None
+    }
     raw_model = kwargs.get("model")
-    awq_gptq_model: _NamedParametersModelProtocol | QuantizableModelProtocol | TorchCausalLMProtocol | None = raw_model if isinstance(raw_model, (_NamedParametersModelProtocol, QuantizableModelProtocol, TorchCausalLMProtocol)) else None
+    awq_gptq_model: (
+        _NamedParametersModelProtocol | ModelWithQuantizableConfigProtocol | TorchCausalLMProtocol | None
+    ) = (
+        raw_model
+        if isinstance(
+            raw_model, (_NamedParametersModelProtocol, ModelWithQuantizableConfigProtocol, TorchCausalLMProtocol)
+        )
+        else None
+    )
     if awq_gptq_model is None and kwargs.get("backend_alias") == "pytorch_native" and method in {"awq", "gptq"}:
         from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
         from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM
@@ -485,17 +598,37 @@ def quantize_model(
         awq_gptq_model = Gemma4ForCausalLM(Gemma4Config.from_preset(model_name))
 
     if method == "gguf":
+        gguf_model: _StateDictModelProtocol | TorchCausalLMProtocol | None = (
+            raw_model if isinstance(raw_model, (_StateDictModelProtocol, TorchCausalLMProtocol)) else None
+        )
+        allow_dummy_fb = extract_bool_kwarg(json_kwargs, "allow_dummy_fallback", False)
 
         def apply_fn() -> tuple[float, str]:
-            """Execute GGUF format quantization export."""
+            """Execute GGUF format quantization export.
+
+            Returns:
+                Tuple of `(memory_reduction_ratio, status)`.
+
+            """
             export_path = str(extract_str_kwarg(json_kwargs, "export_path", "./gguf_export"))
             out_type = str(extract_str_kwarg(json_kwargs, "out_type", "q4_k_m"))
-            return _export_gguf(model_name, export_path, out_type=out_type)
+            return _export_gguf(
+                model_name,
+                export_path,
+                out_type=out_type,
+                allow_dummy_fallback=allow_dummy_fb,
+                model=gguf_model,
+            )
 
     elif method == "awq":
 
         def apply_fn() -> tuple[float, str]:
-            """Execute AWQ 4-bit weight-only activation-aware quantization."""
+            """Execute AWQ 4-bit weight-only activation-aware quantization.
+
+            Returns:
+                Tuple of `(memory_reduction_ratio, status)`.
+
+            """
             export_path = extract_str_kwarg(json_kwargs, "export_path")
             calib_data = kwargs.get("calib_data")
             w_bit = extract_int_kwarg(json_kwargs, "w_bit", 4)
@@ -512,7 +645,12 @@ def quantize_model(
     elif method == "gptq":
 
         def apply_fn() -> tuple[float, str]:
-            """Execute GPTQ second-order error-compensated quantization."""
+            """Execute GPTQ second-order error-compensated quantization.
+
+            Returns:
+                Tuple of `(memory_reduction_ratio, status)`.
+
+            """
             export_path = extract_str_kwarg(json_kwargs, "export_path")
             bits = extract_int_kwarg(json_kwargs, "bits", 4)
             dataset = str(extract_str_kwarg(json_kwargs, "dataset", "c4"))
@@ -531,17 +669,21 @@ def quantize_model(
     else:
 
         def apply_fn() -> tuple[float, str]:
-            """Execute BitsAndBytes INT8/INT4 quantization."""
-            assert torch is not None
+            """Execute BitsAndBytes INT8/INT4 quantization.
+
+            Returns:
+                Tuple of `(memory_reduction_ratio, status)`.
+
+            """
             threshold = extract_float_kwarg(json_kwargs, "llm_int8_threshold", 6.0)
-            f16_dtype: DTypeProtocol | str | None = None
-            with contextlib.suppress(AttributeError):
-                f16_dtype = torch.float16
-            bnb_model: QuantizableModelProtocol | TorchCausalLMProtocol | None = (
+            f16_dtype: DTypeProtocol | str | None = (
+                torch.float16 if isinstance(torch, _Float16TorchModuleProtocol) else None
+            )
+            bnb_model: ModelWithQuantizableConfigProtocol | TorchCausalLMProtocol | None = (
                 raw_model
                 if isinstance(
                     raw_model,
-                    (QuantizableModelProtocol, TorchCausalLMProtocol),
+                    (ModelWithQuantizableConfigProtocol, TorchCausalLMProtocol),
                 )
                 else None
             )

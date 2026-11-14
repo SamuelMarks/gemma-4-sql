@@ -9,34 +9,64 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import NoReturn
 
-import keras
 import pytest
 import torch
-from keras import ops
 
 import gemma_4_sql.backends.keras.train as tr
+from gemma_4_sql._types_models import KerasPreprocessorProtocol
+from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import ETLConfig, TrainingConfig
+from gemma_4_sql.type_hints import ETLConfig, ForwardArg, TensorType, TrainingConfig
 from tests.conftest import requires_keras
+from tests.utils.tensor_helpers import (
+    TypedKerasModelInstanceProtocol,
+    get_typed_keras,
+    get_typed_keras_ops,
+)
 
 pytestmark = requires_keras
+
+keras = get_typed_keras()
+ops = get_typed_keras_ops()
 
 type IntBatch = dict[str, torch.Tensor] | tuple[torch.Tensor, torch.Tensor]
 
 
-def _make_tiny_keras_model() -> keras.Model:
-    """Create a real tiny Keras functional model with a preprocessor attribute."""
+class _TinyPreprocessor(KerasPreprocessorProtocol):
+    """Typed KerasNLP preprocessor stub."""
+
+    sequence_length: int = 512
+
+    def __call__(self, *args: ForwardArg, **kwargs: ForwardArg) -> dict[str, TensorType]:
+        """Return empty tensor dictionary."""
+        _ = (args, kwargs)
+        return {}
+
+
+def _make_tiny_keras_model() -> TypedKerasModelInstanceProtocol:
+    """Create a real tiny Keras functional model with a preprocessor attribute.
+
+    Returns:
+        A tiny functional `keras.Model` with a synthetic `preprocessor`.
+
+    """
     inputs = keras.Input(shape=(4,), dtype="int32")
     x = keras.layers.Embedding(input_dim=32, output_dim=8)(inputs)
     outputs = keras.layers.Dense(32)(x)
     model = keras.Model(inputs=inputs, outputs=outputs)
-    model.preprocessor = type("Preprocessor", (), {"sequence_length": 512})()
+    assert _TinyPreprocessor()() == {}
+    vars(model)["preprocessor"] = _TinyPreprocessor()
     return model
 
 
 @pytest.fixture
-def real_keras_env(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
-    """Configure keras.train with real Keras and a lightweight MirroredStrategy scope."""
+def real_keras_env(monkeypatch: pytest.MonkeyPatch) -> ModuleNamespaceProtocol:
+    """Configure keras.train with real Keras and a lightweight MirroredStrategy scope.
+
+    Returns:
+        The configured `gemma_4_sql.backends.keras.train` module.
+
+    """
 
     class _Scope:
         """No-op strategy scope context manager."""
@@ -75,7 +105,12 @@ def real_keras_env(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
             val: torch.Tensor | list[int] | list[list[int]] | int,
             dtype: str = "int32",
         ) -> torch.Tensor:
-            """Convert array-like to int32 tensor."""
+            """Convert array-like to int32 tensor.
+
+            Returns:
+                An int32 `torch.Tensor` representation of `val`.
+
+            """
             _ = dtype
             return torch.as_tensor(val, dtype=torch.int32)
 
@@ -86,7 +121,7 @@ def real_keras_env(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
 
 def test_train_model_keras(
     tmp_path: Path,
-    real_keras_env: types.ModuleType,
+    real_keras_env: ModuleNamespaceProtocol,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify train_model handles preset loading errors and propagates TrainingError when requested."""
@@ -111,7 +146,12 @@ def test_train_model_keras(
 
         @classmethod
         def from_preset(cls, _model_name: str) -> NoReturn:
-            """Raise ValueError."""
+            """Raise ValueError.
+
+            Raises:
+                ValueError: Always raised to simulate preset load failure.
+
+            """
             raise ValueError("dummy")
 
     monkeypatch.setattr(tr, "GemmaCausalLM", FailingGemmaCls)
@@ -124,10 +164,10 @@ def test_train_model_keras(
 
 
 def test_execute_train_success_real_keras_model(
-    real_keras_env: types.ModuleType,
+    real_keras_env: ModuleNamespaceProtocol,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify _execute_train and train_model compile and fit a real tiny keras.Model with real SparseCategoricalCrossentropy and AdamW."""
+    """Verify _execute_train and train_model compile and fit a tiny keras.Model with real loss and AdamW."""
     _ = real_keras_env
     tiny_model = _make_tiny_keras_model()
     w_before = ops.copy(ops.stop_gradient(tiny_model.layers[-1].weights[0]))
@@ -154,7 +194,7 @@ def test_execute_train_success_real_keras_model(
         """GemmaCausalLM provider returning the real tiny keras.Model."""
 
         @classmethod
-        def from_preset(cls, _model_name: str) -> keras.Model:
+        def from_preset(cls, _model_name: str) -> TypedKerasModelInstanceProtocol:
             """Return tiny_model."""
             return tiny_model
 
@@ -173,7 +213,7 @@ def test_execute_train_success_real_keras_model(
 
 
 def test_execute_train_no_loss(
-    real_keras_env: types.ModuleType,
+    real_keras_env: ModuleNamespaceProtocol,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify _execute_train defaults final_loss to 0.0 when history.history lacks 'loss'."""
@@ -197,7 +237,7 @@ def test_execute_train_no_loss(
         """GemmaCausalLM stub returning `tiny_model`."""
 
         @classmethod
-        def from_preset(cls, _model_name: str) -> keras.Model:
+        def from_preset(cls, _model_name: str) -> TypedKerasModelInstanceProtocol:
             """Return `tiny_model`."""
             return tiny_model
 
@@ -211,7 +251,7 @@ def test_execute_train_no_loss(
 
 
 def test_execute_train_load_fail(
-    real_keras_env: types.ModuleType,
+    real_keras_env: ModuleNamespaceProtocol,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify _execute_train raises ValueError when GemmaCausalLM cannot be loaded or imported."""
@@ -222,11 +262,16 @@ def test_execute_train_load_fail(
 
         @classmethod
         def from_preset(cls, _model_name: str) -> NoReturn:
-            """Raise ValueError."""
+            """Raise ValueError.
+
+            Raises:
+                ValueError: Always raised to simulate preset load failure.
+
+            """
             raise ValueError("Cannot load")
 
     def _none_attr(*_a: str, **_k: str) -> None:
-        """Return None for optional_attr."""
+        """Return None for import_optional_symbol."""
         return
 
     monkeypatch.setattr(tr, "GemmaCausalLM", FailingGemmaCls)
@@ -234,13 +279,13 @@ def test_execute_train_load_fail(
         tr._execute_train("mod", "ds", 1, 2)
 
     monkeypatch.setattr(tr, "GemmaCausalLM", None)
-    monkeypatch.setattr(tr, "optional_attr", _none_attr)
+    monkeypatch.setattr(tr, "import_optional_symbol", _none_attr)
     with pytest.raises(ValueError, match="Failed to load Keras model"):
         tr._execute_train("mod", "ds", 1, 2)
 
 
 def test_execute_train_bad_dataloader(
-    real_keras_env: types.ModuleType,
+    real_keras_env: ModuleNamespaceProtocol,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify _execute_train raises ValueError when build_dataloader returns a non-iterable loader."""
@@ -255,7 +300,7 @@ def test_execute_train_bad_dataloader(
         """GemmaCausalLM stub returning `tiny_model`."""
 
         @classmethod
-        def from_preset(cls, _model_name: str) -> keras.Model:
+        def from_preset(cls, _model_name: str) -> TypedKerasModelInstanceProtocol:
             """Return `tiny_model`."""
             return tiny_model
 

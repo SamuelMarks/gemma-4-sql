@@ -83,8 +83,7 @@ def calculate_load_balancing_loss(router_logits: torch.Tensor, num_experts: int,
     expert_mask = expert_mask.sum(dim=1).float()
     expert_mask_mean = expert_mask.mean(dim=0)
 
-    loss = (router_probs_mean * expert_mask_mean).sum() * num_experts
-    return loss
+    return (router_probs_mean * expert_mask_mean).sum() * num_experts
 
 
 class Gemma4MoE(nn.Module):
@@ -105,12 +104,16 @@ class Gemma4MoE(nn.Module):
         self.num_experts_per_tok = config.num_experts_per_tok
         num_shared = int(config.num_shared_experts)
         shared_inter = config.intermediate_size * max(1, num_shared)
-        routed_inter = config.moe_intermediate_size if config.moe_intermediate_size is not None else config.intermediate_size
+        routed_inter = (
+            config.moe_intermediate_size if config.moe_intermediate_size is not None else config.intermediate_size
+        )
         rms_eps = float(config.rms_norm_eps)
 
         self.shared_experts = Gemma4MLP(config, intermediate_size=shared_inter)
         self.router = Gemma4MoERouter(config)
-        self.experts = nn.ModuleList([Gemma4MLP(config, intermediate_size=routed_inter) for _ in range(self.num_experts)])
+        self.experts = nn.ModuleList([
+            Gemma4MLP(config, intermediate_size=routed_inter) for _ in range(self.num_experts)
+        ])
         self.pre_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=rms_eps)
         self.post_feedforward_layernorm_1 = Gemma4RMSNorm(config.hidden_size, eps=rms_eps)
         self.post_feedforward_layernorm_2 = Gemma4RMSNorm(config.hidden_size, eps=rms_eps)
@@ -141,7 +144,8 @@ class Gemma4MoE(nn.Module):
         flat_routing_source = routing_source.view(-1, hidden_dim)
 
         routing_weights, selected_experts, router_logits = self.router(flat_routing_source)
-        self.last_aux_loss = calculate_load_balancing_loss(router_logits, self.num_experts, self.num_experts_per_tok)
+        raw_aux_loss = calculate_load_balancing_loss(router_logits, self.num_experts, self.num_experts_per_tok)
+        self.last_aux_loss = raw_aux_loss if torch.is_grad_enabled() else raw_aux_loss.detach()
 
         routed_hidden_states = torch.zeros(
             (batch_size * sequence_length, hidden_dim),
@@ -149,9 +153,13 @@ class Gemma4MoE(nn.Module):
             device=hidden_states.device,
         )
 
-        active_experts = torch.unique(selected_experts)
-        for expert_tensor in active_experts:
-            expert_idx = int(expert_tensor.item())
+        from gemma_4_sql.type_hints import ToListArrayProtocol
+
+        flat_experts_view: ToListArrayProtocol = selected_experts.reshape(-1)
+        raw_expert_ids = flat_experts_view.tolist()
+        assert isinstance(raw_expert_ids, list)
+        active_expert_ids = sorted({int(v) for v in raw_expert_ids if isinstance(v, int)})
+        for expert_idx in active_expert_ids:
             idx, top_x = torch.where(selected_experts == expert_idx)
             expert_layer = self.experts[expert_idx]
             expert_tokens = routed_inputs[idx]

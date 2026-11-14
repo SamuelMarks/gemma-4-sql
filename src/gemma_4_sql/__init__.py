@@ -1,8 +1,9 @@
-"""Run main package for gemma-4-sql."""
+"""Root public package exports for gemma-4-sql."""
 
 from __future__ import annotations
 
 from gemma_4_sql.exceptions import (
+    AgentExecutionError,
     BenchmarkError,
     ChatError,
     ConfigurationError,
@@ -14,6 +15,7 @@ from gemma_4_sql.exceptions import (
     ExportError,
     GemmaSQLError,
     InferenceError,
+    MultimodalProcessingError,
     PEFTError,
     QuantizationError,
     SchemaExtractionError,
@@ -29,6 +31,7 @@ from gemma_4_sql.sdk.rag import extract_schema_entities, retrieve_relevant_schem
 from gemma_4_sql.tokenization import SQLTokenizer
 
 __all__ = [
+    "AgentExecutionError",
     "BenchmarkError",
     "ChatError",
     "ConfigurationError",
@@ -41,6 +44,7 @@ __all__ = [
     "GemmaSQLError",
     "InferenceError",
     "LiveDatabaseEngine",
+    "MultimodalProcessingError",
     "PEFTError",
     "QuantizationError",
     "SQLSafetyViolationError",

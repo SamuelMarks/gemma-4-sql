@@ -1,8 +1,10 @@
 """Unit and behavioral tests for common train."""
 
-from gemma_4_sql.backends.common_train import (
+from gemma_4_sql.backends._jax_common import (
     apply_nnx_optimizer_update,
     create_nnx_optimizer,
+)
+from gemma_4_sql.backends.common_train import (
     generic_run_training_epochs,
     resolve_training_dataloader,
 )
@@ -84,7 +86,12 @@ def test_run_train_wrapper() -> None:
     assert res_ok.get("checkpoint_dir") == "/tmp/ckpt"
 
     def _fail() -> tuple[str, float]:
-        """Raise RuntimeError for testing error handling."""
+        """Raise RuntimeError for testing error handling.
+
+        Raises:
+            RuntimeError: Always raised.
+
+        """
         raise RuntimeError("train boom")
 
     res_fail = run_train_wrapper("jax", cfg, _fail)
@@ -100,22 +107,51 @@ def test_run_train_wrapper() -> None:
 
 
 def test_resolve_training_dataloader() -> None:
-    """Verify resolve_training_dataloader handles loaded, synthetic fallback, invalid loader, and strict dataset modes."""
+    """Verify resolve_training_dataloader across loaded, synthetic fallback, invalid, and strict modes."""
     import pytest
 
     from gemma_4_sql.exceptions import DependencyMissingError, ETLError
     from gemma_4_sql.type_hints import ETLResultDict
 
     def _loaded_fn() -> ETLResultDict:
-        """Return a valid loaded ETLResultDict."""
-        return {"backend": "jax", "status": "loaded", "dataset": "ds", "split": "train", "batch_size": 1, "loader": [{"inputs": [1]}]}
+        """Return a valid loaded ETLResultDict.
+
+        Returns:
+            Loaded `ETLResultDict` fixture.
+
+        """
+        return {
+            "backend": "jax",
+            "status": "loaded",
+            "dataset": "ds",
+            "split": "train",
+            "batch_size": 1,
+            "loader": [{"inputs": [1]}],
+        }
 
     def _none_loader_fn() -> ETLResultDict:
-        """Return an ETLResultDict with loader=None."""
-        return {"backend": "jax", "status": "loaded", "dataset": "ds", "split": "train", "batch_size": 1, "loader": None}
+        """Return an ETLResultDict with loader=None.
+
+        Returns:
+            `ETLResultDict` with `loader=None`.
+
+        """
+        return {
+            "backend": "jax",
+            "status": "loaded",
+            "dataset": "ds",
+            "split": "train",
+            "batch_size": 1,
+            "loader": None,
+        }
 
     def _err_loader_fn() -> ETLResultDict:
-        """Raise ETLError."""
+        """Raise ETLError.
+
+        Raises:
+            ETLError: Always raised.
+
+        """
         raise ETLError("bad dataset")
 
     loader1, src1 = resolve_training_dataloader("real_ds", _loaded_fn, lambda: [{"inputs": [0]}])

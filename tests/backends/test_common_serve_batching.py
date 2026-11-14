@@ -6,7 +6,6 @@ import asyncio
 from typing import Never
 
 import pytest
-from fastapi.testclient import TestClient
 
 from gemma_4_sql.backends.common_serve import (
     DirectRunnableAppProtocol,
@@ -15,6 +14,7 @@ from gemma_4_sql.backends.common_serve import (
     serve_model_wrapper,
 )
 from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue
+from tests.utils.test_utils import make_test_client
 
 
 def test_generate_request_validation() -> None:
@@ -49,12 +49,12 @@ def _echo_logic(p: str) -> str:
 def test_common_serve_endpoints() -> None:
     """Verify common serve endpoints behavior and lifespan worker cleanup."""
     app = create_common_app("pytorch", "test", generate_logic=_select_1_logic)
-    with TestClient(app) as client:
+    with make_test_client(app) as client:
         assert client.get("/health").status_code == 200
         assert client.get("/ready").status_code == 200
         assert client.get("/v1/models").status_code == 200
 
-    with TestClient(app) as client:
+    with make_test_client(app) as client:
         resp_async = client.post("/generate", json={"prompt": "async"})
         assert resp_async.json()["sql"] == "SELECT 1;"
 
@@ -67,7 +67,15 @@ async def test_worker_async() -> None:
     observed_batch_sizes: list[int] = []
 
     def b_gen(prompts: list[str]) -> list[str]:
-        """Provide b gen test helper recording batch size."""
+        """Provide b gen test helper recording batch size.
+
+        Args:
+            prompts: Input prompt batch.
+
+        Returns:
+            Generated SQL strings or empty list on `'mismatch'`.
+
+        """
         observed_batch_sizes.append(len(prompts))
         if prompts[0] == "mismatch":
             return []
@@ -84,6 +92,41 @@ async def test_worker_async() -> None:
 
         with pytest.raises(ValueError, match="Batch generation returned"):
             await client.post("/generate", json={"prompt": "mismatch"})
+
+    recorded_groups: list[tuple[list[str], int, float]] = []
+
+    def b_gen_with_cfg(prompts: list[str], *, max_length: int = 128, temperature: float = 0.0) -> list[str]:
+        """Record grouped `(prompts, max_length, temperature)` calls.
+
+        Args:
+            prompts: Input prompt batch.
+            max_length: Max generation tokens.
+            temperature: Sampling temperature.
+
+        Returns:
+            Formatted response strings.
+
+        """
+        recorded_groups.append((list(prompts), max_length, temperature))
+        return [f"{p}:{max_length}:{temperature}" for p in prompts]
+
+    app_cfg = create_common_app(
+        "pytorch", "test", batch_generate_logic=b_gen_with_cfg, max_batch_size=4, max_wait_ms=20.0
+    )
+    assert callable(app_cfg.get("/custom-check"))
+    assert callable(app_cfg.post("/custom-post"))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_cfg), base_url="http://test") as client:
+        c1 = asyncio.create_task(client.post("/generate", json={"prompt": "q1", "max_tokens": 32, "temperature": 0.2}))
+        c2 = asyncio.create_task(client.post("/generate", json={"prompt": "q2", "max_tokens": 64, "temperature": 0.7}))
+        rc1, rc2 = await asyncio.gather(c1, c2)
+        assert rc1.json()["sql"] == "q1:32:0.2"
+        assert rc2.json()["sql"] == "q2:64:0.7"
+
+    # Also test 1-arg batch_generate_logic TypeError fallback when non-default max_tokens/temperature are sent
+    app_1arg = create_common_app("pytorch", "test", batch_generate_logic=b_gen, max_batch_size=2)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_1arg), base_url="http://test") as client:
+        r_fallback = await client.post("/generate", json={"prompt": "abc", "max_tokens": 50, "temperature": 0.5})
+        assert r_fallback.json()["sql"] == "RRR"
 
 
 @pytest.mark.asyncio
@@ -123,7 +166,17 @@ async def test_multimodal_request() -> None:
     captured: JSONDict = {}
 
     def _kw_gen(model_name: str, prompt: str, **kwargs: JSONValue) -> dict[str, str]:
-        """Record forwarded multimodal and sampling kwargs."""
+        """Record forwarded multimodal and sampling kwargs.
+
+        Args:
+            model_name: Target model name.
+            prompt: Input prompt.
+            **kwargs: Forwarded generation options.
+
+        Returns:
+            Dictionary containing `'sql'`.
+
+        """
         captured["model"] = model_name
         captured["prompt"] = prompt
         captured.update(kwargs)
@@ -168,19 +221,39 @@ async def test_multimodal_request() -> None:
 
 
 def test_serve_model_wrapper() -> None:
-    """Verify serve model wrapper behavior."""
+    """Verify serve model wrapper behavior and bounded handle eviction."""
+    from gemma_4_sql.backends.common_serve import _MAX_SERVE_APP_HANDLES, get_serve_handle
+
+    app_inst = create_common_app("pytorch", "test")
     res = serve_model_wrapper(
         "pytorch",
         "test",
         max_batch_size=32,
-        app_factory=lambda: create_common_app("pytorch", "test"),
+        app_factory=lambda: app_inst,
         run_server=False,
         port=8000,
     )
     assert res["status"] == "running_pytorch_serve"
+    assert get_serve_handle(res).app is app_inst
+
+    for idx in range(_MAX_SERVE_APP_HANDLES + 2):
+        serve_model_wrapper(
+            "pytorch",
+            f"evict-model-{idx}",
+            max_batch_size=32,
+            app_factory=lambda: app_inst,
+            run_server=False,
+            port=9000 + idx,
+        )
+    assert get_serve_handle(res).app is None
 
     def fail_factory() -> FastAPIAppProtocol:
-        """Provide fail factory test helper."""
+        """Provide fail factory test helper.
+
+        Raises:
+            RuntimeError: Always raised to test error wrapping.
+
+        """
         raise RuntimeError("failed factory")
 
     res2 = serve_model_wrapper(
@@ -214,7 +287,7 @@ def test_json_response_fallback() -> None:
     with pytest.MonkeyPatch.context() as monkeypatch_ctx:
         monkeypatch_ctx.setattr(mod, "JSONResponse", None)
         app = create_common_app("pytorch", "test", generate_logic=_select_1_logic)
-        client = TestClient(app)
+        client = make_test_client(app)
 
         r1 = client.post("/generate", json={"prompt": "sync"})
         assert r1.json()["sql"] == "SELECT 1;"
@@ -233,7 +306,11 @@ def test_sync_fallback_branches() -> None:
     app0: DirectRunnableAppProtocol = create_common_app("pytorch", "test", generate_logic=_g_prefix)
     assert app0.run_direct("q") == "G:q"
 
-    app1: DirectRunnableAppProtocol = create_common_app("pytorch", "test", batch_generate_logic=lambda p: [f"B:{p[0]}"])
+    def _b_prefix(p: list[str]) -> list[str]:
+        """Return B: prefixed first prompt."""
+        return [f"B:{p[0]}"]
+
+    app1: DirectRunnableAppProtocol = create_common_app("pytorch", "test", batch_generate_logic=_b_prefix)
     assert app1.run_direct("q") == "B:q"
 
     app2: DirectRunnableAppProtocol = create_common_app("pytorch", "test")
@@ -252,7 +329,15 @@ async def test_common_serve_cancel_request() -> None:
     worker_started = threading.Event()
 
     def slow_batch(_p: list[str]) -> list[str]:
-        """Signal worker start and wait for release_worker event."""
+        """Signal worker start and wait for release_worker event.
+
+        Args:
+            _p: Prompt batch.
+
+        Returns:
+            Single-element `['SUCCESS']` list.
+
+        """
         worker_started.set()
         release_worker.wait(timeout=1.0)
         return ["SUCCESS"]
@@ -285,7 +370,15 @@ async def test_common_serve_cancel_request_exception() -> None:
     worker_started = threading.Event()
 
     def error_batch(_p: list[str]) -> Never:
-        """Signal worker start, wait for release_worker, then raise RuntimeError."""
+        """Signal worker start, wait for release_worker, then raise RuntimeError.
+
+        Args:
+            _p: Prompt batch.
+
+        Raises:
+            RuntimeError: Always raised after `release_worker`.
+
+        """
         worker_started.set()
         release_worker.wait(timeout=1.0)
         raise RuntimeError("Fail")
@@ -351,19 +444,27 @@ def test_fastapi_missing_and_run_server(monkeypatch: pytest.MonkeyPatch) -> None
         return {"sql": ""}
 
     app_ok = mod.create_backend_serve_app("jax", "test", generate_sql_fn=_ok_sql_fn)
-    client_ok = TestClient(app_ok)
+    client_ok = make_test_client(app_ok)
     assert client_ok.post("/generate", json={"prompt": "hi"}).json()["sql"] == "SELECT 1"
 
     app_empty = mod.create_backend_serve_app("jax", "test", generate_sql_fn=_empty_sql_fn)
-    client_empty = TestClient(app_empty, raise_server_exceptions=False)
+    client_empty = make_test_client(app_empty, raise_server_exceptions=False)
     assert client_empty.post("/generate", json={"prompt": "hi"}).status_code == 500
 
     def _raise_val(**_k: JSONValue) -> dict[str, str]:
-        """Raise ValueError to simulate backend failure."""
+        """Raise ValueError to simulate backend failure.
+
+        Args:
+            **_k: Unused keyword arguments.
+
+        Raises:
+            ValueError: Always raised.
+
+        """
         raise ValueError("boom")
 
     app_err = mod.create_backend_serve_app("jax", "test", generate_sql_fn=_raise_val)
-    client_err = TestClient(app_err, raise_server_exceptions=False)
+    client_err = make_test_client(app_err, raise_server_exceptions=False)
     assert client_err.post("/generate", json={"prompt": "hi"}).status_code == 500
     assert InferenceError("test").backend is None
 

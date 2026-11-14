@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -115,7 +116,9 @@ def _prepare_attempt_kwargs(
     base_temp = extract_float_kwarg(gen_kwargs, "temperature", 0.0)
     current_temp = min(1.0, base_temp + (attempts - 1) * 0.1)
 
-    other_kwargs: dict[str, JSONValue] = {k: v for k, v in gen_kwargs.items() if k not in ("beam_width", "max_length", "temperature")}
+    other_kwargs: dict[str, JSONValue] = {
+        k: v for k, v in gen_kwargs.items() if k not in ("beam_width", "max_length", "temperature")
+    }
     other_kwargs["temperature"] = current_temp
     if context.image_path is not None:
         other_kwargs["image_path"] = str(context.image_path)
@@ -184,7 +187,15 @@ async def _process_single_prompt(
     while attempts < context.max_retries:
         attempts += 1
         (b_width, m_len, other_kwargs) = _prepare_attempt_kwargs(context, attempts, gen_kwargs)
-        gen_res = backend_impl.generate_sql(model_name, current_prompt, beam_width=b_width, max_length=m_len, **other_kwargs)
+        gen_call = functools.partial(
+            backend_impl.generate_sql,
+            model_name,
+            current_prompt,
+            beam_width=b_width,
+            max_length=m_len,
+            **other_kwargs,
+        )
+        gen_res = await asyncio.to_thread(gen_call)
         sql = extract_sql_from_response(str(gen_res.get("sql", ""))) if not is_failed_status(gen_res) else ""
         confidence_score = extract_float_kwarg(gen_res, "confidence_score", 1.0)
         if context.min_confidence and confidence_score < context.min_confidence:
@@ -195,13 +206,24 @@ async def _process_single_prompt(
                 "success": False,
                 "error": f"Confidence score {confidence_score:.2f} below threshold {context.min_confidence}",
             })
-            current_prompt = f"""{base_prompt}
-Previous attempt was rejected due to low confidence ({confidence_score:.2f}). Please provide a more certain SQL query."""
+            current_prompt = (
+                f"{base_prompt}\n"
+                f"Previous attempt was rejected due to low confidence ({confidence_score:.2f}). "
+                "Please provide a more certain SQL query."
+            )
             final_sql = sql
             continue
         (is_success, query_results, error_msg) = await engine.execute_with_feedback_async(sql)
-        error_msg = error_msg[:MAX_ERR_LEN] + "... (truncated)" if error_msg and len(error_msg) > MAX_ERR_LEN else error_msg
-        history.append({"attempt": attempts, "prompt": current_prompt, "sql": sql, "success": is_success, "error": error_msg})
+        error_msg = (
+            error_msg[:MAX_ERR_LEN] + "... (truncated)" if error_msg and len(error_msg) > MAX_ERR_LEN else error_msg
+        )
+        history.append({
+            "attempt": attempts,
+            "prompt": current_prompt,
+            "sql": sql,
+            "success": is_success,
+            "error": error_msg,
+        })
         if is_success:
             success = True
             final_sql = sql
@@ -282,12 +304,16 @@ async def run_agentic_loop_async(
     if context is None:
         context = AgentContext()
     db_kwargs = kwargs.get("db_kwargs")
-    gen_kwargs: dict[str, JSONValue] = {k: v for k, v in kwargs.items() if k != "db_kwargs" and not isinstance(v, Mapping)}
+    gen_kwargs: dict[str, JSONValue] = {
+        k: v for k, v in kwargs.items() if k != "db_kwargs" and not isinstance(v, Mapping)
+    }
     engine = LiveDatabaseEngine(db_path=context.db_path, ddl=context.ddl, db_type=context.db_type, db_kwargs=db_kwargs)
     backend_impl = get_backend(backend)
     prompts = prompt if isinstance(prompt, list) else [prompt]
     try:
-        tasks = [_process_single_prompt(backend, backend_impl, model_name, p, engine, context, **gen_kwargs) for p in prompts]
+        tasks = [
+            _process_single_prompt(backend, backend_impl, model_name, p, engine, context, **gen_kwargs) for p in prompts
+        ]
         results = list(await asyncio.gather(*tasks))
     finally:
         await engine.close_async()
@@ -347,7 +373,9 @@ def run_agentic_loop(
         A single result dictionary or list of result dictionaries.
 
     """
-    res: AgentLoopResultDict | list[AgentLoopResultDict] = run_coroutine_sync(lambda: run_agentic_loop_async(model_name, prompt, backend=backend, context=context, **kwargs))
+    res: AgentLoopResultDict | list[AgentLoopResultDict] = run_coroutine_sync(
+        lambda: run_agentic_loop_async(model_name, prompt, backend=backend, context=context, **kwargs)
+    )
     return res
 
 

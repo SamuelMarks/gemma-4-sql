@@ -28,7 +28,8 @@ def apply_peft(
         **kwargs: Backend-specific LoRA parameters.
 
     Returns:
-        Structured `PEFTResultDict` containing `backend`, `action`, `model`, `target_modules`, LoRA hyperparameters, and `status`.
+        Structured `PEFTResultDict` containing `backend`, `action`, `model`,
+        `target_modules`, LoRA hyperparameters, and `status`.
 
     """
     resolved_modules = list(target_modules) if target_modules is not None else ["q_proj", "v_proj"]

@@ -5,17 +5,40 @@ from __future__ import annotations
 import io
 import struct
 import sys
-from typing import NoReturn
-from unittest.mock import MagicMock, patch
+import types
+from pathlib import Path
+from typing import NoReturn, Self
 
 import pytest
 
 import gemma_4_sql.backends.common_multimodal as mod
 from gemma_4_sql.exceptions import MultimodalProcessingError
+from gemma_4_sql.type_hints import AudioInput, ImageInput
+from tests.utils.test_utils import FakeModuleNamespace
 
 
 class _DummyPILSentinel:
     """Non-None sentinel for `mod.Image` without an `open` method."""
+
+
+class _SavableImage:
+    """Typed PIL-like image double implementing `SavablePILImageProtocol`."""
+
+    def save(self, fp: io.BytesIO, format: str = "PNG") -> None:
+        """Write deterministic PNG marker bytes into `fp`."""
+        _ = format
+        fp.write(b"saved_png_bytes")
+
+
+class _FakePILPackage(FakeModuleNamespace):
+    """Typed `PIL` package module exposing an `Image` submodule."""
+
+    Image: FakeModuleNamespace
+
+    def __init__(self) -> None:
+        """Initialize fake `PIL` module with a `PIL.Image` submodule."""
+        super().__init__("PIL")
+        self.Image = FakeModuleNamespace("PIL.Image")
 
 
 def test_missing_jnp_and_pil_fallbacks(
@@ -23,64 +46,90 @@ def test_missing_jnp_and_pil_fallbacks(
     synthetic_image_bytes: bytes,
     synthetic_wav_bytes: bytes,
 ) -> None:
-    """Verify load_image_bytes, process_audio, and _parse_wav_samples handle missing jax.numpy/PIL and multi-bit WAVs."""
+    """Verify image loading, audio processing, and WAV parsing handle missing optional deps and multi-bit WAVs."""
     assert len(synthetic_image_bytes) > 0
     assert len(synthetic_wav_bytes) > 0
 
     def _none_attr(*_a: str, **_k: str) -> None:
-        """Return None for optional_attr."""
+        """Return None for import_optional_submodule."""
         return
 
-    def _none_import(_name: str) -> None:
+    def _none_import(_name: str, _proto: type | None = None) -> None:
         """Return None for optional_import."""
         return
 
-    with patch("gemma_4_sql.backends.common_multimodal.logger.debug") as mock_debug:
-        monkeypatch.setattr(mod, "Image", None)
-        monkeypatch.setattr(mod, "optional_attr", _none_attr)
-        mock_image_input = MagicMock()
-        mock_image_input.save = MagicMock()
-        with pytest.raises(MultimodalProcessingError):
-            mod.load_image_bytes(mock_image_input)
-        assert mock_debug.call_args_list[0][0][0] == "Failed to import PIL: %s"
+    debug_messages: list[str] = []
 
-    with patch("gemma_4_sql.backends.common_multimodal.logger.debug"):
-        monkeypatch.setattr(mod, "jnp", None)
-        monkeypatch.setattr(mod, "optional_import", _none_import)
-        wav_header = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    def _record_debug(msg: str, *_args: str) -> None:
+        """Record debug format messages emitted by `mod.logger`."""
+        debug_messages.append(msg)
+
+    with monkeypatch.context() as mp:
+        mp.setattr(mod.logger, "debug", _record_debug)
+        mp.setattr(mod, "Image", None)
+        mp.setattr(mod, "import_optional_submodule", _none_attr)
+        with pytest.raises(MultimodalProcessingError):
+            mod.load_image_bytes(_SavableImage())
+        assert debug_messages[0] == "Failed to import PIL: %s"
+
+    with monkeypatch.context() as mp:
+        mp.setattr(mod.logger, "debug", _record_debug)
+        mp.setattr(mod, "jnp", None)
+        mp.setattr(mod, "optional_import", _none_import)
+        wav_header = (
+            b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00"
+            b"\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+        )
         res = mod.process_audio(wav_header)
         assert len(res["audio_values"]) > 0
 
         with pytest.raises(MultimodalProcessingError):
             mod.process_audio(None)
 
-    wav_8bit = b"RIFF\x26\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x44\xac\x00\x00\x01\x00\x08\x00data\x02\x00\x00\x00\x80\xff"
+    wav_8bit = (
+        b"RIFF\x26\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00"
+        b"\x44\xac\x00\x00\x44\xac\x00\x00\x01\x00\x08\x00data\x02\x00\x00\x00\x80\xff"
+    )
     res_8bit = mod._parse_wav_samples(wav_8bit)
     assert len(res_8bit[0]) == 2
     assert res_8bit[0][0] == 0.0
 
-    wav_24bit = b"RIFF\x2a\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\xcc\x04\x02\x00\x03\x00\x18\x00data\x06\x00\x00\x00\x00\x00\x40\x00\x00\xc0"
+    wav_24bit = (
+        b"RIFF\x2a\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00"
+        b"\x44\xac\x00\x00\xcc\x04\x02\x00\x03\x00\x18\x00data\x06\x00\x00\x00\x00\x00\x40\x00\x00\xc0"
+    )
     res_24bit = mod._parse_wav_samples(wav_24bit)
     assert len(res_24bit[0]) == 2
     assert res_24bit[0][0] == pytest.approx(0.5, rel=1e-4)
     assert res_24bit[0][1] == pytest.approx(-0.5, rel=1e-4)
 
-    wav_32bit_int = b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x10\xb1\x02\x00\x04\x00\x20\x00" + b"data\x04\x00\x00\x00" + struct.pack("<i", 1073741824)
+    wav_32bit_int = (
+        b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x10\xb1\x02\x00\x04\x00\x20\x00"
+        + b"data\x04\x00\x00\x00"
+        + struct.pack("<i", 1073741824)
+    )
     res_32int = mod._parse_wav_samples(wav_32bit_int)
     assert res_32int[0][0] == pytest.approx(0.5, rel=1e-4)
 
-    wav_32bit_float = b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x03\x00\x01\x00\x44\xac\x00\x00\x10\xb1\x02\x00\x04\x00\x20\x00" + b"data\x04\x00\x00\x00" + struct.pack("<f", 0.25)
+    wav_32bit_float = (
+        b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x03\x00\x01\x00\x44\xac\x00\x00\x10\xb1\x02\x00\x04\x00\x20\x00"
+        + b"data\x04\x00\x00\x00"
+        + struct.pack("<f", 0.25)
+    )
     res_32float = mod._parse_wav_samples(wav_32bit_float)
     assert res_32float[0][0] == pytest.approx(0.25, rel=1e-5)
 
-    wav_invalid_bits = b"RIFF\x26\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x44\xac\x00\x00\x01\x00\x0c\x00data\x02\x00\x00\x00\x00\x00"
+    wav_invalid_bits = (
+        b"RIFF\x26\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00"
+        b"\x44\xac\x00\x00\x44\xac\x00\x00\x01\x00\x0c\x00data\x02\x00\x00\x00\x00\x00"
+    )
     with pytest.raises(MultimodalProcessingError, match="Unsupported WAV bits_per_sample: 12"):
         mod._parse_wav_samples(wav_invalid_bits)
 
 
 def test_process_audio_jax_and_lazy_import(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify process_audio handles jax arrays, lazy jax.numpy imports, and missing jax.numpy fallback."""
-    import jax.numpy as jnp_real
+    from gemma_4_sql.backends.jax.gemma4._jnp import jnp as jnp_real
 
     audio_input = jnp_real.array([[1.0, 2.0], [3.0, 4.0]])
     res = mod.process_audio(audio_input)
@@ -92,7 +141,9 @@ def test_process_audio_jax_and_lazy_import(monkeypatch: pytest.MonkeyPatch) -> N
     res_tail = mod.process_audio(short_tail, sample_rate=16000, n_mels=16, frame_length_ms=25, frame_shift_ms=10)
     assert res_tail["num_frames"] == 1
 
-    res_small_mel = mod.process_audio(jnp_real.ones(600, dtype=jnp_real.float32), sample_rate=8000, n_mels=64, frame_length_ms=10, frame_shift_ms=5)
+    res_small_mel = mod.process_audio(
+        jnp_real.ones(600, dtype=jnp_real.float32), sample_rate=8000, n_mels=64, frame_length_ms=10, frame_shift_ms=5
+    )
     assert res_small_mel["num_frames"] > 1
 
     monkeypatch.setattr(mod, "jnp", None)
@@ -101,15 +152,18 @@ def test_process_audio_jax_and_lazy_import(monkeypatch: pytest.MonkeyPatch) -> N
     assert len(res_lazy["audio_values"]) > 0
 
     monkeypatch.setattr(mod, "jnp", None)
-    wav_header = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    wav_header = (
+        b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00"
+        b"\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    )
     res_no_jnp = mod.process_audio(wav_header)
     assert len(res_no_jnp["spectrogram"]) == res_no_jnp["num_frames"]
 
-    def _none_import(_name: str) -> None:
+    def _none_import(_name: str, _proto: type | None = None) -> None:
         """Return None for optional_import."""
         return
 
-    def _raw_bytes(_x: mod.AudioInput) -> bytes:
+    def _raw_bytes(_x: AudioInput) -> bytes:
         """Return b'raw'."""
         return b"raw"
 
@@ -117,14 +171,19 @@ def test_process_audio_jax_and_lazy_import(monkeypatch: pytest.MonkeyPatch) -> N
         """Return `([0.0], 16000)`."""
         return ([0.0], 16000)
 
+    logged_debug: list[str] = []
+
+    def _record_debug(msg: str, *_args: str) -> None:
+        """Record debug messages emitted during `process_audio`."""
+        logged_debug.append(msg)
+
     monkeypatch.setattr(mod, "optional_import", _none_import)
     monkeypatch.setattr(mod, "jnp", None)
-    mock_logger = MagicMock()
-    monkeypatch.setattr(mod, "logger", mock_logger)
+    monkeypatch.setattr(mod.logger, "debug", _record_debug)
     monkeypatch.setattr(mod, "load_audio_bytes", _raw_bytes)
     monkeypatch.setattr(mod, "_parse_wav_samples", _zero_wav)
     mod.process_audio(b"fake")
-    assert any("Failed to import jax.numpy" in str(c) for c in mock_logger.debug.call_args_list)
+    assert any("Failed to import jax.numpy" in m for m in logged_debug)
 
 
 def test_parse_wav_samples_chunk_variants(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,7 +213,15 @@ def test_parse_wav_samples_chunk_variants(monkeypatch: pytest.MonkeyPatch) -> No
     call_count = 0
 
     def _unpack_fail_subchunk(fmt: str, buffer: bytes) -> tuple[int | float | bytes, ...]:
-        """Raise struct.error on the 5th unpack call (subchunk size)."""
+        """Raise struct.error on the 5th unpack call (subchunk size).
+
+        Returns:
+            Unpacked tuple from `struct.unpack` on calls other than the 5th.
+
+        Raises:
+            error: On the 5th unpack call to simulate a corrupted subchunk header.
+
+        """
         nonlocal call_count
         call_count += 1
         if call_count == 5:
@@ -168,7 +235,7 @@ def test_parse_wav_samples_chunk_variants(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_format_multimodal_prompt_and_image_processing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify format_multimodal_prompt (including tokenizer alignment), base64 image loading, and PIL image processing."""
+    """Verify format_multimodal_prompt with tokenizer alignment, base64 image loading, and PIL image processing."""
     with pytest.raises(MultimodalProcessingError):
         mod.format_multimodal_prompt("")
 
@@ -187,19 +254,11 @@ def test_format_multimodal_prompt_and_image_processing(monkeypatch: pytest.Monke
 
     assert mod.load_image_bytes("data:image/png;base64,iVBORw0KGgo=") == bytes.fromhex("89504e470d0a1a0a")
 
-    class SavableImage:
-        """Stub PIL-like image with save method."""
-
-        def save(self, fp: io.BytesIO, format: str = "PNG") -> None:
-            """Write dummy PNG bytes."""
-            _ = format
-            fp.write(b"saved_png_bytes")
-
-    savable_img = SavableImage()
+    savable_img = _SavableImage()
     monkeypatch.setattr(mod, "Image", _DummyPILSentinel())
     assert mod.load_image_bytes(savable_img) == b"saved_png_bytes"
     monkeypatch.setattr(mod, "Image", None)
-    monkeypatch.setitem(sys.modules, "PIL", MagicMock(Image=_DummyPILSentinel()))
+    monkeypatch.setitem(sys.modules, "PIL", _FakePILPackage())
     assert mod.load_image_bytes(savable_img) == b"saved_png_bytes"
 
     with pytest.raises(MultimodalProcessingError, match="target_size dimensions must be positive"):
@@ -214,55 +273,75 @@ def test_format_multimodal_prompt_and_image_processing(monkeypatch: pytest.Monke
     assert res_img["num_patches"] == 256
     assert res_img["shape"] == (3, 224, 224)
 
-    import jax.numpy as jnp_real
+    from gemma_4_sql.backends.jax.gemma4._jnp import jnp as jnp_real
 
     dummy_arr = jnp_real.zeros((3, 14, 14), dtype=jnp_real.float32)
     dummy_aud_arr = jnp_real.zeros(160, dtype=jnp_real.float32)
-    with (
-        patch.object(
-            mod,
-            "process_image",
-            return_value={"pixel_values": dummy_arr, "patches": dummy_arr, "num_patches": 1, "shape": (3, 14, 14)},
-        ),
-        patch.object(
-            mod,
-            "process_audio",
-            return_value={"audio_values": dummy_aud_arr, "spectrogram": dummy_aud_arr, "num_frames": 1, "sample_rate": 16000},
-        ),
-    ):
+
+    dummy_px_list: list[list[list[float]]] = [[[0.0]]]
+    dummy_patches_list: list[list[float]] = [[0.0]]
+    dummy_au_list: list[float] = [0.0]
+    dummy_spec_list: list[list[float]] = [[0.0]]
+
+    def _fake_process_image(_inp: ImageInput | mod.SavablePILImageProtocol) -> mod.ProcessedImageDict:
+        """Return synthetic `ProcessedImageDict`."""
+        return {"pixel_values": dummy_px_list, "patches": dummy_patches_list, "num_patches": 1, "shape": (3, 14, 14)}
+
+    def _fake_process_audio(_inp: str | Path | bytes | mod.NDArrayProtocol) -> mod.ProcessedAudioDict:
+        """Return synthetic `ProcessedAudioDict`."""
+        return {"audio_values": dummy_au_list, "spectrogram": dummy_spec_list, "num_frames": 1, "sample_rate": 16000}
+
+    def _identity_convert(arr: mod._ConvertibleFeatureInput) -> mod._ConvertibleFeatureInput:
+        """Return `arr` unchanged."""
+        return arr
+
+    with monkeypatch.context() as mp:
+        mp.setattr(mod, "process_image", _fake_process_image)
+        mp.setattr(mod, "process_audio", _fake_process_audio)
+
         p_out, pix_out, aud_out = mod.prepare_multimodal_inputs(
             "SELECT 1",
             {"image_path": "img.png", "audio_path": "aud.wav"},
-            lambda arr: arr,
+            _identity_convert,
         )
         assert "<image>" in p_out
         assert "<audio>" in p_out
-        assert pix_out is dummy_arr
-        assert aud_out is dummy_aud_arr
+        assert pix_out is dummy_px_list
+        assert aud_out is dummy_au_list
 
-        p_text, pix_none, aud_none = mod.prepare_multimodal_inputs("SELECT 1", {}, lambda arr: arr)
+        p_text, pix_none, aud_none = mod.prepare_multimodal_inputs("SELECT 1", {}, _identity_convert)
         assert p_text == "SELECT 1"
         assert pix_none is None
         assert aud_none is None
 
         p_pre, pix_pre, aud_pre = mod.prepare_multimodal_inputs(
             "SELECT 1",
-            {"image_path": "img.png", "audio_path": "aud.wav", "pixel_values": dummy_arr, "audio_values": dummy_aud_arr},
-            lambda arr: arr,
+            {
+                "image_path": "img.png",
+                "audio_path": "aud.wav",
+                "pixel_values": dummy_arr,
+                "audio_values": dummy_aud_arr,
+            },
+            _identity_convert,
         )
         assert "<image>" in p_pre
         assert pix_pre is dummy_arr
         assert aud_pre is dummy_aud_arr
 
-    class MockFailingPILImage:
+    class _FailingPILImage:
         """Stub PIL Image that raises ValueError on open."""
 
         @staticmethod
         def open(_buf: io.BytesIO) -> NoReturn:
-            """Raise ValueError."""
+            """Raise ValueError.
+
+            Raises:
+                ValueError: Always raised to simulate corrupted image input.
+
+            """
             raise ValueError("PIL error")
 
-    monkeypatch.setattr(mod, "Image", MockFailingPILImage)
+    monkeypatch.setattr(mod, "Image", _FailingPILImage)
     with pytest.raises(MultimodalProcessingError, match="Corrupted or unreadable image:"):
         mod.process_image(b"fakebytes", target_size=(224, 224), patch_size=14)
 
@@ -270,6 +349,57 @@ def test_format_multimodal_prompt_and_image_processing(monkeypatch: pytest.Monke
     with pytest.raises(MultimodalProcessingError, match=r"PIL\.Image\.open is not callable"):
         mod.process_image(b"fakebytes", target_size=(224, 224), patch_size=14)
 
+    class _ShortBytesImg:
+        """PIL image double returning too few RGB bytes."""
+
+        def __enter__(self) -> Self:
+            """Enter context.
+
+            Returns:
+                Self context manager instance.
+
+            """
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc_val: BaseException | None,
+            exc_tb: types.TracebackType | None = None,
+        ) -> None:
+            """Exit context."""
+            _ = (exc_type, exc_val, exc_tb)
+
+        def convert(self, _mode: str) -> _ShortBytesImg:
+            """Return self."""
+            return self
+
+        def resize(self, _size: tuple[int, int], _resample: int = 2) -> _ShortBytesImg:
+            """Return self."""
+            return self
+
+        def tobytes(self) -> bytes:
+            """Return truncated 3-byte payload."""
+            return b"rgb"
+
+    class _ShortPILModule:
+        """PIL Image module double returning `_ShortBytesImg`."""
+
+        @staticmethod
+        def open(_fp: io.BytesIO) -> _ShortBytesImg:
+            """Open `_ShortBytesImg`.
+
+            Returns:
+                `_ShortBytesImg` stub instance.
+
+            """
+            return _ShortBytesImg()
+
+    monkeypatch.setattr(mod, "Image", _ShortPILModule)
+    with pytest.raises(MultimodalProcessingError, match="Decoded RGB byte buffer length"):
+        mod.process_image(b"short", target_size=(14, 14), patch_size=14)
+
+    monkeypatch.setattr(mod, "Image", None)
     monkeypatch.setattr(mod, "jnp", None)
-    with pytest.raises(MultimodalProcessingError, match="Corrupted or unreadable image:"):
+    with pytest.raises(MultimodalProcessingError, match="Pillow library is required"):
         mod.process_image(b"bad", target_size=(224, 224), patch_size=14)

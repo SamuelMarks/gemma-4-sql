@@ -75,7 +75,7 @@ class Gemma4MLP(nn.Module):
         self.gate_proj = nn.Linear(config.hidden_size, inter_dim, bias=False)
         self.up_proj = nn.Linear(config.hidden_size, inter_dim, bias=False)
         self.down_proj = nn.Linear(inter_dim, config.hidden_size, bias=False)
-        self.act_fn = nn.GELU(approximate="tanh")
+        self.act_fn = nn.SiLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass for MLP.

@@ -35,11 +35,11 @@ config = ETLConfig(dataset_name="", split="train", duckdb_path="my_dataset.duckd
 dataloader_info = etl_posttrain(config=config, backend="jax")
 ```
 
-**Note:** The DuckDB table should contain the standard format expected by `gemma_4_sql`, primarily `sql_prompt` (or `question`) and `sql` (or `query`) text columns.
+**Note:** The DuckDB table is automatically mapped using `tokenize_dataset_element` in `backends/common_data.py`, supporting `sql_prompt` / `question` / `prompt` text columns, `sql` / `query` target columns, DPO preference columns (`chosen` / `chosen_sql` and `rejected` / `rejected_sql`), and optional multimodal columns (`image` / `image_url` / `image_bytes` and `audio` / `audio_clip`).
 
 ## 2. Using DuckDB as the Live Evaluation Engine
 
-Gemma-4-SQL's `LiveDatabaseEngine` supports executing models directly against DuckDB for feedback loops and evaluation metrics (Execution Accuracy - EX).
+Gemma-4-SQL's `LiveDatabaseEngine` supports executing models directly against DuckDB for feedback loops and evaluation metrics (Execution Accuracy - EX). By default (`read_only=True`), `DuckDBAdapter` enforces both dialect-aware SQL lexer checks and DuckDB driver-level external access lockdown (`SET enable_external_access = false` and `READ_ONLY` file mode).
 
 ```python
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
@@ -61,16 +61,16 @@ from gemma_4_sql.sdk.duckdb_extension import embed_in_duckdb
 conn = duckdb.connect("my_database.duckdb")
 
 # This registers the `ask_gemma` scalar function
-embed_in_duckdb(conn=conn, model_name="google/gemma-4-sql-2b", backend="jax", db_path="my_database.duckdb")
+embed_in_duckdb(conn=conn, model_name="google/gemma-4-E2B-it", backend="jax", db_path="my_database.duckdb")
 
 # Query the database in natural language using standard SQL
 result = conn.execute("SELECT ask_gemma('What is the total revenue for 2024?')").fetchall()
 
-# Result is a JSON string containing the generated SQL and execution success/data
+# Result is a JSON string containing prompt, generated_sql, results, success (and error on failure)
 print(result[0][0])
 ```
 
-*Note on Backends:* The `backend` parameter defaults to `"jax"` but supports any registered execution engine: `"jax"`, `"pytorch"`, `"keras"`, `"maxtext"`, or `"mlx"`.
+*Note on Backends:* The `backend` parameter defaults to `"jax"` and supports any registered execution engine: `"jax"`, `"pytorch"`, `"pytorch_hf"`, `"pytorch_native"`, `"keras"`, `"maxtext"`, or `"mlx"`.
 
 ### Command Line Usage
 

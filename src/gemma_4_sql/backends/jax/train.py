@@ -1,29 +1,32 @@
-"""JAX-specific training pipeline."""
+"""JAX-specific training pipeline with masked next-token causal LM cross-entropy."""
 
 from __future__ import annotations
 
-import contextlib
-from collections.abc import Callable, Iterable, Mapping, MutableMapping
-from typing import Protocol, SupportsFloat, TypeGuard, runtime_checkable
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from typing import Protocol, SupportsFloat, runtime_checkable
 
 import jax
-import jax.numpy as jnp
 import optax
 from flax import nnx
 from jax import Array
 
-from gemma_4_sql.backends.common_dpo import ScalarItemProtocol
-from gemma_4_sql.backends.common_inference import call_jax_causal_lm
-from gemma_4_sql.backends.common_train import (
+from gemma_4_sql._types_tensors import extract_scalar_float
+from gemma_4_sql.backends._jax_common import (
     NNXOptimizerProtocol,
+    call_jax_causal_lm,
+)
+from gemma_4_sql.backends._jax_common import (
+    apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
+)
+from gemma_4_sql.backends.common_dpo import ScalarItemProtocol
+from gemma_4_sql.backends.common_train import (
     generic_run_training_epochs,
     resolve_training_dataloader,
     run_train_wrapper,
 )
-from gemma_4_sql.backends.common_train import (
-    apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
-)
+from gemma_4_sql.backends.jax._protocols import TypedJaxDeviceProtocol, is_jnp_missing
 from gemma_4_sql.backends.jax.etl import build_dataloader
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.gemma4.config import ModelConfig, resolve_gemma4_config
 from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM
 from gemma_4_sql.backends.jax.inference import MODEL_CACHE as _MODEL_CACHE
@@ -32,20 +35,14 @@ from gemma_4_sql.type_hints import (
     ETLConfig,
     JaxCausalLMProtocol,
     JaxShardingProtocol,
+    JaxTrainingState,
     TrainingConfig,
-    TrainingLoopState,
     TrainResultDict,
 )
 
 Gemma4Config = ModelConfig
+IGNORE_INDEX = -100
 type JaxTrainStepFn = Callable[..., Array | ScalarItemProtocol | SupportsFloat | float]
-
-
-def _is_mutable_batch[BatchValT](
-    batch: Mapping[str, BatchValT] | None,
-) -> TypeGuard[MutableMapping[str, BatchValT]]:
-    """Narrow `batch` mapping to `MutableMapping` for in-place sharded tensor updates."""
-    return batch is not None
 
 
 @runtime_checkable
@@ -53,11 +50,27 @@ class _NNXValueAndGradModuleProtocol(Protocol):
     """Protocol for a `flax.nnx` module exposing `value_and_grad` and `jit`."""
 
     def value_and_grad(self, fn: Callable[..., Array], /) -> Callable[..., tuple[Array, Array]]:
-        """Create a value-and-gradient function for an NNX module."""
+        """Create a value-and-gradient function for an NNX module.
+
+        Args:
+            fn: Loss callable accepting `(model, batch)`.
+
+        Returns:
+            Callable returning `(loss, grads)`.
+
+        """
         ...
 
     def jit(self, fn: JaxTrainStepFn, /) -> JaxTrainStepFn:
-        """JIT-compile an NNX function."""
+        """JIT-compile an NNX function.
+
+        Args:
+            fn: Training step callable.
+
+        Returns:
+            Compiled training step callable.
+
+        """
         ...
 
 
@@ -83,25 +96,48 @@ def _loss_fn(
     model: Callable[..., Array] | JaxCausalLMProtocol | Gemma4ForCausalLM,
     batch: Mapping[str, Array],
 ) -> Array:
-    """Compute the mean cross-entropy loss for the model on a given token batch.
+    """Compute shifted, `loss_mask`-weighted next-token causal cross-entropy loss.
+
+    Supports both pre-shifted ETL batches (`inputs = full[:-1]`, `targets = full[1:]`,
+    `loss_mask`) and raw unshifted `input_ids`-only batches (`logits[:, :-1, :]` vs
+    `input_ids[:, 1:]`), masking out prompt tokens (`loss_mask == 0`) and `IGNORE_INDEX`.
 
     Args:
         model: Trainable JAX/Flax NNX causal language model.
-        batch: Batch dictionary containing `'inputs'` and `'targets'` token ID arrays.
+        batch: Batch mapping containing `'inputs'`/`'input_ids'`, optional `'targets'`/`'labels'`,
+            and optional `'loss_mask'`.
 
     Returns:
-        Scalar mean cross-entropy loss array.
+        Scalar mean masked cross-entropy loss array.
 
     """
-    inputs = batch["inputs"]
+    inputs = batch["inputs"] if "inputs" in batch else batch["input_ids"]
     seq_len = inputs.shape[1] if len(inputs.shape) > 1 else 1
     positions = jnp.arange(seq_len)[None, :]
     raw_out = call_jax_causal_lm(model, inputs, positions)
     first_out = raw_out[0] if isinstance(raw_out, tuple) else raw_out
     logits: Array = first_out if isinstance(first_out, Array) else jnp.asarray(first_out)
-    targets = batch["targets"]
-    loss = optax.softmax_cross_entropy_with_integer_labels(logits, targets)
-    res: Array = jnp.mean(loss)
+
+    raw_targets = batch["targets"] if "targets" in batch else batch.get("labels")
+    if raw_targets is None:
+        shift_logits = logits[:, :-1, :]
+        shift_targets = inputs[:, 1:]
+        raw_mask = batch["loss_mask"][:, 1:] if "loss_mask" in batch else None
+    else:
+        min_len = min(int(logits.shape[1]), int(raw_targets.shape[-1]))
+        shift_logits = logits[:, :min_len, :]
+        shift_targets = raw_targets[:, :min_len]
+        raw_mask = batch["loss_mask"][:, :min_len] if "loss_mask" in batch else None
+
+    valid_mask = (shift_targets != IGNORE_INDEX).astype(jnp.float32)
+    if raw_mask is not None:
+        valid_mask *= raw_mask.astype(jnp.float32)
+
+    safe_targets = jnp.where(shift_targets >= 0, shift_targets, 0)
+    per_token_loss = optax.softmax_cross_entropy_with_integer_labels(shift_logits, safe_targets)
+    masked_loss = per_token_loss * valid_mask
+    denom = jnp.maximum(jnp.sum(valid_mask), 1.0)
+    res: Array = jnp.sum(masked_loss) / denom
     return res
 
 
@@ -122,9 +158,9 @@ def _get_train_step_fn() -> JaxTrainStepFn:
             backend="jax",
         )
 
-    def train_step(
+    def train_step[OptOutT](
         model: JaxCausalLMProtocol,
-        optimizer: NNXOptimizerProtocol[JaxCausalLMProtocol, Array],
+        optimizer: NNXOptimizerProtocol[JaxCausalLMProtocol, Array, OptOutT],
         batch: Mapping[str, Array],
     ) -> Array:
         """Execute a single JAX-compiled training step.
@@ -132,7 +168,7 @@ def _get_train_step_fn() -> JaxTrainStepFn:
         Args:
             model: Trainable Flax NNX causal language model.
             optimizer: Flax NNX optimizer instance.
-            batch: Token batch dictionary with `'inputs'` and `'targets'`.
+            batch: Token batch dictionary with `'inputs'`, `'targets'`, and optional `'loss_mask'`.
 
         Returns:
             Scalar batch loss tensor.
@@ -146,18 +182,19 @@ def _get_train_step_fn() -> JaxTrainStepFn:
 
 
 def _run_training_epochs[ModelT, OptT, BatchValT](
-    state: TrainingLoopState[ModelT, OptT, Mapping[str, BatchValT]] | TrainingLoopState[ModelT, OptT, dict[str, BatchValT]],
+    state: JaxTrainingState[ModelT, OptT, Mapping[str, BatchValT]]
+    | JaxTrainingState[ModelT, OptT, dict[str, BatchValT]],
 ) -> float:
     """Run supervised training epochs over the JAX dataloader.
 
     Args:
-        state: `TrainingLoopState` holding dataloader, model, optimizer, sharding, and step function.
+        state: `JaxTrainingState` holding dataloader, model, optimizer, sharding, and step function.
 
     Returns:
         Mean batch loss from the final epoch.
 
     """
-    dataloader: Iterable[Mapping[str, BatchValT]] = state.dataloader or ()
+    dataloader: Iterable[Mapping[str, BatchValT]] = state.dataloader
     train_step = state.train_step
     model = state.model
     sharding = state.sharding
@@ -166,26 +203,25 @@ def _run_training_epochs[ModelT, OptT, BatchValT](
         """Place batch tensors onto target sharding and execute one training step.
 
         Args:
-            batch: Dictionary with `inputs` and `targets` arrays.
+            batch: Mapping with `inputs`, `targets`, and optional `loss_mask` arrays.
 
         Returns:
             Scalar batch loss as a float.
 
         """
-        device_put_fn: Callable[[BatchValT, str | Mapping[str, str] | JaxShardingProtocol | None], BatchValT] = jax.device_put
-        mutable_batch = dict(batch)
-        mutable_batch["inputs"] = device_put_fn(mutable_batch["inputs"], sharding)
-        mutable_batch["targets"] = device_put_fn(mutable_batch["targets"], sharding)
-        with contextlib.suppress(TypeError):
-            assert _is_mutable_batch(batch)
-            batch["inputs"] = mutable_batch["inputs"]
-            batch["targets"] = mutable_batch["targets"]
-        assert train_step is not None
-        loss = train_step(model, state.optimizer, mutable_batch)
-        if isinstance(loss, ScalarItemProtocol):
-            return float(loss.item())
-        if isinstance(loss, (int, float, SupportsFloat)):
-            return float(loss)
+        device_put_fn: Callable[[BatchValT, str | Mapping[str, str] | JaxShardingProtocol | None], BatchValT] = vars(
+            jax
+        )["device_put"]
+        sharded_batch: dict[str, BatchValT] = {
+            **batch,
+            "inputs": device_put_fn(batch["inputs"], sharding),
+            "targets": device_put_fn(batch["targets"], sharding),
+        }
+        if "loss_mask" in batch:
+            sharded_batch["loss_mask"] = device_put_fn(batch["loss_mask"], sharding)
+        loss = train_step(model, state.optimizer, sharded_batch)
+        if isinstance(loss, (ScalarItemProtocol, int, float, SupportsFloat)):
+            return extract_scalar_float(loss)
         return 0.0
 
     return generic_run_training_epochs(state.epochs, dataloader, process_batch)
@@ -228,12 +264,16 @@ def _execute_train(
         ValueError: If dataloader is invalid.
 
     """
-    if jax is None or jnp is None or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
+    if jax is None or is_jnp_missing(jnp) or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
         raise DependencyMissingError("JAX dependencies are missing for training.")
 
     cached_model = _MODEL_CACHE.get_model(model_name)
-    model = cached_model if cached_model is not None else Gemma4ForCausalLM(_resolve_gemma4_config(model_name), rngs=nnx.Rngs(0))
-    mesh = jax.sharding.Mesh(jax.devices(), ("data",))
+    if isinstance(cached_model, nnx.Module):
+        model: Gemma4ForCausalLM | nnx.Module = cached_model
+    else:
+        model = Gemma4ForCausalLM(_resolve_gemma4_config(model_name), rngs=nnx.Rngs(0))
+    devices_fn: Callable[[], Sequence[TypedJaxDeviceProtocol]] = vars(jax)["devices"]
+    mesh = jax.sharding.Mesh(devices_fn(), ("data",))
     sharding = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec("data"))
     schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
@@ -251,16 +291,23 @@ def _execute_train(
     dataloader, _ = resolve_training_dataloader(
         dataset,
         lambda: build_dataloader(ETLConfig(dataset_name=dataset, split="train", batch_size=batch_size)),
-        lambda: [{"inputs": jnp.array([[1, 2, 3, 4]], dtype=jnp.int32), "targets": jnp.array([[2, 3, 4, 5]], dtype=jnp.int32)}],
+        lambda: [
+            {
+                "inputs": jnp.array([[2, 10, 11, 12]], dtype=jnp.int32),
+                "targets": jnp.array([[10, 11, 12, 1]], dtype=jnp.int32),
+                "loss_mask": jnp.array([[0, 1, 1, 1]], dtype=jnp.int32),
+            }
+        ],
     )
 
     final_loss = _run_training_epochs(
-        TrainingLoopState(
+        JaxTrainingState(
             dataloader=dataloader,
             epochs=epochs,
             model=model,
             optimizer=optimizer,
             train_step=train_step,
+            learning_rate=learning_rate,
             sharding=sharding,
         )
     )
@@ -283,7 +330,7 @@ def train_model(config: TrainingConfig, **kwargs: StatusValue) -> TrainResultDic
         TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
-    if jax is None or jnp is None or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
+    if jax is None or is_jnp_missing(jnp) or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
         raise DependencyMissingError("JAX dependencies are missing for training.", backend="jax")
 
     model_name = config.model_name

@@ -1,9 +1,9 @@
 """Tests for parameter translation utilities."""
 
 import jax
-import jax.numpy as jnp
 import torch
 
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.pytorch.gemma4.utils_params import translate_jax_to_pytorch
 
 
@@ -31,13 +31,16 @@ def test_translate_jax_to_pytorch() -> None:
 
 
 def test_translate_jax_to_pytorch_kernel_dim3() -> None:
-    """Verify 3D JAX kernel tensor is flattened and transposed to a 2D PyTorch weight tensor."""
+    """Verify 3D JAX q/k/v and o_proj kernel tensors are reshaped and transposed accurately to 2D PyTorch weights."""
     jax_params = {
         "some.kernel": jnp.zeros((2, 3, 4)),
+        "self_attention.o_proj.kernel": jnp.zeros((3, 4, 8)),
     }
     state = translate_jax_to_pytorch(jax_params)
     assert "some.weight" in state
-    assert state["some.weight"].shape == (12, 2)  # (2, 12) transposed
+    assert state["some.weight"].shape == (12, 2)  # (2, 3*4) -> transposed (12, 2)
+    assert "self_attn.o_proj.weight" in state
+    assert state["self_attn.o_proj.weight"].shape == (8, 12)  # (3*4, 8) -> transposed (8, 12)
 
 
 def test_translate_jax_to_pytorch_routed_experts() -> None:

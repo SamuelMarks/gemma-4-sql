@@ -37,7 +37,12 @@ def test_log_metrics_behavioral(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     created_writers: list[_RecordingSummaryWriter] = []
 
     def _writer_factory(log_dir: str = "") -> _RecordingSummaryWriter:
-        """Create and record a `_RecordingSummaryWriter` instance."""
+        """Create and record a `_RecordingSummaryWriter` instance.
+
+        Returns:
+            A newly created `_RecordingSummaryWriter` for `log_dir`.
+
+        """
         writer = _RecordingSummaryWriter(log_dir=log_dir)
         created_writers.append(writer)
         return writer
@@ -47,7 +52,7 @@ def test_log_metrics_behavioral(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     log_dir = str(tmp_path / "jax_logs")
     res = log_metrics({"loss": 0.5}, 10, log_dir)
     assert res["backend"] == "jax"
-    assert res["action"] == "log_metrics"
+    assert res.get("action") == "log_metrics"
     assert res["status"] == "success"
     assert res["step"] == 10
     assert len(created_writers) == 1
@@ -57,7 +62,7 @@ def test_log_metrics_behavioral(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     monkeypatch.setattr(log_mod, "SummaryWriter", None)
     res_fb = log_metrics({"loss": 0.5}, 11, str(tmp_path / "jax_fb"))
     assert res_fb["status"] == "backend_unavailable"
-    fb_path = Path(str(res_fb["fallback_file"]))
+    fb_path = Path(str(res_fb.get("fallback_file")))
     assert fb_path.exists()
     record = json.loads(fb_path.read_text(encoding="utf-8").strip())
     assert record["backend"] == "jax"

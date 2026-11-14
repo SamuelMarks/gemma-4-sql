@@ -1,8 +1,8 @@
 """Unit and behavioral tests for gemma4 rope."""
 
-import jax.numpy as jnp
 import pytest
 
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
@@ -18,11 +18,19 @@ def test_segment_ids_to_positions() -> None:
 
 
 def test_default_rope_params() -> None:
-    """Verify default rope params behavior."""
+    """Verify default rope params behavior including linear factor and proportional partial rotation."""
     positions = jnp.array([1, 2, 3])
     freq, factor = default_rope_params(positions, head_dim=4, rope_theta=10000, factor=2.0)
     assert jnp.allclose(freq, jnp.array([0.5, 0.005]))
     assert factor == 1.0
+
+    partial_freq, _ = default_rope_params(positions, head_dim=8, rope_theta=10000, factor=1.0, proportion=0.5)
+    assert partial_freq.shape == (4,)
+    assert jnp.allclose(partial_freq[2:], jnp.zeros((2,)))
+    assert bool(jnp.all(partial_freq[:2] > 0.0))
+
+    zero_freq, _ = default_rope_params(positions, head_dim=8, rope_theta=10000, factor=1.0, proportion=0.0)
+    assert jnp.allclose(zero_freq, jnp.zeros((4,)))
 
 
 def test_apply_rope() -> None:

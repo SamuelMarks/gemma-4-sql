@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Protocol
-from unittest.mock import MagicMock
+from collections.abc import Iterator, Sequence
 
 from tests.conftest import requires_jax
 
@@ -14,28 +12,58 @@ import duckdb
 import pytest
 
 import gemma_4_sql.backends.jax.etl as jax_etl
-from gemma_4_sql.backends.common_data import TokenizedElementDict
+from gemma_4_sql.backends.common_data import (
+    BaseFormatTransform,
+    GrainBatchOpProtocol,
+    GrainSamplerProtocol,
+    GrainShardingOptionsProtocol,
+    HFDataSource,
+    TokenizedElementDict,
+    _DefaultBaseTransform,
+)
 from gemma_4_sql.exceptions import DependencyMissingError
-from gemma_4_sql.type_hints import ETLConfig, JSONValue
+from gemma_4_sql.type_hints import ETLConfig, JSONDict
 
 
 class _DummyBase:
     """Base class stub for Grain RandomAccessDataSource and MapTransform."""
 
 
-class _MapOperationProtocol(Protocol):
-    """Protocol for a Grain MapTransform operation."""
+class _FakeShardingOptions(GrainShardingOptionsProtocol):
+    """Typed Grain sharding options double."""
 
-    def map(self, element: dict[str, JSONValue]) -> TokenizedElementDict:
-        """Map a dataset element to tokenized inputs and targets."""
-        ...
+
+class _FakeGrainSampler(GrainSamplerProtocol):
+    """Typed Grain `IndexSampler` double."""
+
+    def __init__(self, num_records: int, shard_options: GrainShardingOptionsProtocol | None) -> None:
+        """Store `num_records` and `shard_options`."""
+        self.num_records = num_records
+        self.shard_options = shard_options
+
+
+class _FakeGrainBatchOp(GrainBatchOpProtocol):
+    """Typed Grain `Batch` operation double."""
+
+    def __init__(self, batch_size: int) -> None:
+        """Store `batch_size`."""
+        self.batch_size = batch_size
+
+
+class _FakeDatasetsModule:
+    """Typed Hugging Face `datasets` module double."""
+
+    def load_dataset(self, _path: str, *, split: str = "train") -> list[JSONDict]:
+        """Return single-row synthetic SQL dataset."""
+        _ = split
+        return [{"sql_prompt": "Count users", "sql": "SELECT COUNT(*) FROM users;"}]
 
 
 def test_jax_etl_build_dataloader_real_transform(
     monkeypatch: pytest.MonkeyPatch,
     in_memory_duckdb: duckdb.DuckDBPyConnection,
 ) -> None:
-    """Verify jax.etl.build_dataloader loads records from DuckDB and tokenizes them with real SQLTokenizer."""
+    """Verify jax.etl.build_dataloader loads records from DuckDB and HF and tokenizes them with real SQLTokenizer."""
     in_memory_duckdb.execute("CREATE TABLE sql_train (sql_prompt VARCHAR, sql VARCHAR);")
     in_memory_duckdb.execute("INSERT INTO sql_train VALUES ('Count users', 'SELECT COUNT(*) FROM users;');")
 
@@ -47,9 +75,9 @@ def test_jax_etl_build_dataloader_real_transform(
         def __init__(
             self,
             *,
-            data_source: Sequence[dict[str, JSONValue]],
-            sampler: JSONValue,
-            operations: Sequence[_MapOperationProtocol],
+            data_source: HFDataSource,
+            sampler: GrainSamplerProtocol,
+            operations: Sequence[_DefaultBaseTransform | GrainBatchOpProtocol],
             worker_count: int = 0,
         ) -> None:
             """Record DataLoader arguments and run the map operation on element 0."""
@@ -57,16 +85,82 @@ def test_jax_etl_build_dataloader_real_transform(
             self.sampler = sampler
             self.operations = operations
             captured_worker_counts.append(worker_count)
-            self.first_mapped: TokenizedElementDict = operations[0].map(data_source[0])
+            first_op = operations[0]
+            assert isinstance(first_op, BaseFormatTransform)
+            first_elem = data_source[0]
+            assert isinstance(first_elem, dict)
+            self.first_mapped: TokenizedElementDict = first_op.map(first_elem)
 
-    mock_grain = MagicMock()
-    mock_grain.RandomAccessDataSource = _DummyBase
-    mock_grain.MapTransform = _DummyBase
-    mock_grain.DataLoader = FakeGrainDataLoader
-    monkeypatch.setattr(jax_etl, "grain", mock_grain)
-    monkeypatch.setattr(jax_etl, "datasets", MagicMock())
+        def __iter__(self) -> Iterator[TokenizedElementDict]:
+            """Iterate over the mapped first element.
 
-    def _load_duckdb_stub(_p: str, _t: str) -> list[dict[str, str]]:
+            Returns:
+                An iterator yielding the tokenized first element.
+
+            """
+            return iter([self.first_mapped])
+
+        def __len__(self) -> int:
+            """Return number of items in `self.data_source`."""
+            return len(self.data_source)
+
+    class _FakeGrainModule:
+        """Typed `GrainModuleProtocol` double delegating `DataLoader` to `FakeGrainDataLoader`."""
+
+        RandomAccessDataSource = _DummyBase
+        MapTransform = _DummyBase
+        NoSharding = _FakeShardingOptions
+        JAXDistributedSharding = _FakeShardingOptions
+
+        def IndexSampler(
+            self,
+            *,
+            num_records: int,
+            shard_options: GrainShardingOptionsProtocol | None,
+            shuffle: bool = False,
+            num_epochs: int = 1,
+        ) -> _FakeGrainSampler:
+            """Construct `_FakeGrainSampler`.
+
+            Returns:
+                A `_FakeGrainSampler` configured with record count and sharding.
+
+            """
+            _ = (shuffle, num_epochs)
+            return _FakeGrainSampler(num_records, shard_options)
+
+        def Batch(self, *, batch_size: int) -> _FakeGrainBatchOp:
+            """Construct `_FakeGrainBatchOp`.
+
+            Returns:
+                A `_FakeGrainBatchOp` configured with `batch_size`.
+
+            """
+            return _FakeGrainBatchOp(batch_size)
+
+        def DataLoader(
+            self,
+            *,
+            data_source: HFDataSource,
+            sampler: GrainSamplerProtocol,
+            operations: Sequence[_DefaultBaseTransform | GrainBatchOpProtocol],
+        ) -> FakeGrainDataLoader:
+            """Construct `FakeGrainDataLoader`.
+
+            Returns:
+                A `FakeGrainDataLoader` wrapping the data source and operations.
+
+            """
+            return FakeGrainDataLoader(
+                data_source=data_source,
+                sampler=sampler,
+                operations=operations,
+            )
+
+    monkeypatch.setattr(jax_etl, "grain", _FakeGrainModule())
+    monkeypatch.setattr(jax_etl, "datasets", _FakeDatasetsModule())
+
+    def _load_duckdb_stub(_p: str, _t: str) -> list[JSONDict]:
         """Return 1-row SQL training dataset."""
         return [{"sql_prompt": "Count users", "sql": "SELECT COUNT(*) FROM users;"}]
 
@@ -89,11 +183,16 @@ def test_jax_etl_build_dataloader_real_transform(
     assert res["batch_size"] == 2
     loader = res.get("loader")
     assert isinstance(loader, FakeGrainDataLoader)
+    assert len(loader) == 1
+    assert len(list(iter(loader))) == 1
     assert "inputs" in loader.first_mapped
     assert "targets" in loader.first_mapped
     inputs_seq = loader.first_mapped["inputs"]
     assert isinstance(inputs_seq, list) and len(inputs_seq) > 0
-    assert captured_worker_counts == [0]
+
+    res_hf = jax_etl.build_dataloader(ETLConfig(dataset_name="spider", split="train", batch_size=2, distributed=False))
+    assert res_hf["status"] == "loaded"
+    assert captured_worker_counts == [0, 0]
 
 
 def test_jax_etl_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:

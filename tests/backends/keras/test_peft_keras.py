@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import gc
+import weakref
+from typing import Never
 
 import pytest
 
@@ -16,16 +18,21 @@ from gemma_4_sql.backends.keras.peft import (
     merge_lora_weights,
 )
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
-from gemma_4_sql.type_hints import KerasLayerProtocol, get_quantized_artifact
+from gemma_4_sql.type_hints import KerasLayerProtocol, TfTensorProtocol, get_quantized_artifact
 from tests.conftest import requires_keras
+from tests.utils.tensor_helpers import (
+    TypedKerasDenseInstanceProtocol,
+    get_typed_keras,
+    get_typed_keras_ops,
+)
 
 pytestmark = requires_keras
 
 
 def test_keras_lora_dense_build_and_call() -> None:
     """Test KerasLoRADense layer creation, forward pass, and weight merging with real Keras tensors."""
-    import keras
-    from keras import ops
+    keras = get_typed_keras()
+    ops = get_typed_keras_ops()
 
     dense = keras.layers.Dense(6, name="q_proj")
     x = ops.ones((2, 4), dtype="float32")
@@ -56,18 +63,27 @@ def test_keras_lora_dense_build_and_call() -> None:
 
 def test_keras_lora_dense_lazy_build_and_dropout() -> None:
     """Test KerasLoRADense when wrapped Dense is unbuilt at init and dropout > 0."""
-    import keras
-    from keras import ops
+    keras = get_typed_keras()
+    ops = get_typed_keras_ops()
 
     unbuilt_dense = keras.layers.Dense(5, use_bias=False, name="v_proj")
     assert not unbuilt_dense.built
 
     lora_layer = KerasLoRADense(dense=unbuilt_dense, r=3, lora_alpha=6.0, lora_dropout=0.1)
     assert lora_layer._lora_built is False
+    assert lora_layer.trainable is True
+    assert lora_layer.weights == []
+    assert lora_layer.trainable_variables == []
 
     x = ops.ones((2, 4), dtype="float32")
     out_train = lora_layer(x, training=True)
     assert lora_layer._lora_built is True
+    assert len(lora_layer.weights) == 3
+    assert len(lora_layer.trainable_variables) == 2
+    lora_layer.trainable = False
+    assert lora_layer.trainable is False
+    assert lora_layer.trainable_weights == []
+    lora_layer.trainable = True
     assert out_train.shape == (2, 5)
     assert lora_layer.kernel is unbuilt_dense.kernel
     assert lora_layer.bias is None
@@ -99,9 +115,9 @@ def test_keras_lora_dense_errors(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_inject_and_merge_lora_on_model() -> None:
-    """Test inject_lora, merge_lora_weights, forward-pass modification, and count_parameters on a composite Keras model."""
-    import keras
-    from keras import ops
+    """Test inject_lora, merge_lora_weights, forward-pass updates, and count_parameters on a composite model."""
+    keras = get_typed_keras()
+    ops = get_typed_keras_ops()
 
     q_layer = keras.layers.Dense(4, name="q_proj")
     k_layer = keras.layers.Dense(4, name="k_proj")
@@ -123,21 +139,34 @@ def test_inject_and_merge_lora_on_model() -> None:
 
         def __init__(self) -> None:
             """Initialize composite model."""
-            self.layers: list[keras.layers.Dense | KerasLoRADense | SubBlock] = [q_layer, k_layer, SubBlock(), q_layer]
+            self.layers: list[TypedKerasDenseInstanceProtocol | KerasLoRADense | SubBlock] = [
+                q_layer,
+                k_layer,
+                SubBlock(),
+                q_layer,
+            ]
             self.weights = [*q_layer.weights, *k_layer.weights, *v_layer.weights]
             self.trainable_weights = [w for w in self.weights if w.trainable]
 
-        def __call__[InputT: _KerasTensorInputProtocol](self, inputs: InputT) -> InputT:
-            """Apply the first layer (`q_proj` slot) in `self.layers`."""
+        def __call__(self, inputs: _KerasTensorInputProtocol) -> TfTensorProtocol:
+            """Apply the first layer (`q_proj` slot) in `self.layers`.
+
+            Returns:
+                Output tensor from the first layer.
+
+            """
             first_layer = self.layers[0]
-            assert isinstance(first_layer, (keras.layers.Dense, KerasLoRADense))
-            return first_layer(inputs)
+            assert isinstance(first_layer, (TypedKerasDenseInstanceProtocol, KerasLoRADense))
+            res: TfTensorProtocol = first_layer(inputs)
+            return res
 
     model = CompositeModel()
     _, injected_zero = inject_lora(model, target_modules=[], lora_r=2)
     assert injected_zero == 0
 
-    adapted_model, count = inject_lora(model, target_modules=["q_proj", "v_proj"], lora_r=2, lora_alpha=4.0, lora_dropout=0.0)
+    adapted_model, count = inject_lora(
+        model, target_modules=["q_proj", "v_proj"], lora_r=2, lora_alpha=4.0, lora_dropout=0.0
+    )
     assert count == 2
     adapter = get_keras_lora_adapter(adapted_model)
     assert adapter is not None
@@ -146,7 +175,8 @@ def test_inject_and_merge_lora_on_model() -> None:
     assert isinstance(adapted_model.layers[0], KerasLoRADense)
     assert isinstance(adapted_model.layers[3], KerasLoRADense)
 
-    # Verify forward pass through adapted_model(x) and injected LoRA layers: when lora_b == 0, output matches base layer output
+    # Verify forward pass through adapted_model(x) and injected LoRA layers:
+    # when lora_b == 0, output matches base layer output
     q_lora = adapter.layers["q_proj"].lora_layer
     v_lora = adapter.layers["v_proj"].lora_layer
     assert bool(ops.all(ops.isclose(ops.stop_gradient(adapted_model(x)), base_q_out, rtol=1e-5, atol=1e-5)))
@@ -203,8 +233,8 @@ def test_inject_and_merge_lora_on_model() -> None:
 
 def test_apply_lora_backbone_and_custom_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test apply_lora with KerasNLP backbone.enable_lora, custom models, and merge=True."""
-    import keras
-    from keras import ops
+    keras = get_typed_keras()
+    ops = get_typed_keras_ops()
 
     dense = keras.layers.Dense(4, name="q_proj")
     dense(ops.ones((1, 3), dtype="float32"))
@@ -231,41 +261,106 @@ def test_apply_lora_backbone_and_custom_model(monkeypatch: pytest.MonkeyPatch) -
     assert custom_model.trainable_weights == []
     res = apply_lora("custom", ["q_proj"], lora_r=2, model=custom_model, merge=True)
     assert res["status"] == "completed"
-    assert res["injected_modules"] == 1
+    assert res.get("injected_modules") == 1
+
+    # Verify LoRA-adapted models are garbage-collected cleanly (zero strong-ref ID fallback leak!)
+    def _create_ephemeral_lora_ref() -> weakref.ReferenceType[CustomModel]:
+        """Create and LoRA-adapt a short-lived model and return a weak reference to it.
+
+        Returns:
+            A weak reference to the short-lived `CustomModel` instance.
+
+        """
+        ephemeral_dense = keras.layers.Dense(4, name="q_proj")
+        ephemeral_dense(ops.ones((1, 3), dtype="float32"))
+        ephemeral = CustomModel()
+        ephemeral.layers = [ephemeral_dense]
+        inject_lora(ephemeral, target_modules=["q_proj"], lora_r=2)
+        return weakref.ref(ephemeral)
+
+    weak_ephemeral = _create_ephemeral_lora_ref()
+    gc.collect()
+    assert weak_ephemeral() is None
 
     # Test with KerasNLP-style backbone.enable_lora where backbone also has layers
     backbone_dense = keras.layers.Dense(4, name="v_proj")
     backbone_dense(ops.ones((1, 3), dtype="float32"))
-    mock_backbone = MagicMock()
-    mock_backbone.layers = [backbone_dense]
-    mock_gemma = MagicMock()
-    mock_gemma.backbone = mock_backbone
 
-    mock_cls = MagicMock()
-    mock_cls.from_preset.return_value = mock_gemma
+    class _FakeBackbone:
+        """Typed `KerasBackboneProtocol` double."""
 
-    def _return_mock_cls(*_a: str, **_k: str) -> MagicMock:
-        """Return `mock_cls`."""
-        return mock_cls
+        def __init__(self, layers_list: list[KerasLayerProtocol]) -> None:
+            """Store backbone layers."""
+            self.layers = layers_list
+            self.enabled_ranks: list[int] = []
 
-    def _none_attr(*_a: str, **_k: str) -> None:
-        """Return None for optional_attr."""
-        return
+        def enable_lora(self, rank: int) -> None:
+            """Record enabled LoRA `rank`."""
+            self.enabled_ranks.append(rank)
 
-    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.optional_attr", _return_mock_cls)
+    class _FakeGemmaWithBackbone:
+        """Typed `_BackboneModelProtocol` double."""
+
+        def __init__(self, bb: _FakeBackbone) -> None:
+            """Store `backbone`."""
+            self.backbone = bb
+
+    fake_bb = _FakeBackbone([backbone_dense])
+    fake_gemma = _FakeGemmaWithBackbone(fake_bb)
+
+    class _FakeGemmaLoaderCls:
+        """Typed `GemmaCausalLM` loader double."""
+
+        @staticmethod
+        def from_preset(_name: str) -> _FakeGemmaWithBackbone:
+            """Return `fake_gemma`."""
+            return fake_gemma
+
+    def _return_mock_cls(*_a: str | type) -> type[_FakeGemmaLoaderCls]:
+        """Return `_FakeGemmaLoaderCls`."""
+        return _FakeGemmaLoaderCls
+
+    def _none_attr(*_a: str | type) -> None:
+        """Return None for import_optional_symbol."""
+
+    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.import_optional_symbol", _return_mock_cls)
 
     res_bb = apply_lora("gemma-preset", ["v_proj"], lora_r=4)
     assert res_bb["status"] == "completed"
-    assert res_bb["injected_modules"] == 1
-    mock_backbone.enable_lora.assert_called_once_with(rank=4)
+    assert res_bb.get("injected_modules") == 1
+    assert fake_bb.enabled_ranks == [4]
 
-    # When backbone has no matching Dense layers, count defaults to len(target_modules)
-    mock_backbone.layers = []
+    # When backbone has a non-matching Dense layer, count defaults to len(target_modules)
+    unmatched_bb_dense = keras.layers.Dense(2, name="other_proj")
+    unmatched_bb_dense(ops.ones((1, 2), dtype="float32"))
+    fake_bb.layers.clear()
+    fake_bb.layers.append(unmatched_bb_dense)
     res_bb_empty = apply_lora("gemma-preset", ["q_proj", "v_proj"], lora_r=4)
-    assert res_bb_empty["injected_modules"] == 2
+    assert res_bb_empty.get("injected_modules") == 2
+
+    # Cover tuple with non-KerasLayerProtocol container, unregistered Dense lookup,
+    # standalone layer inject/merge, and immutable tuple container merge
+    fresh_dense = keras.layers.Dense(2, name="fresh_unregistered")
+    inject_lora((CustomModel(),), target_modules=["q_proj"], lora_r=2)
+    assert get_keras_lora_adapter((CustomModel(), fresh_dense)) is None
+    inject_lora(fresh_dense, target_modules=["q_proj"], lora_r=2)
+    merge_lora_weights(fresh_dense)
+
+    merge_lora_weights(keras.layers.Dense(2, name="never_injected"))
+
+    class _TupleLayersModel:
+        """Container with immutable tuple `.layers` holding a `KerasLoRADense` and plain `Dense`."""
+
+        def __init__(self, ld: KerasLoRADense) -> None:
+            """Store two-element tuple."""
+            self.layers = (ld, keras.layers.Dense(2))
+
+    built_d = keras.layers.Dense(2, name="imm_d")
+    built_d(ops.ones((1, 2), dtype="float32"))
+    merge_lora_weights(_TupleLayersModel(KerasLoRADense(built_d, r=2)))
 
     # When GemmaCausalLM is not available and no model is passed
-    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.optional_attr", _none_attr)
+    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.import_optional_symbol", _none_attr)
     res_fail = apply_lora("gemma-preset", ["q_proj"])
     assert "failed:" in res_fail["status"]
 
@@ -273,7 +368,16 @@ def test_apply_lora_backbone_and_custom_model(monkeypatch: pytest.MonkeyPatch) -
         apply_lora("gemma-preset", ["q_proj"], raise_on_error=True)
 
     # When inject_lora raises an error
-    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.inject_lora", MagicMock(side_effect=RuntimeError("inject error")))
+    def _raise_inject(*_a: CustomModel | list[str] | float, **_kw: CustomModel | list[str] | float) -> Never:
+        """Raise RuntimeError.
+
+        Raises:
+            RuntimeError: Always raised to test `apply_lora` error handling.
+
+        """
+        raise RuntimeError("inject error")
+
+    monkeypatch.setattr("gemma_4_sql.backends.keras.peft.inject_lora", _raise_inject)
     res_err = apply_lora("custom", ["target"], model=custom_model)
     assert "failed: inject error" in res_err["status"]
     with pytest.raises(TrainingError, match="inject error"):

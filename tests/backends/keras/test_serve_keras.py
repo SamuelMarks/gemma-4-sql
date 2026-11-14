@@ -17,12 +17,11 @@ from gemma_4_sql.exceptions import DependencyMissingError
 
 def test_serve_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify serve model behavior."""
-    from unittest.mock import MagicMock
-
     import gemma_4_sql.backends.keras.serve as serve_module
+    from tests.utils.test_utils import FakeModuleNamespace
 
-    monkeypatch.setattr(serve_module, "tf", MagicMock())
-    monkeypatch.setattr(serve_module, "keras", MagicMock())
+    monkeypatch.setattr(serve_module, "tf", FakeModuleNamespace("tensorflow"))
+    monkeypatch.setattr(serve_module, "keras", FakeModuleNamespace("keras"))
 
     res = serve_module.serve_model("dummy_model", port=8080, max_batch_size=128)
     assert res["status"] == "running_keras_serve"
@@ -81,20 +80,25 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         max_batch_size: int = 32,
         max_wait_ms: float = 10.0,
     ) -> MockApp:
-        """Provide mock create common app test helper."""
+        """Provide mock create common app test helper.
+
+        Returns:
+            A `MockApp` recording startup and generation callbacks.
+
+        """
         _ = (backend_name, model_name, max_batch_size, max_wait_ms)
         app = MockApp(startup_callback, generate_logic, batch_generate_logic)
         created_apps.append(app)
         return app
 
     def _none_attr(*_a: str, **_k: str) -> None:
-        """Return None for optional_attr."""
+        """Return None for import_optional_symbol."""
         return
 
     monkeypatch.setattr("gemma_4_sql.backends.common_serve.create_common_app", mock_create_common_app)
 
     monkeypatch.setattr(srv, "GemmaCausalLM", None)
-    monkeypatch.setattr(srv, "optional_attr", _none_attr)
+    monkeypatch.setattr(srv, "import_optional_symbol", _none_attr)
     srv.create_app("test_model")
     app = created_apps[-1]
 
@@ -106,7 +110,12 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `MockModel`."""
 
         def generate(self, prompt: str | list[str], **_kwargs: int) -> str | list[str]:
-            """Provide generate test helper."""
+            """Provide generate test helper.
+
+            Returns:
+                Generated SQL string or list of batch SQL strings.
+
+            """
             if isinstance(prompt, list):
                 return [f"BATCH_{p}" for p in prompt]
             return "MOCK_SQL"
@@ -116,7 +125,12 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
         @classmethod
         def from_preset(cls, _model_name: str) -> MockModel:
-            """Provide from preset test helper."""
+            """Provide from preset test helper.
+
+            Returns:
+                A `MockModel` instance.
+
+            """
             return MockModel()
 
     monkeypatch.setattr(srv, "GemmaCausalLM", DummyPreset)
@@ -133,7 +147,12 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `MockModelFail`."""
 
         def generate(self, _prompt: str | list[str], **_kwargs: int) -> Never:
-            """Provide generate test helper."""
+            """Provide generate test helper.
+
+            Raises:
+                ValueError: Always raised to trigger fallback generation.
+
+            """
             raise ValueError("fail")
 
     class DummyPresetFail:
@@ -141,7 +160,12 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
         @classmethod
         def from_preset(cls, _model_name: str) -> MockModelFail:
-            """Provide from preset test helper."""
+            """Provide from preset test helper.
+
+            Returns:
+                A `MockModelFail` instance.
+
+            """
             return MockModelFail()
 
     import gemma_4_sql.backends.keras.inference as real_inf
@@ -167,7 +191,15 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
         """Test stub for `MockBatchModelFail`."""
 
         def generate(self, prompt: str | list[str], **_kwargs: int) -> str:
-            """Provide generate test helper."""
+            """Provide generate test helper.
+
+            Returns:
+                Single-prompt `'MOCK_SQL'` string.
+
+            Raises:
+                TypeError: If `prompt` is a list of strings.
+
+            """
             if isinstance(prompt, list):
                 raise TypeError("batch fail")
             return "MOCK_SQL"
@@ -177,7 +209,12 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
         @classmethod
         def from_preset(cls, _model_name: str) -> MockBatchModelFail:
-            """Provide from preset test helper."""
+            """Provide from preset test helper.
+
+            Returns:
+                A `MockBatchModelFail` instance.
+
+            """
             return MockBatchModelFail()
 
     monkeypatch.setattr(srv, "GemmaCausalLM", DummyPresetBatchFail)
@@ -198,12 +235,17 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Test generic fallback output error
     def gen_err(**_kwargs: str | int) -> Never:
-        """Provide gen err test helper."""
+        """Provide gen err test helper.
+
+        Raises:
+            OSError: Always raised to test generic generation failure handling.
+
+        """
         raise OSError("other err")
 
     monkeypatch.setattr(real_inf, "generate_sql", gen_err)
     monkeypatch.setattr(srv, "GemmaCausalLM", None)
-    monkeypatch.setattr(srv, "optional_attr", _none_attr)
+    monkeypatch.setattr(srv, "import_optional_symbol", _none_attr)
 
     srv.create_app("test_model")
     app_none = created_apps[-1]
@@ -218,9 +260,8 @@ def test_create_app_generation_logic(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_keras_serve_real_fastapi_client(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify Keras create_app serves HTTP /health and /generate requests through a real FastAPI TestClient."""
-    from fastapi.testclient import TestClient
-
     import gemma_4_sql.backends.keras.serve as srv
+    from tests.utils.test_utils import make_test_client
 
     class _RealBatchModel:
         """Deterministic Keras causal LM stub supporting single and batch generation."""
@@ -239,7 +280,7 @@ def test_keras_serve_real_fastapi_client(monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(srv, "GemmaCausalLM", _PresetLoader)
     app = srv.create_app("gemma4-keras", max_batch_size=8)
-    with TestClient(app) as client:
+    with make_test_client(app) as client:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["backend"] == "keras"

@@ -36,7 +36,11 @@ def test_pytorch_logging_real_execution(monkeypatch: pytest.MonkeyPatch, tmp_pat
     writers: list[_RecordingSummaryWriter] = []
 
     def _factory(log_dir: str = "") -> _RecordingSummaryWriter:
-        """Construct and record a `_RecordingSummaryWriter`."""
+        """Construct and record a `_RecordingSummaryWriter`.
+
+        Returns:
+            Recorded `_RecordingSummaryWriter` instance.
+        """
         w = _RecordingSummaryWriter(log_dir=log_dir)
         writers.append(w)
         return w
@@ -46,7 +50,7 @@ def test_pytorch_logging_real_execution(monkeypatch: pytest.MonkeyPatch, tmp_pat
     log_dir = str(tmp_path / "tb_logs")
     res = logging_module.log_metrics({"loss": 0.25, "lr": 1e-4}, step=5, log_dir=log_dir)
     assert res["backend"] == "pytorch"
-    assert res["action"] == "log_metrics"
+    assert res.get("action") == "log_metrics"
     assert res["status"] == "success"
     assert res["step"] == 5
     assert len(writers) == 1
@@ -58,7 +62,7 @@ def test_pytorch_logging_real_execution(monkeypatch: pytest.MonkeyPatch, tmp_pat
     fallback_dir = tmp_path / "fallback_logs"
     res_fb = logging_module.log_metrics({"loss": 0.5}, step=2, log_dir=str(fallback_dir))
     assert res_fb["status"] == "backend_unavailable"
-    fb_file = Path(str(res_fb["fallback_file"]))
+    fb_file = Path(str(res_fb.get("fallback_file")))
     assert fb_file.exists()
     payload = json.loads(fb_file.read_text(encoding="utf-8").strip())
     assert payload["backend"] == "pytorch"

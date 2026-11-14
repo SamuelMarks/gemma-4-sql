@@ -1,18 +1,17 @@
-"""Unit tests for JAX inference, beam search, multimodal forwarding, and checkpoint restoration."""
+"""Unit tests for JAX inference, KV-cached beam search, multimodal forwarding, and checkpoint restoration."""
 
 from __future__ import annotations
 
 import pathlib
-import sys
-from collections.abc import Callable
-from unittest.mock import MagicMock
 
 import jax
 import pytest
+from flax import nnx
 
 import gemma_4_sql.backends.jax.inference as inf
 from gemma_4_sql.backends.common_inference import BoundedLRUCache
 from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
+from gemma_4_sql.backends.jax.gemma4.cache import Cache
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from tests.conftest import requires_jax
 
@@ -27,7 +26,38 @@ def _bypass_jax_jit(monkeypatch: pytest.MonkeyPatch) -> None:
         """Return `fn` unchanged."""
         return fn
 
+    def _fast_forward(
+        model: Gemma4ForCausalLM,
+        cache: Cache,
+        input_ids: jax.Array,
+        positions: jax.Array,
+        *,
+        pixel_values: jax.Array | None = None,
+        image_token_mask: jax.Array | None = None,
+        input_features: jax.Array | None = None,
+        input_features_mask: jax.Array | None = None,
+        audio_token_mask: jax.Array | None = None,
+    ) -> tuple[jax.Array, Cache]:
+        """Run un-jitted forward step returning last-token logits and updated cache.
+
+        Returns:
+            A tuple of last-token logits and the updated KV cache.
+
+        """
+        logits = model(
+            input_ids=input_ids,
+            positions=positions,
+            cache=cache,
+            pixel_values=pixel_values,
+            image_token_mask=image_token_mask,
+            input_features=input_features,
+            input_features_mask=input_features_mask,
+            audio_token_mask=audio_token_mask,
+        )
+        return (logits[:, -1, :], cache)
+
     monkeypatch.setattr(inf.jax, "jit", _identity_jit)
+    monkeypatch.setattr(inf, "forward_fn", _fast_forward)
 
 
 def _make_tiny_jax_model() -> Gemma4ForCausalLM:
@@ -37,8 +67,6 @@ def _make_tiny_jax_model() -> Gemma4ForCausalLM:
         A tiny `Gemma4ForCausalLM` instance initialized with Flax NNX RNGs.
 
     """
-    from flax import nnx
-
     cfg = Gemma4Config(
         vocab_size=320,
         hidden_size=8,
@@ -53,7 +81,7 @@ def _make_tiny_jax_model() -> Gemma4ForCausalLM:
 
 def test_compute_step_probs_real_jax_tensors() -> None:
     """Verify _compute_step_probs computes top-k indices and log probabilities on 3D, 2D, and 1D JAX arrays."""
-    import jax.numpy as jnp
+    from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
     logits_3d = jnp.array([[[0.1, 0.2, 5.0, -1.0]]], dtype=jnp.float32)
     top_idx_3d, top_probs_3d = inf._compute_step_probs(logits_3d, beam_width=2)
@@ -70,9 +98,11 @@ def test_compute_step_probs_real_jax_tensors() -> None:
     assert int(top_idx_1d[0]) == 0
 
 
-def test_beam_search_step_and_jax_beam_search_real_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify _beam_search_step and jax_beam_search execute with a real tiny Gemma4ForCausalLM."""
-    import jax.numpy as jnp
+def test_beam_search_and_kv_cached_beam_search_parity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify jax_kv_cached_beam_search matches uncached jax_beam_search token-for-token and score-for-score."""
+    import jax as real_jax
+
+    from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
     model = _make_tiny_jax_model()
     input_ids = jnp.array([[10, 11]], dtype=jnp.int32)
@@ -80,33 +110,60 @@ def test_beam_search_step_and_jax_beam_search_real_model(monkeypatch: pytest.Mon
     beams = inf._beam_search_step(input_ids, 0.0, model, beam_width=2)
     assert len(beams) == 2
     assert beams[0][0].shape == (1, 3)
-    assert isinstance(beams[0][1], float)
 
-    best_seq, best_score = inf.jax_beam_search(model, input_ids, beam_width=2, max_length=2, eos_token_id=319)
-    assert best_seq.shape == (1, 4)
-    assert isinstance(best_score, float)
+    best_seq_uncached, best_score_uncached = inf.jax_beam_search(
+        model,
+        input_ids,
+        beam_width=2,
+        max_length=3,
+        eos_token_id=319,
+    )
+    best_seq_cached, best_score_cached = inf.jax_kv_cached_beam_search(
+        model,
+        input_ids,
+        beam_width=2,
+        max_length=3,
+        eos_token_id=319,
+    )
+    assert jnp.array_equal(best_seq_cached, best_seq_uncached)
+    assert best_score_cached == pytest.approx(best_score_uncached, abs=1e-4)
 
-    # Verify early stopping when EOS token is already at the end of the sequence
+    # Verify early EOS stop and finished-beam carry-over in jax_kv_cached_beam_search
     eos_seq = jnp.array([[10, 319]], dtype=jnp.int32)
-    stopped_seq, stopped_score = inf.jax_beam_search(model, eos_seq, beam_width=2, max_length=3, eos_token_id=319)
+    stopped_seq, stopped_score = inf.jax_kv_cached_beam_search(
+        model, eos_seq, beam_width=2, max_length=3, eos_token_id=319
+    )
     assert stopped_seq.shape == (1, 2)
     assert stopped_score == 0.0
 
-    # Verify fallback when jax.jit is not present on the jax namespace
-    import jax as real_jax
+    # Force first generated token of top beam to match eos_token_id so step 1 carries finished beam
+    first_tok = int(best_seq_cached[0, 2])
+    early_eos_seq, _ = inf.jax_kv_cached_beam_search(
+        model, input_ids, beam_width=2, max_length=3, eos_token_id=first_tok
+    )
+    assert early_eos_seq.shape[1] >= 3
 
-    fake_jax = MagicMock()
-    del fake_jax.jit
-    fake_jax.nn = real_jax.nn
-    monkeypatch.setattr(inf, "jax", fake_jax)
+    # Also test beam_width=1 where the single beam finishes on step 0 and loop breaks at all(eos)
+    greedy_one, _ = inf.jax_kv_cached_beam_search(model, input_ids, beam_width=1, max_length=1, eos_token_id=319)
+    greedy_first_tok = int(greedy_one[0, 2])
+    single_eos_seq, _ = inf.jax_kv_cached_beam_search(
+        model, input_ids, beam_width=1, max_length=3, eos_token_id=greedy_first_tok
+    )
+    assert int(single_eos_seq[0, -1]) == greedy_first_tok
+
+    # Verify fallback when jax.jit is not present on the jax namespace
+    class _NoJitJaxNamespace:
+        """Typed `jax` namespace without `.jit`."""
+
+        nn = real_jax.nn
+
+    monkeypatch.setattr(inf, "jax", _NoJitJaxNamespace())
     beams_no_jit = inf._beam_search_step(input_ids, 0.0, model, beam_width=2)
     assert len(beams_no_jit) == 2
 
 
 def test_generate_sql_real_tiny_model_and_caching(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
-    """Verify generate_sql initializes a tiny model, caches it, and decodes SQL output."""
-    from flax import nnx
-
+    """Verify generate_sql initializes a tiny model, caches it, and decodes SQL output via KV cache."""
     tiny_model = _make_tiny_jax_model()
 
     def _return_tiny(_cfg: Gemma4Config, rngs: nnx.Rngs | None = None) -> Gemma4ForCausalLM:
@@ -129,15 +186,12 @@ def test_generate_sql_real_tiny_model_and_caching(monkeypatch: pytest.MonkeyPatc
     assert isinstance(res["confidence_score"], float)
     assert model_key in inf._MODEL_CACHE
 
-    # Second call hits _MODEL_CACHE
     res_cached = inf.generate_sql(model_key, "SELECT 1", beam_width=1, max_length=1)
     assert res_cached["status"] == "success"
 
 
 def test_generate_sql_checkpoint_restore_branches(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
-    """Verify generate_sql handles Orbax checkpoint restoration success, None return, no nnx.update, and errors."""
-    from flax import nnx
-
+    """Verify generate_sql handles Orbax checkpoint restoration success, None return, and errors."""
     tiny_model = _make_tiny_jax_model()
 
     def _return_tiny(_cfg: Gemma4Config, rngs: nnx.Rngs | None = None) -> Gemma4ForCausalLM:
@@ -145,44 +199,72 @@ def test_generate_sql_checkpoint_restore_branches(monkeypatch: pytest.MonkeyPatc
         _ = rngs
         return tiny_model
 
-    def _fast_beam(
-        _fn: Callable[[jax.Array, jax.Array], jax.Array],
+    def _fast_kv_beam(
+        _model: Gemma4ForCausalLM,
         ids: jax.Array,
         _bw: int,
         _ml: int,
         _eos: int,
+        **_kw: jax.Array | None,
     ) -> tuple[jax.Array, float]:
         """Return `(ids, -0.5)`."""
         return (ids, -0.5)
 
     monkeypatch.setattr(inf.Gemma4Config, "gemma4_e2b", staticmethod(lambda: tiny_model.config))
     monkeypatch.setattr(inf, "Gemma4ForCausalLM", _return_tiny)
-    monkeypatch.setattr(inf, "jax_beam_search", _fast_beam)
+    monkeypatch.setattr(inf, "jax_kv_cached_beam_search", _fast_kv_beam)
 
     ckpt_dir = tmp_path / "ckpt"
     ckpt_dir.mkdir()
 
-    # 1. Restore succeeds and calls nnx.update
-    mock_ocp = MagicMock()
-    mock_ocp.PyTreeCheckpointer.return_value.restore.return_value = "restored_state"
-    monkeypatch.setitem(sys.modules, "orbax", MagicMock(checkpoint=mock_ocp))
-    monkeypatch.setitem(sys.modules, "orbax.checkpoint", mock_ocp)
+    restore_mode = "ok"
+    update_calls: list[str] = []
 
-    mock_nnx = MagicMock()
-    monkeypatch.setattr(inf, "nnx", mock_nnx)
+    import orbax.checkpoint as ocp
+
+    class _FakeCheckpointer:
+        """Typed Orbax `PyTreeCheckpointer` double."""
+
+        def restore(self, _path: pathlib.Path) -> str | None:
+            """Return state string, `None`, or raise `RuntimeError` based on `restore_mode`.
+
+            Returns:
+                The restored state sentinel or `None`.
+
+            Raises:
+                RuntimeError: If `restore_mode` is set to `'err'`.
+
+            """
+            if restore_mode == "err":
+                raise RuntimeError("corrupt ckpt")
+            if restore_mode == "none":
+                return None
+            return "restored_state"
+
+    class _FakeNNXNamespace:
+        """Typed `nnx` double recording `update` calls."""
+
+        Rngs = nnx.Rngs
+
+        @staticmethod
+        def update(_model: Gemma4ForCausalLM, state: str) -> None:
+            """Record `state` passed to `nnx.update`."""
+            update_calls.append(state)
+
+    monkeypatch.setattr(ocp, "PyTreeCheckpointer", _FakeCheckpointer)
+    monkeypatch.setattr(inf, "nnx", _FakeNNXNamespace)
+
     inf._MODEL_CACHE.pop(str(ckpt_dir), None)
     res1 = inf.generate_sql(str(ckpt_dir), "SELECT 1", beam_width=1, max_length=1)
     assert res1["status"] == "success"
-    mock_nnx.update.assert_called_once()
+    assert update_calls == ["restored_state"]
 
-    # 2. Restore returns None (skips nnx.update)
-    mock_ocp.PyTreeCheckpointer.return_value.restore.return_value = None
+    restore_mode = "none"
     inf._MODEL_CACHE.pop(str(ckpt_dir), None)
     res2 = inf.generate_sql(str(ckpt_dir), "SELECT 1", beam_width=1, max_length=1)
     assert res2["status"] == "success"
 
-    # 3. Restore raises RuntimeError (gracefully ignored unless strict_checkpoint=True)
-    mock_ocp.PyTreeCheckpointer.return_value.restore.side_effect = RuntimeError("corrupt ckpt")
+    restore_mode = "err"
     inf._MODEL_CACHE.pop(str(ckpt_dir), None)
     res3 = inf.generate_sql(str(ckpt_dir), "SELECT 1", beam_width=1, max_length=1)
     assert res3["status"] == "success"
@@ -191,7 +273,6 @@ def test_generate_sql_checkpoint_restore_branches(monkeypatch: pytest.MonkeyPatc
     with pytest.raises(InferenceError, match="corrupt ckpt"):
         inf.generate_sql(str(ckpt_dir), "SELECT 1", beam_width=1, max_length=1, strict_checkpoint=True)
 
-    # 4. Verify BoundedLRUCache LRU eviction and update
     small_cache: BoundedLRUCache[int] = inf.BoundedLRUCache(maxsize=2)
     small_cache.put_model("a", 1)
     small_cache.put_model("a", 10)
@@ -202,9 +283,9 @@ def test_generate_sql_checkpoint_restore_branches(monkeypatch: pytest.MonkeyPatc
     assert small_cache.get_model("c") == 3
 
 
-def test_generate_sql_multimodal_and_typeerror_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify generate_sql processes image/audio paths and falls back when model rejects extra kwargs."""
-    import jax.numpy as jnp
+def test_generate_sql_multimodal_and_generic_callable_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify generate_sql processes image/audio paths and falls back to jax_beam_search for generic callables."""
+    from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
     def _proc_img(_p: str | bytes) -> dict[str, list[list[float]]]:
         """Return pixel_values dict."""
@@ -214,20 +295,19 @@ def test_generate_sql_multimodal_and_typeerror_fallback(monkeypatch: pytest.Monk
         """Return audio_values dict."""
         return {"audio_values": [[0.5, -0.5]]}
 
-    monkeypatch.setattr(
-        "gemma_4_sql.backends.common_multimodal.process_image",
-        _proc_img,
-    )
-    monkeypatch.setattr(
-        "gemma_4_sql.backends.common_multimodal.process_audio",
-        _proc_aud,
-    )
+    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.process_image", _proc_img)
+    monkeypatch.setattr("gemma_4_sql.backends.common_multimodal.process_audio", _proc_aud)
 
-    def strict_PosOnlyModel(seq: jax.Array, _pos: jax.Array | None = None) -> jax.Array:
-        """Model callable that rejects keyword arguments, triggering TypeError fallback."""
+    def strict_pos_only_model(seq: jax.Array, _pos: jax.Array | None = None) -> jax.Array:
+        """Model callable that rejects keyword arguments, exercising generic callable beam search.
+
+        Returns:
+            A uniform float32 logits array of shape `(1, seq_len, 320)`.
+
+        """
         return jnp.ones((1, seq.shape[1], 320), dtype=jnp.float32)
 
-    monkeypatch.setitem(inf._MODEL_CACHE, "strict_pos_model", strict_PosOnlyModel)
+    monkeypatch.setitem(inf._MODEL_CACHE, "strict_pos_model", strict_pos_only_model)
 
     res = inf.generate_sql(
         "strict_pos_model",
@@ -241,7 +321,6 @@ def test_generate_sql_multimodal_and_typeerror_fallback(monkeypatch: pytest.Monk
     assert "<image>" in str(res["prompt"])
     assert "<audio>" in str(res["prompt"])
 
-    # Also test when pixel_values and audio_values are pre-supplied as JAX arrays
     res2 = inf.generate_sql(
         "strict_pos_model",
         "SELECT 1",

@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Protocol, runtime_checkable
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 
-from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, run_benchmark_wrapper
+from gemma_4_sql.backends.common_benchmark import (
+    execute_timed_benchmark_loop,
+    get_current_rss_mb,
+    run_benchmark_wrapper,
+)
+from gemma_4_sql.backends.jax._protocols import is_jnp_missing
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.gemma4.config import JaxDTypeLike, ModelConfig, resolve_gemma4_config
 from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM
 from gemma_4_sql.exceptions import DependencyMissingError
@@ -33,6 +37,23 @@ class JaxDeviceProtocol(Protocol):
 
     def memory_stats(self) -> Mapping[str, int] | None:
         """Return memory usage statistics for the device."""
+        ...
+
+
+@runtime_checkable
+class _JaxDevicesModuleProtocol(Protocol):
+    """Protocol for a `jax` module exposing `.devices(...)`."""
+
+    def devices(self, backend: str | None = None, /) -> Sequence[JaxDeviceProtocol]:
+        """Return available JAX devices for `backend`.
+
+        Args:
+            backend: Optional accelerator platform (`'tpu'`, `'gpu'`, `'cpu'`).
+
+        Returns:
+            Sequence of matching JAX devices.
+
+        """
         ...
 
 
@@ -88,14 +109,16 @@ def _get_device(hardware: str) -> JaxDeviceProtocol | str | None:
         The matched JAX device or default CPU device.
 
     """
+    if not isinstance(jax, _JaxDevicesModuleProtocol):
+        return None
     try:
-        if hardware == "tpu" and jax is not None and jax.devices("tpu"):
+        if hardware == "tpu" and jax.devices("tpu"):
             return jax.devices("tpu")[0]
-        if hardware == "gpu" and jax is not None and jax.devices("gpu"):
+        if hardware == "gpu" and jax.devices("gpu"):
             return jax.devices("gpu")[0]
     except RuntimeError:
         pass
-    return jax.devices("cpu")[0] if jax is not None else None
+    return jax.devices("cpu")[0]
 
 
 def _run_benchmark_pass(
@@ -160,29 +183,25 @@ def _run_benchmark_pass(
     compiled_forward = nnx.jit(forward_pass) if isinstance(nnx, _NNXJitProtocol) else forward_pass
     compiled_generate = nnx.jit(generate_pass) if isinstance(nnx, _NNXJitProtocol) else generate_pass
 
-    default_dev_fn: Callable[[JaxDeviceProtocol | str | None], contextlib.AbstractContextManager[None]] = jax.default_device
+    default_dev_fn: Callable[[JaxDeviceProtocol | str | None], contextlib.AbstractContextManager[None]] = (
+        jax.default_device
+    )
     with default_dev_fn(device):
         dummy_inputs = jax.random.randint(jax.random.key(42), (batch_size, 32), 1, 256000, dtype=jnp.int32)
 
-        for _ in range(warmup_steps):
+        def _step() -> None:
+            """Execute one compiled JAX step and synchronize device output."""
             out = compiled_forward(model, dummy_inputs) if mode == "prefill" else compiled_generate(model, dummy_inputs)
             if isinstance(jax, _JaxBlockUntilReadyProtocol):
                 jax.block_until_ready(out)
 
-        start_time = time.time()
-        for _ in range(num_runs):
-            out = compiled_forward(model, dummy_inputs) if mode == "prefill" else compiled_generate(model, dummy_inputs)
-            if isinstance(jax, _JaxBlockUntilReadyProtocol):
-                jax.block_until_ready(out)
-        end_time = time.time()
-
-        total_time_ms = (end_time - start_time) * 1000.0
-        latency_ms = total_time_ms / max(num_runs, 1)
-
-        if mode == "prefill":
-            tokens_per_sec = 32 * batch_size * num_runs / max(end_time - start_time, 1e-09)
-        else:
-            tokens_per_sec = max_new_tokens * batch_size * num_runs / max(end_time - start_time, 1e-09)
+        tokens_per_sec, latency_ms = execute_timed_benchmark_loop(
+            _step,
+            warmup_steps=warmup_steps,
+            num_runs=num_runs,
+            tokens_per_iter=32 if mode == "prefill" else max_new_tokens,
+            batch_size=batch_size,
+        )
 
         memory_mb = get_current_rss_mb()
         try:
@@ -239,7 +258,7 @@ def benchmark_model(
         num_runs = int(str(kwargs.get("num_runs", 5)))
         return _run_benchmark_pass(model, batch_size, num_runs, warmup_steps, mode, max_new_tokens, device)
 
-    if jax is None or jnp is None or nnx is None or not callable(Gemma4ForCausalLM):
+    if jax is None or is_jnp_missing(jnp) or nnx is None or not callable(Gemma4ForCausalLM):
         raise DependencyMissingError("JAX dependencies are missing.")
 
     return run_benchmark_wrapper(

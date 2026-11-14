@@ -65,7 +65,12 @@ def test_log_metrics_keras(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> N
 
         @staticmethod
         def create_file_writer(log_dir: str) -> _FakeTFWriter:
-            """Create a `_FakeTFWriter` instance."""
+            """Create a `_FakeTFWriter` instance.
+
+            Returns:
+                `_FakeTFWriter` initialized with `log_dir`.
+
+            """
             return _FakeTFWriter(log_dir)
 
         @staticmethod

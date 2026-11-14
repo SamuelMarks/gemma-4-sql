@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
 import re
@@ -16,7 +15,7 @@ import jax
 from flax import nnx
 
 from gemma_4_sql.backends.jax.gemma4.config import ModelConfig
-from gemma_4_sql.backends.lazy_loader import optional_attr
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol
 from gemma_4_sql.type_hints import DTypeProtocol, DTypeSpec, ModelConfigProtocol, NDArrayProtocol
 
 type TransformSpec = tuple[tuple[int, ...] | None, tuple[int, ...] | None, bool] | None
@@ -150,13 +149,17 @@ class SafeOpenCallableProtocol(Protocol):
 
 
 type StateKey = str | int
-type StateLeafValue = "StateNode | ParamValueHolderProtocol | ShapeDtypeLeafProtocol | ArrayLikeTensor | float | int | str | None"
+type StateLeafValue = (
+    "StateNode | ParamValueHolderProtocol | ShapeDtypeLeafProtocol | ArrayLikeTensor | float | int | str | None"
+)
 type StateNode = MutableMapping[StateKey, StateLeafValue]
 type ShardingNode = Mapping[StateKey, "ShardingNode | jax.sharding.Sharding | jax.sharding.PartitionSpec | None"]
 
 logger = logging.getLogger(__name__)
 
-safe_open: SafeOpenCallableProtocol | None = optional_attr("safetensors", "safe_open", SafeOpenCallableProtocol)
+safe_open: SafeOpenCallableProtocol | None = import_optional_symbol(
+    "safetensors", "safe_open", SafeOpenCallableProtocol
+)
 
 
 def map_to_jax_key(mapping: Mapping[str, KeyMapType], source_key: str) -> KeyMapType | tuple[None, None]:
@@ -173,7 +176,11 @@ def map_to_jax_key(mapping: Mapping[str, KeyMapType], source_key: str) -> KeyMap
         ValueError: If multiple regex patterns match `source_key`.
 
     """
-    subs = [(re.sub(pat, repl, source_key), transform) for (pat, (repl, transform)) in mapping.items() if re.match(pat, source_key)]
+    subs = [
+        (re.sub(pat, repl, source_key), transform)
+        for (pat, (repl, transform)) in mapping.items()
+        if re.match(pat, source_key)
+    ]
     if not subs:
         logger.warning("No mapping found for key: %s", source_key)
         return (None, None)
@@ -244,7 +251,16 @@ def _apply_transform(tensor: ArrayLikeTensor, transform: TransformType) -> Array
 
 
 def _resolve_state_key(state_dict: MutableMapping[StateKey, StateLeafValue], key: StateKey) -> StateKey:
-    """Resolve `key` against `state_dict`, coercing between `int` and numeric `str` when needed."""
+    """Resolve `key` against `state_dict`, coercing between `int` and numeric `str` when needed.
+
+    Args:
+        state_dict: Mutable mapping of state dictionary entries.
+        key: Candidate state key (`int` or `str`).
+
+    Returns:
+        Resolved key matching `state_dict` if a coerced match exists, else `key`.
+
+    """
     if key not in state_dict:
         if isinstance(key, str) and key.isdigit() and int(key) in state_dict:
             return int(key)
@@ -293,17 +309,26 @@ def assign_weights(
         if transformed.shape != target_shape:
             msg = f"Shape mismatch for {st_key}: {transformed.shape} vs {target_shape}"
             raise ValueError(msg)
-        shd_leaf = sharding_dict[resolved_key] if isinstance(sharding_dict, Mapping) and resolved_key in sharding_dict else None
+        shd_leaf = (
+            sharding_dict[resolved_key]
+            if isinstance(sharding_dict, Mapping) and resolved_key in sharding_dict
+            else None
+        )
+        device_put_fn: Callable[..., ArrayLikeTensor] = vars(jax)["device_put"]
         if isinstance(shd_leaf, (jax.sharding.Sharding, jax.sharding.PartitionSpec)):
-            val: ArrayLikeTensor = jax.device_put(transformed, shd_leaf)
+            val: ArrayLikeTensor = device_put_fn(transformed, shd_leaf)
         else:
-            val = jax.device_put(transformed)
+            val = device_put_fn(transformed)
         if isinstance(leaf, ParamValueHolderProtocol):
             leaf.value = val
         else:
             state_dict[resolved_key] = val
     else:
-        next_sharding = sharding_dict[resolved_key] if isinstance(sharding_dict, Mapping) and resolved_key in sharding_dict else None
+        next_sharding = (
+            sharding_dict[resolved_key]
+            if isinstance(sharding_dict, Mapping) and resolved_key in sharding_dict
+            else None
+        )
         child_node = state_dict[resolved_key]
         assert isinstance(child_node, MutableMapping)
         assign_weights(
@@ -345,13 +370,14 @@ def assign_weights_from_eval_shape(
         if transformed.shape != expected_shape:
             msg = f"Shape mismatch for {st_key}: {transformed.shape} vs {expected_shape}"
             raise ValueError(msg)
-        resolved_dtype: DTypeSpec | jax.numpy.dtype = str(expected_dtype) if isinstance(expected_dtype, DTypeProtocol) and not isinstance(expected_dtype, jax.numpy.dtype) else expected_dtype
+        resolved_dtype: str | None = str(expected_dtype) if expected_dtype is not None else None
         casted: ArrayLikeTensor = transformed.astype(resolved_dtype)
         target = val_obj.value if isinstance(val_obj, ParamValueHolderProtocol) else val_obj
         if isinstance(target, ShardedTargetProtocol) and bool(target.sharding):
             shd = target.sharding
             shd_spec = shd.spec if isinstance(shd, ShardingWithSpecProtocol) else shd
-            casted = jax.device_put(casted, shd_spec)
+            device_put_fn: Callable[..., ArrayLikeTensor] = vars(jax)["device_put"]
+            casted = device_put_fn(casted, shd_spec)
         if isinstance(val_obj, ParamValueHolderProtocol):
             val_obj.value = casted
         else:
@@ -425,7 +451,10 @@ class _ItemsStateProtocol(Protocol):
 
 
 def state_to_mutable_dict(
-    abs_state: PureDictStateProtocol | FlatDictStateProtocol | _ItemsStateProtocol | Iterable[tuple[StateKey, StateLeafValue]],
+    abs_state: PureDictStateProtocol
+    | FlatDictStateProtocol
+    | _ItemsStateProtocol
+    | Iterable[tuple[StateKey, StateLeafValue]],
 ) -> StateNode:
     """Convert an NNX `State` or mapping into a mutable `StateNode` dictionary.
 
@@ -459,8 +488,10 @@ def _get_model_and_state[ModelT](
     """
     model = model_cls(cfg, rngs=nnx.Rngs(0))
     state: StateNode = {}
-    with contextlib.suppress(RuntimeError, ValueError, TypeError, AttributeError):
-        split_fn: Callable[[ModelT], tuple[nnx.GraphDef[ModelT], PureDictStateProtocol | FlatDictStateProtocol | StateNode]] = nnx.split
+    if isinstance(model, nnx.Module):
+        split_fn: Callable[
+            [ModelT], tuple[nnx.GraphDef[ModelT], PureDictStateProtocol | FlatDictStateProtocol | StateNode]
+        ] = vars(nnx)["split"]
         split_res = split_fn(model)
         raw_state = split_res[1]
         state = state_to_mutable_dict(raw_state) if not isinstance(raw_state, dict) else raw_state
@@ -519,7 +550,7 @@ def create_model_from_safe_tensors[ModelT](
     _populate_state_from_files(file_dir, state, key_mapping)
 
     try:
-        update_fn: Callable[[ModelT, StateNode], None] = nnx.update
+        update_fn: Callable[[ModelT, StateNode], None] = vars(nnx)["update"]
         update_fn(model, state)
     except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as e:
         logger.exception("Failed to update model with loaded state")

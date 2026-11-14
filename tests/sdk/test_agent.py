@@ -1,9 +1,9 @@
-"""Behavioral and unit tests for the SDK Agent module."""
+"""Behavioral and unit tests for the SDK Agent module using typed protocol test doubles."""
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -15,21 +15,72 @@ from gemma_4_sql.sdk.agent import (
     run_agentic_loop,
     run_agentic_loop_async,
 )
-from gemma_4_sql.type_hints import AgentResultDict, InferenceResultDict, JSONValue
+from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
+from gemma_4_sql.sdk.protocols import BackendProtocol
+from gemma_4_sql.type_hints import AgentResultDict, InferenceResultDict, JSONPrimitive, JSONValue
+from tests.utils.test_utils import RecordingBackendDouble
 
 
-def _make_backend_getter(mock_b: MagicMock) -> Callable[[str], MagicMock]:
-    """Create a typed `get_backend` replacement returning `mock_b`."""
+class _ConfigurableAgentBackend(RecordingBackendDouble):
+    """Typed `BackendProtocol` test double supporting custom `generate_sql` callbacks and kwargs capture."""
 
-    def _get(_name: str) -> MagicMock:
-        """Return `mock_b`."""
-        return mock_b
+    def __init__(
+        self,
+        *,
+        sql_fn: Callable[[str, str], InferenceResultDict] | None = None,
+        static_res: InferenceResultDict | None = None,
+    ) -> None:
+        """Initialize configurable backend double.
+
+        Args:
+            sql_fn: Optional callback `(model_name, prompt) -> InferenceResultDict`.
+            static_res: Optional constant `InferenceResultDict` returned on every call.
+
+        """
+        super().__init__()
+        self._sql_fn = sql_fn
+        self._static_res = static_res
+        self.last_kwargs: dict[str, JSONValue] = {}
+
+    def generate_sql(
+        self,
+        model_name: str,
+        prompt: str,
+        beam_width: int = 3,
+        max_length: int = 50,
+        **kwargs: JSONValue,
+    ) -> InferenceResultDict:
+        """Record `kwargs` and return configured `InferenceResultDict`.
+
+        Returns:
+            Configured or default `InferenceResultDict`.
+
+        """
+        self.last_kwargs = {"beam_width": beam_width, "max_length": max_length, **kwargs}
+        if self._sql_fn is not None:
+            return self._sql_fn(model_name, prompt)
+        if self._static_res is not None:
+            return self._static_res
+        return super().generate_sql(model_name, prompt, beam_width, max_length, **kwargs)
+
+
+def _make_backend_getter(backend_double: BackendProtocol) -> Callable[[str], BackendProtocol]:
+    """Create a typed `get_backend` replacement returning `backend_double`.
+
+    Returns:
+        Backend resolver callable returning `backend_double`.
+
+    """
+
+    def _get(_name: str) -> BackendProtocol:
+        """Return `backend_double`."""
+        return backend_double
 
     return _get
 
 
 def test_extract_sql_from_response() -> None:
-    """Verify extract_sql_from_response strips Markdown SQL fences and preserves raw SQL."""
+    """Verify `extract_sql_from_response` strips Markdown SQL fences and preserves raw SQL."""
     assert (
         extract_sql_from_response("""```sql
 SELECT 1
@@ -57,8 +108,13 @@ def test_agentic_loop_self_correction_against_real_sqlite(backend: str, monkeypa
 
     call_count = 0
 
-    def mock_generate(model_name: str, current_prompt: str, **_kwargs: JSONValue) -> InferenceResultDict:
-        """Simulate an initial invalid column query followed by a corrected valid SQL query."""
+    def mock_generate(model_name: str, current_prompt: str) -> InferenceResultDict:
+        """Simulate an initial invalid column query followed by a corrected valid SQL query.
+
+        Returns:
+            Simulated `InferenceResultDict` for the current turn.
+
+        """
         nonlocal call_count
         call_count += 1
         if call_count == 1:
@@ -85,9 +141,8 @@ SELECT name FROM users WHERE age > 30;
             "confidence_score": 0.98,
         }
 
-    mock_backend = MagicMock()
-    mock_backend.generate_sql.side_effect = mock_generate
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
+    typed_backend = _ConfigurableAgentBackend(sql_fn=mock_generate)
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(typed_backend))
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=3)
     res = run_agentic_loop("google/gemma-4-2b", "Find users older than 30", backend=backend, context=ctx)
@@ -97,23 +152,32 @@ SELECT name FROM users WHERE age > 30;
     assert res["attempts"] == 2
     assert res["final_sql"] == "SELECT name FROM users WHERE age > 30;"
     assert res["results"] == [("Alice",)]
-    assert res["history"][0]["success"] is False
-    assert res["history"][1]["success"] is True
+    assert res["history"][0].get("success") is False
+    assert res["history"][1].get("success") is True
 
 
 def test_agentic_loop_invalid_backend() -> None:
-    """Verify run_agentic_loop raises ValueError when an unknown backend is requested."""
+    """Verify `run_agentic_loop` raises `ValueError` when an unknown backend is requested."""
     with pytest.raises(ValueError, match="Unknown backend: invalid"):
         run_agentic_loop("google/gemma-4-2b", "Get all users", backend="invalid")
 
 
 def test_agentic_loop_self_correction_exhaustion(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify agentic loop terminates with success=False when max_retries is exhausted."""
+    """Verify agentic loop terminates with `success=False` when `max_retries` is exhausted."""
     ddl = "CREATE TABLE users (id INT, name TEXT);"
 
-    mock_backend = MagicMock()
-    mock_backend.generate_sql.return_value = {"sql": "SELECT invalid_col FROM users;", "status": "success"}
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
+    typed_backend = _ConfigurableAgentBackend(
+        static_res={
+            "backend": "jax",
+            "model": "m",
+            "prompt": "p",
+            "sql": "SELECT invalid_col FROM users;",
+            "beam_width": 3,
+            "confidence_score": 0.9,
+            "status": "success",
+        }
+    )
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(typed_backend))
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=2)
     res = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
@@ -124,18 +188,22 @@ def test_agentic_loop_self_correction_exhaustion(monkeypatch: pytest.MonkeyPatch
     assert "no such column" in str(res["history"][0]["error"]).lower()
 
 
-def test_agentic_loop_confidence_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify agentic loop rejects SQL generations below min_confidence threshold."""
+def test_agentic_loop_confidence_rejection_and_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify agentic loop rejects SQL below `min_confidence` and accepts SQL meeting `min_confidence`."""
     ddl = "CREATE TABLE users (id INT, name TEXT);"
 
-    mock_backend = MagicMock()
-    mock_backend.generate_sql.return_value = {
-        "sql": "SELECT * FROM users;",
-        "status": "success",
-        "confidence_score": 0.4,
-    }
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
-
+    low_conf = _ConfigurableAgentBackend(
+        static_res={
+            "backend": "jax",
+            "model": "m",
+            "prompt": "p",
+            "sql": "SELECT * FROM users;",
+            "beam_width": 3,
+            "status": "success",
+            "confidence_score": 0.4,
+        }
+    )
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(low_conf))
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=2, min_confidence=0.8)
     res = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
     assert isinstance(res, dict)
@@ -143,38 +211,42 @@ def test_agentic_loop_confidence_rejection(monkeypatch: pytest.MonkeyPatch) -> N
     assert res["attempts"] == 2
     assert "below threshold" in str(res["history"][0]["error"])
 
-
-def test_agentic_loop_confidence_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify agentic loop accepts SQL generations meeting min_confidence threshold."""
-    ddl = "CREATE TABLE users (id INT, name TEXT);"
-
-    mock_backend = MagicMock()
-    mock_backend.generate_sql.return_value = {
-        "sql": "SELECT * FROM users;",
-        "status": "success",
-        "confidence_score": 0.9,
-    }
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
-
-    ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=2, min_confidence=0.8)
-    res = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
-    assert isinstance(res, dict)
-    assert res["success"] is True
-    assert res["attempts"] == 1
+    high_conf = _ConfigurableAgentBackend(
+        static_res={
+            "backend": "jax",
+            "model": "m",
+            "prompt": "p",
+            "sql": "SELECT * FROM users;",
+            "beam_width": 3,
+            "status": "success",
+            "confidence_score": 0.9,
+        }
+    )
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(high_conf))
+    res_ok = run_agentic_loop("google/gemma-4-2b", "Get users", backend="jax", context=ctx)
+    assert isinstance(res_ok, dict)
+    assert res_ok["success"] is True
+    assert res_ok["attempts"] == 1
 
 
 @pytest.mark.asyncio
 async def test_agentic_loop_async_and_batch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify run_agentic_loop_async processes a batch of prompts concurrently."""
+    """Verify `run_agentic_loop_async` processes a batch of prompts concurrently via `asyncio.to_thread`."""
     ddl = "CREATE TABLE users (id INT, name TEXT);"
-
-    mock_backend = MagicMock()
-    mock_backend.generate_sql.return_value = {
-        "sql": "SELECT * FROM users;",
-        "status": "success",
-        "confidence_score": 0.9,
-    }
-    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(mock_backend))
+    typed_backend = _ConfigurableAgentBackend()
+    assert typed_backend.generate_sql("m", "p")["sql"] == "SELECT * FROM jax_table;"
+    typed_backend2 = _ConfigurableAgentBackend(
+        static_res={
+            "backend": "jax",
+            "model": "m",
+            "prompt": "p",
+            "sql": "SELECT * FROM users;",
+            "beam_width": 3,
+            "status": "success",
+            "confidence_score": 0.9,
+        }
+    )
+    monkeypatch.setattr("gemma_4_sql.sdk.agent.get_backend", _make_backend_getter(typed_backend2))
 
     ctx = AgentContext(db_path=":memory:", ddl=ddl, max_retries=1)
     prompts = ["Get users", "Count users"]
@@ -186,23 +258,38 @@ async def test_agentic_loop_async_and_batch(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_process_single_prompt_error_truncation_and_hints() -> None:
-    """Verify _process_single_prompt truncates long errors and injects table/column hints."""
-    mock_backend = MagicMock()
-    mock_backend.generate_sql.return_value = {"sql": "SELECT * FROM bad;", "confidence_score": 1.0}
-
-    mock_engine = MagicMock()
-    long_error = "no such table: bad " + "x" * 600
-    mock_engine.execute_with_feedback_async = AsyncMock(
-        side_effect=[
-            (False, [], long_error),
-            (False, [], "column 'foo' does not exist"),
-            (False, [], "generic syntax error"),
-        ]
+async def test_process_single_prompt_error_truncation_and_hints(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify `_process_single_prompt` truncates long errors and injects table/column hints."""
+    typed_backend = _ConfigurableAgentBackend(
+        static_res={
+            "backend": "jax",
+            "model": "m",
+            "prompt": "p",
+            "sql": "SELECT * FROM bad;",
+            "beam_width": 3,
+            "confidence_score": 1.0,
+            "status": "success",
+        }
     )
 
-    ctx = AgentContext(max_retries=3)
-    res = await _process_single_prompt("jax", mock_backend, "model", "prompt", mock_engine, ctx)
+    from collections.abc import Iterator
+
+    long_error = "no such table: bad " + "x" * 600
+    empty_rows: list[tuple[JSONPrimitive, ...]] = []
+    errors: Iterator[tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]] = iter([
+        (False, empty_rows, long_error),
+        (False, empty_rows, "column 'foo' does not exist"),
+        (False, empty_rows, "generic syntax error"),
+    ])
+
+    async def _scripted_feedback(_q: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
+        """Return next scripted error feedback tuple."""
+        return next(errors)
+
+    async with LiveDatabaseEngine(":memory:") as engine:
+        monkeypatch.setattr(engine, "execute_with_feedback_async", _scripted_feedback)
+        ctx = AgentContext(max_retries=3)
+        res = await _process_single_prompt("jax", typed_backend, "model", "prompt", engine, ctx)
 
     assert res.get("success") is False
     assert res["attempts"] == 3
@@ -213,14 +300,21 @@ async def test_process_single_prompt_error_truncation_and_hints() -> None:
 
 
 def test_agent_multimodal_and_running_loop(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify AgentContext multimodal parameters and sync-over-async running loop execution."""
-    import asyncio
-
+    """Verify `AgentContext` multimodal parameters and sync-over-async running loop execution."""
     import gemma_4_sql.sdk.agent as ag
 
-    mock_b = MagicMock()
-    mock_b.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 0.9, "status": "ok"}
-    monkeypatch.setattr(ag, "get_backend", _make_backend_getter(mock_b))
+    typed_b = _ConfigurableAgentBackend(
+        static_res={
+            "backend": "pytorch",
+            "model": "m",
+            "prompt": "p",
+            "sql": "SELECT 1",
+            "beam_width": 3,
+            "confidence_score": 0.9,
+            "status": "ok",
+        }
+    )
+    monkeypatch.setattr(ag, "get_backend", _make_backend_getter(typed_b))
 
     context = ag.AgentContext(
         ddl="CREATE TABLE t(id int)",
@@ -230,13 +324,17 @@ def test_agent_multimodal_and_running_loop(monkeypatch: pytest.MonkeyPatch) -> N
     )
 
     async def _inside_running_loop() -> AgentResultDict | list[AgentResultDict]:
-        """Call synchronous run_agentic_loop from inside an active asyncio event loop."""
+        """Call synchronous `run_agentic_loop` from inside an active asyncio event loop.
+
+        Returns:
+            Result from `run_agentic_loop`.
+
+        """
         return ag.run_agentic_loop(prompt="test", context=context, model_name="m", backend="pytorch")
 
     res = asyncio.run(_inside_running_loop())
     assert isinstance(res, dict)
     assert res["status"] == "completed"
-    call_kwargs = mock_b.generate_sql.call_args.kwargs
-    assert call_kwargs["image_path"] == "fake.png"
-    assert call_kwargs["audio_path"] == "fake.wav"
-    assert call_kwargs["multimodal_context"] == {"emb": [1.0]}
+    assert typed_b.last_kwargs["image_path"] == "fake.png"
+    assert typed_b.last_kwargs["audio_path"] == "fake.wav"
+    assert typed_b.last_kwargs["multimodal_context"] == {"emb": [1.0]}

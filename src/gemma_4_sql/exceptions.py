@@ -3,28 +3,30 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Protocol, Union, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
 
-@runtime_checkable
-class StringKeyedMappingProtocol(Protocol):
-    """Protocol satisfied by all string-keyed mappings and TypedDicts."""
-
-    def __iter__(self) -> Iterator[str]:
-        """Iterate over the string keys of the mapping."""
-        ...
-
-    def __len__(self) -> int:
-        """Return the number of entries in the mapping."""
-        ...
-
-
 class ExecutionStatus(StrEnum):
-    """Canonical execution status values for backend operations."""
+    """Canonical execution status values for backend operations.
+
+    Attributes:
+        SUCCESS: Operation succeeded (`'success'`).
+        COMPLETED: Multi-step pipeline completed (`'completed'`).
+        LOADED: Resource or dataloader loaded (`'loaded'`).
+        FAILED: Operation failed at runtime (`'failed'`).
+        ERROR: General error status (`'error'`).
+        UNSUPPORTED: Requested capability is unsupported (`'unsupported'`).
+        MISSING_DEPENDENCY: Optional runtime dependency is missing (`'missing_dependency'`).
+        BACKEND_UNAVAILABLE: Target backend runtime is unavailable (`'backend_unavailable'`).
+        INJECTED: Adapter weights were injected (`'injected'`).
+        NO_MATCHING_MODULES: Target module list matched zero layers (`'no_matching_modules'`).
+        EMPTY_DATASET: Dataset contained zero records (`'empty_dataset'`).
+
+    """
 
     SUCCESS = "success"
     COMPLETED = "completed"
@@ -48,7 +50,12 @@ class ErrorPolicyConfigProtocol(Protocol):
 
     @property
     def raise_on_error(self) -> bool:
-        """Provide whether operational errors should be raised immediately."""
+        """Provide whether operational errors should be raised immediately.
+
+        Returns:
+            `True` when operational failures must raise exceptions.
+
+        """
         ...
 
 
@@ -58,7 +65,12 @@ class ExtraKwargsCarrierProtocol(Protocol):
 
     @property
     def extra_kwargs(self) -> Mapping[str, str | int | float | bool | None] | None:
-        """Provide extra keyword arguments mapping."""
+        """Provide extra keyword arguments mapping.
+
+        Returns:
+            Optional mapping of extra keyword options.
+
+        """
         ...
 
 
@@ -101,7 +113,7 @@ class GemmaSQLError(Exception):
         self.cause = cause
 
 
-class DependencyMissingError(GemmaSQLError, RuntimeError, ImportError):
+class DependencyMissingError(GemmaSQLError, ImportError):
     """Raised when a required optional backend dependency is missing.
 
     Attributes:
@@ -184,7 +196,7 @@ class UnsupportedQuantizationMethodError(GemmaSQLError, ValueError):
         self.supported_methods = supported_methods
 
 
-class InferenceError(GemmaSQLError, RuntimeError, ValueError):
+class InferenceError(GemmaSQLError, RuntimeError):
     """Raised when model inference or SQL generation fails.
 
     Attributes:
@@ -222,7 +234,7 @@ class InferenceError(GemmaSQLError, RuntimeError, ValueError):
         )
 
 
-class ExportError(GemmaSQLError, RuntimeError, ValueError):
+class ExportError(GemmaSQLError, RuntimeError):
     """Raised when checkpoint serialization or model export fails.
 
     Attributes:
@@ -260,7 +272,7 @@ class ExportError(GemmaSQLError, RuntimeError, ValueError):
         )
 
 
-class TrainingError(GemmaSQLError, RuntimeError, ValueError):
+class TrainingError(GemmaSQLError, RuntimeError):
     """Raised when pretraining, SFT, post-training, PEFT, or DPO execution fails.
 
     Attributes:
@@ -329,7 +341,7 @@ class ChatError(InferenceError):
         )
 
 
-class EvaluationError(GemmaSQLError, ValueError):
+class EvaluationError(GemmaSQLError, RuntimeError):
     """Raised when model evaluation or metric computation fails."""
 
     def __init__(
@@ -348,6 +360,37 @@ class EvaluationError(GemmaSQLError, ValueError):
             backend: Optional backend identifier where evaluation failed.
             model_name: Optional model identifier being evaluated.
             operation: Optional operation identifier (defaults to `'evaluate'`).
+            cause: Optional underlying exception cause.
+
+        """
+        super().__init__(
+            message,
+            backend=backend,
+            model_name=model_name,
+            operation=operation,
+            cause=cause,
+        )
+
+
+class AgentExecutionError(GemmaSQLError, RuntimeError):
+    """Raised when self-correcting SQL agent loop orchestration fails."""
+
+    def __init__(
+        self,
+        message: str = "Agent execution failed.",
+        *,
+        backend: str | None = None,
+        model_name: str | None = None,
+        operation: str | None = "agent",
+        cause: Exception | None = None,
+    ) -> None:
+        """Initialize AgentExecutionError with structured backend and model context.
+
+        Args:
+            message: Human-readable error description.
+            backend: Optional backend identifier where agent execution failed.
+            model_name: Optional model identifier used by the agent.
+            operation: Optional operation identifier (defaults to `'agent'`).
             cause: Optional underlying exception cause.
 
         """
@@ -453,7 +496,7 @@ class PEFTError(TrainingError):
         )
 
 
-class QuantizationError(GemmaSQLError, RuntimeError, ValueError):
+class QuantizationError(GemmaSQLError, RuntimeError):
     """Raised when model quantization execution fails."""
 
     def __init__(
@@ -519,7 +562,7 @@ class DatabaseExecutionError(GemmaSQLError, RuntimeError):
     """Raised when database adapter connection or SQL query execution fails."""
 
 
-class SQLSafetyViolationError(DatabaseExecutionError, PermissionError):
+class SQLSafetyViolationError(GemmaSQLError, ValueError, PermissionError):
     """Raised when a query violates read-only, DDL, or multi-statement safety guards."""
 
 
@@ -531,7 +574,7 @@ class ConfigurationError(GemmaSQLError, ValueError):
     """Raised when hyperparameters, backend names, or configuration parameters are invalid."""
 
 
-class MultimodalProcessingError(GemmaSQLError, ValueError):
+class MultimodalProcessingError(GemmaSQLError, RuntimeError):
     """Raised when image or audio input decoding, validation, or feature extraction fails."""
 
 
@@ -539,11 +582,9 @@ OPERATIONAL_EXCEPTIONS: tuple[type[Exception], ...] = (
     GemmaSQLError,
     RuntimeError,
     ValueError,
-    TypeError,
     OSError,
     LookupError,
     ArithmeticError,
-    AttributeError,
     ImportError,
 )
 
@@ -577,31 +618,31 @@ StatusInput = Union[
     float,
     bool,
     StatusMapping,
-    StringKeyedMappingProtocol,
     Sequence[StatusValue],
     None,
 ]
 
 
-def resolve_raise_on_error(
-    config: ErrorPolicyConfigProtocol | ExtraKwargsCarrierProtocol | StatusInput = None,
+def resolve_raise_on_error[ValT](
+    config: ErrorPolicyConfigProtocol | ExtraKwargsCarrierProtocol | Mapping[str, ValT] | StatusInput = None,
     *,
     raise_on_error: bool | None = None,
-    kwargs: StatusMapping | None = None,
+    kwargs: Mapping[str, ValT] | None = None,
 ) -> bool:
     """Resolve whether an operation should raise a `GemmaSQLError` subclass on runtime failure.
 
     Error Contract:
-        - `DependencyMissingError`, `ConfigurationError`, and `UnsupportedQuantizationMethodError`
-          always raise immediately regardless of `raise_on_error`.
+        - `DependencyMissingError`, `ConfigurationError`, `UnsupportedQuantizationMethodError`,
+          and `SQLSafetyViolationError` always raise immediately regardless of `raise_on_error`.
         - Operational runtime errors (`TrainingError`, `InferenceError`, `PEFTError`,
-          `QuantizationError`, `ServingError`, `BenchmarkError`, `ExportError`) raise when
+          `QuantizationError`, `ServingError`, `BenchmarkError`, `ExportError`, `EvaluationError`,
+          `AgentExecutionError`, `MultimodalProcessingError`) raise when
           `resolve_raise_on_error(...)` evaluates to `True`, and otherwise populate structured
           `status_code: ExecutionStatus.FAILED`, `error_message: str`, and `status: f"failed: {e}"`
           fields in the returned result dictionary.
 
     Args:
-        config: Optional configuration object (`TrainingConfig`, `DPOConfig`, `ETLConfig`).
+        config: Optional configuration object (`TrainingConfig`, `DPOConfig`, `ETLConfig`) or mapping.
         raise_on_error: Explicit boolean override if provided by the caller.
         kwargs: Optional keyword arguments mapping that may contain `'raise_on_error'`.
 
@@ -623,18 +664,20 @@ def resolve_raise_on_error(
     return False
 
 
-def is_failed_status(result: StatusInput) -> bool:
+def is_failed_status[ValT](
+    result: Mapping[str, ValT] | ExecutionStatus | str | float | bool | Sequence[StatusValue] | None,
+) -> bool:
     """Return True if a backend result dictionary, status enum, or status string indicates failure.
 
-    Checks structured `ExecutionStatus` enum values (`status_code`, `status`) and `error` /
-    `error_message` keys first, falling back to canonical prefix matching for status strings.
+    Checks structured `ExecutionStatus` enum values (`status_code`, `status`) and `error_message` /
+    `error` keys first, falling back to canonical prefix matching for status strings.
 
     Args:
         result: A backend result mapping (containing `'status_code'`, `'error_message'`, `'error'`,
             or `'status'`), `ExecutionStatus`, or status string.
 
     Returns:
-        True if the status represents a failed, unsupported, or missing-dependency outcome.
+        `True` if the status represents a failed, unsupported, or missing-dependency outcome.
 
     """
     if isinstance(result, ExecutionStatus):
@@ -663,6 +706,7 @@ def is_failed_status(result: StatusInput) -> bool:
 
 __all__ = [
     "OPERATIONAL_EXCEPTIONS",
+    "AgentExecutionError",
     "BenchmarkError",
     "ChatError",
     "ConfigurationError",
@@ -686,6 +730,7 @@ __all__ = [
     "StatusInput",
     "StatusMapping",
     "StatusScalar",
+    "StatusValue",
     "TrainingError",
     "UnsupportedQuantizationMethodError",
     "is_failed_status",

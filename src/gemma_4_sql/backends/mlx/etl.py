@@ -1,10 +1,11 @@
-"""MLX-specific ETL pipeline."""
+"""MLX-specific ETL pipeline without fake TypeGuards."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from typing import TypeGuard
 
+from gemma_4_sql._types_results import ETLBatchValue
+from gemma_4_sql._types_tensors import NestedScalarList
 from gemma_4_sql.backends.common_data import (
     DatasetSequenceProtocol,
     HFDatasetsModuleProtocol,
@@ -24,26 +25,32 @@ from gemma_4_sql.backends.common_data import (
 from gemma_4_sql.backends.lazy_loader import optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import DataloaderResultDict, ETLConfig, JSONDict, JSONValue, TensorType
+from gemma_4_sql.type_hints import DataloaderResultDict, ETLConfig, JSONDict, JSONValue, TokenizerProtocol
 
 _raw_datasets = optional_import("datasets")
-datasets: HFDatasetsModuleProtocol | None = _raw_datasets if isinstance(_raw_datasets, HFDatasetsModuleProtocol) else None
+datasets: HFDatasetsModuleProtocol | None = (
+    _raw_datasets if isinstance(_raw_datasets, HFDatasetsModuleProtocol) else None
+)
 
-type MLXCollatedBatchValue = TensorType | Sequence[int] | list[list[int]] | list[list[float]] | list[list[list[float]]] | list[list[list[list[float]]]] | list[TokenizedElementValue]
+type MLXCollatedBatchValue = ETLBatchValue
 type MLXCollatedBatchDict = dict[str, MLXCollatedBatchValue]
 
 
-def _is_int_list_seq(val: list[TokenizedElementValue]) -> TypeGuard[list[list[int]]]:
-    """Narrow `val` to `list[list[int]]` for token sequence padding.
+def _to_nested_scalar_list(val: TokenizedElementValue | JSONValue) -> NestedScalarList:
+    """Recursively convert a tokenized multimodal element into a `NestedScalarList`.
 
     Args:
-        val: List of tokenized element values.
+        val: Multimodal list or scalar value.
 
     Returns:
-        `True` for 1D integer token list batches.
+        Normalized `NestedScalarList`.
 
     """
-    return not isinstance(val, (str, bytes))
+    if isinstance(val, (bool, int, float)):
+        return val
+    if isinstance(val, Sequence) and not isinstance(val, (str, bytes, bytearray)):
+        return [_to_nested_scalar_list(elem) for elem in val]
+    return 0.0
 
 
 def _extract_token_lists(items: list[TokenizedElementDict], key: str) -> list[list[int]]:
@@ -57,52 +64,53 @@ def _extract_token_lists(items: list[TokenizedElementDict], key: str) -> list[li
         List of 1D integer token lists.
 
     """
-    raw = [item[key] for item in items]
-    assert _is_int_list_seq(raw)
-    return raw
+    out: list[list[int]] = []
+    for item in items:
+        raw_seq = item[key]
+        if isinstance(raw_seq, Sequence) and not isinstance(raw_seq, (str, bytes)):
+            out.append([int(tok) for tok in raw_seq if isinstance(tok, (int, float, bool))])
+    return out
 
 
-def _as_batch_mapping(
-    batch: MLXCollatedBatchDict,
-) -> TypeGuard[Mapping[str, TensorType | Sequence[int]]]:
-    """Narrow `batch` to `Mapping[str, TensorType | Sequence[int]]`.
-
-    Args:
-        batch: Collated MLX batch dictionary.
-
-    Returns:
-        `True` when `batch` is a non-string mapping.
-
-    """
-    return not isinstance(batch, (str, bytes))
-
-
-def _is_iterable_dataset(
+def _iter_dataset_records(
     ds: DatasetSequenceProtocol | Iterable[Mapping[str, JSONValue]],
-) -> TypeGuard[Iterable[Mapping[str, JSONValue]]]:
-    """Narrow `ds` to `Iterable[Mapping[str, JSONValue]]`.
+) -> Iterator[Mapping[str, JSONValue]]:
+    """Iterate records from either an indexable `DatasetSequenceProtocol` or an `Iterable` of mappings.
 
     Args:
         ds: Dataset sequence or iterable of records.
 
-    Returns:
-        `True` when `ds` is not a plain `str`.
+    Yields:
+        Individual record mappings.
 
     """
-    return not isinstance(ds, (str, bytes))
+    if isinstance(ds, DatasetSequenceProtocol):
+        for idx in range(len(ds)):
+            row = ds[idx]
+            if isinstance(row, Mapping):
+                yield row
+    else:
+        yield from ds
 
 
 class MLXDataLoader:
-    """Iterable batch dataloader for MLX token sequence and multimodal training."""
+    """Iterable batch dataloader for MLX token sequence and multimodal training.
+
+    Attributes:
+        ds: Underlying Hugging Face Dataset or sequence of SQL prompt/query dictionaries.
+        tok: `TokenizerProtocol` instance used to encode prompts and SQL targets.
+        bs: Number of records per padded batch.
+
+    """
 
     ds: DatasetSequenceProtocol | Iterable[Mapping[str, JSONValue]]
-    tok: SQLTokenizer
+    tok: TokenizerProtocol
     bs: int
 
     def __init__(
         self,
         ds: DatasetSequenceProtocol | Iterable[Mapping[str, JSONValue]],
-        tok: SQLTokenizer,
+        tok: TokenizerProtocol,
         bs: int,
     ) -> None:
         """Initialize the `MLXDataLoader`.
@@ -144,12 +152,14 @@ class MLXDataLoader:
         if "rejected_labels" in items[0]:
             res["rejected_labels"] = _pad_1d_list(_extract_token_lists(items, "rejected_labels"))
         if "pixel_values" in items[0]:
-            res["pixel_values"] = [item["pixel_values"] for item in items]
+            pv_list: NestedScalarList = [_to_nested_scalar_list(item["pixel_values"]) for item in items]
+            res["pixel_values"] = pv_list
         if "audio_values" in items[0]:
-            res["audio_values"] = [item["audio_values"] for item in items]
+            av_list: NestedScalarList = [_to_nested_scalar_list(item["audio_values"]) for item in items]
+            res["audio_values"] = av_list
         return res
 
-    def __iter__(self) -> Iterator[Mapping[str, TensorType | Sequence[int]]]:
+    def __iter__(self) -> Iterator[MLXCollatedBatchDict]:
         """Iterate over the dataset and yield zero-padded token and multimodal batches.
 
         Yields:
@@ -157,21 +167,14 @@ class MLXDataLoader:
 
         """
         batch_items: list[TokenizedElementDict] = []
-        ds_ref = self.ds
-        assert _is_iterable_dataset(ds_ref)
-        for item in ds_ref:
-            assert isinstance(item, Mapping)
+        for item in _iter_dataset_records(self.ds):
             tokenized = tokenize_dataset_element(item, self.tok, process_multimodal=True)
             batch_items.append(tokenized)
             if len(batch_items) == self.bs:
-                collated = self._collate_items(batch_items)
-                assert _as_batch_mapping(collated)
-                yield collated
+                yield self._collate_items(batch_items)
                 batch_items = []
         if batch_items:
-            collated_tail = self._collate_items(batch_items)
-            assert _as_batch_mapping(collated_tail)
-            yield collated_tail
+            yield self._collate_items(batch_items)
 
 
 def _load_hf_or_duckdb(

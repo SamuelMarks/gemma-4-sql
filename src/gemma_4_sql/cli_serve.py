@@ -13,16 +13,21 @@ from gemma_4_sql.cli_misc import (
     parse_json_list,
     print_cli_error,
 )
+from gemma_4_sql.cli_protocols import (
+    AgentArgsProtocol,
+    ChatArgsProtocol,
+    EvaluateArgsProtocol,
+    FewShotArgsProtocol,
+    ServeArgsProtocol,
+)
 from gemma_4_sql.exceptions import GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk import build_few_shot_prompt, chat_turn, evaluate, generate, run_agentic_loop, serve_model
 from gemma_4_sql.sdk.agent import AgentContext
 
 logger = logging.getLogger(__name__)
 
-_extract_serve_multimodal_kwargs = extract_multimodal_cli_kwargs
 
-
-def evaluate_cmd(args: argparse.Namespace) -> int:
+def evaluate_cmd(args: EvaluateArgsProtocol | argparse.Namespace) -> int:
     """Evaluate an existing model.
 
     Args:
@@ -86,11 +91,11 @@ def generate_cmd(args: argparse.Namespace) -> int:
     if sql_output:
         print(str(sql_output))
     if args.show_confidence and "confidence_score" in res:
-        print(f"Confidence: {float(str(res['confidence_score'])):.4f}")
+        print(f"Confidence: {float(res['confidence_score']):.4f}")
     return 1 if is_failed_status(res) else 0
 
 
-def agent_cmd(args: argparse.Namespace) -> int:
+def agent_cmd(args: AgentArgsProtocol | argparse.Namespace) -> int:
     """Run agentic self-correction loop.
 
     Args:
@@ -127,7 +132,7 @@ def agent_cmd(args: argparse.Namespace) -> int:
     return 1 if is_failed_status(res) else 0
 
 
-def serve_cmd(args: argparse.Namespace) -> int:
+def serve_cmd(args: ServeArgsProtocol | argparse.Namespace) -> int:
     """Serve a model using continuous batching.
 
     Args:
@@ -137,7 +142,7 @@ def serve_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if server initialization fails.
 
     """
-    mm_kwargs = _extract_serve_multimodal_kwargs(args)
+    mm_kwargs = extract_multimodal_cli_kwargs(args)
     try:
         res = serve_model(
             model_name=args.model,
@@ -154,7 +159,7 @@ def serve_cmd(args: argparse.Namespace) -> int:
     return 1 if is_failed_status(res) else 0
 
 
-def chat_cmd(args: argparse.Namespace) -> int:
+def chat_cmd(args: ChatArgsProtocol | argparse.Namespace) -> int:
     """Run a multi-turn conversational SQL chat turn.
 
     Args:
@@ -167,7 +172,7 @@ def chat_cmd(args: argparse.Namespace) -> int:
     history = parse_json_list(args.history, "history provided to chat_cmd")
     if history is None:
         return 1
-    mm_kwargs = _extract_serve_multimodal_kwargs(args)
+    mm_kwargs = extract_multimodal_cli_kwargs(args)
     try:
         res = chat_turn(
             model_name=args.model,
@@ -184,7 +189,7 @@ def chat_cmd(args: argparse.Namespace) -> int:
     return 1 if is_failed_status(res) else 0
 
 
-def few_shot_cmd(args: argparse.Namespace) -> int:
+def few_shot_cmd(args: FewShotArgsProtocol | argparse.Namespace) -> int:
     """Run dynamic few-shot prompting.
 
     Args:

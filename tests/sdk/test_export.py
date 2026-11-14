@@ -6,24 +6,24 @@ from pathlib import Path
 
 import pytest
 
-from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.exceptions import DependencyMissingError, ExportError
 from gemma_4_sql.sdk.export import export_model
 
 
 def test_export_jax(tmp_path: Path) -> None:
     """Verify export_model exports a JAX checkpoint artifact to disk."""
     dest = str(tmp_path / "jax_export")
-    res = export_model("model1", dest, "jax")
+    res = export_model("gemma-4-tiny", dest, "jax")
     assert res["backend"] == "jax"
-    assert res["model"] == "model1"
+    assert res["model"] == "gemma-4-tiny"
     assert res["export_path"] == dest
     assert res["format"] == "orbax/saved_model"
     assert Path(str(res["file_path"])).exists()
 
 
 def test_export_keras(tmp_path: Path) -> None:
-    """Verify export_model raises ValueError for unresolvable Keras preset names."""
-    with pytest.raises(ValueError):
+    """Verify export_model raises ExportError for unresolvable Keras preset names."""
+    with pytest.raises(ExportError, match="Failed to load model"):
         export_model("model1", str(tmp_path / "keras_export"), "keras")
 
 
@@ -35,9 +35,8 @@ def test_export_maxtext(tmp_path: Path) -> None:
 
 def test_export_pytorch_routing_and_execution(tmp_path: Path) -> None:
     """Verify export_model serializes a real tiny PyTorch Gemma4ForCausalLM to model.safetensors."""
-    from safetensors.torch import load_file
-
     from gemma_4_sql.backends.pytorch.gemma4 import Gemma4Config
+    from tests.utils.tensor_helpers import torch_load_safetensors as load_file
 
     dest = str(tmp_path / "pytorch_export")
     tiny_cfg = Gemma4Config.gemma4_tiny()

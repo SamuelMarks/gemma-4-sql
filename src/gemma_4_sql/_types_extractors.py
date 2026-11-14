@@ -5,9 +5,9 @@ from __future__ import annotations
 import atexit
 import concurrent.futures
 import threading
-from collections.abc import Callable, Coroutine, Iterator, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol, TypeVar, Union, runtime_checkable
+from typing import TypeVar, Union
 
 type KwargScalar = str | int | float | bool | Path | None
 type StatusScalar = str | int | float | bool | None
@@ -18,35 +18,19 @@ type KwargValue = Union[
 ]
 
 
-@runtime_checkable
-class KwargMappingProtocol(Protocol):
-    """Protocol satisfied by all string-keyed mappings and TypedDicts."""
-
-    def __iter__(self) -> Iterator[str]:
-        """Iterate over the string keys of the mapping."""
-        ...
-
-    def __len__(self) -> int:
-        """Return the number of entries in the mapping."""
-        ...
-
-
-type KwargMapping = Mapping[str, KwargValue] | KwargMappingProtocol
-
-
-def extract_int_kwarg(kwargs: KwargMapping, key: str, default: int) -> int:
+def extract_int_kwarg[ValT](kwargs: Mapping[str, ValT], key: str, default: int) -> int:
     """Extract an integer value from a keyword-argument mapping without string roundtrip coercion.
 
     Args:
         kwargs: Mapping of keyword arguments.
         key: Key to look up.
-        default: Default integer returned when key is absent or None.
+        default: Default integer returned when key is absent or non-numeric.
 
     Returns:
         Coerced integer value.
 
     """
-    val = kwargs.get(key) if isinstance(kwargs, Mapping) else None
+    val = kwargs.get(key)
     if val is None:
         return default
     if isinstance(val, bool):
@@ -56,19 +40,19 @@ def extract_int_kwarg(kwargs: KwargMapping, key: str, default: int) -> int:
     return default
 
 
-def extract_float_kwarg(kwargs: KwargMapping, key: str, default: float) -> float:
+def extract_float_kwarg[ValT](kwargs: Mapping[str, ValT], key: str, default: float) -> float:
     """Extract a float value from a keyword-argument mapping without string roundtrip coercion.
 
     Args:
         kwargs: Mapping of keyword arguments.
         key: Key to look up.
-        default: Default float returned when key is absent or None.
+        default: Default float returned when key is absent or non-numeric.
 
     Returns:
         Coerced float value.
 
     """
-    val = kwargs.get(key) if isinstance(kwargs, Mapping) else None
+    val = kwargs.get(key)
     if val is None:
         return default
     if isinstance(val, bool):
@@ -78,41 +62,41 @@ def extract_float_kwarg(kwargs: KwargMapping, key: str, default: float) -> float
     return default
 
 
-def extract_str_kwarg(kwargs: KwargMapping, key: str, default: str | None = None) -> str | None:
+def extract_str_kwarg[ValT](kwargs: Mapping[str, ValT], key: str, default: str | None = None) -> str | None:
     """Extract an optional string value from a keyword-argument mapping.
 
     Args:
         kwargs: Mapping of keyword arguments.
         key: Key to look up.
-        default: Default string or None returned when key is absent or None.
+        default: Default string or `None` returned when key is absent or `None`.
 
     Returns:
         Extracted string or default.
 
     """
-    val = kwargs.get(key) if isinstance(kwargs, Mapping) else None
+    val = kwargs.get(key)
     if val is None:
         return default
     return str(val)
 
 
-def extract_bool_kwarg(kwargs: KwargMapping, key: str, default: bool = False) -> bool:
+def extract_bool_kwarg[ValT](kwargs: Mapping[str, ValT], key: str, default: bool = False) -> bool:
     """Extract a boolean value from a keyword-argument mapping.
 
     Args:
         kwargs: Mapping of keyword arguments.
         key: Key to look up.
-        default: Default boolean returned when key is absent or None.
+        default: Default boolean returned when key is absent or `None`.
 
     Returns:
         Extracted boolean value.
 
     """
-    val = kwargs.get(key) if isinstance(kwargs, Mapping) else None
+    val = kwargs.get(key)
     if val is None:
         return default
     if isinstance(val, str):
-        return val.strip().lower() in ("1", "true", "yes", "on")
+        return val.strip().lower() in {"1", "true", "yes", "on"}
     return bool(val)
 
 
@@ -144,7 +128,12 @@ def shutdown_sync_coro_executor() -> None:
 
 
 def _get_sync_coro_executor() -> concurrent.futures.ThreadPoolExecutor:
-    """Return or lazily initialize the shared synchronous coroutine `ThreadPoolExecutor`."""
+    """Return or lazily initialize the shared synchronous coroutine `ThreadPoolExecutor`.
+
+    Returns:
+        Active `ThreadPoolExecutor` instance for synchronous coroutine offloading.
+
+    """
     with _EXECUTOR_LOCK:
         executor = _sync_coro_executor_state["executor"]
         if executor is None:
@@ -158,7 +147,9 @@ def _get_sync_coro_executor() -> concurrent.futures.ThreadPoolExecutor:
 
 
 def run_coroutine_sync(coro_factory: Callable[[], Coroutine[None, None, TResult]]) -> TResult:
-    """Execute an async coroutine factory synchronously, safely offloading to a shared worker thread if an event loop is already running.
+    """Execute an async coroutine factory synchronously across event loop contexts.
+
+    Safely offloads execution to a shared worker thread if an event loop is already running.
 
     Args:
         coro_factory: Zero-argument callable returning the coroutine to await.

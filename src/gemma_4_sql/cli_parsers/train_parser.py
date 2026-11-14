@@ -6,13 +6,12 @@ import argparse
 from collections.abc import Callable
 
 from gemma_4_sql.cli_misc import quantize_cmd
+from gemma_4_sql.cli_parsers.protocols import SubparserCollectionProtocol
 from gemma_4_sql.cli_train import dpo_cmd, peft_cmd, posttrain_cmd, pretrain_cmd, sft_cmd, train_cmd
-
-type SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
 
 
 def add_training_subparser(
-    subparsers: SubParsersType,
+    subparsers: SubparserCollectionProtocol,
     name: str,
     help_text: str,
     backend: str,
@@ -38,15 +37,22 @@ def add_training_subparser(
     parser.add_argument("--learning-rate", type=float, default=0.0001, help="Learning rate.")
     parser.add_argument("--batch-size", type=int, default=2, help="Batch size for training dataloader.")
     parser.add_argument("--backend", default=backend, help="Backend to use.")
-    parser.add_argument("--distributed-strategy", default="none", choices=["none", "ddp", "fsdp"], help="Distributed strategy.")
+    parser.add_argument(
+        "--distributed-strategy", default="none", choices=["none", "ddp", "fsdp"], help="Distributed strategy."
+    )
     parser.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or table screenshot.")
     parser.add_argument("--audio-path", default=None, help="Path to recorded natural language query audio file.")
-    parser.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser.set_defaults(func=cmd_func)
     return parser
 
 
-def add_peft_quantize_parsers(subparsers: SubParsersType) -> None:
+def add_peft_quantize_parsers(subparsers: SubparserCollectionProtocol) -> None:
     """Register DPO, PEFT/LoRA, and Quantize subcommand parsers.
 
     Args:
@@ -61,9 +67,16 @@ def add_peft_quantize_parsers(subparsers: SubParsersType) -> None:
     parser_dpo.add_argument("--learning-rate", type=float, default=1e-05, help="Learning rate for DPO.")
     parser_dpo.add_argument("--batch-size", type=int, default=2, help="Batch size for DPO dataloader.")
     parser_dpo.add_argument("--backend", default="jax", help="Backend to use.")
-    parser_dpo.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or table screenshot.")
+    parser_dpo.add_argument(
+        "--image-path", default=None, help="Path to schema diagram, ERD image, or table screenshot."
+    )
     parser_dpo.add_argument("--audio-path", default=None, help="Path to recorded natural language query audio file.")
-    parser_dpo.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_dpo.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser_dpo.set_defaults(func=dpo_cmd)
 
     parser_peft = subparsers.add_parser("peft", help="Apply PEFT / LoRA configuration to a model.")
@@ -77,12 +90,14 @@ def add_peft_quantize_parsers(subparsers: SubParsersType) -> None:
 
     parser_quantize = subparsers.add_parser("quantize", help="Quantize a model.")
     parser_quantize.add_argument("--model", default="gemma-4", help="Model name.")
-    parser_quantize.add_argument("--method", default="int8", choices=["int8", "int4", "awq", "gptq", "gguf"], help="Quantization method.")
+    parser_quantize.add_argument(
+        "--method", default="int8", choices=["int8", "int4", "awq", "gptq", "gguf"], help="Quantization method."
+    )
     parser_quantize.add_argument("--backend", default="pytorch", help="Backend to use.")
     parser_quantize.set_defaults(func=quantize_cmd)
 
 
-def add_training_parsers(subparsers: SubParsersType) -> None:
+def add_training_parsers(subparsers: SubparserCollectionProtocol) -> None:
     """Register all model training, adaptation, and optimization subparsers.
 
     Args:

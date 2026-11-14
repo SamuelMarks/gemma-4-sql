@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-import contextlib
 import copy
 import logging
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol, SupportsFloat, TypeGuard, overload, runtime_checkable
+from typing import Protocol, SupportsFloat, overload, runtime_checkable
 
 from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
+from gemma_4_sql.backends.maxtext._protocols import JnpZerosAndArrayProtocol
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import (
     BackendKwargValue,
+    DTypeProtocol,
     JaxArrayProtocol,
+    MaxTextCausalLMProtocol,
     PEFTResultDict,
     PyTreeNode,
     TensorType,
@@ -32,7 +34,12 @@ class _KeyPathEntryProtocol(Protocol):
 
     @property
     def key(self) -> str:
-        """Provide the dictionary key name."""
+        """Provide the dictionary key name.
+
+        Returns:
+            Dictionary key string.
+
+        """
         ...
 
 
@@ -41,7 +48,12 @@ class _OptaxStateProtocol(Protocol):
     """Protocol satisfied by any Optax optimizer state tuple or dictionary."""
 
     def __repr__(self) -> str:
-        """Return string representation."""
+        """Return string representation.
+
+        Returns:
+            Formatted state representation.
+
+        """
         ...
 
 
@@ -51,21 +63,45 @@ class _OptaxTransformProtocol(Protocol):
 
     @property
     def init(self) -> Callable[..., _OptaxStateProtocol]:
-        """Provide the optimizer state initialization callable."""
+        """Provide the optimizer state initialization callable.
+
+        Returns:
+            Initializer callable mapping parameter PyTrees to optimizer states.
+
+        """
         ...
 
     @property
     def update(self) -> Callable[..., tuple[_OptaxStateProtocol, _OptaxStateProtocol]]:
-        """Provide the optimizer step update callable."""
+        """Provide the optimizer step update callable.
+
+        Returns:
+            Update callable mapping `(grads, state, params)` to `(updates, new_state)`.
+
+        """
         ...
 
 
-class _SizedLeafProtocol(Protocol):
-    """Protocol for a tensor or array leaf exposing `.size`."""
+@runtime_checkable
+class _MaxTextApplyProtocol[OutT](Protocol):
+    """Protocol for a stateless MaxText model exposing `.apply(params, inputs)`."""
 
-    @property
-    def size(self) -> int:
-        """Provide the total number of elements."""
+    def apply(
+        self,
+        params: Mapping[str, PyTreeNode],
+        inputs: OutT,
+        /,
+    ) -> OutT:
+        """Execute forward pass with explicit parameter PyTree.
+
+        Args:
+            params: Parameter PyTree dictionary.
+            inputs: Input token ID or activation array.
+
+        Returns:
+            Model forward output array.
+
+        """
         ...
 
 
@@ -73,51 +109,228 @@ type MaxTextParamLeaf = JaxArrayProtocol | TensorType | SupportsFloat | str
 type MaxTextParamDict = dict[str, "MaxTextParamDict | MaxTextParamLeaf"]
 
 
-def _is_jax_array_leaf(val: MaxTextParamDict | MaxTextParamLeaf) -> TypeGuard[JaxArrayProtocol]:
-    """Narrow `val` to `JaxArrayProtocol` for matrix multiplication and addition.
+@runtime_checkable
+class _ParamItemsMappingProtocol(Protocol):
+    """Non-generic protocol for iterating `(key, value)` pairs of MaxText parameter mappings."""
+
+    def items(self) -> Iterable[tuple[str, BackendKwargValue | MaxTextParamDict | PyTreeNode | None]]:
+        """Yield `(key, value)` pairs."""
+        ...
+
+
+def _coerce_maxtext_param_dict(
+    raw: BackendKwargValue | MaxTextParamDict | PyTreeNode | None,
+) -> MaxTextParamDict | None:
+    """Recursively coerce a mapping into a typed `MaxTextParamDict`.
 
     Args:
-        val: Parameter leaf value.
+        raw: Candidate parameter mapping or scalar.
 
     Returns:
-        `True` when `val` is not a `dict` or `str`.
+        Coerced `MaxTextParamDict`, or `None` when `raw` is not a `Mapping`.
 
     """
-    return not isinstance(val, (dict, str))
+    if not isinstance(raw, Mapping):
+        return None
+    assert isinstance(raw, _ParamItemsMappingProtocol)
+    out: MaxTextParamDict = {}
+    for k, v in raw.items():
+        key_s = str(k)
+        sub = _coerce_maxtext_param_dict(v)
+        if sub is not None:
+            out[key_s] = sub
+        elif isinstance(v, (JaxArrayProtocol, SupportsFloat, str, int, float)):
+            out[key_s] = v
+    return out
 
 
-def _has_size_attr(val: MaxTextParamLeaf) -> TypeGuard[_SizedLeafProtocol]:
-    """Narrow `val` to `_SizedLeafProtocol` for `.size` access.
+@runtime_checkable
+class _JaxPEFTRandomProtocol(Protocol):
+    """Protocol for `jax.random` exposing `PRNGKey`, `split`, and `uniform`."""
 
-    Args:
-        val: Parameter leaf value.
+    def PRNGKey(self, seed: int, /) -> JaxArrayProtocol:
+        """Create a deterministic JAX PRNG key.
 
-    Returns:
-        `True` if `val` is not a primitive `str`, `int`, or `float`.
+        Args:
+            seed: Integer PRNG seed.
 
-    """
-    return not isinstance(val, (str, int, float))
+        Returns:
+            PRNG key `JaxArrayProtocol`.
+
+        """
+        ...
+
+    def split(
+        self,
+        key: JaxArrayProtocol | SupportsFloat,
+        /,
+    ) -> tuple[JaxArrayProtocol, JaxArrayProtocol]:
+        """Split a PRNG key into two independent subkeys.
+
+        Args:
+            key: Parent PRNG key.
+
+        Returns:
+            2-tuple of `(next_key, subkey)`.
+
+        """
+        ...
+
+    def uniform(
+        self,
+        key: JaxArrayProtocol,
+        shape: tuple[int, int],
+        *,
+        dtype: DTypeProtocol | str | None = None,
+        minval: float = 0.0,
+        maxval: float = 1.0,
+    ) -> JaxArrayProtocol:
+        """Sample uniform random float values in `[minval, maxval)`.
+
+        Args:
+            key: JAX PRNG subkey.
+            shape: 2D matrix shape tuple.
+            dtype: Target floating-point dtype.
+            minval: Lower bound.
+            maxval: Upper bound.
+
+        Returns:
+            Sampled `JaxArrayProtocol`.
+
+        """
+        ...
 
 
-def _is_maxtext_param_dict(
-    val: BackendKwargValue | MaxTextParamDict | Mapping[str, PyTreeNode] | dict[str, PyTreeNode] | None,
-) -> TypeGuard[MaxTextParamDict]:
-    """Narrow `val` to `MaxTextParamDict`.
+@runtime_checkable
+class _JaxTreeUtilProtocol(Protocol):
+    """Protocol for `jax.tree_util` exposing `tree_map_with_path`."""
 
-    Args:
-        val: Candidate parameter dictionary.
+    def tree_map_with_path[LeafT, OutLeafT](
+        self,
+        f: Callable[[Sequence[_KeyPathEntryProtocol], LeafT], OutLeafT],
+        tree: Mapping[str, PyTreeNode],
+        /,
+    ) -> Mapping[str, PyTreeNode]:
+        """Map `f(path, leaf)` across every leaf in `tree`.
 
-    Returns:
-        `True` when `val` is a `dict`.
+        Args:
+            f: Path-aware leaf mapping function.
+            tree: Input parameter PyTree dictionary.
 
-    """
-    return isinstance(val, dict)
+        Returns:
+            Mapped PyTree of partition labels.
+
+        """
+        ...
 
 
-jax = optional_import("jax")
-jnp = optional_import("jax.numpy")
-optax = optional_import("optax")
-Gemma4Model: MaxTextModelConstructorProtocol | None = optional_attr(
+@runtime_checkable
+class _JaxPEFTModuleProtocol(Protocol):
+    """Protocol for `jax` exposing `.random` and `.tree_util` in MaxText PEFT."""
+
+    @property
+    def random(self) -> _JaxPEFTRandomProtocol:
+        """Provide `jax.random` namespace."""
+        ...
+
+    @property
+    def tree_util(self) -> _JaxTreeUtilProtocol:
+        """Provide `jax.tree_util` namespace."""
+        ...
+
+
+@runtime_checkable
+class _JnpPEFTModuleProtocol(JnpZerosAndArrayProtocol, Protocol):
+    """Protocol for `jax.numpy` exposing `float32`, `asarray`, `savez`, and `load` in MaxText PEFT."""
+
+    @property
+    def float32(self) -> DTypeProtocol:
+        """Provide `jnp.float32` dtype."""
+        ...
+
+    def asarray(self, a: MaxTextParamLeaf, /) -> JaxArrayProtocol:
+        """Convert `a` into a `JaxArrayProtocol`.
+
+        Args:
+            a: Parameter leaf array or scalar.
+
+        Returns:
+            Converted `JaxArrayProtocol`.
+
+        """
+        ...
+
+    def savez(self, file: Path | str, /, **kwds: JaxArrayProtocol | TensorType) -> None:
+        """Save named adapter arrays to an uncompressed `.npz` archive.
+
+        Args:
+            file: Destination `.npz` path.
+            **kwds: Flattened adapter arrays keyed by parameter path.
+
+        """
+        ...
+
+    def load(self, file: Path | str, /) -> Mapping[str, JaxArrayProtocol]:
+        """Load named adapter arrays from a `.npz` archive.
+
+        Args:
+            file: Source `.npz` path.
+
+        Returns:
+            Mapping from flattened parameter path to `JaxArrayProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _OptaxPEFTModuleProtocol(Protocol):
+    """Protocol for `optax` exposing `adam`, `set_to_zero`, and `multi_transform`."""
+
+    def adam(self, learning_rate: float, /) -> _OptaxTransformProtocol:
+        """Construct an `adam` optimizer transformation.
+
+        Args:
+            learning_rate: Optimizer learning rate.
+
+        Returns:
+            Configured `_OptaxTransformProtocol`.
+
+        """
+        ...
+
+    def set_to_zero(self) -> _OptaxTransformProtocol:
+        """Construct a zero-gradient transformation for frozen parameters.
+
+        Returns:
+            Frozen `_OptaxTransformProtocol`.
+
+        """
+        ...
+
+    def multi_transform(
+        self,
+        transforms: Mapping[str, _OptaxTransformProtocol | str],
+        param_labels: Mapping[str, PyTreeNode],
+        /,
+    ) -> _OptaxTransformProtocol:
+        """Partition parameter updates by `param_labels` across `transforms`.
+
+        Args:
+            transforms: Mapping from partition name to `_OptaxTransformProtocol`.
+            param_labels: Parameter PyTree of partition label strings.
+
+        Returns:
+            Composite `_OptaxTransformProtocol`.
+
+        """
+        ...
+
+
+jax: _JaxPEFTModuleProtocol | None = optional_import("jax", _JaxPEFTModuleProtocol)
+jnp: _JnpPEFTModuleProtocol | None = optional_import("jax.numpy", _JnpPEFTModuleProtocol)
+optax: _OptaxPEFTModuleProtocol | None = optional_import("optax", _OptaxPEFTModuleProtocol)
+Gemma4Model: MaxTextModelConstructorProtocol | None = import_optional_symbol(
     "maxtext.models.gemma4",
     "Gemma4Model",
     MaxTextModelConstructorProtocol,
@@ -216,8 +429,19 @@ def transform_params_to_lora(
     active_rng = rng if rng is not None else jax.random.PRNGKey(0)
     injected_count = 0
 
-    def _inject(curr: MaxTextParamDict | MaxTextParamLeaf, current_path: str = "") -> MaxTextParamDict | MaxTextParamLeaf:
-        """Inject LoRA factors into matching parameter dictionaries."""
+    def _inject(
+        curr: MaxTextParamDict | MaxTextParamLeaf, current_path: str = ""
+    ) -> MaxTextParamDict | MaxTextParamLeaf:
+        """Inject LoRA factors into matching parameter dictionaries.
+
+        Args:
+            curr: Current parameter dictionary or leaf.
+            current_path: Dotted parameter tree path.
+
+        Returns:
+            Updated parameter dictionary or leaf.
+
+        """
         nonlocal injected_count, active_rng
         assert jax is not None
         assert jnp is not None
@@ -228,7 +452,9 @@ def transform_params_to_lora(
             sub_path = f"{current_path}.{k}" if current_path else k
             if isinstance(v, dict):
                 v_dict: MaxTextParamDict = v
-                if "kernel" in v_dict and any(k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in target_modules):
+                if "kernel" in v_dict and any(
+                    k == t or sub_path.endswith(f".{t}") or f".{t}." in sub_path for t in target_modules
+                ):
                     kernel = v_dict["kernel"]
                     assert isinstance(kernel, JaxArrayProtocol)
                     d_in, d_out = kernel.shape
@@ -261,6 +487,10 @@ def transform_params_to_lora(
 def segregate_adapter_params(params: MaxTextParamDict | MaxTextParamLeaf) -> tuple[MaxTextParamDict, MaxTextParamDict]:
     """Segregate a parameter dictionary into trainable LoRA adapters and frozen base weights.
 
+    Only `lora_a` and `lora_b` matrices are partitioned into `trainable`; base kernels,
+    biases, and the fixed `lora_scale` hyperparameter constant (`alpha / r`) remain frozen,
+    matching `create_maxtext_lora_optimizer` and `count_maxtext_parameters`.
+
     Args:
         params: Model parameter PyTree.
 
@@ -276,7 +506,14 @@ def segregate_adapter_params(params: MaxTextParamDict | MaxTextParamLeaf) -> tup
         dst_trainable: MaxTextParamDict,
         dst_frozen: MaxTextParamDict,
     ) -> None:
-        """Split parameters into trainable and frozen PyTrees recursively."""
+        """Split parameters into trainable and frozen PyTrees recursively.
+
+        Args:
+            src: Source parameter tree node.
+            dst_trainable: Destination trainable dictionary.
+            dst_frozen: Destination frozen dictionary.
+
+        """
         if not isinstance(src, dict):
             return
         for k, v in src.items():
@@ -289,7 +526,7 @@ def segregate_adapter_params(params: MaxTextParamDict | MaxTextParamLeaf) -> tup
                     dst_trainable[k] = sub_t
                 if sub_f:
                     dst_frozen[k] = sub_f
-            elif k in ("lora_a", "lora_b", "lora_scale"):
+            elif k in {"lora_a", "lora_b"}:
                 dst_trainable[k] = v
             else:
                 dst_frozen[k] = v
@@ -305,8 +542,8 @@ def create_maxtext_lora_optimizer(
 ) -> _OptaxTransformProtocol:
     """Create an Optax `multi_transform` optimizer updating only LoRA parameters.
 
-    Freezes all base model weights by routing them to `optax.set_to_zero()` while
-    directing LoRA adapters to the specified base optimizer.
+    Freezes all base model weights and `lora_scale` constants by routing them to
+    `optax.set_to_zero()` while directing `lora_a` and `lora_b` adapters to `base_optimizer`.
 
     Args:
         params: Model parameter PyTree containing LoRA adapters.
@@ -326,10 +563,19 @@ def create_maxtext_lora_optimizer(
     resolved_opt = base_optimizer if base_optimizer is not None else optax.adam(learning_rate)
 
     def _label_fn(path: Sequence[_KeyPathEntryProtocol | str], _val: MaxTextParamLeaf) -> str:
-        """Classify parameter path as trainable adapter or frozen base."""
+        """Classify parameter path as trainable adapter or frozen base.
+
+        Args:
+            path: PyTree key path sequence.
+            _val: Leaf parameter value.
+
+        Returns:
+            `'trainable'` for `lora_a` / `lora_b`, otherwise `'frozen'`.
+
+        """
         last_entry = path[-1]
         key = last_entry.key if isinstance(last_entry, _KeyPathEntryProtocol) else str(last_entry)
-        if key in ("lora_a", "lora_b"):
+        if key in {"lora_a", "lora_b"}:
             return "trainable"
         return "frozen"
 
@@ -341,18 +587,20 @@ def create_maxtext_lora_optimizer(
     return res
 
 
-def merge_lora_weights(params: MaxTextParamDict | MaxTextParamLeaf) -> MaxTextParamDict | MaxTextParamLeaf:
-    """Fold LoRA adapter weights back into base MaxText weights.
+def materialize_effective_params(params: MaxTextParamDict | MaxTextParamLeaf) -> MaxTextParamDict | MaxTextParamLeaf:
+    """Differentiably materialize effective `kernel` weights from AQT scales and LoRA adapters.
 
-    Computes:
-        `W_merged = W + scale * (lora_a @ lora_b)`
-    and removes adapter parameters, returning standard model weights.
+    For each projection dictionary:
+    1. If AQT `kernel_scale` is present alongside a quantized `kernel`, dequantizes
+       `kernel.astype(float32) * kernel_scale`.
+    2. If `lora_a` and `lora_b` are present, computes `kernel + lora_scale * (lora_a @ lora_b)`
+       with full JAX autodiff support so gradients flow cleanly into `lora_a` and `lora_b`.
 
     Args:
-        params: Model parameter PyTree containing LoRA adapters.
+        params: Parameter PyTree optionally containing LoRA adapters and/or AQT scales.
 
     Returns:
-        A new parameter dictionary with folded base weights and adapters removed.
+        Parameter PyTree with effective floating-point `kernel` tensors and auxiliary keys stripped.
 
     """
     if not isinstance(params, dict):
@@ -361,25 +609,80 @@ def merge_lora_weights(params: MaxTextParamDict | MaxTextParamLeaf) -> MaxTextPa
     for k, v in params.items():
         if isinstance(v, dict):
             v_dict: MaxTextParamDict = v
-            if "kernel" in v_dict and "lora_a" in v_dict and "lora_b" in v_dict:
-                raw_scale = v_dict.get("lora_scale", 1.0)
-                scale = float(raw_scale) if isinstance(raw_scale, (int, float, JaxArrayProtocol)) else 1.0
-                lora_a = v_dict["lora_a"]
-                lora_b = v_dict["lora_b"]
-                kernel = v_dict["kernel"]
-                assert _is_jax_array_leaf(lora_a)
-                assert _is_jax_array_leaf(lora_b)
-                assert _is_jax_array_leaf(kernel)
-                delta_w = (lora_a @ lora_b) * scale
-                merged_kernel: MaxTextParamLeaf = kernel + delta_w
-                new_module: MaxTextParamDict = {module_k: module_v for module_k, module_v in v_dict.items() if module_k not in ("lora_a", "lora_b", "lora_scale")}
-                new_module["kernel"] = merged_kernel
+            raw_kernel = v_dict.get("kernel")
+            if isinstance(raw_kernel, JaxArrayProtocol) and ("lora_a" in v_dict or "kernel_scale" in v_dict):
+                eff_kernel: JaxArrayProtocol = raw_kernel
+                raw_q_scale = v_dict.get("kernel_scale")
+                if isinstance(raw_q_scale, JaxArrayProtocol) and jnp is not None:
+                    eff_kernel = eff_kernel.astype(jnp.float32) * raw_q_scale
+                lora_a = v_dict.get("lora_a")
+                lora_b = v_dict.get("lora_b")
+                if isinstance(lora_a, JaxArrayProtocol) and isinstance(lora_b, JaxArrayProtocol):
+                    raw_scale = v_dict.get("lora_scale", 1.0)
+                    delta: JaxArrayProtocol = lora_a @ lora_b
+                    if isinstance(raw_scale, JaxArrayProtocol):
+                        eff_kernel += delta * raw_scale
+                    else:
+                        scale_f = float(raw_scale) if isinstance(raw_scale, (int, float, SupportsFloat)) else 1.0
+                        eff_kernel += delta * scale_f
+                new_module: MaxTextParamDict = {
+                    mk: mv
+                    for mk, mv in v_dict.items()
+                    if mk not in {"lora_a", "lora_b", "lora_scale", "kernel_scale", "aqt_config"}
+                }
+                new_module["kernel"] = eff_kernel
                 res[k] = new_module
             else:
-                res[k] = merge_lora_weights(v_dict)
+                res[k] = materialize_effective_params(v_dict)
         else:
             res[k] = v
     return res
+
+
+def merge_lora_weights(params: MaxTextParamDict | MaxTextParamLeaf) -> MaxTextParamDict | MaxTextParamLeaf:
+    """Fold LoRA adapter weights back into base MaxText weights.
+
+    Computes `W_merged = W + scale * (lora_a @ lora_b)` and removes adapter parameters,
+    returning standard model weights.
+
+    Args:
+        params: Model parameter PyTree containing LoRA adapters.
+
+    Returns:
+        A new parameter dictionary with folded base weights and adapters removed.
+
+    """
+    return materialize_effective_params(params)
+
+
+def apply_with_lora[OutT](
+    model: _MaxTextApplyProtocol[OutT],
+    lora_params: Mapping[str, PyTreeNode],
+    inputs: OutT,
+) -> OutT:
+    """Execute a stateless MaxText model forward pass with LoRA adapters active.
+
+    Materializes `W + lora_scale * (lora_a @ lora_b)` differentiably so `lora_a` and `lora_b`
+    participate in both forward inference and `jax.grad` / `jax.value_and_grad` optimization.
+
+    Args:
+        model: Stateless MaxText model exposing `.apply(params, inputs)`.
+        lora_params: Parameter PyTree containing base weights and `lora_a` / `lora_b` adapters.
+        inputs: Input token ID or activation array.
+
+    Returns:
+        Forward output logits or activations produced by `model.apply(...)`.
+
+    """
+    coerced = _coerce_maxtext_param_dict(lora_params)
+    effective_tree: Mapping[str, PyTreeNode]
+    if coerced is not None:
+        materialized = materialize_effective_params(coerced)
+        assert isinstance(materialized, dict)
+        effective_tree = materialized
+    else:
+        effective_tree = lora_params
+    return model.apply(effective_tree, inputs)
 
 
 def save_maxtext_adapters(params: MaxTextParamDict | MaxTextParamLeaf, save_path: str | Path) -> None:
@@ -398,13 +701,19 @@ def save_maxtext_adapters(params: MaxTextParamDict | MaxTextParamLeaf, save_path
 
     path = Path(save_path)
     if path.is_dir() or path.suffix != ".npz":
-        path = path / "maxtext_lora_adapters.npz"
+        path /= "maxtext_lora_adapters.npz"
     path.parent.mkdir(parents=True, exist_ok=True)
 
     adapters: dict[str, JaxArrayProtocol | TensorType] = {}
 
     def _collect(curr: MaxTextParamDict | MaxTextParamLeaf, current_path: str = "") -> None:
-        """Collect adapter arrays from parameter tree into flat dict."""
+        """Collect adapter arrays from parameter tree into flat dict.
+
+        Args:
+            curr: Current parameter dictionary or leaf.
+            current_path: Dotted key path prefix.
+
+        """
         assert jnp is not None
         if not isinstance(curr, dict):
             return
@@ -412,7 +721,7 @@ def save_maxtext_adapters(params: MaxTextParamDict | MaxTextParamLeaf, save_path
             sub_path = f"{current_path}.{k}" if current_path else k
             if isinstance(v, dict):
                 _collect(v, sub_path)
-            elif k in ("lora_a", "lora_b", "lora_scale"):
+            elif k in {"lora_a", "lora_b", "lora_scale"}:
                 adapters[sub_path] = jnp.asarray(v)
 
     _collect(params)
@@ -472,20 +781,23 @@ def count_maxtext_parameters(params: MaxTextParamDict | MaxTextParamLeaf) -> tup
     total_count = 0
 
     def _count(curr: MaxTextParamDict | MaxTextParamLeaf) -> None:
-        """Count parameters recursively in parameter dictionary."""
+        """Count parameters recursively in parameter dictionary.
+
+        Args:
+            curr: Current parameter dictionary or leaf.
+
+        """
         nonlocal trainable_count, total_count
         if not isinstance(curr, dict):
             return
         for k, v in curr.items():
             if isinstance(v, dict):
                 _count(v)
-            else:
-                with contextlib.suppress(AttributeError, TypeError, ValueError, AssertionError):
-                    assert _has_size_attr(v)
-                    size = int(v.size)
-                    total_count += size
-                    if k in ("lora_a", "lora_b"):
-                        trainable_count += size
+            elif isinstance(v, JaxArrayProtocol):
+                size = math.prod(int(dim) for dim in v.shape)
+                total_count += size
+                if k in {"lora_a", "lora_b"}:
+                    trainable_count += size
 
     _count(params)
     return total_count, trainable_count
@@ -499,7 +811,7 @@ def apply_lora(
     lora_dropout: float = 0.05,
     **kwargs: BackendKwargValue | MaxTextParamDict | Mapping[str, PyTreeNode],
 ) -> PEFTResultDict:
-    """Apply LoRA to a model using the MaxText backend.
+    """Apply LoRA to a model using the MaxText backend and cache adapted parameters.
 
     Args:
         model_name: The name of the target model.
@@ -520,20 +832,30 @@ def apply_lora(
         raise DependencyMissingError("MaxText dependencies are missing.")
 
     def _inject() -> int:
-        """Initialize or transform MaxText parameter PyTree with LoRA matrices."""
+        """Initialize or transform MaxText parameter PyTree with LoRA matrices.
+
+        Returns:
+            Number of projection modules into which LoRA adapters were injected.
+
+        """
+        from gemma_4_sql.backends.maxtext.inference import cache_maxtext_params
+
         assert jax is not None
         assert jnp is not None
         raw_params = kwargs.get("params")
-        if _is_maxtext_param_dict(raw_params):
-            params: MaxTextParamDict = raw_params
+        coerced_params = _coerce_maxtext_param_dict(raw_params)
+        loaded_model: MaxTextCausalLMProtocol | None = None
+        if coerced_params is not None:
+            params: MaxTextParamDict = coerced_params
         else:
             assert Gemma4Model is not None
-            model = Gemma4Model(model_name)
+            cand_model = Gemma4Model(model_name)
             rng = jax.random.PRNGKey(0)
             dummy_input = jnp.zeros((1, 10), dtype=jnp.int32)
-            raw_init = dict(model.init(rng, dummy_input))
-            assert _is_maxtext_param_dict(raw_init)
+            raw_init = _coerce_maxtext_param_dict(dict(cand_model.init(rng, dummy_input)))
+            assert raw_init is not None
             params = raw_init
+            loaded_model = cand_model
 
         params, injected_count = transform_params_to_lora(
             params=params,
@@ -547,8 +869,9 @@ def apply_lora(
         if raw_out_dir is not None:
             save_maxtext_adapters(params, str(raw_out_dir))
 
-        if kwargs.get("merge"):
-            _ = merge_lora_weights(params)
+        final_params = merge_lora_weights(params) if kwargs.get("merge") else params
+        assert isinstance(final_params, dict)
+        cache_maxtext_params(model_name, final_params, model=loaded_model)
 
         logger.info("MaxText LoRA applied to %d modules", injected_count)
         return injected_count
@@ -572,9 +895,11 @@ __all__ = [
     "MaxTextParamLeaf",
     "PyTreeNode",
     "apply_lora",
+    "apply_with_lora",
     "count_maxtext_parameters",
     "create_maxtext_lora_optimizer",
     "load_maxtext_adapters",
+    "materialize_effective_params",
     "merge_lora_weights",
     "save_maxtext_adapters",
     "segregate_adapter_params",

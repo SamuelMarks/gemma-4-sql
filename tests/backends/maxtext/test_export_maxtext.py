@@ -1,17 +1,25 @@
-"""Unit and behavioral tests for export maxtext with real Orbax checkpointing."""
+"""Unit and behavioral tests for MaxText export with real Orbax checkpointing without MagicMock."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import jax
-import jax.numpy as jnp
 import orbax.checkpoint as ocp
 import pytest
 
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
+from gemma_4_sql.backends.maxtext import inference as maxtext_inference
 from gemma_4_sql.backends.maxtext.export import export_model
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError
+
+
+@pytest.fixture(autouse=True)
+def _clear_caches() -> None:
+    """Clear MaxText caches before each export test."""
+    maxtext_inference._MODEL_CACHE.clear()
+    maxtext_inference._PARAMS_ONLY_CACHE.clear()
 
 
 class _TinyStatelessMaxTextModel:
@@ -22,18 +30,28 @@ class _TinyStatelessMaxTextModel:
         self.model_name = model_name
 
     def init(self, rng: jax.Array, dummy_input: jax.Array) -> dict[str, jax.Array]:
-        """Initialize real JAX array parameters."""
+        """Initialize real JAX array parameters.
+
+        Returns:
+            A dictionary containing initialized float32 parameter `'w'`.
+
+        """
         _ = (rng, dummy_input)
         return {"w": jnp.array([2.0, 4.0], dtype=jnp.float32)}
 
     def apply(self, params: dict[str, jax.Array], inputs: jax.Array) -> jax.Array:
-        """Apply model parameters to inputs."""
+        """Apply model parameters to inputs.
+
+        Returns:
+            A float32 ones logits array of shape `(batch, seq, 8)`.
+
+        """
         _ = params
         return jnp.ones((inputs.shape[0], inputs.shape[1], 8), dtype=jnp.float32)
 
 
-def test_export_model_success_with_kwargs(tmp_path: Path) -> None:
-    """Verify export_model writes a real Orbax checkpoint to disk when params are supplied."""
+def test_export_model_success_with_kwargs_and_cached_params(tmp_path: Path) -> None:
+    """Verify `export_model` writes explicit `params` or cached MaxText weights to Orbax."""
     export_path = tmp_path / "export_dir"
     weights = {"w": jnp.array([1.5, 3.5], dtype=jnp.float32)}
 
@@ -48,13 +66,39 @@ def test_export_model_success_with_kwargs(tmp_path: Path) -> None:
     assert result["format"] == "maxtext/checkpoint"
     assert (ckpt_dir / "0").exists()
 
-    with ocp.CheckpointManager(ckpt_dir, ocp.PyTreeCheckpointer()) as mngr:
+    from gemma_4_sql.backends.maxtext import export as export_mod
+    from gemma_4_sql.type_hints import JaxArrayProtocol
+
+    ocp_typed = export_mod.ocp
+    assert ocp_typed is not None
+    with ocp_typed.CheckpointManager(ckpt_dir, ocp_typed.PyTreeCheckpointer()) as mngr:
         restored = mngr.restore(0)
-    assert jnp.allclose(restored["w"], weights["w"])
+    restored_w = restored["w"]
+    assert isinstance(restored_w, JaxArrayProtocol)
+    assert jnp.allclose(jnp.asarray(restored_w), weights["w"])
+
+    # Verify cached parameters are exported even when `Gemma4Model` is `None`!
+    cached_weights = {"w": jnp.array([7.0, 9.0], dtype=jnp.float32)}
+    maxtext_inference.cache_maxtext_params("cached_model", cached_weights)
+    cached_export_dir = tmp_path / "cached_export"
+    with patch("gemma_4_sql.backends.maxtext.export.Gemma4Model", None):
+        cached_res = export_model("cached_model", str(cached_export_dir))
+    assert cached_res["status"] == "exported_with_maxtext_orbax"
+    with ocp_typed.CheckpointManager(
+        cached_export_dir / "maxtext_orbax_ckpt",
+        ocp_typed.PyTreeCheckpointer(),
+    ) as mngr:
+        restored_cached = mngr.restore(0)
+    restored_cached_w = restored_cached["w"]
+    assert isinstance(restored_cached_w, JaxArrayProtocol)
+    assert jnp.allclose(jnp.asarray(restored_cached_w), cached_weights["w"])
 
 
 def test_export_model_success_without_kwargs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify export_model initializes Gemma4Model and writes a real Orbax checkpoint."""
+    """Verify `export_model` initializes `Gemma4Model`, caches weights, and writes a real Orbax checkpoint."""
+    from gemma_4_sql.backends.maxtext import export as export_mod
+    from gemma_4_sql.type_hints import JaxArrayProtocol
+
     export_path = tmp_path / "export_dir_no_kwargs"
     monkeypatch.setattr("gemma_4_sql.backends.maxtext.export.Gemma4Model", _TinyStatelessMaxTextModel)
 
@@ -63,48 +107,65 @@ def test_export_model_success_without_kwargs(tmp_path: Path, monkeypatch: pytest
     ckpt_dir = export_path / "maxtext_orbax_ckpt"
     assert (ckpt_dir / "0").exists()
 
-    with ocp.CheckpointManager(ckpt_dir, ocp.PyTreeCheckpointer()) as mngr:
+    ocp_typed = export_mod.ocp
+    assert ocp_typed is not None
+    with ocp_typed.CheckpointManager(ckpt_dir, ocp_typed.PyTreeCheckpointer()) as mngr:
         restored = mngr.restore(0)
-    assert jnp.allclose(restored["w"], jnp.array([2.0, 4.0], dtype=jnp.float32))
-    out = _TinyStatelessMaxTextModel("test_model").apply(restored, jnp.zeros((1, 2), dtype=jnp.int32))
+    restored_w = restored["w"]
+    assert isinstance(restored_w, JaxArrayProtocol)
+    assert jnp.allclose(jnp.asarray(restored_w), jnp.array([2.0, 4.0], dtype=jnp.float32))
+    restored_arrs = {k: jnp.asarray(v) for k, v in restored.items() if isinstance(v, JaxArrayProtocol)}
+    out = _TinyStatelessMaxTextModel("test_model").apply(restored_arrs, jnp.zeros((1, 2), dtype=jnp.int32))
     assert out.shape == (1, 2, 8)
 
 
 def test_export_model_missing_jax(tmp_path: Path) -> None:
-    """Verify export model missing jax behavior."""
-    with patch("gemma_4_sql.backends.maxtext.export.jax", None), pytest.raises(DependencyMissingError, match=r"MaxText export dependencies \(jax, orbax\.checkpoint\) are missing\."):
+    """Verify `export_model` raises `DependencyMissingError` when `jax` is `None`."""
+    with (
+        patch("gemma_4_sql.backends.maxtext.export.jax", None),
+        pytest.raises(
+            DependencyMissingError, match=r"MaxText export dependencies \(jax, orbax\.checkpoint\) are missing\."
+        ),
+    ):
         export_model("test_model", str(tmp_path))
 
 
 def test_export_model_missing_gemma4model(tmp_path: Path) -> None:
-    """Verify export model missing gemma4model behavior."""
+    """Verify `export_model` raises `DependencyMissingError` when `Gemma4Model` is `None`."""
     with (
         patch("gemma_4_sql.backends.maxtext.export.Gemma4Model", None),
-        pytest.raises(DependencyMissingError, match=r"MaxText dependency \(maxtext\.models\.gemma4\.Gemma4Model\) is missing\."),
+        pytest.raises(
+            DependencyMissingError, match=r"MaxText dependency \(maxtext\.models\.gemma4\.Gemma4Model\) is missing\."
+        ),
     ):
         export_model("test_model", str(tmp_path))
 
 
 def test_export_model_init_error(tmp_path: Path) -> None:
-    """Verify export model init error behavior."""
-    mock_gemma4 = MagicMock(side_effect=RuntimeError("Init failed"))
+    """Verify `export_model` wraps `Gemma4Model` initialization failures in `ExportError`."""
+
+    def _failing_gemma4(_name: str) -> _TinyStatelessMaxTextModel:
+        """Raise `RuntimeError` during model construction.
+
+        Raises:
+            RuntimeError: Always raised to test `ExportError` wrapping.
+
+        """
+        raise RuntimeError("Init failed")
+
     with (
-        patch("gemma_4_sql.backends.maxtext.export.Gemma4Model", mock_gemma4),
+        patch("gemma_4_sql.backends.maxtext.export.Gemma4Model", _failing_gemma4),
         pytest.raises(ExportError, match="Failed to initialize MaxText model 'test_model': Init failed"),
     ):
         export_model("test_model", str(tmp_path))
 
 
 def test_export_model_save_error(tmp_path: Path) -> None:
-    """Verify export model save error behavior."""
+    """Verify `export_model` wraps Orbax checkpoint save failures in `ExportError`."""
     export_path = tmp_path / "export_dir"
 
-    mock_mngr_class = MagicMock(side_effect=RuntimeError("Save failed"))
-    mock_ocp = MagicMock()
-    mock_ocp.CheckpointManager = mock_mngr_class
-
     with (
-        patch("gemma_4_sql.backends.maxtext.export.ocp", mock_ocp),
+        patch.object(ocp, "CheckpointManager", side_effect=RuntimeError("Save failed")),
         pytest.raises(ExportError, match="Failed to save MaxText Orbax checkpoint"),
     ):
         export_model("test_model", str(export_path), params={"w": jnp.array([1.0])})

@@ -6,6 +6,7 @@ import argparse
 
 from gemma_4_sql.cli import build_root_parser
 from gemma_4_sql.cli_parsers import (
+    SubparserCollectionProtocol,
     add_etl_parsers,
     add_evaluate_parsers,
     add_generate_agent_parsers,
@@ -29,6 +30,7 @@ def test_add_etl_parsers() -> None:
     """Test registering ETL parsers."""
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="cmd", required=True)
+    assert isinstance(subparsers, SubparserCollectionProtocol)
     etl_parser = add_etl_parsers(subparsers)
     assert isinstance(etl_parser, argparse.ArgumentParser)
 
@@ -98,14 +100,34 @@ def test_add_misc_and_db_parsers() -> None:
     assert exec_args.cmd == "execute"
     assert exec_args.query == "SELECT 1"
 
-    bench_args = parser.parse_args(["benchmark", "--model", "gemma-4", "--hardware", "cpu", "--image-path", "erd.png", "--audio-path", "q.wav", "--modality", "multimodal"])
+    bench_args = parser.parse_args([
+        "benchmark",
+        "--model",
+        "gemma-4",
+        "--hardware",
+        "cpu",
+        "--image-path",
+        "erd.png",
+        "--audio-path",
+        "q.wav",
+        "--modality",
+        "multimodal",
+    ])
     assert bench_args.cmd == "benchmark"
     assert bench_args.hardware == "cpu"
     assert bench_args.image_path == "erd.png"
     assert bench_args.audio_path == "q.wav"
     assert bench_args.modality == "multimodal"
 
-    rag_args = parser.parse_args(["rag", "--ddl", "CREATE TABLE t (x INT);", "--image-path", "erd.png", "--modality", "vision"])
+    rag_args = parser.parse_args([
+        "rag",
+        "--ddl",
+        "CREATE TABLE t (x INT);",
+        "--image-path",
+        "erd.png",
+        "--modality",
+        "vision",
+    ])
     assert rag_args.cmd == "rag"
     assert rag_args.ddl == "CREATE TABLE t (x INT);"
     assert rag_args.image_path == "erd.png"

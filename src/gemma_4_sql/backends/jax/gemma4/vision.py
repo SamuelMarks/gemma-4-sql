@@ -5,10 +5,11 @@ from __future__ import annotations
 import math
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
 from jax import Array
 from jax.sharding import PartitionSpec
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 from .config import ModelConfig, VisionConfig
 from .layers import Gemma4RMSNorm, make_embed, make_linear
@@ -31,7 +32,16 @@ class SiglipVisionEmbeddings(nnx.Module):
 
         ki = functools.partial(jax.nn.initializers.lecun_normal())
         bi = functools.partial(jax.nn.initializers.zeros)
-        self.patch_embedding = nnx.Conv(config.num_channels, config.hidden_size, kernel_size=(config.patch_size, config.patch_size), strides=(config.patch_size, config.patch_size), padding="valid", kernel_init=ki, bias_init=bi, rngs=rngs)
+        self.patch_embedding = nnx.Conv(
+            config.num_channels,
+            config.hidden_size,
+            kernel_size=(config.patch_size, config.patch_size),
+            strides=(config.patch_size, config.patch_size),
+            padding="valid",
+            kernel_init=ki,
+            bias_init=bi,
+            rngs=rngs,
+        )
         self.position_embedding = make_embed(self.num_patches, config.hidden_size, embedding_metadata={}, rngs=rngs)
 
     def __call__(self, pixel_values: Array) -> Array:
@@ -115,8 +125,12 @@ class SiglipMLP(nnx.Module):
 
         """
         self.config = config
-        self.fc1 = make_linear(config.hidden_size, config.intermediate_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.fc2 = make_linear(config.intermediate_size, config.hidden_size, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.fc1 = make_linear(
+            config.hidden_size, config.intermediate_size, kernel_metadata={}, bias_metadata={}, rngs=rngs
+        )
+        self.fc2 = make_linear(
+            config.intermediate_size, config.hidden_size, kernel_metadata={}, bias_metadata={}, rngs=rngs
+        )
 
     def __call__(self, x: Array) -> Array:
         """Apply the MLP with tanh-approximate GELU activation.
@@ -313,7 +327,9 @@ class Gemma4MultiModalProjector(nnx.Module):
         self.kernel_size = self.patches_per_img // self.tokens_per_side
         self.num_output_tokens = self.tokens_per_side * self.tokens_per_side
         self.mm_input_projection_weight = nnx.Param(jnp.zeros((vhs, ths)), rngs=rngs)
-        self.mm_soft_emb_norm = Gemma4RMSNorm(vhs, eps=config.vision_config.layer_norm_eps, dtype=config.dtype, rngs=rngs)
+        self.mm_soft_emb_norm = Gemma4RMSNorm(
+            vhs, eps=config.vision_config.layer_norm_eps, dtype=config.dtype, rngs=rngs
+        )
 
     def __call__(self, vision_outputs: Array) -> Array:
         """Project and pool the vision outputs.

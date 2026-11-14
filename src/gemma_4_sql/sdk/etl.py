@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 
-from gemma_4_sql.constants import DEFAULT_BACKEND, DEFAULT_POSTTRAIN_DATASET, DEFAULT_PRETRAIN_DATASET, DEFAULT_SFT_DATASET
+from gemma_4_sql.constants import (
+    DEFAULT_BACKEND,
+    DEFAULT_POSTTRAIN_DATASET,
+    DEFAULT_PRETRAIN_DATASET,
+    DEFAULT_SFT_DATASET,
+)
 from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.type_hints import ETLConfig, ETLResultDict, JSONValue
 
@@ -18,18 +24,25 @@ def _route_backend(config: ETLConfig, backend: str, **kwargs: JSONValue) -> ETLR
         **kwargs: Additional keyword arguments passed to the specific backend implementation.
 
     Returns:
-        Structured `ETLResultDict` containing `dataset`, `split`, `batch_size`, `backend`, `distributed`, `status`, and `loader`.
+        Structured `ETLResultDict` containing `dataset`, `split`, `batch_size`, `backend`,
+        `distributed`, `status`, and `loader`.
 
     """
     return get_backend(backend).build_dataloader(config, **kwargs)
 
 
-def etl_pretrain(config: ETLConfig | None = None, backend: str = DEFAULT_BACKEND) -> ETLResultDict:
+def etl_pretrain(
+    config: ETLConfig | None = None,
+    backend: str = DEFAULT_BACKEND,
+    *,
+    router: Callable[[ETLConfig, str], ETLResultDict] | None = None,
+) -> ETLResultDict:
     """Run ETL pipeline for pretraining SQL datasets.
 
     Args:
         config: The ETL configuration.
         backend: The target ecosystem ('jax', 'keras', 'maxtext', 'mlx', or 'pytorch').
+        router: Optional injected `(config, backend) -> ETLResultDict` routing callable.
 
     Returns:
         A dictionary containing metadata and dataset representation.
@@ -40,15 +53,22 @@ def etl_pretrain(config: ETLConfig | None = None, backend: str = DEFAULT_BACKEND
     else:
         cfg = copy.deepcopy(config)
         cfg.stage = "pretrain"
-    return _route_backend(cfg, backend)
+    route_fn = router if router is not None else _route_backend
+    return route_fn(cfg, backend)
 
 
-def etl_sft(config: ETLConfig | None = None, backend: str = DEFAULT_BACKEND) -> ETLResultDict:
+def etl_sft(
+    config: ETLConfig | None = None,
+    backend: str = DEFAULT_BACKEND,
+    *,
+    router: Callable[[ETLConfig, str], ETLResultDict] | None = None,
+) -> ETLResultDict:
     """Run ETL pipeline for SFT (Supervised Fine-Tuning) SQL datasets.
 
     Args:
         config: The ETL configuration.
         backend: The target ecosystem ('jax', 'keras', 'maxtext', 'mlx', or 'pytorch').
+        router: Optional injected `(config, backend) -> ETLResultDict` routing callable.
 
     Returns:
         A dictionary containing metadata and dataset representation.
@@ -59,15 +79,22 @@ def etl_sft(config: ETLConfig | None = None, backend: str = DEFAULT_BACKEND) -> 
     else:
         cfg = copy.deepcopy(config)
         cfg.stage = "sft"
-    return _route_backend(cfg, backend)
+    route_fn = router if router is not None else _route_backend
+    return route_fn(cfg, backend)
 
 
-def etl_posttrain(config: ETLConfig | None = None, backend: str = DEFAULT_BACKEND) -> ETLResultDict:
+def etl_posttrain(
+    config: ETLConfig | None = None,
+    backend: str = DEFAULT_BACKEND,
+    *,
+    router: Callable[[ETLConfig, str], ETLResultDict] | None = None,
+) -> ETLResultDict:
     """Run ETL pipeline for post-training/RLHF SQL datasets.
 
     Args:
         config: The ETL configuration.
         backend: The target ecosystem ('jax', 'keras', 'maxtext', 'mlx', or 'pytorch').
+        router: Optional injected `(config, backend) -> ETLResultDict` routing callable.
 
     Returns:
         A dictionary containing metadata and dataset representation.
@@ -78,7 +105,8 @@ def etl_posttrain(config: ETLConfig | None = None, backend: str = DEFAULT_BACKEN
     else:
         cfg = copy.deepcopy(config)
         cfg.stage = "posttrain"
-    return _route_backend(cfg, backend)
+    route_fn = router if router is not None else _route_backend
+    return route_fn(cfg, backend)
 
 
 __all__ = ["etl_posttrain", "etl_pretrain", "etl_sft"]

@@ -12,12 +12,12 @@ Follow these steps to create a new backend plugin.
 Create a new Python module for your backend. If you are adding it to this repository, create a folder like `src/gemma_4_sql/backends/mlx/`.
 
 ### 2. Implement the Backend Submodules & `BackendProtocol`
-Your backend must implement the strongly-typed interface defined in `src/gemma_4_sql/sdk/protocols.py` (`BackendProtocol`, which combines `TrainingProtocol` and `InferenceProtocol`).
+Your backend must implement the strongly-typed interface defined in `src/gemma_4_sql/sdk/protocols.py` (`BackendProtocol`, which composes `TrainingProtocol` and `InferenceProtocol` from 11 segregated `@runtime_checkable` capability protocols: `TrainCapableProtocol`, `DPOCapableProtocol`, `ETLCapableProtocol`, `ExportCapableProtocol`, `MetricsLoggingProtocol`, `PEFTCapableProtocol`, `QuantizeCapableProtocol`, `TrainerIdentifiableProtocol`, `InferenceCapableProtocol`, `ServeCapableProtocol`, and `BenchmarkCapableProtocol`).
 
-Create the submodules (`train.py`, `inference.py`, `etl.py`, `dpo.py`, `peft.py`, `quantize.py`, `serve.py`, `benchmark.py`, `export.py`, `logging.py`) and implement the required functions using the shared wrappers in `src/gemma_4_sql/backends/common_*.py` and strict type hints from `src/gemma_4_sql/type_hints.py` (never use `typing.Any`, `object`, `typing.cast`, or `getattr`).
+Create the submodules (`train.py`, `inference.py`, `etl.py`, `dpo.py`, `peft.py`, `quantize.py`, `serve.py`, `benchmark.py`, `export.py`, `logging.py`) and implement the required functions using the shared wrappers in `src/gemma_4_sql/backends/common_*.py` and strict type hints from `src/gemma_4_sql/type_hints.py` (never use `typing.Any`, `object`, `typing.cast`, `getattr`, `setattr`, `hasattr`, or `delattr`).
 
-**CRITICAL RULE: Lazy Import Heavy Dependencies via `optional_import` / `optional_attr`!**
-To prevent dependency conflicts and keep the CLI fast, use `optional_import` or `optional_attr` from `gemma_4_sql.backends.lazy_loader` and raise `DependencyMissingError` when optional backend libraries are absent:
+**CRITICAL RULE: Lazy Import Heavy Dependencies via `lazy_loader`!**
+To prevent dependency conflicts and keep the CLI fast, use `optional_import`, `import_optional_symbol`, `import_optional_submodule`, or `LazyLoader` from `gemma_4_sql.backends.lazy_loader` (passing a `@runtime_checkable` `Protocol` when narrowing module or symbol types) and raise `DependencyMissingError` when optional backend libraries are absent:
 
 ```python
 # src/gemma_4_sql/backends/mlx/train.py
@@ -57,39 +57,34 @@ def train_model(config: TrainingConfig, **kwargs: StatusValue) -> TrainResultDic
 ```
 
 ### 3. Create `adapter.py` with `ModuleDelegatedBackend`
-Each backend exposes an `adapter.py` module containing a `ModuleDelegatedBackend` subclass and an explicit `ADAPTER_CLASS: type[BackendProtocol]` binding (matching `AdapterModuleProtocol` in `src/gemma_4_sql/sdk/registry.py`):
+Each backend exposes an `adapter.py` module containing a `ModuleDelegatedBackend` subclass with typed submodule class attributes and an `ADAPTER_CLASS` binding (matching `AdapterModuleProtocol` in `src/gemma_4_sql/sdk/registry.py`). If multiple entry-point aliases share a single adapter (such as `pytorch`, `pytorch_hf`, and `pytorch_native`), set `uses_backend_alias = True` so `ADAPTER_CLASS.from_alias(name)` forwards `backend_alias` automatically:
 
 ```python
 # src/gemma_4_sql/backends/mlx/adapter.py
 from __future__ import annotations
 
 from gemma_4_sql.backends.base_adapter import ModuleDelegatedBackend
-from gemma_4_sql.sdk.protocols import BackendProtocol
 
 from . import benchmark, dpo, etl, export, inference, logging, peft, quantize, serve, train
 
 
 class MLXBackend(ModuleDelegatedBackend):
-    """Unified MLX backend implementation."""
+    """MLX implementation of BackendProtocol."""
 
-    def __init__(self) -> None:
-        """Initialize the MLXBackend adapter with its submodule bindings."""
-        super().__init__(
-            trainer_name="mlx_trainer",
-            train_mod=train,
-            dpo_mod=dpo,
-            etl_mod=etl,
-            export_mod=export,
-            logging_mod=logging,
-            peft_mod=peft,
-            quantize_mod=quantize,
-            inference_mod=inference,
-            serve_mod=serve,
-            benchmark_mod=benchmark,
-        )
+    train_module = train
+    dpo_module = dpo
+    etl_module = etl
+    export_module = export
+    logging_module = logging
+    peft_module = peft
+    quantize_module = quantize
+    inference_module = inference
+    serve_module = serve
+    benchmark_module = benchmark
+    trainer_name = "mlx_trainer"
 
 
-ADAPTER_CLASS: type[BackendProtocol] = MLXBackend
+ADAPTER_CLASS = MLXBackend
 ```
 
 ### 4. Expose the API in `__init__.py`
@@ -172,6 +167,6 @@ from gemma_4_sql.sdk.models import train_from_scratch
 from gemma_4_sql.type_hints import TrainingConfig
 
 # The SDK dynamically loads your MLX implementation!
-config = TrainingConfig(model_name="gemma-2b", backend="mlx")
+config = TrainingConfig(model_name="google/gemma-4-E2B", dataset="my-custom-dataset", backend="mlx")
 train_from_scratch(config)
 ```

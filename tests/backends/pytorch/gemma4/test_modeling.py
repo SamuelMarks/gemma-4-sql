@@ -26,9 +26,14 @@ from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4AudioConfig, Gemma4
 
 def test_gemma4_config() -> None:
     """Test Gemma4Config."""
-    config = Gemma4Config(hidden_size=512, test_kwarg=True, vision_config={"hidden_size": 128, "extra": 1}, audio_config={"hidden_size": 128, "extra": 1})
+    config = Gemma4Config(
+        hidden_size=512,
+        test_kwarg=True,
+        vision_config={"hidden_size": 128, "extra": 1},
+        audio_config={"hidden_size": 128, "extra": 1},
+    )
     assert config.hidden_size == 512
-    assert config.vocab_size == 256000
+    assert config.vocab_size == 262144
     assert config.extra_attributes["test_kwarg"] is True
     assert config.vision_config.hidden_size == 128
     assert config.vision_config.extra_attributes["extra"] == 1
@@ -130,11 +135,15 @@ def test_gemma4_attention() -> None:
     assert out3.shape == (2, 4, 256)
 
     # Test SDPA path
-    attn_sdpa = Gemma4Attention(Gemma4Config(hidden_size=256, num_attention_heads=4, num_key_value_heads=2, head_dim=64, sliding_window=None), layer_idx=0)
+    attn_sdpa = Gemma4Attention(
+        Gemma4Config(hidden_size=256, num_attention_heads=4, num_key_value_heads=2, head_dim=64, sliding_window=None),
+        layer_idx=0,
+    )
     out5, _ = attn_sdpa(x)
     assert out5.shape == (2, 4, 256)
 
-    # Test global attention with share_kv_projections, global_head_dim, num_global_key_value_heads, and attn_logits_soft_cap
+    # Test global attention with share_kv_projections, global_head_dim,
+    # num_global_key_value_heads, and attn_logits_soft_cap.
     cfg_global = Gemma4Config(
         hidden_size=256,
         num_attention_heads=4,
@@ -161,7 +170,9 @@ def test_gemma4_attention() -> None:
 
 def test_gemma4_decoder_layer() -> None:
     """Test Gemma4DecoderLayer."""
-    config = Gemma4Config(hidden_size=256, num_attention_heads=4, num_key_value_heads=2, head_dim=64, intermediate_size=512, num_experts=1)
+    config = Gemma4Config(
+        hidden_size=256, num_attention_heads=4, num_key_value_heads=2, head_dim=64, intermediate_size=512, num_experts=1
+    )
     layer = Gemma4DecoderLayer(config, layer_idx=0)
     x = torch.randn(2, 4, 256)
     out, past, router_logits = layer(x)
@@ -169,7 +180,9 @@ def test_gemma4_decoder_layer() -> None:
     assert past is not None
     assert router_logits is None
 
-    config_moe = Gemma4Config(hidden_size=256, num_attention_heads=4, num_key_value_heads=2, head_dim=64, intermediate_size=512, num_experts=4)
+    config_moe = Gemma4Config(
+        hidden_size=256, num_attention_heads=4, num_key_value_heads=2, head_dim=64, intermediate_size=512, num_experts=4
+    )
     layer_moe = Gemma4DecoderLayer(config_moe, layer_idx=0)
     out_moe, past_moe, router_logits_moe = layer_moe(x)
     assert out_moe.shape == (2, 4, 256)
@@ -208,7 +221,9 @@ def test_gemma4_for_causal_lm() -> None:
         model.lm_head.weight.fill_(0.0)
         model.lm_head.bias.fill_(0.0)
         model.lm_head.bias[7] = 100.0
-    gen_eos = model.generate(torch.tensor([[1, 2]], dtype=torch.long), max_new_tokens=5, min_new_tokens=1, eos_token_id=7)
+    gen_eos = model.generate(
+        torch.tensor([[1, 2]], dtype=torch.long), max_new_tokens=5, min_new_tokens=1, eos_token_id=7
+    )
     # Token 0 cannot be 7 due to min_new_tokens=1; token 1 becomes 7 and stops immediately -> length 2 + 2 = 4
     assert gen_eos.shape == (1, 4)
     assert int(gen_eos[0, -1].item()) == 7
@@ -337,7 +352,11 @@ def test_gemma4_native_save_load_and_generate(tmp_path: Path, monkeypatch: pytes
 
     # Test Exception in load_file
     def mock_load_file_exc(*_args: str, **_kwargs: str) -> Never:
-        """Provide mock load file exc test helper."""
+        """Provide mock load file exc test helper.
+
+        Raises:
+            RuntimeError: Always raised to simulate safetensors loading error.
+        """
         raise RuntimeError("Custom exception")
 
     monkeypatch.setattr("safetensors.torch.load_file", mock_load_file_exc, raising=False)
@@ -374,7 +393,9 @@ def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest
     assert exp_res["status"] == "exported_with_safetensors"
     assert exp_res["backend"] == "pytorch_native"
 
-    torch.manual_seed(42)
+    from tests.utils.tensor_helpers import torch_manual_seed
+
+    torch_manual_seed(42)
     gen_res = generate_sql("test_model", "SELECT 1", max_length=2, backend_alias="pytorch_native", config=tiny_cfg)
     assert gen_res["status"] == "success"
     assert gen_res["backend"] == "pytorch_native"
@@ -384,11 +405,22 @@ def test_pytorch_native_pipeline_integration(tmp_path: Path, monkeypatch: pytest
         """Test class for MockLoader."""
 
         def __iter__(self) -> Iterator[dict[str, torch.Tensor]]:
-            """Initialize __iter__."""
-            yield {"inputs": torch.tensor([[1, 2]], dtype=torch.long), "targets": torch.tensor([[2, 3]], dtype=torch.long)}
+            """Yield a single synthetic batch.
+
+            Yields:
+                Dictionary mapping `'inputs'` and `'targets'` to token ID tensors.
+            """
+            yield {
+                "inputs": torch.tensor([[1, 2]], dtype=torch.long),
+                "targets": torch.tensor([[2, 3]], dtype=torch.long),
+            }
 
         def __len__(self) -> int:
-            """Initialize __len__."""
+            """Compute loader batch count.
+
+            Returns:
+                Constant batch count of `1`.
+            """
             return 1
 
     def _mock_build_loader(_c: ETLConfig) -> dict[str, MockLoader]:

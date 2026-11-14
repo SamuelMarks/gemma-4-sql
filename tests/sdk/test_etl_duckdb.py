@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sized
+from collections.abc import Iterable, Mapping, Sequence, Sized
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-from gemma_4_sql.backends.common_data import load_duckdb_dataset
+from gemma_4_sql.backends.common_data import DatasetSequenceProtocol, _BaseFormatTransformRoot, load_duckdb_dataset
 from gemma_4_sql.exceptions import ETLError
 from gemma_4_sql.sdk.etl import etl_posttrain, etl_pretrain, etl_sft
-from gemma_4_sql.type_hints import ETLConfig
+from gemma_4_sql.type_hints import ETLConfig, JSONValue
 from tests.conftest import requires_duckdb
 
 pytestmark = requires_duckdb
@@ -27,14 +26,21 @@ class _DummyDatasetsSentinel:
 
 @pytest.fixture
 def seeded_duckdb_file(tmp_path: Path) -> str:
-    """Create a real temporary DuckDB database file populated with SQL training rows."""
+    """Create a real temporary DuckDB database file populated with SQL training rows.
+
+    Returns:
+        Filesystem path to the temporary DuckDB database file.
+
+    """
     import duckdb
 
     db_file = str(tmp_path / "etl.duckdb")
     conn = duckdb.connect(db_file)
     conn.execute("CREATE TABLE sql_train (question VARCHAR, query VARCHAR)")
     conn.execute("INSERT INTO sql_train VALUES ('List all users', 'SELECT * FROM users;')")
-    conn.execute("INSERT INTO sql_train VALUES ('Count active orders', 'SELECT COUNT(*) FROM orders WHERE active = 1;')")
+    conn.execute(
+        "INSERT INTO sql_train VALUES ('Count active orders', 'SELECT COUNT(*) FROM orders WHERE active = 1;')"
+    )
     conn.close()
     return db_file
 
@@ -92,10 +98,56 @@ def test_duckdb_etl_grain_backends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify Grain-based backends (jax, keras, maxtext) load real rows from DuckDB."""
-    mock_grain = MagicMock()
-    mock_grain.RandomAccessDataSource = _DummyBase
-    mock_grain.MapTransform = _DummyBase
-    monkeypatch.setattr(f"gemma_4_sql.backends.{backend}.etl.grain", mock_grain, raising=False)
+
+    class _FakeGrainModule:
+        """Strongly-typed Grain module double recording `DataLoader` arguments."""
+
+        RandomAccessDataSource = _DummyBase
+        MapTransform = _DummyBase
+        last_source: DatasetSequenceProtocol | None = None
+
+        @staticmethod
+        def NoSharding() -> str:
+            """Return `'no_shard'` sentinel."""
+            return "no_shard"
+
+        @staticmethod
+        def JAXDistributedSharding() -> str:
+            """Return `'jax_shard'` sentinel."""
+            return "jax_shard"
+
+        @staticmethod
+        def IndexSampler(
+            *, num_records: int, shard_options: JSONValue, shuffle: bool, num_epochs: int
+        ) -> dict[str, int | bool | str]:
+            """Return sampler descriptor."""
+            return {"num_records": num_records, "shard": str(shard_options), "shuffle": shuffle, "epochs": num_epochs}
+
+        @staticmethod
+        def Batch(*, batch_size: int) -> dict[str, int]:
+            """Return batch operation descriptor."""
+            return {"batch_size": batch_size}
+
+        @classmethod
+        def DataLoader(
+            cls,
+            *,
+            data_source: DatasetSequenceProtocol,
+            sampler: dict[str, int | bool | str],
+            operations: Sequence[_BaseFormatTransformRoot | dict[str, int]],
+        ) -> list[dict[str, str]]:
+            """Capture `data_source` and return empty list.
+
+            Returns:
+                Empty batch list.
+
+            """
+            _ = (sampler, operations)
+            cls.last_source = data_source
+            return []
+
+    assert _FakeGrainModule.JAXDistributedSharding() == "jax_shard"
+    monkeypatch.setattr(f"gemma_4_sql.backends.{backend}.etl.grain", _FakeGrainModule, raising=False)
     monkeypatch.setattr(f"gemma_4_sql.backends.{backend}.etl.datasets", _DummyDatasetsSentinel(), raising=False)
 
     config = ETLConfig(
@@ -107,8 +159,8 @@ def test_duckdb_etl_grain_backends(
     res = etl_pretrain(config, backend=backend)
     assert res["status"] == "loaded"
     assert res["backend"] == backend
-    call_kwargs = mock_grain.DataLoader.call_args.kwargs
-    source = call_kwargs["data_source"]
+    source = _FakeGrainModule.last_source
+    assert source is not None
     assert len(source) == 2
     assert source[0] == {"question": "List all users", "query": "SELECT * FROM users;"}
 

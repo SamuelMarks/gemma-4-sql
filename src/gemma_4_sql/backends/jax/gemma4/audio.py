@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 from .audio_attention import (
     Gemma4AudioAttention,
@@ -127,7 +128,10 @@ class Gemma4AudioModel(nnx.Module):
         block_starts = jnp.arange(num_blocks) * chunk_size
         offsets = jnp.arange(chunk_size + max_past_horizon + max_future_horizon)
         kv_indices = block_starts[:, None] + offsets[None, :]
-        kv_indices = jnp.broadcast_to(kv_indices[None, None, :, None, :], (batch_size, 1, num_blocks, chunk_size, chunk_size + max_past_horizon + max_future_horizon))
+        kv_indices = jnp.broadcast_to(
+            kv_indices[None, None, :, None, :],
+            (batch_size, 1, num_blocks, chunk_size, chunk_size + max_past_horizon + max_future_horizon),
+        )
         return jnp.take_along_axis(mask_5d, kv_indices, axis=-1)
 
     def __call__(self, input_features: jax.Array, attention_mask: jax.Array | None = None) -> jax.Array:

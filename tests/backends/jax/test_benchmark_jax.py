@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
@@ -16,9 +14,32 @@ from gemma_4_sql.backends.jax.gemma4 import Gemma4Config, Gemma4ForCausalLM
 from gemma_4_sql.exceptions import DependencyMissingError
 
 
+class _FakeJaxDevicesModule:
+    """Typed `jax` module double for `_get_device` hardware resolution tests."""
+
+    def __init__(self, *, fail_accelerators: bool = False) -> None:
+        """Initialize with optional accelerator failure flag."""
+        self.fail_accelerators = fail_accelerators
+
+    def devices(self, hw: str) -> list[str]:
+        """Return synthetic device list or raise RuntimeError on accelerators.
+
+        Returns:
+            A single-element list containing a synthetic device identifier.
+
+        Raises:
+            RuntimeError: If `fail_accelerators` is enabled for GPU or TPU.
+
+        """
+        if self.fail_accelerators and hw in {"tpu", "gpu"}:
+            raise RuntimeError("No accelerator")
+        return [f"fake_{hw}_device"]
+
+
 def test_missing_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify benchmark_model raises DependencyMissingError when jax is None."""
+    """Verify benchmark_model raises DependencyMissingError and _get_device returns None when jax is None."""
     monkeypatch.setattr(jax_benchmark, "jax", None)
+    assert jax_benchmark._get_device("cpu") is None
     with pytest.raises(DependencyMissingError, match=r"JAX dependencies are missing\."):
         jax_benchmark.benchmark_model("test_model", "cpu", 1)
 
@@ -28,24 +49,12 @@ def test_get_device(monkeypatch: pytest.MonkeyPatch) -> None:
     dev_cpu = jax_benchmark._get_device("cpu")
     assert dev_cpu is not None
 
-    def _devices_by_hw(hw: str) -> list[str]:
-        """Return mock device list for known hardware types."""
-        return [f"mock_{hw}_device"] if hw in ("gpu", "tpu", "cpu") else []
+    monkeypatch.setattr(jax_benchmark, "jax", _FakeJaxDevicesModule(fail_accelerators=False))
+    assert jax_benchmark._get_device("gpu") == "fake_gpu_device"
+    assert jax_benchmark._get_device("tpu") == "fake_tpu_device"
 
-    mock_jax = MagicMock()
-    mock_jax.devices.side_effect = _devices_by_hw
-    monkeypatch.setattr(jax_benchmark, "jax", mock_jax)
-    assert jax_benchmark._get_device("gpu") == "mock_gpu_device"
-    assert jax_benchmark._get_device("tpu") == "mock_tpu_device"
-
-    def raise_on_accel(hw: str) -> list[str]:
-        """Raise RuntimeError on tpu/gpu."""
-        if hw in ("tpu", "gpu"):
-            raise RuntimeError("No accelerator")
-        return ["mock_cpu_device"]
-
-    mock_jax.devices.side_effect = raise_on_accel
-    assert jax_benchmark._get_device("tpu") == "mock_cpu_device"
+    monkeypatch.setattr(jax_benchmark, "jax", _FakeJaxDevicesModule(fail_accelerators=True))
+    assert jax_benchmark._get_device("tpu") == "fake_cpu_device"
 
 
 def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,16 +79,16 @@ def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyP
     # Device with explicit peak_bytes_in_use memory_stats and warmup in generate mode
     from contextlib import AbstractContextManager, nullcontext
 
-    class _MockJaxDevice:
+    class _FakeJaxDevice:
         """Concrete device stub implementing `JaxDeviceProtocol`."""
 
         def memory_stats(self) -> dict[str, int]:
             """Return deterministic peak_bytes_in_use."""
             return {"peak_bytes_in_use": 64 * 1024 * 1024}
 
-    mock_device_with_stats = _MockJaxDevice()
+    device_with_stats = _FakeJaxDevice()
 
-    def _null_default_device(_d: _MockJaxDevice | _FailingStatsDevice) -> AbstractContextManager[None]:
+    def _null_default_device(_d: _FakeJaxDevice | _FailingStatsDevice) -> AbstractContextManager[None]:
         """Return nullcontext for default_device."""
         return nullcontext()
 
@@ -91,7 +100,7 @@ def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyP
         warmup_steps=1,
         mode="generate",
         max_new_tokens=2,
-        device=mock_device_with_stats,
+        device=device_with_stats,
     )
     assert mem_stats == 64.0
 
@@ -99,7 +108,12 @@ def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyP
         """Concrete device stub raising RuntimeError from `memory_stats()`."""
 
         def memory_stats(self) -> dict[str, int]:
-            """Raise RuntimeError to exercise fallback RSS calculation."""
+            """Raise RuntimeError to exercise fallback RSS calculation.
+
+            Raises:
+                RuntimeError: Always raised to simulate unavailable device stats.
+
+            """
             raise RuntimeError("stats unavailable")
 
     _, _, mem_fallback = jax_benchmark._run_benchmark_pass(
@@ -123,14 +137,13 @@ def test_run_benchmark_pass_and_benchmark_model_real(monkeypatch: pytest.MonkeyP
         warmup_steps=1,
         mode="prefill",
         max_new_tokens=1,
-        device=mock_device_with_stats,
+        device=device_with_stats,
     )
     monkeypatch.setattr(jax_benchmark, "nnx", nnx)
 
     # End-to-end benchmark_model with tiny config
-    monkeypatch.setattr(Gemma4Config, "gemma4_e2b", classmethod(lambda _cls: cfg))
     res = jax_benchmark.benchmark_model(
-        "tiny_model",
+        "gemma-4-tiny",
         "cpu",
         1,
         dtype="float32",

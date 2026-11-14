@@ -23,7 +23,8 @@ def log_metrics(
         **kwargs: Additional backend logging options (e.g., `step_duration_s`).
 
     Returns:
-        Structured `LogMetricsResultDict` containing `backend`, `step`, `logged_metrics`, `log_dir`, `timestamp`, and `status`.
+        Structured `LogMetricsResultDict` containing `backend`, `step`, `logged_metrics`,
+        `log_dir`, `timestamp`, and `status`.
 
     """
     return get_backend(backend).log_metrics(metrics, step, log_dir, **kwargs)

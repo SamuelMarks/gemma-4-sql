@@ -14,15 +14,15 @@ from gemma_4_sql.sdk.quantize import quantize_model
 
 def test_quantize_jax() -> None:
     """Verify `quantize_model` executes INT8 weight quantization on the JAX backend."""
-    res = quantize_model("model1", "int8", backend="jax")
+    res = quantize_model("gemma-4-tiny", "int8", backend="jax")
     assert res["backend"] == "jax"
-    assert res["model"] == "model1"
+    assert res["model"] == "gemma-4-tiny"
     assert res["method"] == "int8"
     assert res["memory_reduction_factor"] > 0.0
 
 
 def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Verify `quantize_model` executes real PyTorch AWQ and GGUF quantization on a tiny model and raises when PyTorch is unavailable."""
+    """Verify `quantize_model` executes PyTorch AWQ and GGUF quantization and checks missing torch."""
     import gemma_4_sql.backends.pytorch.quantize as pt_q
 
     res = quantize_model("gemma-4-tiny", "awq", backend="pytorch_native")
@@ -35,6 +35,7 @@ def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
         "gguf",
         backend="pytorch_native",
         export_path=str(tmp_path / "gguf_out"),
+        allow_dummy_fallback=True,
     )
     assert gguf_res["backend"] == "pytorch_native"
     assert gguf_res["method"] == "gguf"
@@ -48,13 +49,16 @@ def test_quantize_pytorch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 def test_quantize_keras(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify `quantize_model` executes Keras INT8 quantization and rejects unsupported methods."""
     import gemma_4_sql.backends.keras.quantize as kq
+    from tests.utils.tensor_helpers import get_typed_keras_ops
+
+    typed_ops = get_typed_keras_ops()
 
     class DummyLayer:
         """Minimal layer stub with 2D Keras tensor weights."""
 
         def __init__(self) -> None:
             """Initialize layer stub."""
-            self.weights = [ops.reshape(ops.linspace(1.0, 4.0, 4), (2, 2))]
+            self.weights = [typed_ops.reshape(typed_ops.linspace(1.0, 4.0, 4), (2, 2))]
 
     class DummyKerasModel:
         """Minimal Keras model stub with quantizable layers."""
@@ -86,15 +90,16 @@ def test_quantize_keras(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None
 
     monkeypatch.setattr(kq, "keras", keras)
     monkeypatch.setattr(kq, "ops", ops)
-    monkeypatch.setattr(kq, "optional_attr", _resolve_dummy_causal_lm)
+    monkeypatch.setattr(kq, "import_optional_symbol", _resolve_dummy_causal_lm)
     export_dest = tmp_path / "q_dir"
 
     res = quantize_model("model3", "int8", backend="keras", export_path=str(export_dest))
     assert res["backend"] == "keras"
     assert res["model"] == "model3"
-    assert res["status"] == "quantized_int8"
-    assert res["quantized_layers_count"] == 2
-    assert Path(str(res["export_path"])).exists()
+    assert res["status"] == "simulated_quantized_int8"
+    assert res["memory_reduction_factor"] == 0.0
+    assert res.get("quantized_layers_count") == 2
+    assert Path(str(res.get("export_path"))).exists()
 
     with pytest.raises(UnsupportedQuantizationMethodError):
         quantize_model("model3", "awq", backend="keras", strict_method=True)

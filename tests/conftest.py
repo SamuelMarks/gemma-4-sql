@@ -120,7 +120,12 @@ class MockOpenedImage:
         self._size: tuple[int, int] = (224, 224)
 
     def __enter__(self) -> Self:
-        """Enter context manager."""
+        """Enter context manager.
+
+        Returns:
+            Self instance.
+
+        """
         return self
 
     def __exit__(
@@ -136,7 +141,12 @@ class MockOpenedImage:
         return self
 
     def resize(self, size: tuple[int, int] | Sequence[int], _resample: int | None = None) -> MockOpenedImage:
-        """Record resized dimensions and return self."""
+        """Record resized dimensions and return self.
+
+        Returns:
+            Resized `MockOpenedImage` instance.
+
+        """
         self._size = (int(size[0]), int(size[1]))
         return self
 
@@ -162,11 +172,27 @@ class MockPILImage:
 
 @pytest.fixture
 def synthetic_image_bytes() -> bytes:
-    """Provide a minimal valid 1x1 PNG byte sequence."""
-    return bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082")
+    """Provide a minimal valid 1x1 PNG byte sequence.
+
+    Returns:
+        Raw 1x1 PNG image bytes.
+
+    """
+    return bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000d4944415478da63fccfc0500f000485018084a98c210000000049454e44ae426082"
+    )
 
 
 @pytest.fixture
 def synthetic_wav_bytes() -> bytes:
-    """Provide a minimal valid 16-bit PCM RIFF WAVE byte sequence."""
-    return b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    """Provide a minimal valid 16-bit PCM RIFF WAVE byte sequence.
+
+    Returns:
+        Raw 16-bit PCM WAV header bytes.
+
+    """
+    return (
+        b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00"
+        b"\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x00\x00\x00\x00"
+    )

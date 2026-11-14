@@ -16,6 +16,7 @@ from gemma_4_sql.backends.common_multimodal import (
     process_audio,
 )
 from gemma_4_sql.backends.common_serve import GenerateRequest, create_common_app
+from gemma_4_sql.exceptions import MultimodalProcessingError
 from gemma_4_sql.sdk.agent import AgentContext, run_agentic_loop
 from gemma_4_sql.sdk.evaluation import evaluate
 from gemma_4_sql.sdk.inference import generate_sql
@@ -80,7 +81,7 @@ def test_load_image_bytes(tmp_path: Path) -> None:
     assert len(load_image_bytes(long_b64)) > 0
 
     # Error conditions
-    with pytest.raises(ValueError, match="image_input cannot be None"):
+    with pytest.raises(MultimodalProcessingError, match="image_input cannot be None"):
         load_image_bytes(None)
 
     with pytest.raises(FileNotFoundError, match="Image file not found"):
@@ -97,19 +98,19 @@ def test_load_image_bytes(tmp_path: Path) -> None:
             """No-op save."""
             _ = (fp, format)
 
-    def _none_attr(_m: str, _a: str) -> None:
-        """Return None for optional_attr."""
+    def _none_submod(_m: str, _a: str) -> None:
+        """Return None for import_optional_submodule."""
         return
 
     savable = _DummySavable()
     savable.save(io.BytesIO())
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(cm, "Image", None)
-        mp.setattr(cm, "optional_attr", _none_attr)
-        with pytest.raises(ValueError, match="Unsupported image input type"):
+        mp.setattr(cm, "import_optional_submodule", _none_submod)
+        with pytest.raises(MultimodalProcessingError, match="Unsupported image input type"):
             load_image_bytes(savable)
 
-    with pytest.raises(ValueError, match="Unsupported image input type"):
+    with pytest.raises(MultimodalProcessingError, match="Unsupported image input type"):
         load_image_bytes([1, 2])
 
 
@@ -127,10 +128,10 @@ def test_process_image(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res["num_patches"] == 256
     assert res["shape"] == (3, 224, 224)
 
-    with pytest.raises(ValueError, match="target_size dimensions must be positive"):
+    with pytest.raises(MultimodalProcessingError, match="target_size dimensions must be positive"):
         cm.process_image(b"fake", target_size=(0, 224))
 
-    with pytest.raises(ValueError, match="target dimensions"):
+    with pytest.raises(MultimodalProcessingError, match="target dimensions"):
         cm.process_image(b"fake", target_size=(224, 224), patch_size=15)
 
 
@@ -151,13 +152,13 @@ def test_load_audio_bytes(tmp_path: Path) -> None:
     assert load_audio_bytes(data_uri) == wav
 
     # Errors
-    with pytest.raises(ValueError, match="audio_input cannot be None"):
+    with pytest.raises(MultimodalProcessingError, match="audio_input cannot be None"):
         load_audio_bytes(None)
 
     with pytest.raises(FileNotFoundError, match="Audio file not found"):
         load_audio_bytes(tmp_path / "nonexistent.wav")
 
-    with pytest.raises(ValueError, match="Unsupported audio input type"):
+    with pytest.raises(MultimodalProcessingError, match="Unsupported audio input type"):
         load_audio_bytes([0.1, 0.2])
 
 
@@ -180,7 +181,7 @@ def test_process_audio() -> None:
     assert res_list["num_frames"] >= 1
 
     # Validation errors
-    with pytest.raises(ValueError, match="must be positive integers"):
+    with pytest.raises(MultimodalProcessingError, match="must be positive integers"):
         process_audio(mono_wav, sample_rate=0)
 
 
@@ -209,32 +210,32 @@ def test_format_multimodal_prompt() -> None:
 
     # Vision only
     vis_res = format_multimodal_prompt("Count departments", has_image=True)
-    assert vis_res["prompt"].startswith("<image>")
-    assert vis_res["modality"] == "vision"
-    vis_mask = vis_res["image_token_mask"]
+    assert vis_res.get("prompt", "").startswith("<image>")
+    assert vis_res.get("modality") == "vision"
+    vis_mask = vis_res.get("image_token_mask")
     assert vis_mask is not None
     assert vis_mask[0] is True
     assert vis_mask[1] is False
 
     # Audio only
     aud_res = format_multimodal_prompt("Calculate sum", has_audio=True)
-    assert aud_res["prompt"].startswith("<audio>")
-    assert aud_res["modality"] == "audio"
-    aud_mask = aud_res["audio_token_mask"]
+    assert aud_res.get("prompt", "").startswith("<audio>")
+    assert aud_res.get("modality") == "audio"
+    aud_mask = aud_res.get("audio_token_mask")
     assert aud_mask is not None
     assert aud_mask[0] is True
 
-    # Multimodal (vision + audio)
+    # Combined vision and audio multimodal prompt
     mm_res = format_multimodal_prompt("Find customer with id 10", has_image=True, has_audio=True)
-    assert "<image>" in mm_res["prompt"]
-    assert "<audio>" in mm_res["prompt"]
-    assert mm_res["modality"] == "multimodal"
+    assert "<image>" in mm_res.get("prompt", "")
+    assert "<audio>" in mm_res.get("prompt", "")
+    assert mm_res.get("modality") == "multimodal"
 
     # Already has tokens in prompt
     existing_res = format_multimodal_prompt("<image> Query schema", has_image=True)
-    assert existing_res["prompt"].count("<image>") == 1
+    assert existing_res.get("prompt", "").count("<image>") == 1
 
-    with pytest.raises(ValueError, match=r"prompt cannot be empty\."):
+    with pytest.raises(MultimodalProcessingError, match=r"prompt cannot be empty\."):
         format_multimodal_prompt("")
 
 
@@ -247,7 +248,12 @@ def test_sdk_inference_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
 
         @staticmethod
         def generate_sql(model_name: str, prompt: str, **kwargs: JSONValue) -> InferenceResultDict:
-            """Capture arguments."""
+            """Capture arguments.
+
+            Returns:
+                Simulated `InferenceResultDict` payload.
+
+            """
             captured["model_name"] = model_name
             captured["prompt"] = prompt
             captured.update(kwargs)
@@ -290,7 +296,12 @@ def test_sdk_agent_multimodal_preservation(monkeypatch: pytest.MonkeyPatch) -> N
 
         @staticmethod
         def generate_sql(model_name: str, prompt: str, **kwargs: JSONValue) -> InferenceResultDict:
-            """Record prompt and kwargs."""
+            """Record prompt and kwargs.
+
+            Returns:
+                Simulated `InferenceResultDict` for retry testing.
+
+            """
             attempts_seen.append(prompt)
             assert kwargs.get("image_path") == "schema.png"
             assert kwargs.get("modality") == "vision"
@@ -392,11 +403,16 @@ def test_sdk_evaluation_multimodal(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_common_serve_multimodal() -> None:
     """Test FastAPI continuous batching server with multimodal attachments."""
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
+    from gemma_4_sql.backends.common_serve import ServeApplicationBundle
+    from tests.utils.test_utils import make_test_client
 
     def _gen_logic(prompt: str) -> str:
-        """Format SQL query with prompt."""
+        """Format SQL query with prompt.
+
+        Returns:
+            Formatted SQL query string.
+
+        """
         return f"SELECT * FROM test WHERE p='{prompt}'"
 
     app = create_common_app(
@@ -407,21 +423,25 @@ def test_common_serve_multimodal() -> None:
 
     req_payload: JSONDict = {
         "prompt": "Find all records",
-        "image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        "image_base64": (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        ),
         "modality": "vision",
     }
     validated = GenerateRequest.from_dict(req_payload)
     assert validated.modality == "vision"
     assert validated.image_base64 is not None
 
-    assert isinstance(app, FastAPI)
-    with TestClient(app) as client:
+    assert isinstance(app, ServeApplicationBundle)
+    with make_test_client(app) as client:
         resp = client.post("/generate", json=req_payload)
         assert resp.status_code == 200
         body = resp.json()
         assert "sql" in body
         assert body["modality"] == "vision"
-        assert "<image>" in body["sql"]
+        sql_str = body["sql"]
+        assert isinstance(sql_str, str)
+        assert "<image>" in sql_str
 
 
 def test_common_multimodal_pure_python_fallbacks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -431,7 +451,7 @@ def test_common_multimodal_pure_python_fallbacks(monkeypatch: pytest.MonkeyPatch
     orig_jnp = cm.jnp
     orig_image = cm.Image
 
-    def _none_import(_name: str) -> None:
+    def _none_import(_name: str, _proto: type | None = None) -> None:
         """Return None for optional_import."""
         return
 
@@ -441,7 +461,7 @@ def test_common_multimodal_pure_python_fallbacks(monkeypatch: pytest.MonkeyPatch
 
     # Process image with pure python fallback
     raw_img = b"fake_image_bytes"
-    with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
+    with pytest.raises(MultimodalProcessingError, match="Corrupted or unreadable image:"):
         cm.process_image(raw_img, target_size=(28, 28), patch_size=14)
 
     # Process audio with pure python fallback
@@ -495,19 +515,29 @@ def test_multimodal_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
         res_img_with_pil = cm.process_image(png_header, target_size=(14, 14), patch_size=14)
         assert res_img_with_pil["num_patches"] == 1
         monkeypatch_ctx.setattr(cm, "jnp", None)
-        with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
-            cm.process_image(png_header, target_size=(14, 14), patch_size=14)
+        res_img_pure_py = cm.process_image(png_header, target_size=(14, 14), patch_size=14)
+        assert res_img_pure_py["num_patches"] == 1
+        assert res_img_pure_py["shape"] == (3, 14, 14)
+        assert isinstance(res_img_pure_py["pixel_values"], list)
+        assert len(res_img_pure_py["pixel_values"]) == 3
+        assert len(res_img_pure_py["patches"]) == 1
+        assert len(res_img_pure_py["patches"][0]) == 3 * 14 * 14
 
     # Corrupted WAV header triggering struct.error
     corrupt_wav = b"RIFF" + b"\x00" * 4 + b"WAVE" + b"\x00" * 40
 
     def _raise_struct_err(*_a: str | bytes, **_k: str) -> NoReturn:
-        """Raise struct.error."""
+        """Raise struct.error.
+
+        Raises:
+            struct.error: Always raised to simulate corrupted WAV header unpacking.
+
+        """
         raise struct.error("Corrupted WAV unpack")
 
     with monkeypatch.context() as monkeypatch_ctx:
         monkeypatch_ctx.setattr("struct.unpack", _raise_struct_err)
-        with pytest.raises(ValueError, match="Corrupted WAV fmt chunk header"):
+        with pytest.raises(MultimodalProcessingError, match="Corrupted WAV fmt chunk header"):
             cm._parse_wav_samples(corrupt_wav)
 
     # PIL open raising OSError handled gracefully
@@ -516,12 +546,17 @@ def test_multimodal_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
 
         @staticmethod
         def open(_buf: bytes | str | Path) -> NoReturn:
-            """Raise OSError to simulate corrupted image open."""
+            """Raise OSError to simulate corrupted image open.
+
+            Raises:
+                OSError: Always raised to simulate unreadable image bytes.
+
+            """
             raise OSError("Corrupted image")
 
     with monkeypatch.context() as monkeypatch_ctx:
         monkeypatch_ctx.setattr(cm, "Image", _MockFailingPIL)
-        with pytest.raises(ValueError, match="Corrupted or unreadable image:"):
+        with pytest.raises(MultimodalProcessingError, match="Corrupted or unreadable image:"):
             cm.process_image(b"corrupted", target_size=(14, 14), patch_size=14)
 
     # Audio file not found
@@ -542,32 +577,36 @@ def test_multimodal_edge_cases(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(samples_s) > 0
 
     # Audio input as jax.Array
-    import jax.numpy as jnp
+    from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
     arr_audio = jnp.array([0.05, -0.05, 0.1, -0.1], dtype=jnp.float32)
     res_np = cm.process_audio(arr_audio)
     assert res_np["num_frames"] >= 1
 
     # WAV container with intermediate chunk before data chunk
-    chunk_wav = b"RIFF\x30\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00JUNK\x04\x00\x00\x001234data\x04\x00\x00\x00\x00\x00\x00\x00"
+    chunk_wav = (
+        b"RIFF\x30\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00"
+        b"\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00"
+        b"JUNK\x04\x00\x00\x001234data\x04\x00\x00\x00\x00\x00\x00\x00"
+    )
     samples_chunk, _ = cm._parse_wav_samples(chunk_wav)
     assert len(samples_chunk) > 0
 
     # Empty bytes raises MultimodalProcessingError (a ValueError subclass)
-    with pytest.raises(ValueError, match="Audio byte payload cannot be empty"):
+    with pytest.raises(MultimodalProcessingError, match="Audio byte payload cannot be empty"):
         cm._parse_wav_samples(b"")
 
     # Corrupt image bytes triggering PIL exception
-    with pytest.raises(ValueError):
+    with pytest.raises(MultimodalProcessingError):
         cm.process_image(b"NOT_A_VALID_IMAGE_BYTES_PAYLOAD", target_size=(14, 14), patch_size=14)
 
     # Missing jnp raises MultimodalProcessingError
     with monkeypatch.context() as monkeypatch_ctx:
         monkeypatch_ctx.setattr(cm, "jnp", None)
-        with pytest.raises(ValueError):
+        with pytest.raises(MultimodalProcessingError):
             cm.process_image(b"NOT_A_VALID_IMAGE", target_size=(14, 14), patch_size=14)
 
     # Truncated WAV header raises MultimodalProcessingError
     truncated_wav = b"RIFF\x20\x00\x00\x00WAVEfmt "
-    with pytest.raises(ValueError, match="Truncated or malformed RIFF/WAVE header"):
+    with pytest.raises(MultimodalProcessingError, match="Truncated or malformed RIFF/WAVE header"):
         cm._parse_wav_samples(truncated_wav)

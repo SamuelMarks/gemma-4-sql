@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 from .config import AudioConfig
 from .layers import Gemma4ClippableLinear, Gemma4RMSNorm
@@ -23,7 +24,15 @@ class Gemma4AudioSubSampleConvProjectionLayer(nnx.Module):
             rngs: Flax NNX random number generators.
 
         """
-        self.conv = nnx.Conv(in_channels, channels, kernel_size=(3, 3), strides=(2, 2), padding=((1, 1), (1, 1)), use_bias=False, rngs=rngs)
+        self.conv = nnx.Conv(
+            in_channels,
+            channels,
+            kernel_size=(3, 3),
+            strides=(2, 2),
+            padding=((1, 1), (1, 1)),
+            use_bias=False,
+            rngs=rngs,
+        )
         self.norm = nnx.LayerNorm(channels, epsilon=norm_eps, use_bias=False, rngs=rngs)
 
     def __call__(self, x: jax.Array, mask: jax.Array | None = None) -> tuple[jax.Array, jax.Array | None]:
@@ -96,8 +105,12 @@ class Gemma4AudioFeedForward(nnx.Module):
             rngs: Flax NNX random number generators.
 
         """
-        self.ffw_layer_1 = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 4, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
-        self.ffw_layer_2 = Gemma4ClippableLinear(config.hidden_size * 4, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
+        self.ffw_layer_1 = Gemma4ClippableLinear(
+            config.hidden_size, config.hidden_size * 4, use_clipped_linears=config.use_clipped_linears, rngs=rngs
+        )
+        self.ffw_layer_2 = Gemma4ClippableLinear(
+            config.hidden_size * 4, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs
+        )
         self.pre_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
         self.post_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
         self.gradient_clipping = config.gradient_clipping
@@ -138,7 +151,15 @@ class Gemma4AudioCausalConv1d(nnx.Module):
         """
         self.kernel_size = config.conv_kernel_size
         self.left_pad = self.kernel_size - 1
-        self.conv = nnx.Conv(config.hidden_size, config.hidden_size, kernel_size=self.kernel_size, feature_group_count=config.hidden_size, use_bias=False, padding=0, rngs=rngs)
+        self.conv = nnx.Conv(
+            config.hidden_size,
+            config.hidden_size,
+            kernel_size=self.kernel_size,
+            feature_group_count=config.hidden_size,
+            use_bias=False,
+            padding=0,
+            rngs=rngs,
+        )
 
     def __call__(self, x: jax.Array) -> jax.Array:
         """Apply causal 1D convolution.
@@ -165,8 +186,12 @@ class Gemma4AudioLightConv1d(nnx.Module):
             rngs: JAX NNX random number generators.
 
         """
-        self.linear_start = Gemma4ClippableLinear(config.hidden_size, config.hidden_size * 2, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
-        self.linear_end = Gemma4ClippableLinear(config.hidden_size, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
+        self.linear_start = Gemma4ClippableLinear(
+            config.hidden_size, config.hidden_size * 2, use_clipped_linears=config.use_clipped_linears, rngs=rngs
+        )
+        self.linear_end = Gemma4ClippableLinear(
+            config.hidden_size, config.hidden_size, use_clipped_linears=config.use_clipped_linears, rngs=rngs
+        )
         self.depthwise_conv1d = Gemma4AudioCausalConv1d(config, rngs=rngs)
         self.pre_layer_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)
         self.conv_norm = Gemma4RMSNorm(config.hidden_size, eps=config.rms_norm_eps, dtype=jnp.float32, rngs=rngs)

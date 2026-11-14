@@ -6,9 +6,9 @@ from tests.conftest import requires_jax
 
 pytestmark = requires_jax
 
-import jax.numpy as jnp
 from flax import nnx
 
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.gemma4.attention import (
     Gemma4Attention,
     _compute_attention_scores_and_output,

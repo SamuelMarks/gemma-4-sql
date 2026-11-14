@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from typing import Protocol, Self, runtime_checkable
 
 from gemma_4_sql._types_configs import DPOConfig, ETLConfig, TrainingConfig
@@ -27,7 +27,12 @@ class CursorProtocol(Protocol):
 
     @property
     def description(self) -> Sequence[Sequence[str | int | None]] | bool | None:
-        """Provide the cursor column description metadata."""
+        """Provide the cursor column description metadata.
+
+        Returns:
+            DB-API 2.0 column description sequence or `None` for non-row statements.
+
+        """
         ...
 
     def execute(
@@ -36,15 +41,29 @@ class CursorProtocol(Protocol):
         params: Sequence[JSONPrimitive] = (),
         /,
     ) -> Self:
-        """Execute a SQL query on the cursor."""
+        """Execute a SQL query on the cursor.
+
+        Args:
+            query: SQL statement text.
+            params: Positional query bind parameters.
+
+        Returns:
+            Cursor instance after execution.
+
+        """
         ...
 
     def fetchall(self) -> Sequence[Sequence[JSONPrimitive]]:
-        """Fetch all remaining rows of a query result set."""
+        """Fetch all remaining rows of a query result set.
+
+        Returns:
+            Sequence of result rows.
+
+        """
         ...
 
     def close(self) -> None:
-        """Close the cursor."""
+        """Close the cursor and release driver resources."""
         ...
 
 
@@ -53,7 +72,12 @@ class DatabaseConnectionProtocol(Protocol):
     """Protocol representing a DB-API 2.0 or analytical database connection."""
 
     def cursor(self) -> CursorProtocol:
-        """Return a new `CursorProtocol` object using the connection."""
+        """Return a new `CursorProtocol` object using the connection.
+
+        Returns:
+            Newly created database cursor.
+
+        """
         ...
 
     def execute(
@@ -62,15 +86,34 @@ class DatabaseConnectionProtocol(Protocol):
         params: Sequence[JSONPrimitive] = (),
         /,
     ) -> CursorProtocol:
-        """Execute a SQL statement directly on the connection."""
+        """Execute a SQL statement directly on the connection.
+
+        Args:
+            query: SQL statement text.
+            params: Positional query bind parameters.
+
+        Returns:
+            Cursor holding the statement execution results.
+
+        """
         ...
 
     def commit(self) -> Self | None:
-        """Commit any pending transaction to the database."""
+        """Commit any pending transaction to the database.
+
+        Returns:
+            Optional self reference or `None`.
+
+        """
         ...
 
     def rollback(self) -> Self | None:
-        """Roll back any pending transaction."""
+        """Roll back any pending transaction.
+
+        Returns:
+            Optional self reference or `None`.
+
+        """
         ...
 
     def close(self) -> None:
@@ -82,8 +125,13 @@ class DatabaseConnectionProtocol(Protocol):
 class AsyncDatabaseConnectionProtocol(Protocol):
     """Protocol representing an asynchronous database connection (`asyncpg`, `aiosqlite`, etc.)."""
 
-    async def close(self) -> None:
-        """Close the asynchronous database connection."""
+    def close(self) -> Coroutine[None, None, None] | None:
+        """Close the asynchronous database connection.
+
+        Returns:
+            Optional awaitable coroutine when closing asynchronously, or `None`.
+
+        """
         ...
 
 
@@ -93,7 +141,12 @@ class DuckDBConnectionProtocol(DatabaseConnectionProtocol, Protocol):
 
     @property
     def description(self) -> Sequence[Sequence[str | int | None]] | bool | None:
-        """Provide the cursor column description metadata."""
+        """Provide the cursor column description metadata.
+
+        Returns:
+            DuckDB result column description metadata or `None`.
+
+        """
         ...
 
     def create_function(
@@ -101,7 +154,16 @@ class DuckDBConnectionProtocol(DatabaseConnectionProtocol, Protocol):
         name: str,
         function: Callable[..., str],
     ) -> Self | None:
-        """Register a Python scalar UDF with DuckDB."""
+        """Register a Python scalar UDF with DuckDB.
+
+        Args:
+            name: SQL function identifier to register.
+            function: Python callable implementing the scalar UDF.
+
+        Returns:
+            Optional DuckDB connection reference or `None`.
+
+        """
         ...
 
     def execute(
@@ -110,15 +172,34 @@ class DuckDBConnectionProtocol(DatabaseConnectionProtocol, Protocol):
         params: Sequence[JSONPrimitive] | Mapping[str, JSONPrimitive] | None = ...,
         /,
     ) -> Self:
-        """Execute a SQL statement directly on the DuckDB connection."""
+        """Execute a SQL statement directly on the DuckDB connection.
+
+        Args:
+            query: SQL query string to execute.
+            params: Optional positional or named query parameters.
+
+        Returns:
+            Connection instance positioned on the result set.
+
+        """
         ...
 
     def fetchall(self) -> Sequence[Sequence[JSONPrimitive]]:
-        """Fetch all remaining rows of a query result set."""
+        """Fetch all remaining rows of a query result set.
+
+        Returns:
+            Sequence of result rows.
+
+        """
         ...
 
     def cursor(self) -> DuckDBConnectionProtocol:
-        """Return a thread-local duplicate DuckDB cursor/connection."""
+        """Return a thread-local duplicate DuckDB cursor/connection.
+
+        Returns:
+            Independent DuckDB cursor connection sharing the database catalog.
+
+        """
         ...
 
 
@@ -127,7 +208,16 @@ class TrainSubmoduleProtocol(Protocol):
     """Protocol for backend `train` submodules."""
 
     def train_model(self, config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
-        """Execute backend training pipeline."""
+        """Execute backend training pipeline.
+
+        Args:
+            config: Validated `TrainingConfig` hyperparameters.
+            **kwargs: Additional backend-specific options.
+
+        Returns:
+            Structured `TrainResultDict` summary.
+
+        """
         ...
 
 
@@ -136,7 +226,16 @@ class DPOSubmoduleProtocol(Protocol):
     """Protocol for backend `dpo` submodules."""
 
     def run_dpo(self, config: DPOConfig, **kwargs: JSONValue) -> DPOResultDict:
-        """Execute backend DPO pipeline."""
+        """Execute backend DPO pipeline.
+
+        Args:
+            config: Validated `DPOConfig` hyperparameters.
+            **kwargs: Additional backend-specific options.
+
+        Returns:
+            Structured `DPOResultDict` summary.
+
+        """
         ...
 
 
@@ -145,7 +244,16 @@ class ETLSubmoduleProtocol(Protocol):
     """Protocol for backend `etl` submodules."""
 
     def build_dataloader(self, config: ETLConfig, **kwargs: JSONValue) -> ETLResultDict:
-        """Execute backend dataloader construction."""
+        """Execute backend dataloader construction.
+
+        Args:
+            config: Validated `ETLConfig` parameters.
+            **kwargs: Additional backend-specific options.
+
+        Returns:
+            Structured `ETLResultDict` containing the constructed loader.
+
+        """
         ...
 
 
@@ -154,7 +262,17 @@ class ExportSubmoduleProtocol(Protocol):
     """Protocol for backend `export` submodules."""
 
     def export_model(self, model_name: str, export_path: str, **kwargs: JSONValue) -> ExportResultDict:
-        """Execute backend model export."""
+        """Execute backend model export.
+
+        Args:
+            model_name: Target model name or checkpoint path.
+            export_path: Destination export directory or file path.
+            **kwargs: Additional backend-specific options.
+
+        Returns:
+            Structured `ExportResultDict` summary.
+
+        """
         ...
 
 
@@ -162,8 +280,21 @@ class ExportSubmoduleProtocol(Protocol):
 class LoggingSubmoduleProtocol(Protocol):
     """Protocol for backend `logging` submodules."""
 
-    def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> LogMetricsResultDict:
-        """Execute backend metric logging."""
+    def log_metrics(
+        self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue
+    ) -> LogMetricsResultDict:
+        """Execute backend metric logging.
+
+        Args:
+            metrics: Mapping of metric names to scalar float values.
+            step: Global training or evaluation step index.
+            log_dir: Output log directory path.
+            **kwargs: Additional metadata fields.
+
+        Returns:
+            Structured `LogMetricsResultDict` summary.
+
+        """
         ...
 
 
@@ -180,7 +311,20 @@ class PEFTSubmoduleProtocol(Protocol):
         lora_dropout: float = 0.05,
         **kwargs: JSONValue,
     ) -> PEFTResultDict:
-        """Execute backend LoRA adapter injection."""
+        """Execute backend LoRA adapter injection.
+
+        Args:
+            model_name: Target model identifier.
+            target_modules: Module name substrings to adapt with LoRA.
+            lora_r: Low-rank bottleneck dimension.
+            lora_alpha: Scaling factor numerator.
+            lora_dropout: Dropout probability on LoRA inputs.
+            **kwargs: Additional backend-specific options.
+
+        Returns:
+            Structured `PEFTResultDict` summary.
+
+        """
         ...
 
 
@@ -189,7 +333,17 @@ class QuantizeSubmoduleProtocol(Protocol):
     """Protocol for backend `quantize` submodules."""
 
     def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> QuantizeResultDict:
-        """Execute backend model quantization."""
+        """Execute backend model quantization.
+
+        Args:
+            model_name: Target model identifier.
+            method: Quantization algorithm (`'int8'`, `'int4'`, `'awq'`, `'gptq'`, `'gguf'`).
+            **kwargs: Additional quantization options.
+
+        Returns:
+            Structured `QuantizeResultDict` summary.
+
+        """
         ...
 
 
@@ -205,7 +359,19 @@ class InferenceSubmoduleProtocol(Protocol):
         max_length: int = 50,
         **kwargs: JSONValue,
     ) -> InferenceResultDict:
-        """Execute backend SQL generation."""
+        """Execute backend SQL generation.
+
+        Args:
+            model_name: Target model identifier.
+            prompt: Natural language SQL prompt.
+            beam_width: Number of beams for search decoding.
+            max_length: Maximum number of tokens to generate.
+            **kwargs: Additional decoding or multimodal options.
+
+        Returns:
+            Structured `InferenceResultDict` containing generated SQL and confidence.
+
+        """
         ...
 
 
@@ -220,7 +386,18 @@ class ServeSubmoduleProtocol(Protocol):
         max_batch_size: int = 32,
         **kwargs: JSONValue,
     ) -> ServeResultDict:
-        """Execute backend continuous batching server initialization."""
+        """Execute backend continuous batching server initialization.
+
+        Args:
+            model_name: Target model identifier.
+            port: TCP port to listen on.
+            max_batch_size: Maximum batch size per continuous batching window.
+            **kwargs: Additional serving options.
+
+        Returns:
+            JSON-serializable `ServeResultDict` metadata.
+
+        """
         ...
 
 
@@ -235,7 +412,18 @@ class BenchmarkSubmoduleProtocol(Protocol):
         batch_size: int = 32,
         **kwargs: JSONValue,
     ) -> BenchmarkResultDict:
-        """Execute backend hardware benchmark."""
+        """Execute backend hardware benchmark.
+
+        Args:
+            model_name: Target model identifier.
+            hardware: Hardware target descriptor.
+            batch_size: Batch size to profile.
+            **kwargs: Additional benchmark parameters.
+
+        Returns:
+            Structured `BenchmarkResultDict` latency and throughput metrics.
+
+        """
         ...
 
 

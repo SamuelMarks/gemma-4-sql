@@ -17,7 +17,9 @@ from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import ETLConfig, ETLResultDict, JSONValue
 
 _raw_datasets = optional_import("datasets")
-datasets: HFDatasetsModuleProtocol | None = _raw_datasets if isinstance(_raw_datasets, HFDatasetsModuleProtocol) else None
+datasets: HFDatasetsModuleProtocol | None = (
+    _raw_datasets if isinstance(_raw_datasets, HFDatasetsModuleProtocol) else None
+)
 _raw_grain = optional_import("grain.python")
 grain: GrainModuleProtocol | None = _raw_grain if isinstance(_raw_grain, GrainModuleProtocol) else None
 _wrap_maxtext_transform = wrap_maxtext_transform

@@ -19,26 +19,51 @@ class DummyTensor:
         self.value = value
 
     def __sub__(self, other: DummyTensor | float, /) -> DummyTensor:
-        """Subtract another DummyTensor or float."""
+        """Subtract another DummyTensor or float.
+
+        Returns:
+            Difference wrapped in `DummyTensor`.
+
+        """
         other_val = other.value if isinstance(other, DummyTensor) else float(other)
         return DummyTensor(self.value - other_val)
 
     def __rsub__(self, other: DummyTensor | float, /) -> DummyTensor:
-        """Right-subtract this DummyTensor from a float or DummyTensor."""
+        """Right-subtract this DummyTensor from a float or DummyTensor.
+
+        Returns:
+            Difference wrapped in `DummyTensor`.
+
+        """
         other_val = other.value if isinstance(other, DummyTensor) else float(other)
         return DummyTensor(other_val - self.value)
 
     def __mul__(self, other: DummyTensor | float, /) -> DummyTensor:
-        """Multiply by scalar float or DummyTensor."""
+        """Multiply by scalar float or DummyTensor.
+
+        Returns:
+            Product wrapped in `DummyTensor`.
+
+        """
         other_val = other.value if isinstance(other, DummyTensor) else float(other)
         return DummyTensor(self.value * other_val)
 
     def __rmul__(self, other: DummyTensor | float, /) -> DummyTensor:
-        """Right-multiply by scalar float or DummyTensor."""
+        """Right-multiply by scalar float or DummyTensor.
+
+        Returns:
+            Product wrapped in `DummyTensor`.
+
+        """
         return self.__mul__(other)
 
     def __neg__(self) -> DummyTensor:
-        """Negate value."""
+        """Negate value.
+
+        Returns:
+            Negated `DummyTensor`.
+
+        """
         return DummyTensor(-self.value)
 
     def detach(self) -> DummyTensor:
@@ -54,7 +79,12 @@ class DummyTensor:
         return self.value
 
     def __float__(self) -> float:
-        """Convert to Python float."""
+        """Convert to Python float.
+
+        Returns:
+            Scalar `float` value.
+
+        """
         return self.value
 
 
@@ -67,7 +97,12 @@ def test_generic_dpo_loss_with_methods() -> None:
     beta = 0.1
 
     def log_sigmoid(x: DummyTensor) -> DummyTensor:
-        """Scale input value by 2."""
+        """Scale input value by 2.
+
+        Returns:
+            Scaled `DummyTensor`.
+
+        """
         return DummyTensor(x.value * 2.0)
 
     loss, chosen_rewards, rejected_rewards = generic_dpo_loss(
@@ -96,27 +131,57 @@ def test_generic_dpo_loss_without_methods() -> None:
             self.val = val
 
         def __float__(self) -> float:
-            """Convert to float."""
+            """Convert to float.
+
+            Returns:
+                Scalar `float` value.
+
+            """
             return self.val
 
         def __sub__(self, other: PlainArith | float, /) -> PlainArith:
-            """Subtract."""
+            """Subtract.
+
+            Returns:
+                Difference wrapped in `PlainArith`.
+
+            """
             return PlainArith(self.val - float(other))
 
         def __rsub__(self, other: PlainArith | float, /) -> PlainArith:
-            """Right subtract."""
+            """Right subtract.
+
+            Returns:
+                Difference wrapped in `PlainArith`.
+
+            """
             return PlainArith(float(other) - self.val)
 
         def __mul__(self, other: PlainArith | float, /) -> PlainArith:
-            """Multiply."""
+            """Multiply.
+
+            Returns:
+                Product wrapped in `PlainArith`.
+
+            """
             return PlainArith(self.val * float(other))
 
         def __rmul__(self, other: PlainArith | float, /) -> PlainArith:
-            """Right multiply."""
+            """Right multiply.
+
+            Returns:
+                Product wrapped in `PlainArith`.
+
+            """
             return PlainArith(float(other) * self.val)
 
         def __neg__(self) -> PlainArith:
-            """Negate."""
+            """Negate.
+
+            Returns:
+                Negated `PlainArith`.
+
+            """
             return PlainArith(-self.val)
 
     policy_chosen = PlainArith(1.0)
@@ -126,7 +191,12 @@ def test_generic_dpo_loss_without_methods() -> None:
     beta = 0.1
 
     def log_sigmoid(x: PlainArith) -> PlainArith:
-        """Scale value by 2."""
+        """Scale value by 2.
+
+        Returns:
+            Scaled `PlainArith`.
+
+        """
         return PlainArith(x.val * 2.0)
 
     loss, chosen_rewards, rejected_rewards = generic_dpo_loss(
@@ -145,7 +215,12 @@ def test_generic_dpo_loss_without_methods() -> None:
     assert rejected_rewards.val == pytest.approx(0.01)
 
     def log_sigmoid_float(x: float) -> float:
-        """Scale float by 2."""
+        """Scale float by 2.
+
+        Returns:
+            Scaled `float`.
+
+        """
         return float(x) * 2.0
 
     loss_f, ch_f, rej_f = generic_dpo_loss(1.0, 0.5, 0.8, 0.4, 0.1, log_sigmoid_float)
@@ -153,22 +228,38 @@ def test_generic_dpo_loss_without_methods() -> None:
     assert ch_f == pytest.approx(0.02)
     assert rej_f == pytest.approx(0.01)
 
+    from gemma_4_sql.backends.common_dpo import _mul_dpo, _sub_dpo
 
-def test_generic_run_training_epochs_none_dataloader() -> None:
-    """Verify generic_run_training_epochs returns 0.0 when dataloader is None."""
-    state: DPOLoopState[str | None, str | None, dict[str, int]] = DPOLoopState(dataloader=None, epochs=2)
+    assert _sub_dpo(5.0, 2.0, scale=0.5) == pytest.approx(1.5)
+    assert float(_sub_dpo(DummyTensor(5.0), DummyTensor(2.0), scale=0.5)) == pytest.approx(1.5)
+    assert _mul_dpo(0.2, 4.0, scale=2.5) == pytest.approx(2.0)
+    assert float(_mul_dpo(0.2, DummyTensor(4.0), scale=2.5)) == pytest.approx(2.0)
+
+
+def test_generic_run_training_epochs_empty_dataloader() -> None:
+    """Verify generic_run_training_epochs returns 0.0 when dataloader is empty."""
+    state: DPOLoopState[str, str, dict[str, int]] = DPOLoopState(
+        dataloader=[],
+        policy_model="p",
+        ref_model="r",
+        optimizer="o",
+        epochs=2,
+    )
     assert generic_run_training_epochs(state, lambda *_a: 0.0) == 0.0
 
 
 def test_generic_run_training_epochs_normal() -> None:
     """Verify generic_run_training_epochs averages batch losses with .item()."""
-    state: DPOLoopState[str | None, str | None, dict[str, int]] = DPOLoopState(
+    state: DPOLoopState[str, str, dict[str, int]] = DPOLoopState(
         dataloader=[{"data": 1}, {"data": 2}],
+        policy_model="p",
+        ref_model="r",
+        optimizer="o",
         epochs=2,
         beta=0.1,
     )
 
-    def step_fn(_policy: str | None, _ref: str | None, _opt: str | None, batch: dict[str, int], _beta: float) -> DummyTensor:
+    def step_fn(_policy: str, _ref: str, _opt: str, batch: dict[str, int], _beta: float) -> DummyTensor:
         """Return DummyTensor proportional to batch data."""
         return DummyTensor(float(batch["data"]) * 0.5)
 
@@ -187,13 +278,16 @@ def test_generic_run_training_epochs_no_item() -> None:
             yield {"data": 1}
             yield {"data": 2}
 
-    state: DPOLoopState[str | None, str | None, dict[str, int]] = DPOLoopState(
+    state: DPOLoopState[str, str, dict[str, int]] = DPOLoopState(
         dataloader=GeneratorLoader(),
+        policy_model="p",
+        ref_model="r",
+        optimizer="o",
         epochs=1,
         beta=0.1,
     )
 
-    def step_fn(_policy: str | None, _ref: str | None, _opt: str | None, batch: dict[str, int], _beta: float) -> float:
+    def step_fn(_policy: str, _ref: str, _opt: str, batch: dict[str, int], _beta: float) -> float:
         """Return plain float loss."""
         return float(batch["data"]) * 0.5
 
@@ -209,7 +303,12 @@ def test_run_dpo_wrapper() -> None:
     assert res_ok["final_loss"] == 0.125
 
     def _fail(_m: str, _d: str, _b: float, _ep: int, _lr: float, _bs: int) -> tuple[str, float]:
-        """Raise ValueError for testing error handling."""
+        """Raise ValueError for testing error handling.
+
+        Raises:
+            ValueError: Always raised to simulate operational DPO failure.
+
+        """
         raise ValueError("dpo boom")
 
     res_fail = run_dpo_wrapper("jax", cfg, _fail)
@@ -219,7 +318,12 @@ def test_run_dpo_wrapper() -> None:
         run_dpo_wrapper("jax", cfg, _fail, raise_on_error=True)
 
     def _raise_dep(_m: str, _d: str, _b: float, _ep: int, _lr: float, _bs: int) -> tuple[str, float]:
-        """Raise DependencyMissingError."""
+        """Raise DependencyMissingError.
+
+        Raises:
+            DependencyMissingError: Always raised to test dependency propagation.
+
+        """
         raise DependencyMissingError("missing dpo dep")
 
     with pytest.raises(DependencyMissingError, match="missing dpo dep"):

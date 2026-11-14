@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_export import run_export_wrapper
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.common_inference import make_model_cache_key
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config as NativeGemma4Config
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError, StatusValue
 from gemma_4_sql.type_hints import ExportResultDict, TensorProtocol, TorchCausalLMProtocol, TorchTensorProtocol
@@ -19,7 +20,12 @@ class _ClonableTensorProtocol(TorchTensorProtocol, Protocol):
     """Protocol for a tensor supporting `.clone()`."""
 
     def clone(self) -> TorchTensorProtocol:
-        """Return a copy of the tensor."""
+        """Return a copy of the tensor.
+
+        Returns:
+            Cloned `TorchTensorProtocol` tensor.
+
+        """
         ...
 
 
@@ -33,7 +39,13 @@ class _SafetensorsSaveFileProtocol(Protocol):
         filename: str,
         /,
     ) -> None:
-        """Serialize `tensors` to a safetensors file at `filename`."""
+        """Serialize `tensors` to a safetensors file at `filename`.
+
+        Args:
+            tensors: Mapping of parameter names to tensors.
+            filename: Output `.safetensors` file path.
+
+        """
         ...
 
 
@@ -42,12 +54,42 @@ class _SavePretrainedModelProtocol(TorchCausalLMProtocol, Protocol):
     """Protocol for a PyTorch model supporting `.save_pretrained(export_path)`."""
 
     def save_pretrained(self, save_directory: str, /) -> str | None:
-        """Persist model or adapter weights to `save_directory`."""
+        """Persist model or adapter weights to `save_directory`.
+
+        Args:
+            save_directory: Destination directory path.
+
+        Returns:
+            Saved file path or `None`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _NativeFromPretrainedProtocol(Protocol):
+    """Protocol for `NativeGemma4` exposing `.from_pretrained(model_name, config=...)`."""
+
+    def from_pretrained(
+        self,
+        model_name_or_path: str | Path,
+        config: NativeGemma4Config | None = None,
+    ) -> _SavePretrainedModelProtocol:
+        """Load or instantiate a `Gemma4ForCausalLM` from checkpoint path or preset.
+
+        Args:
+            model_name_or_path: Checkpoint path or preset identifier.
+            config: Optional explicit `Gemma4Config`.
+
+        Returns:
+            Loaded `_SavePretrainedModelProtocol` instance.
+
+        """
         ...
 
 
 torch = optional_import("torch")
-save_file: _SafetensorsSaveFileProtocol | None = optional_attr(
+save_file: _SafetensorsSaveFileProtocol | None = import_optional_symbol(
     "safetensors.torch",
     "save_file",
     _SafetensorsSaveFileProtocol,
@@ -72,6 +114,52 @@ def _is_rank_zero() -> bool:
         logger = logging.getLogger(__name__)
         logger.debug("Distributed not available or not initialized: %s", e)
     return True
+
+
+def _resolve_native_export_model(
+    model_name: str,
+    raw_cfg: StatusValue | NativeGemma4Config | None,
+) -> _SavePretrainedModelProtocol:
+    """Resolve a cached, checkpoint-restored, or configured native PyTorch Gemma 4 model.
+
+    Args:
+        model_name: Model cache key, checkpoint path, or preset name.
+        raw_cfg: Optional explicit `Gemma4Config` passed by caller.
+
+    Returns:
+        Resolved `_SavePretrainedModelProtocol` model ready for state-dict serialization.
+
+    """
+    from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4Config
+    from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
+    from gemma_4_sql.backends.pytorch.inference import MODEL_CACHE
+
+    cfg_opt = raw_cfg if isinstance(raw_cfg, NativeGemma4Config) else None
+    direct_cached = MODEL_CACHE.get_model(model_name)
+    if direct_cached is not None and isinstance(direct_cached[0], _SavePretrainedModelProtocol):
+        return direct_cached[0]
+    from_pretrained_ref = (
+        NativeGemma4.from_pretrained if isinstance(NativeGemma4, _NativeFromPretrainedProtocol) else None
+    )
+    keyed_cache_id = make_model_cache_key(
+        model_name,
+        backend_name="native",
+        config=cfg_opt,
+        factories=(from_pretrained_ref,) if from_pretrained_ref is not None else (),
+    )
+    keyed_cached = MODEL_CACHE.get_model(keyed_cache_id)
+    if keyed_cached is not None and isinstance(keyed_cached[0], _SavePretrainedModelProtocol):
+        return keyed_cached[0]
+
+    model_path = Path(model_name)
+    if model_path.exists() and isinstance(NativeGemma4, _NativeFromPretrainedProtocol):
+        return NativeGemma4.from_pretrained(model_name, config=cfg_opt)
+
+    cfg = cfg_opt if cfg_opt is not None else Gemma4Config.from_preset(model_name)
+    if isinstance(NativeGemma4, _NativeFromPretrainedProtocol):
+        return NativeGemma4.from_pretrained(model_name, config=cfg)
+    instantiated: _SavePretrainedModelProtocol = NativeGemma4(cfg)
+    return instantiated
 
 
 def _save_real_model(
@@ -100,19 +188,47 @@ def _save_real_model(
     """
     try:
         if backend_alias == "pytorch_native":
-            from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4Config
-            from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
-
-            raw_cfg = kwargs.get("config")
-            cfg = raw_cfg if isinstance(raw_cfg, NativeGemma4Config) else Gemma4Config.from_preset(model_name)
-            model: _SavePretrainedModelProtocol = NativeGemma4(cfg)
-            tensors: dict[str, TorchTensorProtocol | TensorProtocol] = {k: v.clone() if k == "lm_head.weight" and isinstance(v, _ClonableTensorProtocol) else v for k, v in model.state_dict().items()}
+            native_model = _resolve_native_export_model(model_name, kwargs.get("config"))
+            tensors: dict[str, TorchTensorProtocol | TensorProtocol] = {
+                k: v.clone() if k == "lm_head.weight" and isinstance(v, _ClonableTensorProtocol) else v
+                for k, v in native_model.state_dict().items()
+            }
+            save_pretrained_fn: Callable[[str], str | None] = native_model.save_pretrained
         else:
-            from transformers.models.gemma4 import Gemma4ForCausalLM
 
-            gemma4_for_causal_lm_cls = Gemma4ForCausalLM
-            model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
-            tensors = dict(model.state_dict())
+            @runtime_checkable
+            class _ExportModelInstanceProtocol(Protocol):
+                """Protocol for a loaded Hugging Face causal LM supporting `state_dict` and `save_pretrained`."""
+
+                def state_dict(self) -> Mapping[str, TorchTensorProtocol | TensorProtocol]:
+                    """Return model parameter state dictionary."""
+                    ...
+
+                def save_pretrained(self, save_directory: str, /) -> str | None:
+                    """Persist model weights/adapters to `save_directory`."""
+                    ...
+
+            @runtime_checkable
+            class _ExportCausalLMLoaderProtocol(Protocol):
+                """Protocol for `Gemma4ForCausalLM` exposing `from_pretrained`."""
+
+                def from_pretrained(self, model_id: str, /) -> _ExportModelInstanceProtocol:
+                    """Load pretrained `Gemma4ForCausalLM`."""
+                    ...
+
+            gemma4_for_causal_lm_cls = import_optional_symbol(
+                "transformers.models.gemma4",
+                "Gemma4ForCausalLM",
+                _ExportCausalLMLoaderProtocol,
+            )
+            if gemma4_for_causal_lm_cls is None:
+                msg = (
+                    f"Failed to load model {model_name}: transformers.models.gemma4.Gemma4ForCausalLM is not available."
+                )
+                raise ExportError(msg, backend=backend_alias)
+            hf_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
+            tensors = dict(hf_model.state_dict())
+            save_pretrained_fn = hf_model.save_pretrained
     except (ImportError, ValueError, OSError) as e:
         msg = f"Failed to load model {model_name}"
         raise ExportError(msg, backend=backend_alias, cause=e) from e
@@ -121,7 +237,7 @@ def _save_real_model(
     out_dir.mkdir(parents=True, exist_ok=True)
     file_path = out_dir / "model.safetensors"
     if kwargs.get("export_type") == "adapter":
-        model.save_pretrained(export_path)
+        save_pretrained_fn(export_path)
         file_path = out_dir / "adapter_model.safetensors"
     elif is_rank_zero and save_file is not None:
         save_file(tensors, str(file_path))

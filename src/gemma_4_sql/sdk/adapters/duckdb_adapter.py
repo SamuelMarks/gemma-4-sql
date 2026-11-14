@@ -3,29 +3,47 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import threading
 from collections.abc import Sequence
-from typing import Protocol, TypeGuard, runtime_checkable
+from enum import Enum
+from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.backends.lazy_loader import LazyLoader
+from gemma_4_sql.backends.lazy_loader import LazyLoader, ModuleNamespaceProtocol
 from gemma_4_sql.exceptions import DatabaseExecutionError, DependencyMissingError
-from gemma_4_sql.type_hints import CursorProtocol, DatabaseConnectionProtocol, DuckDBConnectionProtocol, JSONPrimitive
+from gemma_4_sql.type_hints import DatabaseConnectionProtocol, DuckDBConnectionProtocol, JSONPrimitive
 
-from .base import DatabaseAdapter, DBKwargValue
+from .base import (
+    CursorFactoryConnectionProtocol,
+    DatabaseAdapter,
+    DBKwargValue,
+    DirectExecConnectionProtocol,
+    FetchableCursorProtocol,
+    SyncAdapterConnection,
+)
 
 logger = logging.getLogger(__name__)
 
 
+class _LoaderSentinel(Enum):
+    """Sentinel indicating `duckdb` has not yet been lazily imported."""
+
+    UNRESOLVED = "unresolved"
+
+
 @runtime_checkable
-class DuckDBModuleProtocol(Protocol):
-    """Protocol for the `duckdb` Python driver module."""
+class _DuckDBErrorModuleProtocol(Protocol):
+    """Protocol for a `duckdb` module exposing `Error`."""
 
     @property
-    def Error(self) -> type[Exception]:
+    def Error(self) -> type[BaseException] | int | str | None:
         """Provide `duckdb.Error` exception class."""
         ...
+
+
+@runtime_checkable
+class DuckDBModuleProtocol(_DuckDBErrorModuleProtocol, Protocol):
+    """Protocol for the `duckdb` Python driver module."""
 
     def connect(
         self,
@@ -33,31 +51,50 @@ class DuckDBModuleProtocol(Protocol):
         *,
         read_only: bool = False,
         **kwargs: DBKwargValue,
-    ) -> DuckDBConnectionProtocol:
-        """Open a DuckDB database connection."""
+    ) -> DuckDBConnectionProtocol | DirectExecConnectionProtocol:
+        """Open a DuckDB database connection.
+
+        Args:
+            database: Database file path or `':memory:'`.
+            read_only: Whether to open the database in read-only mode.
+            **kwargs: Additional DuckDB connection parameters.
+
+        Returns:
+            Opened `DuckDBConnectionProtocol` connection.
+
+        """
         ...
 
 
-duckdb = LazyLoader("duckdb").get_module()
+_DUCKDB_LOADER: LazyLoader[ModuleNamespaceProtocol] = LazyLoader("duckdb")
+duckdb: DuckDBModuleProtocol | ModuleNamespaceProtocol | _LoaderSentinel | None = _LoaderSentinel.UNRESOLVED
 
 
-def _is_duckdb_conn(val: DBKwargValue | None) -> TypeGuard[DatabaseConnectionProtocol]:
-    """Check whether `val` is an active database connection or cursor exposing `.execute`.
+def _resolve_duckdb(
+    override: DuckDBModuleProtocol | ModuleNamespaceProtocol | _LoaderSentinel | None = _LoaderSentinel.UNRESOLVED,
+) -> DuckDBModuleProtocol | ModuleNamespaceProtocol | None:
+    """Resolve `duckdb` lazily while honoring explicit DI or module-level overrides.
 
     Args:
-        val: Candidate `db_kwargs` value.
+        override: Optional explicitly injected `duckdb` module or `None`.
 
     Returns:
-        `True` if `val` is a connection object, `False` otherwise.
+        Loaded `duckdb` module or `None` if unavailable.
 
     """
-    return val is not None and not isinstance(val, (str, int, float, bool, list, dict, tuple))
+    global duckdb
+    if override is not _LoaderSentinel.UNRESOLVED:
+        return override
+    if duckdb is _LoaderSentinel.UNRESOLVED:
+        duckdb = _DUCKDB_LOADER.get_module()
+    return duckdb
 
 
-class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnectionProtocol]):
+class DuckDBAdapter(DatabaseAdapter[SyncAdapterConnection, SyncAdapterConnection]):
     """Adapter for DuckDB analytical databases."""
 
     _lock: threading.Lock
+    _duckdb_override: DuckDBModuleProtocol | ModuleNamespaceProtocol | _LoaderSentinel | None
 
     def __init__(
         self,
@@ -65,6 +102,10 @@ class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnecti
         db_kwargs: dict[str, DBKwargValue] | None = None,
         *,
         read_only: bool = False,
+        lazy_connect: bool = False,
+        duckdb_module: (
+            DuckDBModuleProtocol | ModuleNamespaceProtocol | _LoaderSentinel | None
+        ) = _LoaderSentinel.UNRESOLVED,
     ) -> None:
         """Initialize the DuckDB adapter with a thread synchronization lock.
 
@@ -72,10 +113,13 @@ class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnecti
             db_path: Path to DuckDB database file or `':memory:'`.
             db_kwargs: Optional connection keyword arguments.
             read_only: Whether to open the database in read-only mode.
+            lazy_connect: Whether to defer synchronous connection establishment until `.conn` access.
+            duckdb_module: Optional injected `duckdb` driver module or `None` for testing.
 
         """
         self._lock = threading.Lock()
-        super().__init__(db_path, db_kwargs or {}, read_only=read_only)
+        self._duckdb_override = duckdb_module
+        super().__init__(db_path, db_kwargs or {}, read_only=read_only, lazy_connect=lazy_connect)
 
     @property
     def error_classes(self) -> tuple[type[Exception], ...]:
@@ -85,13 +129,14 @@ class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnecti
             Tuple containing `duckdb.Error` or fallback execution error classes.
 
         """
-        if duckdb is not None:
-            with contextlib.suppress(AttributeError, TypeError):
-                err: type[Exception] = duckdb.Error
-                return (err,)
+        mod = _resolve_duckdb(self._duckdb_override)
+        if isinstance(mod, _DuckDBErrorModuleProtocol):
+            err_attr = mod.Error
+            if isinstance(err_attr, type) and issubclass(err_attr, Exception):
+                return (err_attr,)
         return (RuntimeError, OSError, DatabaseExecutionError)
 
-    def connect(self) -> DatabaseConnectionProtocol:
+    def connect(self) -> SyncAdapterConnection:
         """Connect synchronously to DuckDB or reuse an injected connection.
 
         Returns:
@@ -102,18 +147,23 @@ class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnecti
 
         """
         candidate = self.db_kwargs.get("existing_conn") or self.db_kwargs.get("conn")
-        if _is_duckdb_conn(candidate):
+        if isinstance(candidate, (DatabaseConnectionProtocol, DirectExecConnectionProtocol)):
             return candidate
-        if duckdb is None:
+        mod = _resolve_duckdb(self._duckdb_override)
+        if not isinstance(mod, DuckDBModuleProtocol):
             msg = "duckdb is required. Install with `pip install duckdb`."
             raise DependencyMissingError(msg, dependency_name="duckdb", backend="duckdb")
         kwargs = self.db_kwargs.copy()
-        if self.read_only and self.db_path != ":memory:":
-            kwargs["read_only"] = True
-        conn: DatabaseConnectionProtocol = duckdb.connect(self.db_path, **kwargs)
-        return conn
+        ro_flag = bool(kwargs.pop("read_only", False)) or (self.read_only and self.db_path != ":memory:")
+        raw_conn = mod.connect(self.db_path, read_only=ro_flag, **kwargs)
+        if self.read_only:
+            try:
+                raw_conn.execute("SET enable_external_access = false;")
+            except self.error_classes:
+                pass
+        return raw_conn
 
-    async def connect_async(self) -> DatabaseConnectionProtocol:
+    async def connect_async(self) -> SyncAdapterConnection:
         """Return the active DuckDB connection for async operations.
 
         Returns:
@@ -128,10 +178,20 @@ class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnecti
         Args:
             ddl: Schema DDL string to execute.
 
+        Raises:
+            DatabaseExecutionError: If DuckDB DDL execution fails.
+
         """
         if ddl and ddl.strip():
             with self._lock:
-                self.conn.execute(ddl)
+                try:
+                    active = self.conn
+                    if isinstance(active, DirectExecConnectionProtocol):
+                        active.execute(ddl)
+                    else:
+                        active.cursor().execute(ddl)
+                except self.error_classes as e:
+                    raise DatabaseExecutionError(str(e), cause=e) from e
 
     def close(self) -> None:
         """Close the DuckDB connection if it was not externally provided."""
@@ -187,11 +247,12 @@ class DuckDBAdapter(DatabaseAdapter[DatabaseConnectionProtocol, DatabaseConnecti
 
                 """
                 with self._lock:
-                    cur: DatabaseConnectionProtocol | CursorProtocol = self.conn
-                    with contextlib.suppress(AttributeError, TypeError):
-                        cur = self.conn.cursor()
-                    rows: list[tuple[JSONPrimitive, ...]] = [tuple(r) for r in cur.execute(query, params or ()).fetchall()]
-                    return rows
+                    active_conn = self.conn
+                    if isinstance(active_conn, CursorFactoryConnectionProtocol):
+                        cur = active_conn.cursor()
+                        return [tuple(r) for r in cur.execute(query, params or ()).fetchall()]
+                    res: FetchableCursorProtocol = active_conn.execute(query, params or ())
+                    return [tuple(r) for r in res.fetchall()]
 
             return await asyncio.to_thread(_exec)
         except self.error_classes as e:

@@ -39,7 +39,9 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(models, "get_backend", _dispatch_backend)
 
-    res = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="jax"))
+    res = pretrain_model(
+        TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="jax")
+    )
     assert res["backend"] == "jax"
     assert res["action"] == "pretrain"
     assert res["model"] == "my-model"
@@ -47,13 +49,17 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     assert jax_double.train_configs[0].epochs == 2
 
     with pytest.raises(DependencyMissingError):
-        pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="pytorch"))
+        pretrain_model(
+            TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="pytorch")
+        )
 
     import gemma_4_sql.backends.keras.train as ktrain
 
     monkeypatch.setattr(ktrain, "tf", None)
     with pytest.raises(DependencyMissingError):
-        pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
+        pretrain_model(
+            TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras")
+        )
 
     class DummyPreprocessor:
         """Preprocessor stub with sequence_length."""
@@ -136,7 +142,9 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ktrain, "GemmaCausalLM", DummyGemmaCausalLM)
     monkeypatch.setattr(ktrain, "build_dataloader", _keras_train_loader)
 
-    res_k = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras"))
+    res_k = pretrain_model(
+        TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras")
+    )
     assert res_k["backend"] == "keras"
     assert res_k["action"] == "pretrain"
     assert res_k["status"] == "completed"
@@ -146,9 +154,13 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(mx_train, "jax", None)
     with pytest.raises(DependencyMissingError):
-        pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="maxtext"))
+        pretrain_model(
+            TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="maxtext")
+        )
 
-    res_mlx = pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="mlx"))
+    res_mlx = pretrain_model(
+        TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="mlx")
+    )
     assert res_mlx["backend"] == "mlx"
     assert len(mlx_double.train_configs) == 1
     assert mlx_double.train_configs[0].action == "pretrain"
@@ -157,11 +169,13 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_pretrain_model_error() -> None:
     """Verify `pretrain_model` raises `ConfigurationError` with an unknown backend."""
     with pytest.raises(ConfigurationError, match="Unknown backend: unknown"):
-        pretrain_model(TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="unknown"))
+        pretrain_model(
+            TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="unknown")
+        )
 
 
 def test_models_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify `pretrain_model`, `train_from_scratch`, `sft_model`, and `posttrain_model` populate default configs without mutating caller configs."""
+    """Verify training entrypoints populate default configs without mutating caller configs."""
     recording_double = RecordingBackendDouble("jax")
 
     def _get_recording_double(_b: str) -> RecordingBackendDouble:
@@ -189,12 +203,14 @@ def test_models_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert recording_double.train_configs[-1].backend == "keras"
 
 
+@pytest.mark.jax
 def test_sft_and_train_from_scratch_real_tiny_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `sft_model` and `train_from_scratch` execute a real 1-step JAX training loop on a tiny Gemma 4 model."""
+    pytest.importorskip("jax")
     import jax
-    import jax.numpy as jnp
 
     import gemma_4_sql.backends.jax.train as jax_train
+    from gemma_4_sql.backends.jax.gemma4._jnp import jnp
     from gemma_4_sql.type_hints import ETLConfig
 
     def _jax_train_loader(_cfg: ETLConfig) -> dict[str, list[dict[str, jax.Array]]]:

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.backends.lazy_loader import optional_attr
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol
+from gemma_4_sql.exceptions import ExecutionStatus
 from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
 
@@ -18,15 +18,24 @@ class SummaryWriterInstanceProtocol(Protocol):
     """Protocol for a TensorBoard `SummaryWriter` instance."""
 
     def add_scalar(self, tag: str, scalar_value: float, global_step: int) -> None:
-        """Record a scalar metric at `global_step`."""
+        """Record a scalar metric at `global_step`.
+
+        Args:
+            tag: Metric tag name.
+            scalar_value: Recorded float value.
+            global_step: Step counter index.
+
+        """
         ...
+
+
+@runtime_checkable
+class ClosableSummaryWriterProtocol(SummaryWriterInstanceProtocol, Protocol):
+    """Protocol for a TensorBoard `SummaryWriter` instance exposing `.close()`."""
 
     def close(self) -> None:
         """Flush and close the summary writer."""
         ...
-
-
-ClosableSummaryWriterProtocol = SummaryWriterInstanceProtocol
 
 
 type SummaryWriterFactory = Callable[..., SummaryWriterInstanceProtocol] | type
@@ -39,7 +48,7 @@ def get_tensorboard_summary_writer() -> type | None:
         The `SummaryWriter` class or `None` if `tensorboardX` is unavailable.
 
     """
-    writer_cls = optional_attr("tensorboardX", "SummaryWriter", type)
+    writer_cls = import_optional_symbol("tensorboardX", "SummaryWriter", type)
     return writer_cls if isinstance(writer_cls, type) else None
 
 
@@ -50,7 +59,7 @@ def get_torch_tensorboard_writer() -> type | None:
         The `SummaryWriter` class or `None` if `torch.utils.tensorboard` is unavailable.
 
     """
-    writer_cls = optional_attr("torch.utils.tensorboard", "SummaryWriter", type)
+    writer_cls = import_optional_symbol("torch.utils.tensorboard", "SummaryWriter", type)
     return writer_cls if isinstance(writer_cls, type) else None
 
 
@@ -90,7 +99,7 @@ def log_metrics_wrapper(
             for k, v in metrics.items():
                 writer.add_scalar(k, v, step)
         finally:
-            with contextlib.suppress(AttributeError):
+            if isinstance(writer, ClosableSummaryWriterProtocol):
                 writer.close()
         status = "success"
     else:
@@ -109,17 +118,17 @@ def log_metrics_wrapper(
         if extra_fields:
             record.update(extra_fields)
         with open(metrics_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record) + chr(10))
+            f.write(json.dumps(record) + "\n")
         fallback_file = str(metrics_file)
 
+    status_code = ExecutionStatus.SUCCESS.value if status == "success" else ExecutionStatus.BACKEND_UNAVAILABLE.value
     result: LogMetricsResultDict = {
         "backend": backend_name,
         "action": "log_metrics",
         "step": step,
-        "logged_step": step,
         "metrics": metrics,
-        "logged_metrics": metrics,
         "status": status,
+        "status_code": status_code,
         "log_dir": log_dir,
         "timestamp": timestamp,
     }

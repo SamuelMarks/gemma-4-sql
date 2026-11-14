@@ -19,7 +19,14 @@ def test_gemma4_vision_embeddings() -> None:
 
 def test_gemma4_vision_model() -> None:
     """Test Gemma4VisionModel including 2D RoPE and spatial pooling."""
-    config = Gemma4VisionConfig(hidden_size=256, intermediate_size=512, num_hidden_layers=2, num_attention_heads=4, patch_size=14, image_size=224)
+    config = Gemma4VisionConfig(
+        hidden_size=256,
+        intermediate_size=512,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        patch_size=14,
+        image_size=224,
+    )
     model = Gemma4VisionModel(config)
     x = torch.randn(2, 3, 224, 224)
     out = model(x)

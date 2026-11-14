@@ -124,5 +124,5 @@ def test_resolve_gemma4_config() -> None:
 def test_model_config() -> None:
     """Verify model config behavior."""
     cfg = ModelConfig()
-    assert cfg.vocab_size == 256000
+    assert cfg.vocab_size == 262144
     assert cfg.hidden_size == 2048

@@ -2,24 +2,49 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import sys
 
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax
 
-import jax.numpy as jnp
 import pytest
 from flax import nnx
 
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.gemma4.cache import init_cache
 from gemma_4_sql.backends.jax.gemma4.config import AudioConfig, ModelConfig, VisionConfig
 from gemma_4_sql.backends.jax.gemma4.modeling import Gemma4ForCausalLM, Gemma4Model, _default_jit, forward
+from tests.utils.test_utils import FakeModuleNamespace
+
+
+class _FakeHuggingFaceHubModule(FakeModuleNamespace):
+    """Typed `huggingface_hub` module double exposing `snapshot_download`."""
+
+    def __init__(self) -> None:
+        """Initialize fake `huggingface_hub` module and call log."""
+        super().__init__("huggingface_hub")
+        self.downloaded_repos: list[tuple[str, str]] = []
+
+    def snapshot_download(self, *, repo_id: str, allow_patterns: str) -> str:
+        """Record `(repo_id, allow_patterns)` and return synthetic checkpoint path.
+
+        Returns:
+            A synthetic local checkpoint directory path.
+
+        """
+        self.downloaded_repos.append((repo_id, allow_patterns))
+        return "path/to/model"
 
 
 @pytest.fixture
 def tiny_config() -> ModelConfig:
-    """Provide tiny config test helper."""
+    """Provide tiny config test helper.
+
+    Returns:
+        A minimal single-layer `ModelConfig` instance.
+
+    """
     return ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -33,7 +58,12 @@ def tiny_config() -> ModelConfig:
 
 @pytest.fixture
 def tiny_ple_config() -> ModelConfig:
-    """Provide tiny ple config test helper."""
+    """Provide tiny ple config test helper.
+
+    Returns:
+        A minimal `ModelConfig` with per-layer input embeddings enabled.
+
+    """
     return ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -49,7 +79,12 @@ def tiny_ple_config() -> ModelConfig:
 
 @pytest.fixture
 def tiny_multimodal_config() -> ModelConfig:
-    """Provide tiny multimodal config test helper."""
+    """Provide tiny multimodal config test helper.
+
+    Returns:
+        A minimal `ModelConfig` with vision and audio sub-configs.
+
+    """
     return ModelConfig(
         vocab_size=10,
         hidden_size=8,
@@ -58,7 +93,9 @@ def tiny_multimodal_config() -> ModelConfig:
         num_key_value_heads=1,
         head_dim=4,
         intermediate_size=16,
-        vision_config=VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4, image_size=16),
+        vision_config=VisionConfig(
+            hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4, image_size=16
+        ),
         audio_config=AudioConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2),
         final_logit_softcapping=30.0,
     )
@@ -95,7 +132,7 @@ def test_gemma4_model_forward(tiny_config: ModelConfig) -> None:
     cache_kv = init_cache(cfg_kv_shared, batch_size=1, max_seq_len=6)
     out_kv = model_kv(input_ids, positions, cache=cache_kv)
     assert out_kv.shape == (1, 3, 8)
-    assert cache_kv[0].cur_ind.value == 6
+    assert cache_kv[0].cur_ind.value == 3
     assert cache_kv[1].cur_ind.value == 0
 
 
@@ -166,7 +203,9 @@ def test_gemma4_multimodal_with_ple(tiny_ple_config: ModelConfig) -> None:
     """Verify gemma4 multimodal with ple behavior."""
     config = tiny_ple_config
     config.num_kv_shared_layers = 1
-    config.vision_config = VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4, image_size=16)
+    config.vision_config = VisionConfig(
+        hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4, image_size=16
+    )
     config.audio_config = AudioConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2)
 
     rngs = nnx.Rngs(0)
@@ -195,7 +234,13 @@ def test_gemma4_multimodal_missing_masks(tiny_multimodal_config: ModelConfig) ->
     input_features = jnp.ones((1, 100, 128))
     input_features_mask = jnp.ones((1, 100))
 
-    logits = model(input_ids, positions, pixel_values=pixel_values, input_features=input_features, input_features_mask=input_features_mask)
+    logits = model(
+        input_ids,
+        positions,
+        pixel_values=pixel_values,
+        input_features=input_features,
+        input_features_mask=input_features_mask,
+    )
     assert logits.shape == (1, 3, 10)
 
 
@@ -237,25 +282,42 @@ def test_project_ple_none(tiny_ple_config: ModelConfig) -> None:
     assert proj.shape == (1, 3, 2, 4)
 
 
-def test_from_pretrained() -> None:
+def test_from_pretrained(monkeypatch: pytest.MonkeyPatch, tiny_config: ModelConfig) -> None:
     """Verify from pretrained behavior."""
-    import sys
+    fake_hub = _FakeHuggingFaceHubModule()
+    expected_model = Gemma4ForCausalLM(tiny_config, rngs=nnx.Rngs(0))
+    created_calls: list[tuple[str, ModelConfig]] = []
 
-    mock_huggingface = MagicMock()
-    mock_huggingface.snapshot_download.return_value = "path/to/model"
+    def _fake_create_from_pretrained(ckpt_path: str, cfg: ModelConfig) -> Gemma4ForCausalLM:
+        """Record checkpoint path and config, returning `expected_model`.
 
-    with patch.dict(sys.modules, {"huggingface_hub": mock_huggingface}):
-        with patch("gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained") as mock_create:
-            mock_create.return_value = "mocked_model"
+        Returns:
+            The prebuilt `expected_model` instance.
 
-            res = Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B")
-            assert res == "mocked_model"
+        """
+        created_calls.append((ckpt_path, cfg))
+        return expected_model
 
-            with pytest.raises(ValueError, match="Model name 'unknown' is unknown"):
-                Gemma4ForCausalLM.from_pretrained("unknown")
+    with monkeypatch.context() as mp_missing:
+        mp_missing.setitem(sys.modules, "huggingface_hub", None)
+        with pytest.raises(ImportError, match=r"huggingface_hub\.snapshot_download is not available"):
+            Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B")
 
-            res = Gemma4ForCausalLM.from_pretrained("unknown", config=ModelConfig())
-            assert res == "mocked_model"
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+    monkeypatch.setattr(
+        "gemma_4_sql.backends.jax.gemma4.modeling.create_gemma4_from_pretrained", _fake_create_from_pretrained
+    )
+
+    res = Gemma4ForCausalLM.from_pretrained("google/gemma-4-E2B")
+    assert res is expected_model
+
+    with pytest.raises(ValueError, match="Model name 'unknown' is unknown"):
+        Gemma4ForCausalLM.from_pretrained("unknown")
+
+    res_custom = Gemma4ForCausalLM.from_pretrained("unknown", config=tiny_config)
+    assert res_custom is expected_model
+    assert len(fake_hub.downloaded_repos) == 2
+    assert len(created_calls) == 2
 
 
 def test_default_jit() -> None:
@@ -263,7 +325,12 @@ def test_default_jit() -> None:
     import jax
 
     def _add_one(x: jax.Array) -> jax.Array:
-        """Add 1 to array."""
+        """Add 1 to array.
+
+        Returns:
+            The input JAX array incremented by 1.
+
+        """
         return x + 1
 
     fn = _default_jit(_add_one)

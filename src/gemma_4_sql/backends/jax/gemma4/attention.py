@@ -6,9 +6,10 @@ import math
 from collections.abc import Callable
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
 from jax import Array
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 from .cache import LayerCache
 from .config import AttentionType, ModelConfig
@@ -18,7 +19,11 @@ from .rope import RoPE, apply_rope
 MASK_PENALTY = -10000.0
 
 
-def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Array], attention_mask: jax.Array | None, config_params: tuple[int, float | None, int, int]) -> jax.Array:
+def _compute_attention_scores_and_output(
+    qkv: tuple[jax.Array, jax.Array, jax.Array],
+    attention_mask: jax.Array | None,
+    config_params: tuple[int, float | None, int, int],
+) -> jax.Array:
     """Compute scaled dot-product attention scores, optional soft-capping, and context projection.
 
     Args:
@@ -42,13 +47,15 @@ def _compute_attention_scores_and_output(qkv: tuple[jax.Array, jax.Array, jax.Ar
         scores /= soft_cap
         scores = jnp.tanh(scores) * soft_cap
     if attention_mask is not None:
-        scores = scores + attention_mask
+        scores += attention_mask
     weights = jax.nn.softmax(scores, axis=-1)
     out = jnp.einsum("bhqk,bkhd->bqhd", weights, v)
     return out.reshape((out.shape[0], out.shape[1], -1))
 
 
-def _prepare_qkv_for_attention(qkv: tuple[jax.Array, jax.Array, jax.Array], positions: Array, rope: RoPE, cache: LayerCache | None) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+def _prepare_qkv_for_attention(
+    qkv: tuple[jax.Array, jax.Array, jax.Array], positions: Array, rope: RoPE, cache: LayerCache | None
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
     """Apply Rotary Position Embeddings (RoPE), update the KV cache, and construct causal/window masks.
 
     Args:
@@ -84,14 +91,14 @@ def _is_global_attention(attention_type: AttentionType | str) -> bool:
     """Return True if `attention_type` represents global attention."""
     if isinstance(attention_type, AttentionType):
         return attention_type == AttentionType.GLOBAL
-    return str(attention_type).upper() in ("GLOBAL", "ATTENTIONTYPE.GLOBAL")
+    return str(attention_type).upper() in {"GLOBAL", "ATTENTIONTYPE.GLOBAL"}
 
 
 def _is_local_sliding_attention(attention_type: AttentionType | str) -> bool:
     """Return True if `attention_type` represents local sliding-window attention."""
     if isinstance(attention_type, AttentionType):
         return attention_type == AttentionType.LOCAL_SLIDING
-    return str(attention_type).upper() in ("LOCAL_SLIDING", "ATTENTIONTYPE.LOCAL_SLIDING")
+    return str(attention_type).upper() in {"LOCAL_SLIDING", "ATTENTIONTYPE.LOCAL_SLIDING"}
 
 
 class Gemma4Attention(nnx.Module):
@@ -115,7 +122,11 @@ class Gemma4Attention(nnx.Module):
         """
         self.num_heads = config.num_attention_heads
         if _is_global_attention(attention_type):
-            self.num_kv_heads = config.num_global_key_value_heads if config.num_global_key_value_heads is not None else config.num_key_value_heads
+            self.num_kv_heads = (
+                config.num_global_key_value_heads
+                if config.num_global_key_value_heads is not None
+                else config.num_key_value_heads
+            )
             self.head_dim = config.global_head_dim if config.global_head_dim is not None else config.head_dim
             self.share_kv = config.share_kv_projections
         else:
@@ -132,13 +143,19 @@ class Gemma4Attention(nnx.Module):
 
         """
         if _is_global_attention(attention_type):
-            rope_factor = float(config.global_rope_proportion)
+            rope_proportion = float(config.global_rope_proportion)
             raw_theta = config.global_rope_max_timescale
         else:
-            rope_factor = float(config.local_rope_proportion)
+            rope_proportion = float(config.local_rope_proportion)
             raw_theta = config.local_rope_max_timescale
         rope_theta = float(raw_theta if raw_theta is not None else config.rope_max_timescale)
-        self.rope = RoPE(rope_type="default", head_dim=self.head_dim, rope_theta=int(rope_theta), factor=rope_factor)
+        self.rope = RoPE(
+            rope_type="default",
+            head_dim=self.head_dim,
+            rope_theta=int(rope_theta),
+            factor=1.0,
+            proportion=rope_proportion,
+        )
 
     def __init__(self, config: ModelConfig, attention_type: AttentionType | str, *, rngs: nnx.Rngs) -> None:
         """Initialize Multi-Head / Grouped-Query Attention module.
@@ -155,16 +172,50 @@ class Gemma4Attention(nnx.Module):
         self.hidden_size = config.hidden_size
         self.dtype = config.dtype
         shd = config.shd_cfg
-        self.q_proj = make_linear(self.hidden_size, self.num_heads * self.head_dim, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.k_proj = make_linear(self.hidden_size, self.num_kv_heads * self.head_dim, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+        self.q_proj = make_linear(
+            self.hidden_size,
+            self.num_heads * self.head_dim,
+            use_bias=False,
+            kernel_metadata={},
+            bias_metadata={},
+            rngs=rngs,
+        )
+        self.k_proj = make_linear(
+            self.hidden_size,
+            self.num_kv_heads * self.head_dim,
+            use_bias=False,
+            kernel_metadata={},
+            bias_metadata={},
+            rngs=rngs,
+        )
         if not self.share_kv:
-            self.v_proj = make_linear(self.hidden_size, self.num_kv_heads * self.head_dim, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
+            self.v_proj = make_linear(
+                self.hidden_size,
+                self.num_kv_heads * self.head_dim,
+                use_bias=False,
+                kernel_metadata={},
+                bias_metadata={},
+                rngs=rngs,
+            )
         else:
             self.v_proj = None
-        self.o_proj = make_linear(self.num_heads * self.head_dim, self.hidden_size, use_bias=False, kernel_metadata={}, bias_metadata={}, rngs=rngs)
-        self.q_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
-        self.k_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
-        self.v_norm = Gemma4RMSNorm(self.head_dim, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs)
+        self.o_proj = make_linear(
+            self.num_heads * self.head_dim,
+            self.hidden_size,
+            use_bias=False,
+            kernel_metadata={},
+            bias_metadata={},
+            rngs=rngs,
+        )
+        self.q_norm = Gemma4RMSNorm(
+            self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs
+        )
+        self.k_norm = Gemma4RMSNorm(
+            self.head_dim, eps=config.rms_norm_eps, dtype=config.dtype, _shd=shd.norm, rngs=rngs
+        )
+        self.v_norm = Gemma4RMSNorm(
+            self.head_dim, eps=config.rms_norm_eps, with_scale=False, dtype=config.dtype, _shd=shd.norm, rngs=rngs
+        )
         self._setup_rope(config, attention_type)
 
     def inject_lora_projections(
@@ -198,7 +249,74 @@ class Gemma4Attention(nnx.Module):
         return injected
 
     @jax.named_scope("gemma4_attention")
-    def __call__(self, x: Array, positions: Array, cache: LayerCache | None = None, attention_mask: Array | None = None) -> Array:
+    def forward_with_kv(
+        self,
+        x: Array,
+        positions: Array,
+        cache: LayerCache | None = None,
+        attention_mask: Array | None = None,
+        shared_kv: tuple[Array, Array] | None = None,
+    ) -> tuple[Array, tuple[Array, Array]]:
+        """Apply attention and return both projected outputs and `(k_cached, v_cached)` states.
+
+        Args:
+            x: Input hidden state tensor of shape `(batch, seq_len, hidden_size)`.
+            positions: Token position indices tensor of shape `(batch, seq_len)`.
+            cache: Optional `LayerCache` for autoregressive KV caching.
+            attention_mask: Optional additive attention mask tensor.
+            shared_kv: Optional precomputed `(k_states, v_states)` from an earlier KV-anchor layer.
+
+        Returns:
+            Tuple of `(output_hidden_states, (k_states, v_states))`.
+
+        """
+        (batch_size, seq_len, _) = x.shape
+        q = self.q_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
+        q = self.q_norm(q)
+
+        can_reuse_shared_kv = (
+            shared_kv is not None
+            and shared_kv[0].shape[2] == self.num_kv_heads
+            and shared_kv[0].shape[3] == self.head_dim
+        )
+        if can_reuse_shared_kv and shared_kv is not None:
+            (k, v) = shared_kv
+            (sin, cos) = self.rope(positions)
+            q = apply_rope(q, sin, cos)
+            mask_len = k.shape[1]
+            mask = jnp.arange(mask_len)[None, :] <= positions[:, :, None]
+            window = positions[:, :, None] - jnp.arange(mask_len)[None, :]
+            should_advance_cache = False
+        else:
+            k = self.k_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
+            v = (
+                k
+                if (self.share_kv or self.v_proj is None)
+                else self.v_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
+            )
+            k = self.k_norm(k)
+            v = self.v_norm(v)
+            (q, k, v, mask, window) = _prepare_qkv_for_attention((q, k, v), positions, self.rope, cache)
+            should_advance_cache = cache is not None
+
+        if _is_local_sliding_attention(self.attention_type):
+            mask &= window < self.config.sliding_window_size
+        structural_mask = jnp.where(mask, 0.0, MASK_PENALTY).astype(q.dtype)[:, None, :, :]
+        attention_mask = structural_mask if attention_mask is None else attention_mask + structural_mask
+        out = _compute_attention_scores_and_output(
+            (q, k, v),
+            attention_mask,
+            (self.head_dim, self.config.attn_logits_soft_cap, self.num_kv_heads, self.num_heads),
+        )
+        if should_advance_cache and cache is not None:
+            cache.cur_ind.value += seq_len
+        res: Array = self.o_proj(out).astype(self.dtype)
+        return (res, (k, v))
+
+    @jax.named_scope("gemma4_attention")
+    def __call__(
+        self, x: Array, positions: Array, cache: LayerCache | None = None, attention_mask: Array | None = None
+    ) -> Array:
         """Apply attention over the input sequences.
 
         Args:
@@ -211,20 +329,4 @@ class Gemma4Attention(nnx.Module):
             Output hidden state tensor of shape `(batch, seq_len, hidden_size)`.
 
         """
-        (batch_size, seq_len, _) = x.shape
-        q = self.q_proj(x).reshape((batch_size, seq_len, self.num_heads, self.head_dim))
-        k = self.k_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
-        v = k if (self.share_kv or self.v_proj is None) else self.v_proj(x).reshape((batch_size, seq_len, self.num_kv_heads, self.head_dim))
-        q = self.q_norm(q)
-        k = self.k_norm(k)
-        v = self.v_norm(v)
-        (q, k, v, mask, window) = _prepare_qkv_for_attention((q, k, v), positions, self.rope, cache)
-        if _is_local_sliding_attention(self.attention_type):
-            mask &= window < self.config.sliding_window_size
-        structural_mask = jnp.where(mask, 0.0, MASK_PENALTY).astype(q.dtype)[:, None, :, :]
-        attention_mask = structural_mask if attention_mask is None else attention_mask + structural_mask
-        out = _compute_attention_scores_and_output((q, k, v), attention_mask, (self.head_dim, self.config.attn_logits_soft_cap, self.num_kv_heads, self.num_heads))
-        if cache is not None:
-            cache.cur_ind.value += seq_len
-        res: Array = self.o_proj(out).astype(self.dtype)
-        return res
+        return self.forward_with_kv(x, positions, cache, attention_mask)[0]

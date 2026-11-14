@@ -4,12 +4,88 @@ from __future__ import annotations
 
 import logging
 import resource
+import time
 from collections.abc import Callable
 
 from gemma_4_sql.exceptions import StatusValue
 from gemma_4_sql.type_hints import BenchmarkResultDict, LatencyStatsDict
 
 logger = logging.getLogger(__name__)
+
+
+def compute_throughput_and_latency_ms(
+    elapsed_s: float,
+    *,
+    tokens_per_iter: int,
+    batch_size: int,
+    num_runs: int,
+) -> tuple[float, float]:
+    """Compute `(tokens_per_sec, latency_ms)` from total wall-clock elapsed seconds.
+
+    Args:
+        elapsed_s: Total wall-clock seconds across `num_runs`.
+        tokens_per_iter: Number of tokens processed per sequence per iteration.
+        batch_size: Number of sequences per batch.
+        num_runs: Number of timed benchmark iterations.
+
+    Returns:
+        Tuple of `(tokens_per_sec, latency_ms)`.
+
+    """
+    safe_elapsed = max(elapsed_s, 1e-09)
+    latency_ms = float((elapsed_s * 1000.0) / max(1, num_runs))
+    tokens_per_sec = float((max(1, tokens_per_iter) * batch_size * num_runs) / safe_elapsed)
+    return (tokens_per_sec, latency_ms)
+
+
+def execute_timed_benchmark_loop(
+    timed_step_fn: Callable[[], None],
+    *,
+    warmup_steps: int,
+    num_runs: int,
+    tokens_per_iter: int,
+    batch_size: int,
+    warmup_step_fn: Callable[[], None] | None = None,
+    post_warmup_fn: Callable[[], None] | None = None,
+    post_runs_fn: Callable[[], None] | None = None,
+    use_perf_counter: bool = False,
+) -> tuple[float, float]:
+    """Execute untimed warmup steps followed by timed benchmark runs and return `(tokens_per_sec, latency_ms)`.
+
+    Args:
+        timed_step_fn: Single timed iteration callable.
+        warmup_steps: Number of untimed warmup iterations.
+        num_runs: Number of timed benchmark iterations.
+        tokens_per_iter: Number of tokens processed per sequence per timed run (`32` for prefill or `max_new_tokens`).
+        batch_size: Number of sequences per batch.
+        warmup_step_fn: Optional warmup step callable when warmup differs from `timed_step_fn`.
+        post_warmup_fn: Optional synchronization barrier executed once after warmup completes.
+        post_runs_fn: Optional synchronization barrier executed before stopping the timer.
+        use_perf_counter: If `True`, sample `time.perf_counter()`, otherwise `time.time()`.
+
+    Returns:
+        Tuple of `(tokens_per_sec, latency_ms)`.
+
+    """
+    active_warmup = warmup_step_fn if warmup_step_fn is not None else timed_step_fn
+    for _ in range(warmup_steps):
+        active_warmup()
+    if post_warmup_fn is not None:
+        post_warmup_fn()
+
+    start_time = time.perf_counter() if use_perf_counter else time.time()
+    for _ in range(num_runs):
+        timed_step_fn()
+    if post_runs_fn is not None:
+        post_runs_fn()
+    end_time = time.perf_counter() if use_perf_counter else time.time()
+
+    return compute_throughput_and_latency_ms(
+        end_time - start_time,
+        tokens_per_iter=tokens_per_iter,
+        batch_size=batch_size,
+        num_runs=num_runs,
+    )
 
 
 def get_current_rss_mb() -> float:
@@ -57,7 +133,15 @@ def compute_latency_statistics(latencies_ms: list[float]) -> LatencyStatsDict:
     n = len(sorted_lats)
 
     def _percentile(p: float) -> float:
-        """Calculate the p-th percentile from sorted latencies."""
+        """Calculate the p-th percentile from sorted latencies.
+
+        Args:
+            p: Percentile value in `[0.0, 100.0]`.
+
+        Returns:
+            Interpolated index percentile latency in milliseconds.
+
+        """
         idx = max(0, min(n - 1, round((p / 100.0) * (n - 1))))
         return float(sorted_lats[idx])
 
@@ -102,7 +186,8 @@ def run_benchmark_wrapper(
         A dictionary containing the benchmark results.
 
     Raises:
-        DependencyMissingError: If raise_if_missing is True and missing_deps is True.
+        DependencyMissingError: If raise_if_missing is True and missing_deps is True, or if raised by `benchmark_fn`.
+        ConfigurationError: If raised by `benchmark_fn`.
         BenchmarkError: If `raise_on_error` is enabled and `benchmark_fn` raises an exception.
 
     """
@@ -132,7 +217,9 @@ def run_benchmark_wrapper(
             "memory_mb": 0.0,
         }
 
-    logger.info("Starting %s benchmark for %s on %s (batch size %d)", backend_name.upper(), model_name, hardware, batch_size)
+    logger.info(
+        "Starting %s benchmark for %s on %s (batch size %d)", backend_name.upper(), model_name, hardware, batch_size
+    )
 
     should_raise = resolve_raise_on_error(raise_on_error=raise_on_error, kwargs=dict(kwargs))
     rss_start = get_current_rss_mb()

@@ -1,16 +1,231 @@
-"""Tests for PyTorch benchmark."""
+"""Tests for PyTorch benchmark and TorchRuntimeAdapter using typed protocol doubles without MagicMock."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import contextlib
+from collections.abc import Generator
+from typing import Self
+from unittest.mock import patch
 
 import pytest
+import torch
 
 import gemma_4_sql.backends.pytorch.benchmark as benchmark_module
+from gemma_4_sql.backends.pytorch.runtime_adapter import TorchRuntimeAdapter
 from gemma_4_sql.exceptions import DependencyMissingError
 from tests.conftest import requires_torch
 
 pytestmark = requires_torch
+
+
+class _FakeCudaNamespace:
+    """Typed `torch.cuda` double tracking synchronization, memory stats, and availability."""
+
+    def __init__(self, *, available: bool = False, max_bytes: int = 10 * 1048576) -> None:
+        """Initialize CUDA stub state."""
+        self.available = available
+        self.max_bytes = max_bytes
+        self.sync_calls = 0
+        self.reset_calls = 0
+
+    def is_available(self) -> bool:
+        """Return `self.available`."""
+        return self.available
+
+    def synchronize(self) -> None:
+        """Increment `sync_calls`."""
+        self.sync_calls += 1
+
+    def max_memory_allocated(self) -> int:
+        """Return `self.max_bytes`."""
+        return self.max_bytes
+
+    def reset_peak_memory_stats(self) -> None:
+        """Increment `reset_calls`."""
+        self.reset_calls += 1
+
+
+class _FakeMpsBackend:
+    """Typed `torch.backends.mps` availability double."""
+
+    def __init__(self, *, available: bool = False) -> None:
+        """Store availability flag."""
+        self.available = available
+
+    def is_available(self) -> bool:
+        """Return `self.available`."""
+        return self.available
+
+
+class _FakeBackendsNamespace:
+    """Typed `torch.backends` container double."""
+
+    def __init__(self, mps_available: bool = False) -> None:
+        """Initialize `.mps` availability double."""
+        self.mps = _FakeMpsBackend(available=mps_available)
+
+
+class _FakeMpsRuntimeNamespace:
+    """Typed `torch.mps` runtime double."""
+
+    def __init__(self, *, driver_bytes: int = 5 * 1048576) -> None:
+        """Initialize MPS runtime state."""
+        self.driver_bytes = driver_bytes
+        self.sync_calls = 0
+
+    def synchronize(self) -> None:
+        """Increment `sync_calls`."""
+        self.sync_calls += 1
+
+    def driver_allocated_memory(self) -> int:
+        """Return `self.driver_bytes`."""
+        return self.driver_bytes
+
+
+class _FakeTorchRuntimeModule:
+    """Typed `torch` module double satisfying `TorchRuntimeAdapter` structural protocols."""
+
+    def __init__(
+        self,
+        *,
+        cuda_available: bool = False,
+        mps_available: bool = False,
+        compile_raises: bool = False,
+    ) -> None:
+        """Initialize fake torch namespaces and dtypes."""
+        self.cuda = _FakeCudaNamespace(available=cuda_available)
+        self.backends = _FakeBackendsNamespace(mps_available=mps_available)
+        self.mps = _FakeMpsRuntimeNamespace()
+        self.bfloat16: str | None = "bf16"
+        self.float16: str | None = "fp16"
+        self.float32: str | None = "fp32"
+        self.long: str | None = "int64"
+        self.compile_raises = compile_raises
+        self.seeds: list[int] = []
+
+    def compile[ModelT](self, model: ModelT) -> ModelT:
+        """Return `model` or raise `RuntimeError` if `compile_raises` is set.
+
+        Raises:
+            RuntimeError: If `self.compile_raises` is True.
+        """
+        if self.compile_raises:
+            raise RuntimeError("compile error")
+        return model
+
+    def manual_seed(self, seed: int) -> None:
+        """Record `seed`."""
+        self.seeds.append(seed)
+
+    @contextlib.contextmanager
+    def no_grad(self) -> Generator[None, None, None]:
+        """Yield inside a no-grad stub context."""
+        yield
+
+    def randint(self, low: int, high: int, size: tuple[int, ...], *, dtype: str | None = None) -> torch.Tensor:
+        """Delegate synthetic integer input creation to real `torch.randint`.
+
+        Returns:
+            Random integer tensor.
+        """
+        _ = dtype
+        return torch.randint(low, min(high, 64), size, dtype=torch.long)
+
+
+class _MinimalTorchModuleWithoutHelpers:
+    """Minimal `torch` double omitting `manual_seed`, `no_grad`, `cuda`, `backends`, and `mps`."""
+
+    long: None = None
+
+    def randint(
+        self, _low: int, _high: int, _size: tuple[int, ...], *, dtype: str | None = None
+    ) -> _NonMovableTensorStub:
+        """Return a tensor stub whose `.to()` raises `TypeError`."""
+        _ = dtype
+        return _NonMovableTensorStub()
+
+
+class _NonMovableTensorStub:
+    """Minimal `TorchTensorProtocol`-compatible input stub whose `.to(...)` raises `TypeError`."""
+
+    shape = (1, 32)
+    ndim = 2
+    dtype = None
+
+    def to(self, _dev: str) -> Self:
+        """Raise `TypeError` to exercise the fallback branch in `TorchRuntimeAdapter.randint`.
+
+        Raises:
+            TypeError: Always raised to test device fallback.
+        """
+        raise TypeError("unsupported device")
+
+
+class _MovableBenchModel:
+    """Typed benchmark model double supporting `.to()`, `.eval()`, `.generate()`, and `.config`."""
+
+    class _Cfg:
+        """Model config with custom `vocab_size`."""
+
+        vocab_size = 128
+
+    config = _Cfg()
+
+    def __init__(self) -> None:
+        """Initialize call counters."""
+        self.moved_to: list[str] = []
+        self.eval_called = False
+
+    def __call__(self, *args: benchmark_module.ForwardArg, **kwargs: benchmark_module.ForwardArg) -> torch.Tensor:
+        """Return dummy output tensor."""
+        _ = (args, kwargs)
+        return torch.zeros((1, 4))
+
+    def to(self, target: str) -> Self:
+        """Record `target` device/dtype.
+
+        Returns:
+            Self after recording `target`.
+        """
+        self.moved_to.append(str(target))
+        return self
+
+    def eval(self) -> Self:
+        """Mark `eval_called`.
+
+        Returns:
+            Self after setting `eval_called`.
+        """
+        self.eval_called = True
+        return self
+
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        *,
+        max_new_tokens: int = 20,
+        min_new_tokens: int = 0,
+    ) -> torch.Tensor:
+        """Return `input_ids`."""
+        _ = (max_new_tokens, min_new_tokens)
+        return input_ids
+
+
+class _MinimalBenchModel:
+    """Minimal callable benchmark model without `.to()`, `.generate()`, or `.config`."""
+
+    def eval(self) -> Self:
+        """Perform a no-op eval call.
+
+        Returns:
+            Self unchanged.
+        """
+        return self
+
+    def __call__(self, *args: benchmark_module.ForwardArg, **kwargs: benchmark_module.ForwardArg) -> torch.Tensor:
+        """Return dummy output tensor."""
+        _ = (args, kwargs)
+        return torch.zeros((1, 4))
 
 
 def test_pytorch_benchmark_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -24,121 +239,145 @@ def test_pytorch_benchmark_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_get_device(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test _get_device across cpu, cuda, and mps."""
-    mock_torch = MagicMock()
-    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
+    fake_torch = _FakeTorchRuntimeModule()
+    monkeypatch.setattr(benchmark_module, "torch", fake_torch)
 
     assert benchmark_module._get_device("cpu") == "cpu"
 
-    mock_torch.cuda.is_available.return_value = True
+    fake_torch.cuda.available = True
     assert benchmark_module._get_device("gpu") == "cuda"
 
-    mock_torch.cuda.is_available.return_value = False
-    mock_torch.backends.mps.is_available.return_value = True
+    fake_torch.cuda.available = False
+    fake_torch.backends.mps.available = True
     assert benchmark_module._get_device("gpu") == "mps"
 
-    mock_torch.backends.mps.is_available.return_value = False
+    fake_torch.backends.mps.available = False
     assert benchmark_module._get_device("gpu") == "cpu"
 
 
 def test_load_pytorch_model_and_device(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test _load_pytorch_model_and_device across native and HF backends."""
-    mock_torch = MagicMock()
-    mock_auto = MagicMock()
-    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
-    monkeypatch.setattr(benchmark_module, "AutoModelForCausalLM", mock_auto)
+    fake_torch = _FakeTorchRuntimeModule()
 
-    mock_torch.cuda.is_available.return_value = False
-    mock_torch.backends.mps.is_available.return_value = False
-    mock_torch.bfloat16 = "bf16"
-    mock_torch.float32 = "fp32"
+    class _FakeHFAutoLoader:
+        """Typed `AutoModelForCausalLM` loader double."""
 
-    with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM") as mock_native:
-        mock_model = MagicMock()
-        mock_native.return_value = mock_model
+        current_model: _MovableBenchModel | _MinimalBenchModel = _MovableBenchModel()
 
-        with patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4Config"):
-            _res, dev = benchmark_module._load_pytorch_model_and_device("test_model", "cpu", dtype="bfloat16", backend_alias="pytorch_native")
-            assert dev == "cpu"
+        @classmethod
+        def from_pretrained(
+            cls, _name: str, *, torch_dtype: str | None = None
+        ) -> _MovableBenchModel | _MinimalBenchModel:
+            """Return `cls.current_model`."""
+            _ = torch_dtype
+            return cls.current_model
 
-            del mock_torch.bfloat16
-            del mock_torch.float32
-            benchmark_module._load_pytorch_model_and_device("test_model", "cpu", dtype="unknown", backend_alias="pytorch_native")
+    monkeypatch.setattr(benchmark_module, "torch", fake_torch)
+    monkeypatch.setattr(benchmark_module, "AutoModelForCausalLM", _FakeHFAutoLoader)
 
-            mock_torch.bfloat16 = None
-            benchmark_module._load_pytorch_model_and_device("test_model", "cpu", dtype="bfloat16", backend_alias="pytorch_native")
-            del mock_torch.bfloat16
+    native_stub: _MovableBenchModel | _MinimalBenchModel = _MovableBenchModel()
 
-            del mock_model.to
-            benchmark_module._load_pytorch_model_and_device("test_model", "cpu", dtype="unknown", backend_alias="pytorch_native")
+    from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
 
-    mock_hf_model = MagicMock()
-    mock_auto.from_pretrained.return_value = mock_hf_model
+    def _build_native_stub(_cfg: Gemma4Config | None = None) -> _MovableBenchModel | _MinimalBenchModel:
+        """Return `native_stub`."""
+        _ = _cfg
+        return native_stub
+
+    with (
+        patch("gemma_4_sql.backends.pytorch.gemma4.modeling.Gemma4ForCausalLM", side_effect=_build_native_stub),
+        patch.object(Gemma4Config, "from_preset", return_value=Gemma4Config.gemma4_tiny()),
+    ):
+        _res, dev = benchmark_module._load_pytorch_model_and_device(
+            "test_model",
+            "cpu",
+            dtype="bfloat16",
+            backend_alias="pytorch_native",
+        )
+        assert dev == "cpu"
+
+        fake_torch.bfloat16 = None
+        fake_torch.float32 = None
+        benchmark_module._load_pytorch_model_and_device(
+            "test_model", "cpu", dtype="unknown", backend_alias="pytorch_native"
+        )
+        benchmark_module._load_pytorch_model_and_device(
+            "test_model", "cpu", dtype="bfloat16", backend_alias="pytorch_native"
+        )
+
+        native_stub = _MinimalBenchModel()
+        benchmark_module._load_pytorch_model_and_device(
+            "test_model", "cpu", dtype="unknown", backend_alias="pytorch_native"
+        )
+
     benchmark_module._load_pytorch_model_and_device("model", "cpu", dtype="bfloat16", backend_alias="pytorch")
 
-    mock_torch.compile.side_effect = RuntimeError("compile error")
+    fake_torch.compile_raises = True
     benchmark_module._load_pytorch_model_and_device("model", "cpu", dtype="bfloat16", backend_alias="pytorch")
 
-    del mock_hf_model.to
-    del mock_hf_model.eval
-    del mock_torch.compile
+    _FakeHFAutoLoader.current_model = _MinimalBenchModel()
+    monkeypatch.setattr(benchmark_module, "torch", _MinimalTorchModuleWithoutHelpers())
     benchmark_module._load_pytorch_model_and_device("model", "cpu", dtype="bfloat16", backend_alias="pytorch")
 
 
 def test_sync_and_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test _sync_cuda and _get_memory_mb."""
-    mock_torch = MagicMock()
-    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
+    fake_torch = _FakeTorchRuntimeModule()
+    monkeypatch.setattr(benchmark_module, "torch", fake_torch)
 
     benchmark_module._sync_cuda("cuda")
-    mock_torch.cuda.synchronize.assert_called_once()
+    assert fake_torch.cuda.sync_calls == 1
 
     benchmark_module._sync_cuda("mps")
-    mock_torch.mps.synchronize.assert_called_once()
+    assert fake_torch.mps.sync_calls == 1
 
     benchmark_module._sync_cuda("cpu")
-
-    mock_torch.cuda.max_memory_allocated.return_value = 1048576 * 10
     assert benchmark_module._get_memory_mb(None, "cuda") == 10.0
-
-    mock_torch.mps.driver_allocated_memory.return_value = 1048576 * 5
     assert benchmark_module._get_memory_mb(None, "mps") == 5.0
-
     assert benchmark_module._get_memory_mb(None, "cpu") > 0.0
 
 
-@patch("time.time")
-def test_run_benchmark_pass(mock_time: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Test _run_benchmark_pass."""
-    mock_torch = MagicMock()
-    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
+def test_run_benchmark_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test _run_benchmark_pass across prefill, decode, and minimal runtime adapter fallbacks."""
+    fake_torch = _FakeTorchRuntimeModule()
+    monkeypatch.setattr(benchmark_module, "torch", fake_torch)
 
-    mock_model = MagicMock()
-    times = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+    model = _MovableBenchModel()
+    times = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6] * 5
 
-    mock_time.side_effect = times * 5
-    tps, _lat, _mem = benchmark_module._run_benchmark_pass(mock_model, "cuda", 1, 1, 1, "prefill", 10)
-    assert tps > 0
+    with patch("time.time", side_effect=list(times)):
+        tps, _lat, _mem = benchmark_module._run_benchmark_pass(model, "cuda", 1, 1, 1, "prefill", 10)
+        assert tps > 0
+        assert fake_torch.cuda.reset_calls == 1
 
-    mock_time.side_effect = times * 5
-    tps, _lat, _mem = benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "decode", 10)
-    assert tps > 0
+    with patch("time.time", side_effect=list(times)):
+        tps2, _lat2, _mem2 = benchmark_module._run_benchmark_pass(model, "cpu", 1, 1, 1, "decode", 10)
+        assert tps2 > 0
 
-    del mock_torch.manual_seed
-    del mock_torch.no_grad
-    mock_inputs = MagicMock(spec=[])
-    mock_torch.randint.return_value = mock_inputs
-    mock_time.side_effect = times * 5
-    benchmark_module._run_benchmark_pass(mock_model, "cpu", 1, 1, 1, "prefill", 10)
+    monkeypatch.setattr(benchmark_module, "torch", _MinimalTorchModuleWithoutHelpers())
+    with patch("time.time", side_effect=list(times)):
+        benchmark_module._run_benchmark_pass(_MinimalBenchModel(), "cpu", 1, 1, 1, "prefill", 10)
 
 
 def test_benchmark_model_behavioral(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify benchmark_model executes through run_benchmark_wrapper with real stats."""
-    mock_torch = MagicMock()
-    monkeypatch.setattr(benchmark_module, "torch", mock_torch)
-    monkeypatch.setattr(benchmark_module, "AutoModelForCausalLM", MagicMock())
+    fake_torch = _FakeTorchRuntimeModule()
+    monkeypatch.setattr(benchmark_module, "torch", fake_torch)
+
+    class _DummyLoader:
+        """Minimal HF loader stub."""
+
+        @staticmethod
+        def from_pretrained(_n: str, *, torch_dtype: str | None = None) -> _MinimalBenchModel:
+            """Return `_MinimalBenchModel`."""
+            _ = torch_dtype
+            return _MinimalBenchModel()
+
+    assert _DummyLoader.from_pretrained("x") is not None
+    monkeypatch.setattr(benchmark_module, "AutoModelForCausalLM", _DummyLoader)
 
     with (
-        patch.object(benchmark_module, "_load_pytorch_model_and_device", return_value=(MagicMock(), "cpu")),
+        patch.object(benchmark_module, "_load_pytorch_model_and_device", return_value=(_MinimalBenchModel(), "cpu")),
         patch.object(benchmark_module, "_run_benchmark_pass", return_value=(250.0, 4.0, 128.0)),
     ):
         res = benchmark_module.benchmark_model("model", "cpu", 1)
@@ -147,13 +386,12 @@ def test_benchmark_model_behavioral(monkeypatch: pytest.MonkeyPatch) -> None:
         assert res["tokens_per_sec"] == 250.0
         assert res["latency_ms"] == 4.0
 
-    mock_model_no_gen = MagicMock(spec=[])
     with patch("time.time", side_effect=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]):
-        benchmark_module._run_benchmark_pass(mock_model_no_gen, "cpu", 1, 1, 1, "decode", 10)
+        benchmark_module._run_benchmark_pass(_MinimalBenchModel(), "cpu", 1, 1, 1, "decode", 10)
 
 
 def test_real_pytorch_tiny_gemma4_benchmark_cpu() -> None:
-    """Verify _run_benchmark_pass executes against a real tiny Gemma4ForCausalLM on CPU in both prefill and decode modes."""
+    """Verify _run_benchmark_pass executes on a real tiny Gemma4ForCausalLM in prefill and decode modes."""
     from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
     from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM
 
@@ -180,9 +418,7 @@ def test_real_pytorch_tiny_gemma4_benchmark_cpu() -> None:
 
 
 def test_torch_runtime_adapter_edge_cases() -> None:
-    """Verify TorchRuntimeAdapter handles None torch module and float16/float32 dtype resolution."""
-    from gemma_4_sql.backends.pytorch.runtime_adapter import TorchRuntimeAdapter
-
+    """Verify TorchRuntimeAdapter handles None torch, invalid vocab_size, and float16/float32 dtypes."""
     empty_adapter = TorchRuntimeAdapter(None)
     assert empty_adapter.get_device("gpu") == "cpu"
     assert empty_adapter.resolve_dtype("bfloat16") is None
@@ -195,11 +431,77 @@ def test_torch_runtime_adapter_edge_cases() -> None:
     with empty_adapter.no_grad():
         pass
 
-    mock_t = MagicMock()
-    mock_t.float16 = "fp16"
-    mock_t.float32 = "fp32"
-    mock_t.compile = 123  # non-callable compile attribute
-    adapter = TorchRuntimeAdapter(mock_t)
+    class _DtypeAndNonCallableCompileStub:
+        """Typed torch stub with float16/float32 dtypes and non-callable compile attribute."""
+
+        float16 = "fp16"
+        float32 = "fp32"
+        compile = None
+
+    adapter = TorchRuntimeAdapter(_DtypeAndNonCallableCompileStub())
     assert adapter.resolve_dtype("float16") == "fp16"
     assert adapter.resolve_dtype("float32") == "fp32"
     assert adapter.compile_model("m") == "m"
+
+    class _BadVocabModel:
+        """Model with non-positive vocab_size to exercise fallback 256000."""
+
+        class _Cfg:
+            """Config with vocab_size = 0."""
+
+            vocab_size = 0
+
+        config = _Cfg()
+
+        def __call__(self, *args: benchmark_module.ForwardArg, **kwargs: benchmark_module.ForwardArg) -> float:
+            """Return 0.0."""
+            _ = (args, kwargs)
+            return 0.0
+
+    assert _BadVocabModel()() == 0.0
+    assert benchmark_module._resolve_vocab_bound(_BadVocabModel()) == 256000
+
+    class _NoneCfgModel:
+        """Model with `config = None` and `eval = None`."""
+
+        config = None
+        eval = None
+
+        def __call__(self, *args: benchmark_module.ForwardArg, **kwargs: benchmark_module.ForwardArg) -> float:
+            """Return 0.0."""
+            _ = (args, kwargs)
+            return 0.0
+
+    none_cfg_m = _NoneCfgModel()
+    assert none_cfg_m() == 0.0
+    assert benchmark_module._resolve_vocab_bound(none_cfg_m) == 256000
+    benchmark_module._move_and_eval(none_cfg_m, "cpu")
+
+    class _NullNamespacesTorchStub:
+        """Torch stub with `cuda = None`, `backends = None`, and `mps = None`."""
+
+        cuda = None
+        backends = None
+        mps = None
+
+    null_ns_adapter = TorchRuntimeAdapter(_NullNamespacesTorchStub())
+    assert null_ns_adapter.get_device("gpu") == "cpu"
+    null_ns_adapter.synchronize("cuda")
+    null_ns_adapter.synchronize("mps")
+    assert null_ns_adapter.max_memory_mb("cuda", 16.0) == 16.0
+    assert null_ns_adapter.max_memory_mb("mps", 16.0) == 16.0
+    null_ns_adapter.reset_peak_memory_stats("cuda")
+    null_ns_adapter.reset_peak_memory_stats("cpu")
+
+    class _NullInnerMpsBackends:
+        """Backends stub with `mps = None`."""
+
+        mps = None
+
+    class _NullInnerMpsTorch:
+        """Torch stub with `backends.mps = None`."""
+
+        backends = _NullInnerMpsBackends()
+
+    assert TorchRuntimeAdapter(_NullInnerMpsTorch()).get_device("gpu") == "cpu"
+    assert TorchRuntimeAdapter(_MinimalTorchModuleWithoutHelpers()).get_device("gpu") == "cpu"

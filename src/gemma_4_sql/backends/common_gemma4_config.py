@@ -68,8 +68,9 @@ class BaseAudioConfigFields:
 class BaseGemma4ConfigFields:
     """Shared hardware-agnostic Gemma 4 architectural hyperparameters."""
 
-    vocab_size: int = 256000
+    vocab_size: int = 262144
     vocab_size_per_layer_input: int | None = None
+    tie_word_embeddings: bool = True
     hidden_size: int = 2048
     hidden_size_per_layer_input: int | None = None
     intermediate_size: int = 8192
@@ -106,7 +107,11 @@ class BaseGemma4ConfigFields:
             Deterministic string fingerprint summarizing core model dimensions.
 
         """
-        return f"layers={self.num_hidden_layers},hidden={self.hidden_size},heads={self.num_attention_heads},kv={self.num_key_value_heads},vocab={self.vocab_size},experts={self.num_experts}"
+        return (
+            f"layers={self.num_hidden_layers},hidden={self.hidden_size},"
+            f"heads={self.num_attention_heads},kv={self.num_key_value_heads},"
+            f"vocab={self.vocab_size},experts={self.num_experts}"
+        )
 
     @classmethod
     def _from_spec(cls, spec: Mapping[str, int]) -> Self:
@@ -188,7 +193,8 @@ class BaseGemma4ConfigFields:
         """Resolve a configuration preset from a model identifier string.
 
         Args:
-            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`, `'gemma-4-26B-A4B'`, `'gemma-4-31B'`, `'gemma-4-tiny'`).
+            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`,
+                `'gemma-4-26B-A4B'`, `'gemma-4-31B'`, `'gemma-4-tiny'`).
 
         Returns:
             Matching configuration preset instance of type `cls`.
@@ -265,7 +271,7 @@ GEMMA4_TINY_SPEC: dict[str, int] = {
     "head_dim": 32,
     "global_head_dim": 32,
     "num_experts": 1,
-    "vocab_size": 128,
+    "vocab_size": 320,
 }
 
 
@@ -280,7 +286,7 @@ def resolve_gemma4_preset_name(model_name: str) -> str:
 
     """
     lowered = model_name.lower()
-    if "tiny" in lowered or lowered.startswith(("test", "model")):
+    if "tiny" in lowered:
         return "tiny"
     if "31b" in lowered:
         return "31b"

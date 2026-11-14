@@ -1,9 +1,9 @@
 """Unit and behavioral tests for gemma4 layers."""
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
 
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from tests.conftest import requires_jax
 
 pytestmark = requires_jax

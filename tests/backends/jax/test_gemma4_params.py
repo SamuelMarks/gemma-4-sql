@@ -11,11 +11,10 @@ from tests.conftest import requires_jax
 pytestmark = requires_jax
 
 import jax
-import jax.numpy as jnp
 import pytest
-from safetensors.flax import save_file
 
 import gemma_4_sql.backends.jax.gemma4.params as params_mod
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 from gemma_4_sql.backends.jax.gemma4.config import AudioConfig, ModelConfig, VisionConfig
 from gemma_4_sql.backends.jax.gemma4.params import (
     _fix_jax_state_embeddings,
@@ -26,6 +25,7 @@ from gemma_4_sql.backends.jax.gemma4.params import (
 )
 from gemma_4_sql.backends.jax.gemma4.utils_params import KeyMapType, StateNode
 from gemma_4_sql.exceptions import DependencyMissingError
+from tests.utils.tensor_helpers import flax_save_safetensors as save_file
 
 
 def test_stack_expert_tensors_none_key() -> None:
@@ -64,7 +64,9 @@ def test_create_gemma4_from_pretrained(tmp_path: Path) -> None:
         head_dim=4,
         intermediate_size=16,
         num_experts=4,
-        vision_config=VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4),
+        vision_config=VisionConfig(
+            hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4
+        ),
         audio_config=AudioConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2),
     )
 
@@ -87,7 +89,12 @@ def test_process_standard_tensor_errors() -> None:
             return ()
 
         def get_tensor(self, _key: str) -> jax.Array:
-            """Provide get tensor test helper."""
+            """Provide get tensor test helper.
+
+            Returns:
+                A 1D zero JAX array.
+
+            """
             return jnp.zeros((1,))
 
     sf = FakeSF()
@@ -96,7 +103,9 @@ def test_process_standard_tensor_errors() -> None:
     process_standard_tensor(sf, "model.embed_tokens.weight", jax_state, mapping)
     process_standard_tensor(sf, "unknown.key", jax_state, mapping)
 
-    with patch("gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape", side_effect=AttributeError("bad")):
+    with patch(
+        "gemma_4_sql.backends.jax.gemma4.params.assign_weights_from_eval_shape", side_effect=AttributeError("bad")
+    ):
         with pytest.raises(AttributeError):
             process_standard_tensor(FakeSF(), "model.embed_tokens.weight", jax_state, mapping)
 
@@ -105,7 +114,15 @@ def test_create_gemma4_from_pretrained_etils_missing(tmp_path: Path, monkeypatch
     """Verify create gemma4 from pretrained etils missing behavior via both sys.modules[None] and ImportError."""
     import sys
 
-    cfg = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16)
+    cfg = ModelConfig(
+        vocab_size=10,
+        hidden_size=8,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=4,
+        intermediate_size=16,
+    )
 
     # Path 1: sys.modules["etils"] = None
     monkeypatch.setitem(sys.modules, "etils", None)
@@ -129,7 +146,9 @@ def test_fix_jax_state_embeddings_coverage() -> None:
         num_key_value_heads=1,
         head_dim=4,
         intermediate_size=16,
-        vision_config=VisionConfig(hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4),
+        vision_config=VisionConfig(
+            hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16, patch_size=4
+        ),
     )
 
     jax_state: StateNode = {
@@ -147,7 +166,15 @@ def test_fix_jax_state_embeddings_coverage() -> None:
     assert isinstance(emb_sub, dict)
     assert isinstance(emb_sub["position_ids"], jax.Array)
 
-    cfg2 = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16)
+    cfg2 = ModelConfig(
+        vocab_size=10,
+        hidden_size=8,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=4,
+        intermediate_size=16,
+    )
     jax_state2: StateNode = {"model": {"embed_scale": 1.0}}
     _fix_jax_state_embeddings(jax_state2, None, cfg2)
 
@@ -155,7 +182,15 @@ def test_fix_jax_state_embeddings_coverage() -> None:
 def test_create_gemma4_state_dict_fallbacks(tmp_path: Path) -> None:
     """Verify create gemma4 state dict fallbacks behavior."""
     save_file({"lm_head.weight": jnp.zeros((10, 8), dtype=jnp.float32)}, str(tmp_path / "model.safetensors"))
-    cfg = ModelConfig(vocab_size=10, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, num_key_value_heads=1, head_dim=4, intermediate_size=16)
+    cfg = ModelConfig(
+        vocab_size=10,
+        hidden_size=8,
+        num_hidden_layers=1,
+        num_attention_heads=2,
+        num_key_value_heads=1,
+        head_dim=4,
+        intermediate_size=16,
+    )
 
     with patch("flax.nnx.split") as mock_split:
 
@@ -163,7 +198,12 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path: Path) -> None:
             """Test stub for `MockState0`."""
 
             def to_pure_dict(self) -> StateNode:
-                """Provide to pure dict test helper."""
+                """Provide to pure dict test helper.
+
+                Returns:
+                    A dictionary representing pure state.
+
+                """
                 return {"a": 0}
 
         mock_split.return_value = (None, MockState0())
@@ -176,7 +216,12 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path: Path) -> None:
             """Test stub for `MockState1`."""
 
             def to_flat_dict(self) -> StateNode:
-                """Provide to flat dict test helper."""
+                """Provide to flat dict test helper.
+
+                Returns:
+                    A dictionary representing flattened state.
+
+                """
                 return {"a": 1}
 
         mock_split.return_value = (None, MockState1())
@@ -189,7 +234,12 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path: Path) -> None:
             """Test stub for `MockState2`."""
 
             def __iter__(self) -> Iterator[tuple[str, int]]:
-                """Provide iter test helper."""
+                """Provide iter test helper.
+
+                Yields:
+                    Key-value pairs from the synthetic state dictionary.
+
+                """
                 yield from {"b": 2}.items()
 
         mock_split.return_value = (None, MockState2())
@@ -197,3 +247,12 @@ def test_create_gemma4_state_dict_fallbacks(tmp_path: Path) -> None:
             mock_merge.return_value = "model2"
             res = create_gemma4_from_pretrained(str(tmp_path), cfg)
             assert res == "model2"
+
+    import re
+    import sys
+
+    with (
+        patch.dict(sys.modules, {"safetensors": None}),
+        pytest.raises(DependencyMissingError, match="safetensors dependency missing"),
+    ):
+        params_mod._process_safetensors_file(tmp_path / "m.safetensors", re.compile(r"x"), {}, {}, {})

@@ -36,7 +36,12 @@ def test_log_metrics_success() -> None:
     writers: list[_RecordingSummaryWriter] = []
 
     def _factory(log_dir: str = "") -> _RecordingSummaryWriter:
-        """Construct and record a `_RecordingSummaryWriter`."""
+        """Construct and record a `_RecordingSummaryWriter`.
+
+        Returns:
+            A newly constructed `_RecordingSummaryWriter`.
+
+        """
         w = _RecordingSummaryWriter(log_dir=log_dir)
         writers.append(w)
         return w
@@ -46,10 +51,10 @@ def test_log_metrics_success() -> None:
 
     assert result["backend"] == "maxtext"
     assert result.get("action") == "log_metrics"
-    assert result.get("step") == step
-    assert result.get("metrics") == metrics
-    assert result.get("logged_metrics") == metrics
+    assert result["step"] == step
+    assert result["metrics"] == metrics
     assert result["status"] == "success"
+    assert result.get("status_code") == "success"
     assert result["log_dir"] == log_dir
     assert "timestamp" in result
 

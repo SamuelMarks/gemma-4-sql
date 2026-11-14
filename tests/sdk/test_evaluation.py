@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import NoReturn
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+import torch
 
 from gemma_4_sql.exceptions import DependencyMissingError, EvaluationError
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.evaluation import (
+    _coerce_multimodal_json,
+    _normalize_id_matrix,
     _process_batch_inputs,
     _run_evaluation_inference,
+    _to_int_seq,
     compute_metrics,
     compute_metrics_async,
     evaluate,
@@ -19,7 +24,16 @@ from gemma_4_sql.sdk.evaluation import (
 )
 from gemma_4_sql.sdk.registry import get_backend
 from gemma_4_sql.tokenization import SQLTokenizer
-from gemma_4_sql.type_hints import ETLConfig, InferenceResultDict, JSONPrimitive, JSONValue
+from gemma_4_sql.type_hints import (
+    DataLoaderProtocol,
+    DataloaderResultDict,
+    ETLConfig,
+    InferenceResultDict,
+    JSONPrimitive,
+    JSONValue,
+    TensorType,
+)
+from tests.utils.test_utils import RecordingBackendDouble
 
 
 def _stub_select_1(*_args: str | int, **_kwargs: JSONValue) -> dict[str, str]:
@@ -33,7 +47,12 @@ def test_evaluate_jax(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(jax_agent, "generate_sql", _stub_select_1)
 
     def raise_err(*_a: ETLConfig, **_k: JSONValue) -> NoReturn:
-        """Raise DependencyMissingError when building dataloader."""
+        """Raise DependencyMissingError when building dataloader.
+
+        Raises:
+            DependencyMissingError: Always raised to simulate missing JAX dependency.
+
+        """
         raise DependencyMissingError("Mocked missing JAX", backend="jax")
 
     monkeypatch.setattr(jax_agent, "build_dataloader", raise_err)
@@ -60,7 +79,11 @@ def test_evaluate_keras_with_live_sqlite(monkeypatch: pytest.MonkeyPatch) -> Non
     keras_agent = get_backend("keras")
     monkeypatch.setattr(keras_agent, "build_dataloader", _keras_eval_loader)
     monkeypatch.setattr(keras_agent, "generate_sql", _keras_eval_gen)
-    ddl = "CREATE TABLE users (id INT, name TEXT); INSERT INTO users VALUES (1, 'Alice'); INSERT INTO users VALUES (2, 'Bob');"
+    ddl = (
+        "CREATE TABLE users (id INT, name TEXT); "
+        "INSERT INTO users VALUES (1, 'Alice'); "
+        "INSERT INTO users VALUES (2, 'Bob');"
+    )
     res = evaluate("model1", "data1", "keras", ddl=ddl)
     assert res["backend"] == "keras"
     assert res["model"] == "model1"
@@ -91,7 +114,9 @@ def test_evaluate_maxtext(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_evaluate_pytorch(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify evaluate with PyTorch backend handles tuple batches from DataLoader."""
 
-    def _pytorch_eval_loader(*_args: ETLConfig, **_kwargs: JSONValue) -> dict[str, list[tuple[list[list[int]], list[list[int]]]]]:
+    def _pytorch_eval_loader(
+        *_args: ETLConfig, **_kwargs: JSONValue
+    ) -> dict[str, list[tuple[list[list[int]], list[list[int]]]]]:
         """Return 1-batch tuple evaluation loader."""
         return {"loader": [([[1]], [[2]])]}
 
@@ -190,16 +215,74 @@ async def test_compute_metrics_inside_running_event_loop() -> None:
         assert metrics["execution_accuracy"] == pytest.approx(1.0)
 
 
+type _EvalBatchRow = Mapping[str, TensorType | Sequence[int]]
+
+
+class _EvalTestBackend(RecordingBackendDouble):
+    """Typed `BackendProtocol` test double for `_run_evaluation_inference` tests."""
+
+    def __init__(self, loader_val: DataLoaderProtocol[_EvalBatchRow] | None, gen_res: InferenceResultDict) -> None:
+        """Store `loader_val` and `gen_res`."""
+        super().__init__()
+        self._loader_val = loader_val
+        self._gen_res = gen_res
+
+    def build_dataloader(self, config: ETLConfig, **_kwargs: JSONValue) -> DataloaderResultDict:
+        """Return configured `loader` payload."""
+        return {
+            "dataset": config.dataset_name,
+            "split": config.split,
+            "status": "loaded",
+            "batch_size": config.batch_size,
+            "backend": "jax",
+            "distributed": config.distributed,
+            "loader": self._loader_val,
+        }
+
+    def generate_sql(
+        self,
+        model_name: str,
+        prompt: str,
+        beam_width: int = 3,
+        max_length: int = 50,
+        **_kwargs: JSONValue,
+    ) -> InferenceResultDict:
+        """Return `self._gen_res`."""
+        _ = (model_name, prompt, beam_width, max_length)
+        return self._gen_res
+
+
 def test_run_evaluation_inference_no_dataloader() -> None:
     """Verify _run_evaluation_inference raises EvaluationError when dataloader is None or backend fails."""
-    backend_impl = MagicMock()
-    backend_impl.build_dataloader.return_value = {"loader": None}
+    none_backend = _EvalTestBackend(
+        None,
+        {
+            "backend": "jax",
+            "model": "m",
+            "prompt": "p",
+            "sql": "SELECT 1",
+            "beam_width": 3,
+            "confidence_score": 0.9,
+            "status": "success",
+        },
+    )
     with pytest.raises(EvaluationError, match="Valid iterable dataloader is required for evaluation"):
-        _run_evaluation_inference("model", "dataset", backend_impl)
+        _run_evaluation_inference("model", "dataset", none_backend)
 
-    backend_impl.build_dataloader.return_value = {"loader": [{"inputs": [[65]], "targets": [[65]]}]}
-    backend_impl.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 0.9, "status": "failed: boom"}
-    preds, _truths, scores = _run_evaluation_inference("model", "dataset", backend_impl)
+    single_row: _EvalBatchRow = {"inputs": torch.tensor([[65]]), "targets": torch.tensor([[65]])}
+    fail_backend = _EvalTestBackend(
+        [single_row],
+        {
+            "backend": "jax",
+            "model": "m",
+            "prompt": "p",
+            "sql": "SELECT 1",
+            "beam_width": 3,
+            "confidence_score": 0.9,
+            "status": "failed: boom",
+        },
+    )
+    preds, _truths, scores = _run_evaluation_inference("model", "dataset", fail_backend)
     assert preds == [""]
     assert scores == [0.0]
 
@@ -256,10 +339,20 @@ def test_evaluate_empty_confidence_scores() -> None:
 
 def test_run_evaluation_inference_max_batches() -> None:
     """Verify _run_evaluation_inference respects MAX_BATCHES and custom max_batches."""
-    backend_impl = MagicMock()
-    mock_loader = [({"inputs": [[1]], "targets": [[1]]}) for _ in range(15)]
-    backend_impl.build_dataloader.return_value = {"loader": mock_loader}
-    backend_impl.generate_sql.return_value = {"sql": "SELECT 1", "confidence_score": 0.9}
+    sample_row: _EvalBatchRow = {"inputs": torch.tensor([[1]]), "targets": torch.tensor([[1]])}
+    mock_loader: list[_EvalBatchRow] = [sample_row for _ in range(15)]
+    backend_impl = _EvalTestBackend(
+        mock_loader,
+        {
+            "backend": "jax",
+            "model": "m",
+            "prompt": "p",
+            "sql": "SELECT 1",
+            "beam_width": 3,
+            "confidence_score": 0.9,
+            "status": "success",
+        },
+    )
 
     preds, truths, scores = _run_evaluation_inference("model", "dataset", backend_impl)
     assert len(preds) == 10
@@ -326,29 +419,24 @@ def test_evaluate_with_image_path() -> None:
 
 def test_collect_predictions_batch_multimodal() -> None:
     """Verify _run_evaluation_inference forwards pixel_values and audio_values from batches."""
-    backend_impl = MagicMock()
-
-    def mock_generate_sql(model_name: str, prompt: str, **_kwargs: JSONValue) -> InferenceResultDict:
-        """Return simulated SQL and confidence score."""
-        return {
+    multimodal_batch: _EvalBatchRow = {
+        "inputs": torch.tensor([[1, 2]]),
+        "targets": torch.tensor([[2, 3]]),
+        "pixel_values": torch.tensor([[0.1] * 10]),
+        "audio_values": torch.tensor([[0.2] * 10]),
+    }
+    backend_impl = _EvalTestBackend(
+        [multimodal_batch],
+        {
             "backend": "jax",
-            "model": model_name,
-            "prompt": prompt,
+            "model": "test-model",
+            "prompt": "p",
             "sql": "SELECT 1",
             "beam_width": 3,
             "confidence_score": 0.85,
             "status": "success",
-        }
-
-    backend_impl.generate_sql.side_effect = mock_generate_sql
-
-    multimodal_batch = {
-        "inputs": [[1, 2]],
-        "targets": [[2, 3]],
-        "pixel_values": [[0.1] * 10],
-        "audio_values": [[0.2] * 10],
-    }
-    backend_impl.build_dataloader.return_value = {"loader": [multimodal_batch]}
+        },
+    )
 
     preds, _truths, scores = _run_evaluation_inference(
         model_name="test-model",
@@ -382,10 +470,10 @@ def test_evaluate_syntax_variations() -> None:
 def test_evaluate_empty_metrics(synthetic_dataset: list[dict[str, str]]) -> None:
     """Verify compute_metrics returns 0.0 metrics for empty input lists and synthetic_dataset has expected items."""
     assert len(synthetic_dataset) == 2
-    mock_engine = MagicMock()
-    metrics = compute_metrics(mock_engine, [], [])
-    assert metrics.get("exact_match") == 0.0
-    assert metrics.get("execution_accuracy") == 0.0
+    with LiveDatabaseEngine(":memory:") as engine:
+        metrics = compute_metrics(engine, [], [])
+        assert metrics.get("exact_match") == 0.0
+        assert metrics.get("execution_accuracy") == 0.0
 
 
 def test_extract_batch_ids_dict_edge_cases() -> None:
@@ -423,6 +511,29 @@ def test_extract_batch_ids_dict_edge_cases() -> None:
     assert inputs5 == []
     assert targets5 == []
 
+    # Cover all branches of _to_int_seq, _normalize_id_matrix, and _coerce_multimodal_json
+    class _ZeroDimIterTensor:
+        """0-D tensor stub whose `__iter__` raises `TypeError` (like a 0-D tensor without `.tolist()`)."""
+
+        def __iter__(self) -> NoReturn:
+            """Raise `TypeError` on iteration.
+
+            Raises:
+                TypeError: Always raised to simulate iterating over a 0-D tensor.
+
+            """
+            raise TypeError("iteration over a 0-d tensor")
+
+    assert _to_int_seq(None) == []
+    assert _to_int_seq("abc") == []
+    assert _to_int_seq(["12", "-3", "skip"]) == [12, -3]
+    assert _normalize_id_matrix("raw_str") == [[]]
+    assert _normalize_id_matrix(ScalarTensor()) == [[7]]
+    assert _normalize_id_matrix(_ZeroDimIterTensor()) == [[]]
+    assert _coerce_multimodal_json(ScalarTensor()) == 7
+    assert _coerce_multimodal_json({"a": [1, 2]}) == {"a": [1, 2]}
+    assert _coerce_multimodal_json(b"raw_bytes") is None
+
 
 @pytest.mark.asyncio
 async def test_compute_metrics_async_mismatch_and_exception(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -433,7 +544,12 @@ async def test_compute_metrics_async_mismatch_and_exception(monkeypatch: pytest.
             await compute_metrics_async(engine, ["a", "b"], ["a"])
 
         async def mock_exec(_query: str) -> tuple[bool, list[tuple[JSONPrimitive, ...]], str | None]:
-            """Raise RuntimeError during execution."""
+            """Raise RuntimeError during execution.
+
+            Raises:
+                RuntimeError: Always raised to test execution exception handling.
+
+            """
             raise RuntimeError("Mock error")
 
         monkeypatch.setattr(engine, "execute_with_feedback_async", mock_exec)

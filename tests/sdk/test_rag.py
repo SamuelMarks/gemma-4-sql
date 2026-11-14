@@ -2,7 +2,6 @@
 
 from collections.abc import Sequence
 from typing import NoReturn
-from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -13,7 +12,12 @@ from gemma_4_sql.sdk.rag import build_rag_prompt, extract_schema_entities, retri
 
 def test_extract_schema_entities() -> None:
     """Verify extract schema entities behavior."""
-    ddl = "\n\n    CREATE TABLE users (\n        id INT,\n        name VARCHAR,\n        PRIMARY KEY (id)\n    );\n    CREATE TABLE orders (\n        order_id INT,\n        user_id INT,\n        amount DECIMAL,\n        FOREIGN KEY (user_id) REFERENCES users(id)\n    );\n    "
+    ddl = (
+        "\n\n    CREATE TABLE users (\n        id INT,\n        name VARCHAR,\n"
+        "        PRIMARY KEY (id)\n    );\n    CREATE TABLE orders (\n"
+        "        order_id INT,\n        user_id INT,\n        amount DECIMAL,\n"
+        "        FOREIGN KEY (user_id) REFERENCES users(id)\n    );\n    "
+    )
     schema = extract_schema_entities(ddl)
     assert "users" in schema
     assert schema["users"] == ["id", "name"]
@@ -31,7 +35,11 @@ def test_extract_schema_entities_ignore_comments() -> None:
 
 def test_retrieve_relevant_schema() -> None:
     """Verify retrieve relevant schema behavior."""
-    schema = {"users": ["id", "name"], "orders": ["order_id", "user_id", "amount"], "products": ["prod_id", "name", "price"]}
+    schema = {
+        "users": ["id", "name"],
+        "orders": ["order_id", "user_id", "amount"],
+        "products": ["prod_id", "name", "price"],
+    }
     context = retrieve_relevant_schema("Find all users names", schema)
     assert "Table: users | Columns: id, name" in context
     assert "Table: orders" not in context
@@ -60,7 +68,12 @@ class MockSentenceTransformer:
         """Initialize test stub instance."""
 
     def encode(self, docs: list[str]) -> list[list[float]]:
-        """Provide encode test helper."""
+        """Provide encode test helper.
+
+        Returns:
+            2D unit vector list matching `docs` length.
+
+        """
         return [[1.0] for _ in docs]
 
 
@@ -68,11 +81,21 @@ class MockSimilarities:
     """Provide class docstring."""
 
     def argsort(self) -> list[int]:
-        """Provide argsort test helper."""
+        """Provide argsort test helper.
+
+        Returns:
+            Single-index list `[0]`.
+
+        """
         return [0]
 
     def __getitem__(self, _idx: int) -> float:
-        """Provide getitem test helper."""
+        """Provide getitem test helper.
+
+        Returns:
+            Constant similarity score `1.0`.
+
+        """
         return 1.0
 
 
@@ -80,7 +103,12 @@ def mock_cosine_similarity(
     _a: Sequence[Sequence[float]],
     _b: Sequence[Sequence[float]],
 ) -> list[MockSimilarities]:
-    """Provide mock cosine similarity test helper."""
+    """Provide mock cosine similarity test helper.
+
+    Returns:
+        Single-element list containing `MockSimilarities`.
+
+    """
     return [MockSimilarities()]
 
 
@@ -101,7 +129,12 @@ def test_retrieve_relevant_schema_semantic_error(monkeypatch: pytest.MonkeyPatch
         *_args: Sequence[Sequence[float]],
         **_kwargs: str | float,
     ) -> NoReturn:
-        """Provide raise err test helper."""
+        """Provide raise err test helper.
+
+        Raises:
+            ValueError: Always raised to simulate similarity failure.
+
+        """
         msg = "err"
         raise ValueError(msg)
 
@@ -134,7 +167,10 @@ def test_rag_import_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(rag, "cosine_similarity", None)
     assert rag.SentenceTransformer is None
     assert rag.cosine_similarity is None
-    assert rag.build_rag_prompt("Find users", "CREATE TABLE users (id INT);", sql_prefix="") == "-- Relevant Schema Context:\n-- Table: users | Columns: id\n\n-- Request:\n-- Find users"
+    assert (
+        rag.build_rag_prompt("Find users", "CREATE TABLE users (id INT);", sql_prefix="")
+        == "-- Relevant Schema Context:\n-- Table: users | Columns: id\n\n-- Request:\n-- Find users"
+    )
 
     ddl_emp_weather = "CREATE TABLE weather (city TEXT, temp FLOAT); CREATE TABLE employees (id INT, salary FLOAT);"
     schema_ew = extract_schema_entities(ddl_emp_weather)
@@ -170,16 +206,23 @@ def test_rag_no_relevant_tables(monkeypatch: pytest.MonkeyPatch) -> None:
             return torch.tensor(rows, dtype=torch.float32)
 
     def _real_cosine_similarity(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-        """Compute exact cosine similarity matrix between 2D tensors `a` and `b`."""
-        a_norm = a / torch.linalg.norm(a, dim=-1, keepdim=True)
-        b_norm = b / torch.linalg.norm(b, dim=-1, keepdim=True)
-        return a_norm @ b_norm.T
+        """Compute exact cosine similarity matrix between 2D tensors `a` and `b`.
+
+        Returns:
+            Pairwise cosine similarity matrix tensor.
+
+        """
+        a_norm = a / torch.sqrt(torch.sum(a * a, dim=-1, keepdim=True))
+        b_norm = b / torch.sqrt(torch.sum(b * b, dim=-1, keepdim=True))
+        return a_norm @ b_norm.transpose(0, 1)
 
     def _make_embedder(*_a: str, **_k: str) -> _EmbedderStub:
         """Return a new `_EmbedderStub` instance."""
         return _EmbedderStub()
 
-    def _zero_cosine(_a: Sequence[Sequence[float]] | torch.Tensor, _b: Sequence[Sequence[float]] | torch.Tensor) -> torch.Tensor:
+    def _zero_cosine(
+        _a: Sequence[Sequence[float]] | torch.Tensor, _b: Sequence[Sequence[float]] | torch.Tensor
+    ) -> torch.Tensor:
         """Return a zero cosine similarity matrix."""
         return torch.tensor([[0.0, 0.0]])
 
@@ -227,7 +270,7 @@ def test_extract_schema_entities_complex() -> None:
 
 
 def test_extract_schema_entities_edge_cases() -> None:
-    """Test extract_schema_entities with empty columns, trailing commas, TEMP tables, catalog prefixes, and strict=True."""
+    """Test extract_schema_entities with empty columns, TEMP tables, catalog prefixes, and strict=True."""
     from gemma_4_sql.exceptions import SchemaExtractionError
 
     ddl = "CREATE TEMP TABLE cat.sch.t (col1 INT, , @invalid INT, col2 TEXT, );\nCREATE TEMPORARY TABLE t2 (a INT,);"
@@ -359,38 +402,68 @@ def test_rag_bm25_search() -> None:
 
 
 def test_rag_successful_imports(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify semantic search caches embeddings and models across calls using `clear_rag_model_cache`."""
+    """Verify semantic search caches embeddings, evicts via `set_maxsize`, and parses literal-heavy DDL."""
     rag.clear_rag_model_cache()
-    mock_st_class = MagicMock()
-    mock_model = MagicMock()
+    encode_calls = 0
+    cos_calls = 0
 
-    def _encode_texts(texts: Sequence[str]) -> torch.Tensor:
-        """Return 2D embedding tensor for `texts`."""
-        return torch.tensor([[1.0, 0.0]] * len(texts))
+    class _TypedEmbedder:
+        """Typed `EmbedderModelProtocol` test double."""
 
-    mock_model.encode.side_effect = _encode_texts
-    mock_st_class.return_value = mock_model
+        def __init__(self, _model_name: str) -> None:
+            """Accept model identifier."""
 
-    mock_cos = MagicMock(return_value=torch.tensor([[0.9, 0.1]], dtype=torch.float64))
-    monkeypatch.setattr(rag, "SentenceTransformer", mock_st_class)
-    monkeypatch.setattr(rag, "cosine_similarity", mock_cos)
+        def encode(self, sentences: Sequence[str], **_kwargs: str | int | bool) -> torch.Tensor:
+            """Return 2D embedding tensor and increment `encode_calls`."""
+            nonlocal encode_calls
+            encode_calls += 1
+            return torch.tensor([[1.0, 0.0]] * len(sentences))
+
+    def _typed_cos(_a: torch.Tensor, _b: torch.Tensor) -> torch.Tensor:
+        """Return deterministic cosine similarity matrix."""
+        nonlocal cos_calls
+        cos_calls += 1
+        return torch.tensor([[0.9, 0.1]], dtype=torch.float64)
+
+    monkeypatch.setattr(rag, "SentenceTransformer", _TypedEmbedder)
+    monkeypatch.setattr(rag, "cosine_similarity", _typed_cos)
 
     schema = {"table1": ["col1"], "table2": ["col2"]}
     res = rag._semantic_search("query", schema, ["table1", "table2"], top_k_tables=1)
     assert res == ["table1"]
-    assert mock_model.encode.call_count == 2
-    mock_cos.assert_called_once()
+    assert encode_calls == 2
+    assert cos_calls == 1
 
     # Second call with same schema should hit cached table embeddings (only encodes prompt)
     res2 = rag._semantic_search("second query", schema, ["table1", "table2"], top_k_tables=1)
     assert res2 == ["table1"]
-    assert mock_model.encode.call_count == 3
+    assert encode_calls == 3
 
-    # Verify LRU eviction when MAX_SCHEMA_CACHE_SIZE is exceeded
+    # Verify thread-safe LRU eviction via `set_maxsize` when `MAX_SCHEMA_CACHE_SIZE` shrinks
     monkeypatch.setattr(rag, "MAX_SCHEMA_CACHE_SIZE", 1)
-    rag._semantic_search("third query", {"table3": ["c"]}, ["table3"], top_k_tables=1)
+    rag._semantic_search("third query", {"table3": ["c1"], "table4": ["c2"]}, ["table3", "table4"], top_k_tables=1)
+    assert len(rag._SCHEMA_EMBEDDING_CACHE) == 1
+    rag._SCHEMA_EMBEDDING_CACHE.set_maxsize(2)
+    rag._SCHEMA_EMBEDDING_CACHE.put_model("extra_key_1", [[0.0, 0.0]])
+    rag._SCHEMA_EMBEDDING_CACHE.put_model("extra_key_2", [[1.0, 1.0]])
+    assert len(rag._SCHEMA_EMBEDDING_CACHE) == 2
+    rag._SCHEMA_EMBEDDING_CACHE.set_maxsize(1)
     assert len(rag._SCHEMA_EMBEDDING_CACHE) == 1
     rag.clear_rag_model_cache()
+
+    # Adversarial DDL with `)` and `,` inside string literals + schema-qualified quoted identifiers
+    tricky_ddl = (
+        'CREATE TABLE "my.schema"."my ""orders""" ('
+        " status TEXT DEFAULT 'pending (new)',"
+        """ "note ""col"" " TEXT CHECK (note IN ('a,b', 'c)')),"""
+        " amount NUMERIC(10, 2)); "
+        "CREATE TABLE `cat`.`back``tbl` (`col``1` INT); "
+        "CREATE TABLE [dbo].[brack]]tbl] ([col]]1] INT);"
+    )
+    extracted = rag.extract_schema_entities(tricky_ddl, strict=True)
+    assert extracted['my "orders"'] == ["status", 'note "col" ', "amount"]
+    assert extracted["back`tbl"] == ["col`1"]
+    assert extracted["brack]tbl"] == ["col]1"]
 
     mm_prompt = rag.build_rag_prompt(
         "Find users",

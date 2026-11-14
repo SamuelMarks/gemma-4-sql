@@ -2,26 +2,26 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
-from collections.abc import Sequence
-from typing import Protocol, TypeGuard, runtime_checkable
+from collections.abc import Callable, Mapping, Sequence
+from typing import Protocol, runtime_checkable
 
-from gemma_4_sql._types_models import KerasSamplerProtocol
-from gemma_4_sql._types_tensors import NestedScalarList, ToListArrayProtocol
+from gemma_4_sql._types_models import KerasSamplerProtocol, KerasScoreType
+from gemma_4_sql._types_tensors import NestedScalarList, TensorProtocol
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
     make_model_cache_key,
     normalize_logprob_confidence,
     run_inference_wrapper,
 )
-from gemma_4_sql.backends.lazy_loader import optional_attr, optional_import
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError, StatusValue
 from gemma_4_sql.tokenization import SQLTokenizer
 from gemma_4_sql.type_hints import (
     InferenceResultDict,
     JSONValue,
     KerasCausalLMProtocol,
+    KerasLayerProtocol,
     NDArrayProtocol,
     TfTensorProtocol,
 )
@@ -30,40 +30,126 @@ logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
+class _GenerateOnlyKerasModelProtocol(Protocol):
+    """Protocol for minimal Keras generation models exposing `.generate(prompt, max_length=...)`."""
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        max_length: int = 50,
+    ) -> (
+        TensorProtocol
+        | TfTensorProtocol
+        | Sequence[int]
+        | Sequence[str]
+        | Mapping[str, KerasScoreType]
+        | tuple[str, KerasScoreType]
+        | str
+        | int
+    ):
+        """Generate SQL text or structured output.
+
+        Args:
+            prompt: Input prompt string.
+            max_length: Maximum sequence length.
+
+        Returns:
+            Generated output.
+
+        """
+        ...
+
+
+@runtime_checkable
 class _GemmaCausalLMLoaderProtocol(Protocol):
     """Protocol for `keras_nlp.models.GemmaCausalLM` exposing `.from_preset(model_name)`."""
 
-    def from_preset(self, model_name: str, /) -> KerasCausalLMProtocol:
-        """Load a `GemmaCausalLM` model from a preset identifier."""
+    def from_preset(self, model_name: str, /) -> KerasCausalLMProtocol | _GenerateOnlyKerasModelProtocol:
+        """Load a `GemmaCausalLM` model from a preset identifier.
+
+        Args:
+            model_name: Preset identifier string.
+
+        Returns:
+            Loaded `KerasCausalLMProtocol` instance.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _ToListOnlyScoreProtocol(Protocol):
+    """Protocol for score arrays or tensors exposing `.tolist()`."""
+
+    def tolist(self) -> NestedScalarList:
+        """Convert score tensor into nested Python scalar list.
+
+        Returns:
+            Nested float/int list or scalar.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _CompileSamplerModelProtocol(Protocol):
+    """Protocol for KerasNLP models supporting `.compile(sampler=...)`."""
+
+    def compile(self, *, sampler: KerasSamplerProtocol) -> None:
+        """Compile model with `sampler`.
+
+        Args:
+            sampler: Configured `KerasSamplerProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _MutableSamplerAttrProtocol(Protocol):
+    """Protocol for KerasNLP models exposing mutable `.sampler`."""
+
+    sampler: KerasSamplerProtocol | str | Callable[..., TensorProtocol] | None
+
+
+@runtime_checkable
+class _LastScoresModelProtocol(Protocol):
+    """Protocol for KerasNLP models exposing `.last_scores`."""
+
+    @property
+    def last_scores(self) -> KerasScoreType:
+        """Provide scores recorded from the last generation call.
+
+        Returns:
+            Recorded scores or `None`.
+
+        """
         ...
 
 
 type _BeamSamplerInstanceProtocol = KerasSamplerProtocol
-type KerasScoreInput = TfTensorProtocol | NDArrayProtocol | NestedScalarList | float | int | str | Sequence[float | int | str | Sequence[float | int | str | None] | None] | None
-
-
-def _is_tolist_capable(val: KerasScoreInput) -> TypeGuard[ToListArrayProtocol]:
-    """Narrow `val` to `ToListArrayProtocol` for attribute-guarded `.tolist()` calls.
-
-    Args:
-        val: Candidate score tensor or array.
-
-    Returns:
-        `True` if `val` is not `None` and not a primitive or sequence.
-
-    """
-    return val is not None and not isinstance(val, (int, float, list, tuple))
-
+type KerasScoreInput = (
+    TfTensorProtocol
+    | NDArrayProtocol
+    | _ToListOnlyScoreProtocol
+    | NestedScalarList
+    | float
+    | int
+    | str
+    | Sequence[float | int | str | Sequence[float | int | str | None] | None]
+    | None
+)
 
 keras = optional_import("keras")
 tf = optional_import("tensorflow")
-GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = optional_attr(
+GemmaCausalLM: _GemmaCausalLMLoaderProtocol | None = import_optional_symbol(
     "keras_nlp.models",
     "GemmaCausalLM",
     _GemmaCausalLMLoaderProtocol,
 )
 
-_MODEL_CACHE: BoundedLRUCache[KerasCausalLMProtocol] = BoundedLRUCache(maxsize=4)
+_MODEL_CACHE: BoundedLRUCache[KerasCausalLMProtocol | _GenerateOnlyKerasModelProtocol] = BoundedLRUCache(maxsize=4)
 
 
 def _extract_flat_scores(scores: KerasScoreInput) -> list[float]:
@@ -90,11 +176,6 @@ def _extract_flat_scores(scores: KerasScoreInput) -> list[float]:
 def compute_keras_confidence(scores: KerasScoreInput, num_tokens: int) -> float:
     """Compute length-normalized sequence confidence score from generation scores or probabilities.
 
-    Mathematical formulation:
-        For log-probabilities: `confidence = exp((1 / max(1, L)) * sum(log_probs))`
-        For linear probabilities: `confidence = (1 / max(1, L)) * sum(probs)`
-    Bounded in `[0.0, 1.0]`.
-
     Args:
         scores: Sequence log probabilities, token probabilities, or scalar score.
         num_tokens: Number of generated tokens `L`.
@@ -105,10 +186,9 @@ def compute_keras_confidence(scores: KerasScoreInput, num_tokens: int) -> float:
     """
     if num_tokens <= 0:
         return 0.0
-    resolved: KerasScoreInput = scores
-    with contextlib.suppress(AttributeError, TypeError, AssertionError):
-        assert _is_tolist_capable(resolved)
-        resolved = resolved.tolist()
+    resolved: KerasScoreInput = (
+        scores.tolist() if isinstance(scores, _ToListOnlyScoreProtocol) and callable(scores.tolist) else scores
+    )
 
     if isinstance(resolved, (list, tuple)):
         flat_scores = _extract_flat_scores(resolved)
@@ -129,9 +209,15 @@ def compute_keras_confidence(scores: KerasScoreInput, num_tokens: int) -> float:
 
 
 def configure_beam_sampler(
-    model: KerasCausalLMProtocol,
+    model: KerasCausalLMProtocol
+    | _GenerateOnlyKerasModelProtocol
+    | _CompileSamplerModelProtocol
+    | _MutableSamplerAttrProtocol
+    | KerasLayerProtocol
+    | str
+    | None,
     beam_width: int,
-) -> _BeamSamplerInstanceProtocol | str | None:
+) -> _BeamSamplerInstanceProtocol | None:
     """Configure KerasNLP `BeamSampler` on a causal language model.
 
     Args:
@@ -142,22 +228,46 @@ def configure_beam_sampler(
         The instantiated sampler, or `None` if unavailable.
 
     """
-    sampler: _BeamSamplerInstanceProtocol | str | None = None
-    try:
-        import keras_nlp
 
-        beam_sampler_cls = keras_nlp.samplers.BeamSampler
-        if callable(beam_sampler_cls):
-            sampler = beam_sampler_cls(num_beams=beam_width)
+    @runtime_checkable
+    class _KerasNlpSamplersNamespaceProtocol(Protocol):
+        """Protocol for `keras_nlp.samplers` exposing `BeamSampler`."""
+
+        @property
+        def BeamSampler(self) -> Callable[..., _BeamSamplerInstanceProtocol | str | None] | None:
+            """Provide `BeamSampler` constructor or `None`."""
+            ...
+
+    @runtime_checkable
+    class _KerasNlpSamplersPkgProtocol(Protocol):
+        """Protocol for `keras_nlp` exposing `.samplers`."""
+
+        @property
+        def samplers(self) -> _KerasNlpSamplersNamespaceProtocol:
+            """Provide `keras_nlp.samplers` namespace."""
+            ...
+
+    sampler: _BeamSamplerInstanceProtocol | None = None
+    try:
+        keras_nlp_mod = optional_import("keras_nlp", _KerasNlpSamplersPkgProtocol)
+        if keras_nlp_mod is not None:
+            beam_sampler_cls = keras_nlp_mod.samplers.BeamSampler
+            if callable(beam_sampler_cls):
+                candidate = beam_sampler_cls(num_beams=beam_width)
+                if isinstance(candidate, KerasSamplerProtocol):
+                    sampler = candidate
     except (ImportError, AttributeError, ValueError, TypeError) as e:
         logger.warning("KerasNLP BeamSampler could not be imported: %s", e)
 
     if sampler is not None:
-        try:
-            model.compile(sampler=sampler)
-        except (AttributeError, TypeError):
-            with contextlib.suppress(AttributeError, TypeError):
-                model.sampler = sampler
+        if isinstance(model, _CompileSamplerModelProtocol) and callable(model.compile):
+            try:
+                model.compile(sampler=sampler)
+                return sampler
+            except (AttributeError, TypeError):
+                pass
+        if isinstance(model, _MutableSamplerAttrProtocol):
+            model.sampler = sampler
 
     return sampler
 
@@ -170,9 +280,6 @@ def generate_sql(
     **kwargs: JSONValue,
 ) -> InferenceResultDict:
     """Generate a SQL query from a natural language prompt using Keras.
-
-    Configures `BeamSampler` with the requested `beam_width`, executes generation,
-    extracts token scores, and dynamically computes sequence confidence.
 
     Args:
         model_name: The name or preset of the target model.
@@ -192,15 +299,28 @@ def generate_sql(
         raise DependencyMissingError("Keras dependencies are missing.")
 
     def _execute() -> tuple[str, float]:
-        """Run Keras model preset loading, BeamSampler configuration, and generation."""
+        """Run Keras model preset loading, BeamSampler configuration, and generation.
+
+        Returns:
+            Tuple of `(generated_sql, confidence_score)`.
+
+        Raises:
+            ImportError: If `keras_nlp.models.GemmaCausalLM` is unavailable.
+            InferenceError: If Keras generation yields an empty SQL sequence.
+
+        """
         logger.info("Generating with Keras %s (beam_width=%d)", model_name, beam_width)
-        gemma_causal_lm_cls = GemmaCausalLM if GemmaCausalLM is not None else optional_attr("keras_nlp.models", "GemmaCausalLM", _GemmaCausalLMLoaderProtocol)
+        gemma_causal_lm_cls = (
+            GemmaCausalLM
+            if GemmaCausalLM is not None
+            else import_optional_symbol("keras_nlp.models", "GemmaCausalLM", _GemmaCausalLMLoaderProtocol)
+        )
         if gemma_causal_lm_cls is None:
             raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
         cache_key = make_model_cache_key(
             model_name,
             backend_name="keras",
-            factories=(gemma_causal_lm_cls, gemma_causal_lm_cls.from_preset),
+            factories=(gemma_causal_lm_cls.from_preset,),
         )
         model = _MODEL_CACHE.get_model(cache_key) or gemma_causal_lm_cls.from_preset(model_name)
         _MODEL_CACHE.put_model(cache_key, model)
@@ -218,12 +338,16 @@ def generate_sql(
             scores = output[1]
         elif isinstance(output, str):
             raw_text = output
-            with contextlib.suppress(AttributeError):
+            if isinstance(model, _LastScoresModelProtocol):
                 scores = model.last_scores
         else:
             raw_text = str(output)
 
-        sql = raw_text[len(prompt) :].strip() if prompt and raw_text.startswith(prompt) else raw_text.replace(prompt, "", 1).strip()
+        sql = (
+            raw_text[len(prompt) :].strip()
+            if prompt and raw_text.startswith(prompt)
+            else raw_text.replace(prompt, "", 1).strip()
+        )
         if not sql:
             raise InferenceError("Keras generation yielded an empty SQL sequence.")
 
@@ -232,5 +356,7 @@ def generate_sql(
         confidence_score = compute_keras_confidence(scores, num_tokens)
         return (sql, confidence_score)
 
-    wrapper_kwargs: dict[str, StatusValue] = {k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    wrapper_kwargs: dict[str, StatusValue] = {
+        k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None
+    }
     return run_inference_wrapper("keras", model_name, prompt, beam_width, _execute, **wrapper_kwargs)

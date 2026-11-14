@@ -64,7 +64,12 @@ def test_route_backend_pytorch_forwarding(monkeypatch: pytest.MonkeyPatch) -> No
     captured_configs: list[ETLConfig] = []
 
     def spy_build(config: ETLConfig, **_kwargs: JSONValue) -> DataloaderResultDict:
-        """Record forwarded ETLConfig."""
+        """Record forwarded ETLConfig.
+
+        Returns:
+            Simulated `DataloaderResultDict` payload.
+
+        """
         captured_configs.append(config)
         return {
             "backend": "pytorch",
@@ -88,7 +93,12 @@ def test_etl_pretrain_propagates_missing_dependency(monkeypatch: pytest.MonkeyPa
     jax_agent = get_backend("jax")
 
     def raise_err(*_a: ETLConfig, **_k: JSONValue) -> NoReturn:
-        """Raise DependencyMissingError."""
+        """Raise DependencyMissingError.
+
+        Raises:
+            DependencyMissingError: Always raised to simulate missing JAX dependencies.
+
+        """
         raise DependencyMissingError("Mocked missing JAX")
 
     monkeypatch.setattr(jax_agent, "build_dataloader", raise_err)
@@ -121,12 +131,17 @@ def test_etl_sft_and_posttrain_forwarding(monkeypatch: pytest.MonkeyPatch) -> No
     assert res_post["batch_size"] == 16
 
 
-def test_etl_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_etl_default_configs() -> None:
     """Verify etl_pretrain, etl_sft, and etl_posttrain populate default ETLConfig when None is passed."""
     captured: list[tuple[ETLConfig, str]] = []
 
     def spy_route(c: ETLConfig, b: str) -> DataloaderResultDict:
-        """Record routed config and backend."""
+        """Record routed config and backend.
+
+        Returns:
+            Simulated `DataloaderResultDict` payload.
+
+        """
         captured.append((c, b))
         return {
             "backend": b,
@@ -137,15 +152,13 @@ def test_etl_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
             "status": "loaded",
         }
 
-    monkeypatch.setattr(etl, "_route_backend", spy_route)
+    assert etl.etl_pretrain(ETLConfig(dataset_name="d", split="train"), router=spy_route)["dataset"] == "d"
+    assert etl.etl_pretrain(None, router=spy_route)["dataset"] == "my-custom-dataset"
 
-    assert etl.etl_pretrain(ETLConfig(dataset_name="d", split="train"))["dataset"] == "d"
-    assert etl.etl_pretrain(None)["dataset"] == "my-custom-dataset"
+    assert etl.etl_sft(ETLConfig(dataset_name="d2", split="train"), router=spy_route)["dataset"] == "d2"
+    assert etl.etl_sft(None, router=spy_route)["dataset"] == DEFAULT_SFT_DATASET
 
-    assert etl.etl_sft(ETLConfig(dataset_name="d2", split="train"))["dataset"] == "d2"
-    assert etl.etl_sft(None)["dataset"] == DEFAULT_SFT_DATASET
-
-    assert etl.etl_posttrain(ETLConfig(dataset_name="d3", split="train"))["dataset"] == "d3"
-    assert etl.etl_posttrain(None)["dataset"] == DEFAULT_POSTTRAIN_DATASET
+    assert etl.etl_posttrain(ETLConfig(dataset_name="d3", split="train"), router=spy_route)["dataset"] == "d3"
+    assert etl.etl_posttrain(None, router=spy_route)["dataset"] == DEFAULT_POSTTRAIN_DATASET
     assert len(captured) == 6
     assert [c.stage for c, _ in captured] == ["pretrain", "pretrain", "sft", "sft", "posttrain", "posttrain"]

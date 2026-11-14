@@ -8,7 +8,11 @@ from typing import Never
 
 import pytest
 
-from gemma_4_sql.backends.common_logging import log_metrics_wrapper
+from gemma_4_sql.backends.common_logging import (
+    get_tensorboard_summary_writer,
+    get_torch_tensorboard_writer,
+    log_metrics_wrapper,
+)
 
 
 class MockWriterWithClose:
@@ -20,7 +24,9 @@ class MockWriterWithClose:
         self.scalars: list[tuple[str, float, int]] = []
         self.closed = False
 
-    def add_scalar(self, tag: str, scalar_value: float, global_step: int | None = None, **_kwargs: float | str | bool | None) -> None:
+    def add_scalar(
+        self, tag: str, scalar_value: float, global_step: int | None = None, **_kwargs: float | str | bool | None
+    ) -> None:
         """Provide add scalar test helper."""
         self.scalars.append((tag, scalar_value, int(global_step or 0)))
 
@@ -40,15 +46,14 @@ class MockWriterWithoutClose:
         self.log_dir = log_dir
         self.scalars: list[tuple[str, float, int]] = []
 
-    def add_scalar(self, tag: str, scalar_value: float, global_step: int | None = None, **_kwargs: float | str | bool | None) -> None:
+    def add_scalar(
+        self, tag: str, scalar_value: float, global_step: int | None = None, **_kwargs: float | str | bool | None
+    ) -> None:
         """Provide add scalar test helper."""
         self.scalars.append((tag, scalar_value, int(global_step or 0)))
 
     def flush(self) -> None:
         """Provide flush test helper."""
-
-    def close(self) -> None:
-        """Provide close test helper."""
 
 
 def test_log_metrics_wrapper_with_writer_with_close(tmp_path: Path) -> None:
@@ -59,7 +64,12 @@ def test_log_metrics_wrapper_with_writer_with_close(tmp_path: Path) -> None:
     writer_instances: list[MockWriterWithClose] = []
 
     def _factory_with_close(log_dir: str = "logs", **_kwargs: str | int | bool | None) -> MockWriterWithClose:
-        """Instantiate and record a MockWriterWithClose."""
+        """Instantiate and record a MockWriterWithClose.
+
+        Returns:
+            Recorded `MockWriterWithClose` instance.
+
+        """
         inst = MockWriterWithClose(log_dir)
         writer_instances.append(inst)
         return inst
@@ -97,7 +107,12 @@ def test_log_metrics_wrapper_with_writer_without_close(tmp_path: Path) -> None:
     writer_instances: list[MockWriterWithoutClose] = []
 
     def _factory_without_close(log_dir: str = "logs", **_kwargs: str | int | bool | None) -> MockWriterWithoutClose:
-        """Instantiate and record a MockWriterWithoutClose."""
+        """Instantiate and record a MockWriterWithoutClose.
+
+        Returns:
+            Recorded `MockWriterWithoutClose` instance.
+
+        """
         inst = MockWriterWithoutClose(log_dir)
         writer_instances.append(inst)
         return inst
@@ -144,7 +159,7 @@ def test_log_metrics_wrapper_without_writer_fallback(tmp_path: Path) -> None:
     assert fallback_file.exists()
     assert fallback_file.parent.name == "logs"
 
-    with open(fallback_file) as f:
+    with open(fallback_file, encoding="utf-8") as f:
         lines = f.readlines()
 
     assert len(lines) == 1
@@ -178,7 +193,7 @@ def test_log_metrics_wrapper_without_writer_fallback_minimal(tmp_path: Path) -> 
     fallback_file = Path(str(result.get("fallback_file")))
     assert fallback_file.exists()
 
-    with open(fallback_file) as f:
+    with open(fallback_file, encoding="utf-8") as f:
         lines = f.readlines()
 
     assert len(lines) == 1
@@ -205,8 +220,15 @@ def test_log_metrics_wrapper_writer_closes_on_error(tmp_path: Path) -> None:
             super().__init__(log_dir)
             writer_instances.append(self)
 
-        def add_scalar(self, tag: str, scalar_value: float, global_step: int | None = None, **_kwargs: float | str | bool | None) -> Never:
-            """Provide add scalar test helper."""
+        def add_scalar(
+            self, tag: str, scalar_value: float, global_step: int | None = None, **_kwargs: float | str | bool | None
+        ) -> Never:
+            """Provide add scalar test helper.
+
+            Raises:
+                ValueError: Always raised to test writer cleanup on error.
+
+            """
             _ = (tag, scalar_value, global_step)
             raise ValueError("Intentional error")
 
@@ -222,3 +244,11 @@ def test_log_metrics_wrapper_writer_closes_on_error(tmp_path: Path) -> None:
     assert len(writer_instances) == 1
     writer = writer_instances[0]
     assert writer.closed is True
+
+
+def test_get_summary_writer_helpers() -> None:
+    """Verify `get_tensorboard_summary_writer` and `get_torch_tensorboard_writer` return a class or `None`."""
+    tbx = get_tensorboard_summary_writer()
+    assert tbx is None or isinstance(tbx, type)
+    torch_tb = get_torch_tensorboard_writer()
+    assert torch_tb is None or isinstance(torch_tb, type)

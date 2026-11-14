@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-import argparse
-
 from gemma_4_sql.cli_misc import export_cmd
+from gemma_4_sql.cli_parsers.protocols import SubparserCollectionProtocol
 from gemma_4_sql.cli_serve import agent_cmd, chat_cmd, evaluate_cmd, few_shot_cmd, generate_cmd, serve_cmd
 
-type SubParsersType = argparse._SubParsersAction[argparse.ArgumentParser]
 
-
-def add_evaluate_parsers(subparsers: SubParsersType) -> None:
+def add_evaluate_parsers(subparsers: SubparserCollectionProtocol) -> None:
     """Register evaluation, few-shot prompting, and conversational chat subparsers.
 
     Args:
@@ -27,7 +24,12 @@ def add_evaluate_parsers(subparsers: SubParsersType) -> None:
     parser_evaluate.add_argument("--ddl", default="", help="DDL string to setup the evaluation schema.")
     parser_evaluate.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or screenshot.")
     parser_evaluate.add_argument("--audio-path", default=None, help="Path to recorded query audio file.")
-    parser_evaluate.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_evaluate.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser_evaluate.add_argument("--max-batches", type=int, default=10, help="Maximum number of batches to evaluate.")
     parser_evaluate.set_defaults(func=evaluate_cmd)
 
@@ -38,7 +40,12 @@ def add_evaluate_parsers(subparsers: SubParsersType) -> None:
     parser_few_shot.add_argument("--backend", default="jax", help="Backend to use.")
     parser_few_shot.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or screenshot.")
     parser_few_shot.add_argument("--audio-path", default=None, help="Path to recorded query audio file.")
-    parser_few_shot.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_few_shot.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser_few_shot.set_defaults(func=few_shot_cmd)
 
     parser_chat = subparsers.add_parser("chat", help="Execute a turn in a multi-turn conversational SQL chat.")
@@ -48,11 +55,16 @@ def add_evaluate_parsers(subparsers: SubParsersType) -> None:
     parser_chat.add_argument("--backend", default="jax", help="Backend to use.")
     parser_chat.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or screenshot.")
     parser_chat.add_argument("--audio-path", default=None, help="Path to recorded query audio file.")
-    parser_chat.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_chat.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser_chat.set_defaults(func=chat_cmd)
 
 
-def add_serve_export_parsers(subparsers: SubParsersType) -> None:
+def add_serve_export_parsers(subparsers: SubparserCollectionProtocol) -> None:
     """Register HTTP continuous batching serving and model export parsers.
 
     Args:
@@ -67,7 +79,12 @@ def add_serve_export_parsers(subparsers: SubParsersType) -> None:
     parser_serve.add_argument("--backend", default="pytorch", help="Backend to use.")
     parser_serve.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or screenshot.")
     parser_serve.add_argument("--audio-path", default=None, help="Path to recorded query audio file.")
-    parser_serve.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_serve.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser_serve.set_defaults(func=serve_cmd)
 
     parser_export = subparsers.add_parser("export", help="Export and save a trained model.")
@@ -77,7 +94,7 @@ def add_serve_export_parsers(subparsers: SubParsersType) -> None:
     parser_export.set_defaults(func=export_cmd)
 
 
-def add_generate_agent_parsers(subparsers: SubParsersType) -> None:
+def add_generate_agent_parsers(subparsers: SubparserCollectionProtocol) -> None:
     """Register SQL generation and self-correction agent parsers.
 
     Args:
@@ -96,7 +113,12 @@ def add_generate_agent_parsers(subparsers: SubParsersType) -> None:
     parser_generate.add_argument("--show-confidence", action="store_true", help="Display the model's confidence score.")
     parser_generate.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or screenshot.")
     parser_generate.add_argument("--audio-path", default=None, help="Path to recorded query audio file.")
-    parser_generate.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_generate.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser_generate.set_defaults(func=generate_cmd)
 
     parser_agent = subparsers.add_parser("agent", help="Run agentic self-correction loop.")
@@ -111,11 +133,16 @@ def add_generate_agent_parsers(subparsers: SubParsersType) -> None:
     parser_agent.add_argument("--backend", default="jax", help="Backend to use.")
     parser_agent.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or screenshot.")
     parser_agent.add_argument("--audio-path", default=None, help="Path to recorded query audio file.")
-    parser_agent.add_argument("--modality", default="text", choices=["text", "vision", "audio", "multimodal"], help="Explicit modality selector.")
+    parser_agent.add_argument(
+        "--modality",
+        default="text",
+        choices=["text", "vision", "audio", "multimodal"],
+        help="Explicit modality selector.",
+    )
     parser_agent.set_defaults(func=agent_cmd)
 
 
-def add_inference_parsers(subparsers: SubParsersType) -> None:
+def add_inference_parsers(subparsers: SubparserCollectionProtocol) -> None:
     """Register serving, export, generation, and agentic loop subparsers.
 
     Args:

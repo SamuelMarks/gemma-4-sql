@@ -23,15 +23,15 @@ To contribute to `gemma-4-sql` or modify its logic, install the development depe
 
 1. **Install Dev Dependencies:**
    ```bash
-   pip install -e ".[dev]"
-   # Or via uv: uv sync --extra dev --extra mlx
+   pip install -e ".[all,dev]"
+   # Or via uv: uv sync --extra all --extra dev
    ```
 
 2. **Run Linting, Formatting & Docstring Checks (`ruff` & `interrogate`):**
    ```bash
-   ruff check .
-   ruff format .
-   interrogate -v src/gemma_4_sql tests scripts
+   ruff check src tests scripts
+   ruff format --check src tests scripts
+   interrogate -v src/gemma_4_sql tests scripts --fail-under=100
    ```
 
 3. **Run Strict Type Checking (`pyright`, `ty`, `mypy`):**
@@ -43,7 +43,7 @@ To contribute to `gemma-4-sql` or modify its logic, install the development depe
 
 4. **Run Tests with 100% Branch Coverage (`pytest` / `pre-commit`):**
    ```bash
-   pytest --cov=src/gemma_4_sql --cov-branch --cov-fail-under=100 tests/
+   pytest --cov=src/gemma_4_sql --cov=tests --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=100
    pre-commit run --all-files
    ```
 
@@ -51,7 +51,7 @@ To contribute to `gemma-4-sql` or modify its logic, install the development depe
 
 ## 1. Data Preparation (ETL)
 
-The ETL process standardizes Hugging Face datasets into optimized formats using Google's `grain` library. This is crucial for distributing training data to different backend engines (JAX, Keras, MaxText, PyTorch).
+The ETL process standardizes Hugging Face and DuckDB datasets into aligned causal LM formats (`input_ids`, `labels`, `loss_mask`) using Google's `grain` library and native backend batch loaders across all execution engines (`jax`, `keras`, `maxtext`, `pytorch`, `pytorch_hf`, `pytorch_native`, `mlx`).
 
 ### CLI
 
@@ -90,7 +90,7 @@ keras_loader = sft_data["loader"]
 
 ## 2. Model Training & Fine-Tuning
 
-The framework supports multiple training stages out-of-the-box. The backend flag implicitly routes the execution to the chosen engine (`jax`, `keras`, `maxtext`, `pytorch`).
+The framework supports multiple training stages out-of-the-box. The backend flag routes execution to the chosen engine (`jax`, `keras`, `maxtext`, `pytorch`, `pytorch_hf`, `pytorch_native`, `mlx`).
 
 ### CLI
 
@@ -148,7 +148,7 @@ from gemma_4_sql.sdk.export import export_model
 
 # Export using Keras
 result = export_model(model_name="gemma-4", export_path="./exported/gemma-4-keras", backend="keras")
-print(f"Exported to: {result['path']}")
+print(f"Exported to: {result['export_path']} (artifact: {result['file_path']})")
 ```
 
 ---
@@ -315,7 +315,8 @@ gemma-4-sql chat --model gemma-4 \
 
 ### High-Throughput Serving (Continuous Batching)
 ```bash
-gemma-4-sql serve --model gemma-4 --port 8000 --max-batch-size 256 --backend pytorch
+# Pass --run-server to start the live Uvicorn HTTP server (omitting it initializes and validates the FastAPI bundle)
+gemma-4-sql serve --model gemma-4 --port 8000 --max-batch-size 256 --run-server --backend pytorch
 ```
 
 ---
@@ -375,7 +376,7 @@ print(f"MLX Tokens/sec: {mlx_metrics['tokens_per_sec']}")
 
 ## 12. Tokenization
 
-You can manually encode strings or decode tokens using the same tokenization logic the ETL process uses. It defaults to character-level encoding, or it can use a Hugging Face tokenizer if provided.
+You can manually encode strings or decode tokens using the same `SQLTokenizer` logic the ETL process uses. When no Hugging Face model is loaded, it defaults to `ByteFallbackTokenizer` (`vocab_size=259`), which encodes UTF-8 bytes at `byte + 3` so special control tokens (`pad=0`, `eos=1`, `bos=2`) remain disjoint from raw byte IDs.
 
 ### CLI
 
@@ -383,11 +384,11 @@ You can manually encode strings or decode tokens using the same tokenization log
 # Encode text
 gemma-4-sql tokenize --encode "SELECT * FROM users"
 
-# Decode tokens
-gemma-4-sql tokenize --decode "83, 69, 76, 69, 67, 84"
+# Decode tokens ("SELECT" in default ByteFallbackTokenizer -> ASCII + 3)
+gemma-4-sql tokenize --decode "86, 72, 79, 72, 70, 87"
 
-# Use a Hugging Face model
-gemma-4-sql tokenize --encode "SELECT * FROM users" --hf-model "google/gemma-2b"
+# Use a Hugging Face Gemma 4 tokenizer
+gemma-4-sql tokenize --encode "SELECT * FROM users" --hf-model "google/gemma-4-E2B"
 ```
 
 ---
@@ -412,7 +413,9 @@ gemma-4-sql log --step 200 --metrics "loss=0.3,acc=0.95" --log-dir "./runs/exper
 from gemma_4_sql.sdk.logging import log_metrics
 
 # Log metrics directly to TensorBoard via the Keras backend
-result = log_metrics(metrics={"loss": 0.5, "execution_accuracy": 0.88}, step=100, log_dir="./runs/experiment_1", backend="keras")
+result = log_metrics(
+    metrics={"loss": 0.5, "execution_accuracy": 0.88}, step=100, log_dir="./runs/experiment_1", backend="keras"
+)
 print(f"Status: {result['status']}")
 ```
 
@@ -422,7 +425,7 @@ print(f"Status: {result['status']}")
 
 `gemma-4-sql` supports multimodal generation and self-correction, enabling models to ingest database Entity-Relationship Diagrams (ERDs), table screenshots, or spoken natural language queries.
 
-All core CLI commands (`generate`, `agent`, `evaluate`, `chat`, `few-shot`, `etl`, `train`, `benchmark`) accept `--image-path`, `--audio-path`, and `--modality`.
+All multimodal-capable CLI commands (`generate`, `agent`, `evaluate`, `chat`, `few-shot`, `rag`, `etl`, `train`, `pretrain`, `sft`, `posttrain`, `dpo`, `serve`, `benchmark`) accept `--image-path`, `--audio-path`, and `--modality`.
 
 ### CLI
 

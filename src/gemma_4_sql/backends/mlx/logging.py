@@ -8,7 +8,9 @@ from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 SummaryWriter = get_torch_tensorboard_writer()
 
 
-def log_metrics(metrics: dict[str, float], step: int, log_dir: str = "logs", **_kwargs: JSONValue) -> LogMetricsResultDict:
+def log_metrics(
+    metrics: dict[str, float], step: int, log_dir: str = "logs", **_kwargs: JSONValue
+) -> LogMetricsResultDict:
     """Log metrics using MLX TensorBoard tools.
 
     Args:

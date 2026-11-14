@@ -11,9 +11,9 @@ from collections.abc import Callable, Sequence
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_inference import BoundedLRUCache, make_model_cache_key
-from gemma_4_sql.backends.lazy_loader import optional_attr
+from gemma_4_sql.backends.lazy_loader import import_optional_symbol
 from gemma_4_sql.exceptions import SchemaExtractionError
-from gemma_4_sql.sdk.sql_lexer import extract_word_tokens, strip_sql_comments
+from gemma_4_sql.sdk.sql_lexer import extract_word_tokens, scan_sql_segments
 from gemma_4_sql.type_hints import EmbedderModelProtocol, NDArrayProtocol
 
 MIN_SIMILARITY = 0.1
@@ -59,15 +59,17 @@ class CosineSimilarityCallableProtocol(Protocol):
         ...
 
 
-SentenceTransformer: Callable[[str], EmbedderModelProtocol] | None = optional_attr(
+SentenceTransformer: Callable[[str], EmbedderModelProtocol] | None = import_optional_symbol(
     "sentence_transformers",
     "SentenceTransformer",
     SentenceTransformerConstructorProtocol,
 )
-cosine_similarity: Callable[[EmbeddingMatrix, EmbeddingMatrix], Sequence[SimilarityRowProtocol]] | None = optional_attr(
-    "sklearn.metrics.pairwise",
-    "cosine_similarity",
-    CosineSimilarityCallableProtocol,
+cosine_similarity: Callable[[EmbeddingMatrix, EmbeddingMatrix], Sequence[SimilarityRowProtocol]] | None = (
+    import_optional_symbol(
+        "sklearn.metrics.pairwise",
+        "cosine_similarity",
+        CosineSimilarityCallableProtocol,
+    )
 )
 
 _SCHEMA_EMBEDDING_CACHE: BoundedLRUCache[EmbeddingMatrix] = BoundedLRUCache(maxsize=MAX_SCHEMA_CACHE_SIZE)
@@ -90,11 +92,9 @@ def _compute_embedding(text: str, dim: int = EMBEDDING_DIM) -> list[float]:
     features: list[tuple[str, float]] = []
     for w in words:
         features.append((f"w:{w}", 2.0))
-        for part in _expand_identifier_tokens(w):
-            features.append((f"p:{part}", 1.5))
+        features.extend((f"p:{part}", 1.5) for part in _expand_identifier_tokens(w))
         padded = f"<{w}>"
-        for i in range(max(0, len(padded) - 2)):
-            features.append((f"g:{padded[i : i + 3]}", 0.5))
+        features.extend((f"g:{padded[i : i + 3]}", 0.5) for i in range(max(0, len(padded) - 2)))
 
     if not features:
         return vec
@@ -126,6 +126,9 @@ def _get_sentence_transformer(model_id: str = "all-MiniLM-L6-v2") -> EmbedderMod
     Returns:
         Instantiated or cached `SentenceTransformer` model.
 
+    Raises:
+        RuntimeError: If `SentenceTransformer` is unavailable.
+
     """
     cache_key = make_model_cache_key(model_id, backend_name="rag", factories=(SentenceTransformer,))
     cached = _SENTENCE_TRANSFORMER_CACHE.get_model(cache_key)
@@ -139,7 +142,7 @@ def _get_sentence_transformer(model_id: str = "all-MiniLM-L6-v2") -> EmbedderMod
 
 
 def _clean_identifier(identifier: str) -> str:
-    """Strip surrounding quotes or brackets from a SQL identifier.
+    """Strip surrounding quotes or brackets and unescape doubled delimiters from a SQL identifier.
 
     Args:
         identifier: The raw SQL identifier.
@@ -148,7 +151,14 @@ def _clean_identifier(identifier: str) -> str:
         The unquoted identifier string.
 
     """
-    return identifier.strip("\"`'[]")
+    stripped = identifier.strip()
+    if len(stripped) >= 2 and stripped[0] == '"' and stripped[-1] == '"':
+        return stripped[1:-1].replace('""', '"')
+    if len(stripped) >= 2 and stripped[0] == "`" and stripped[-1] == "`":
+        return stripped[1:-1].replace("``", "`")
+    if len(stripped) >= 2 and stripped[0] == "[" and stripped[-1] == "]":
+        return stripped[1:-1].replace("]]", "]")
+    return stripped.strip("\"`'[]")
 
 
 def extract_schema_entities(ddl: str, *, strict: bool = False) -> dict[str, list[str]]:
@@ -169,16 +179,20 @@ def extract_schema_entities(ddl: str, *, strict: bool = False) -> dict[str, list
         SchemaExtractionError: If `strict=True` and unbalanced parentheses are encountered.
 
     """
-    cleaned_ddl = strip_sql_comments(ddl)
+    segments = scan_sql_segments(ddl)
+    masked_ddl = "".join(
+        " " * len(seg.text) if seg.kind in {"comment", "literal", "unclosed_comment", "unclosed_quote"} else seg.text
+        for seg in segments
+    )
     schema: dict[str, list[str]] = {}
-    ident_pat = r'(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|[a-zA-Z0-9_]+)'
+    ident_pat = r'(?:"(?:[^"]|"")+"|`(?:[^`]|``)+`|\[(?:[^\]]|\]\])+\]|[a-zA-Z0-9_]+)'
     pattern = re.compile(
-        rf"CREATE\s+(?:(?:OR\s+REPLACE|TEMPORARY|TEMP|MATERIALIZED)\s+)*(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:{ident_pat}\.)*({ident_pat})\s*\(",
+        rf"CREATE\s+(?:(?:OR\s+REPLACE|TEMPORARY|TEMP|MATERIALIZED)\s+)*(?:TABLE|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:{ident_pat}\s*\.\s*)*({ident_pat})\s*\(",
         re.IGNORECASE,
     )
     pos = 0
     while True:
-        match = pattern.search(cleaned_ddl, pos)
+        match = pattern.search(masked_ddl, pos)
         if not match:
             break
         raw_table_name = match.group(1)
@@ -187,15 +201,15 @@ def extract_schema_entities(ddl: str, *, strict: bool = False) -> dict[str, list
         start_idx = match.end()
         depth = 1
         i = start_idx
-        while i < len(cleaned_ddl) and depth > 0:
-            if cleaned_ddl[i] == "(":
+        while i < len(masked_ddl) and depth > 0:
+            if masked_ddl[i] == "(":
                 depth += 1
-            elif cleaned_ddl[i] == ")":
+            elif masked_ddl[i] == ")":
                 depth -= 1
             i += 1
         if depth > 0 and strict:
             raise SchemaExtractionError(f"Unbalanced parentheses in CREATE TABLE '{table_name}'")
-        columns_block = cleaned_ddl[start_idx : i - 1]
+        columns_block = masked_ddl[start_idx : i - 1]
         pos = i
 
         raw_cols: list[str] = []
@@ -217,7 +231,7 @@ def extract_schema_entities(ddl: str, *, strict: bool = False) -> dict[str, list
             raw_cols.append("".join(cur).strip())
 
         ignored_keywords = ("PRIMARY KEY", "FOREIGN KEY", "CONSTRAINT", "UNIQUE", "CHECK", "INDEX")
-        col_pattern = re.compile(r'^(?:"([^"]+)"|`([^`]+)`|\[([^\]]+)\]|([a-zA-Z0-9_]+))')
+        col_pattern = re.compile(r'^(?:"((?:[^"]|"")+)"|`((?:[^`]|``)+)`|\[((?:[^\]]|\]\])+)\]|([a-zA-Z0-9_]+))')
 
         for col_def in raw_cols:
             c = col_def.strip()
@@ -229,6 +243,7 @@ def extract_schema_entities(ddl: str, *, strict: bool = False) -> dict[str, list
             col_match = col_pattern.match(c)
             if col_match:
                 col_name = next(g for g in col_match.groups() if g is not None)
+                col_name = col_name.replace('""', '"').replace("``", "`").replace("]]", "]")
                 schema[table_name].append(col_name)
 
     return schema
@@ -394,7 +409,7 @@ def _semantic_search(
         table_docs = [f"Table {t} with columns: {', '.join(schema[t])}" for t in table_names]
 
         schema_key = hashlib.sha256(";;".join(table_docs).encode()).hexdigest()
-        _SCHEMA_EMBEDDING_CACHE.maxsize = MAX_SCHEMA_CACHE_SIZE
+        _SCHEMA_EMBEDDING_CACHE.set_maxsize(MAX_SCHEMA_CACHE_SIZE)
         cached_embeddings = _SCHEMA_EMBEDDING_CACHE.get_model(schema_key)
         if cached_embeddings is not None:
             table_embeddings = cached_embeddings
@@ -405,7 +420,9 @@ def _semantic_search(
         prompt_embedding = model.encode([prompt])
         similarities = cosine_similarity(prompt_embedding, table_embeddings)[0]
         top_indices = list(similarities.argsort())[-top_k_tables:][::-1]
-        relevant_tables: list[str] = [table_names[int(i)] for i in top_indices if float(similarities[int(i)]) > min_similarity]
+        relevant_tables: list[str] = [
+            table_names[int(i)] for i in top_indices if float(similarities[int(i)]) > min_similarity
+        ]
         if not relevant_tables:
             relevant_tables = table_names[:top_k_tables]
     except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
@@ -433,7 +450,11 @@ def retrieve_relevant_schema(prompt: str, schema: dict[str, list[str]], top_k_ta
     table_names = list(schema.keys())
     if not table_names:
         return ""
-    relevant_tables = _semantic_search(prompt, schema, table_names, top_k_tables) if SentenceTransformer is not None and cosine_similarity is not None else _keyword_search(prompt, schema, top_k_tables)
+    relevant_tables = (
+        _semantic_search(prompt, schema, table_names, top_k_tables)
+        if SentenceTransformer is not None and cosine_similarity is not None
+        else _keyword_search(prompt, schema, top_k_tables)
+    )
     context_lines = ["-- Relevant Schema Context:"]
     for table in relevant_tables:
         cols = ", ".join(schema[table])

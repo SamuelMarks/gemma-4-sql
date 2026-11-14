@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import ClassVar, Self
+
 from gemma_4_sql.sdk.protocols import BackendProtocol
 from gemma_4_sql.type_hints import (
     BenchmarkResultDict,
@@ -45,6 +47,7 @@ class ModuleDelegatedBackend(BackendProtocol):
     serve_module: ServeSubmoduleProtocol
     benchmark_module: BenchmarkSubmoduleProtocol
     trainer_name: str = ""
+    uses_backend_alias: ClassVar[bool] = False
 
     def __init__(self, backend_alias: str | None = None) -> None:
         """Initialize the backend adapter with an optional backend alias.
@@ -54,6 +57,21 @@ class ModuleDelegatedBackend(BackendProtocol):
 
         """
         self.backend_alias = backend_alias
+
+    @classmethod
+    def from_alias(cls, alias: str) -> Self:
+        """Instantiate the adapter for the registered backend entry-point `alias`.
+
+        Args:
+            alias: Registered backend entry-point name.
+
+        Returns:
+            Configured adapter instance.
+
+        """
+        if cls.uses_backend_alias and "_" in alias:
+            return cls(backend_alias=alias)
+        return cls()
 
     def _inject_alias(self, kwargs: dict[str, JSONValue]) -> dict[str, JSONValue]:
         """Inject `backend_alias` into `kwargs` if configured and not already present.
@@ -124,7 +142,9 @@ class ModuleDelegatedBackend(BackendProtocol):
         """
         return self.export_module.export_model(model_name, export_path, **self._inject_alias(kwargs))
 
-    def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> LogMetricsResultDict:
+    def log_metrics(
+        self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue
+    ) -> LogMetricsResultDict:
         """Log training and evaluation metrics.
 
         Args:
@@ -162,7 +182,9 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing adapter configuration status.
 
         """
-        return self.peft_module.apply_lora(model_name, target_modules, lora_r, lora_alpha, lora_dropout, **self._inject_alias(kwargs))
+        return self.peft_module.apply_lora(
+            model_name, target_modules, lora_r, lora_alpha, lora_dropout, **self._inject_alias(kwargs)
+        )
 
     def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> QuantizeResultDict:
         """Quantize model weights for reduced memory footprint.
@@ -199,7 +221,9 @@ class ModuleDelegatedBackend(BackendProtocol):
             Dictionary containing generated SQL and confidence metrics.
 
         """
-        return self.inference_module.generate_sql(model_name, prompt, beam_width, max_length, **self._inject_alias(kwargs))
+        return self.inference_module.generate_sql(
+            model_name, prompt, beam_width, max_length, **self._inject_alias(kwargs)
+        )
 
     def serve_model(
         self,

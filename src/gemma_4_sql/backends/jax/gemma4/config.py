@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
-import jax.numpy as jnp
 from jax.sharding import PartitionSpec
 
 from gemma_4_sql.backends.common_gemma4_config import (
@@ -18,8 +17,10 @@ from gemma_4_sql.backends.common_gemma4_config import (
     BaseVisionConfigFields,
     get_gemma4_preset_spec,
 )
+from gemma_4_sql.backends.jax._protocols import JaxConcreteDType
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
-type JaxDTypeLike = jnp.dtype | type[jnp.generic] | str
+type JaxDTypeLike = JaxConcreteDType | str
 
 
 @dataclass(frozen=True)
@@ -173,7 +174,9 @@ class ModelConfig(BaseGemma4ConfigFields):
             Constructed `ModelConfig` instance.
 
         """
-        shd = ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else ShardConfig.no_sharding()
+        shd = (
+            ShardConfig.default(use_fsdp=use_fsdp, use_tp=use_tp) if (use_fsdp or use_tp) else ShardConfig.no_sharding()
+        )
         cfg = cls() if spec is None else super()._from_spec(spec)
         cfg.shd_cfg = shd
         return cfg
@@ -267,7 +270,8 @@ class ModelConfig(BaseGemma4ConfigFields):
         """Resolve a `ModelConfig` preset from a model identifier string.
 
         Args:
-            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`, `'gemma-4-26B-A4B'`, `'gemma-4-31B'`, `'gemma-4-tiny'`).
+            model_name: Target model name (e.g., `'google/gemma-4-E2B'`, `'gemma-4-E4B'`,
+                `'gemma-4-26B-A4B'`, `'gemma-4-31B'`, `'gemma-4-tiny'`).
             use_fsdp: Whether to enable FSDP sharding.
             use_tp: Whether to enable tensor-parallel sharding.
 

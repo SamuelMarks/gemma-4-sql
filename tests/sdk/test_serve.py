@@ -2,33 +2,39 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import gemma_4_sql.backends.pytorch.serve as pt_serve
 from gemma_4_sql.exceptions import ConfigurationError, DependencyMissingError
-from gemma_4_sql.sdk.serve import serve_model
+from gemma_4_sql.sdk.serve import serve_model, serve_model_handle
 from tests.conftest import requires_jax
 from tests.utils.test_utils import RecordingBackendDouble
 
 
 @requires_jax
 def test_serve_model_jax_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify serve_model initializes a working FastAPI continuous batching app for JAX."""
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
+    """Verify serve_model_handle creates a FastAPI continuous batching app with JSON-serializable metadata."""
+    from gemma_4_sql.backends.common_serve import ServeApplicationBundle
+    from gemma_4_sql.type_hints import FastAPIAppProtocol
+    from tests.utils.test_utils import make_test_client
 
     double = RecordingBackendDouble("jax")
     monkeypatch.setattr("gemma_4_sql.backends.jax.inference.generate_sql", double.generate_sql)
-    res = serve_model("foo", port=8123, max_batch_size=16, backend="jax")
+    handle = serve_model_handle("foo", port=8123, max_batch_size=16, backend="jax")
+    res = handle.metadata
+    assert json.loads(json.dumps(res))["model"] == "foo"
     assert res["backend"] == "jax"
     assert res["model"] == "foo"
     assert res["port"] == 8123
     assert res["max_batch_size"] == 16
     assert res.get("mode") == "continuous_batching"
-    app = res.get("app")
-    assert isinstance(app, FastAPI)
+    app = handle.app
+    assert isinstance(app, ServeApplicationBundle)
+    assert isinstance(app, FastAPIAppProtocol)
 
-    with TestClient(app) as client:
+    with make_test_client(app) as client:
         health = client.get("/health")
         assert health.status_code == 200
         assert health.json()["status"] == "healthy"
@@ -40,7 +46,10 @@ def test_serve_model_jax_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
 
         models = client.get("/v1/models")
         assert models.status_code == 200
-        assert models.json()["data"][0]["id"] == "foo"
+        models_data = models.json()["data"]
+        assert isinstance(models_data, list)
+        assert isinstance(models_data[0], dict)
+        assert models_data[0]["id"] == "foo"
 
         gen = client.post("/generate", json={"prompt": "Count rows"})
         assert gen.status_code == 200

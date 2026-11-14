@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import io
 import re
 import subprocess
@@ -9,20 +10,47 @@ import sys
 from collections.abc import Sequence
 from contextlib import redirect_stdout, suppress
 from pathlib import Path
-from typing import Protocol
-
-from gemma_4_sql.backends.lazy_loader import optional_attr
+from typing import Protocol, runtime_checkable
 
 
+@runtime_checkable
 class _InterrogateMainProtocol(Protocol):
     """Protocol for `interrogate.cli.main` callable."""
 
     def __call__(self, args: Sequence[str], /) -> None:
-        """Execute interrogate CLI with command-line arguments."""
+        """Execute interrogate CLI with command-line arguments.
+
+        Args:
+            args: Command-line arguments passed to `interrogate`.
+
+        """
         ...
 
 
-interrogate_main: _InterrogateMainProtocol | None = optional_attr("interrogate.cli", "main", _InterrogateMainProtocol)
+@runtime_checkable
+class _InterrogateCliModuleProtocol(Protocol):
+    """Protocol for `interrogate.cli` module exposing `main`."""
+
+    main: _InterrogateMainProtocol
+
+
+def _load_interrogate_main() -> _InterrogateMainProtocol | None:
+    """Import `interrogate.cli.main` lazily without dynamic `getattr` casts.
+
+    Returns:
+        `interrogate.cli.main` callable when available, otherwise `None`.
+
+    """
+    try:
+        mod = importlib.import_module("interrogate.cli")
+    except ImportError:
+        return None
+    if isinstance(mod, _InterrogateCliModuleProtocol):
+        return mod.main
+    return None
+
+
+interrogate_main: _InterrogateMainProtocol | None = _load_interrogate_main()
 
 
 def get_color(pct: int) -> str:
@@ -63,8 +91,10 @@ def _run_checked_command(cmd: Sequence[str], label: str) -> str:
     """
     res = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if res.returncode != 0:
-        nl = chr(10)
-        print(f"[update_badges] WARNING: {label} exited with code {res.returncode}:{nl}{res.stdout}{nl}{res.stderr}", flush=True)
+        warning_msg = f"""[update_badges] WARNING: {label} exited with code {res.returncode}:
+{res.stdout}
+{res.stderr}"""
+        print(warning_msg, flush=True)
     return res.stdout
 
 
@@ -81,22 +111,22 @@ def resolve_coverage_output(argv: Sequence[str] | None = None) -> str:
     args = argv if argv is not None else sys.argv
     cov_path = Path(".coverage")
     tox_cov_path = Path(".tox/.coverage")
-    if tox_cov_path.exists() and "--force-run" not in args:
-        print("[update_badges] Reading existing .tox/.coverage...", flush=True)
-        return _run_checked_command(
-            [sys.executable, "-m", "coverage", "report", "--keep-combined", "--data-file=.tox/.coverage"],
-            "coverage report (.tox/.coverage)",
-        )
     if cov_path.exists() and "--force-run" not in args:
         print("[update_badges] Reading existing .coverage...", flush=True)
         return _run_checked_command(
             [sys.executable, "-m", "coverage", "report"],
             "coverage report (.coverage)",
         )
+    if tox_cov_path.exists() and "--force-run" not in args:
+        print("[update_badges] Reading existing .tox/.coverage...", flush=True)
+        return _run_checked_command(
+            [sys.executable, "-m", "coverage", "report", "--keep-combined", "--data-file=.tox/.coverage"],
+            "coverage report (.tox/.coverage)",
+        )
 
     if cov_path.exists():
         cov_path.unlink()
-    for extra_cov in Path(".").glob(".coverage.*"):
+    for extra_cov in Path().glob(".coverage.*"):
         extra_cov.unlink()
 
     out = ""
@@ -109,6 +139,7 @@ def resolve_coverage_output(argv: Sequence[str] | None = None) -> str:
             "--cov=src/gemma_4_sql",
             "--cov-branch",
             "--cov-report=term",
+            "--cov-fail-under=0",
             "tests/core/",
             "tests/sdk/",
             "tests/cli/",
@@ -126,6 +157,7 @@ def resolve_coverage_output(argv: Sequence[str] | None = None) -> str:
             "--cov-branch",
             "--cov-append",
             "--cov-report=term",
+            "--cov-fail-under=0",
             "tests/backends/pytorch/",
             "tests/backends/keras/",
         ],
@@ -141,6 +173,7 @@ def resolve_coverage_output(argv: Sequence[str] | None = None) -> str:
             "--cov-branch",
             "--cov-append",
             "--cov-report=term",
+            "--cov-fail-under=0",
             "tests/backends/jax/",
             "tests/backends/maxtext/",
         ],
@@ -157,6 +190,7 @@ def resolve_coverage_output(argv: Sequence[str] | None = None) -> str:
             "--cov-branch",
             "--cov-append",
             "--cov-report=term",
+            "--cov-fail-under=0",
             "tests/backends/mlx/",
             *backend_root_tests,
         ],
@@ -222,25 +256,23 @@ def update_readme_badges(readme_path: Path, cov_pct: int, doc_pct: int) -> bool:
     return False
 
 
-def main() -> None:
-    """Compute test and docstring coverage percentages and update README.md badges."""
-    cov_out_str = resolve_coverage_output()
+def main(argv: Sequence[str] | None = None) -> int:
+    """Compute test and docstring coverage percentages and update README.md badges.
+
+    Args:
+        argv: Optional sequence of command-line arguments.
+
+    Returns:
+        Exit code `0` upon successful badge evaluation.
+
+    """
+    cov_out_str = resolve_coverage_output(argv)
     print("[update_badges] Calculating coverage and updating badges...", flush=True)
     cov_pct = parse_coverage_percentage(cov_out_str)
     doc_pct = compute_doc_coverage_percentage()
     update_readme_badges(Path("README.md"), cov_pct, doc_pct)
-    sys.exit(0)
+    return 0
 
 
-def run_if_main(module_name: str) -> None:
-    """Execute `main()` when invoked as the entry-point script.
-
-    Args:
-        module_name: Value of `__name__` for the calling module.
-
-    """
-    if module_name == "__main__":
-        main()
-
-
-run_if_main(__name__)
+if __name__ == "__main__":
+    sys.exit(main())

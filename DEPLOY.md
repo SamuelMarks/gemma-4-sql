@@ -98,31 +98,31 @@ gemma-4-sql etl pretrain --dataset my-custom-dataset --batch-size 128 --backend 
 
 ### Step 2: Run Continuous Pretraining
 
-Use the `pretrain` command. This loads existing weights and continues the learning process.
+Use the `pretrain` command with one of the official Gemma 4 foundation presets (`google/gemma-4-E2B`, `google/gemma-4-E4B`, `google/gemma-4-26B-A4B`, `google/gemma-4-31B`, or their `-it` variants). This loads existing weights and continues the learning process.
 
 **JAX (Flax NNX):**
 ```bash
-gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend jax
+gemma-4-sql pretrain --model google/gemma-4-E4B --dataset my-custom-dataset --backend jax
 ```
 
 **MaxText (AI-Hypercomputer):**
 ```bash
-gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend maxtext
+gemma-4-sql pretrain --model google/gemma-4-E4B --dataset my-custom-dataset --backend maxtext
 ```
 
 **Keras:**
 ```bash
-gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend keras
+gemma-4-sql pretrain --model google/gemma-4-E4B --dataset my-custom-dataset --backend keras
 ```
 
 **PyTorch:**
 ```bash
-gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend pytorch
+gemma-4-sql pretrain --model google/gemma-4-E4B --dataset my-custom-dataset --backend pytorch
 ```
 
 **MLX (Apple Silicon):**
 ```bash
-gemma-4-sql pretrain --model google/gemma-4 --dataset my-custom-dataset --backend mlx
+gemma-4-sql pretrain --model google/gemma-4-E4B --dataset my-custom-dataset --backend mlx
 ```
 
 ---
@@ -245,7 +245,20 @@ gemma-4-sql benchmark --model my-sft-gemma-4 --hardware cpu --batch-size 1 --bac
   "batch_size": 128,
   "tokens_per_sec": 4500.0,
   "latency_ms": 10.1,
-  "memory_mb": 16384.0
+  "memory_mb": 16384.0,
+  "rss_memory_mb": 512.4,
+  "status": "success",
+  "status_code": "success",
+  "latency_stats": {
+    "mean_ms": 10.1,
+    "std_ms": 0.4,
+    "min_ms": 9.6,
+    "max_ms": 10.8,
+    "p50_ms": 10.0,
+    "p95_ms": 10.7,
+    "p99_ms": 10.8,
+    "num_samples": 10
+  }
 }
 ```
 

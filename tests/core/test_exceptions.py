@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 from gemma_4_sql.exceptions import (
+    OPERATIONAL_EXCEPTIONS,
+    AgentExecutionError,
     BenchmarkError,
     ChatError,
     ConfigurationError,
@@ -51,7 +53,7 @@ def test_gemma_sql_error_base() -> None:
 
 
 def test_dependency_missing_error() -> None:
-    """Verify DependencyMissingError inherits from GemmaSQLError and ImportError."""
+    """Verify DependencyMissingError inherits strictly from GemmaSQLError and ImportError (not RuntimeError)."""
     err = DependencyMissingError(
         "torch is required",
         dependency_name="torch",
@@ -66,10 +68,12 @@ def test_dependency_missing_error() -> None:
     assert err.operation == "train"
     assert isinstance(err, GemmaSQLError)
     assert isinstance(err, ImportError)
+    assert not isinstance(err, RuntimeError)
+    assert not isinstance(err, ValueError)
 
 
 def test_unsupported_quantization_method_error() -> None:
-    """Verify UnsupportedQuantizationMethodError stores method and supported_methods."""
+    """Verify UnsupportedQuantizationMethodError stores method and supported_methods and inherits ValueError only."""
     err = UnsupportedQuantizationMethodError(
         "fp4 not supported",
         method="fp4",
@@ -85,41 +89,53 @@ def test_unsupported_quantization_method_error() -> None:
     assert err.operation == "quantize"
     assert isinstance(err, GemmaSQLError)
     assert isinstance(err, ValueError)
+    assert not isinstance(err, RuntimeError)
 
 
 @pytest.mark.parametrize(
-    ("exc_cls", "std_parent"),
+    ("exc_cls", "std_parent", "forbidden_parent"),
     [
-        (InferenceError, RuntimeError),
-        (ChatError, InferenceError),
-        (ExportError, RuntimeError),
-        (TrainingError, RuntimeError),
-        (PEFTError, TrainingError),
-        (ETLError, RuntimeError),
-        (EvaluationError, ValueError),
-        (ServingError, RuntimeError),
-        (BenchmarkError, RuntimeError),
-        (QuantizationError, RuntimeError),
-        (DatabaseExecutionError, RuntimeError),
-        (SQLSafetyViolationError, PermissionError),
-        (SchemaExtractionError, ValueError),
-        (ConfigurationError, ValueError),
-        (MultimodalProcessingError, ValueError),
+        (InferenceError, RuntimeError, ValueError),
+        (ChatError, InferenceError, ValueError),
+        (ExportError, RuntimeError, ValueError),
+        (TrainingError, RuntimeError, ValueError),
+        (PEFTError, TrainingError, ValueError),
+        (ETLError, RuntimeError, ValueError),
+        (EvaluationError, RuntimeError, ValueError),
+        (AgentExecutionError, RuntimeError, ValueError),
+        (ServingError, RuntimeError, ValueError),
+        (BenchmarkError, RuntimeError, ValueError),
+        (QuantizationError, RuntimeError, ValueError),
+        (DatabaseExecutionError, RuntimeError, ValueError),
+        (MultimodalProcessingError, RuntimeError, ValueError),
+        (SQLSafetyViolationError, ValueError, RuntimeError),
+        (SchemaExtractionError, ValueError, RuntimeError),
+        (ConfigurationError, ValueError, RuntimeError),
     ],
 )
 def test_domain_exception_inheritance(
     exc_cls: type[GemmaSQLError],
     std_parent: type[Exception],
+    forbidden_parent: type[Exception],
 ) -> None:
-    """Verify domain exceptions inherit from both GemmaSQLError and standard exception types."""
+    """Verify domain exceptions inherit cleanly without RuntimeError/ValueError multiple-inheritance ambiguity."""
     err = exc_cls("domain error", backend="keras", model_name="gemma-4-E2B")
     assert str(err) == "domain error"
     assert err.backend == "keras"
     assert err.model_name == "gemma-4-E2B"
     assert isinstance(err, GemmaSQLError)
     assert isinstance(err, std_parent)
+    assert not isinstance(err, forbidden_parent)
     if exc_cls is SQLSafetyViolationError:
-        assert isinstance(err, DatabaseExecutionError)
+        assert isinstance(err, PermissionError)
+
+
+def test_operational_exceptions_exclude_type_and_attribute_error() -> None:
+    """Verify OPERATIONAL_EXCEPTIONS excludes AttributeError and TypeError so programming defects propagate."""
+    assert AttributeError not in OPERATIONAL_EXCEPTIONS
+    assert TypeError not in OPERATIONAL_EXCEPTIONS
+    assert not issubclass(AttributeError, OPERATIONAL_EXCEPTIONS)
+    assert not issubclass(TypeError, OPERATIONAL_EXCEPTIONS)
 
 
 def test_structured_operation_exceptions() -> None:
@@ -157,6 +173,9 @@ def test_structured_operation_exceptions() -> None:
     eval_err = EvaluationError("eval boom", backend="jax", model_name="gemma-4-E2B")
     assert eval_err.operation == "evaluate"
 
+    agent_err = AgentExecutionError("agent boom", backend="jax", model_name="gemma-4-E2B")
+    assert agent_err.operation == "agent"
+
     peft_err = PEFTError("peft boom", backend="jax", model_name="gemma-4-E2B")
     assert peft_err.operation == "peft"
 
@@ -170,6 +189,7 @@ def test_is_failed_status() -> None:
     assert is_failed_status("unsupported_method_fp4") is True
     assert is_failed_status("missing_tensorboard") is True
     assert is_failed_status("completed") is False
+    assert is_failed_status(["not", "a", "mapping"]) is False
     assert is_failed_status({"status": "failed: err"}) is True
     assert is_failed_status({"status": "failed: err", "status_code": "completed"}) is True
     assert is_failed_status({"status": ExecutionStatus.ERROR}) is True
@@ -201,9 +221,12 @@ def test_resolve_raise_on_error() -> None:
     assert resolve_raise_on_error(cfg_false) is False
 
     class _OnlyExtraConfig:
-        """Config carrying only extra_kwargs without raise_on_error property."""
+        """Stub implementing ExtraKwargsCarrierProtocol with non-mapping extra_kwargs."""
 
-        extra_kwargs: dict[str, str | int | float | bool | None] | None = None
+        @property
+        def extra_kwargs(self) -> None:
+            """Empty extra_kwargs property."""
+            return
 
     assert resolve_raise_on_error(_OnlyExtraConfig()) is False
     assert resolve_raise_on_error("plain_string") is False

@@ -154,12 +154,14 @@ def test_run_dpo_keras(monkeypatch: pytest.MonkeyPatch) -> None:
     assert res["final_loss"] == pytest.approx(0.15)
 
 
+@pytest.mark.jax
 def test_run_dpo_jax_real_tiny_execution(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `run_dpo` executes a real 1-step JAX DPO preference update on a tiny Gemma 4 model."""
+    pytest.importorskip("jax")
     import jax
-    import jax.numpy as jnp
 
     import gemma_4_sql.backends.jax.dpo as jax_dpo
+    from gemma_4_sql.backends.jax.gemma4._jnp import jnp
     from gemma_4_sql.type_hints import ETLConfig
 
     def _jax_dpo_loader(_cfg: ETLConfig) -> dict[str, list[dict[str, jax.Array]]]:

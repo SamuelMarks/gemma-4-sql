@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import math
+import sys
 from collections.abc import Callable, Sequence
-from typing import Protocol, TypeGuard, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.exceptions import (
     OPERATIONAL_EXCEPTIONS,
@@ -22,8 +22,9 @@ from gemma_4_sql.type_hints import (
     DTypeProtocol,
     DTypeSpec,
     JSONValue,
+    ModelConfigProtocol,
     ModelType,
-    QuantizableModelProtocol,
+    QuantizableModelType,
     QuantizeResultDict,
     register_quantized_artifact,
 )
@@ -47,20 +48,19 @@ class QuantizableConfigHolderProtocol(Protocol):
     quantization_config: JSONValue | None
 
 
+@runtime_checkable
 class ModelWithQuantizableConfigProtocol(Protocol):
-    """Protocol for a model exposing a `.config` attribute conforming to `QuantizableConfigHolderProtocol`."""
+    """Protocol for a model exposing a `.config` attribute."""
 
     @property
-    def config(self) -> QuantizableConfigHolderProtocol:
-        """Provide the model's configuration object."""
+    def config(self) -> QuantizableConfigHolderProtocol | ModelConfigProtocol | None:
+        """Provide the model's configuration object.
+
+        Returns:
+            Quantizable or architectural configuration holder object, or `None`.
+
+        """
         ...
-
-
-def _is_config_model(
-    model: ModelType | QuantizableModelProtocol | ModelWithQuantizableConfigProtocol | None,
-) -> TypeGuard[ModelWithQuantizableConfigProtocol]:
-    """Narrow `model` to `ModelWithQuantizableConfigProtocol`."""
-    return model is not None and not isinstance(model, (str, int, float, bool))
 
 
 type BitsAndBytesFactory = BitsAndBytesConfigProtocol | Callable[..., JSONValue] | type
@@ -71,7 +71,7 @@ def apply_bits_and_bytes_quantization(
     bits_and_bytes_config_cls: BitsAndBytesFactory | None,
     float16_dtype: DTypeProtocol | DTypeSpec = None,
     *,
-    model: ModelType | QuantizableModelProtocol | ModelWithQuantizableConfigProtocol | None = None,
+    model: ModelType | QuantizableModelType | ModelWithQuantizableConfigProtocol | None = None,
     llm_int8_threshold: float = 6.0,
     llm_int8_skip_modules: list[str] | None = None,
     bnb_4bit_quant_type: str = "nf4",
@@ -101,7 +101,10 @@ def apply_bits_and_bytes_quantization(
 
     """
     if bits_and_bytes_config_cls is None:
-        msg = "bitsandbytes and transformers are required for BitsAndBytes quantization. Install with `pip install bitsandbytes transformers`."
+        msg = (
+            "bitsandbytes and transformers are required for BitsAndBytes quantization. "
+            "Install with `pip install bitsandbytes transformers`."
+        )
         raise DependencyMissingError(msg, dependency_name="bitsandbytes", backend="pytorch")
 
     if method == "int8":
@@ -134,8 +137,10 @@ def apply_bits_and_bytes_quantization(
             backend="pytorch",
         )
 
-    if _is_config_model(model):
-        with contextlib.suppress(AttributeError, TypeError):
+    if model is not None:
+        if isinstance(model, ModelWithQuantizableConfigProtocol) and isinstance(
+            model.config, QuantizableConfigHolderProtocol
+        ):
             model.config.quantization_config = bnb_config
         register_quantized_artifact(model, method=method)
 
@@ -169,6 +174,7 @@ def quantize_model_wrapper(
     Raises:
         DependencyMissingError: If raised by `apply_fn`.
         UnsupportedQuantizationMethodError: If raised by `apply_fn`.
+        ConfigurationError: If raised by `apply_fn`.
         QuantizationError: If `raise_on_error` is True and `apply_fn` fails.
 
     """
@@ -241,10 +247,14 @@ def compute_awq_channel_scales(
     out_dim = len(weight_2d)
     in_dim = len(weight_2d[0])
 
-    w_col_mean = [max(1e-5, sum(abs(float(weight_2d[r][c])) for r in range(out_dim)) / float(out_dim)) for c in range(in_dim)]
+    w_col_mean = [
+        max(1e-5, sum(abs(float(weight_2d[r][c])) for r in range(out_dim)) / float(out_dim)) for c in range(in_dim)
+    ]
     if activations_2d and len(activations_2d) > 0 and len(activations_2d[0]) == in_dim:
         n_tok = len(activations_2d)
-        x_col_mean = [max(1e-5, sum(abs(float(activations_2d[t][c])) for t in range(n_tok)) / float(n_tok)) for c in range(in_dim)]
+        x_col_mean = [
+            max(1e-5, sum(abs(float(activations_2d[t][c])) for t in range(n_tok)) / float(n_tok)) for c in range(in_dim)
+        ]
     else:
         x_col_mean = list(w_col_mean)
 
@@ -260,7 +270,7 @@ def compute_awq_channel_scales(
         total_sq_err = 0.0
         for r in range(out_dim):
             row_scaled = [float(weight_2d[r][c]) * scales[c] for c in range(in_dim)]
-            row_max = max(1e-5, max(abs(v) for v in row_scaled))
+            row_max = max(1e-05, *(abs(v) for v in row_scaled))
             step = row_max / q_max
             for c in range(in_dim):
                 q_val = max(-8.0, min(7.0, round(row_scaled[c] / step))) * step
@@ -276,8 +286,8 @@ def compute_awq_channel_scales(
     return best_scales
 
 
-def _invert_spd_matrix(matrix: list[list[float]]) -> list[list[float]]:
-    """Invert a symmetric positive-definite matrix using Gauss-Jordan elimination with diagonal fallback.
+def _invert_with_partial_pivoting(matrix: list[list[float]]) -> list[list[float]]:
+    """Invert a square matrix via Gauss-Jordan elimination with partial row pivoting.
 
     Args:
         matrix: Square 2D matrix of shape `(n, n)`.
@@ -289,8 +299,12 @@ def _invert_spd_matrix(matrix: list[list[float]]) -> list[list[float]]:
     n = len(matrix)
     aug = [[float(matrix[i][j]) for j in range(n)] + [1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
     for col in range(n):
-        pivot = max(abs(aug[col][col]), 1e-8)
-        inv_pivot = 1.0 / pivot if aug[col][col] >= 0.0 else -1.0 / pivot
+        pivot_row = max(range(col, n), key=lambda r: abs(aug[r][col]))
+        if pivot_row != col:
+            aug[col], aug[pivot_row] = aug[pivot_row], aug[col]
+        raw_pivot = aug[col][col]
+        signed_pivot = raw_pivot if abs(raw_pivot) >= 1e-8 else (1e-8 if raw_pivot >= 0.0 else -1e-8)
+        inv_pivot = 1.0 / signed_pivot
         for j in range(2 * n):
             aug[col][j] *= inv_pivot
         for row in range(n):
@@ -299,6 +313,173 @@ def _invert_spd_matrix(matrix: list[list[float]]) -> list[list[float]]:
                 for j in range(2 * n):
                     aug[row][j] -= factor * aug[col][j]
     return [row[n:] for row in aug]
+
+
+@runtime_checkable
+class _NativeIntScalarProtocol(Protocol):
+    """Protocol for scalar integer status tensors exposing `.item()`."""
+
+    def item(self) -> int | float | bool:
+        """Extract scalar integer status code.
+
+        Returns:
+            Status code (`0` when Cholesky factorization succeeded).
+
+        """
+        ...
+
+
+@runtime_checkable
+class _NativeMatrixTensorProtocol(Protocol):
+    """Protocol for 2D float tensors convertible back to nested Python float lists."""
+
+    def tolist(self) -> list[list[float]]:
+        """Convert 2D tensor into nested Python float lists.
+
+        Returns:
+            Nested 2D float list representation.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _NativeCholeskyLinalgProtocol(Protocol):
+    """Protocol for `torch.linalg` exposing `cholesky_ex`."""
+
+    def cholesky_ex(
+        self, a: _NativeMatrixTensorProtocol
+    ) -> tuple[_NativeMatrixTensorProtocol, _NativeIntScalarProtocol]:
+        """Compute Cholesky factor `L` and error status tensor without throwing on non-SPD input.
+
+        Args:
+            a: Symmetric 2D matrix tensor.
+
+        Returns:
+            Tuple of `(chol_factor, info_tensor)`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _NativeTorchCholeskyProtocol(Protocol):
+    """Protocol for `torch` module supporting float64 Cholesky matrix inversion."""
+
+    @property
+    def float64(self) -> DTypeProtocol:
+        """Provide 64-bit floating-point dtype.
+
+        Returns:
+            `torch.float64` dtype descriptor.
+
+        """
+        ...
+
+    @property
+    def linalg(self) -> _NativeCholeskyLinalgProtocol:
+        """Provide linear algebra namespace.
+
+        Returns:
+            `torch.linalg` namespace.
+
+        """
+        ...
+
+    def tensor(self, data: list[list[float]], *, dtype: DTypeProtocol) -> _NativeMatrixTensorProtocol:
+        """Construct a 2D tensor from nested float lists.
+
+        Args:
+            data: 2D nested float list.
+            dtype: Target floating-point dtype.
+
+        Returns:
+            2D float64 tensor.
+
+        """
+        ...
+
+    def cholesky_inverse(self, l_factor: _NativeMatrixTensorProtocol) -> _NativeMatrixTensorProtocol:
+        """Compute `A^{-1}` from lower-triangular Cholesky factor `L`.
+
+        Args:
+            l_factor: Lower-triangular Cholesky factor tensor.
+
+        Returns:
+            Symmetric inverse tensor `A^{-1}`.
+
+        """
+        ...
+
+
+def _try_native_spd_inverse(matrix: list[list[float]]) -> list[list[float]] | None:
+    """Attempt native `torch.linalg.cholesky_ex` + `cholesky_inverse` when `torch` is loaded and `n >= 8`.
+
+    Args:
+        matrix: Square 2D float matrix of shape `(n, n)`.
+
+    Returns:
+        Inverted `n x n` float matrix if native Cholesky succeeded, or `None` to fall back.
+
+    """
+    torch_mod = sys.modules.get("torch")
+    if not isinstance(torch_mod, _NativeTorchCholeskyProtocol):
+        return None
+    mat_t = torch_mod.tensor(matrix, dtype=torch_mod.float64)
+    chol_factor, info = torch_mod.linalg.cholesky_ex(mat_t)
+    if int(info.item()) != 0:
+        return None
+    inv_raw = torch_mod.cholesky_inverse(chol_factor).tolist()
+    return [[float(x) for x in row] for row in inv_raw]
+
+
+def _invert_spd_matrix(matrix: list[list[float]]) -> list[list[float]]:
+    """Invert a symmetric positive-definite Hessian matrix via native or pure-Python Cholesky `L @ L^T`.
+
+    Dispatches matrices with `n >= 8` to native `torch` LAPACK Cholesky inversion when available,
+    falling back to pure-Python Cholesky or partial-pivoted Gauss-Jordan elimination otherwise.
+
+    Args:
+        matrix: Square symmetric positive-definite 2D matrix of shape `(n, n)`.
+
+    Returns:
+        Inverse matrix `H^{-1}` of shape `(n, n)`.
+
+    """
+    n = len(matrix)
+    if n == 0:
+        return []
+    if n >= 8:
+        native_inv = _try_native_spd_inverse(matrix)
+        if native_inv is not None:
+            return native_inv
+    chol = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1):
+            acc = sum(chol[i][k] * chol[j][k] for k in range(j))
+            if i == j:
+                diag_val = float(matrix[i][i]) - acc
+                if diag_val <= 1e-12:
+                    return _invert_with_partial_pivoting(matrix)
+                chol[i][j] = math.sqrt(diag_val)
+            else:
+                chol[i][j] = (float(matrix[i][j]) - acc) / chol[j][j]
+
+    # Forward substitution to compute L^{-1} (lower triangular)
+    l_inv = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        l_inv[i][i] = 1.0 / chol[i][i]
+        for j in range(i):
+            l_inv[i][j] = -sum(chol[i][k] * l_inv[k][j] for k in range(j, i)) / chol[i][i]
+
+    # H^{-1} = (L^{-1})^T @ L^{-1}
+    h_inv = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i, n):
+            val = sum(l_inv[k][i] * l_inv[k][j] for k in range(j, n))
+            h_inv[i][j] = val
+            h_inv[j][i] = val
+    return h_inv
 
 
 def compute_gptq_compensated_weights(
@@ -326,7 +507,13 @@ def compute_gptq_compensated_weights(
     if activations_2d and len(activations_2d) > 0 and len(activations_2d[0]) == in_dim:
         n_tok = len(activations_2d)
         scale_factor = 2.0 / float(max(1, n_tok))
-        h = [[scale_factor * sum(float(activations_2d[t][i]) * float(activations_2d[t][j]) for t in range(n_tok)) for j in range(in_dim)] for i in range(in_dim)]
+        h = [
+            [
+                scale_factor * sum(float(activations_2d[t][i]) * float(activations_2d[t][j]) for t in range(n_tok))
+                for j in range(in_dim)
+            ]
+            for i in range(in_dim)
+        ]
     else:
         h = [[1.0 if i == j else 0.0 for j in range(in_dim)] for i in range(in_dim)]
 

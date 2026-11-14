@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 
 import jax
-import jax.numpy as jnp
 from flax import nnx
+
+from gemma_4_sql.backends.jax.gemma4._jnp import jnp
 
 from .config import AudioConfig
 from .layers import ConstVar, Gemma4ClippableLinear
@@ -23,7 +24,9 @@ class Gemma4AudioRelPositionalEncoding(nnx.Module):
 
         """
         self.hidden_size = config.hidden_size
-        self.context_size = config.attention_chunk_size + config.attention_context_left - 1 + config.attention_context_right
+        self.context_size = (
+            config.attention_chunk_size + config.attention_context_left - 1 + config.attention_context_right
+        )
         min_timescale = 1.0
         max_timescale = 10000.0
         num_timescales = self.hidden_size // 2
@@ -105,7 +108,9 @@ def rel_shift(x: jax.Array, context_size: int) -> jax.Array:
     return x.reshape((batch_size, num_heads, num_blocks, block_size, context_size))
 
 
-def compute_audio_attention_outputs(attn: Gemma4AudioAttention, qkv: tuple[jax.Array, jax.Array, jax.Array], pos_emb: jax.Array, mask: jax.Array | None) -> jax.Array:
+def compute_audio_attention_outputs(
+    attn: Gemma4AudioAttention, qkv: tuple[jax.Array, jax.Array, jax.Array], pos_emb: jax.Array, mask: jax.Array | None
+) -> jax.Array:
     """Compute the multi-head attention outputs for audio.
 
     Args:
@@ -173,9 +178,15 @@ class Gemma4AudioAttention(nnx.Module):
         self.softcap = config.attention_logit_cap
         self.invalid_logits_value = config.attention_invalid_logits_value
         hs = config.hidden_size
-        self.q_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
-        self.k_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
-        self.v_proj = Gemma4ClippableLinear(hs, self.num_heads * self.head_dim, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
+        self.q_proj = Gemma4ClippableLinear(
+            hs, self.num_heads * self.head_dim, use_clipped_linears=config.use_clipped_linears, rngs=rngs
+        )
+        self.k_proj = Gemma4ClippableLinear(
+            hs, self.num_heads * self.head_dim, use_clipped_linears=config.use_clipped_linears, rngs=rngs
+        )
+        self.v_proj = Gemma4ClippableLinear(
+            hs, self.num_heads * self.head_dim, use_clipped_linears=config.use_clipped_linears, rngs=rngs
+        )
         self.post = Gemma4ClippableLinear(hs, hs, use_clipped_linears=config.use_clipped_linears, rngs=rngs)
         self.relative_k_proj = nnx.Linear(hs, self.num_heads * self.head_dim, use_bias=False, rngs=rngs)
         self.per_dim_scale = nnx.Param(jnp.zeros(self.head_dim))

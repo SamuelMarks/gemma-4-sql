@@ -1,4 +1,4 @@
-"""Runtime-checkable protocols for gemma-4-sql training and inference backends."""
+"""Segregated, runtime-checkable capability protocols for gemma-4-sql backends."""
 
 from __future__ import annotations
 
@@ -23,14 +23,14 @@ from gemma_4_sql.type_hints import (
 
 
 @runtime_checkable
-class TrainingProtocol(Protocol):
-    """Training backend interface."""
+class TrainCapableProtocol(Protocol):
+    """Capability protocol for backends supporting supervised and pre-training loops."""
 
     def train_model(self, config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
         """Train a model according to training configuration.
 
         Args:
-            config: TrainingConfig specifying dataset, epochs, learning rate, and strategy.
+            config: `TrainingConfig` specifying dataset, epochs, learning rate, and strategy.
             **kwargs: Backend-specific execution overrides.
 
         Returns:
@@ -39,11 +39,16 @@ class TrainingProtocol(Protocol):
         """
         ...
 
+
+@runtime_checkable
+class DPOCapableProtocol(Protocol):
+    """Capability protocol for backends supporting Direct Preference Optimization (DPO)."""
+
     def run_dpo(self, config: DPOConfig, **kwargs: JSONValue) -> DPOResultDict:
         """Run Direct Preference Optimization (DPO).
 
         Args:
-            config: DPOConfig specifying dataset, model, beta, epochs, and learning rate.
+            config: `DPOConfig` specifying dataset, model, beta, epochs, and learning rate.
             **kwargs: Backend-specific execution overrides.
 
         Returns:
@@ -52,18 +57,28 @@ class TrainingProtocol(Protocol):
         """
         ...
 
+
+@runtime_checkable
+class ETLCapableProtocol(Protocol):
+    """Capability protocol for backends supporting ETL dataloader construction."""
+
     def build_dataloader(self, config: ETLConfig, **kwargs: JSONValue) -> DataloaderResultDict:
         """Construct ETL dataloader pipeline.
 
         Args:
-            config: ETLConfig specifying dataset name, split, batch size, and storage options.
-            **kwargs: Overrides for ETL configuration (e.g., duckdb_path, duckdb_table).
+            config: `ETLConfig` specifying dataset name, split, batch size, and storage options.
+            **kwargs: Overrides for ETL configuration (e.g., `duckdb_path`, `duckdb_table`).
 
         Returns:
             Dictionary containing dataloader objects and metadata.
 
         """
         ...
+
+
+@runtime_checkable
+class ExportCapableProtocol(Protocol):
+    """Capability protocol for backends supporting checkpoint / artifact export."""
 
     def export_model(self, model_name: str, export_path: str, **kwargs: JSONValue) -> ExportResultDict:
         """Export model weights and architecture definition.
@@ -79,7 +94,14 @@ class TrainingProtocol(Protocol):
         """
         ...
 
-    def log_metrics(self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue) -> LogMetricsResultDict:
+
+@runtime_checkable
+class MetricsLoggingProtocol(Protocol):
+    """Capability protocol for backends supporting training/evaluation metrics logging."""
+
+    def log_metrics(
+        self, metrics: dict[str, float], step: int, log_dir: str = "logs", **kwargs: JSONValue
+    ) -> LogMetricsResultDict:
         """Log training and evaluation metrics.
 
         Args:
@@ -93,6 +115,11 @@ class TrainingProtocol(Protocol):
 
         """
         ...
+
+
+@runtime_checkable
+class PEFTCapableProtocol(Protocol):
+    """Capability protocol for backends supporting Parameter-Efficient Fine-Tuning (LoRA)."""
 
     def apply_lora(
         self,
@@ -119,12 +146,17 @@ class TrainingProtocol(Protocol):
         """
         ...
 
+
+@runtime_checkable
+class QuantizeCapableProtocol(Protocol):
+    """Capability protocol for backends supporting post-training weight quantization."""
+
     def quantize_model(self, model_name: str, method: str = "int8", **kwargs: JSONValue) -> QuantizeResultDict:
         """Quantize model weights for reduced memory footprint.
 
         Args:
             model_name: Target model identifier.
-            method: Quantization method (e.g., 'int8', 'awq', 'gptq').
+            method: Quantization method (e.g., `'int8'`, `'awq'`, `'gptq'`).
             **kwargs: Backend-specific quantization options.
 
         Returns:
@@ -132,6 +164,11 @@ class TrainingProtocol(Protocol):
 
         """
         ...
+
+
+@runtime_checkable
+class TrainerIdentifiableProtocol(Protocol):
+    """Capability protocol exposing the canonical trainer name for a backend."""
 
     def get_trainer(self, **_kwargs: JSONValue) -> str:
         """Return the canonical trainer identifier for this backend.
@@ -147,8 +184,8 @@ class TrainingProtocol(Protocol):
 
 
 @runtime_checkable
-class InferenceProtocol(Protocol):
-    """Inference backend interface."""
+class InferenceCapableProtocol(Protocol):
+    """Capability protocol for backends supporting autoregressive SQL generation."""
 
     def generate_sql(
         self,
@@ -173,6 +210,11 @@ class InferenceProtocol(Protocol):
         """
         ...
 
+
+@runtime_checkable
+class ServeCapableProtocol(Protocol):
+    """Capability protocol for backends supporting continuous-batching model serving."""
+
     def serve_model(
         self,
         model_name: str,
@@ -194,6 +236,11 @@ class InferenceProtocol(Protocol):
         """
         ...
 
+
+@runtime_checkable
+class BenchmarkCapableProtocol(Protocol):
+    """Capability protocol for backends supporting hardware latency/memory benchmarking."""
+
     def benchmark_model(
         self,
         model_name: str,
@@ -205,9 +252,9 @@ class InferenceProtocol(Protocol):
 
         Args:
             model_name: Target model identifier.
-            hardware: Target hardware device ('gpu', 'tpu-v5p', 'cpu').
+            hardware: Target hardware device (`'gpu'`, `'tpu-v5p'`, `'cpu'`).
             batch_size: Batch size for benchmarking.
-            **kwargs: Additional benchmark options like warmup_steps or num_runs.
+            **kwargs: Additional benchmark options like `warmup_steps` or `num_runs`.
 
         Returns:
             Dictionary containing throughput (tokens/sec), latency (ms), and memory (MB).
@@ -217,8 +264,48 @@ class InferenceProtocol(Protocol):
 
 
 @runtime_checkable
+class TrainingProtocol(
+    TrainCapableProtocol,
+    DPOCapableProtocol,
+    ETLCapableProtocol,
+    ExportCapableProtocol,
+    MetricsLoggingProtocol,
+    PEFTCapableProtocol,
+    QuantizeCapableProtocol,
+    TrainerIdentifiableProtocol,
+    Protocol,
+):
+    """Composite training backend interface combining segregated training capability protocols."""
+
+
+@runtime_checkable
+class InferenceProtocol(
+    InferenceCapableProtocol,
+    ServeCapableProtocol,
+    BenchmarkCapableProtocol,
+    Protocol,
+):
+    """Composite inference backend interface combining generation, serving, and benchmarking."""
+
+
+@runtime_checkable
 class BackendProtocol(TrainingProtocol, InferenceProtocol, Protocol):
     """Unified runtime-checkable Backend protocol combining training and inference capabilities."""
 
 
-__all__ = ["BackendProtocol", "InferenceProtocol", "TrainingProtocol"]
+__all__ = [
+    "BackendProtocol",
+    "BenchmarkCapableProtocol",
+    "DPOCapableProtocol",
+    "ETLCapableProtocol",
+    "ExportCapableProtocol",
+    "InferenceCapableProtocol",
+    "InferenceProtocol",
+    "MetricsLoggingProtocol",
+    "PEFTCapableProtocol",
+    "QuantizeCapableProtocol",
+    "ServeCapableProtocol",
+    "TrainCapableProtocol",
+    "TrainerIdentifiableProtocol",
+    "TrainingProtocol",
+]

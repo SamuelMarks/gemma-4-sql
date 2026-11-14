@@ -36,7 +36,11 @@ def test_mlx_logging_real_execution(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     writers: list[_RecordingSummaryWriter] = []
 
     def _factory(log_dir: str = "") -> _RecordingSummaryWriter:
-        """Construct and record a `_RecordingSummaryWriter`."""
+        """Construct and record a `_RecordingSummaryWriter`.
+
+        Returns:
+            Recorded `_RecordingSummaryWriter` instance.
+        """
         w = _RecordingSummaryWriter(log_dir=log_dir)
         writers.append(w)
         return w
@@ -46,7 +50,7 @@ def test_mlx_logging_real_execution(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     log_dir = str(tmp_path / "mlx_tb")
     res = logging_module.log_metrics({"loss": 0.75}, step=3, log_dir=log_dir)
     assert res["backend"] == "mlx"
-    assert res["action"] == "log_metrics"
+    assert res.get("action") == "log_metrics"
     assert res["status"] == "success"
     assert len(writers) == 1
     assert writers[0].scalars == [("loss", 0.75, 3)]
@@ -56,7 +60,7 @@ def test_mlx_logging_real_execution(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     fb_dir = tmp_path / "mlx_fb"
     res_fb = logging_module.log_metrics({"loss": 0.75}, step=4, log_dir=str(fb_dir))
     assert res_fb["status"] == "backend_unavailable"
-    fb_file = Path(str(res_fb["fallback_file"]))
+    fb_file = Path(str(res_fb.get("fallback_file")))
     assert fb_file.exists()
     data = json.loads(fb_file.read_text(encoding="utf-8").strip())
     assert data["backend"] == "mlx"
