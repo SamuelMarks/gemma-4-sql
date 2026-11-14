@@ -237,3 +237,35 @@ def test_registry_invalid_protocol_instance() -> None:
             entry_points_provider=lambda: {"gemma_4_sql.backends": [fake_ep]},
             module_loader=lambda _name: adapter_mod,
         )
+
+
+def test_tpu_comparison_backends_and_aliases_registered() -> None:
+    """Verify all 7 `TPU_COMPARISON_BACKENDS` and short Keras aliases resolve through `get_backend`."""
+    from gemma_4_sql.backends.base_adapter import ModuleDelegatedBackend
+    from gemma_4_sql.constants import KERAS_BACKEND_ALIAS_MAP, TPU_COMPARISON_BACKENDS
+
+    assert len(TPU_COMPARISON_BACKENDS) == 7
+    assert KERAS_BACKEND_ALIAS_MAP["keras_jax"] == "jax"
+    assert KERAS_BACKEND_ALIAS_MAP["keras_tensorflow"] == "tensorflow"
+    assert KERAS_BACKEND_ALIAS_MAP["keras_tf"] == "tensorflow"
+    assert KERAS_BACKEND_ALIAS_MAP["keras_pytorch"] == "torch"
+    assert KERAS_BACKEND_ALIAS_MAP["keras_torch"] == "torch"
+
+    for alias in (*TPU_COMPARISON_BACKENDS, "keras_tf", "keras_torch", "pytorch_hf"):
+        validate_backend_name(alias)
+        backend_inst = get_backend(alias)
+        assert isinstance(backend_inst, BackendProtocol)
+        assert isinstance(backend_inst, ModuleDelegatedBackend)
+        if alias == "maxtext":
+            assert backend_inst.backend_alias is None
+            assert backend_inst.get_trainer(include_alias=True) == "maxtext_trainer"
+        else:
+            assert backend_inst.backend_alias == alias
+            assert backend_inst.get_trainer().endswith("_trainer")
+            assert backend_inst.get_trainer(include_alias=True) == f"{alias}_trainer"
+
+    for canonical in ("jax", "keras", "pytorch"):
+        base_inst = get_backend(canonical)
+        assert isinstance(base_inst, ModuleDelegatedBackend)
+        assert base_inst.backend_alias is None
+        assert base_inst.get_trainer(include_alias=True) == f"{canonical}_trainer"

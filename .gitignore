@@ -1,5 +1,6 @@
 *.bak
 coverage.json
+tfrc.policy.json
 mise.toml
 logs
 test_logs/

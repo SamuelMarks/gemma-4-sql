@@ -31,6 +31,13 @@ def add_evaluate_parsers(subparsers: SubparserCollectionProtocol) -> None:
         help="Explicit modality selector.",
     )
     parser_evaluate.add_argument("--max-batches", type=int, default=10, help="Maximum number of batches to evaluate.")
+    parser_evaluate.add_argument("--hardware", default=None, help="Optional target hardware ('tpu', 'gpu', 'cpu').")
+    parser_evaluate.add_argument(
+        "--strict-hardware",
+        action="store_true",
+        help="Fail immediately if requested TPU/GPU hardware is unavailable.",
+    )
+    parser_evaluate.add_argument("--output-json", default=None, help="Optional path to atomically write JSON output.")
     parser_evaluate.set_defaults(func=evaluate_cmd)
 
     parser_few_shot = subparsers.add_parser("few-shot", help="Build a dynamic few-shot prompt.")
@@ -111,6 +118,13 @@ def add_generate_agent_parsers(subparsers: SubparserCollectionProtocol) -> None:
     parser_generate.add_argument("--top-p", type=float, default=1.0, help="Top-p sampling threshold.")
     parser_generate.add_argument("--seed", type=int, default=42, help="Random seed for generation.")
     parser_generate.add_argument("--show-confidence", action="store_true", help="Display the model's confidence score.")
+    parser_generate.add_argument("--hardware", default=None, help="Optional target hardware ('tpu', 'gpu', 'cpu').")
+    parser_generate.add_argument(
+        "--strict-hardware",
+        action="store_true",
+        help="Fail immediately if requested TPU/GPU hardware is unavailable.",
+    )
+    parser_generate.add_argument("--output-json", default=None, help="Optional path to atomically write JSON output.")
     parser_generate.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or screenshot.")
     parser_generate.add_argument("--audio-path", default=None, help="Path to recorded query audio file.")
     parser_generate.add_argument(

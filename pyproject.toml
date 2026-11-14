@@ -22,10 +22,17 @@ gemma-4-sql = "gemma_4_sql.cli:cli"
 
 [project.entry-points."gemma_4_sql.backends"]
 jax = "gemma_4_sql.backends.jax"
+jax_native = "gemma_4_sql.backends.jax"
 keras = "gemma_4_sql.backends.keras"
+keras_jax = "gemma_4_sql.backends.keras"
+keras_tensorflow = "gemma_4_sql.backends.keras"
+keras_tf = "gemma_4_sql.backends.keras"
+keras_pytorch = "gemma_4_sql.backends.keras"
+keras_torch = "gemma_4_sql.backends.keras"
 maxtext = "gemma_4_sql.backends.maxtext"
 pytorch = "gemma_4_sql.backends.pytorch"
 pytorch_hf = "gemma_4_sql.backends.pytorch"
+hf_transformers = "gemma_4_sql.backends.pytorch"
 pytorch_native = "gemma_4_sql.backends.pytorch"
 mlx = "gemma_4_sql.backends.mlx"
 

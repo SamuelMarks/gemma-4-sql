@@ -17,6 +17,7 @@ from gemma_4_sql.exceptions import (
     ExecutionStatus,
     ExportError,
     GemmaSQLError,
+    HardwareUnavailableError,
     InferenceError,
     MultimodalProcessingError,
     PEFTError,
@@ -72,6 +73,22 @@ def test_dependency_missing_error() -> None:
     assert not isinstance(err, ValueError)
 
 
+def test_hardware_unavailable_error_attributes() -> None:
+    """Verify `HardwareUnavailableError` records `hardware`, `backend`, `model_name`, and `operation`."""
+    hw_err = HardwareUnavailableError(
+        "No TPU devices found",
+        hardware="tpu-v6e",
+        backend="jax_native",
+        model_name="google/gemma-4-E4B",
+    )
+    assert str(hw_err) == "No TPU devices found"
+    assert hw_err.hardware == "tpu-v6e"
+    assert hw_err.backend == "jax_native"
+    assert hw_err.model_name == "google/gemma-4-E4B"
+    assert hw_err.operation == "benchmark"
+    assert isinstance(hw_err, ConfigurationError)
+
+
 def test_unsupported_quantization_method_error() -> None:
     """Verify UnsupportedQuantizationMethodError stores method and supported_methods and inherits ValueError only."""
     err = UnsupportedQuantizationMethodError(
@@ -111,6 +128,7 @@ def test_unsupported_quantization_method_error() -> None:
         (SQLSafetyViolationError, ValueError, RuntimeError),
         (SchemaExtractionError, ValueError, RuntimeError),
         (ConfigurationError, ValueError, RuntimeError),
+        (HardwareUnavailableError, ConfigurationError, RuntimeError),
     ],
 )
 def test_domain_exception_inheritance(

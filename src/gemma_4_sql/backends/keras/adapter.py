@@ -21,6 +21,8 @@ class KerasBackend(ModuleDelegatedBackend):
     serve_module = serve
     benchmark_module = benchmark
     trainer_name = "keras_trainer"
+    canonical_name = "keras"
+    uses_backend_alias = True
 
 
 ADAPTER_CLASS = KerasBackend

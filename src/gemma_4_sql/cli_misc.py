@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from collections.abc import Mapping
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.cli_protocols import RagArgsProtocol
+from gemma_4_sql.cli_protocols import EvaluateArgsProtocol, RagArgsProtocol, TrainArgsProtocol
 from gemma_4_sql.exceptions import ExecutionStatus, GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk.export import export_model
 from gemma_4_sql.sdk.logging import log_metrics
@@ -42,6 +44,82 @@ class MultimodalCLIArgsProtocol(ModalityCLIArgsProtocol, Protocol):
     def audio_path(self) -> str | None:
         """Provide optional audio path."""
         ...
+
+
+@runtime_checkable
+class HardwareCLIArgsProtocol(Protocol):
+    """Protocol for parsed CLI arguments carrying an optional `.hardware` attribute."""
+
+    @property
+    def hardware(self) -> str | None:
+        """Provide target hardware string."""
+        ...
+
+
+@runtime_checkable
+class StrictHardwareCLIArgsProtocol(Protocol):
+    """Protocol for parsed CLI arguments carrying `.strict_hardware`."""
+
+    @property
+    def strict_hardware(self) -> bool:
+        """Provide strict hardware enforcement flag."""
+        ...
+
+
+@runtime_checkable
+class OutputJSONCLIArgsProtocol(Protocol):
+    """Protocol for parsed CLI arguments carrying an optional `.output_json` path."""
+
+    @property
+    def output_json(self) -> str | None:
+        """Provide optional destination JSON file path."""
+        ...
+
+
+def extract_hardware_cli_kwargs(
+    args: argparse.Namespace | HardwareCLIArgsProtocol | StrictHardwareCLIArgsProtocol | MultimodalCLIArgsProtocol,
+) -> dict[str, JSONValue]:
+    """Extract optional `hardware` and `strict_hardware` flags from parsed CLI arguments.
+
+    Args:
+        args: Parsed command-line arguments namespace or protocol.
+
+    Returns:
+        Dictionary containing `hardware` and/or `strict_hardware` when configured.
+
+    """
+    hw_extra: dict[str, JSONValue] = {}
+    if isinstance(args, HardwareCLIArgsProtocol) and args.hardware is not None:
+        hw_extra["hardware"] = str(args.hardware)
+    if isinstance(args, StrictHardwareCLIArgsProtocol) and args.strict_hardware:
+        hw_extra["strict_hardware"] = True
+    return hw_extra
+
+
+def write_atomic_output_json(
+    args: argparse.Namespace | OutputJSONCLIArgsProtocol | TrainArgsProtocol | EvaluateArgsProtocol | str | None,
+    payload: Mapping[str, JSONValue] | str,
+) -> None:
+    """Persist serialized JSON `payload` atomically (`<path>.tmp` -> `<path>`) when `--output-json` is set.
+
+    Args:
+        args: Parsed CLI namespace, `OutputJSONCLIArgsProtocol`, or explicit file path string.
+        payload: JSON-serializable mapping or pre-formatted JSON string.
+
+    """
+    out_path_str: str | None = None
+    if isinstance(args, str):
+        out_path_str = args
+    elif isinstance(args, OutputJSONCLIArgsProtocol) and args.output_json:
+        out_path_str = str(args.output_json)
+    if not out_path_str:
+        return
+    dest = Path(out_path_str)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dest = dest.with_name(f"{dest.name}.tmp")
+    content = payload if isinstance(payload, str) else json.dumps(dict(payload), indent=2)
+    tmp_dest.write_text(content + chr(10), encoding="utf-8")
+    tmp_dest.replace(dest)
 
 
 def extract_multimodal_cli_kwargs(args: MultimodalCLIArgsProtocol | argparse.Namespace) -> dict[str, JSONValue]:

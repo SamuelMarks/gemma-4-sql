@@ -101,14 +101,23 @@ class _FakeTorchRuntimeModule:
         self.float32: str | None = "fp32"
         self.long: str | None = "int64"
         self.compile_raises = compile_raises
+        self.last_compile_backend: str = "inductor"
         self.seeds: list[int] = []
 
-    def compile[ModelT](self, model: ModelT) -> ModelT:
+    def compile[ModelT](self, model: ModelT, *, backend: str = "inductor") -> ModelT:
         """Return `model` or raise `RuntimeError` if `compile_raises` is set.
+
+        Args:
+            model: Model to compile.
+            backend: Compiler backend identifier.
+
+        Returns:
+            `model` unchanged.
 
         Raises:
             RuntimeError: If `self.compile_raises` is True.
         """
+        self.last_compile_backend = backend
         if self.compile_raises:
             raise RuntimeError("compile error")
         return model

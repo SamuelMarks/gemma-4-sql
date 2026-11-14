@@ -105,7 +105,14 @@ def test_add_misc_and_db_parsers() -> None:
         "--model",
         "gemma-4",
         "--hardware",
-        "cpu",
+        "tpu-v6e",
+        "--num-runs",
+        "12",
+        "--strict-hardware",
+        "--tensor-parallel-size",
+        "4",
+        "--output-json",
+        "/tmp/bench.json",
         "--image-path",
         "erd.png",
         "--audio-path",
@@ -114,10 +121,46 @@ def test_add_misc_and_db_parsers() -> None:
         "multimodal",
     ])
     assert bench_args.cmd == "benchmark"
-    assert bench_args.hardware == "cpu"
+    assert bench_args.hardware == "tpu-v6e"
+    assert bench_args.num_runs == 12
+    assert bench_args.strict_hardware is True
+    assert bench_args.tensor_parallel_size == 4
+    assert bench_args.output_json == "/tmp/bench.json"
     assert bench_args.image_path == "erd.png"
     assert bench_args.audio_path == "q.wav"
     assert bench_args.modality == "multimodal"
+
+    matrix_args = parser.parse_args([
+        "benchmark-matrix",
+        "--model",
+        "google/gemma-4-E4B",
+        "--hardware",
+        "tpu-v5e",
+        "--backends",
+        "jax_native,maxtext",
+        "--modes",
+        "prefill,decode",
+        "--batch-sizes",
+        "1,8",
+        "--num-runs",
+        "5",
+        "--warmup-steps",
+        "2",
+        "--strict-hardware",
+        "--markdown",
+        "--output-json",
+        "/tmp/matrix.json",
+    ])
+    assert matrix_args.cmd == "benchmark-matrix"
+    assert matrix_args.hardware == "tpu-v5e"
+    assert matrix_args.backends == "jax_native,maxtext"
+    assert matrix_args.modes == "prefill,decode"
+    assert matrix_args.batch_sizes == "1,8"
+    assert matrix_args.num_runs == 5
+    assert matrix_args.warmup_steps == 2
+    assert matrix_args.strict_hardware is True
+    assert matrix_args.markdown is True
+    assert matrix_args.output_json == "/tmp/matrix.json"
 
     rag_args = parser.parse_args([
         "rag",

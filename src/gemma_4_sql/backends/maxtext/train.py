@@ -9,6 +9,7 @@ from typing import Protocol, SupportsFloat, runtime_checkable
 
 from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
 from gemma_4_sql._types_tensors import extract_scalar_float
+from gemma_4_sql.backends._jax_common import initialize_jax_distributed_if_configured
 from gemma_4_sql.backends.common_train import (
     generic_run_training_epochs,
     resolve_training_dataloader,
@@ -462,20 +463,16 @@ def _initialize_jax_distributed(
         `True` if initialization was performed, `False` if skipped.
 
     """
-    if jax is not None:
-        try:
-            init_kwargs: dict[str, str | int] = {}
-            if coordinator_address is not None:
-                init_kwargs["coordinator_address"] = coordinator_address
-            if num_processes is not None:
-                init_kwargs["num_processes"] = num_processes
-            if process_id is not None:
-                init_kwargs["process_id"] = process_id
-            jax.distributed.initialize(**init_kwargs)
-            return True
-        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:
-            logger.warning("jax.distributed.initialize() failed or already initialized: %s", init_err)
-    return False
+    if jax is None:
+        return False
+    topo = initialize_jax_distributed_if_configured(
+        jax,
+        coordinator_address=coordinator_address,
+        num_processes=num_processes,
+        process_id=process_id,
+        force_attempt=True,
+    )
+    return topo.is_distributed
 
 
 def save_maxtext_checkpoint[ParamValT, OptValT](
@@ -699,6 +696,18 @@ def train_model(config: TrainingConfig, **kwargs: JSONValue) -> TrainResultDict:
     """
     if jax is None or jnp is None or optax is None or (Gemma4Model is None and maxtext_train is None):
         raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
+    if bool(kwargs.get("strict_hardware", False)):
+        from gemma_4_sql.backends._jax_common import (
+            JaxShardingDevicesModuleProtocol,
+            build_tpu_mesh_and_sharding,
+        )
+
+        _ = build_tpu_mesh_and_sharding(
+            jax if isinstance(jax, JaxShardingDevicesModuleProtocol) else None,
+            str(kwargs.get("hardware", "cpu")),
+            strict_hardware=True,
+            backend_label="maxtext",
+        )
 
     dataset = config.dataset
     epochs = config.epochs

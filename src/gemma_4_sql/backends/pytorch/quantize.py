@@ -26,6 +26,7 @@ from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_im
 from gemma_4_sql.backends.pytorch.gguf import (
     GGUFHeaderInfo,
     GGUFTensorDescriptor,
+    TensorInput,
     _StateDictModelProtocol,
     _write_gguf_file,
     validate_gguf_file,
@@ -489,6 +490,45 @@ def _apply_gptq_quantization(
     return (0.75, "quantized_gptq")
 
 
+@runtime_checkable
+class _QuantXLADeviceTensorProtocol(Protocol):
+    """Protocol for XLA tensors exposing `.device` and `.to('cpu')`."""
+
+    @property
+    def device(self) -> DTypeProtocol | str | int:
+        """Provide tensor device handle."""
+        ...
+
+    def to(self, target: str, /) -> TorchTensorProtocol:
+        """Move tensor to `target` device.
+
+        Args:
+            target: Target device string (`'cpu'`).
+
+        Returns:
+            CPU-staged tensor.
+
+        """
+        ...
+
+
+def _stage_xla_gguf_tensor[TensorT: TensorInput | _QuantXLADeviceTensorProtocol](
+    tensor: TensorT,
+) -> TensorInput | TensorT:
+    """Stage `xla:*` tensors onto `'cpu'` prior to GGUF binary serialization.
+
+    Args:
+        tensor: Extracted state-dict tensor or buffer.
+
+    Returns:
+        CPU-staged tensor when originating on XLA, otherwise original `tensor`.
+
+    """
+    if isinstance(tensor, _QuantXLADeviceTensorProtocol) and str(tensor.device).startswith("xla"):
+        return tensor.to("cpu")
+    return tensor
+
+
 def _export_gguf(
     model_name: str,
     export_path: str | None = None,
@@ -529,10 +569,11 @@ def _export_gguf(
 
         source_arg: _StateDictModelProtocol | TorchCausalLMProtocol | str = model if model is not None else model_name
         try:
-            tensors = _gguf_mod.extract_pytorch_state_dict(
+            raw_tensors = _gguf_mod.extract_pytorch_state_dict(
                 source_arg,
                 allow_dummy_fallback=allow_dummy_fallback,
             )
+            tensors = {k: _stage_xla_gguf_tensor(v) for k, v in raw_tensors.items()}
         except (ExportError, ImportError, ValueError, RuntimeError, AttributeError, OSError) as exc:
             raise QuantizationError(
                 f"Failed to extract PyTorch weights for GGUF export of '{model_name}': {exc}",
@@ -591,7 +632,7 @@ def quantize_model(
         )
         else None
     )
-    if awq_gptq_model is None and kwargs.get("backend_alias") == "pytorch_native" and method in {"awq", "gptq"}:
+    if awq_gptq_model is None and kwargs.get("backend_alias") == "pytorch_native" and method in {"awq", "gptq", "gguf"}:
         from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
         from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM
 
@@ -599,7 +640,11 @@ def quantize_model(
 
     if method == "gguf":
         gguf_model: _StateDictModelProtocol | TorchCausalLMProtocol | None = (
-            raw_model if isinstance(raw_model, (_StateDictModelProtocol, TorchCausalLMProtocol)) else None
+            raw_model
+            if isinstance(raw_model, (_StateDictModelProtocol, TorchCausalLMProtocol))
+            else (
+                awq_gptq_model if isinstance(awq_gptq_model, (_StateDictModelProtocol, TorchCausalLMProtocol)) else None
+            )
         )
         allow_dummy_fb = extract_bool_kwarg(json_kwargs, "allow_dummy_fallback", False)
 

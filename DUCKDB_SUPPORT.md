@@ -70,7 +70,7 @@ result = conn.execute("SELECT ask_gemma('What is the total revenue for 2024?')")
 print(result[0][0])
 ```
 
-*Note on Backends:* The `backend` parameter defaults to `"jax"` and supports any registered execution engine: `"jax"`, `"pytorch"`, `"pytorch_hf"`, `"pytorch_native"`, `"keras"`, `"maxtext"`, or `"mlx"`.
+*Note on Backends:* The `backend` parameter defaults to `"jax"` and supports any registered execution engine or TPU comparison alias: `"jax"`, `"jax_native"`, `"pytorch"`, `"pytorch_hf"`, `"hf_transformers"`, `"pytorch_native"`, `"keras"`, `"keras_jax"`, `"keras_tensorflow"`, `"keras_tf"`, `"keras_pytorch"`, `"keras_torch"`, `"maxtext"`, or `"mlx"`.
 
 ### Command Line Usage
 

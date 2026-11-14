@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import inspect
+import logging
+import os
 import types
 import weakref
-from collections.abc import Callable, Hashable, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Protocol, Self, SupportsFloat, runtime_checkable
 
 from gemma_4_sql._types_tensors import ScalarItemExtractorProtocol, extract_scalar_float
-from gemma_4_sql.type_hints import ForwardArg
+from gemma_4_sql.backends.common_benchmark import normalize_hardware_family
+from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol
+from gemma_4_sql.exceptions import HardwareUnavailableError
+from gemma_4_sql.type_hints import ForwardArg, JaxShardingProtocol
+
+logger = logging.getLogger(__name__)
+_jax_dist_init_state: list[bool] = [False]
 
 
 @runtime_checkable
@@ -647,24 +656,362 @@ def apply_nnx_optimizer_update[ModelT, GradsT, UpdateOutT](
     _ = optimizer.update(model, grads)
 
 
+@dataclass(frozen=True)
+class JaxTopologyInfo:
+    """Multi-host and multi-chip JAX runtime topology metadata.
+
+    Attributes:
+        is_distributed: Whether multi-host `jax.distributed` is active.
+        process_index: Zero-based worker index (`0..process_count-1`).
+        process_count: Total number of participating worker hosts.
+        local_device_count: Accelerator chip count visible on the local worker.
+        global_device_count: Total accelerator chip count across all workers.
+        device_kind: Active primary accelerator kind (`'tpu'`, `'gpu'`, `'cpu'`).
+
+    """
+
+    is_distributed: bool
+    process_index: int
+    process_count: int
+    local_device_count: int
+    global_device_count: int
+    device_kind: str
+
+
+@runtime_checkable
+class _JaxDistributedInitNamespaceProtocol(Protocol):
+    """Protocol for `jax.distributed` exposing `.initialize(**kwargs)`."""
+
+    def initialize(self, **kwargs: str | int | None) -> None:
+        """Initialize JAX distributed coordination."""
+        ...
+
+
+@runtime_checkable
+class _JaxWithDistributedProtocol(Protocol):
+    """Protocol for `jax` exposing `.distributed`."""
+
+    @property
+    def distributed(self) -> _JaxDistributedInitNamespaceProtocol:
+        """Provide `jax.distributed` namespace."""
+        ...
+
+
+@runtime_checkable
+class _JaxProcessTopologyProtocol(Protocol):
+    """Protocol for `jax` exposing multi-host process/device count queries."""
+
+    def process_index(self) -> int:
+        """Return zero-based host rank."""
+        ...
+
+    def process_count(self) -> int:
+        """Return total host process count."""
+        ...
+
+    def local_device_count(self) -> int:
+        """Return local device count."""
+        ...
+
+    def device_count(self) -> int:
+        """Return global device count."""
+        ...
+
+
+@runtime_checkable
+class JaxMemoryStatsDeviceProtocol(Protocol):
+    """Protocol for a JAX device exposing `.memory_stats()`."""
+
+    def memory_stats(self) -> Mapping[str, int | float] | None:
+        """Return device HBM/VRAM usage dictionary or `None`."""
+        ...
+
+
+@runtime_checkable
+class _JaxShardingNamespaceProtocol(Protocol):
+    """Protocol for `jax.sharding` providing `Mesh`, `NamedSharding`, and `PartitionSpec`."""
+
+    def Mesh(
+        self,
+        devices: Sequence[JaxMemoryStatsDeviceProtocol | str],
+        axis_names: tuple[str, ...],
+        /,
+    ) -> str | JaxMemoryStatsDeviceProtocol:
+        """Construct a device `Mesh`."""
+        ...
+
+    def PartitionSpec(self, *axes: str | None) -> str | tuple[str | None, ...]:
+        """Construct a `PartitionSpec`."""
+        ...
+
+    def NamedSharding(
+        self,
+        mesh: str | JaxMemoryStatsDeviceProtocol,
+        spec: str | tuple[str | None, ...],
+        /,
+    ) -> JaxShardingProtocol:
+        """Construct a `NamedSharding`."""
+        ...
+
+
+@runtime_checkable
+class _JaxShardingDevicesModuleProtocol(Protocol):
+    """Protocol for `jax` exposing `.devices(...)` and `.sharding`."""
+
+    def devices(self, backend: str | None = None, /) -> Sequence[JaxMemoryStatsDeviceProtocol | str]:
+        """Return JAX devices filtered by `backend`."""
+        ...
+
+
+@runtime_checkable
+class _JaxWithShardingAttrProtocol(Protocol):
+    """Protocol for `jax` exposing `.sharding`."""
+
+    @property
+    def sharding(self) -> _JaxShardingNamespaceProtocol:
+        """Provide `jax.sharding` namespace."""
+        ...
+
+
+JaxShardingDevicesModuleProtocol = _JaxShardingDevicesModuleProtocol
+
+
+def reset_jax_distributed_state() -> None:
+    """Reset the module-level JAX distributed initialization state (for unit tests)."""
+    _jax_dist_init_state[0] = False
+
+
+def initialize_jax_distributed_if_configured(
+    jax_mod: (
+        _JaxWithDistributedProtocol
+        | _JaxProcessTopologyProtocol
+        | _JaxShardingDevicesModuleProtocol
+        | ModuleNamespaceProtocol
+        | None
+    ),
+    *,
+    coordinator_address: str | None = None,
+    num_processes: int | None = None,
+    process_id: int | None = None,
+    force_attempt: bool = False,
+) -> JaxTopologyInfo:
+    """Idempotently initialize multi-host `jax.distributed` when coordinator env/args are present.
+
+    Inspects `JAX_COORDINATOR_ADDRESS`, `MEGASCALE_COORDINATOR_ADDRESS`, `NUM_PROCESSES`,
+    `TPU_NUM_WORKERS`, `PROCESS_ID`, and `TPU_WORKER_ID` when explicit arguments are omitted.
+
+    Args:
+        jax_mod: Loaded `jax` module or typed test double.
+        coordinator_address: Optional explicit `<ip>:<port>` coordinator endpoint.
+        num_processes: Optional explicit total host process count.
+        process_id: Optional explicit zero-based host rank.
+        force_attempt: If `True`, attempt `jax.distributed.initialize` unconditionally.
+
+    Returns:
+        `JaxTopologyInfo` describing active host and device topology.
+
+    """
+    coord = (
+        coordinator_address
+        or os.environ.get("JAX_COORDINATOR_ADDRESS")
+        or os.environ.get("MEGASCALE_COORDINATOR_ADDRESS")
+        or None
+    )
+    raw_np = (
+        num_processes
+        if num_processes is not None
+        else (os.environ.get("NUM_PROCESSES") or os.environ.get("TPU_NUM_WORKERS"))
+    )
+    raw_pid = (
+        process_id if process_id is not None else (os.environ.get("PROCESS_ID") or os.environ.get("TPU_WORKER_ID"))
+    )
+    parsed_np = int(raw_np) if isinstance(raw_np, (int, str)) and str(raw_np).strip() else None
+    parsed_pid = int(raw_pid) if isinstance(raw_pid, (int, str)) and str(raw_pid).strip() else None
+
+    has_env_config = coord is not None or parsed_np is not None or parsed_pid is not None
+    should_call = force_attempt or (has_env_config and not _jax_dist_init_state[0])
+
+    init_succeeded = _jax_dist_init_state[0]
+    if should_call and isinstance(jax_mod, _JaxWithDistributedProtocol):
+        try:
+            init_kwargs: dict[str, str | int] = {}
+            if coord is not None:
+                init_kwargs["coordinator_address"] = coord
+            if parsed_np is not None:
+                init_kwargs["num_processes"] = parsed_np
+            if parsed_pid is not None:
+                init_kwargs["process_id"] = parsed_pid
+            jax_mod.distributed.initialize(**init_kwargs)
+            if not force_attempt:
+                _jax_dist_init_state[0] = True
+            init_succeeded = True
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as init_err:
+            logger.warning("jax.distributed.initialize() failed or already initialized: %s", init_err)
+
+    proc_idx = 0
+    proc_cnt = 1
+    local_cnt = 1
+    global_cnt = 1
+    if isinstance(jax_mod, _JaxProcessTopologyProtocol):
+        try:
+            proc_idx = int(jax_mod.process_index())
+            proc_cnt = max(1, int(jax_mod.process_count()))
+            local_cnt = max(1, int(jax_mod.local_device_count()))
+            global_cnt = max(1, int(jax_mod.device_count()))
+        except RuntimeError:
+            pass
+
+    dev_kind = "cpu"
+    if isinstance(jax_mod, _JaxShardingDevicesModuleProtocol):
+        for candidate in ("tpu", "gpu"):
+            try:
+                if len(jax_mod.devices(candidate)) > 0:
+                    dev_kind = candidate
+                    break
+            except RuntimeError:
+                continue
+
+    return JaxTopologyInfo(
+        is_distributed=bool(init_succeeded or proc_cnt > 1),
+        process_index=proc_idx,
+        process_count=proc_cnt,
+        local_device_count=local_cnt,
+        global_device_count=global_cnt,
+        device_kind=dev_kind,
+    )
+
+
+def build_tpu_mesh_and_sharding[DevT](
+    jax_mod: _JaxShardingDevicesModuleProtocol | None,
+    hardware: str,
+    *,
+    batch_size: int = 1,
+    tensor_parallel_size: int = 1,
+    strict_hardware: bool = False,
+    backend_label: str = "jax",
+    fallback_device: DevT | None = None,
+) -> tuple[
+    JaxMemoryStatsDeviceProtocol | str | DevT | None,
+    list[JaxMemoryStatsDeviceProtocol | str],
+    str,
+    JaxShardingProtocol | None,
+]:
+    """Resolve TPU/GPU/CPU devices and build a multi-chip `NamedSharding` across all chips when available.
+
+    Args:
+        jax_mod: Loaded `jax` module or typed test double.
+        hardware: Target hardware identifier (`'tpu'`, `'tpu-v6e'`, `'tpu-v5p'`, `'gpu'`, `'cpu'`).
+        batch_size: Batch size used to determine data-parallel vs replicated input sharding.
+        tensor_parallel_size: Requested tensor-parallel degree (`>= 1`).
+        strict_hardware: Whether to raise `HardwareUnavailableError` if requested TPU/GPU is absent.
+        backend_label: Backend identifier recorded on `HardwareUnavailableError`.
+        fallback_device: Optional fallback device when `jax_mod` is `None`.
+
+    Returns:
+        4-tuple of `(primary_device, active_devices, resolved_device_str, data_sharding_or_none)`.
+
+    Raises:
+        HardwareUnavailableError: When `strict_hardware=True` and requested TPU/GPU is unavailable.
+
+    """
+    _ = tensor_parallel_size
+    if jax_mod is None:
+        if strict_hardware and normalize_hardware_family(hardware) in {"tpu", "gpu"}:
+            msg = f"JAX module unavailable for requested hardware '{hardware}'."
+            raise HardwareUnavailableError(msg, hardware=hardware, backend=backend_label)
+        return (fallback_device, [], "cpu", None)
+
+    hw_family = normalize_hardware_family(hardware)
+    active_devs: list[JaxMemoryStatsDeviceProtocol | str] = []
+    resolved_str = "cpu"
+
+    if hw_family in {"tpu", "gpu"}:
+        try:
+            found = list(jax_mod.devices(hw_family))
+        except RuntimeError:
+            found = []
+        if found:
+            active_devs = found
+            resolved_str = f"{hw_family}:0"
+        elif strict_hardware:
+            msg = f"JAX backend '{backend_label}' could not resolve '{hardware}' devices."
+            raise HardwareUnavailableError(msg, hardware=hardware, backend=backend_label)
+
+    if not active_devs:
+        try:
+            active_devs = list(jax_mod.devices("cpu"))
+        except RuntimeError:
+            active_devs = []
+        resolved_str = "cpu"
+
+    primary: JaxMemoryStatsDeviceProtocol | str | DevT | None = active_devs[0] if active_devs else fallback_device
+    sharding: JaxShardingProtocol | None = None
+    if len(active_devs) > 1 and isinstance(jax_mod, _JaxWithShardingAttrProtocol):
+        try:
+            mesh = jax_mod.sharding.Mesh(active_devs, ("data",))
+            spec = (
+                jax_mod.sharding.PartitionSpec("data", None)
+                if batch_size >= len(active_devs) and batch_size % len(active_devs) == 0
+                else jax_mod.sharding.PartitionSpec()
+            )
+            sharding = jax_mod.sharding.NamedSharding(mesh, spec)
+        except (TypeError, ValueError, RuntimeError, AttributeError):
+            sharding = None
+
+    return (primary, active_devs, resolved_str, sharding)
+
+
+def aggregate_jax_peak_hbm_mb(
+    devices: Sequence[JaxMemoryStatsDeviceProtocol | str],
+) -> float | None:
+    """Return maximum per-device `peak_bytes_in_use` in MiB across `devices`, or `None` if unavailable.
+
+    Args:
+        devices: Sequence of JAX device handles or strings.
+
+    Returns:
+        Peak HBM usage in MiB when device memory stats are reported, else `None`.
+
+    """
+    peaks: list[float] = []
+    for dev in devices:
+        if isinstance(dev, JaxMemoryStatsDeviceProtocol):
+            try:
+                stats = dev.memory_stats()
+            except (AttributeError, KeyError, RuntimeError, TypeError):
+                stats = None
+            if stats is not None:
+                raw = stats.get("peak_bytes_in_use", stats.get("bytes_in_use"))
+                if raw is not None and raw > 0:
+                    peaks.append(float(raw) / (1024.0 * 1024.0))
+    return max(peaks) if peaks else None
+
+
 __all__ = [
     "BeamSequenceArrayProtocol",
     "JaxJitBeamModuleProtocol",
+    "JaxMemoryStatsDeviceProtocol",
     "JaxModuleBeamProtocol",
     "JaxNNBeamNamespaceProtocol",
     "JaxNNLogSoftmaxProtocol",
     "JaxNumpyBeamProtocol",
     "JaxNumpyLogpOpsProtocol",
+    "JaxShardingDevicesModuleProtocol",
     "JaxSliceableTensorProtocol",
+    "JaxTopologyInfo",
     "NNXModuleNamespaceProtocol",
     "NNXOptimizerProtocol",
     "ScalarItemExtractorProtocol",
+    "aggregate_jax_peak_hbm_mb",
     "apply_nnx_optimizer_update",
     "build_jax_beam_step_fn",
+    "build_tpu_mesh_and_sharding",
     "call_jax_causal_lm",
     "compute_jax_step_probs",
     "create_nnx_optimizer",
     "expand_jax_beams",
     "gather_jax_sequence_logps",
+    "initialize_jax_distributed_if_configured",
+    "reset_jax_distributed_state",
     "run_jax_beam_search_step",
 ]

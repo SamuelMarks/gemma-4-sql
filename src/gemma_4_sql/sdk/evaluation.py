@@ -391,15 +391,37 @@ def _run_evaluation_inference(
                 else None
             )
 
-            gen_res = backend_impl.generate_sql(
-                model_name,
-                prompt_text,
-                modality=modality,
-                image_path=img_arg,
-                pixel_values=pv_arg,
-                audio_path=aud_arg,
-                audio_values=av_arg,
+            hw_val: JSONValue = (
+                str(kwargs["hardware"]) if "hardware" in kwargs and kwargs["hardware"] is not None else None
             )
+            strict_val: JSONValue = (
+                bool(kwargs["strict_hardware"])
+                if "strict_hardware" in kwargs and kwargs["strict_hardware"] is not None
+                else None
+            )
+
+            if hw_val is not None or strict_val is not None:
+                gen_res = backend_impl.generate_sql(
+                    model_name,
+                    prompt_text,
+                    modality=modality,
+                    image_path=img_arg,
+                    pixel_values=pv_arg,
+                    audio_path=aud_arg,
+                    audio_values=av_arg,
+                    hardware=hw_val,
+                    strict_hardware=strict_val,
+                )
+            else:
+                gen_res = backend_impl.generate_sql(
+                    model_name,
+                    prompt_text,
+                    modality=modality,
+                    image_path=img_arg,
+                    pixel_values=pv_arg,
+                    audio_path=aud_arg,
+                    audio_values=av_arg,
+                )
             sql_pred = "" if is_failed_status(gen_res) else str(gen_res.get("sql", ""))
             conf_score = 0.0 if is_failed_status(gen_res) else extract_float_kwarg(gen_res, "confidence_score", 0.0)
             preds.append(sql_pred)

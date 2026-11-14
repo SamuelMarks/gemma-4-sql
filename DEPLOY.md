@@ -64,14 +64,24 @@ gemma-4-sql train \
     --backend pytorch
 ```
 
-**Distributed PyTorch (DDP / FSDP):**
-For multi-GPU or multi-node PyTorch training, use `torchrun` along with the `--distributed-strategy` flag.
+**Distributed PyTorch (DDP / FSDP on GPU, PJRT XLA on TPU):**
+For multi-GPU or multi-node PyTorch training, use `torchrun` along with `--distributed-strategy` (`ddp` or `fsdp`); on Google Cloud TPUs via `torch_xla` PJRT, pass `--distributed-strategy xla` (or `tpu` / `pjrt`) and `--hardware tpu-v6e --strict-hardware`:
 ```bash
+# Multi-GPU FSDP
 torchrun --nproc_per_node=8 -m gemma_4_sql.cli train \
     --model gemma-4 \
     --dataset my-custom-dataset \
     --backend pytorch \
     --distributed-strategy fsdp
+
+# Cloud TPU PJRT (hf_transformers or pytorch_native)
+gemma-4-sql train \
+    --model google/gemma-4-E4B \
+    --dataset my-custom-dataset \
+    --backend pytorch_native \
+    --hardware tpu-v6e \
+    --strict-hardware \
+    --distributed-strategy xla
 ```
 
 #### Using MLX (Apple Silicon)
@@ -205,17 +215,26 @@ gemma-4-sql benchmark --model my-sft-gemma-4 --hardware gpu --batch-size 32 --ba
 gemma-4-sql benchmark --model my-sft-gemma-4 --hardware gpu --batch-size 32 --backend jax
 ```
 
-### Benchmarking on TPU (Google Cloud TPU v4 / v5e)
+### Benchmarking on TPU (Google Cloud TPU v4 / v5e / v6e — All 7 Backends)
 
-**Using MaxText (Highly optimized for TPU interconnects):**
+You can benchmark any single backend or run an automated 7-backend comparison matrix (`hf_transformers`, `pytorch_native`, `keras_jax`, `keras_tensorflow`, `keras_pytorch`, `maxtext`, `jax_native`) with `--strict-hardware` so CPU fallback is immediately rejected:
+
 ```bash
-gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu --batch-size 128 --backend maxtext
+# Single-backend TPU benchmarks
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu --batch-size 128 --backend maxtext --strict-hardware
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu-v6e --batch-size 64 --backend jax_native --strict-hardware
+gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu-v5e --batch-size 64 --backend keras_jax --strict-hardware
+
+# Full 7-backend comparison matrix with Markdown table and atomic JSON output
+gemma-4-sql benchmark-matrix \
+  --model google/gemma-4-E4B \
+  --hardware tpu-v6e \
+  --strict-hardware \
+  --markdown \
+  --output-json ./tpu_matrix.json
 ```
 
-**Using Keras (with TPUStrategy):**
-```bash
-gemma-4-sql benchmark --model my-sft-gemma-4 --hardware tpu --batch-size 128 --backend keras
-```
+For zero-cost TFRC orchestration across `/dev/shm` `uv`-isolated virtualenvs and multi-host Queued Resources (`--worker=all`), use `./deploy_with_libscript.sh --tpu-matrix --tfrc-only --tfrc-config ./tfrc.policy.json` (see [`tfrc.policy.example.json`](./tfrc.policy.example.json)).
 
 ### Benchmarking on Apple Silicon (M1/M2/M3/M4 Metal GPU)
 
@@ -241,23 +260,26 @@ gemma-4-sql benchmark --model my-sft-gemma-4 --hardware cpu --batch-size 1 --bac
 {
   "backend": "maxtext",
   "model": "my-sft-gemma-4",
-  "hardware": "tpu",
+  "hardware": "tpu-v6e",
   "batch_size": 128,
   "tokens_per_sec": 4500.0,
   "latency_ms": 10.1,
   "memory_mb": 16384.0,
   "rss_memory_mb": 512.4,
+  "rss_mb": 512.4,
+  "resolved_device": "tpu:0",
+  "device_count": 8,
+  "compile_latency_ms": 1840.2,
+  "peak_hbm_mb": 16384.0,
   "status": "success",
   "status_code": "success",
   "latency_stats": {
     "mean_ms": 10.1,
-    "std_ms": 0.4,
-    "min_ms": 9.6,
-    "max_ms": 10.8,
     "p50_ms": 10.0,
-    "p95_ms": 10.7,
+    "p90_ms": 10.6,
     "p99_ms": 10.8,
-    "num_samples": 10
+    "min_ms": 9.6,
+    "max_ms": 10.8
   }
 }
 ```
@@ -292,9 +314,9 @@ gemma-4-sql log --step 1000 --metrics "eval_loss=0.3,execution_accuracy=0.89" --
 To automatically provision and orchestrate this hardware (including DNS, network, firewall, storage, and nodes) across Google Cloud (or AWS/Azure) or synthesize native OS installers, `gemma-4-sql` includes root [`libscript.json`](./libscript.json) and [`packaging.json`](./packaging.json) manifests along with [`deploy_with_libscript.sh`](./deploy_with_libscript.sh) (POSIX) and [`deploy_with_libscript.cmd`](./deploy_with_libscript.cmd) (Windows Batch).
 
 ### Declarative Dependency, Database, ML, Ingress & Service Lifecycle (`libscript.json` & `packaging.json`)
-From a `libscript` checkout (or using `./deploy_with_libscript.sh` / `deploy_with_libscript.cmd`), you can bootstrap the required toolchains (`python` 3.12, `huggingface-cli`, `xpk`) and local verification databases (`duckdb`, `sqlite`, `postgres`), execute declarative `.ml` training/inference workflows across local or cloud targets (`local`, `gcp-tpu-vm`, `gcp-gpu-vm`, `gke-xpk`), apply `.ingress` reverse-proxy routes via `netctl`, manage the serving/TensorBoard services, or build native packages:
+From a `libscript` checkout (or using `./deploy_with_libscript.sh` / `deploy_with_libscript.cmd`), you can bootstrap the required toolchains (`python` 3.12, `uv`, `huggingface-cli`, plus optional `xpk` and `tensorboard`) and local verification databases (`duckdb`, `sqlite`, `postgres`), execute declarative `.ml` training/inference/7-backend matrix workflows across local or cloud targets (`local`, `gcp-tpu-vm`, `gcp-gpu-vm`, `gke-xpk`), apply `.ingress` reverse-proxy routes via `netctl`, manage the serving/TensorBoard services, or build native packages:
 ```bash
-# Bootstrap local toolchains & editable install (or pass --tpu-vm / --gpu-vm / --gke-xpk / --train / --infer)
+# Bootstrap local toolchains & editable install (supports --tpu-vm / --tpu-matrix / --tfrc-only / --tfrc-config / --gpu-vm / --gke-xpk / --train / --infer)
 ./deploy_with_libscript.sh
 
 # Resolve and install dependencies (and execute pre_install / post_install / build hooks) declared in libscript.json

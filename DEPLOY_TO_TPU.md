@@ -2,7 +2,7 @@
 
 This document provides a comprehensive guide to deploying, training, and serving the `gemma-4-sql` Large Language Model on Google Cloud TPUs utilizing the `libscript` infrastructure automation ecosystem. 
 
-Because `gemma-4-sql` natively supports multiple backends (`jax`, `maxtext`, `pytorch`, `pytorch_hf`, `pytorch_native`, `keras`, plus local `mlx` on Apple Silicon) and data sources (HuggingFace datasets, DuckDB), this guide details how to leverage `libscript` to orchestrate both single-node and multi-node (distributed) TPU training architectures.
+Because `gemma-4-sql` natively supports all seven Cloud TPU comparison backends (`hf_transformers`, `pytorch_native`, `keras_jax`, `keras_tensorflow`, `keras_pytorch`, `maxtext`, `jax_native`, plus canonical aliases `jax`, `keras`, `pytorch`, `pytorch_hf` and local `mlx` on Apple Silicon) and data sources (HuggingFace datasets, DuckDB), this guide details how to leverage `libscript` to orchestrate both single-node and multi-node (distributed) TPU training and benchmarking architectures.
 
 ---
 
@@ -28,19 +28,22 @@ export GCP_ZONE="us-central2-b"
 # TPU Hardware Configuration
 export TPU_ZONE="us-central2-b"
 export TPU_ACCELERATOR_TYPE="v4-8"
-export TPU_SCHEDULING_TYPE="on-demand" # For TFRC, change to "spot" or "preemptible"
-export TPU_USE_QUEUED_RESOURCE="false" # For TFRC, change to "true" to wait for capacity
+export TPU_SCHEDULING_TYPE="spot" # Use "spot" (or "on-demand" if explicitly granted by TFRC)
+export TPU_USE_QUEUED_RESOURCE="true" # Recommended for TFRC Queued Resources capacity allocation
 export TPU_COUNT="1" # Set >1 for multiple nodes
 
 # Single-Node TPU VM Config
+# IMPORTANT FOR TFRC ($0 billing): Persistent Disks are NOT covered by TFRC grants!
+# Keep TPU_DATA_DISK_SIZE="0" and DISK_SIZE_GB="0" (matching libscript.json defaults) for $0 TFRC runs;
+# only set >0 when intentionally provisioning billable GCP Persistent Disk storage.
 export TPU_NAME="gemma-train-node"
 export SERVE_TPU_NAME="gemma-serve-node"
-export TPU_DATA_DISK_SIZE="500" # Size in GB for persistent disk caching
+export TPU_DATA_DISK_SIZE="0"
 export DISK_SIZE_GB="$TPU_DATA_DISK_SIZE"
 export DISK_NAME="${TPU_NAME}-data"
 export TRAIN_CMD="gemma-4-sql sft --model $MODEL_NAME --dataset $DATASET_NAME --backend maxtext"
 
-# Multi-Node Distributed GKE/XPK Config
+# Multi-Node Distributed GKE/XPK Config (Note: GKE system CPU node pools incur non-TFRC GCP charges)
 export XPK_CLUSTER_NAME="gemma-training-cluster"
 export WORKLOAD_NAME="gemma-full-train"
 export TPU_SLICE_COUNT="4"
@@ -61,9 +64,9 @@ export GCS_BUCKET="$BUCKET_NAME"
 
 If you have been granted access via the [TPU Research Cloud (TFRC)](https://sites.research.google/trc/about/), you receive sponsored compute in specific shapes and geographical zones. To ensure your workloads do not incur unexpected billing and properly leverage your grant, adhere to the following configurations:
 
-1. **Strict Zone Matching:** TFRC grants are rigidly tied to specific zones (e.g., `us-central1-a`, `us-central1-b`, `us-central2-b`, or `europe-west4-a`). You **must** set your `GCP_ZONE` and `TPU_ZONE` environment variables precisely to the zone specified in your grant approval email.
-2. **Preemptible / Spot Instances:** Most TFRC grants provide *preemptible* (spot) TPUs, with perhaps only a small number of on-demand TPUs. When provisioning via `gcloud` or `libscript`, export `TPU_SCHEDULING_TYPE="spot"` (or `"preemptible"`) and `TPU_USE_QUEUED_RESOURCE="true"`. Both `topologies/gke-tpu-cluster/cli.{sh,cmd}` and `payloads/ai/gke-xpk-training/deploy.{sh,cmd}` automatically forward `--spot` (or `--on-demand`) and `--num-slices=$TPU_SLICE_COUNT` to `xpk` when `TPU_SCHEDULING_TYPE` and `TPU_SLICE_COUNT` are set.
-3. **Accelerator Types:** TFRC commonly provides `v2-8`, `v3-8`, or sometimes specific v4 typologies. Update `TPU_ACCELERATOR_TYPE` (e.g., `v3-8`) to exactly match your allocated capacity.
+1. **Strict Zone & Policy Allowlisting (`tfrc.policy.json`):** TFRC grants are rigidly tied to specific zones (e.g., `us-central2-b`, `us-east1-d`, `us-central1-a`, or `europe-west4-a`). Copy [`tfrc.policy.example.json`](./tfrc.policy.example.json) to `tfrc.policy.json`, populate your exact granted zones/SKUs/expiration date, and pass `--tfrc-only --tfrc-config ./tfrc.policy.json` to `deploy_with_libscript.sh`.
+2. **Queued Resources & Spot / On-Demand Tiers:** Export `TPU_USE_QUEUED_RESOURCE="true"` and match `TPU_SCHEDULING_TYPE` (`"spot"` or `"on-demand"`) strictly to your TFRC allocation. Avoid extra Persistent Disks (`DISK_SIZE_GB=0`) and GKE/XPK clusters when operating strictly under `$0` TFRC quota, as GKE system CPU node pools and extra PDs are billed outside TFRC. Both `topologies/gke-tpu-cluster/cli.{sh,cmd}` and `payloads/ai/gke-xpk-training/deploy.{sh,cmd}` automatically forward `--spot` (or `--on-demand`) and `--num-slices=$TPU_SLICE_COUNT` to `xpk` when GKE/XPK is intentionally used.
+3. **Accelerator Types:** Current TFRC grants commonly allocate `v4-8`, `v5litepod-8` (`v5e`), `v6e-8` (Trillium), or multi-host `v4-16`/`v4-32`/`v5litepod-16` slices. Update `TPU_ACCELERATOR_TYPE` (e.g., `v6e-8` or `v4-8`) to match your granted SKU.
 
 **To verify your quota before provisioning:**
 ```bash
@@ -85,12 +88,14 @@ cd ~/.libscript
 # Install the Google Cloud CLI component and authenticate
 ./libscript.sh install cloud-providers/gcp-cli latest
 
-# Install the HuggingFace CLI and XPK orchestrator
+# Install uv and the HuggingFace CLI (required); install XPK only if using GKE/XPK (Approach B)
+./libscript.sh install toolchains/uv latest
 ./libscript.sh install toolchains/huggingface-cli latest
-./libscript.sh install toolchains/xpk latest
+./libscript.sh install toolchains/xpk latest  # Optional: skip for $0 TFRC TPU VM runs
 
 # Activate installed toolchains in your current shell
 eval "$(./libscript.sh env gcp-cli latest)"
+eval "$(./libscript.sh env uv latest)"
 eval "$(./libscript.sh env huggingface-cli latest)"
 eval "$(./libscript.sh env xpk latest)"
 
@@ -387,3 +392,43 @@ gcloud compute tpus tpu-vm list --zone="$TPU_ZONE"
 # Confirm your model weights are still safe in Object Storage
 gcloud storage ls "$BUCKET_NAME/gemma-4-pt/"
 ```
+
+---
+
+## 7. Zero-Cost TFRC 7-Backend Comparison Matrix (`tpu_matrix`)
+
+When running under a **Google Cloud TPU Research Cloud (TFRC)** grant, `gemma-4-sql` and `libscript` provide strict `$0` cost guardrails (`--tfrc-only --tfrc-config ./tfrc.policy.json`) to benchmark, train, and evaluate all **seven Gemma 4 framework/backend configurations** on identical single-host (`v4-8`, `v5litepod-8`, `v6e-8`) or multi-host (`v4-16`, `v4-32`, `v5litepod-16`, `--worker=all`) TPU slices:
+
+1. `hf_transformers` — Hugging Face `transformers` (`Gemma4ForCausalLM`) via `torch_xla` PJRT
+2. `pytorch_native` — Native `gemma_4_sql.backends.pytorch.gemma4` via `torch_xla` PJRT
+3. `keras_jax` — Keras 3 (`KERAS_BACKEND=jax`) + `keras.distribution.DataParallel` + `jax[tpu]`
+4. `keras_tensorflow` — Keras 3 (`KERAS_BACKEND=tensorflow`) + `TPUClusterResolver("local")` / `TPUStrategy`
+5. `keras_pytorch` — Keras 3 (`KERAS_BACKEND=torch`) + `torch_xla` PJRT
+6. `maxtext` — AI-Hypercomputer `maxtext` + `jax.distributed` + multi-chip TPU `Mesh`
+7. `jax_native` — Native Flax NNX `gemma_4_sql.backends.jax.gemma4` + `jax.distributed` + multi-chip TPU `Mesh`
+
+### Zero-Cost TFRC Guardrails & `/dev/shm` `uv` Virtualenv Isolation
+
+* **Explicit Policy Allowlist (`tfrc.policy.json`)**: Copy [`tfrc.policy.example.json`](./tfrc.policy.example.json) to `tfrc.policy.json` (git-ignored) and declare your exact TFRC grant zones, accelerator SKUs (`v4-8`, `v5litepod-8`, `v6e-8`), scheduling tiers (`on-demand` vs `spot`), chip caps, and grant expiration date.
+* **Zero Extra Persistent Disks & No GKE/XPK Under `--tfrc-only`**: `libscript.json` defaults `DISK_SIZE_GB=0` and `TPU_DATA_DISK_SIZE=0`, keeps `xpk` optional-only (since GKE system CPU node pools are billed outside TFRC), and uses SSH artifact collection by default (or same-region GCS buckets only).
+* **Isolated `/dev/shm` `uv` Environments**: Because `jax[tpu]`, `torch_xla[tpu]`, and `tensorflow-tpu` pin distinct `libtpu` wheels, `libscript` provisions isolated `uv` virtualenvs inside RAM-backed `/dev/shm/libscript-venvs/<backend>` on every worker (`--worker=all`) and verifies `/dev/accel*` / `/dev/vfio/*` device release before each cell.
+
+```bash
+cp tfrc.policy.example.json tfrc.policy.json
+# Edit tfrc.policy.json with your TFRC project_id and granted zones/SKUs
+
+# Dry-run or execute the 7-backend TFRC TPU matrix via deploy_with_libscript.sh
+./deploy_with_libscript.sh --tpu-matrix --tfrc-only --tfrc-config ./tfrc.policy.json --dry-run
+
+# Or run the local/on-VM matrix CLI directly on an active TPU VM:
+gemma-4-sql benchmark-matrix \
+  --model google/gemma-4-E4B \
+  --hardware tpu-v6e \
+  --backends hf_transformers,pytorch_native,keras_jax,keras_tensorflow,keras_pytorch,maxtext,jax_native \
+  --modes prefill,decode \
+  --batch-sizes 1,8 \
+  --strict-hardware \
+  --markdown \
+  --output-json ./logs/tpu_matrix.json
+```
+

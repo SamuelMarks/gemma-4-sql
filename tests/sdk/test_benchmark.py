@@ -20,13 +20,14 @@ def test_benchmark_jax() -> None:
 
 
 def test_benchmark_keras_routing_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Verify benchmark forwards exact arguments to Keras backend and raises when TensorFlow is missing."""
+    """Verify benchmark forwards exact arguments to Keras backend and raises when Keras is missing."""
     import gemma_4_sql.backends.keras as kb
     import gemma_4_sql.backends.keras.benchmark as kbm
 
-    monkeypatch.setattr(kbm, "tf", None)
-    with pytest.raises(DependencyMissingError):
-        benchmark("gemma-4", "gpu", 1, "keras")
+    with monkeypatch.context() as mp:
+        mp.setattr(kbm, "keras", None)
+        with pytest.raises(DependencyMissingError):
+            benchmark("gemma-4", "gpu", 1, "keras")
 
     keras_double = RecordingBackendDouble("keras")
     monkeypatch.setattr(kbm, "benchmark_model", keras_double.benchmark_model)

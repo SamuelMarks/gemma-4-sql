@@ -9,6 +9,7 @@ from contextlib import AbstractContextManager
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql._types_tensors import extract_scalar_float
+from gemma_4_sql.backends.common_benchmark import normalize_hardware_family
 from gemma_4_sql.backends.common_dpo import ScalarItemProtocol
 from gemma_4_sql.backends.common_inference import (
     BoundedLRUCache,
@@ -20,6 +21,7 @@ from gemma_4_sql.backends.common_inference import (
 from gemma_4_sql.backends.common_multimodal import prepare_multimodal_inputs
 from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
+from gemma_4_sql.backends.pytorch.runtime_adapter import TorchRuntimeAdapter
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
 from gemma_4_sql.type_hints import (
     BackendKwargValue,
@@ -172,6 +174,23 @@ class _HFGenerateScoredOutputProtocol(Protocol):
 
         Returns:
             Sequence of scalar log-probability score tensors.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _MovableInferenceModelProtocol(Protocol):
+    """Protocol for inference models supporting `.to(device)`."""
+
+    def to[ModelSelfT](self: ModelSelfT, device: str, /) -> ModelSelfT:
+        """Move model onto `device`.
+
+        Args:
+            device: Target device string.
+
+        Returns:
+            Model placed on `device`.
 
         """
         ...
@@ -447,20 +466,40 @@ def _resolve_model_device(model: _CachedPyTorchModel) -> str:
     return "cpu"
 
 
-def _move_tensor_if_supported(tensor: TorchTensorProtocol | None, device: str) -> TorchTensorProtocol | None:
-    """Move `tensor` to `device` if `.to(device)` is supported.
+def _move_required_tensor(tensor: TorchTensorProtocol, device: str) -> TorchTensorProtocol:
+    """Move non-optional `tensor` to `device` if `.to(device)` is supported.
 
     Args:
-        tensor: Optional tensor to move.
+        tensor: Tensor to move.
         device: Target device string.
 
     Returns:
         Moved tensor or original `tensor`.
 
     """
-    if tensor is not None and callable(tensor.to):
+    try:
         return tensor.to(device)
-    return tensor
+    except (TypeError, AssertionError, RuntimeError):
+        return tensor
+
+
+def _move_tensor_if_supported(
+    tensor: TorchTensorProtocol | None,
+    device: str,
+) -> TorchTensorProtocol | None:
+    """Move optional `tensor` to `device` if `.to(device)` is supported.
+
+    Args:
+        tensor: Optional tensor to move.
+        device: Target device string.
+
+    Returns:
+        Moved tensor or `None`.
+
+    """
+    if tensor is None:
+        return None
+    return _move_required_tensor(tensor, device)
 
 
 def _run_generation(
@@ -527,6 +566,14 @@ def _run_generation(
     mm_kwargs: dict[str, BackendKwargValue] = {
         k: v for k, v in kwargs.items() if not isinstance(v, (Gemma4Config, CacheFingerprintProtocol))
     }
+    hardware = str(kwargs.get("hardware", "cpu"))
+    strict_hw = bool(kwargs.get("strict_hardware", False))
+    xla_target_dev = (
+        TorchRuntimeAdapter(None).get_device(hardware, strict_hardware=strict_hw)
+        if normalize_hardware_family(hardware) == "tpu"
+        else ""
+    )
+    use_xla = xla_target_dev.startswith("xla")
     (prompt, pixel_values, audio_values) = prepare_multimodal_inputs(
         prompt,
         mm_kwargs,
@@ -573,6 +620,12 @@ def _run_generation(
         else:
             loaded_native: _CachedNativeModel = NativeGemma4.from_pretrained(model_name, config=cfg_in)
             model = loaded_native
+        if use_xla:
+            if isinstance(model, _MovableInferenceModelProtocol):
+                model = model.to(xla_target_dev)
+            input_ids = _move_required_tensor(input_ids, xla_target_dev)
+            pixel_values = _move_tensor_if_supported(pixel_values, xla_target_dev)
+            audio_values = _move_tensor_if_supported(audio_values, xla_target_dev)
         if isinstance(model, TorchCausalLMProtocol) and callable(model.train):
             model.train(False)
         _MODEL_CACHE.put_model(native_cache_key, (model, tokenizer))
@@ -585,6 +638,8 @@ def _run_generation(
                 pixel_values=pixel_values,
                 audio_values=audio_values,
             )
+        if use_xla:
+            TorchRuntimeAdapter(None).synchronize(xla_target_dev)
 
         gen_tokens = output_ids[0][input_ids.shape[-1] :]
         if len(gen_tokens) == 0:
@@ -633,7 +688,7 @@ def _run_generation(
     )
     hf_cache_key = make_model_cache_key(
         model_name,
-        backend_name="hf",
+        backend_name=f"hf:{xla_target_dev}" if use_xla else "hf",
         adapter_path=adapter_key,
         factories=(tok_factory, model_factory, peft_factory),
     )
@@ -644,18 +699,25 @@ def _run_generation(
         assert AutoTokenizer is not None
         assert AutoModelForCausalLM is not None
         hf_tokenizer = AutoTokenizer.from_pretrained(model_name)
-        hf_model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
+        if use_xla:
+            hf_model = AutoModelForCausalLM.from_pretrained(model_name)
+            if isinstance(hf_model, _MovableInferenceModelProtocol):
+                hf_model = hf_model.to(xla_target_dev)
+        else:
+            hf_model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
         if "adapter_path" in kwargs or "lora_path" in kwargs:
             adapter_path = str(kwargs.get("adapter_path") or kwargs.get("lora_path"))
             try:
                 if peft_cls_ref is None:
                     raise ImportError("peft.PeftModel is not available.")
                 hf_model = peft_cls_ref.from_pretrained(hf_model, adapter_path)
+                if use_xla and isinstance(hf_model, _MovableInferenceModelProtocol):
+                    hf_model = hf_model.to(xla_target_dev)
             except (ImportError, ValueError, RuntimeError, OSError) as e:
                 logger.warning("Could not load adapter from %s: %s", adapter_path, e)
         _HF_MODEL_CACHE.put_model(hf_cache_key, (hf_model, hf_tokenizer))
 
-    device = _resolve_model_device(hf_model)
+    device = xla_target_dev if use_xla else _resolve_model_device(hf_model)
     inputs = hf_tokenizer(prompt, return_tensors="pt")
     if isinstance(inputs, _BatchEncodingProtocol) and callable(inputs.to):
         inputs = inputs.to(device)
@@ -679,6 +741,8 @@ def _run_generation(
         output_scores=True,
         return_dict_in_generate=True,
     )
+    if use_xla:
+        TorchRuntimeAdapter(None).synchronize(xla_target_dev)
     sequences = outputs.sequences
     input_length = 0
     in_ids: TorchTensorProtocol | None = (

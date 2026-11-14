@@ -574,6 +574,45 @@ class ConfigurationError(GemmaSQLError, ValueError):
     """Raised when hyperparameters, backend names, or configuration parameters are invalid."""
 
 
+class HardwareUnavailableError(ConfigurationError):
+    """Raised when strict hardware enforcement is active and the requested accelerator is unavailable.
+
+    Attributes:
+        hardware: Requested hardware identifier (e.g., `'tpu'`, `'tpu-v6e'`, `'gpu'`).
+
+    """
+
+    def __init__(
+        self,
+        message: str = "Requested hardware accelerator is unavailable.",
+        *,
+        hardware: str | None = None,
+        backend: str | None = None,
+        model_name: str | None = None,
+        operation: str | None = "benchmark",
+        cause: Exception | None = None,
+    ) -> None:
+        """Initialize HardwareUnavailableError with structured accelerator context.
+
+        Args:
+            message: Human-readable error description.
+            hardware: Requested accelerator label that could not be resolved.
+            backend: Optional backend identifier where hardware resolution failed.
+            model_name: Optional model identifier associated with the operation.
+            operation: Optional operation identifier (defaults to `'benchmark'`).
+            cause: Optional underlying exception cause.
+
+        """
+        super().__init__(
+            message,
+            backend=backend,
+            model_name=model_name,
+            operation=operation,
+            cause=cause,
+        )
+        self.hardware = hardware
+
+
 class MultimodalProcessingError(GemmaSQLError, RuntimeError):
     """Raised when image or audio input decoding, validation, or feature extraction fails."""
 
@@ -719,6 +758,7 @@ __all__ = [
     "ExportError",
     "ExtraKwargsCarrierProtocol",
     "GemmaSQLError",
+    "HardwareUnavailableError",
     "InferenceError",
     "MultimodalProcessingError",
     "PEFTError",

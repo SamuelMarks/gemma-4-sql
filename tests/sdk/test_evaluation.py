@@ -454,6 +454,8 @@ def test_collect_predictions_batch_multimodal() -> None:
         dataset_name="test-data",
         backend_impl=backend_impl,
         modality="multimodal",
+        hardware="tpu-v6e",
+        strict_hardware=True,
     )
     assert preds2 == ["SELECT 1"]
 

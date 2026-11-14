@@ -6,11 +6,12 @@ import logging
 import math
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, Self, runtime_checkable
 
 from gemma_4_sql.backends.common_inference import make_model_cache_key
 from gemma_4_sql.backends.common_peft import apply_lora_wrapper, matches_target_module
 from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
+from gemma_4_sql.backends.pytorch.runtime_adapter import TorchRuntimeAdapter
 from gemma_4_sql.exceptions import DependencyMissingError, StatusValue
 from gemma_4_sql.type_hints import (
     CausalLMProtocol,
@@ -405,6 +406,23 @@ def inject_native_pytorch_lora[SubmodT](
     return len(matched_paths)
 
 
+@runtime_checkable
+class _DeviceMovablePeftModelProtocol(Protocol):
+    """Protocol for PEFT models supporting `.to(device)` placement."""
+
+    def to(self, device: str, /) -> Self:
+        """Move model parameters onto `device`.
+
+        Args:
+            device: Target device string (`'xla:0'`, `'cpu'`).
+
+        Returns:
+            Device-placed model.
+
+        """
+        ...
+
+
 def apply_lora(
     model_name: str,
     target_modules: list[str],
@@ -421,7 +439,7 @@ def apply_lora(
         lora_r: The rank of the LoRA update matrices.
         lora_alpha: The scaling factor for LoRA.
         lora_dropout: The dropout probability for LoRA layers.
-        **kwargs: Additional configuration options (including `output_dir` and `raise_on_error`).
+        **kwargs: Additional configuration options (including `output_dir`, `hardware`, `strict_hardware`).
 
     Returns:
         A dictionary containing the results.
@@ -432,8 +450,14 @@ def apply_lora(
 
     """
     backend_alias = str(kwargs.get("backend_alias", "pytorch"))
+    hardware = str(kwargs.get("hardware", "cpu"))
+    strict_hw = bool(kwargs.get("strict_hardware", False))
     if torch is None:
         raise DependencyMissingError("PyTorch PEFT dependencies are missing.", backend=backend_alias)
+    target_dev = (
+        TorchRuntimeAdapter(None).get_device(hardware, strict_hardware=strict_hw) if hardware != "cpu" else "cpu"
+    )
+    use_xla = target_dev.startswith("xla")
 
     if backend_alias == "pytorch_native":
 
@@ -464,13 +488,19 @@ def apply_lora(
                 native_model = Gemma4ForCausalLM.from_pretrained(model_name)
                 tok_ref = None
 
+            if use_xla:
+                native_model = native_model.to(target_dev)
             count = inject_native_pytorch_lora(native_model, target_modules, lora_r, lora_alpha, lora_dropout)
             MODEL_CACHE.put_model(model_name, (native_model, tok_ref))
             MODEL_CACHE.put_model(native_cache_key, (native_model, tok_ref))
             if "output_dir" in kwargs and kwargs["output_dir"] is not None:
                 out_dir = Path(str(kwargs["output_dir"]))
                 out_dir.mkdir(parents=True, exist_ok=True)
+                if use_xla:
+                    native_model = native_model.to("cpu")
                 native_model.save_pretrained(str(out_dir))
+                if use_xla:
+                    native_model = native_model.to(target_dev)
             return count
 
         return apply_lora_wrapper(
@@ -485,7 +515,7 @@ def apply_lora(
         )
 
     if peft is None or AutoModelForCausalLM is None or LoraConfig is None or get_peft_model is None:
-        raise DependencyMissingError("PyTorch PEFT dependencies are missing.", backend="pytorch")
+        raise DependencyMissingError("PyTorch PEFT dependencies are missing.", backend=backend_alias)
 
     auto_cls = AutoModelForCausalLM
     lora_cfg_cls = LoraConfig
@@ -499,6 +529,8 @@ def apply_lora(
 
         """
         base_model = auto_cls.from_pretrained(model_name)
+        if use_xla and isinstance(base_model, _DeviceMovablePeftModelProtocol):
+            base_model = base_model.to(target_dev)
         lora_config = lora_cfg_cls(
             r=lora_r,
             lora_alpha=lora_alpha,
@@ -508,6 +540,8 @@ def apply_lora(
             task_type="CAUSAL_LM",
         )
         model = get_peft_fn(base_model, lora_config)
+        if use_xla and isinstance(model, _DeviceMovablePeftModelProtocol):
+            model = model.to(target_dev)
         if isinstance(model, _PrintableTrainableProtocol) and callable(model.print_trainable_parameters):
             model.print_trainable_parameters()
         if (
@@ -515,11 +549,13 @@ def apply_lora(
             and isinstance(model, _SavePretrainedAdapterProtocol)
             and callable(model.save_pretrained)
         ):
+            if use_xla and isinstance(model, _DeviceMovablePeftModelProtocol):
+                model = model.to("cpu")
             model.save_pretrained(str(kwargs["output_dir"]))
         return _count_injected_peft_modules(model, target_modules)
 
     return apply_lora_wrapper(
-        "pytorch",
+        backend_alias,
         model_name,
         target_modules,
         lora_r,

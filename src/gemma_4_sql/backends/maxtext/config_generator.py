@@ -10,13 +10,77 @@ import atexit
 import itertools
 import shutil
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 
 from gemma_4_sql.type_hints import JSONValue, TrainingConfig
 
 _MANAGED_GIN_TEMP_DIRS: list[Path] = []
 _GIN_FILE_COUNTER = itertools.count(1)
+
+
+def _slice_preset(dp: int, fsdp: int, tp: int, dcn_dp: int = 1) -> Mapping[str, int]:
+    """Build an immutable ICI/DCN parallelism dictionary for a TPU slice SKU.
+
+    Args:
+        dp: ICI data parallelism degree.
+        fsdp: ICI FSDP parallelism degree.
+        tp: ICI tensor parallelism degree.
+        dcn_dp: DCN multi-slice data parallelism degree.
+
+    Returns:
+        Read-only mapping of parallelism axis degrees.
+
+    """
+    return MappingProxyType({
+        "ici_data_parallelism": dp,
+        "ici_fsdp_parallelism": fsdp,
+        "ici_tensor_parallelism": tp,
+        "dcn_data_parallelism": dcn_dp,
+    })
+
+
+TPU_SLICE_TOPOLOGY_PRESETS: Mapping[str, Mapping[str, int]] = MappingProxyType({
+    "v4-8": _slice_preset(1, 4, 1),
+    "v4-16": _slice_preset(1, 8, 1),
+    "v4-32": _slice_preset(1, 8, 2),
+    "v5litepod-4": _slice_preset(1, 4, 1),
+    "v5litepod-8": _slice_preset(1, 8, 1),
+    "v5litepod-16": _slice_preset(1, 8, 2),
+    "v5e-8": _slice_preset(1, 8, 1),
+    "v5p-8": _slice_preset(1, 4, 1),
+    "v6e-4": _slice_preset(1, 4, 1),
+    "v6e-8": _slice_preset(1, 8, 1),
+    "v6e-16": _slice_preset(1, 8, 2),
+})
+
+
+def resolve_tpu_slice_parallelism(tpu_type: str | None) -> Mapping[str, int] | None:
+    """Resolve optimal ICI/DCN parallelism settings for a Cloud TPU SKU (`v4-8`, `v5litepod-8`, `v6e-8`, etc.).
+
+    Args:
+        tpu_type: Raw TPU SKU or hardware string (e.g., `'v6e-8'`, `'tpu-v5litepod-8'`, `'v4-32'`).
+
+    Returns:
+        Read-only mapping of ICI/DCN parallelism integers, or `None` when unrecognized.
+
+    """
+    if not tpu_type:
+        return None
+    norm = tpu_type.strip().lower().removeprefix("tpu-")
+    if norm in TPU_SLICE_TOPOLOGY_PRESETS:
+        return TPU_SLICE_TOPOLOGY_PRESETS[norm]
+    if norm.startswith("v6e"):
+        return TPU_SLICE_TOPOLOGY_PRESETS["v6e-8"]
+    if norm.startswith(("v5e", "v5litepod")):
+        return TPU_SLICE_TOPOLOGY_PRESETS["v5litepod-8"]
+    if norm.startswith("v5p"):
+        return TPU_SLICE_TOPOLOGY_PRESETS["v5p-8"]
+    if norm.startswith("v4"):
+        return TPU_SLICE_TOPOLOGY_PRESETS["v4-8"]
+    return None
 
 
 def cleanup_temp_gin_configs() -> None:
@@ -48,6 +112,9 @@ class MaxTextHyperparameters:
         steps: Total training steps to execute.
         dataset_name: Dataset identifier used for loading and tokenization.
         checkpoint_period: Frequency in steps at which checkpoints are persisted.
+        ici_fsdp_parallelism: Optional ICI FSDP parallelism degree for TPU slice topology.
+        ici_tensor_parallelism: Optional ICI tensor parallelism degree for TPU slice topology.
+        dcn_data_parallelism: Optional DCN multi-slice data parallelism degree.
 
     """
 
@@ -64,6 +131,9 @@ class MaxTextHyperparameters:
     steps: int = 1000
     dataset_name: str = "dummy"
     checkpoint_period: int = 500
+    ici_fsdp_parallelism: int | None = None
+    ici_tensor_parallelism: int | None = None
+    dcn_data_parallelism: int | None = None
 
 
 def _to_float(val: JSONValue, default: float) -> float:
@@ -204,6 +274,24 @@ def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: JSONValue) -
         msg = f"checkpoint_period must be positive, got {checkpoint_period}"
         raise ValueError(msg)
 
+    raw_tpu_sku = merged.get("tpu_type") or merged.get("hardware")
+    slice_preset = resolve_tpu_slice_parallelism(str(raw_tpu_sku)) if isinstance(raw_tpu_sku, str) else None
+    ici_fsdp = (
+        _to_int(merged["ici_fsdp_parallelism"], 1)
+        if "ici_fsdp_parallelism" in merged and merged["ici_fsdp_parallelism"] is not None
+        else (slice_preset["ici_fsdp_parallelism"] if slice_preset is not None else None)
+    )
+    ici_tp = (
+        _to_int(merged["ici_tensor_parallelism"], 1)
+        if "ici_tensor_parallelism" in merged and merged["ici_tensor_parallelism"] is not None
+        else (slice_preset["ici_tensor_parallelism"] if slice_preset is not None else None)
+    )
+    dcn_dp = (
+        _to_int(merged["dcn_data_parallelism"], 1)
+        if "dcn_data_parallelism" in merged and merged["dcn_data_parallelism"] is not None
+        else (slice_preset["dcn_data_parallelism"] if slice_preset is not None else None)
+    )
+
     return MaxTextHyperparameters(
         model_architecture=model_architecture,
         per_device_batch_size=per_device,
@@ -218,6 +306,9 @@ def build_maxtext_hyperparameters(config: TrainingConfig, **kwargs: JSONValue) -
         steps=steps,
         dataset_name=dataset_name,
         checkpoint_period=checkpoint_period,
+        ici_fsdp_parallelism=ici_fsdp,
+        ici_tensor_parallelism=ici_tp,
+        dcn_data_parallelism=dcn_dp,
     )
 
 
@@ -237,6 +328,13 @@ def generate_maxtext_gin_config(config: TrainingConfig, **kwargs: JSONValue) -> 
     """
     params = build_maxtext_hyperparameters(config, **kwargs)
     mesh_axes_str = "[" + ", ".join(f"'{axis}'" for axis in params.mesh_axes) + "]"
+    topology_lines = ""
+    if params.ici_fsdp_parallelism is not None:
+        topology_lines += f"ici_fsdp_parallelism = {params.ici_fsdp_parallelism}\n"
+    if params.ici_tensor_parallelism is not None:
+        topology_lines += f"ici_tensor_parallelism = {params.ici_tensor_parallelism}\n"
+    if params.dcn_data_parallelism is not None:
+        topology_lines += f"dcn_data_parallelism = {params.dcn_data_parallelism}\n"
 
     return f"""# MaxText Configuration for Gemma-4 SQL
 # Auto-generated by gemma_4_sql.backends.maxtext.config_generator
@@ -252,7 +350,7 @@ model_name = "{params.model_architecture}"
 per_device_batch_size = {params.per_device_batch_size}
 global_batch_size = {params.global_batch_size}
 mesh_axes = {mesh_axes_str}
-
+{topology_lines}
 # Optimizer & learning rate schedule
 learning_rate = {params.learning_rate}
 opt_type = "{params.opt_type}"

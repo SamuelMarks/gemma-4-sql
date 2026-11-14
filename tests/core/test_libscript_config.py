@@ -119,12 +119,58 @@ def test_deploy_with_libscript_scripts_exist_and_help() -> None:
         assert "--train" in text
         assert "--infer" in text
         assert "--dry-run" in text
+        assert "--tfrc-only" in text
+        assert "--tfrc-config" in text
+        assert "--tpu-matrix" in text
+        assert "experiment tpu_matrix" in text
         assert "APP_DIR" in text
 
     res = subprocess.run(["sh", str(sh_script), "--help"], capture_output=True, text=True, check=True)
     assert "Usage:" in res.stdout
     assert "--train" in res.stdout
     assert "--gpu-vm" in res.stdout
+    assert "--tfrc-only" in res.stdout
+    assert "--tpu-matrix" in res.stdout
+
+    # Zero-cost TFRC invariants in libscript.json and tfrc.policy.example.json
+    manifest = json.loads((REPO_ROOT / "libscript.json").read_text(encoding="utf-8"))
+    assert manifest["vars"]["DISK_SIZE_GB"] == 0
+    assert manifest["vars"]["TPU_DATA_DISK_SIZE"] == 0
+    assert manifest["vars"]["TFRC_STRICT"] == "1"
+    assert manifest["vars"]["TPU_USE_QUEUED_RESOURCE"] == "true"
+    assert "disk_gb" not in manifest["infrastructure"]["node"]
+    req_tools = {t["name"] for t in manifest["dependencies"]["required"]["toolchains"]}
+    install_req_tools = {t["name"] for t in manifest["install"]["dependencies"]["required"]["toolchains"]}
+    opt_tools = {t["name"] for t in manifest["dependencies"]["optional"]}
+    assert "uv" in req_tools
+    assert "xpk" not in req_tools
+    assert "xpk" not in install_req_tools
+    assert "xpk" in opt_tools
+    assert len(manifest["ml"]["backends"]) == 7
+
+    policy_example = json.loads((REPO_ROOT / "tfrc.policy.example.json").read_text(encoding="utf-8"))
+    assert policy_example["allow_extra_pd"] is False
+    assert policy_example["allow_gke_xpk"] is False
+    assert len(policy_example["allowed_allocations"]) >= 3
+
+    # Verify --tfrc-only blocks billable GKE/XPK and missing --tfrc-config
+    blocked_xpk = subprocess.run(
+        ["sh", str(sh_script), "--gke-xpk", "--tfrc-only"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert blocked_xpk.returncode == 1
+    assert "blocks billable non-TFRC target" in blocked_xpk.stderr
+
+    missing_cfg = subprocess.run(
+        ["sh", str(sh_script), "--tpu-vm", "--tfrc-only"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert missing_cfg.returncode == 1
+    assert "requires --tfrc-config" in missing_cfg.stderr
 
 
 def test_deploy_docs_use_current_libscript_paths() -> None:

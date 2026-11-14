@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM deploy_with_libscript.cmd
-REM Installs dependencies and orchestrates gemma-4-sql local, GPU, or TPU training/inference deployment via libscript.
+REM Installs dependencies and orchestrates gemma-4-sql local, GPU, or zero-cost TFRC TPU deployment & 7-backend matrix experiments via libscript.
 
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
@@ -22,6 +22,8 @@ if exist "%SCRIPT_DIR%\..\libscript\libscript.cmd" (
 set "MODE=local"
 set "ACTION=deploy"
 set "DRY_RUN_FLAG="
+set "TFRC_ONLY=0"
+set "TFRC_CONFIG_PATH=%TFRC_CONFIG%"
 
 :parse_args
 if "%~1"=="" goto :args_done
@@ -37,12 +39,48 @@ if /i "%~1"=="--train" set "ACTION=train"
 if /i "%~1"=="--infer" set "ACTION=infer"
 if /i "%~1"=="--serve" set "ACTION=infer"
 if /i "%~1"=="--serve-ml" set "ACTION=infer"
+if /i "%~1"=="--tpu-matrix" (
+    set "MODE=gcp-tpu-vm"
+    set "ACTION=tpu-matrix"
+)
+if /i "%~1"=="--tfrc-only" set "TFRC_ONLY=1"
+if /i "%~1"=="--tfrc-config" (
+    set "TFRC_CONFIG_PATH=%~2"
+    shift
+)
 if /i "%~1"=="--dry-run" set "DRY_RUN_FLAG=--dry-run"
 shift
 goto :parse_args
 
 :args_done
 set "APP_DIR=%SCRIPT_DIR%"
+
+if "!TFRC_ONLY!"=="1" (
+    set "TFRC_STRICT=1"
+    set "DISK_SIZE_GB=0"
+    set "TPU_DATA_DISK_SIZE=0"
+    if /i "!MODE!"=="gke-xpk" (
+        echo ERROR: --tfrc-only blocks billable non-TFRC target gke-xpk. 1>&2
+        exit /b 1
+    )
+    if /i "!MODE!"=="gcp-gpu-vm" (
+        echo ERROR: --tfrc-only blocks billable non-TFRC target gcp-gpu-vm. 1>&2
+        exit /b 1
+    )
+    if "!TFRC_CONFIG_PATH!"=="" (
+        echo ERROR: --tfrc-only requires --tfrc-config ^<path^>. 1>&2
+        exit /b 1
+    )
+    set "TFRC_CONFIG=!TFRC_CONFIG_PATH!"
+)
+
+if /i "!ACTION!"=="tpu-matrix" (
+    set "MATRIX_ARGS="
+    if "!TFRC_ONLY!"=="1" set "MATRIX_ARGS=--tfrc-only --tfrc-config !TFRC_CONFIG_PATH!"
+    if not "!DRY_RUN_FLAG!"=="" set "MATRIX_ARGS=!MATRIX_ARGS! --dry-run"
+    call "!LIBSCRIPT_CMD!" experiment tpu_matrix "%SCRIPT_DIR%\libscript.json" !MATRIX_ARGS!
+    exit /b !errorlevel!
+)
 
 if not "!DRY_RUN_FLAG!"=="" (
     set "ML_CMD=!ACTION!"
@@ -53,10 +91,13 @@ if not "!DRY_RUN_FLAG!"=="" (
 
 echo Installing required dependencies via libscript...
 call "!LIBSCRIPT_CMD!" install python 3.12
+call "!LIBSCRIPT_CMD!" install uv latest
 call "!LIBSCRIPT_CMD!" install duckdb latest
 call "!LIBSCRIPT_CMD!" install sqlite latest
 call "!LIBSCRIPT_CMD!" install huggingface-cli latest
-call "!LIBSCRIPT_CMD!" install xpk latest
+if /i "!MODE!"=="gke-xpk" if not "!TFRC_ONLY!"=="1" (
+    call "!LIBSCRIPT_CMD!" install xpk latest
+)
 if exist "%SCRIPT_DIR%\libscript.json" (
     call "!LIBSCRIPT_CMD!" install-deps "%SCRIPT_DIR%\libscript.json"
 )
@@ -86,5 +127,5 @@ if /i "!MODE!"=="gcp-tpu-vm" (
 exit /b %errorlevel%
 
 :help
-echo Usage: deploy_with_libscript.cmd [--local ^| --tpu-vm ^| --gpu-vm ^| --gke-xpk] [--train ^| --infer ^| --serve] [--dry-run] [--help]
+echo Usage: deploy_with_libscript.cmd [--local ^| --tpu-vm ^| --gpu-vm ^| --gke-xpk] [--train ^| --infer ^| --serve ^| --tpu-matrix] [--tfrc-only] [--tfrc-config PATH] [--dry-run] [--help]
 exit /b 0

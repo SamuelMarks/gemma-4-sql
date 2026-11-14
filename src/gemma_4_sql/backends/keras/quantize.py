@@ -442,18 +442,23 @@ def quantize_model(
             model = kwargs.get("model")
             if model is None:
                 try:
-                    gemma_causal_lm_cls = import_optional_symbol(
-                        "keras_nlp.models",
-                        "GemmaCausalLM",
+                    from gemma_4_sql.backends.keras._runtime import (
+                        load_keras_gemma_model,
+                        load_preset_with_hf_fallback,
+                    )
+
+                    gemma_causal_lm_cls = load_keras_gemma_model(
+                        model_name,
                         _GemmaCausalLMLoaderProtocol,
+                        symbol_importer=import_optional_symbol,
                     )
                     if gemma_causal_lm_cls is None:
                         raise QuantizationError(
-                            f"keras_nlp.models.GemmaCausalLM is unavailable to load '{model_name}'.",
+                            f"keras_hub / keras_nlp GemmaCausalLM is unavailable to load '{model_name}'.",
                             backend="keras",
                             model_name=model_name,
                         )
-                    model = gemma_causal_lm_cls.from_preset(model_name)
+                    model = load_preset_with_hf_fallback(gemma_causal_lm_cls, model_name)
                 except QuantizationError:
                     raise
                 except (ImportError, ValueError, RuntimeError, AttributeError, OSError) as err:
@@ -512,13 +517,21 @@ def quantize_model(
             if prev_policy is not None:
                 _set_keras_policy(prev_policy)
 
+    from gemma_4_sql.backends.keras._env import resolve_and_validate_keras_backend
+
+    backend_alias = str(kwargs.get("backend_alias", "keras"))
+    explicit_kb = (
+        str(kwargs["keras_backend"]) if "keras_backend" in kwargs and kwargs["keras_backend"] is not None else None
+    )
+    active_kb = resolve_and_validate_keras_backend(backend_alias, explicit_kb)
     wrapped = quantize_model_wrapper(
-        backend_name="keras",
+        backend_name=backend_alias,
         model_name=model_name,
         method=method,
         apply_fn=_apply,
         raise_on_error=bool(kwargs.get("raise_on_error")),
     )
+    wrapped["keras_backend"] = active_kb
     if export_file is not None:
         wrapped["export_path"] = str(export_file)
     if quantized_layers_count > 0:

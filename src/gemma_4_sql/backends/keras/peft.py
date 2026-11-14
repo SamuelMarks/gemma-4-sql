@@ -960,11 +960,18 @@ def apply_lora(
             _ = merge_lora_weights(model)
         return injected_count
 
+    from gemma_4_sql.backends.keras._env import resolve_and_validate_keras_backend
+
+    backend_alias = str(kwargs.get("backend_alias", "keras"))
+    explicit_kb = (
+        str(kwargs["keras_backend"]) if "keras_backend" in kwargs and kwargs["keras_backend"] is not None else None
+    )
+    active_kb = resolve_and_validate_keras_backend(backend_alias, explicit_kb)
     wrapper_kwargs: dict[str, StatusValue] = {
         k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None
     }
-    return apply_lora_wrapper(
-        "keras",
+    res = apply_lora_wrapper(
+        backend_alias,
         model_name,
         target_modules,
         lora_r,
@@ -973,6 +980,8 @@ def apply_lora(
         _inject,
         **wrapper_kwargs,
     )
+    res["keras_backend"] = active_kb
+    return res
 
 
 __all__ = [

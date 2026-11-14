@@ -30,6 +30,45 @@ class _ClonableTensorProtocol(TorchTensorProtocol, Protocol):
 
 
 @runtime_checkable
+class _HasDeviceAndToProtocol(Protocol):
+    """Protocol for tensors exposing `.device` and `.to('cpu')` for XLA host staging."""
+
+    @property
+    def device(self) -> str | Path | None:
+        """Provide tensor device descriptor."""
+        ...
+
+    def to(self, target: str, /) -> TorchTensorProtocol:
+        """Move tensor to `target` device.
+
+        Args:
+            target: Target device string (`'cpu'`).
+
+        Returns:
+            Host-staged tensor.
+
+        """
+        ...
+
+
+def _stage_xla_tensor_to_cpu[TensorT: TorchTensorProtocol | TensorProtocol | _HasDeviceAndToProtocol](
+    tensor: TensorT,
+) -> TorchTensorProtocol | TensorProtocol | TensorT:
+    """Move `tensor` from an `xla:*` device to `'cpu'` prior to `safetensors` serialization.
+
+    Args:
+        tensor: Parameter tensor from `state_dict()`.
+
+    Returns:
+        CPU-staged tensor when originating on XLA, otherwise original `tensor`.
+
+    """
+    if isinstance(tensor, _HasDeviceAndToProtocol) and str(tensor.device).startswith("xla"):
+        return tensor.to("cpu")
+    return tensor
+
+
+@runtime_checkable
 class _SafetensorsSaveFileProtocol(Protocol):
     """Protocol for `safetensors.torch.save_file`."""
 
@@ -190,7 +229,9 @@ def _save_real_model(
         if backend_alias == "pytorch_native":
             native_model = _resolve_native_export_model(model_name, kwargs.get("config"))
             tensors: dict[str, TorchTensorProtocol | TensorProtocol] = {
-                k: v.clone() if k == "lm_head.weight" and isinstance(v, _ClonableTensorProtocol) else v
+                k: _stage_xla_tensor_to_cpu(
+                    v.clone() if k == "lm_head.weight" and isinstance(v, _ClonableTensorProtocol) else v
+                )
                 for k, v in native_model.state_dict().items()
             }
             save_pretrained_fn: Callable[[str], str | None] = native_model.save_pretrained
@@ -227,7 +268,7 @@ def _save_real_model(
                 )
                 raise ExportError(msg, backend=backend_alias)
             hf_model = gemma4_for_causal_lm_cls.from_pretrained(model_name)
-            tensors = dict(hf_model.state_dict())
+            tensors = {k: _stage_xla_tensor_to_cpu(v) for k, v in hf_model.state_dict().items()}
             save_pretrained_fn = hf_model.save_pretrained
     except (ImportError, ValueError, OSError) as e:
         msg = f"Failed to load model {model_name}"

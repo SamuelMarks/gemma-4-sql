@@ -41,9 +41,10 @@ To contribute to `gemma-4-sql` or modify its logic, install the development depe
    mypy src/gemma_4_sql
    ```
 
-4. **Run Tests with 100% Branch Coverage (`pytest` / `pre-commit`):**
+4. **Run Tests with 100% Branch Coverage (`pytest`, `tox`, & `pre-commit`):**
    ```bash
    pytest --cov=src/gemma_4_sql --cov=tests --cov=scripts --cov-branch --cov-report=term-missing --cov-fail-under=100
+   uvx --with tox-uv tox
    pre-commit run --all-files
    ```
 
@@ -51,7 +52,7 @@ To contribute to `gemma-4-sql` or modify its logic, install the development depe
 
 ## 1. Data Preparation (ETL)
 
-The ETL process standardizes Hugging Face and DuckDB datasets into aligned causal LM formats (`input_ids`, `labels`, `loss_mask`) using Google's `grain` library and native backend batch loaders across all execution engines (`jax`, `keras`, `maxtext`, `pytorch`, `pytorch_hf`, `pytorch_native`, `mlx`).
+The ETL process standardizes Hugging Face and DuckDB datasets into aligned causal LM formats (`input_ids`, `labels`, `loss_mask`) using Google's `grain` library and native backend batch loaders across all registered execution engines and TPU comparison aliases (`jax`, `jax_native`, `keras`, `keras_jax`, `keras_tensorflow`, `keras_tf`, `keras_pytorch`, `keras_torch`, `maxtext`, `pytorch`, `pytorch_hf`, `hf_transformers`, `pytorch_native`, `mlx`).
 
 ### CLI
 
@@ -90,7 +91,7 @@ keras_loader = sft_data["loader"]
 
 ## 2. Model Training & Fine-Tuning
 
-The framework supports multiple training stages out-of-the-box. The backend flag routes execution to the chosen engine (`jax`, `keras`, `maxtext`, `pytorch`, `pytorch_hf`, `pytorch_native`, `mlx`).
+The framework supports multiple training stages out-of-the-box. The `--backend` flag routes execution to any registered engine or TPU comparison alias (`jax`, `jax_native`, `keras`, `keras_jax`, `keras_tensorflow`, `keras_tf`, `keras_pytorch`, `keras_torch`, `maxtext`, `pytorch`, `pytorch_hf`, `hf_transformers`, `pytorch_native`, `mlx`), and all training/DPO/PEFT/generate/evaluate commands accept `--hardware`, `--strict-hardware`, and atomic `--output-json`.
 
 ### CLI
 
@@ -99,16 +100,16 @@ The framework supports multiple training stages out-of-the-box. The backend flag
 gemma-4-sql train --model gemma-4 --dataset my_dataset --backend pytorch
 
 # 2. Pretrain (Domain Adaptation)
-gemma-4-sql pretrain --model gemma-4 --dataset my-custom-dataset --backend maxtext
+gemma-4-sql pretrain --model gemma-4 --dataset my-custom-dataset --backend maxtext --hardware tpu-v6e --strict-hardware
 
 # 3. Supervised Fine-Tuning (SFT)
-gemma-4-sql sft --model gemma-4 --dataset my-custom-sft-dataset --backend jax
+gemma-4-sql sft --model gemma-4 --dataset my-custom-sft-dataset --backend jax_native --output-json ./sft_result.json
 
 # 4. Post-Training
-gemma-4-sql posttrain --model gemma-4 --dataset my-custom-dpo-dataset --backend keras
+gemma-4-sql posttrain --model gemma-4 --dataset my-custom-dpo-dataset --backend keras_jax
 
 # 5. Direct Preference Optimization (DPO)
-gemma-4-sql dpo --model gemma-4 --dataset my_dpo_dataset --beta 0.1 --backend jax
+gemma-4-sql dpo --model gemma-4 --dataset my_dpo_dataset --beta 0.1 --backend jax_native
 ```
 
 ### SDK
@@ -157,10 +158,10 @@ print(f"Exported to: {result['export_path']} (artifact: {result['file_path']})")
 
 To save compute and memory footprints, you can inject LoRA adapters (PEFT) and quantize models.
 
-*   **JAX (`--backend jax`)**: Injects object-oriented `nnx.LoRALinear` adapters into Flax NNX modules; supports Activation-aware Weight Quantization (`--method awq`) and uniform INT8 (`--method int8`).
+*   **JAX (`--backend jax` / `jax_native`)**: Injects object-oriented `nnx.LoRALinear` adapters into Flax NNX modules; supports Activation-aware Weight Quantization (`--method awq`) and uniform INT8 (`--method int8`).
 *   **MaxText (`--backend maxtext`)**: Performs functional parameter PyTree surgery decomposing projection matrices; supports Google AQT (`aqt.jax.v2`) numerical INT8 and INT4 quantization (`--method int8`, `--method int4`).
-*   **Keras (`--backend keras`)**: Enables native KerasNLP LoRA (`enable_lora` / `KerasLoRALayer`) and supports INT8 / INT4 global dtype policies and layer weight quantization (`--method int8`, `--method int4`).
-*   **PyTorch (`--backend pytorch` / `pytorch_hf` / `pytorch_native`)**: Interfaces with Hugging Face `peft` and `NativeLoRALinear`, supporting INT8, INT4, AWQ, GPTQ, and native GGUF binary export.
+*   **Keras (`--backend keras` / `keras_jax` / `keras_tensorflow` / `keras_pytorch`)**: Enables native KerasHub/KerasNLP LoRA (`enable_lora` / `KerasLoRADense`) and supports INT8 / INT4 global dtype policies and layer weight quantization (`--method int8`, `--method int4`).
+*   **PyTorch (`--backend pytorch` / `pytorch_hf` / `hf_transformers` / `pytorch_native`)**: Interfaces with Hugging Face `peft` and `NativeLoRALinear`, supporting INT8, INT4, AWQ, GPTQ, and native GGUF binary export.
 *   **MLX (`--backend mlx`)**: Utilizes `MLXLoRALinear` layers and Metal-accelerated INT8, INT4, AWQ, and GPTQ quantization.
 
 ### CLI
@@ -354,6 +355,9 @@ gemma-4-sql benchmark --model gemma-4 --hardware gpu --batch-size 32 --backend p
 # Benchmark MaxText backend on TPU
 gemma-4-sql benchmark --model gemma-4 --hardware tpu --batch-size 128 --backend maxtext
 
+# Run the 7-backend TPU comparison matrix (hf_transformers, pytorch_native, keras_jax, keras_tensorflow, keras_pytorch, maxtext, jax_native)
+gemma-4-sql benchmark-matrix --model google/gemma-4-E4B --hardware tpu-v6e --strict-hardware --markdown --output-json matrix.json
+
 # Benchmark MLX backend on Apple Silicon (Metal GPU)
 gemma-4-sql benchmark --model gemma-4 --hardware gpu --batch-size 16 --backend mlx
 ```
@@ -361,11 +365,27 @@ gemma-4-sql benchmark --model gemma-4 --hardware gpu --batch-size 16 --backend m
 ### SDK
 
 ```python
-from gemma_4_sql.sdk.benchmark import benchmark
+from gemma_4_sql.sdk.benchmark import benchmark, benchmark_matrix
 
 # Benchmark MaxText on TPU
 metrics = benchmark(model_name="gemma-4", hardware="tpu", batch_size=128, backend="maxtext")
 print(f"TPU Tokens/sec: {metrics['tokens_per_sec']}")
+
+# Compare multiple backends side-by-side and render Markdown table
+matrix = benchmark_matrix(
+    model_name="google/gemma-4-E4B",
+    hardware="tpu-v6e",
+    backends=(
+        "hf_transformers",
+        "pytorch_native",
+        "keras_jax",
+        "keras_tensorflow",
+        "keras_pytorch",
+        "maxtext",
+        "jax_native",
+    ),
+)
+print(matrix["markdown_table"])
 
 # Benchmark MLX on Apple Silicon GPU
 mlx_metrics = benchmark(model_name="gemma-4", hardware="gpu", batch_size=16, backend="mlx")
@@ -395,7 +415,7 @@ gemma-4-sql tokenize --encode "SELECT * FROM users" --hf-model "google/gemma-4-E
 
 ## 13. Logging (TensorBoard Integration)
 
-Gemma-4-SQL provides native integration with TensorBoard across all backend topologies (`jax`, `maxtext`, `keras`, `pytorch`, `mlx`). You can log arbitrary metrics (loss, accuracy, execution accuracy) during training, pretraining, or evaluation.
+Gemma-4-SQL provides native integration with TensorBoard across all backend topologies (`jax`/`jax_native`, `maxtext`, `keras`/`keras_jax`/`keras_tensorflow`/`keras_pytorch`, `pytorch`/`hf_transformers`/`pytorch_native`, `mlx`), gating multi-host JAX writes on `process_index == 0` and falling back cleanly to `SummaryWriter` / `metrics.jsonl` when TensorFlow is absent under `keras_jax` or `keras_pytorch`. You can log arbitrary metrics (loss, accuracy, execution accuracy) during training, pretraining, or evaluation.
 
 ### CLI
 

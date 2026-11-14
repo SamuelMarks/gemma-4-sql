@@ -47,13 +47,14 @@ class ModuleDelegatedBackend(BackendProtocol):
     serve_module: ServeSubmoduleProtocol
     benchmark_module: BenchmarkSubmoduleProtocol
     trainer_name: str = ""
+    canonical_name: ClassVar[str] = ""
     uses_backend_alias: ClassVar[bool] = False
 
     def __init__(self, backend_alias: str | None = None) -> None:
         """Initialize the backend adapter with an optional backend alias.
 
         Args:
-            backend_alias: Optional alias (e.g., `'pytorch_native'`, `'pytorch_hf'`) forwarded in kwargs.
+            backend_alias: Optional alias (e.g., `'pytorch_native'`, `'keras_jax'`) forwarded in kwargs.
 
         """
         self.backend_alias = backend_alias
@@ -69,7 +70,7 @@ class ModuleDelegatedBackend(BackendProtocol):
             Configured adapter instance.
 
         """
-        if cls.uses_backend_alias and "_" in alias:
+        if cls.uses_backend_alias and alias and alias != cls.canonical_name:
             return cls(backend_alias=alias)
         return cls()
 
@@ -267,16 +268,18 @@ class ModuleDelegatedBackend(BackendProtocol):
         """
         return self.benchmark_module.benchmark_model(model_name, hardware, batch_size, **self._inject_alias(kwargs))
 
-    def get_trainer(self, **_kwargs: JSONValue) -> str:
+    def get_trainer(self, **kwargs: JSONValue) -> str:
         """Return the canonical trainer identifier for this backend.
 
         Args:
-            **_kwargs: Optional backend-specific keyword arguments.
+            **kwargs: Optional keyword arguments (`include_alias=True` returns `<alias>_trainer`).
 
         Returns:
-            Trainer identifier string (e.g., `'jax_trainer'`).
+            Trainer identifier string (e.g., `'jax_trainer'` or `'keras_jax_trainer'`).
 
         """
+        if bool(kwargs.get("include_alias")) and self.backend_alias is not None:
+            return f"{self.backend_alias}_trainer"
         return self.trainer_name
 
 

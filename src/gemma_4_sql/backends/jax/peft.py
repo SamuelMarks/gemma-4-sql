@@ -423,9 +423,23 @@ def apply_lora(
         DependencyMissingError: If JAX PEFT dependencies are missing.
 
     """
+    backend_alias = str(kwargs.get("backend_alias", "jax"))
     if optax is None or jax is None or nnx is None or not callable(Gemma4ForCausalLM):
-        raise DependencyMissingError("JAX PEFT dependencies are missing.")
+        raise DependencyMissingError("JAX PEFT dependencies are missing.", backend=backend_alias)
 
+    from gemma_4_sql.backends._jax_common import (
+        build_tpu_mesh_and_sharding,
+        initialize_jax_distributed_if_configured,
+    )
+
+    _ = initialize_jax_distributed_if_configured(jax)
+    if bool(kwargs.get("strict_hardware", False)):
+        _ = build_tpu_mesh_and_sharding(
+            jax,
+            str(kwargs.get("hardware", "cpu")),
+            strict_hardware=True,
+            backend_label=backend_alias,
+        )
     raw_rngs = kwargs.get("rngs")
     resolved_rngs = raw_rngs if isinstance(raw_rngs, nnx.Rngs) else nnx.Rngs(0)
     raw_model = kwargs.get("model")
@@ -467,7 +481,7 @@ def apply_lora(
         return injected_count
 
     return apply_lora_wrapper(
-        "jax",
+        backend_alias,
         model_name,
         target_modules,
         lora_r,

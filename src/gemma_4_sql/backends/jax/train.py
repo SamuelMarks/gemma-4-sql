@@ -13,7 +13,9 @@ from jax import Array
 from gemma_4_sql._types_tensors import extract_scalar_float
 from gemma_4_sql.backends._jax_common import (
     NNXOptimizerProtocol,
+    build_tpu_mesh_and_sharding,
     call_jax_causal_lm,
+    initialize_jax_distributed_if_configured,
 )
 from gemma_4_sql.backends._jax_common import (
     apply_nnx_optimizer_update as _apply_nnx_optimizer_update,
@@ -330,8 +332,21 @@ def train_model(config: TrainingConfig, **kwargs: StatusValue) -> TrainResultDic
         TrainingError: If training fails and `raise_on_error` is enabled.
 
     """
-    if jax is None or is_jnp_missing(jnp) or optax is None or not callable(Gemma4ForCausalLM) or nnx is None:
-        raise DependencyMissingError("JAX dependencies are missing for training.", backend="jax")
+    raw_alias = (
+        kwargs.get("backend_alias")
+        or kwargs.get("backend")
+        or (config.backend if config.backend == "jax_native" else "jax")
+    )
+    backend_alias = str(raw_alias)
+    hardware = str(kwargs.get("hardware", config.extra_kwargs.get("hardware", "cpu")))
+    strict_hw = bool(kwargs.get("strict_hardware", config.extra_kwargs.get("strict_hardware", False)))
+
+    if jax is None or is_jnp_missing(jnp) or nnx is None or optax is None or not callable(Gemma4ForCausalLM):
+        raise DependencyMissingError("JAX dependencies are missing for training.", backend=backend_alias)
+
+    _ = initialize_jax_distributed_if_configured(jax)
+    if strict_hw:
+        _ = build_tpu_mesh_and_sharding(jax, hardware, strict_hardware=True, backend_label=backend_alias)
 
     model_name = config.model_name
     dataset = config.dataset
@@ -339,7 +354,7 @@ def train_model(config: TrainingConfig, **kwargs: StatusValue) -> TrainResultDic
     learning_rate = config.learning_rate
     batch_size = config.batch_size
     return run_train_wrapper(
-        "jax",
+        backend_alias,
         config,
         lambda: _execute_train(dataset, epochs, learning_rate, batch_size=batch_size, model_name=model_name),
         **kwargs,

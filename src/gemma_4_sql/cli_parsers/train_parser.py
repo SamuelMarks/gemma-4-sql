@@ -38,8 +38,18 @@ def add_training_subparser(
     parser.add_argument("--batch-size", type=int, default=2, help="Batch size for training dataloader.")
     parser.add_argument("--backend", default=backend, help="Backend to use.")
     parser.add_argument(
-        "--distributed-strategy", default="none", choices=["none", "ddp", "fsdp"], help="Distributed strategy."
+        "--distributed-strategy",
+        default="none",
+        choices=["none", "ddp", "fsdp", "xla", "tpu", "pjrt"],
+        help="Distributed strategy.",
     )
+    parser.add_argument("--hardware", default=None, help="Target hardware accelerator (e.g., 'tpu', 'gpu', 'cpu').")
+    parser.add_argument(
+        "--strict-hardware",
+        action="store_true",
+        help="Fail immediately if requested TPU/GPU hardware is unavailable.",
+    )
+    parser.add_argument("--output-json", default=None, help="Optional path to atomically write JSON output.")
     parser.add_argument("--image-path", default=None, help="Path to schema diagram, ERD image, or table screenshot.")
     parser.add_argument("--audio-path", default=None, help="Path to recorded natural language query audio file.")
     parser.add_argument(
@@ -68,6 +78,17 @@ def add_peft_quantize_parsers(subparsers: SubparserCollectionProtocol) -> None:
     parser_dpo.add_argument("--batch-size", type=int, default=2, help="Batch size for DPO dataloader.")
     parser_dpo.add_argument("--backend", default="jax", help="Backend to use.")
     parser_dpo.add_argument(
+        "--hardware",
+        default=None,
+        help="Target hardware accelerator (e.g., 'tpu', 'gpu', 'cpu').",
+    )
+    parser_dpo.add_argument(
+        "--strict-hardware",
+        action="store_true",
+        help="Fail immediately if requested TPU/GPU hardware is unavailable.",
+    )
+    parser_dpo.add_argument("--output-json", default=None, help="Optional path to atomically write JSON output.")
+    parser_dpo.add_argument(
         "--image-path", default=None, help="Path to schema diagram, ERD image, or table screenshot."
     )
     parser_dpo.add_argument("--audio-path", default=None, help="Path to recorded natural language query audio file.")
@@ -86,6 +107,9 @@ def add_peft_quantize_parsers(subparsers: SubparserCollectionProtocol) -> None:
     parser_peft.add_argument("--lora-alpha", type=int, default=16, help="LoRA alpha parameter.")
     parser_peft.add_argument("--lora-dropout", type=float, default=0.05, help="LoRA dropout probability.")
     parser_peft.add_argument("--backend", default="jax", help="Backend to use.")
+    parser_peft.add_argument("--hardware", default=None, help="Target hardware accelerator.")
+    parser_peft.add_argument("--strict-hardware", action="store_true", help="Fail if TPU/GPU is unavailable.")
+    parser_peft.add_argument("--output-json", default=None, help="Optional path to atomically write JSON output.")
     parser_peft.set_defaults(func=peft_cmd)
 
     parser_quantize = subparsers.add_parser("quantize", help="Quantize a model.")

@@ -434,11 +434,23 @@ def generate_sql(
         conf = normalize_logprob_confidence(logprob_sum, max(1, out_len - len(input_tokens)))
         return (sql_out, conf)
 
+    from gemma_4_sql.backends._jax_common import (
+        build_tpu_mesh_and_sharding,
+        initialize_jax_distributed_if_configured,
+    )
+
+    backend_alias = str(kwargs.get("backend_alias", "jax"))
+    hardware = str(kwargs.get("hardware", "cpu"))
+    strict_hw = bool(kwargs.get("strict_hardware", False))
+    _ = initialize_jax_distributed_if_configured(jax)
+    if strict_hw:
+        _ = build_tpu_mesh_and_sharding(jax, hardware, strict_hardware=True, backend_label=backend_alias)
+
     wrapper_kwargs: dict[str, StatusValue] = {
         "raise_on_error": raise_on_error,
         "strict_checkpoint": strict_checkpoint,
     }
-    return run_inference_wrapper("jax", model_name, prompt, beam_width, _execute, **wrapper_kwargs)
+    return run_inference_wrapper(backend_alias, model_name, prompt, beam_width, _execute, **wrapper_kwargs)
 
 
 __all__ = [

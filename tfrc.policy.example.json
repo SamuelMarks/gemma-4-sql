@@ -1,0 +1,38 @@
+{
+  "project_id": "replace-with-your-tfrc-gcp-project-id",
+  "grant_expires_on": "2027-06-30",
+  "allow_extra_pd": false,
+  "allow_gke_xpk": false,
+  "allow_public_ip": true,
+  "max_ttl_minutes": 180,
+  "default_transfer_mode": "ssh",
+  "allowed_gcs_regions": [
+    "us-central1",
+    "us-central2",
+    "us-east1",
+    "europe-west4"
+  ],
+  "allowed_allocations": [
+    {
+      "zone": "us-central2-b",
+      "accelerator_types": ["v4-8", "v4-16", "v4-32"],
+      "scheduling_tiers": ["on-demand", "spot"],
+      "max_chips": 32,
+      "runtime_version": "tpu-ubuntu2204-base"
+    },
+    {
+      "zone": "us-central1-a",
+      "accelerator_types": ["v5litepod-4", "v5litepod-8"],
+      "scheduling_tiers": ["spot"],
+      "max_chips": 8,
+      "runtime_version": "v2-alpha-tpuv5-lite"
+    },
+    {
+      "zone": "us-east1-d",
+      "accelerator_types": ["v6e-4", "v6e-8"],
+      "scheduling_tiers": ["spot"],
+      "max_chips": 8,
+      "runtime_version": "v2-alpha-tpuv6e"
+    }
+  ]
+}

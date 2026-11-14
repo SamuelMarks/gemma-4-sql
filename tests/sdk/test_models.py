@@ -55,11 +55,12 @@ def test_pretrain_model(monkeypatch: pytest.MonkeyPatch) -> None:
 
     import gemma_4_sql.backends.keras.train as ktrain
 
-    monkeypatch.setattr(ktrain, "tf", None)
-    with pytest.raises(DependencyMissingError):
-        pretrain_model(
-            TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras")
-        )
+    with monkeypatch.context() as mp:
+        mp.setattr(ktrain, "keras", None)
+        with pytest.raises(DependencyMissingError):
+            pretrain_model(
+                TrainingConfig(action="pretrain", model_name="my-model", dataset="my-data", epochs=2, backend="keras")
+            )
 
     class DummyPreprocessor:
         """Preprocessor stub with sequence_length."""

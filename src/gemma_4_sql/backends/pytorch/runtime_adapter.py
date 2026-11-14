@@ -4,26 +4,179 @@ from __future__ import annotations
 
 import contextlib
 import logging
-from collections.abc import Generator
+from collections.abc import Generator, Mapping, Sequence
 from typing import Protocol, runtime_checkable
 
-from gemma_4_sql.type_hints import DTypeProtocol, TorchCausalLMProtocol, TorchTensorProtocol
+from gemma_4_sql.backends.common_benchmark import get_current_rss_mb, normalize_hardware_family
+from gemma_4_sql.backends.lazy_loader import optional_import
+from gemma_4_sql.exceptions import HardwareUnavailableError
+from gemma_4_sql.type_hints import (
+    DTypeProtocol,
+    TorchCausalLMProtocol,
+    TorchOptimizerProtocol,
+    TorchTensorProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
 class _CompileCallableProtocol(Protocol):
-    """Protocol for `torch.compile` preserving the compiled model type."""
+    """Protocol for `torch.compile` preserving the compiled model type with optional `backend`."""
 
-    def __call__[ModelT](self, model: ModelT) -> ModelT:
+    def __call__[ModelT](self, model: ModelT, *, backend: str = "inductor") -> ModelT:
         """Compile `model` and return a callable of the same type.
 
         Args:
             model: Model instance to compile.
+            backend: Optional compiler backend identifier (`'inductor'`, `'openxla'`).
 
         Returns:
             Compiled model instance.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _CudaDeviceCountProtocol(Protocol):
+    """Protocol for `torch.cuda` exposing `device_count()`."""
+
+    def device_count(self) -> int:
+        """Return count of visible CUDA devices.
+
+        Returns:
+            Visible CUDA device count.
+
+        """
+        ...
+
+
+@runtime_checkable
+class XLADeviceDescriptorProtocol(Protocol):
+    """Structural protocol for `torch.device` XLA descriptors exposing `.type`."""
+
+    @property
+    def type(self) -> str:
+        """Provide the device type string (`'xla'`)."""
+        ...
+
+
+@runtime_checkable
+class TorchXLAModuleProtocol(Protocol):
+    """Protocol for top-level `torch_xla` PJRT device, synchronization, and device-list APIs."""
+
+    def device(self) -> XLADeviceDescriptorProtocol | str:
+        """Return the active PJRT XLA device descriptor or string.
+
+        Returns:
+            Active XLA device descriptor or `'xla:0'` string.
+
+        """
+        ...
+
+    def sync(self) -> None:
+        """Flush and synchronize pending lazy XLA operations."""
+        ...
+
+    def devices(self) -> Sequence[XLADeviceDescriptorProtocol | str]:
+        """Return all visible XLA devices on the current worker.
+
+        Returns:
+            Sequence of visible XLA device descriptors or strings.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TorchXLACoreModelProtocol(Protocol):
+    """Protocol for `torch_xla.core.xla_model` (`xm`) TPU runtime helpers."""
+
+    def xla_device(self) -> XLADeviceDescriptorProtocol | str:
+        """Return the default XLA device for the current process.
+
+        Returns:
+            Default XLA device descriptor or string.
+
+        """
+        ...
+
+    def get_xla_supported_devices(self, devkind: str | None = None) -> Sequence[str]:
+        """Return supported XLA device strings filtered by `devkind` (e.g., `'TPU'`).
+
+        Args:
+            devkind: Optional device kind filter (`'TPU'`, `'CPU'`, `'GPU'`).
+
+        Returns:
+            Sequence of supported XLA device strings.
+
+        """
+        ...
+
+    def mark_step(self) -> None:
+        """Mark an XLA execution step boundary."""
+        ...
+
+    def wait_device_ops(self) -> None:
+        """Block until pending XLA device operations complete."""
+        ...
+
+    def get_memory_info(self, device: XLADeviceDescriptorProtocol | str, /) -> Mapping[str, int | float]:
+        """Query XLA device HBM memory telemetry (`bytes_used`, `peak_bytes_used`, `bytes_limit`).
+
+        Args:
+            device: Target XLA device descriptor or string.
+
+        Returns:
+            Mapping of memory metric names to byte counts.
+
+        """
+        ...
+
+    def optimizer_step(
+        self,
+        optimizer: TorchOptimizerProtocol,
+        *,
+        barrier: bool = False,
+    ) -> None:
+        """Perform cross-replica gradient reduction, `optimizer.step()`, and `mark_step()`.
+
+        Args:
+            optimizer: PyTorch optimizer instance.
+            barrier: Whether to execute an XLA step barrier after stepping.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TorchXLARuntimeProtocol(Protocol):
+    """Protocol for `torch_xla.runtime` multi-host PJRT ordinal queries."""
+
+    def global_ordinal(self) -> int:
+        """Return global ordinal of the current process across the TPU slice.
+
+        Returns:
+            Zero-based global ordinal.
+
+        """
+        ...
+
+    def world_size(self) -> int:
+        """Return total PJRT world size across all TPU workers.
+
+        Returns:
+            Total process count.
+
+        """
+        ...
+
+    def local_ordinal(self) -> int:
+        """Return host-local ordinal on the current TPU VM worker.
+
+        Returns:
+            Zero-based local ordinal.
 
         """
         ...
@@ -391,28 +544,75 @@ class TorchRuntimeProtocol(Protocol):
 
 
 class TorchRuntimeAdapter:
-    """Adapter encapsulating `torch.cuda`, `torch.backends.mps`, `no_grad`, `manual_seed`, and `compile`."""
+    """Adapter encapsulating `torch_xla` TPU, `torch.cuda`, `torch.backends.mps`, RNG, and `compile`."""
 
-    def __init__(self, torch_module: TorchModuleInput | None) -> None:
-        """Initialize the runtime adapter around a loaded `torch` module.
+    def __init__(
+        self,
+        torch_module: TorchModuleInput | None,
+        *,
+        xla_module: TorchXLAModuleProtocol | None = None,
+        xm_module: TorchXLACoreModelProtocol | None = None,
+    ) -> None:
+        """Initialize the runtime adapter around `torch` and optional `torch_xla` modules.
 
         Args:
             torch_module: Loaded `torch` module or test double.
+            xla_module: Optional `torch_xla` module or typed test double.
+            xm_module: Optional `torch_xla.core.xla_model` module or typed test double.
 
         """
         self._torch = torch_module
+        self._xla = xla_module
+        self._xm = xm_module
 
-    def get_device(self, hardware: str) -> str:
-        """Resolve the target execution device (`'cpu'`, `'cuda'`, or `'mps'`).
+    def _resolve_xla_modules(
+        self,
+    ) -> tuple[TorchXLAModuleProtocol | None, TorchXLACoreModelProtocol | None]:
+        """Lazily resolve `torch_xla` and `torch_xla.core.xla_model` modules when available.
+
+        Returns:
+            2-tuple of `(xla_module, xm_module)`.
+
+        """
+        xla_mod = self._xla if self._xla is not None else optional_import("torch_xla", TorchXLAModuleProtocol)
+        xm_mod = (
+            self._xm if self._xm is not None else optional_import("torch_xla.core.xla_model", TorchXLACoreModelProtocol)
+        )
+        return (xla_mod, xm_mod)
+
+    def get_device(self, hardware: str, *, strict_hardware: bool = False) -> str:
+        """Resolve the target execution device (`'xla:0'`, `'cuda'`, `'mps'`, or `'cpu'`).
 
         Args:
-            hardware: Requested hardware string (`'cpu'`, `'gpu'`, `'cuda'`, `'mps'`).
+            hardware: Requested hardware string (`'tpu'`, `'tpu-v6e'`, `'gpu'`, `'cuda'`, `'mps'`, `'cpu'`).
+            strict_hardware: If `True`, raise `HardwareUnavailableError` when TPU/GPU falls back to CPU.
 
         Returns:
             Resolved PyTorch device identifier string.
 
+        Raises:
+            HardwareUnavailableError: When `strict_hardware=True` and the requested TPU or GPU is unavailable.
+
         """
-        if hardware == "cpu" or self._torch is None:
+        hw_family = normalize_hardware_family(hardware)
+        if hw_family == "cpu":
+            return "cpu"
+        if hw_family == "tpu":
+            xla_mod, xm_mod = self._resolve_xla_modules()
+            if xm_mod is not None:
+                tpu_devs = xm_mod.get_xla_supported_devices("TPU")
+                if len(tpu_devs) > 0:
+                    return str(xla_mod.device()) if xla_mod is not None else str(xm_mod.xla_device())
+            if xla_mod is not None and len(xla_mod.devices()) > 0:
+                return str(xla_mod.device())
+            if strict_hardware:
+                msg = f"PyTorch/XLA TPU device unavailable for requested hardware '{hardware}'."
+                raise HardwareUnavailableError(msg, hardware=hardware, backend="pytorch")
+            return "cpu"
+        if self._torch is None:
+            if strict_hardware and hw_family == "gpu":
+                msg = f"PyTorch GPU runtime unavailable for requested hardware '{hardware}'."
+                raise HardwareUnavailableError(msg, hardware=hardware, backend="pytorch")
             return "cpu"
         if isinstance(self._torch, _TorchWithCudaProtocol):
             cuda_ns = self._torch.cuda
@@ -432,7 +632,42 @@ class TorchRuntimeAdapter:
                     and mps_ns.is_available()
                 ):
                     return "mps"
+        if strict_hardware and hw_family == "gpu":
+            msg = f"CUDA GPU device unavailable for requested hardware '{hardware}'."
+            raise HardwareUnavailableError(msg, hardware=hardware, backend="pytorch")
         return "cpu"
+
+    def get_device_count(self, hardware: str) -> int:
+        """Return count of participating devices for `hardware`.
+
+        Args:
+            hardware: Target hardware identifier.
+
+        Returns:
+            Active device count (>= 1).
+
+        """
+        hw_family = normalize_hardware_family(hardware)
+        if hw_family == "tpu":
+            xla_mod, xm_mod = self._resolve_xla_modules()
+            if xm_mod is not None:
+                supported = xm_mod.get_xla_supported_devices("TPU")
+                if len(supported) > 0:
+                    return len(supported)
+            if xla_mod is not None:
+                devs = xla_mod.devices()
+                if len(devs) > 0:
+                    return len(devs)
+            return 1
+        if hw_family == "gpu" and isinstance(self._torch, _TorchWithCudaProtocol):
+            cuda_ns = self._torch.cuda
+            if (
+                isinstance(cuda_ns, _CudaAvailableOnlyProtocol)
+                and cuda_ns.is_available()
+                and isinstance(cuda_ns, _CudaDeviceCountProtocol)
+            ):
+                return max(1, int(cuda_ns.device_count()))
+        return 1
 
     def resolve_dtype(self, dtype_name: str) -> DTypeProtocol | str | None:
         """Resolve a string dtype identifier (`'bfloat16'`, `'float16'`, `'float32'`) on `torch`.
@@ -473,11 +708,12 @@ class TorchRuntimeAdapter:
             return self._torch.long
         return None
 
-    def compile_model[ModelT](self, model: ModelT) -> ModelT:
-        """Compile `model` with `torch.compile` when available, falling back on error.
+    def compile_model[ModelT](self, model: ModelT, *, device: str = "cpu") -> ModelT:
+        """Compile `model` with `torch.compile` (using `backend='openxla'` on XLA TPUs).
 
         Args:
             model: PyTorch model instance to compile.
+            device: Resolved target device string (`'xla:0'`, `'cuda'`, `'cpu'`).
 
         Returns:
             Compiled model or original `model` if compilation is unsupported or fails.
@@ -489,21 +725,36 @@ class TorchRuntimeAdapter:
         if not isinstance(compile_fn, _CompileCallableProtocol):
             return model
         try:
+            if device.startswith("xla"):
+                try:
+                    return compile_fn(model, backend="openxla")
+                except TypeError:
+                    return compile_fn(model)
             return compile_fn(model)
         except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
             logger.warning("torch.compile failed: %s", e)
             return model
 
+    maybe_compile = compile_model
+
     def synchronize(self, device: str) -> None:
-        """Synchronize accelerator streams on `'cuda'` or `'mps'`.
+        """Synchronize accelerator execution on `'xla:*'`, `'cuda'`, or `'mps'`.
 
         Args:
             device: Target device identifier string.
 
         """
+        if device.startswith("xla"):
+            xla_mod, xm_mod = self._resolve_xla_modules()
+            if xla_mod is not None:
+                xla_mod.sync()
+            elif xm_mod is not None:
+                xm_mod.mark_step()
+                xm_mod.wait_device_ops()
+            return
         if self._torch is None:
             return
-        if device == "cuda" and isinstance(self._torch, _TorchWithCudaProtocol):
+        if device.startswith("cuda") and isinstance(self._torch, _TorchWithCudaProtocol):
             cuda_ns = self._torch.cuda
             if isinstance(cuda_ns, _CudaNamespaceProtocol) and callable(cuda_ns.synchronize):
                 cuda_ns.synchronize()
@@ -513,19 +764,27 @@ class TorchRuntimeAdapter:
                 mps_ns.synchronize()
 
     def max_memory_mb(self, device: str, fallback_rss_mb: float) -> float:
-        """Query peak allocated accelerator memory in MiB or return `fallback_rss_mb`.
+        """Query peak allocated accelerator HBM/VRAM in MiB or return `fallback_rss_mb`.
 
         Args:
-            device: Target device identifier string (`'cuda'`, `'mps'`, or `'cpu'`).
+            device: Target device identifier string (`'xla:0'`, `'cuda'`, `'mps'`, or `'cpu'`).
             fallback_rss_mb: Process RSS memory in MiB used when accelerator stats are unavailable.
 
         Returns:
             Peak allocated memory in MiB.
 
         """
+        if device.startswith("xla"):
+            _, xm_mod = self._resolve_xla_modules()
+            if xm_mod is not None:
+                mem_info = xm_mod.get_memory_info(device)
+                raw_bytes = mem_info.get("peak_bytes_used", mem_info.get("bytes_used"))
+                if isinstance(raw_bytes, (int, float)) and raw_bytes > 0:
+                    return float(raw_bytes) / (1024.0 * 1024.0)
+            return fallback_rss_mb
         if self._torch is None:
             return fallback_rss_mb
-        if device == "cuda" and isinstance(self._torch, _TorchWithCudaProtocol):
+        if device.startswith("cuda") and isinstance(self._torch, _TorchWithCudaProtocol):
             cuda_ns = self._torch.cuda
             if isinstance(cuda_ns, _CudaNamespaceProtocol) and callable(cuda_ns.max_memory_allocated):
                 return float(cuda_ns.max_memory_allocated()) / (1024.0 * 1024.0)
@@ -535,14 +794,26 @@ class TorchRuntimeAdapter:
                 return float(mps_ns.driver_allocated_memory()) / (1024.0 * 1024.0)
         return fallback_rss_mb
 
+    def get_memory_mb(self, device: str) -> float:
+        """Query peak allocated memory in MiB on `device`, falling back to current process RSS.
+
+        Args:
+            device: Target device identifier string.
+
+        Returns:
+            Memory usage in MiB.
+
+        """
+        return self.max_memory_mb(device, get_current_rss_mb())
+
     def reset_peak_memory_stats(self, device: str) -> None:
-        """Reset peak memory statistics on `'cuda'` devices.
+        """Reset peak memory statistics on `'cuda'` devices (no-op on XLA/CPU/MPS).
 
         Args:
             device: Target device identifier string.
 
         """
-        if device == "cuda" and isinstance(self._torch, _TorchWithCudaProtocol):
+        if device.startswith("cuda") and isinstance(self._torch, _TorchWithCudaProtocol):
             cuda_ns = self._torch.cuda
             if isinstance(cuda_ns, _CudaNamespaceProtocol) and callable(cuda_ns.reset_peak_memory_stats):
                 cuda_ns.reset_peak_memory_stats()
@@ -598,4 +869,8 @@ __all__ = [
     "TorchRandintProtocol",
     "TorchRuntimeAdapter",
     "TorchRuntimeProtocol",
+    "TorchXLACoreModelProtocol",
+    "TorchXLAModuleProtocol",
+    "TorchXLARuntimeProtocol",
+    "XLADeviceDescriptorProtocol",
 ]

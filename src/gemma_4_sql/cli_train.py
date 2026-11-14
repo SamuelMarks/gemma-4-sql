@@ -6,7 +6,12 @@ import argparse
 import json
 from collections.abc import Callable
 
-from gemma_4_sql.cli_misc import extract_multimodal_cli_kwargs, print_cli_error
+from gemma_4_sql.cli_misc import (
+    extract_hardware_cli_kwargs,
+    extract_multimodal_cli_kwargs,
+    print_cli_error,
+    write_atomic_output_json,
+)
 from gemma_4_sql.cli_protocols import TrainArgsProtocol
 from gemma_4_sql.exceptions import GemmaSQLError, is_failed_status
 from gemma_4_sql.sdk import (
@@ -53,6 +58,8 @@ def _run_training_stage(
         Exit code `0` on success, or `1` if the training status indicates failure.
 
     """
+    merged_extra = extract_multimodal_cli_kwargs(args)
+    merged_extra.update(extract_hardware_cli_kwargs(args))
     config = TrainingConfig(
         model_name=args.model,
         dataset=args.dataset,
@@ -61,13 +68,15 @@ def _run_training_stage(
         batch_size=args.batch_size,
         backend=args.backend,
         distributed_strategy=args.distributed_strategy,
-        extra_kwargs=extract_multimodal_cli_kwargs(args),
+        extra_kwargs=merged_extra,
     )
     try:
         res = stage_fn(config)
     except GemmaSQLError as err:
         return _format_cli_error(err, action, args.backend, args.model)
-    print(json.dumps(res, indent=2))
+    formatted = json.dumps(res, indent=2)
+    write_atomic_output_json(args, formatted)
+    print(formatted)
     return 1 if is_failed_status(res) else 0
 
 
@@ -134,6 +143,7 @@ def dpo_cmd(args: argparse.Namespace) -> int:
 
     """
     mm_kwargs = extract_multimodal_cli_kwargs(args)
+    mm_kwargs.update(extract_hardware_cli_kwargs(args))
     try:
         res = run_dpo(
             model_name=args.model,
@@ -147,7 +157,9 @@ def dpo_cmd(args: argparse.Namespace) -> int:
         )
     except GemmaSQLError as err:
         return _format_cli_error(err, "dpo", args.backend, args.model)
-    print(json.dumps(res, indent=2))
+    formatted = json.dumps(res, indent=2)
+    write_atomic_output_json(args, formatted)
+    print(formatted)
     return 1 if is_failed_status(res) else 0
 
 
@@ -162,6 +174,7 @@ def peft_cmd(args: argparse.Namespace) -> int:
 
     """
     target_modules = args.target_modules.split(",") if args.target_modules else None
+    hw_kwargs = extract_hardware_cli_kwargs(args)
     try:
         res = apply_peft(
             model_name=args.model,
@@ -170,8 +183,11 @@ def peft_cmd(args: argparse.Namespace) -> int:
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
             backend=args.backend,
+            **hw_kwargs,
         )
     except GemmaSQLError as err:
         return _format_cli_error(err, "apply_lora", args.backend, args.model)
-    print(json.dumps(res, indent=2))
+    formatted = json.dumps(res, indent=2)
+    write_atomic_output_json(args, formatted)
+    print(formatted)
     return 1 if is_failed_status(res) else 0

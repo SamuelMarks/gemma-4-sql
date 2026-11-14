@@ -21,6 +21,8 @@ class JaxBackend(ModuleDelegatedBackend):
     serve_module = serve
     benchmark_module = benchmark
     trainer_name = "jax_trainer"
+    canonical_name = "jax"
+    uses_backend_alias = True
 
 
 ADAPTER_CLASS = JaxBackend

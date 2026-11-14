@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol, optional_import
+from gemma_4_sql.backends.pytorch.runtime_adapter import (
+    TorchRuntimeAdapter,
+    TorchXLACoreModelProtocol,
+    TorchXLARuntimeProtocol,
+)
+from gemma_4_sql.type_hints import TorchOptimizerProtocol
 
 
 @runtime_checkable
@@ -165,17 +171,41 @@ class _TorchFSDPModuleProtocol(Protocol):
 def setup_distributed(
     distributed_strategy: str,
     torch_module: TorchDistributedSetupModuleProtocol | ModuleNamespaceProtocol | None,
+    *,
+    hardware: str = "cpu",
+    strict_hardware: bool = False,
 ) -> tuple[bool, TorchDistModuleProtocol | None, str, int]:
-    """Initialize PyTorch distributed process group and resolve local device.
+    """Initialize PyTorch distributed process group and resolve local device (XLA TPU, CUDA, or CPU).
 
     Args:
-        distributed_strategy: Distributed strategy identifier (`'ddp'`, `'fsdp'`, or `'none'`).
+        distributed_strategy: Strategy identifier (`'ddp'`, `'fsdp'`, `'xla'`, `'tpu'`, `'pjrt'`, or `'none'`).
         torch_module: Loaded `torch` module used to query CUDA availability and device count.
+        hardware: Optional target hardware string (`'tpu'`, `'tpu-v6e'`, `'gpu'`, `'cpu'`).
+        strict_hardware: Whether to raise `HardwareUnavailableError` if requested TPU/GPU is missing.
 
     Returns:
         A 4-tuple of `(is_distributed, dist_module, device_str, device_id)`.
 
     """
+    if distributed_strategy in {"xla", "tpu", "pjrt"}:
+        _ = optional_import("torch_xla.distributed.xla_backend")
+        xla_dev = TorchRuntimeAdapter(None).get_device("tpu", strict_hardware=strict_hardware)
+        raw_dist = optional_import("torch.distributed")
+        dist_mod_xla: TorchDistModuleProtocol | None = (
+            raw_dist if isinstance(raw_dist, TorchDistModuleProtocol) else None
+        )
+        if dist_mod_xla is not None and not dist_mod_xla.is_initialized():
+            try:
+                dist_mod_xla.init_process_group("xla")
+            except (RuntimeError, ValueError):
+                dist_mod_xla = None
+        xla_rt = optional_import("torch_xla.runtime", TorchXLARuntimeProtocol)
+        ordinal = xla_rt.global_ordinal() if xla_rt is not None else 0
+        is_dist = (xla_rt is not None and xla_rt.world_size() > 1) or (
+            dist_mod_xla is not None and dist_mod_xla.is_initialized()
+        )
+        return (is_dist, dist_mod_xla, xla_dev, ordinal)
+
     assert isinstance(torch_module, TorchDistributedSetupModuleProtocol)
     is_distributed = distributed_strategy in {"ddp", "fsdp"}
     dist_mod: TorchDistModuleProtocol | None = None
@@ -196,9 +226,38 @@ def setup_distributed(
             torch_module.device(device_str)
             torch_module.cuda.set_device(device_id)
     else:
+        tpu_candidate = (
+            TorchRuntimeAdapter(None).get_device(hardware, strict_hardware=strict_hardware)
+            if hardware.strip().lower().startswith("tpu")
+            else "cpu"
+        )
+        if tpu_candidate.startswith("xla"):
+            return (False, None, tpu_candidate, 0)
         device_str = "cuda" if cuda_available else "cpu"
         torch_module.device(device_str)
     return (is_distributed, dist_mod, device_str, device_id)
+
+
+def step_optimizer_xla_aware(
+    optimizer: TorchOptimizerProtocol,
+    device: str = "cpu",
+) -> None:
+    """Step `optimizer`, invoking `xm.optimizer_step(..., barrier=True)` and `sync()` on XLA TPUs.
+
+    Args:
+        optimizer: PyTorch optimizer instance.
+        device: Active device string (`'xla:0'`, `'cuda'`, `'cpu'`).
+
+    """
+    if device.startswith("xla"):
+        xm_mod = optional_import("torch_xla.core.xla_model", TorchXLACoreModelProtocol)
+        if xm_mod is not None:
+            xm_mod.optimizer_step(optimizer, barrier=True)
+        else:
+            optimizer.step()
+        TorchRuntimeAdapter(None).synchronize(device)
+        return
+    optimizer.step()
 
 
 def wrap_model_distributed[ModelT](
@@ -252,5 +311,6 @@ __all__ = [
     "TorchDistributedSetupModuleProtocol",
     "cleanup_distributed",
     "setup_distributed",
+    "step_optimizer_xla_aware",
     "wrap_model_distributed",
 ]

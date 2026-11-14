@@ -166,12 +166,20 @@ def _create_vllm_app(model_name: str, max_batch_size: int) -> FastAPIAppProtocol
 _create_app = _create_vllm_app
 
 
-def _create_native_app(model_name: str, max_batch_size: int) -> FastAPIAppProtocol:
+def _create_native_app(
+    model_name: str,
+    max_batch_size: int,
+    *,
+    backend_alias: str = "pytorch",
+    hardware: str = "cpu",
+) -> FastAPIAppProtocol:
     """Create native PyTorch in-process continuous batching FastAPI server.
 
     Args:
         model_name: Name of the model to serve.
         max_batch_size: Maximum continuous batch size.
+        backend_alias: PyTorch backend alias (`'pytorch'`, `'hf_transformers'`, `'pytorch_native'`).
+        hardware: Target hardware identifier (`'cpu'`, `'gpu'`, `'tpu'`).
 
     Returns:
         The FastAPI application instance.
@@ -191,7 +199,12 @@ def _create_native_app(model_name: str, max_batch_size: int) -> FastAPIAppProtoc
         """
         from gemma_4_sql.backends.pytorch.inference import generate_sql
 
-        res = generate_sql(model_name=model_name, prompt=prompt)
+        res = generate_sql(
+            model_name=model_name,
+            prompt=prompt,
+            backend_alias=backend_alias,
+            hardware=hardware,
+        )
         return {k: v for k, v in res.items() if isinstance(v, (str, int, float, bool)) or v is None}
 
     return create_backend_serve_app(
@@ -219,6 +232,8 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         DependencyMissingError: If vLLM dependencies are missing and native fallback is not active.
 
     """
+    backend_alias = str(kwargs.get("backend_alias", "pytorch"))
+    hardware = str(kwargs.get("hardware", "cpu"))
     engine_type = str(kwargs.get("engine", "vllm" if not kwargs.get("native_fallback") else "native"))
     use_native = engine_type == "native" or bool(kwargs.get("native_fallback"))
 
@@ -234,7 +249,12 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
                 Configured `FastAPIAppProtocol` instance.
 
             """
-            return _create_native_app(model_name, max_batch_size)
+            return _create_native_app(
+                model_name,
+                max_batch_size,
+                backend_alias=backend_alias,
+                hardware=hardware,
+            )
 
     else:
 
@@ -256,6 +276,8 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         max_batch_size=max_batch_size,
         app_factory=app_factory,
     )
+    if backend_alias != "pytorch":
+        result["backend_variant"] = backend_alias
 
     if not use_native:
         if result["status"] == "running_pytorch_serve":

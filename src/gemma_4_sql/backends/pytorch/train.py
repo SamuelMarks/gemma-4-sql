@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from typing import Protocol, runtime_checkable
+from typing import Protocol, Self, runtime_checkable
 
 from gemma_4_sql.backends.common_train import (
     generic_run_training_epochs,
@@ -16,6 +16,7 @@ from gemma_4_sql.backends.pytorch.distributed import (
     TorchDistributedSetupModuleProtocol,
     cleanup_distributed,
     setup_distributed,
+    step_optimizer_xla_aware,
     wrap_model_distributed,
 )
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
@@ -40,8 +41,25 @@ from gemma_4_sql.type_hints import (
 class _PretrainedModelInstanceProtocol(TorchCausalLMProtocol, Protocol):
     """Protocol for a loaded PyTorch model supporting `.to(device)`."""
 
-    def to(self, device: str, /) -> TorchCausalLMProtocol:
+    def to(self, device: str, /) -> Self:
         """Move model to `device`."""
+        ...
+
+
+@runtime_checkable
+class _PrecisionCastableModelProtocol(Protocol):
+    """Protocol for PyTorch `nn.Module` precision casting methods."""
+
+    def bfloat16(self) -> Self:
+        """Cast floating-point parameters to `bfloat16`."""
+        ...
+
+    def half(self) -> Self:
+        """Cast floating-point parameters to `float16`."""
+        ...
+
+    def float(self) -> Self:
+        """Cast floating-point parameters to `float32`."""
         ...
 
 
@@ -153,17 +171,27 @@ Gemma4ForCausalLM: _PretrainedCausalLMLoaderProtocol | None = import_optional_sy
 
 def _setup_distributed(
     distributed_strategy: str,
+    *,
+    hardware: str = "cpu",
+    strict_hardware: bool = False,
 ) -> tuple[bool, TorchDistModuleProtocol | None, str, int]:
-    """Set up distributed environment.
+    """Set up distributed environment across CPU, CUDA, or XLA TPU.
 
     Args:
         distributed_strategy: The string representing the distributed strategy.
+        hardware: Target hardware string (`'tpu'`, `'tpu-v6e'`, `'gpu'`, `'cpu'`).
+        strict_hardware: Whether to raise `HardwareUnavailableError` if requested accelerator is missing.
 
     Returns:
         A 4-tuple of `(is_distributed, dist_module, device_str, device_id)`.
 
     """
-    return setup_distributed(distributed_strategy, torch)
+    return setup_distributed(
+        distributed_strategy,
+        torch,
+        hardware=hardware,
+        strict_hardware=strict_hardware,
+    )
 
 
 def _extract_logits_tensor(
@@ -230,15 +258,19 @@ def _run_training_epochs[
         raw_targets = batch["targets"]
         assert isinstance(raw_inputs, _ReshapableLogitsProtocol)
         assert isinstance(raw_targets, _ReshapableLogitsProtocol)
-        inputs = raw_inputs.to(device)
-        targets = raw_targets.to(device)
+        try:
+            inputs = raw_inputs.to(device)
+            targets = raw_targets.to(device)
+        except (TypeError, AssertionError, RuntimeError):
+            inputs = raw_inputs
+            targets = raw_targets
         optimizer.zero_grad()
         raw_outputs = model(inputs)
         logits = _extract_logits_tensor(raw_outputs)
         loss = criterion(logits.view(-1, logits.size(-1)), targets.view(-1))
         assert isinstance(loss, _ReshapableLogitsProtocol)
         loss.backward()
-        optimizer.step()
+        step_optimizer_xla_aware(optimizer, str(device))
         return float(loss.item())
 
     return generic_run_training_epochs(state.epochs, dataloader, _step)
@@ -273,6 +305,9 @@ def _execute_train(
     backend_alias: str = "pytorch",
     *,
     model_config: Gemma4Config | None = None,
+    hardware: str = "cpu",
+    dtype: str | None = None,
+    strict_hardware: bool = False,
 ) -> tuple[str, float]:
     """Execute the core PyTorch training loop.
 
@@ -285,6 +320,9 @@ def _execute_train(
         batch_size: Training batch size.
         backend_alias: PyTorch backend variant.
         model_config: Optional explicit `Gemma4Config` for native initialization.
+        hardware: Target hardware string (`'tpu'`, `'gpu'`, `'cpu'`).
+        dtype: Optional floating-point precision string (e.g., `'bfloat16'`).
+        strict_hardware: Whether to fail fast when requested TPU/GPU hardware is unavailable.
 
     Returns:
         A tuple of `(status, final_loss)`.
@@ -300,14 +338,29 @@ def _execute_train(
 
     dist_module: TorchDistModuleProtocol | None = None
     try:
-        (is_distributed, dist_module, device, device_id) = _setup_distributed(distributed_strategy)
+        (is_distributed, dist_module, device, device_id) = _setup_distributed(
+            distributed_strategy,
+            hardware=hardware,
+            strict_hardware=strict_hardware,
+        )
         if backend_alias == "pytorch_native":
             from gemma_4_sql.backends.pytorch.gemma4.modeling import Gemma4ForCausalLM as NativeGemma4
 
-            raw_model: TorchCausalLMProtocol = NativeGemma4.from_pretrained(model_name, config=model_config).to(device)
+            loaded_model: _PretrainedModelInstanceProtocol = NativeGemma4.from_pretrained(
+                model_name, config=model_config
+            )
         else:
             assert Gemma4ForCausalLM is not None
-            raw_model = Gemma4ForCausalLM.from_pretrained(model_name).to(device)
+            loaded_model = Gemma4ForCausalLM.from_pretrained(model_name)
+
+        if dtype is not None and isinstance(loaded_model, _PrecisionCastableModelProtocol):
+            if dtype == "bfloat16":
+                loaded_model = loaded_model.bfloat16()
+            elif dtype == "float16":
+                loaded_model = loaded_model.half()
+            elif dtype == "float32":
+                loaded_model = loaded_model.float()
+        raw_model: TorchCausalLMProtocol = loaded_model.to(device)
         model: TorchCausalLMProtocol = _wrap_model_distributed(raw_model, distributed_strategy, device_id)
         optimizer: TorchOptimizerProtocol = optim.AdamW(model.parameters(), lr=learning_rate)
         criterion = nn.CrossEntropyLoss()
@@ -367,9 +420,13 @@ def train_model(
     raw_alias = (
         kwargs.get("backend_alias")
         or kwargs.get("backend")
-        or ("pytorch_native" if config.backend == "pytorch_native" else "pytorch")
+        or (config.backend if config.backend in {"pytorch_native", "pytorch_hf", "hf_transformers"} else "pytorch")
     )
     backend_alias = str(raw_alias)
+    hardware = str(kwargs.get("hardware", config.extra_kwargs.get("hardware", "cpu")))
+    raw_dtype = kwargs.get("dtype", config.extra_kwargs.get("dtype"))
+    dtype = str(raw_dtype) if isinstance(raw_dtype, str) and raw_dtype else None
+    strict_hw = bool(kwargs.get("strict_hardware", config.extra_kwargs.get("strict_hardware", False)))
 
     if (
         torch is None
@@ -397,6 +454,9 @@ def train_model(
             batch_size=batch_size,
             backend_alias=backend_alias,
             model_config=resolved_model_cfg,
+            hardware=hardware,
+            dtype=dtype,
+            strict_hardware=strict_hw,
         ),
         **wrapper_kwargs,
     )

@@ -13,20 +13,20 @@ The system is composed of several key modules:
 ### 1.1 CLI & SDK Layer (`src/gemma_4_sql/cli.py`, `cli_*.py`, `cli_parsers/`, and `sdk/`)
 This is the entry point. The CLI maps shell commands directly to Python SDK functions. The SDK exposes high-level orchestration abstractions:
 *   `train_from_scratch`, `pretrain_model`, `sft_model`, `posttrain_model`, `run_dpo`
-*   `evaluate`, `export_model`, `generate` (and `generate_sql`), `benchmark`
+*   `evaluate`, `export_model`, `generate` (and `generate_sql`), `benchmark`, `benchmark_matrix`, `format_benchmark_matrix_markdown`
 *   `run_agentic_loop` (and `run_agentic_loop_async`), `chat_turn`, `serve_model`, `serve_model_handle`, `apply_peft`, `quantize_model`, `log_metrics`
 *   `build_rag_prompt`, `extract_schema_entities`, `retrieve_relevant_schema`, `build_few_shot_prompt`, `generate_few_shot_sql`, `etl_pretrain`, `etl_sft`, `etl_posttrain`, `embed_in_duckdb`, `LiveDatabaseEngine`, `SQLTokenizer`
 
 ### 1.2 The Backend Registry & Dispatcher (`sdk/registry.py`, `sdk/protocols.py`, `sdk/models.py`, and `backends/base_adapter.py`)
-ML-backed SDK operations route through `get_backend(name)` in `src/gemma_4_sql/sdk/registry.py`. Based on the `--backend` flag or configuration (`jax`, `keras`, `maxtext`, `pytorch`, `pytorch_hf`, `pytorch_native`, `mlx`), the registry resolves the backend's `adapter.py` module (`ADAPTER_CLASS`), instantiates its `ModuleDelegatedBackend` adapter via `from_alias(name)`, and thread-safely caches the validated `BackendProtocol` instance (composed from 11 segregated capability protocols in `sdk/protocols.py`). Pure-SQL and prompt-formatting utilities (`LiveDatabaseEngine`, `sql_lexer`, `rag`, `SQLTokenizer`, and `build_few_shot_prompt` via lightweight `validate_backend_name`) avoid loading heavy ML runtimes unnecessarily.
+ML-backed SDK operations route through `get_backend(name)` in `src/gemma_4_sql/sdk/registry.py`. Based on the `--backend` flag or configuration (`jax`, `jax_native`, `keras`, `keras_jax`, `keras_tensorflow`, `keras_tf`, `keras_pytorch`, `keras_torch`, `maxtext`, `pytorch`, `pytorch_hf`, `hf_transformers`, `pytorch_native`, `mlx`), the registry resolves the backend's `adapter.py` module (`ADAPTER_CLASS`), instantiates its `ModuleDelegatedBackend` adapter via `from_alias(name)`, and thread-safely caches the validated `BackendProtocol` instance (composed from 11 segregated capability protocols in `sdk/protocols.py`). Pure-SQL and prompt-formatting utilities (`LiveDatabaseEngine`, `sql_lexer`, `rag`, `SQLTokenizer`, and `build_few_shot_prompt` via lightweight `validate_backend_name`) avoid loading heavy ML runtimes unnecessarily.
 
 ### 1.3 Swappable Execution Backends (`backends/`)
-Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`, `mlx`) implements `BackendProtocol` across training, DPO, ETL, PEFT, quantization, exporting, logging, benchmarking, serving, and inference. Shared orchestration, numerical calibration, continuous batching, JAX helpers, and configuration schemas live in `backends/common_*.py` and `backends/_jax_common.py` (`common_train.py`, `common_dpo.py`, `common_data.py`, `common_inference.py`, `common_quantize.py`, `common_serve.py`, `common_benchmark.py`, `common_export.py`, `common_logging.py`, `common_multimodal.py`, `common_peft.py`, `common_gemma4_config.py`, `_jax_common.py`), while framework-idiomatic execution remains native to each backend:
+Each backend folder (`jax`, `keras`, `maxtext`, `pytorch`, `mlx`) implements `BackendProtocol` across training, DPO, ETL, PEFT, quantization, exporting, logging, benchmarking, serving, and inference. Shared orchestration, numerical calibration, continuous batching, JAX multi-host/mesh helpers, and configuration schemas live in `backends/common_*.py` and `backends/_jax_common.py` (`common_train.py`, `common_dpo.py`, `common_data.py`, `common_inference.py`, `common_quantize.py`, `common_serve.py`, `common_benchmark.py`, `common_export.py`, `common_logging.py`, `common_multimodal.py`, `common_peft.py`, `common_gemma4_config.py`, `_jax_common.py`), while framework-idiomatic execution remains native to each backend:
 
-*   **JAX (`backends/jax`)**: Built on the modern **Flax NNX** object-oriented paradigm. Houses a custom, from-scratch implementation of Gemma 4 (`backends/jax/gemma4/`) across text, vision, audio, and MoE architectures. Employs `@nnx.jit` compiled loops, `nnx.value_and_grad`, dynamic KV caching, `nnx.LoRALinear` adapters, and native Activation-aware Weight Quantization (AWQ) and uniform INT8.
-*   **MaxText (`backends/maxtext`)**: Integrates directly with Google's **MaxText** AI-Hypercomputer distributed training framework (`maxtext.train` and `maxtext.models.gemma4`). Rather than Flax NNX, it operates on functional Linen/JAX parameter PyTrees, generates Gin configuration files dynamically, orchestrates multi-host TPU Pod training across multi-dimensional device meshes (`data`, `fsdp`, `tensor`), uses `MaxTextFormatTransform`, and applies Google **AQT** (`aqt.jax.v2`) for INT8/INT4 quantization.
-*   **Keras (`backends/keras`)**: Integrates with `keras_nlp` / `keras-hub` (using `GemmaCausalLM`) and leverages Keras 3 core abstractions (`keras.Model.fit`, `keras.ops`, dtype policies, and `.keras` v3 serialization).
-*   **PyTorch (`backends/pytorch`)**: Supports both the standard Hugging Face `transformers` stack (`pytorch` / `pytorch_hf` via `Gemma4ForCausalLM`) and a standalone pure Native PyTorch implementation (`pytorch_native` in `backends/pytorch/gemma4/` covering text, vision, audio, MoE, proportional RoPE, and both `DynamicCache` and hybrid global/sliding-window `StaticCache` KV caching), plus native GGUF v3 binary serialization (`backends/pytorch/gguf.py`) and `safetensors` export.
+*   **JAX (`backends/jax`)**: Built on the modern **Flax NNX** object-oriented paradigm (`jax` / `jax_native`). Houses a custom, from-scratch implementation of Gemma 4 (`backends/jax/gemma4/`) across text, vision, audio, and MoE architectures. Employs `@nnx.jit` compiled loops, `nnx.value_and_grad`, dynamic KV caching, `nnx.LoRALinear` adapters, idempotent multi-host `jax.distributed` bootstrap, multi-chip TPU `Mesh` + `NamedSharding`, and native Activation-aware Weight Quantization (AWQ) and uniform INT8.
+*   **MaxText (`backends/maxtext`)**: Integrates directly with Google's **MaxText** AI-Hypercomputer distributed training framework (`maxtext.train` and `maxtext.models.gemma4`). Rather than Flax NNX, it operates on functional Linen/JAX parameter PyTrees, generates Gin configuration files dynamically (with TPU `v4`/`v5e`/`v5p`/`v6e` ICI/DCN slice presets), orchestrates multi-host TPU Pod training across multi-dimensional device meshes (`data`, `fsdp`, `tensor`), uses `MaxTextFormatTransform`, and applies Google **AQT** (`aqt.jax.v2`) for INT8/INT4 quantization.
+*   **Keras (`backends/keras`)**: Supports all three **Keras 3** computation backends via `backends/keras/_env.py` and `backends/keras/_runtime.py` (`keras_jax` via `KERAS_BACKEND=jax` + `keras.distribution.DataParallel` + stateless `jax.value_and_grad`, `keras_tensorflow`/`keras_tf` via `KERAS_BACKEND=tensorflow` + `TPUClusterResolver` / `TPUStrategy`, and `keras_pytorch`/`keras_torch` via `KERAS_BACKEND=torch` + `torch_xla` PJRT), resolving `keras_hub.models.Gemma4CausalLM` -> `GemmaCausalLM` -> `CausalLM` -> `keras_nlp.models.GemmaCausalLM` with `hf://` preset fallback and `.keras` v3 serialization.
+*   **PyTorch (`backends/pytorch`)**: Supports both the Hugging Face `transformers` stack (`pytorch` / `pytorch_hf` / `hf_transformers` via `Gemma4ForCausalLM`) and a standalone pure Native PyTorch implementation (`pytorch_native` in `backends/pytorch/gemma4/` covering text, vision, audio, MoE, proportional RoPE, and both `DynamicCache` and hybrid global/sliding-window `StaticCache` KV caching), with native `torch_xla` PJRT / `openxla` TPU support (`runtime_adapter.py`, `distributed.py`), CPU-staged `safetensors` export, and GGUF v3 binary serialization (`gguf.py`).
 *   **MLX (`backends/mlx`)**: Tailored for Apple Silicon hardware, providing compiled Metal-accelerated training (`mx.compile`), DPO, LoRA (`MLXLoRALinear`), 4-bit/8-bit/AWQ/GPTQ quantization, and continuous batching serving via FastAPI.
 
 ### 1.4 MaxText Exclusive vs. JAX (Flax NNX) Stack
@@ -39,8 +39,8 @@ While both backends run on top of JAX and XLA, they represent distinct architect
 | **Model Source** | From-scratch internal implementation (`backends/jax/gemma4/`) | Upstream `maxtext.models.gemma4.Gemma4Model` |
 | **Modality Support** | Text, Audio (Conformer/Subsample), Vision (SigLIP), MoE | Core Text-to-SQL Causal LM via MaxText |
 | **Configuration** | Typed Python dataclasses (`ModelConfig`, `TrainingConfig`) | Dynamic Gin configuration generator (`.gin` files & CLI args) |
-| **Cluster Orchestration** | Local accelerators or JAX distributed host initialization | Multi-host TPU Pod orchestration via `maxtext.train.main` & device meshes |
-| **Device Mesh Topology** | JAX default device placement / sharding | Multi-dimensional mesh axes (`data`, `fsdp`, `tensor`) |
+| **Cluster Orchestration** | Idempotent `jax.distributed` multi-host bootstrap + rank-0 gating | Multi-host TPU Pod orchestration via `maxtext.train.main` & device meshes |
+| **Device Mesh Topology** | 1D/2D `jax.sharding.Mesh` (`data`, `model`) + `NamedSharding` | Multi-dimensional mesh axes (`data`, `fsdp`, `tensor`) + TPU SKU presets |
 | **ETL Format Transform** | Grain `BaseFormatTransform` (`input_ids`, `labels`, `loss_mask`) | `MaxTextFormatTransform` (injects `segment_ids` & `positions`) |
 | **PEFT / LoRA** | Object-oriented `nnx.LoRALinear` module adaptation | Functional PyTree surgery on raw parameter dictionaries (`"kernel"`) |
 | **Quantization** | Native JAX uniform INT8 and Activation-aware Weight Quantization (AWQ) | Google **AQT** (`aqt.jax.v2`) targeting attention & MLP projection matrices |
@@ -97,7 +97,7 @@ To fit large models (like Gemma 4) on compute-constrained or consumer hardware, 
 *   **PEFT / LoRA:**
     *   **JAX:** Handled via Flax NNX module replacement using `nnx.LoRALinear` layers with configurable `lora_r` rank and scaling alpha.
     *   **MaxText:** Handled via functional parameter PyTree surgery (`transform_params_to_lora`) decomposing matched `"kernel"` projection matrices into low-rank `lora_a` and `lora_b` factors without requiring NNX state.
-    *   **Keras:** Handled via native KerasNLP `enable_lora` APIs and custom `KerasLoRALayer` adapters.
+    *   **Keras:** Handled via native KerasHub/KerasNLP `enable_lora` APIs and in-place `KerasLoRADense` adapters.
     *   **PyTorch:** Handled via Hugging Face `peft` (`LoraConfig`) or native `NativeLoRALinear` module replacement (`add_module`).
     *   **MLX:** Handled via `MLXLoRALinear` adapter layers on Apple Silicon.
 *   **Quantization:**
@@ -117,8 +117,23 @@ Serving high-concurrency workloads uses a unified FastAPI continuous-batching qu
 ## 5. Metrics & Monitoring (TensorBoard)
 
 To provide a unified MLOps experience, `gemma-4-sql` abstracts metric logging through `sdk/logging.py` and `backends/common_logging.py`. Depending on the backend executed, the payload is directed to the appropriate writer (with automatic JSONL fallback to `metrics.jsonl` when optional summary writer packages are absent):
-*   **JAX / MaxText:** Emits metrics via `tensorboardX.SummaryWriter` (or `torch.utils.tensorboard.SummaryWriter`).
-*   **Keras:** Uses `tensorflow.summary.create_file_writer`.
+*   **JAX / MaxText:** Emits metrics via `tensorboardX.SummaryWriter` (or `torch.utils.tensorboard.SummaryWriter`), gated on `process_index == 0` in multi-host topologies (`process_count > 1`).
+*   **Keras:** Uses `tensorflow.summary.create_file_writer` when TensorFlow is installed, falling back cleanly to `common_logging` (`SummaryWriter` / `metrics.jsonl`) under `keras_jax` and `keras_pytorch` without TensorFlow.
 *   **PyTorch / MLX:** Uses `torch.utils.tensorboard.SummaryWriter`.
 
 This abstraction allows user scripts and internal training loops to simply call `log_metrics(metrics={"loss": 0.5}, step=100, log_dir="logs", backend="...")` without having to manage backend-specific TensorBoard writer lifecycles.
+
+---
+
+## 6. Seven-Backend Google Cloud TPU Execution Parity
+
+`gemma-4-sql` exposes seven first-class entry-point aliases (`TPU_COMPARISON_BACKENDS`) for apples-to-apples single-host and multi-host TPU benchmarking, SFT, PEFT, DPO, and SQL accuracy evaluation:
+
+*   **`hf_transformers`** (`backends.pytorch`): Hugging Face `Gemma4ForCausalLM` over `torch_xla` PJRT (`torch_xla.device()`, `torch_xla.sync()`, `xm.optimizer_step`, `xm.get_memory_info`).
+*   **`pytorch_native`** (`backends.pytorch`): Pure-`torch.nn` `Gemma4ForCausalLM` over `torch_xla` PJRT without requiring `transformers`.
+*   **`keras_jax`** (`backends.keras`): Keras 3 (`KERAS_BACKEND=jax`) using `keras.ops`, `keras.distribution.DataParallel`, and stateless `jax.value_and_grad` DPO without TensorFlow.
+*   **`keras_tensorflow`** / **`keras_tf`** (`backends.keras`): Keras 3 (`KERAS_BACKEND=tensorflow`) using `TPUClusterResolver("local")` and `TPUStrategy`.
+*   **`keras_pytorch`** / **`keras_torch`** (`backends.keras`): Keras 3 (`KERAS_BACKEND=torch`) over `torch_xla` PJRT without TensorFlow.
+*   **`maxtext`** (`backends.maxtext`): Google AI-Hypercomputer MaxText with idempotent multi-host `jax.distributed`, multi-chip `NamedSharding`, and TPU `v4`/`v5e`/`v5p`/`v6e` ICI/DCN slice presets.
+*   **`jax_native`** (`backends.jax`): Native Flax NNX `Gemma4ForCausalLM` with idempotent multi-host `jax.distributed`, multi-chip `Mesh` sharding, and rank-0 checkpoint/logging gating.
+

@@ -528,6 +528,20 @@ def run_dpo(config: DPOConfig, **kwargs: StatusValue) -> DPOResultDict:
     """
     if jax is None or jnp is None or optax is None or Gemma4Model is None:
         raise DependencyMissingError("MaxText dependencies are missing.", backend="maxtext")
+    from gemma_4_sql.backends._jax_common import (
+        JaxShardingDevicesModuleProtocol,
+        build_tpu_mesh_and_sharding,
+        initialize_jax_distributed_if_configured,
+    )
+
+    _ = initialize_jax_distributed_if_configured(jax)
+    if bool(kwargs.get("strict_hardware", False)):
+        _ = build_tpu_mesh_and_sharding(
+            jax if isinstance(jax, JaxShardingDevicesModuleProtocol) else None,
+            str(kwargs.get("hardware", "cpu")),
+            strict_hardware=True,
+            backend_label="maxtext",
+        )
     return run_dpo_wrapper(
         "maxtext",
         config,

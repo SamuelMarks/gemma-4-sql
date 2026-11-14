@@ -57,7 +57,7 @@ def train_model(config: TrainingConfig, **kwargs: StatusValue) -> TrainResultDic
 ```
 
 ### 3. Create `adapter.py` with `ModuleDelegatedBackend`
-Each backend exposes an `adapter.py` module containing a `ModuleDelegatedBackend` subclass with typed submodule class attributes and an `ADAPTER_CLASS` binding (matching `AdapterModuleProtocol` in `src/gemma_4_sql/sdk/registry.py`). If multiple entry-point aliases share a single adapter (such as `pytorch`, `pytorch_hf`, and `pytorch_native`), set `uses_backend_alias = True` so `ADAPTER_CLASS.from_alias(name)` forwards `backend_alias` automatically:
+Each backend exposes an `adapter.py` module containing a `ModuleDelegatedBackend` subclass with typed submodule class attributes and an `ADAPTER_CLASS` binding (matching `AdapterModuleProtocol` in `src/gemma_4_sql/sdk/registry.py`). If multiple entry-point aliases share a single adapter (such as `PyTorchBackend` for `pytorch`/`pytorch_hf`/`hf_transformers`/`pytorch_native`, `KerasBackend` for `keras`/`keras_jax`/`keras_tensorflow`/`keras_tf`/`keras_pytorch`/`keras_torch`, and `JaxBackend` for `jax`/`jax_native`), set `uses_backend_alias = True` so `ADAPTER_CLASS.from_alias(name)` forwards `backend_alias` automatically:
 
 ```python
 # src/gemma_4_sql/backends/mlx/adapter.py
@@ -138,10 +138,17 @@ Edit the `pyproject.toml` file at the root of the Gemma-4-SQL repository:
 ```toml
 [project.entry-points."gemma_4_sql.backends"]
 jax = "gemma_4_sql.backends.jax"
+jax_native = "gemma_4_sql.backends.jax"
 keras = "gemma_4_sql.backends.keras"
+keras_jax = "gemma_4_sql.backends.keras"
+keras_tensorflow = "gemma_4_sql.backends.keras"
+keras_tf = "gemma_4_sql.backends.keras"
+keras_pytorch = "gemma_4_sql.backends.keras"
+keras_torch = "gemma_4_sql.backends.keras"
 maxtext = "gemma_4_sql.backends.maxtext"
 pytorch = "gemma_4_sql.backends.pytorch"
 pytorch_hf = "gemma_4_sql.backends.pytorch"
+hf_transformers = "gemma_4_sql.backends.pytorch"
 pytorch_native = "gemma_4_sql.backends.pytorch"
 mlx = "gemma_4_sql.backends.mlx"  # <-- Add your new backend here
 ```

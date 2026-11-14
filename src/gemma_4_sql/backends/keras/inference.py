@@ -14,6 +14,14 @@ from gemma_4_sql.backends.common_inference import (
     normalize_logprob_confidence,
     run_inference_wrapper,
 )
+from gemma_4_sql.backends.keras._env import resolve_and_validate_keras_backend
+from gemma_4_sql.backends.keras._runtime import (
+    KerasWithDistributionProtocol,
+    enter_keras_distribution_scope,
+    load_keras_gemma_model,
+    load_preset_with_hf_fallback,
+    synchronize_keras_outputs,
+)
 from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError, StatusValue
 from gemma_4_sql.tokenization import SQLTokenizer
@@ -295,7 +303,21 @@ def generate_sql(
         DependencyMissingError: If Keras or TensorFlow dependencies are missing.
 
     """
-    if keras is None or tf is None:
+    backend_alias = str(kwargs.get("backend_alias", "keras"))
+    hardware = str(kwargs.get("hardware", "cpu"))
+    strict_hw = bool(kwargs.get("strict_hardware", False))
+    explicit_kb = (
+        str(kwargs["keras_backend"]) if "keras_backend" in kwargs and kwargs["keras_backend"] is not None else None
+    )
+    if backend_alias == "keras" and explicit_kb is None and tf is not None:
+        active_kb = "tensorflow"
+    else:
+        active_kb = resolve_and_validate_keras_backend(backend_alias, explicit_kb)
+
+    missing_tf_alias = active_kb == "tensorflow" and tf is None and backend_alias in {"keras_tensorflow", "keras_tf"}
+    if keras is None or missing_tf_alias:
+        raise DependencyMissingError("Keras dependencies are missing.", backend=backend_alias)
+    if backend_alias == "keras" and explicit_kb is None and tf is None:
         raise DependencyMissingError("Keras dependencies are missing.")
 
     def _execute() -> tuple[str, float]:
@@ -305,28 +327,38 @@ def generate_sql(
             Tuple of `(generated_sql, confidence_score)`.
 
         Raises:
-            ImportError: If `keras_nlp.models.GemmaCausalLM` is unavailable.
+            ImportError: If KerasHub / KerasNLP `GemmaCausalLM` is unavailable.
             InferenceError: If Keras generation yields an empty SQL sequence.
 
         """
-        logger.info("Generating with Keras %s (beam_width=%d)", model_name, beam_width)
-        gemma_causal_lm_cls = (
-            GemmaCausalLM
-            if GemmaCausalLM is not None
-            else import_optional_symbol("keras_nlp.models", "GemmaCausalLM", _GemmaCausalLMLoaderProtocol)
+        logger.info("Generating with Keras (%s) %s (beam_width=%d)", active_kb, model_name, beam_width)
+        gemma_causal_lm_cls = load_keras_gemma_model(
+            model_name,
+            _GemmaCausalLMLoaderProtocol,
+            explicit_cls=GemmaCausalLM,
+            symbol_importer=import_optional_symbol,
         )
         if gemma_causal_lm_cls is None:
-            raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
+            raise ImportError("keras_hub.models.Gemma4CausalLM / keras_nlp.models.GemmaCausalLM is not available.")
         cache_key = make_model_cache_key(
             model_name,
-            backend_name="keras",
+            backend_name=f"keras:{active_kb}",
             factories=(gemma_causal_lm_cls.from_preset,),
         )
-        model = _MODEL_CACHE.get_model(cache_key) or gemma_causal_lm_cls.from_preset(model_name)
-        _MODEL_CACHE.put_model(cache_key, model)
+        dist_keras = keras if isinstance(keras, KerasWithDistributionProtocol) else None
+        with enter_keras_distribution_scope(
+            active_kb,
+            hardware,
+            keras_mod=dist_keras,
+            strict_hardware=strict_hw,
+            backend_label=backend_alias,
+        ) as (resolved_dev, _):
+            model = _MODEL_CACHE.get_model(cache_key) or load_preset_with_hf_fallback(gemma_causal_lm_cls, model_name)
+            _MODEL_CACHE.put_model(cache_key, model)
 
-        configure_beam_sampler(model, beam_width)
-        output = model.generate(prompt, max_length=max_length)
+            configure_beam_sampler(model, beam_width)
+            output = model.generate(prompt, max_length=max_length)
+            synchronize_keras_outputs(active_kb, output, device=resolved_dev)
 
         scores: KerasScoreInput = None
         if isinstance(output, dict):
@@ -359,4 +391,6 @@ def generate_sql(
     wrapper_kwargs: dict[str, StatusValue] = {
         k: v for k, v in kwargs.items() if isinstance(v, (str, int, float, bool)) or v is None
     }
-    return run_inference_wrapper("keras", model_name, prompt, beam_width, _execute, **wrapper_kwargs)
+    res = run_inference_wrapper(backend_alias, model_name, prompt, beam_width, _execute, **wrapper_kwargs)
+    res["keras_backend"] = active_kb
+    return res

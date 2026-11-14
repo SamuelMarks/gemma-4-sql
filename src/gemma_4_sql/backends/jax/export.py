@@ -135,8 +135,13 @@ def export_model(
         ExportError: If model state extraction or checkpoint saving fails.
 
     """
+    backend_alias = str(kwargs.get("backend_alias", "jax"))
     if jax is None or is_jnp_missing(jnp) or ocp is None:
-        raise DependencyMissingError("JAX export dependencies are missing.")
+        raise DependencyMissingError("JAX export dependencies are missing.", backend=backend_alias)
+
+    from gemma_4_sql.backends._jax_common import initialize_jax_distributed_if_configured
+
+    topo = initialize_jax_distributed_if_configured(jax)
 
     def _execute() -> tuple[Path, str]:
         """Extract or resolve JAX model weights and persist them via Orbax `PyTreeCheckpointer`.
@@ -149,6 +154,10 @@ def export_model(
             ExportError: If state extraction or Orbax checkpoint persistence fails.
 
         """
+        file_path = Path(export_path) / "orbax_ckpt"
+        if topo.process_count > 1 and topo.process_index != 0:
+            return (file_path, "skipped_non_zero_rank")
+
         raw_weights = kwargs.get("weights", kwargs.get("params"))
         normalized_arg = _normalize_export_tree(raw_weights)
         if normalized_arg is not None:
@@ -175,7 +184,6 @@ def export_model(
             except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
                 raise ExportError(f"Failed to extract state for model '{model_name}': {e}") from e
 
-        file_path = Path(export_path) / "orbax_ckpt"
         try:
             ckpt_factory: Callable[[], _OrbaxSaveCheckpointerProtocol] = vars(ocp)["PyTreeCheckpointer"]
             checkpointer = ckpt_factory()
@@ -188,4 +196,4 @@ def export_model(
 
         return (file_path, "exported_with_orbax")
 
-    return run_export_wrapper("jax", model_name, export_path, "orbax/saved_model", _execute)
+    return run_export_wrapper(backend_alias, model_name, export_path, "orbax/saved_model", _execute)

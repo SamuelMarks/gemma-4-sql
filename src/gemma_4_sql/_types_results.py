@@ -115,6 +115,8 @@ class BaseOperationResultDict(TypedDict):
         status: Human-readable status string.
         status_code: Canonical `ExecutionStatus` code string (`'success'`, `'completed'`, `'failed'`, etc.).
         error_message: Structured error description populated when `status_code` indicates failure.
+        backend_variant: Optional comparison alias (`'hf_transformers'`, `'keras_jax'`, `'jax_native'`, etc.).
+        keras_backend: Optional active Keras 3 backend engine (`'jax'`, `'tensorflow'`, or `'torch'`).
 
     """
 
@@ -122,6 +124,8 @@ class BaseOperationResultDict(TypedDict):
     status: str
     status_code: NotRequired[str]
     error_message: NotRequired[str | None]
+    backend_variant: NotRequired[str]
+    keras_backend: NotRequired[str]
 
 
 class TrainResultDict(BaseOperationResultDict):
@@ -413,6 +417,11 @@ class BenchmarkResultDict(BaseOperationResultDict):
         latency_ms: Mean per-batch latency in milliseconds.
         memory_mb: Peak accelerator/process memory usage in megabytes.
         rss_memory_mb: Optional host RSS memory footprint in megabytes.
+        rss_mb: Optional host RSS memory alias in megabytes.
+        resolved_device: Optional concrete runtime device string (`'tpu:0'`, `'xla:0'`, `'/TPU:0'`, `'cpu'`).
+        device_count: Optional count of participating accelerator devices/chips.
+        compile_latency_ms: Optional cold XLA compilation duration on warmup iteration 0 in milliseconds.
+        peak_hbm_mb: Optional peak accelerator HBM memory usage in megabytes.
         latency_stats: Optional percentile latency distribution breakdown.
 
     """
@@ -424,7 +433,56 @@ class BenchmarkResultDict(BaseOperationResultDict):
     latency_ms: float
     memory_mb: float
     rss_memory_mb: NotRequired[float]
+    rss_mb: NotRequired[float]
+    resolved_device: NotRequired[str]
+    device_count: NotRequired[int]
+    compile_latency_ms: NotRequired[float]
+    peak_hbm_mb: NotRequired[float]
     latency_stats: NotRequired[LatencyStatsDict]
+
+
+class BenchmarkMatrixCellDict(TypedDict):
+    """Single cell entry in a multi-backend TPU benchmark comparison matrix.
+
+    Attributes:
+        backend: Comparison backend identifier (e.g., `'hf_transformers'`, `'keras_jax'`).
+        mode: Benchmark execution mode (`'prefill'`, `'decode'`, `'end-to-end'`).
+        batch_size: Batch size profiled for this cell.
+        result: Full `BenchmarkResultDict` emitted by the backend.
+        speedup_vs_hf_transformers: Throughput ratio relative to `hf_transformers` when available.
+        speedup_vs_jax_native: Throughput ratio relative to `jax_native` when available.
+
+    """
+
+    backend: str
+    mode: str
+    batch_size: int
+    result: BenchmarkResultDict
+    speedup_vs_hf_transformers: NotRequired[float | None]
+    speedup_vs_jax_native: NotRequired[float | None]
+
+
+class BenchmarkMatrixResultDict(TypedDict):
+    """Structured return dictionary for a multi-backend benchmark comparison matrix.
+
+    Attributes:
+        model: Benchmarked model identifier.
+        hardware: Target hardware identifier.
+        dtype: Numerical precision string (`'bfloat16'`, `'float16'`, `'float32'`).
+        status: Overall matrix status (`'success'` or `'failed'`).
+        status_code: Canonical `ExecutionStatus` code string.
+        cells: Ordered list of `BenchmarkMatrixCellDict` comparison entries.
+        markdown_table: Optional formatted Markdown summary table.
+
+    """
+
+    model: str
+    hardware: str
+    dtype: str
+    status: str
+    status_code: str
+    cells: list[BenchmarkMatrixCellDict]
+    markdown_table: NotRequired[str]
 
 
 class ServeResultDict(BaseOperationResultDict):
@@ -565,6 +623,8 @@ __all__ = [
     "AgentLoopResultDict",
     "AgentResultDict",
     "BaseOperationResultDict",
+    "BenchmarkMatrixCellDict",
+    "BenchmarkMatrixResultDict",
     "BenchmarkResultDict",
     "ChatMessageDict",
     "ChatTurnResultDict",

@@ -9,11 +9,21 @@ from unittest.mock import patch
 import pytest
 
 from gemma_4_sql.backends.common_benchmark import (
+    BenchmarkTelemetry,
     compute_latency_statistics,
+    execute_detailed_benchmark_loop,
+    execute_timed_benchmark_loop,
     get_current_rss_mb,
+    normalize_benchmark_mode,
+    normalize_hardware_family,
     run_benchmark_wrapper,
 )
-from gemma_4_sql.exceptions import BenchmarkError, DependencyMissingError
+from gemma_4_sql.exceptions import (
+    BenchmarkError,
+    ConfigurationError,
+    DependencyMissingError,
+    HardwareUnavailableError,
+)
 from tests.utils.test_utils import FakeModuleNamespace
 
 
@@ -196,4 +206,179 @@ def test_run_benchmark_wrapper_failure() -> None:
             "cpu",
             1,
             lambda: (_ for _ in ()).throw(DependencyMissingError("missing bench dep")),
+        )
+
+
+def test_normalize_hardware_and_mode() -> None:
+    """Verify SKU-qualified hardware family and benchmark mode normalization including error branches."""
+    assert normalize_hardware_family("tpu") == "tpu"
+    assert normalize_hardware_family("TPU-v6e-8") == "tpu"
+    assert normalize_hardware_family("tpu_v4_8") == "tpu"
+    assert normalize_hardware_family("gpu") == "gpu"
+    assert normalize_hardware_family("cuda:0") == "gpu"
+    assert normalize_hardware_family("gpu-a100") == "gpu"
+    assert normalize_hardware_family("mps") == "mps"
+    assert normalize_hardware_family("mps:0") == "mps"
+    assert normalize_hardware_family("cpu") == "cpu"
+    assert normalize_hardware_family("x86_64") == "cpu"
+
+    assert normalize_benchmark_mode("prefill") == "prefill"
+    assert normalize_benchmark_mode("decode") == "decode"
+    assert normalize_benchmark_mode("generate") == "decode"
+    assert normalize_benchmark_mode("end-to-end") == "end-to-end"
+    assert normalize_benchmark_mode("e2e") == "end-to-end"
+    with pytest.raises(ConfigurationError, match="Unsupported benchmark mode"):
+        normalize_benchmark_mode("invalid_mode", backend="jax_native")
+
+
+def test_execute_detailed_benchmark_loop_variants() -> None:
+    """Verify `execute_detailed_benchmark_loop` across warmup=0, warmup=1, and warmup=3 with sync barrier."""
+    steps = 0
+    warmups = 0
+    syncs = 0
+
+    def _step() -> None:
+        """Increment timed step counter."""
+        nonlocal steps
+        steps += 1
+
+    def _warmup() -> None:
+        """Increment warmup step counter."""
+        nonlocal warmups
+        warmups += 1
+
+    def _sync() -> None:
+        """Increment device synchronization counter."""
+        nonlocal syncs
+        syncs += 1
+
+    m0 = execute_detailed_benchmark_loop(
+        _step,
+        warmup_steps=0,
+        num_runs=2,
+        tokens_per_iter=16,
+        batch_size=2,
+    )
+    assert m0.compile_latency_ms == 0.0
+    assert len(m0.latency_samples) == 2
+    assert steps == 2
+
+    m1 = execute_detailed_benchmark_loop(
+        _step,
+        warmup_steps=1,
+        num_runs=2,
+        tokens_per_iter=16,
+        batch_size=2,
+        warmup_step_fn=_warmup,
+        sync_fn=_sync,
+    )
+    assert m1.compile_latency_ms >= 0.0
+    assert warmups == 1
+    assert syncs == 3
+
+    m3 = execute_detailed_benchmark_loop(
+        _step,
+        warmup_steps=3,
+        num_runs=2,
+        tokens_per_iter=16,
+        batch_size=2,
+        sync_fn=_sync,
+    )
+    assert m3.tokens_per_sec > 0.0
+    assert len(m3.latency_samples) == 2
+
+    m3_nosync = execute_detailed_benchmark_loop(
+        _step,
+        warmup_steps=2,
+        num_runs=1,
+        tokens_per_iter=16,
+        batch_size=1,
+    )
+    assert m3_nosync.compile_latency_ms >= 0.0
+
+    tps_legacy, lat_legacy = execute_timed_benchmark_loop(
+        _step,
+        warmup_steps=1,
+        num_runs=1,
+        tokens_per_iter=8,
+        batch_size=1,
+        warmup_step_fn=_warmup,
+        post_warmup_fn=_sync,
+        post_runs_fn=_sync,
+        use_perf_counter=True,
+    )
+    assert tps_legacy > 0.0
+    assert lat_legacy >= 0.0
+    tps_plain, _ = execute_timed_benchmark_loop(
+        _step,
+        warmup_steps=0,
+        num_runs=1,
+        tokens_per_iter=8,
+        batch_size=1,
+    )
+    assert tps_plain > 0.0
+
+
+def test_run_benchmark_wrapper_telemetry_and_strict_hardware() -> None:
+    """Verify `BenchmarkTelemetry` fields and `strict_hardware` enforcement in `run_benchmark_wrapper`."""
+    full_tel = BenchmarkTelemetry(
+        tokens_per_sec=1200.0,
+        latency_ms=4.5,
+        memory_mb=2048.0,
+        resolved_device="tpu:0",
+        device_count=8,
+        compile_latency_ms=320.0,
+        peak_hbm_mb=2048.0,
+        keras_backend="jax",
+        latency_samples=(4.0, 5.0),
+    )
+    res = run_benchmark_wrapper(
+        "keras_jax",
+        "google/gemma-4-E4B",
+        "tpu-v6e",
+        8,
+        lambda: full_tel,
+        strict_hardware=True,
+    )
+    assert res["status"] == "success"
+    assert res.get("backend_variant") == "keras_jax"
+    assert res.get("resolved_device") == "tpu:0"
+    assert res.get("device_count") == 8
+    assert res.get("compile_latency_ms") == 320.0
+    assert res.get("peak_hbm_mb") == 2048.0
+    assert res.get("keras_backend") == "jax"
+    assert "latency_stats" in res
+    assert res["latency_stats"]["mean_ms"] == 4.5
+    assert "rss_mb" in res
+
+    minimal_tel = BenchmarkTelemetry(tokens_per_sec=50.0, latency_ms=20.0, memory_mb=64.0)
+    res_min = run_benchmark_wrapper("jax_native", "m", "cpu", 1, lambda: minimal_tel)
+    assert "resolved_device" not in res_min
+    assert "latency_stats" not in res_min
+
+    with pytest.raises(HardwareUnavailableError, match="missing dependencies"):
+        run_benchmark_wrapper(
+            "jax_native",
+            "m",
+            "tpu-v5e",
+            1,
+            lambda: minimal_tel,
+            missing_deps=True,
+            strict_hardware=True,
+        )
+
+    cpu_fallback_tel = BenchmarkTelemetry(
+        tokens_per_sec=10.0,
+        latency_ms=99.0,
+        memory_mb=128.0,
+        resolved_device="/CPU:0",
+    )
+    with pytest.raises(HardwareUnavailableError, match="Strict hardware check failed"):
+        run_benchmark_wrapper(
+            "keras_tensorflow",
+            "m",
+            "tpu-v4-8",
+            1,
+            lambda: cpu_fallback_tel,
+            strict_hardware=True,
         )

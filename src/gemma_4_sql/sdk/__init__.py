@@ -5,7 +5,7 @@ from __future__ import annotations
 from gemma_4_sql.tokenization import SQLTokenizer
 
 from .agent import run_agentic_loop
-from .benchmark import benchmark
+from .benchmark import benchmark, benchmark_matrix, format_benchmark_matrix_markdown
 from .chat import chat_turn
 from .db_engine import LiveDatabaseEngine
 from .dpo import run_dpo
@@ -28,6 +28,7 @@ __all__ = [
     "TrainingConfig",
     "apply_peft",
     "benchmark",
+    "benchmark_matrix",
     "build_few_shot_prompt",
     "build_rag_prompt",
     "chat_turn",
@@ -38,6 +39,7 @@ __all__ = [
     "evaluate",
     "export_model",
     "extract_schema_entities",
+    "format_benchmark_matrix_markdown",
     "generate",
     "generate_sql",
     "log_metrics",

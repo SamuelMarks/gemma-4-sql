@@ -14,6 +14,7 @@ from gemma_4_sql.exceptions import (
     ExecutionStatus,
     ExportError,
     GemmaSQLError,
+    HardwareUnavailableError,
     InferenceError,
     MultimodalProcessingError,
     PEFTError,
@@ -24,6 +25,7 @@ from gemma_4_sql.exceptions import (
     TrainingError,
     UnsupportedQuantizationMethodError,
 )
+from gemma_4_sql.sdk.benchmark import benchmark_matrix
 from gemma_4_sql.sdk.db_engine import LiveDatabaseEngine
 from gemma_4_sql.sdk.duckdb_extension import embed_in_duckdb
 from gemma_4_sql.sdk.logging import log_metrics
@@ -42,6 +44,7 @@ __all__ = [
     "ExecutionStatus",
     "ExportError",
     "GemmaSQLError",
+    "HardwareUnavailableError",
     "InferenceError",
     "LiveDatabaseEngine",
     "MultimodalProcessingError",
@@ -53,6 +56,7 @@ __all__ = [
     "ServingError",
     "TrainingError",
     "UnsupportedQuantizationMethodError",
+    "benchmark_matrix",
     "embed_in_duckdb",
     "extract_schema_entities",
     "log_metrics",

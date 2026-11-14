@@ -7,6 +7,8 @@ from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql.backends.common_serve import create_backend_serve_app, serve_model_wrapper
+from gemma_4_sql.backends.keras._env import resolve_and_validate_keras_backend
+from gemma_4_sql.backends.keras._runtime import load_keras_gemma_model, load_preset_with_hf_fallback
 from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
 from gemma_4_sql.exceptions import DependencyMissingError
 from gemma_4_sql.type_hints import FastAPIAppProtocol, JSONDict, JSONValue, ServeResultDict
@@ -68,14 +70,15 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
         nonlocal loaded_model
         logger.info("Pre-loading Keras model %s for continuous batching server...", model_name)
         try:
-            gemma_causal_lm_cls = (
-                GemmaCausalLM
-                if GemmaCausalLM is not None
-                else import_optional_symbol("keras_nlp.models", "GemmaCausalLM", _GemmaCausalLMLoaderProtocol)
+            gemma_causal_lm_cls = load_keras_gemma_model(
+                model_name,
+                _GemmaCausalLMLoaderProtocol,
+                explicit_cls=GemmaCausalLM,
+                symbol_importer=import_optional_symbol,
             )
             if gemma_causal_lm_cls is None:
-                raise ImportError("keras_nlp.models.GemmaCausalLM is not available.")
-            loaded_model = gemma_causal_lm_cls.from_preset(model_name)
+                raise ImportError("keras_hub / keras_nlp GemmaCausalLM is not available.")
+            loaded_model = load_preset_with_hf_fallback(gemma_causal_lm_cls, model_name)
         except (ImportError, ValueError, TypeError, AttributeError, RuntimeError) as e:
             logger.warning("Could not pre-load Keras model %s: %s", model_name, e)
 
@@ -154,14 +157,14 @@ def create_app(model_name: str, max_batch_size: int = 32) -> FastAPIAppProtocol:
     )
 
 
-def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **_kwargs: JSONValue) -> ServeResultDict:
-    """Serve a model using Keras continuous batching.
+def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **kwargs: JSONValue) -> ServeResultDict:
+    """Serve a model using Keras continuous batching across JAX, TensorFlow, or PyTorch backends.
 
     Args:
         model_name: The name of the target model.
         port: The network port to listen on.
         max_batch_size: The maximum allowed batch size.
-        **_kwargs: Underlying server and backend-specific configuration options.
+        **kwargs: Underlying server and backend-specific configuration options.
 
     Returns:
         A structured `ServeResultDict` containing the server metadata.
@@ -170,13 +173,22 @@ def serve_model(model_name: str, port: int = 8000, max_batch_size: int = 256, **
         DependencyMissingError: If Keras dependencies are missing for serve.
 
     """
-    if tf is None or keras is None:
-        raise DependencyMissingError("Keras dependencies are missing for serve.", backend="keras")
+    backend_alias = str(kwargs.get("backend_alias", "keras"))
+    explicit_kb = (
+        str(kwargs["keras_backend"]) if "keras_backend" in kwargs and kwargs["keras_backend"] is not None else None
+    )
+    active_kb = resolve_and_validate_keras_backend(backend_alias, explicit_kb)
+    if keras is None or (backend_alias in {"keras_tensorflow", "keras_tf"} and tf is None):
+        raise DependencyMissingError("Keras dependencies are missing for serve.", backend=backend_alias)
 
-    return serve_model_wrapper(
+    res = serve_model_wrapper(
         backend_name="keras",
         model_name=model_name,
         port=port,
         max_batch_size=max_batch_size,
         app_factory=lambda: create_app(model_name, max_batch_size=max_batch_size),
     )
+    if backend_alias != "keras":
+        res["backend_variant"] = backend_alias
+    res["keras_backend"] = active_kb
+    return res

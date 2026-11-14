@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import Protocol, Self, runtime_checkable
 
 from gemma_4_sql.backends.common_benchmark import (
-    execute_timed_benchmark_loop,
+    BenchmarkTelemetry,
+    DetailedLoopMetrics,
+    execute_detailed_benchmark_loop,
     get_current_rss_mb,
+    normalize_benchmark_mode,
+    normalize_hardware_family,
     run_benchmark_wrapper,
 )
 from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
@@ -217,6 +222,7 @@ def _load_pytorch_model_and_device(
     *,
     dtype: str = "bfloat16",
     backend_alias: str = "pytorch",
+    strict_hardware: bool = False,
 ) -> tuple[TorchCausalLMProtocol, str]:
     """Load the model and determine device.
 
@@ -224,14 +230,15 @@ def _load_pytorch_model_and_device(
         model_name: The name of the target model.
         hardware: The target hardware accelerator.
         dtype: The string representing dtype.
-        backend_alias: The alias used (`'pytorch'`, `'pytorch_hf'`, `'pytorch_native'`).
+        backend_alias: The alias used (`'pytorch'`, `'pytorch_hf'`, `'hf_transformers'`, `'pytorch_native'`).
+        strict_hardware: Whether to raise `HardwareUnavailableError` on accelerator fallback.
 
     Returns:
         A tuple of `(model, device)`.
 
     """
     adapter = _runtime()
-    device = adapter.get_device(hardware)
+    device = adapter.get_device(hardware, strict_hardware=strict_hardware)
     torch_dtype = adapter.resolve_dtype(dtype)
 
     if backend_alias == "pytorch_native":
@@ -245,7 +252,7 @@ def _load_pytorch_model_and_device(
         model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch_dtype)
         _move_and_eval(model, device)
 
-    compiled = adapter.compile_model(model)
+    compiled = adapter.compile_model(model, device=device)
     return (compiled, device)
 
 
@@ -313,6 +320,12 @@ def _call_decode_generate(
         _ = model.generate(dummy_inputs, max_new_tokens=tokens, min_new_tokens=tokens)
 
 
+_LAST_LOOP_METRICS: contextvars.ContextVar[DetailedLoopMetrics | None] = contextvars.ContextVar(
+    "pytorch_last_loop_metrics",
+    default=None,
+)
+
+
 def _run_benchmark_pass(
     model: TorchCausalLMProtocol | CausalLMProtocol | _BenchmarkCallableProtocol,
     device: str,
@@ -322,7 +335,7 @@ def _run_benchmark_pass(
     mode: str,
     max_new_tokens: int,
 ) -> tuple[float, float, float]:
-    """Execute the forward pass benchmark loop.
+    """Execute synchronized warmup and per-step timed benchmark runs.
 
     Args:
         model: Loaded PyTorch causal LM instance.
@@ -330,13 +343,14 @@ def _run_benchmark_pass(
         batch_size: Batch size for synthetic benchmark inputs.
         num_runs: Number of timed benchmark iterations.
         warmup_steps: Number of untimed warmup iterations.
-        mode: Benchmark mode (`'prefill'` or `'decode'`).
-        max_new_tokens: Number of tokens to generate in decode mode.
+        mode: Benchmark mode (`'prefill'`, `'decode'`, `'generate'`, or `'end-to-end'`).
+        max_new_tokens: Number of tokens to generate in non-prefill modes.
 
     Returns:
         Tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
 
     """
+    canon_mode = normalize_benchmark_mode(mode, backend="pytorch")
     adapter = _runtime()
     adapter.manual_seed(42)
 
@@ -347,24 +361,26 @@ def _run_benchmark_pass(
     def _run_pt_step(gen_tokens: int) -> None:
         """Execute one PyTorch prefill or decode step under `no_grad`."""
         with adapter.no_grad():
-            if mode == "prefill":
+            if canon_mode == "prefill":
                 _ = model(dummy_inputs)
             else:
                 _call_decode_generate(model, dummy_inputs, gen_tokens)
 
-    tokens_per_sec, latency_ms = execute_timed_benchmark_loop(
+    # On XLA TPUs, warmup must use `max_new_tokens` so XLA compiles the exact decode graph shape.
+    warmup_gen_tokens = max_new_tokens if device.startswith("xla") else 2
+    metrics = execute_detailed_benchmark_loop(
         lambda: _run_pt_step(max_new_tokens),
         warmup_steps=warmup_steps,
         num_runs=num_runs,
-        tokens_per_iter=32 if mode == "prefill" else max_new_tokens,
+        tokens_per_iter=32 if canon_mode == "prefill" else max_new_tokens,
         batch_size=batch_size,
-        warmup_step_fn=lambda: _run_pt_step(2),
-        post_warmup_fn=lambda: _sync_cuda(device),
-        post_runs_fn=lambda: _sync_cuda(device),
+        warmup_step_fn=lambda: _run_pt_step(warmup_gen_tokens),
+        sync_fn=lambda: _sync_cuda(device),
     )
+    _LAST_LOOP_METRICS.set(metrics)
 
     memory_mb = _get_memory_mb(model, device)
-    return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
+    return (float(metrics.tokens_per_sec), float(metrics.latency_ms), float(memory_mb))
 
 
 def benchmark_model(
@@ -373,13 +389,13 @@ def benchmark_model(
     batch_size: int = 32,
     **kwargs: JSONValue,
 ) -> BenchmarkResultDict:
-    """Benchmark a model using the PyTorch backend.
+    """Benchmark a model using the PyTorch backend (`hf_transformers` or `pytorch_native`).
 
     Args:
         model_name: The name of the model to benchmark.
-        hardware: Target hardware for the benchmark (e.g., `'gpu'`, `'tpu'`, `'cpu'`).
+        hardware: Target hardware for the benchmark (e.g., `'gpu'`, `'tpu'`, `'tpu-v6e'`, `'cpu'`).
         batch_size: Batch size to use during benchmarking.
-        **kwargs: Additional args like `num_runs`.
+        **kwargs: Additional args like `num_runs`, `warmup_steps`, `mode`, `strict_hardware`, `backend_alias`.
 
     Returns:
         A dictionary containing benchmark metrics and status.
@@ -389,27 +405,59 @@ def benchmark_model(
 
     """
     backend_alias = str(kwargs.get("backend_alias", "pytorch"))
+    strict_hw = bool(kwargs.get("strict_hardware", False))
+    missing_hf = backend_alias != "pytorch_native" and AutoModelForCausalLM is None
+    if torch is None or missing_hf:
+        from gemma_4_sql.exceptions import DependencyMissingError
 
-    def _run() -> tuple[float, float, float]:
-        """Load PyTorch model and execute benchmark pass.
+        raise DependencyMissingError("PyTorch dependencies are missing.", backend=backend_alias)
+
+    def _run() -> BenchmarkTelemetry:
+        """Load PyTorch model, execute synchronized benchmark pass, and collect XLA/GPU telemetry.
 
         Returns:
-            Tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
+            `BenchmarkTelemetry` across timed runs.
 
         """
         dtype = str(kwargs.get("dtype", "bfloat16"))
         mode = str(kwargs.get("mode", "prefill"))
         max_new_tokens = int(str(kwargs.get("max_new_tokens", 128)))
         warmup_steps = int(str(kwargs.get("warmup_steps", 5)))
-
-        (model, device) = _load_pytorch_model_and_device(model_name, hardware, dtype=dtype, backend_alias=backend_alias)
         num_runs = int(str(kwargs.get("num_runs", 5)))
-        return _run_benchmark_pass(model, device, batch_size, num_runs, warmup_steps, mode, max_new_tokens)
 
-    if torch is None or AutoModelForCausalLM is None:
-        from gemma_4_sql.exceptions import DependencyMissingError
-
-        raise DependencyMissingError("PyTorch dependencies are missing.")
+        (model, device) = _load_pytorch_model_and_device(
+            model_name,
+            hardware,
+            dtype=dtype,
+            backend_alias=backend_alias,
+            strict_hardware=strict_hw,
+        )
+        ctx_tok = _LAST_LOOP_METRICS.set(None)
+        try:
+            tps, lat_ms, memory_mb = _run_benchmark_pass(
+                model,
+                device,
+                batch_size,
+                num_runs,
+                warmup_steps,
+                mode,
+                max_new_tokens,
+            )
+            loop_metrics = _LAST_LOOP_METRICS.get()
+        finally:
+            _LAST_LOOP_METRICS.reset(ctx_tok)
+        dev_count = _runtime().get_device_count(hardware) if normalize_hardware_family(hardware) != "cpu" else 1
+        peak_hbm = memory_mb if device.startswith(("xla", "cuda")) else None
+        return BenchmarkTelemetry(
+            tokens_per_sec=tps,
+            latency_ms=lat_ms,
+            memory_mb=memory_mb,
+            resolved_device=device,
+            device_count=dev_count,
+            compile_latency_ms=loop_metrics.compile_latency_ms if loop_metrics is not None else None,
+            peak_hbm_mb=peak_hbm,
+            latency_samples=loop_metrics.latency_samples if loop_metrics is not None else (),
+        )
 
     return run_benchmark_wrapper(
         backend_name=backend_alias,
@@ -417,6 +465,8 @@ def benchmark_model(
         hardware=hardware,
         batch_size=batch_size,
         benchmark_fn=_run,
+        strict_hardware=strict_hw,
+        raise_on_error=bool(kwargs["raise_on_error"]) if "raise_on_error" in kwargs else None,
     )
 
 

@@ -8,10 +8,12 @@ import logging
 
 from gemma_4_sql.cli_misc import (
     MultimodalCLIArgsProtocol,
+    extract_hardware_cli_kwargs,
     extract_multimodal_cli_kwargs,
     parse_db_kwargs,
     parse_json_list,
     print_cli_error,
+    write_atomic_output_json,
 )
 from gemma_4_sql.cli_protocols import (
     AgentArgsProtocol,
@@ -40,6 +42,7 @@ def evaluate_cmd(args: EvaluateArgsProtocol | argparse.Namespace) -> int:
     db_kwargs = parse_db_kwargs(args.db_kwargs)
     if db_kwargs is None:
         return 1
+    hw_kwargs = extract_hardware_cli_kwargs(args)
     try:
         res = evaluate(
             model_name=args.model,
@@ -53,10 +56,13 @@ def evaluate_cmd(args: EvaluateArgsProtocol | argparse.Namespace) -> int:
             image_path=args.image_path,
             audio_path=args.audio_path,
             modality=args.modality,
+            **hw_kwargs,
         )
     except GemmaSQLError as err:
         return print_cli_error(err, args.backend, model=args.model)
-    print(json.dumps(res, indent=2))
+    formatted = json.dumps(res, indent=2)
+    write_atomic_output_json(args, formatted)
+    print(formatted)
     return 1 if is_failed_status(res) else 0
 
 
@@ -70,6 +76,7 @@ def generate_cmd(args: argparse.Namespace) -> int:
         Exit code `0` on success, or `1` if generation fails.
 
     """
+    hw_kwargs = extract_hardware_cli_kwargs(args)
     try:
         res = generate(
             model_name=args.model,
@@ -84,9 +91,11 @@ def generate_cmd(args: argparse.Namespace) -> int:
             image_path=args.image_path,
             audio_path=args.audio_path,
             modality=args.modality,
+            **hw_kwargs,
         )
     except GemmaSQLError as err:
         return print_cli_error(err, args.backend, model=args.model)
+    write_atomic_output_json(args, json.dumps(res, indent=2))
     sql_output = (res or {}).get("sql", "")
     if sql_output:
         print(str(sql_output))

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager
@@ -9,9 +11,19 @@ from types import EllipsisType
 from typing import Protocol, runtime_checkable
 
 from gemma_4_sql._types_models import MaxTextModelConstructorProtocol
+from gemma_4_sql.backends._jax_common import (
+    JaxMemoryStatsDeviceProtocol,
+    aggregate_jax_peak_hbm_mb,
+    build_tpu_mesh_and_sharding,
+    initialize_jax_distributed_if_configured,
+)
 from gemma_4_sql.backends.common_benchmark import (
-    execute_timed_benchmark_loop,
+    BenchmarkTelemetry,
+    DetailedLoopMetrics,
+    execute_detailed_benchmark_loop,
     get_current_rss_mb,
+    normalize_benchmark_mode,
+    normalize_hardware_family,
     run_benchmark_wrapper,
 )
 from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol, import_optional_symbol, optional_import
@@ -21,6 +33,7 @@ from gemma_4_sql.type_hints import (
     DTypeProtocol,
     ForwardOutput,
     JaxArrayProtocol,
+    JaxShardingProtocol,
     JSONValue,
     MaxTextCausalLMProtocol,
     PyTreeNode,
@@ -30,19 +43,7 @@ from gemma_4_sql.type_hints import (
 
 logger = logging.getLogger(__name__)
 
-
-@runtime_checkable
-class _MemoryStatsDeviceProtocol(Protocol):
-    """Protocol for a JAX device exposing `.memory_stats()`."""
-
-    def memory_stats(self) -> Mapping[str, int] | None:
-        """Return memory usage statistics for the device.
-
-        Returns:
-            Mapping of memory stat names to byte counts, or `None`.
-
-        """
-        ...
+_MemoryStatsDeviceProtocol = JaxMemoryStatsDeviceProtocol
 
 
 @runtime_checkable
@@ -255,8 +256,23 @@ def _resolve_jnp_dtype(dtype_str: str) -> DTypeProtocol | str | None:
     return dtype_map.get(dtype_str)
 
 
+@runtime_checkable
+class _MaxTextDevicePutProtocol(Protocol):
+    """Protocol for `jax` exposing `device_put(x, sharding)`."""
+
+    def device_put[ArrT](self, x: ArrT, device: JaxShardingProtocol, /) -> ArrT:
+        """Shard or place `x` according to `device`."""
+        ...
+
+
+_LAST_MAXTEXT_METRICS: contextvars.ContextVar[DetailedLoopMetrics | None] = contextvars.ContextVar(
+    "maxtext_last_benchmark_metrics",
+    default=None,
+)
+
+
 def _get_device(hardware: str) -> _MemoryStatsDeviceProtocol | str | None:
-    """Provide the JAX device for the requested hardware.
+    """Provide the JAX device for the requested hardware (`'tpu'`, `'tpu-v5p'`, `'tpu-v6e'`, `'gpu'`).
 
     Args:
         hardware: Target hardware string.
@@ -265,14 +281,17 @@ def _get_device(hardware: str) -> _MemoryStatsDeviceProtocol | str | None:
         Matched JAX device or default CPU device.
 
     """
+    if jax is None:
+        return None
+    hw_family = normalize_hardware_family(hardware)
     try:
-        if hardware == "tpu" and jax is not None and jax.devices("tpu"):
+        if hw_family == "tpu" and jax.devices("tpu"):
             return jax.devices("tpu")[0]
-        if hardware == "gpu" and jax is not None and jax.devices("gpu"):
+        if hw_family == "gpu" and jax.devices("gpu"):
             return jax.devices("gpu")[0]
     except RuntimeError:
         pass
-    return jax.devices("cpu")[0] if jax is not None else None
+    return jax.devices("cpu")[0]
 
 
 type _MaxTextBenchmarkParams = (
@@ -332,8 +351,10 @@ def _run_benchmark_pass(
     mode: str,
     max_new_tokens: int,
     device: _MemoryStatsDeviceProtocol | str | None,
+    *,
+    sharding: JaxShardingProtocol | None = None,
 ) -> tuple[float, float, float]:
-    """Execute the forward pass benchmark loop.
+    """Execute the forward or generation pass benchmark loop on `device` or multi-chip `sharding`.
 
     Args:
         model: The model.
@@ -341,9 +362,10 @@ def _run_benchmark_pass(
         batch_size: The number of items to process in a single batch.
         num_runs: The integer value for num runs.
         warmup_steps: Number of warmup steps.
-        mode: Benchmark mode.
+        mode: Benchmark mode (`'prefill'`, `'decode'`, `'generate'`, `'end-to-end'`).
         max_new_tokens: Max tokens.
         device: JAX device.
+        sharding: Optional multi-chip `NamedSharding` across TPU/GPU `Mesh`.
 
     Returns:
         A tuple containing `(tokens_per_sec, latency_ms, memory_mb)`.
@@ -351,6 +373,7 @@ def _run_benchmark_pass(
     """
     assert jax is not None
     assert jnp is not None
+    canon_mode = normalize_benchmark_mode(mode, backend="maxtext")
 
     def forward_pass(params: _MaxTextBenchmarkParams, inputs: TensorType) -> ForwardOutput | _MaxTextLogitsProtocol:
         """Execute model forward pass.
@@ -389,22 +412,26 @@ def _run_benchmark_pass(
         forward_pass = jit_sync.jit(forward_pass)
         generate_pass = jit_sync.jit(generate_pass)
 
-    with jax.default_device(device):
+    dev_cm = contextlib.nullcontext() if sharding is not None else jax.default_device(device)
+    with dev_cm:
         dummy_inputs = jax.random.randint(jax.random.PRNGKey(42), (batch_size, 32), 1, 256000, dtype=jnp.int32)
+        if sharding is not None and isinstance(jax, _MaxTextDevicePutProtocol):
+            dummy_inputs = jax.device_put(dummy_inputs, sharding)
 
         def _step() -> None:
             """Execute one MaxText forward or generate step and synchronize."""
-            out = forward_pass(params, dummy_inputs) if mode == "prefill" else generate_pass(params, dummy_inputs)
+            out = forward_pass(params, dummy_inputs) if canon_mode == "prefill" else generate_pass(params, dummy_inputs)
             if jit_sync is not None:
                 jit_sync.block_until_ready(out)
 
-        tokens_per_sec, latency_ms = execute_timed_benchmark_loop(
+        metrics = execute_detailed_benchmark_loop(
             _step,
             warmup_steps=warmup_steps,
             num_runs=num_runs,
-            tokens_per_iter=32 if mode == "prefill" else max_new_tokens,
+            tokens_per_iter=32 if canon_mode == "prefill" else max_new_tokens,
             batch_size=batch_size,
         )
+        _LAST_MAXTEXT_METRICS.set(metrics)
 
         memory_mb = get_current_rss_mb()
         if isinstance(device, _MemoryStatsDeviceProtocol):
@@ -412,7 +439,7 @@ def _run_benchmark_pass(
             if stats is not None:
                 memory_mb = float(stats.get("peak_bytes_in_use", int(memory_mb * 1024 * 1024))) / (1024 * 1024)
 
-    return (float(tokens_per_sec), float(latency_ms), float(memory_mb))
+    return (float(metrics.tokens_per_sec), float(metrics.latency_ms), float(memory_mb))
 
 
 def benchmark_model(
@@ -425,20 +452,22 @@ def benchmark_model(
 
     Args:
         model_name: The name of the model to benchmark.
-        hardware: Target hardware for the benchmark (e.g., `'tpu-v5p'`, `'gpu'`).
+        hardware: Target hardware for the benchmark (e.g., `'tpu-v5p'`, `'tpu-v6e'`, `'gpu'`).
         batch_size: Batch size to use during benchmarking.
-        **kwargs: Additional args like `num_runs`.
+        **kwargs: Additional args like `num_runs`, `strict_hardware`, `tensor_parallel_size`.
 
     Returns:
         A dictionary containing benchmark metrics and status.
 
     """
+    strict_hw = bool(kwargs.get("strict_hardware", False))
+    tp_size = int(str(kwargs.get("tensor_parallel_size", 1)))
 
-    def _run() -> tuple[float, float, float]:
-        """Initialize MaxText model and execute hardware benchmark pass.
+    def _run() -> BenchmarkTelemetry:
+        """Initialize MaxText model, shard across TPU Mesh, and execute hardware benchmark pass.
 
         Returns:
-            Tuple of `(tokens_per_sec, latency_ms, memory_mb)`.
+            `BenchmarkTelemetry` across timed iterations.
 
         """
         assert jax is not None
@@ -448,12 +477,21 @@ def benchmark_model(
         mode = str(kwargs.get("mode", "prefill"))
         max_new_tokens = int(str(kwargs.get("max_new_tokens", 128)))
         warmup_steps = int(str(kwargs.get("warmup_steps", 5)))
-        device = _get_device(hardware)
+        num_runs = int(str(kwargs.get("num_runs", 5)))
 
-        try:
-            jax.distributed.initialize()
-        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError) as e:
-            logger.warning("jax.distributed.initialize() failed: %s", e)
+        _ = initialize_jax_distributed_if_configured(jax, force_attempt=True)
+
+        primary_dev, active_devs, resolved_str, sharding = build_tpu_mesh_and_sharding(
+            jax,
+            hardware,
+            batch_size=batch_size,
+            tensor_parallel_size=tp_size,
+            strict_hardware=strict_hw,
+            backend_label="maxtext",
+        )
+        device: _MemoryStatsDeviceProtocol | str | None = (
+            primary_dev if isinstance(primary_dev, (_MemoryStatsDeviceProtocol, str)) else _get_device(hardware)
+        )
 
         try:
             model = Gemma4Model(model_name, dtype=_resolve_jnp_dtype(dtype_str))
@@ -464,8 +502,35 @@ def benchmark_model(
         dummy_inputs = jax.random.randint(rng, (batch_size, 32), 1, 256000, dtype=jnp.int32)
         params = model.init(rng, dummy_inputs)
 
-        num_runs = int(str(kwargs.get("num_runs", 5)))
-        return _run_benchmark_pass(model, params, batch_size, num_runs, warmup_steps, mode, max_new_tokens, device)
+        ctx_tok = _LAST_MAXTEXT_METRICS.set(None)
+        try:
+            tps, lat_ms, mem_mb = _run_benchmark_pass(
+                model,
+                params,
+                batch_size,
+                num_runs,
+                warmup_steps,
+                mode,
+                max_new_tokens,
+                device,
+                sharding=sharding,
+            )
+            loop_metrics = _LAST_MAXTEXT_METRICS.get()
+        finally:
+            _LAST_MAXTEXT_METRICS.reset(ctx_tok)
+
+        agg_hbm = aggregate_jax_peak_hbm_mb(active_devs) if resolved_str.startswith(("tpu", "gpu")) else None
+        effective_mem = agg_hbm if agg_hbm is not None else mem_mb
+        return BenchmarkTelemetry(
+            tokens_per_sec=tps,
+            latency_ms=lat_ms,
+            memory_mb=effective_mem,
+            resolved_device=resolved_str,
+            device_count=max(1, len(active_devs)),
+            compile_latency_ms=loop_metrics.compile_latency_ms if loop_metrics is not None else None,
+            peak_hbm_mb=agg_hbm,
+            latency_samples=loop_metrics.latency_samples if loop_metrics is not None else (),
+        )
 
     return run_benchmark_wrapper(
         backend_name="maxtext",
@@ -474,4 +539,6 @@ def benchmark_model(
         batch_size=batch_size,
         missing_deps=jax is None or jnp is None or Gemma4Model is None,
         benchmark_fn=_run,
+        strict_hardware=strict_hw,
+        raise_on_error=bool(kwargs["raise_on_error"]) if "raise_on_error" in kwargs else None,
     )

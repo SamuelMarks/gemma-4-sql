@@ -21,9 +21,14 @@ from gemma_4_sql.backends.common_train import (
     resolve_training_dataloader,
 )
 from gemma_4_sql.backends.lazy_loader import import_optional_symbol, optional_import
-from gemma_4_sql.backends.pytorch.distributed import TorchDistModuleProtocol, cleanup_distributed
+from gemma_4_sql.backends.pytorch.distributed import (
+    TorchDistModuleProtocol,
+    cleanup_distributed,
+    step_optimizer_xla_aware,
+)
 from gemma_4_sql.backends.pytorch.etl import build_dataloader
 from gemma_4_sql.backends.pytorch.gemma4.config import Gemma4Config
+from gemma_4_sql.backends.pytorch.runtime_adapter import TorchRandintProtocol, TorchRuntimeAdapter
 from gemma_4_sql.exceptions import DependencyMissingError, ExecutionStatus, StatusValue, TrainingError
 from gemma_4_sql.type_hints import (
     DPOConfig,
@@ -384,12 +389,47 @@ def _compute_pytorch_logps(
     return 0.0
 
 
+@runtime_checkable
+class _DeviceMovableDPOProtocol(Protocol):
+    """Protocol for DPO models or tensors supporting `.to(device)`."""
+
+    def to[TargetT](self: TargetT, device: str, /) -> TargetT:
+        """Move model or tensor onto `device`.
+
+        Args:
+            device: Target device string.
+
+        Returns:
+            Moved model or tensor.
+
+        """
+        ...
+
+
+def _move_dpo_batch_value(val: TorchDPOBatchValue | None, device: str) -> TorchDPOBatchValue | None:
+    """Move `val` onto `device` when `device != 'cpu'` and `.to(...)` is supported.
+
+    Args:
+        val: Preference batch tensor or value.
+        device: Resolved accelerator device string.
+
+    Returns:
+        Device-placed value or original `val`.
+
+    """
+    if device != "cpu" and val is not None and isinstance(val, _DeviceMovableDPOProtocol):
+        return val.to(device)
+    return val
+
+
 def _run_dpo_step(
     policy_model: TorchDPOModel | None,
     ref_model: TorchDPOModel | None,
     optimizer: TorchOptimizerProtocol | None,
     batch: Mapping[str, TorchDPOBatchValue],
     beta: float,
+    *,
+    device: str = "cpu",
 ) -> TorchTensorProtocol | ArithmeticTensorProtocol | float:
     """Run a single PyTorch DPO optimization step.
 
@@ -399,6 +439,7 @@ def _run_dpo_step(
         optimizer: PyTorch optimizer instance.
         batch: Preference batch dictionary containing chosen and rejected inputs/labels.
         beta: KL penalty temperature coefficient.
+        device: Active accelerator device string (`'xla:0'`, `'cuda'`, `'mps'`, `'cpu'`).
 
     Returns:
         Scalar DPO step loss tensor or float.
@@ -407,10 +448,10 @@ def _run_dpo_step(
     assert torch is not None
     if optimizer is not None and callable(optimizer.zero_grad):
         optimizer.zero_grad()
-    ch_inputs = batch.get("chosen_inputs", batch.get("inputs"))
-    re_inputs = batch.get("rejected_inputs", batch.get("inputs"))
-    ch_labels = batch.get("chosen_labels")
-    re_labels = batch.get("rejected_labels")
+    ch_inputs = _move_dpo_batch_value(batch.get("chosen_inputs", batch.get("inputs")), device)
+    re_inputs = _move_dpo_batch_value(batch.get("rejected_inputs", batch.get("inputs")), device)
+    ch_labels = _move_dpo_batch_value(batch.get("chosen_labels"), device)
+    re_labels = _move_dpo_batch_value(batch.get("rejected_labels"), device)
 
     pi_ch_logps = _compute_pytorch_logps(policy_model, ch_inputs, ch_labels)
     pi_re_logps = _compute_pytorch_logps(policy_model, re_inputs, re_labels)
@@ -422,7 +463,7 @@ def _run_dpo_step(
     if isinstance(loss, _BackwardLossProtocol) and callable(loss.backward):
         loss.backward()
     if optimizer is not None and callable(optimizer.step):
-        optimizer.step()
+        step_optimizer_xla_aware(optimizer, device)
     return loss
 
 
@@ -432,11 +473,14 @@ def _run_training_epochs[
     BatchT: Mapping[str, TorchDPOBatchValue],
 ](
     state: DPOLoopState[ModelT, OptT, BatchT],
+    *,
+    device: str = "cpu",
 ) -> float:
     """Run PyTorch DPO training epochs over the preference dataloader.
 
     Args:
         state: `DPOLoopState` holding models, optimizer, dataloader, and beta.
+        device: Active accelerator device string.
 
     Returns:
         Mean batch loss from the final epoch.
@@ -458,7 +502,7 @@ def _run_training_epochs[
             Scalar float DPO loss for the batch.
 
         """
-        loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta)
+        loss = _run_dpo_step(policy_model, ref_model, optimizer, batch, beta, device=device)
         if isinstance(loss, ScalarItemProtocol) and callable(loss.item):
             return extract_scalar_float(loss)
         return float(loss)
@@ -532,6 +576,8 @@ def run_dpo(
     """
     extra = config.extra_kwargs
     backend_alias = str(kwargs.get("backend_alias", extra.get("backend_alias", "pytorch")))
+    hardware = str(kwargs.get("hardware", extra.get("hardware", "cpu")))
+    strict_hw = bool(kwargs.get("strict_hardware", extra.get("strict_hardware", False)))
     raw_cfg = kwargs.get("model_config") or extra.get("model_config")
     model_config = raw_cfg if isinstance(raw_cfg, Gemma4Config) else None
     raw_dist = kwargs.get("dist_module") or extra.get("dist_module")
@@ -569,11 +615,18 @@ def run_dpo(
             assert optim is not None
             assert torch is not None
             torch_mod = torch
+            rt_mod: TorchRandintProtocol | None = torch_mod if isinstance(torch_mod, TorchRandintProtocol) else None
+            device = TorchRuntimeAdapter(rt_mod).get_device(hardware, strict_hardware=strict_hw)
             (policy_model, ref_model) = _load_dpo_models(
                 model_name,
                 backend_alias=backend_alias,
                 model_config=model_config,
             )
+            if device != "cpu":
+                if isinstance(policy_model, _DeviceMovableDPOProtocol):
+                    policy_model = policy_model.to(device)
+                if isinstance(ref_model, _DeviceMovableDPOProtocol):
+                    ref_model = ref_model.to(device)
             optimizer: TorchOptimizerProtocol = optim.AdamW(policy_model.parameters(), lr=learning_rate)
             try:
                 dataloader, _ = resolve_training_dataloader(
@@ -603,7 +656,8 @@ def run_dpo(
                     ref_model=ref_model,
                     optimizer=optimizer,
                     beta=beta,
-                )
+                ),
+                device=device,
             )
             return (ExecutionStatus.COMPLETED.value, float(final_loss))
         finally:

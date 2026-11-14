@@ -354,11 +354,25 @@ def run_dpo(config: DPOConfig, **kwargs: StatusValue) -> DPOResultDict:
         TrainingError: If DPO fails and `raise_on_error` is enabled.
 
     """
+    extra = config.extra_kwargs
+    backend_alias = str(kwargs.get("backend_alias", extra.get("backend_alias", "jax")))
+    hardware = str(kwargs.get("hardware", extra.get("hardware", "cpu")))
+    strict_hw = bool(kwargs.get("strict_hardware", extra.get("strict_hardware", False)))
+
     if jax is None or is_jnp_missing(jnp) or jnn is None or optax is None or not callable(Gemma4ForCausalLM):
-        raise DependencyMissingError("JAX DPO dependencies are missing.", backend="jax")
+        raise DependencyMissingError("JAX DPO dependencies are missing.", backend=backend_alias)
+
+    from gemma_4_sql.backends._jax_common import (
+        build_tpu_mesh_and_sharding,
+        initialize_jax_distributed_if_configured,
+    )
+
+    _ = initialize_jax_distributed_if_configured(jax)
+    if strict_hw:
+        _ = build_tpu_mesh_and_sharding(jax, hardware, strict_hardware=True, backend_label=backend_alias)
 
     return run_dpo_wrapper(
-        "jax",
+        backend_alias,
         config,
         lambda m, d, b, ep, lr, bs: _execute_dpo(m, d, b, ep, lr, batch_size=bs),
         **kwargs,

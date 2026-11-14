@@ -6,6 +6,7 @@ import types
 from typing import Protocol, Self, runtime_checkable
 
 from gemma_4_sql.backends.common_logging import SummaryWriterFactory, log_metrics_wrapper
+from gemma_4_sql.backends.keras._env import resolve_and_validate_keras_backend
 from gemma_4_sql.backends.lazy_loader import ModuleNamespaceProtocol, optional_import
 from gemma_4_sql.type_hints import JSONValue, LogMetricsResultDict
 
@@ -143,32 +144,49 @@ def log_metrics(
     metrics: dict[str, float],
     step: int,
     log_dir: str = "logs",
-    **_kwargs: JSONValue,
+    **kwargs: JSONValue,
 ) -> LogMetricsResultDict:
-    """Log metrics using Keras/TensorFlow TensorBoard tools and common JSONL fallback.
+    """Log metrics using TensorFlow TensorBoard when available or JSONL/SummaryWriter on JAX/PyTorch.
 
     Args:
         metrics: The evaluation or training metrics.
         step: The current training or logging step.
         log_dir: The directory to save logs.
-        **_kwargs: Additional logging keyword arguments.
+        **kwargs: Additional logging keyword arguments (`backend_alias`, `keras_backend`).
 
     Returns:
         Structured `LogMetricsResultDict` containing logged metrics and status.
 
     Raises:
-        DependencyMissingError: If TensorFlow dependencies are missing.
+        DependencyMissingError: If TensorFlow is missing when running default/TF Keras logging.
 
     """
-    if tf is None:
+    backend_alias = str(kwargs.get("backend_alias", "keras"))
+    explicit_kb = (
+        str(kwargs["keras_backend"]) if "keras_backend" in kwargs and kwargs["keras_backend"] is not None else None
+    )
+    non_tf_alias = backend_alias in {"keras_jax", "keras_pytorch", "keras_torch"} or explicit_kb in {"jax", "torch"}
+    if tf is None and not non_tf_alias:
         from gemma_4_sql.exceptions import DependencyMissingError
 
-        raise DependencyMissingError("TensorFlow dependencies are missing.", backend="keras")
+        raise DependencyMissingError("TensorFlow dependencies are missing.", backend=backend_alias)
+
+    if tf is None:
+        active_kb = resolve_and_validate_keras_backend(backend_alias, explicit_kb)
+        res_non_tf = log_metrics_wrapper(
+            backend_name=backend_alias,
+            metrics=metrics,
+            step=step,
+            log_dir=log_dir,
+            summary_writer_cls=None,
+        )
+        res_non_tf["keras_backend"] = active_kb
+        return res_non_tf
 
     has_summary = isinstance(tf, _TFSummaryHolderProtocol)
     writer_cls: SummaryWriterFactory | None = _TFSummaryWriterAdapter if has_summary else None
     res = log_metrics_wrapper(
-        backend_name="keras",
+        backend_name=backend_alias,
         metrics=metrics,
         step=step,
         log_dir=log_dir,
