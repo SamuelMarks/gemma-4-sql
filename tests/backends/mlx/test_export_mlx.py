@@ -10,14 +10,16 @@ import pytest
 
 import gemma_4_sql.backends.mlx.export as export_module
 from gemma_4_sql.exceptions import DependencyMissingError, ExportError
+from gemma_4_sql.type_hints import MlxArrayProtocol
 from tests.conftest import requires_mlx
+from tests.utils.tensor_helpers import get_typed_mx
 
 pytestmark = requires_mlx
 
 
 def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify MLX export_model writes real safetensors with mlx.core.save_safetensors and config.json."""
-    import mlx.core as mx
+    mx = get_typed_mx()
 
     export_dir = tmp_path / "export"
     expected_weight = mx.array([1.25, 2.5, 3.75], dtype=mx.float32)
@@ -35,14 +37,14 @@ def test_export_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             """Store config."""
             self.config = cfg
 
-        def parameters(self) -> dict[str, mx.array]:
+        def parameters(self) -> dict[str, MlxArrayProtocol]:
             """Return parameter dictionary."""
             return {"w": expected_weight}
 
     class _ModelWithoutConfig:
         """Typed MLX model double exposing `.parameters()` without `.config`."""
 
-        def parameters(self) -> dict[str, mx.array]:
+        def parameters(self) -> dict[str, MlxArrayProtocol]:
             """Return parameter dictionary."""
             return {"w": expected_weight}
 

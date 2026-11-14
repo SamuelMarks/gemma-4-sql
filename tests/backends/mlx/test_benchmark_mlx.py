@@ -8,7 +8,15 @@ import pytest
 
 import gemma_4_sql.backends.mlx.benchmark as benchmark_module
 from gemma_4_sql.exceptions import DependencyMissingError
+from gemma_4_sql.type_hints import DTypeProtocol, MlxArrayProtocol
 from tests.conftest import requires_mlx
+from tests.utils.tensor_helpers import (
+    TypedMlxLinearProtocol,
+    TypedMlxSequentialProtocol,
+    get_typed_mlx_nn,
+    get_typed_mx,
+    mx_eval_model,
+)
 
 pytestmark = requires_mlx
 
@@ -27,7 +35,7 @@ def test_mlx_benchmark_missing_deps(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_load_mlx_model_and_device(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test _load_mlx_model_and_device across cpu, gpu, single return, and device setter errors."""
-    import mlx.nn as mlx_nn
+    mlx_nn = get_typed_mlx_nn()
 
     lin = mlx_nn.Linear(4, 4)
 
@@ -63,7 +71,7 @@ def test_load_mlx_model_and_device(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_mx = _FakeMxWithSetDevice()
     return_tuple = True
 
-    def _fake_load(_name: str) -> tuple[mlx_nn.Linear, str] | mlx_nn.Linear:
+    def _fake_load(_name: str) -> tuple[TypedMlxLinearProtocol, str] | TypedMlxLinearProtocol:
         """Return `(lin, 'tok')` or `lin`."""
         return (lin, "tok") if return_tuple else lin
 
@@ -198,7 +206,7 @@ def test_get_peak_memory_mb(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_run_benchmark_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     """Test _run_benchmark_pass across e2e, prefill, decode, reset errors, and None model."""
-    import mlx.core as real_mx
+    real_mx = get_typed_mx()
 
     class _ResetMetalStub:
         """Metal stub supporting `is_available` and `reset_peak_memory`."""
@@ -231,7 +239,7 @@ def test_run_benchmark_pass(monkeypatch: pytest.MonkeyPatch) -> None:
             self.metal = metal_obj
 
         @staticmethod
-        def zeros(shape: tuple[int, int], *, dtype: real_mx.Dtype) -> real_mx.array:
+        def zeros(shape: tuple[int, int], *, dtype: DTypeProtocol) -> MlxArrayProtocol:
             """Delegate to `real_mx.zeros`.
 
             Returns:
@@ -240,7 +248,7 @@ def test_run_benchmark_pass(monkeypatch: pytest.MonkeyPatch) -> None:
             return real_mx.zeros(shape, dtype=dtype)
 
         @staticmethod
-        def eval(*_args: real_mx.array | str) -> None:
+        def eval(*_args: MlxArrayProtocol | str) -> None:
             """No-op eval."""
 
     def _model_fn(_x: benchmark_module.MlxArrayProtocol) -> str:
@@ -272,32 +280,12 @@ def test_run_benchmark_pass(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_benchmark_model_behavioral(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify benchmark_model executes real MLX forward passes on a tiny mlx.nn.Module through run_benchmark_wrapper."""
-    import mlx.core as mx
-    import mlx.nn as mlx_nn
+    mlx_nn = get_typed_mlx_nn()
 
-    class TinyMLXBenchModel(mlx_nn.Module):
-        """Tiny MLX causal LM for real benchmark execution."""
-
-        def __init__(self) -> None:
-            """Initialize TinyMLXBenchModel."""
-            super().__init__()
-            self.embed = mlx_nn.Embedding(32, 8)
-            self.head = mlx_nn.Linear(8, 32)
-
-        def __call__(self, x: mx.array) -> mx.array:
-            """Run forward pass on input token IDs.
-
-            Returns:
-                Output vocabulary logits array.
-            """
-            return self.head(self.embed(x))
-
-    from tests.utils.tensor_helpers import mx_eval_model
-
-    tiny_model = TinyMLXBenchModel()
+    tiny_model = mlx_nn.Sequential(mlx_nn.Embedding(32, 8), mlx_nn.Linear(8, 32))
     mx_eval_model(tiny_model)
 
-    def _load_tiny(_m: str) -> tuple[TinyMLXBenchModel, str]:
+    def _load_tiny(_m: str) -> tuple[TypedMlxSequentialProtocol, str]:
         """Return `(tiny_model, 'tok')`."""
         return (tiny_model, "tok")
 

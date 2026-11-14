@@ -9,41 +9,39 @@ from unittest.mock import patch
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError, ETLError, TrainingError
-from gemma_4_sql.type_hints import DPOConfig, DPOLoopState
+from gemma_4_sql.type_hints import DPOConfig, DPOLoopState, MlxArrayProtocol
 from tests.conftest import requires_mlx
+from tests.utils.tensor_helpers import (
+    TypedMlxLinearProtocol,
+    TypedMlxSequentialProtocol,
+    get_typed_mlx_nn,
+    get_typed_mlx_optim,
+    get_typed_mx,
+    mx_eval,
+    mx_eval_model,
+)
 
 pytestmark = requires_mlx
 
 
 def test_real_mlx_dpo_loss_logps_and_step(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify MLX dpo_loss, _compute_mlx_logps, _run_dpo_step, and run_dpo with real MLX arrays."""
-    import mlx.core as mx
-    import mlx.nn as mlx_nn
-    import mlx.optimizers as optim
-
     import gemma_4_sql.backends.mlx.dpo as dpo_module
 
-    class TinyMLXPolicy(mlx_nn.Module):
-        """Minimal MLX causal language model for DPO testing."""
+    mx = get_typed_mx()
+    mlx_nn = get_typed_mlx_nn()
+    optim = get_typed_mlx_optim()
 
-        def __init__(self) -> None:
-            """Initialize TinyMLXPolicy with embedding and linear head."""
-            super().__init__()
-            self.embed = mlx_nn.Embedding(32, 8)
-            self.head = mlx_nn.Linear(8, 32)
+    def _build_policy() -> TypedMlxSequentialProtocol:
+        """Build a real 2-layer MLX causal policy (`Embedding -> Linear`).
 
-        def __call__(self, x: mx.array) -> mx.array:
-            """Compute vocabulary logits from token IDs.
+        Returns:
+            Initialized `TypedMlxSequentialProtocol` model.
+        """
+        return mlx_nn.Sequential(mlx_nn.Embedding(32, 8), mlx_nn.Linear(8, 32))
 
-            Returns:
-                Vocabulary logits array.
-            """
-            return self.head(self.embed(x))
-
-    from tests.utils.tensor_helpers import mx_eval, mx_eval_model
-
-    policy_model = TinyMLXPolicy()
-    ref_model = TinyMLXPolicy()
+    policy_model = _build_policy()
+    ref_model = _build_policy()
     mx_eval_model(policy_model, ref_model)
 
     optimizer = optim.AdamW(learning_rate=1e-2)
@@ -82,10 +80,10 @@ def test_real_mlx_dpo_loss_logps_and_step(monkeypatch: pytest.MonkeyPatch) -> No
     assert loss_step_1 > 0.0
     assert loss_step_2 < loss_step_1
 
-    # Full run_dpo end-to-end execution with real TinyMLXPolicy
-    def _load_tiny(_m: str) -> tuple[TinyMLXPolicy, str]:
-        """Return `(TinyMLXPolicy(), 'tok')`."""
-        return (TinyMLXPolicy(), "tok")
+    # Full run_dpo end-to-end execution with real MLX Sequential policy
+    def _load_tiny(_m: str) -> tuple[TypedMlxSequentialProtocol, str]:
+        """Return `(_build_policy(), 'tok')`."""
+        return (_build_policy(), "tok")
 
     monkeypatch.setattr(dpo_module, "load", _load_tiny)
     with patch.object(dpo_module, "build_dataloader", side_effect=ETLError("offline fallback")):
@@ -96,9 +94,9 @@ def test_real_mlx_dpo_loss_logps_and_step(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_dpo_loss_and_fallback_log_sigmoid(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify dpo_loss computes exact preference loss on real MLX arrays and checks missing dependencies."""
-    import mlx.core as mx
-
     import gemma_4_sql.backends.mlx.dpo as dpo_module
+
+    mx = get_typed_mx()
 
     eq_logp = mx.array([-1.5])
     eq_loss, eq_ch_r, eq_re_r = dpo_module.dpo_loss(eq_logp, eq_logp, eq_logp, eq_logp, 0.1)
@@ -123,9 +121,9 @@ def test_dpo_loss_and_fallback_log_sigmoid(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_run_dpo_step_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_dpo_step and _compute_mlx_logps fallback branches without MagicMock."""
-    import mlx.core as mx
-
     import gemma_4_sql.backends.mlx.dpo as dpo_module
+
+    mx = get_typed_mx()
 
     class _ArithMeanStub:
         """Minimal `ArithmeticTensorProtocol` stub."""
@@ -158,7 +156,7 @@ def test_run_dpo_step_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     assert float(arith_inst) == 1.0 and (arith_inst - 1.0) is arith_inst and (1.0 - arith_inst) is arith_inst
     assert (arith_inst * 1.0) is arith_inst and (1.0 * arith_inst) is arith_inst and (-arith_inst) is arith_inst
 
-    def _one_d_mlx_model(_x: dpo_module.MlxDPOBatchValue) -> mx.array:
+    def _one_d_mlx_model(_x: dpo_module.MlxDPOBatchValue) -> MlxArrayProtocol:
         """Return 1D MLX array to exercise `raw_logits.mean(axis=-1)`."""
         return mx.array([1.0, 3.0])
 
@@ -200,12 +198,12 @@ def test_run_dpo_step_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
         def value_and_grad(
             _m: dpo_module.MlxDPOModel,
             _fn: dpo_module.Callable[..., float],
-        ) -> dpo_module.Callable[..., tuple[float, dict[str, mx.array]]]:
+        ) -> dpo_module.Callable[..., tuple[float, dict[str, MlxArrayProtocol]]]:
             """Return callable yielding `(0.5, {})`."""
 
             def _inner(
                 *_args: dpo_module.MlxDPOModel | dpo_module.MlxDPOBatch | float,
-            ) -> tuple[float, dict[str, mx.array]]:
+            ) -> tuple[float, dict[str, MlxArrayProtocol]]:
                 """Return `(0.5, {})`."""
                 return (0.5, {})
 
@@ -219,10 +217,10 @@ def test_run_dpo_step_fallback_paths(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_run_training_epochs_and_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_training_epochs and run_dpo error handling without MagicMock."""
-    import mlx.core as mx
-    import mlx.nn as mlx_nn
-
     import gemma_4_sql.backends.mlx.dpo as dpo_module
+
+    mx = get_typed_mx()
+    mlx_nn = get_typed_mlx_nn()
 
     def _dummy_policy(_x: dpo_module.MlxDPOBatchValue) -> float:
         """Return `0.0`."""
@@ -241,7 +239,7 @@ def test_run_training_epochs_and_errors(monkeypatch: pytest.MonkeyPatch) -> None
 
     calls = 0
 
-    def _step_arr(*_a: dpo_module.MlxDPOModel | str | dict[str, int] | float | None) -> mx.array:
+    def _step_arr(*_a: dpo_module.MlxDPOModel | str | dict[str, int] | float | None) -> MlxArrayProtocol:
         """Increment `calls` and return `mx.array(0.5)`.
 
         Returns:
@@ -264,7 +262,7 @@ def test_run_training_epochs_and_errors(monkeypatch: pytest.MonkeyPatch) -> None
 
     lin = mlx_nn.Linear(4, 4)
 
-    def _load_lin(_m: str) -> tuple[mlx_nn.Linear, str]:
+    def _load_lin(_m: str) -> tuple[TypedMlxLinearProtocol, str]:
         """Return `(lin, 'tok1')`."""
         return (lin, "tok1")
 

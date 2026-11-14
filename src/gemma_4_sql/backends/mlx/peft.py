@@ -113,7 +113,7 @@ class _MlxDropoutProtocol(Protocol):
 class _MlxModuleHierarchyProtocol(Protocol):
     """Protocol for an `mlx.nn.Module` supporting `.named_modules()`."""
 
-    def named_modules(self) -> Iterable[tuple[str, _MlxLinearProtocol]]:
+    def named_modules(self) -> Iterable[tuple[str, MlxPEFTTarget]]:
         """Yield `(path, submodule)` pairs across the module tree."""
         ...
 
@@ -269,7 +269,7 @@ class _MlxPEFTNNProtocol(Protocol):
     """Protocol for `mlx.nn` exposing `Dropout`, `Identity`, and `Linear`."""
 
     @property
-    def Linear(self) -> type:
+    def Linear(self) -> type[_MlxLinearProtocol]:
         """Provide `mlx.nn.Linear` class for `isinstance` checks."""
         ...
 
@@ -314,11 +314,56 @@ class _MxArrayFactoryProtocol(Protocol):
 
 
 @runtime_checkable
+class _MlxNativeModuleProtocol(Protocol):
+    """Protocol for `mlx.nn.Module` base methods invoked by native `MLXLoRALinear`."""
+
+    def __init__(self) -> None:
+        """Initialize `mlx.nn.Module` dictionary storage."""
+        ...
+
+    def freeze(
+        self,
+        *,
+        recurse: bool = True,
+        keys: Sequence[str] | None = None,
+    ) -> Self | None:
+        """Freeze parameter keys on this module.
+
+        Args:
+            recurse: Whether to recurse into child modules.
+            keys: Optional subset of parameter keys to freeze.
+
+        Returns:
+            Optional self reference or `None`.
+
+        """
+        ...
+
+    def parameters(self) -> Mapping[str, MlxPEFTTarget | _MlxTensorProtocol]:
+        """Return full parameter tree of this module.
+
+        Returns:
+            Mapping from parameter names to MLX tensors or submodules.
+
+        """
+        ...
+
+    def trainable_parameters(self) -> Mapping[str, MlxPEFTTarget | _MlxTensorProtocol]:
+        """Return trainable parameter tree of this module.
+
+        Returns:
+            Mapping from trainable parameter names to MLX tensors or submodules.
+
+        """
+        ...
+
+
+@runtime_checkable
 class _MlxModuleNamespaceCheckProtocol(Protocol):
     """Protocol verifying `nn` is the real `mlx.nn` module exposing `Module`."""
 
     @property
-    def Module(self) -> type:
+    def Module(self) -> type[_MlxNativeModuleProtocol]:
         """Provide `mlx.nn.Module` class."""
         ...
 
@@ -335,13 +380,13 @@ def _get_native_mlx_lora_cls() -> type[MLXLoRALinear] | None:
     """
     if _NATIVE_LORA_CLS_CACHE:
         return _NATIVE_LORA_CLS_CACHE[0]
-    try:
-        from mlx import nn as _real_nn
-    except ImportError:
+    real_nn = optional_import("mlx.nn", _MlxModuleNamespaceCheckProtocol)
+    if real_nn is None:
         return None
+    mod_cls: type[_MlxNativeModuleProtocol] = real_nn.Module
 
-    class _NativeMLXLoRALinear(MLXLoRALinear, _real_nn.Module):
-        """Concrete `MLXLoRALinear` bound to `mlx.nn.Module` for parameter & gradient traversal."""
+    class _NativeMLXLoRALinearMixin(MLXLoRALinear):
+        """Concrete `MLXLoRALinear` mixin delegating parameter & freeze trees to `mlx.nn.Module`."""
 
         def __init__(
             self,
@@ -353,7 +398,8 @@ def _get_native_mlx_lora_cls() -> type[MLXLoRALinear] | None:
             bias: bool = False,
         ) -> None:
             """Initialize `mlx.nn.Module` dictionary storage and `MLXLoRALinear` weights."""
-            _real_nn.Module.__init__(self)
+            assert isinstance(self, _MlxNativeModuleProtocol)
+            mod_cls.__init__(self)
             self._init_lora_fields(
                 in_features=in_features,
                 out_features=out_features,
@@ -366,7 +412,8 @@ def _get_native_mlx_lora_cls() -> type[MLXLoRALinear] | None:
 
         def _freeze_base_weights(self, *, has_bias: bool) -> None:
             """Freeze `weight` and optional `bias` keys on the underlying `mlx.nn.Module`."""
-            _real_nn.Module.freeze(
+            assert isinstance(self, _MlxNativeModuleProtocol)
+            mod_cls.freeze(
                 self,
                 recurse=False,
                 keys=["weight", "bias"] if has_bias else ["weight"],
@@ -379,10 +426,8 @@ def _get_native_mlx_lora_cls() -> type[MLXLoRALinear] | None:
                 Dictionary mapping parameter names to MLX tensor instances.
 
             """
-            params_fn: Callable[[MLXLoRALinear], Mapping[str, MlxPEFTTarget | _MlxTensorProtocol]] = vars(
-                _real_nn.Module
-            )["parameters"]
-            raw_p = params_fn(self)
+            assert isinstance(self, _MlxNativeModuleProtocol)
+            raw_p = mod_cls.parameters(self)
             return {str(k): v for k, v in raw_p.items() if isinstance(v, _MlxTensorProtocol)}
 
         def trainable_parameters(self) -> dict[str, _MlxTensorProtocol]:
@@ -392,14 +437,15 @@ def _get_native_mlx_lora_cls() -> type[MLXLoRALinear] | None:
                 Dictionary mapping trainable parameter names to MLX tensor instances.
 
             """
-            train_params_fn: Callable[[MLXLoRALinear], Mapping[str, MlxPEFTTarget | _MlxTensorProtocol]] = vars(
-                _real_nn.Module
-            )["trainable_parameters"]
-            raw_tp = train_params_fn(self)
+            assert isinstance(self, _MlxNativeModuleProtocol)
+            raw_tp = mod_cls.trainable_parameters(self)
             return {str(k): v for k, v in raw_tp.items() if isinstance(v, _MlxTensorProtocol)}
 
-    _NATIVE_LORA_CLS_CACHE.append(_NativeMLXLoRALinear)
-    return _NativeMLXLoRALinear
+    empty_ns: dict[str, Callable[..., None]] = {}
+    native_cls: type = type("_NativeMLXLoRALinear", (_NativeMLXLoRALinearMixin, mod_cls), empty_ns)
+    assert issubclass(native_cls, MLXLoRALinear)
+    _NATIVE_LORA_CLS_CACHE.append(native_cls)
+    return native_cls
 
 
 class MLXLoRALinear:

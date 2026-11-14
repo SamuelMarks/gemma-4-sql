@@ -7,45 +7,35 @@ from unittest.mock import patch
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError, ETLError, TrainingError
-from gemma_4_sql.type_hints import MlxArrayProtocol, MlxTrainerState, TrainingConfig
+from gemma_4_sql.type_hints import ETLConfig, MlxArrayProtocol, MlxTrainerState, TrainingConfig
 from tests.conftest import requires_mlx
+from tests.utils.tensor_helpers import (
+    TypedMlxLinearProtocol,
+    TypedMlxSequentialProtocol,
+    get_typed_mlx_nn,
+    get_typed_mx,
+    mx_eval,
+    mx_eval_model,
+)
 
 pytestmark = requires_mlx
 
 
 def test_real_mlx_training_epochs_and_execute_train(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _run_training_epochs and _execute_train run real MLX forward/backward updates on a tiny nn.Module."""
-    import mlx.core as mx
-    import mlx.nn as mlx_nn
-
     import gemma_4_sql.backends.mlx.train as train_module
-    from gemma_4_sql.type_hints import ETLConfig
 
-    class TinyMLXModel(mlx_nn.Module):
-        """Minimal MLX language model for supervised fine-tuning tests."""
+    mx = get_typed_mx()
+    mlx_nn = get_typed_mlx_nn()
 
-        def __init__(self) -> None:
-            """Initialize TinyMLXModel with embedding and output projection."""
-            super().__init__()
-            self.embed = mlx_nn.Embedding(32, 8)
-            self.head = mlx_nn.Linear(8, 32)
-
-        def __call__(self, x: mx.array) -> mx.array:
-            """Compute logits from input token IDs.
-
-            Returns:
-                Vocabulary logits array.
-            """
-            return self.head(self.embed(x))
-
-    from tests.utils.tensor_helpers import mx_eval, mx_eval_model
-
-    tiny_model = TinyMLXModel()
+    tiny_model = mlx_nn.Sequential(mlx_nn.Embedding(32, 8), mlx_nn.Linear(8, 32))
     mx_eval_model(tiny_model)
-    old_weight = mx.array(tiny_model.head.weight)
+    head_layer = tiny_model.layers[1]
+    assert isinstance(head_layer, mlx_nn.Linear)
+    old_weight = mx.array(head_layer.weight)
     mx_eval(old_weight)
 
-    def _load_tiny(_m: str) -> tuple[TinyMLXModel, str]:
+    def _load_tiny(_m: str) -> tuple[TypedMlxSequentialProtocol, str]:
         """Return `(tiny_model, 'tok')`."""
         return (tiny_model, "tok")
 
@@ -62,7 +52,15 @@ def test_real_mlx_training_epochs_and_execute_train(monkeypatch: pytest.MonkeyPa
     status, final_loss = train_module._execute_train("tiny", "ds", epochs=1, learning_rate=1e-2, batch_size=1)
     assert status == "completed"
     assert final_loss > 0.0
-    assert not mx.allclose(old_weight, tiny_model.head.weight).item()
+    updated_head = tiny_model.layers[1]
+    assert isinstance(updated_head, mlx_nn.Linear)
+    assert not mx.allclose(old_weight, updated_head.weight).item()
+
+    nested_grad = train_module._to_mlx_grad_tree({
+        "submod": {"w": old_weight},
+        "layers": [{"w": old_weight}, [old_weight], "skip"],
+    })
+    assert nested_grad is not None and "layers" in nested_grad and "submod" in nested_grad
 
     # Also exercise offline fallback dataloader when build_dataloader raises ETLError on synthetic dataset
     with patch.object(train_module, "build_dataloader", side_effect=ETLError("offline")):
@@ -124,14 +122,13 @@ def test_run_training_epochs_scalar_loss() -> None:
 
 def test_execute_train_invalid_dataloader_and_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify _execute_train validates the dataloader and raises DependencyMissingError when MLX is missing."""
-    import mlx.nn as mlx_nn
-
     import gemma_4_sql.backends.mlx.train as train_module
-    from gemma_4_sql.type_hints import ETLConfig
+
+    mlx_nn = get_typed_mlx_nn()
 
     lin = mlx_nn.Linear(4, 4)
 
-    def _load_lin(_m: str) -> mlx_nn.Linear:
+    def _load_lin(_m: str) -> TypedMlxLinearProtocol:
         """Return `lin`."""
         return lin
 

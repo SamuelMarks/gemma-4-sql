@@ -9,7 +9,9 @@ import pytest
 
 import gemma_4_sql.backends.mlx.inference as inf_module
 from gemma_4_sql.exceptions import DependencyMissingError, InferenceError
+from gemma_4_sql.type_hints import MlxArrayProtocol
 from tests.conftest import requires_mlx
+from tests.utils.tensor_helpers import TypedMlxLinearProtocol, get_typed_mlx_nn, get_typed_mx
 
 pytestmark = requires_mlx
 
@@ -39,14 +41,14 @@ class _StubMlxTokenizer:
 
 def test_real_mlx_beam_search_and_confidence() -> None:
     """Verify mlx_beam_search and compute_confidence_score execute with real MLX arrays."""
-    import mlx.core as mx
+    mx = get_typed_mx()
 
     assert inf_module.compute_confidence_score([], 0) == 0.0
     assert inf_module.compute_confidence_score([0.1, 0.2], 2) == 1.0
     assert 0.0 < inf_module.compute_confidence_score([-1.0, -2.0], 2) < 1.0
     assert 0.0 < inf_module.compute_confidence_score(-3.0, 2) < 1.0
 
-    def real_mlx_model(seq_tensor: mx.array) -> mx.array:
+    def real_mlx_model(seq_tensor: MlxArrayProtocol) -> MlxArrayProtocol:
         """Return 3D MLX logits favoring token 5 on step 0 and EOS token 2 on step 1."""
         seq_len = int(seq_tensor.shape[1])
         logits = mx.zeros((1, seq_len, 16), dtype=mx.float32)
@@ -67,7 +69,7 @@ def test_real_mlx_beam_search_and_confidence() -> None:
     assert 0.0 < conf <= 1.0
 
     # Also test beam carry-over when one beam finishes on step 0 while sibling beam continues on step 1
-    def split_beam_model(seq_tensor: mx.array) -> mx.array:
+    def split_beam_model(seq_tensor: MlxArrayProtocol) -> MlxArrayProtocol:
         """Favor both EOS (2) and token (5) on step 0, then EOS (2) on step 1.
 
         Returns:
@@ -97,28 +99,28 @@ def test_mlx_beam_search_no_model() -> None:
 
 def test_mlx_beam_search_shape_variants() -> None:
     """Verify mlx_beam_search handles 2D, list, tuple, scalar, and 1D model outputs."""
-    import mlx.core as mx
+    mx = get_typed_mx()
 
     hot = mx.array([10.0 if i == 5 else 0.0 for i in range(8)], dtype=mx.float32)
     tok = _StubMlxTokenizer(encoded=[1, 2], decoded="SELECT 1;", eos_token_id=2)
 
-    def _model_2d(_x: mx.array) -> mx.array:
+    def _model_2d(_x: MlxArrayProtocol) -> MlxArrayProtocol:
         """Return 2D stacked logits."""
         return mx.stack([hot, hot])
 
-    def _model_list(_x: mx.array) -> list[mx.array]:
+    def _model_list(_x: MlxArrayProtocol) -> list[MlxArrayProtocol]:
         """Return list of logits."""
         return [hot]
 
-    def _model_tuple(_x: mx.array) -> tuple[mx.array]:
+    def _model_tuple(_x: MlxArrayProtocol) -> tuple[MlxArrayProtocol]:
         """Return 1-tuple of logits."""
         return (hot,)
 
-    def _model_1d(_x: mx.array) -> mx.array:
+    def _model_1d(_x: MlxArrayProtocol) -> MlxArrayProtocol:
         """Return 1D logits."""
         return hot
 
-    def _model_scalar(_x: mx.array) -> float:
+    def _model_scalar(_x: MlxArrayProtocol) -> float:
         """Return scalar float (producing EOS fallback candidate)."""
         return 0.0
 
@@ -145,11 +147,11 @@ def test_mlx_beam_search_no_mx(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_mlx_beam_search_fallbacks_and_empty_results() -> None:
     """Verify mlx_beam_search fallback to SQLTokenizer and error handling on EOS-only or empty decoded strings."""
-    import mlx.core as mx
+    mx = get_typed_mx()
 
     hot_tok65 = mx.array([10.0 if i == 68 else 0.0 for i in range(128)], dtype=mx.float32)
 
-    def _tok68_model(_x: mx.array) -> mx.array:
+    def _tok68_model(_x: MlxArrayProtocol) -> MlxArrayProtocol:
         """Return hot_tok65 favoring printable ASCII token ID 68."""
         return hot_tok65
 
@@ -158,7 +160,7 @@ def test_mlx_beam_search_fallbacks_and_empty_results() -> None:
 
     hot_eos1 = mx.array([10.0 if i == 1 else 0.0 for i in range(8)], dtype=mx.float32)
 
-    def _eos1_model(_x: mx.array) -> mx.array:
+    def _eos1_model(_x: MlxArrayProtocol) -> MlxArrayProtocol:
         """Return hot_eos1."""
         return hot_eos1
 
@@ -176,13 +178,13 @@ def test_mlx_beam_search_fallbacks_and_empty_results() -> None:
 
 def test_generate_sql(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify generate_sql orchestrates loading, caching, beam search, errors, and missing deps."""
-    import mlx.nn as mlx_nn
+    mlx_nn = get_typed_mlx_nn()
 
     inf_module._MODEL_CACHE.clear()
     lin = mlx_nn.Linear(4, 4)
     tok = _StubMlxTokenizer()
 
-    def _load_pair(_name: str) -> tuple[mlx_nn.Linear, _StubMlxTokenizer]:
+    def _load_pair(_name: str) -> tuple[TypedMlxLinearProtocol, _StubMlxTokenizer]:
         """Return `(lin, tok)`."""
         return (lin, tok)
 

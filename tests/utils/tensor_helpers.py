@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Concatenate, ParamSpec, Protocol, Self, TypeVar, runtime_checkable
 
 from gemma_4_sql._types_models import (
     KerasCompiledOptimizerProtocol,
@@ -15,12 +15,19 @@ from gemma_4_sql._types_models import (
     KerasSamplerProtocol,
 )
 from gemma_4_sql.backends.keras.peft import KerasDenseLayerProtocol, _KerasTensorInputProtocol
-from gemma_4_sql.backends.lazy_loader import catch_optional_imports, import_optional_symbol, optional_import
+from gemma_4_sql.backends.lazy_loader import (
+    ModuleNamespaceProtocol,
+    catch_optional_imports,
+    import_optional_symbol,
+    optional_import,
+)
 from gemma_4_sql.type_hints import (
     DTypeProtocol,
     ForwardArg,
     KerasVariableProtocol,
     MlxArrayProtocol,
+    MlxCausalLMProtocol,
+    NestedScalarList,
     TensorProtocol,
     TfTensorProtocol,
 )
@@ -897,3 +904,735 @@ def mx_save_safetensors(file: Path | str, arrays: Mapping[str, MlxArrayProtocol]
     mod = optional_import("mlx.core", _MxEvalModuleProtocol)
     assert mod is not None
     mod.save_safetensors(str(file), arrays)
+
+
+_TMlxGradModel = TypeVar("_TMlxGradModel")
+_PMlxGrad = ParamSpec("_PMlxGrad")
+
+
+@runtime_checkable
+class TypedMlxRandomProtocol(Protocol):
+    """Typed `mlx.core.random` namespace protocol for deterministic MLX test fixtures."""
+
+    def seed(self, seed: int, /) -> None:
+        """Seed the MLX random number generator.
+
+        Args:
+            seed: Integer random seed.
+
+        """
+        ...
+
+    def normal(
+        self,
+        shape: Sequence[int],
+        *,
+        dtype: DTypeProtocol | None = None,
+    ) -> MlxArrayProtocol:
+        """Sample standard normal MLX array values.
+
+        Args:
+            shape: Output tensor shape dimensions.
+            dtype: Optional MLX dtype.
+
+        Returns:
+            Sampled `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def uniform(
+        self,
+        *,
+        low: float,
+        high: float,
+        shape: tuple[int, int],
+    ) -> MlxArrayProtocol:
+        """Sample uniform random MLX array values in `[low, high)`.
+
+        Args:
+            low: Lower uniform bound.
+            high: Upper uniform bound.
+            shape: 2D shape tuple.
+
+        Returns:
+            Sampled `MlxArrayProtocol`.
+
+        """
+        ...
+
+
+type TypedMlxArrayInput = (
+    MlxArrayProtocol
+    | TensorProtocol
+    | NestedScalarList
+    | Sequence[int]
+    | Sequence[float]
+    | Sequence[Sequence[int]]
+    | Sequence[Sequence[float]]
+)
+
+
+@runtime_checkable
+class TypedMlxCoreProtocol(ModuleNamespaceProtocol, Protocol):
+    """Typed `mlx.core` module protocol avoiding `Unknown` diagnostics when MLX is uninstalled."""
+
+    @property
+    def float32(self) -> DTypeProtocol:
+        """Provide `mlx.core.float32` dtype."""
+        ...
+
+    @property
+    def int32(self) -> DTypeProtocol:
+        """Provide `mlx.core.int32` dtype."""
+        ...
+
+    @property
+    def random(self) -> TypedMlxRandomProtocol:
+        """Provide `mlx.core.random` namespace."""
+        ...
+
+    def array(
+        self,
+        val: TypedMlxArrayInput,
+        /,
+        *,
+        dtype: DTypeProtocol | None = None,
+    ) -> MlxArrayProtocol:
+        """Construct an MLX array from `val`.
+
+        Args:
+            val: Input scalar, nested sequence, or tensor.
+            dtype: Optional target MLX data type.
+
+        Returns:
+            Constructed `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def zeros(
+        self,
+        shape: int | Sequence[int],
+        /,
+        *,
+        dtype: DTypeProtocol | None = None,
+    ) -> MlxArrayProtocol:
+        """Construct a zero-filled MLX array.
+
+        Args:
+            shape: Target dimension size or shape tuple.
+            dtype: Optional target MLX data type.
+
+        Returns:
+            Zero-initialized `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def ones(
+        self,
+        shape: int | Sequence[int],
+        /,
+        *,
+        dtype: DTypeProtocol | None = None,
+    ) -> MlxArrayProtocol:
+        """Construct a ones-filled MLX array.
+
+        Args:
+            shape: Target dimension size or shape tuple.
+            dtype: Optional target MLX data type.
+
+        Returns:
+            Ones-initialized `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def stack(self, arrays: Sequence[MlxArrayProtocol], /, axis: int = 0) -> MlxArrayProtocol:
+        """Stack a sequence of MLX arrays along a new axis.
+
+        Args:
+            arrays: Sequence of arrays to stack.
+            axis: Insertion axis index.
+
+        Returns:
+            Stacked `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def reshape(self, a: MlxArrayProtocol, shape: tuple[int, int], /) -> MlxArrayProtocol:
+        """Reshape `a` to `shape`.
+
+        Args:
+            a: Input MLX array.
+            shape: Target 2D shape tuple.
+
+        Returns:
+            Reshaped `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def mean(self, a: MlxArrayProtocol, /, axis: int | None = None) -> MlxArrayProtocol:
+        """Compute arithmetic mean over `a`.
+
+        Args:
+            a: Input MLX array.
+            axis: Optional reduction axis.
+
+        Returns:
+            Reduced mean `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def abs(self, a: MlxArrayProtocol, /) -> MlxArrayProtocol:
+        """Compute elementwise absolute value of `a`.
+
+        Args:
+            a: Input MLX array.
+
+        Returns:
+            Absolute value `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def max(self, a: MlxArrayProtocol, /, axis: int | None = None) -> MlxArrayProtocol:
+        """Compute maximum value over `a`.
+
+        Args:
+            a: Input MLX array.
+            axis: Optional reduction axis.
+
+        Returns:
+            Maximum `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def allclose(
+        self,
+        a: MlxArrayProtocol,
+        b: MlxArrayProtocol,
+        /,
+        rtol: float = 1e-5,
+        atol: float = 1e-8,
+    ) -> MlxArrayProtocol:
+        """Compare two MLX arrays elementwise within tolerance.
+
+        Args:
+            a: Left-hand MLX array.
+            b: Right-hand MLX array.
+            rtol: Relative tolerance.
+            atol: Absolute tolerance.
+
+        Returns:
+            Scalar boolean `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def array_equal(self, a: MlxArrayProtocol, b: MlxArrayProtocol, /) -> MlxArrayProtocol:
+        """Check exact elementwise equality of two MLX arrays.
+
+        Args:
+            a: Left-hand MLX array.
+            b: Right-hand MLX array.
+
+        Returns:
+            Scalar boolean `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def eval(self, *args: MxEvalInput) -> None:
+        """Evaluate lazy MLX computation graphs.
+
+        Args:
+            *args: Lazy arrays or parameter trees.
+
+        """
+        ...
+
+    def save_safetensors(self, file: str, arrays: Mapping[str, MlxArrayProtocol], /) -> None:
+        """Save named MLX arrays to a `.safetensors` file.
+
+        Args:
+            file: Destination path string.
+            arrays: Mapping from tensor names to `MlxArrayProtocol`.
+
+        """
+        ...
+
+    def load(self, file: str, /) -> dict[str, MlxArrayProtocol]:
+        """Load named MLX arrays from a `.safetensors` file.
+
+        Args:
+            file: Source `.safetensors` path string.
+
+        Returns:
+            Loaded dictionary mapping tensor names to `MlxArrayProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxModuleProtocol(Protocol):
+    """Typed `mlx.nn.Module` container protocol supporting dictionary submodule composition and parameter trees."""
+
+    def __init__(self) -> None:
+        """Initialize an empty `mlx.nn.Module` container."""
+        ...
+
+    def parameters(self) -> dict[str, MlxArrayProtocol | TensorProtocol]:
+        """Return nested parameter dictionary.
+
+        Returns:
+            Dictionary of module parameters.
+
+        """
+        ...
+
+    def trainable_parameters(self) -> dict[str, MlxArrayProtocol | TensorProtocol]:
+        """Return nested trainable parameter dictionary.
+
+        Returns:
+            Dictionary of trainable module parameters.
+
+        """
+        ...
+
+    def update(
+        self,
+        parameters: Mapping[str, MlxArrayProtocol | TensorProtocol | Mapping[str, MlxArrayProtocol | TensorProtocol]],
+    ) -> Self | None:
+        """Update module parameters in-place.
+
+        Args:
+            parameters: Replacement parameter tree.
+
+        Returns:
+            Optional self reference or `None`.
+
+        """
+        ...
+
+    def freeze(self) -> Self | None:
+        """Freeze module parameters.
+
+        Returns:
+            Optional self reference or `None`.
+
+        """
+        ...
+
+    def named_modules(self) -> Iterable[tuple[str, TypedMlxModuleProtocol]]:
+        """Yield `(dotted_name, submodule)` pairs across the module hierarchy.
+
+        Returns:
+            Iterable of `(name, module)` pairs.
+
+        """
+        ...
+
+    def __getitem__(self, key: str, /) -> TypedMlxSubmoduleEntry:
+        """Retrieve a child module, list of modules, or parameter array at `key`.
+
+        Args:
+            key: Child module or parameter key.
+
+        Returns:
+            Stored submodule, module list, or array.
+
+        """
+        ...
+
+    def __setitem__(self, key: str, value: TypedMlxSubmoduleEntry, /) -> None:
+        """Register a child module, list of modules, or parameter array under `key`.
+
+        Args:
+            key: Child module or parameter key.
+            value: Submodule, module list, or array to store.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxCallableModuleProtocol(TypedMlxModuleProtocol, Protocol):
+    """Typed callable `mlx.nn.Module` subclass protocol (e.g., `Linear`, `Embedding`, `Sequential`)."""
+
+    def __call__(
+        self,
+        *args: ForwardArg | MlxArrayProtocol,
+        **kwargs: ForwardArg | MlxArrayProtocol,
+    ) -> MlxArrayProtocol:
+        """Execute module forward pass.
+
+        Args:
+            *args: Positional input tensors.
+            **kwargs: Keyword forward options.
+
+        Returns:
+            Output `MlxArrayProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxLinearProtocol(TypedMlxCallableModuleProtocol, Protocol):
+    """Typed `mlx.nn.Linear` layer protocol."""
+
+    @property
+    def weight(self) -> MlxArrayProtocol:
+        """Provide 2D linear weight matrix."""
+        ...
+
+    @property
+    def bias(self) -> MlxArrayProtocol:
+        """Provide 1D linear bias vector."""
+        ...
+
+    def __init__(self, input_dims: int, output_dims: int, bias: bool = True) -> None:
+        """Initialize an MLX `Linear` layer.
+
+        Args:
+            input_dims: Input feature dimension.
+            output_dims: Output feature dimension.
+            bias: Whether to include bias.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxQuantizedLinearProtocol(TypedMlxCallableModuleProtocol, Protocol):
+    """Typed `mlx.nn.QuantizedLinear` layer protocol."""
+
+    @property
+    def weight(self) -> MlxArrayProtocol:
+        """Provide packed quantized weight buffer."""
+        ...
+
+    @property
+    def scales(self) -> MlxArrayProtocol:
+        """Provide quantization group scales."""
+        ...
+
+    @property
+    def biases(self) -> MlxArrayProtocol:
+        """Provide quantization group biases."""
+        ...
+
+
+@runtime_checkable
+class TypedMlxEmbeddingProtocol(TypedMlxCallableModuleProtocol, Protocol):
+    """Typed `mlx.nn.Embedding` layer protocol."""
+
+    @property
+    def weight(self) -> MlxArrayProtocol:
+        """Provide 2D embedding lookup matrix."""
+        ...
+
+    def __init__(self, num_embeddings: int, dims: int) -> None:
+        """Initialize an MLX `Embedding` table.
+
+        Args:
+            num_embeddings: Vocabulary size.
+            dims: Embedding feature dimension.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxRMSNormProtocol(TypedMlxCallableModuleProtocol, Protocol):
+    """Typed `mlx.nn.RMSNorm` layer protocol."""
+
+    @property
+    def weight(self) -> MlxArrayProtocol:
+        """Provide 1D RMSNorm scale vector."""
+        ...
+
+    def __init__(self, dims: int, eps: float = 1e-5) -> None:
+        """Initialize an MLX `RMSNorm` layer.
+
+        Args:
+            dims: Feature dimension.
+            eps: Numerical stability epsilon.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxSequentialProtocol(TypedMlxCallableModuleProtocol, Protocol):
+    """Typed `mlx.nn.Sequential` container protocol."""
+
+    layers: list[TypedMlxCallableModuleProtocol]
+
+    def __init__(self, *modules: TypedMlxCallableModuleProtocol) -> None:
+        """Initialize a sequential chain of MLX modules.
+
+        Args:
+            *modules: Ordered child MLX modules.
+
+        """
+        ...
+
+
+type TypedMlxSubmoduleEntry = (
+    TypedMlxModuleProtocol
+    | TypedMlxCallableModuleProtocol
+    | MlxCausalLMProtocol
+    | MlxArrayProtocol
+    | list[TypedMlxCallableModuleProtocol | MlxCausalLMProtocol]
+    | None
+)
+
+
+@runtime_checkable
+class TypedMlxDropoutCallableProtocol(Protocol):
+    """Protocol for an MLX `Dropout` or `Identity` callable layer."""
+
+    def __call__(self, x: MlxArrayProtocol, /) -> MlxArrayProtocol:
+        """Apply dropout or identity pass-through to `x`.
+
+        Args:
+            x: Input array.
+
+        Returns:
+            Output `MlxArrayProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxNNProtocol(ModuleNamespaceProtocol, Protocol):
+    """Typed `mlx.nn` module protocol for MLX test suites."""
+
+    @property
+    def Module(self) -> type[TypedMlxModuleProtocol]:
+        """Provide `mlx.nn.Module` base class."""
+        ...
+
+    @property
+    def Linear(self) -> type[TypedMlxLinearProtocol]:
+        """Provide `mlx.nn.Linear` class."""
+        ...
+
+    @property
+    def QuantizedLinear(self) -> type[TypedMlxQuantizedLinearProtocol]:
+        """Provide `mlx.nn.QuantizedLinear` class."""
+        ...
+
+    @property
+    def Embedding(self) -> type[TypedMlxEmbeddingProtocol]:
+        """Provide `mlx.nn.Embedding` class."""
+        ...
+
+    @property
+    def RMSNorm(self) -> type[TypedMlxRMSNormProtocol]:
+        """Provide `mlx.nn.RMSNorm` class."""
+        ...
+
+    @property
+    def Sequential(self) -> type[TypedMlxSequentialProtocol]:
+        """Provide `mlx.nn.Sequential` class."""
+        ...
+
+    def Dropout(self, p: float = 0.5) -> TypedMlxDropoutCallableProtocol:
+        """Construct an MLX `Dropout` module.
+
+        Args:
+            p: Dropout probability.
+
+        Returns:
+            Callable dropout module.
+
+        """
+        ...
+
+    def Identity(self) -> TypedMlxDropoutCallableProtocol:
+        """Construct an MLX `Identity` module.
+
+        Returns:
+            Callable identity module.
+
+        """
+        ...
+
+    def value_and_grad(
+        self,
+        model: _TMlxGradModel,
+        fn: Callable[Concatenate[_TMlxGradModel, _PMlxGrad], MlxArrayProtocol],
+    ) -> Callable[Concatenate[_TMlxGradModel, _PMlxGrad], tuple[MlxArrayProtocol, dict[str, MlxArrayProtocol]]]:
+        """Transform scalar-loss `fn` to compute `(loss, grads)` with respect to `model`.
+
+        Args:
+            model: Target MLX module.
+            fn: Loss function returning scalar `MlxArrayProtocol`.
+
+        Returns:
+            Differentiated `(loss, grads)` callable.
+
+        """
+        ...
+
+    def quantize(
+        self,
+        model: TypedMlxModuleProtocol | MlxCausalLMProtocol,
+        *,
+        group_size: int = 64,
+        bits: int = 4,
+    ) -> None:
+        """Quantize linear layers of `model` in-place.
+
+        Args:
+            model: Target MLX module.
+            group_size: Quantization block size.
+            bits: Bit width per weight.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxOptimizerInstanceProtocol(Protocol):
+    """Typed MLX optimizer instance protocol exposing `.state` and `.update(...)`."""
+
+    @property
+    def state(self) -> MxEvalInput:
+        """Provide optimizer state tree."""
+        ...
+
+    def update(
+        self,
+        model: _MlxParameterizedModelProtocol | MlxCausalLMProtocol,
+        gradients: Mapping[str, MxEvalInput],
+    ) -> None:
+        """Apply parameter updates from `gradients` onto `model`.
+
+        Args:
+            model: Target trainable MLX module.
+            gradients: Gradient tree matching trainable parameters.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxOptimProtocol(ModuleNamespaceProtocol, Protocol):
+    """Typed `mlx.optimizers` module protocol."""
+
+    def AdamW(self, learning_rate: float) -> TypedMlxOptimizerInstanceProtocol:
+        """Construct an `AdamW` optimizer.
+
+        Args:
+            learning_rate: Step size scalar.
+
+        Returns:
+            Initialized `TypedMlxOptimizerInstanceProtocol`.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxUtilsProtocol(ModuleNamespaceProtocol, Protocol):
+    """Typed `mlx.utils` module protocol exposing `tree_flatten`."""
+
+    def tree_flatten(self, tree: MxEvalInput, /) -> list[tuple[str, MlxArrayProtocol]]:
+        """Flatten nested MLX parameter dictionary/list tree into `(dotted_key, array)` pairs.
+
+        Args:
+            tree: Nested parameter tree.
+
+        Returns:
+            List of `(dotted_key, MlxArrayProtocol)` entries.
+
+        """
+        ...
+
+
+@runtime_checkable
+class TypedMlxLmProtocol(ModuleNamespaceProtocol, Protocol):
+    """Typed `mlx_lm` module protocol exposing `load`."""
+
+    def load(self, path_or_hf_repo: str, /) -> tuple[MlxCausalLMProtocol, str | None]:
+        """Load an MLX model and tokenizer.
+
+        Args:
+            path_or_hf_repo: Model repository or local path.
+
+        Returns:
+            `(model, tokenizer)` pair.
+
+        """
+        ...
+
+
+def get_typed_mx() -> TypedMlxCoreProtocol:
+    """Return the loaded `mlx.core` module narrowed to `TypedMlxCoreProtocol`.
+
+    Returns:
+        `TypedMlxCoreProtocol` instance.
+
+    """
+    mod = optional_import("mlx.core", TypedMlxCoreProtocol)
+    assert mod is not None
+    return mod
+
+
+def get_typed_mlx_nn() -> TypedMlxNNProtocol:
+    """Return the loaded `mlx.nn` module narrowed to `TypedMlxNNProtocol`.
+
+    Returns:
+        `TypedMlxNNProtocol` instance.
+
+    """
+    mod = optional_import("mlx.nn", TypedMlxNNProtocol)
+    assert mod is not None
+    return mod
+
+
+def get_typed_mlx_optim() -> TypedMlxOptimProtocol:
+    """Return the loaded `mlx.optimizers` module narrowed to `TypedMlxOptimProtocol`.
+
+    Returns:
+        `TypedMlxOptimProtocol` instance.
+
+    """
+    mod = optional_import("mlx.optimizers", TypedMlxOptimProtocol)
+    assert mod is not None
+    return mod
+
+
+def get_typed_mlx_utils() -> TypedMlxUtilsProtocol:
+    """Return the loaded `mlx.utils` module narrowed to `TypedMlxUtilsProtocol`.
+
+    Returns:
+        `TypedMlxUtilsProtocol` instance.
+
+    """
+    mod = optional_import("mlx.utils", TypedMlxUtilsProtocol)
+    assert mod is not None
+    return mod
+
+
+def get_typed_mlx_lm() -> TypedMlxLmProtocol:
+    """Return the loaded `mlx_lm` module narrowed to `TypedMlxLmProtocol`.
+
+    Returns:
+        `TypedMlxLmProtocol` instance.
+
+    """
+    mod = optional_import("mlx_lm", TypedMlxLmProtocol)
+    assert mod is not None
+    return mod

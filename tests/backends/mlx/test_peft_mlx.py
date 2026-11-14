@@ -12,18 +12,31 @@ from unittest.mock import patch
 import pytest
 
 from gemma_4_sql.exceptions import DependencyMissingError, TrainingError
+from gemma_4_sql.type_hints import MlxArrayProtocol, MlxCausalLMProtocol
 from tests.conftest import requires_mlx
-from tests.utils.tensor_helpers import assert_tensors_close
+from tests.utils.tensor_helpers import (
+    TypedMlxCallableModuleProtocol,
+    TypedMlxLinearProtocol,
+    TypedMlxModuleProtocol,
+    TypedMlxSequentialProtocol,
+    assert_tensors_close,
+    get_typed_mlx_nn,
+    get_typed_mlx_optim,
+    get_typed_mlx_utils,
+    get_typed_mx,
+    mx_eval,
+    mx_save_safetensors,
+)
 
 pytestmark = requires_mlx
 
 
 def test_mlx_peft_fallback_base_when_mlx_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify `MLXLoRALinear` falls back cleanly when `mlx` is absent on non-Apple hosts."""
-    import mlx.core as mx
-    import mlx.nn as mlx_nn
-
     import gemma_4_sql.backends.mlx.peft as peft_module
+
+    mx = get_typed_mx()
+    mlx_nn = get_typed_mlx_nn()
 
     with patch.dict(sys.modules, {"mlx": None, "mlx.nn": None, "mlx.core": None}):
         importlib.reload(peft_module)
@@ -51,14 +64,12 @@ def test_mlx_peft_fallback_base_when_mlx_absent(monkeypatch: pytest.MonkeyPatch)
 
 def test_mlx_lora_linear_nn_module_parameters_and_value_and_grad() -> None:
     """Test MLXLoRALinear subclasses mlx.nn.Module, freezes base weights, and trains under mlx.nn.value_and_grad."""
-    from collections.abc import Callable
-
-    import mlx.core as mx
-    from mlx import nn
-
-    import gemma_4_sql.backends.mlx.train as mlx_train_mod
     from gemma_4_sql.backends.mlx.peft import MLXLoRALinear
-    from tests.utils.tensor_helpers import mx_eval
+
+    mx = get_typed_mx()
+    nn = get_typed_mlx_nn()
+    optim = get_typed_mlx_optim()
+    mx.random.seed(42)
 
     with pytest.raises(ValueError, match="LoRA rank r must be positive"):
         MLXLoRALinear(in_features=4, out_features=4, r=0)
@@ -83,28 +94,25 @@ def test_mlx_lora_linear_nn_module_parameters_and_value_and_grad() -> None:
     lora_train = MLXLoRALinear.from_linear(base_lin, r=2, lora_alpha=4.0, lora_dropout=0.0)
     assert isinstance(lora_train, nn.Module)
     mx_eval(lora_train.parameters())
-    assert isinstance(lora_train.weight, mx.array)
+    assert isinstance(lora_train.weight, MlxArrayProtocol)
     frozen_w_before = mx.array(lora_train.weight)
     mx_eval(frozen_w_before)
 
     target = mx.ones((2, 3)) * 2.0
-    assert mlx_train_mod.optim is not None
-    opt = mlx_train_mod.optim.AdamW(learning_rate=5e-2)
+    opt = optim.AdamW(learning_rate=1e-2)
 
-    def _mse_loss(mod: MLXLoRALinear, inp: mx.array, tgt: mx.array) -> mx.array:
+    def _mse_loss(mod: MLXLoRALinear, inp: MlxArrayProtocol, tgt: MlxArrayProtocol) -> MlxArrayProtocol:
         """Compute mean squared error loss.
 
         Returns:
             Scalar MSE loss array.
         """
-        diff = mod(inp) - tgt
+        out = mod(inp)
+        assert isinstance(out, MlxArrayProtocol)
+        diff = out - tgt
         return mx.mean(diff * diff)
 
-    vg_fn: Callable[
-        [MLXLoRALinear, Callable[[MLXLoRALinear, mx.array, mx.array], mx.array]],
-        Callable[[MLXLoRALinear, mx.array, mx.array], tuple[mx.array, dict[str, mx.array]]],
-    ] = vars(nn)["value_and_grad"]
-    loss_and_grad = vg_fn(lora_train, _mse_loss)
+    loss_and_grad = nn.value_and_grad(lora_train, _mse_loss)
     loss0, grads0 = loss_and_grad(lora_train, x, target)
     assert set(grads0.keys()) == {"lora_a", "lora_b"}
     opt.update(lora_train, grads0)
@@ -117,7 +125,7 @@ def test_mlx_lora_linear_nn_module_parameters_and_value_and_grad() -> None:
     mx_eval(loss2)
 
     assert float(loss2) < float(loss0)
-    assert isinstance(lora_train.weight, mx.array)
+    assert isinstance(lora_train.weight, MlxArrayProtocol)
     assert bool(mx.array_equal(lora_train.weight, frozen_w_before).item())
 
     layer_drop = MLXLoRALinear(in_features=4, out_features=3, r=2, lora_alpha=4.0, lora_dropout=0.1, bias=False)
@@ -152,20 +160,23 @@ def test_mlx_lora_linear_nn_module_parameters_and_value_and_grad() -> None:
 
 def test_mlx_lora_linear_from_linear_and_safetensors(tmp_path: Path) -> None:
     """Test MLXLoRALinear.from_linear conversion and adapter safetensors save/load."""
-    import mlx.core as mx
-    from mlx import nn
-
     from gemma_4_sql.backends.mlx.peft import MLXLoRALinear
+
+    mx = get_typed_mx()
+    nn = get_typed_mlx_nn()
 
     base_lin = nn.Linear(4, 3, bias=True)
     x = mx.ones((1, 4))
     expected_base = base_lin(x)
 
     lora_lin = MLXLoRALinear.from_linear(base_lin, r=2, lora_alpha=4.0, lora_dropout=0.0)
-    assert bool(mx.allclose(lora_lin(x), expected_base, rtol=1e-5, atol=1e-5).item())
+    out_initial = lora_lin(x)
+    assert isinstance(out_initial, MlxArrayProtocol)
+    assert bool(mx.allclose(out_initial, expected_base, rtol=1e-5, atol=1e-5).item())
 
     lora_lin.lora_b = mx.ones((2, 3)) * 0.25
     expected_adapted = lora_lin(x)
+    assert isinstance(expected_adapted, MlxArrayProtocol)
 
     adapter_file = tmp_path / "sub" / "layer_adapter.safetensors"
     lora_lin.save_adapters(adapter_file)
@@ -173,9 +184,9 @@ def test_mlx_lora_linear_from_linear_and_safetensors(tmp_path: Path) -> None:
 
     lora_lin2 = MLXLoRALinear.from_linear(base_lin, r=2, lora_alpha=4.0, lora_dropout=0.0)
     lora_lin2.load_adapters(adapter_file)
-    assert bool(mx.allclose(lora_lin2(x), expected_adapted, rtol=1e-5, atol=1e-5).item())
-
-    from tests.utils.tensor_helpers import mx_save_safetensors
+    out_reloaded = lora_lin2(x)
+    assert isinstance(out_reloaded, MlxArrayProtocol)
+    assert bool(mx.allclose(out_reloaded, expected_adapted, rtol=1e-5, atol=1e-5).item())
 
     bad_file = tmp_path / "bad.safetensors"
     mx_save_safetensors(bad_file, {"wrong_key": mx.zeros((1,))})
@@ -185,9 +196,6 @@ def test_mlx_lora_linear_from_linear_and_safetensors(tmp_path: Path) -> None:
 
 def test_inject_lora_and_model_adapter_persistence(tmp_path: Path) -> None:
     """Test inject_lora on an MLX model hierarchy, trainable_parameters traversal, and save/load_adapter_weights."""
-    import mlx.core as mx
-    from mlx import nn
-
     from gemma_4_sql.backends.mlx.peft import (
         MLXLoRALinear,
         apply_lora,
@@ -196,49 +204,72 @@ def test_inject_lora_and_model_adapter_persistence(tmp_path: Path) -> None:
         save_adapter_weights,
     )
 
-    class ToyAttention(nn.Module):
-        """Toy attention block with q_proj, k_proj, and v_proj."""
+    mx = get_typed_mx()
+    nn = get_typed_mlx_nn()
+    mlx_utils = get_typed_mlx_utils()
 
-        def __init__(self) -> None:
-            """Initialize ToyAttention."""
-            super().__init__()
-            self.q_proj: nn.Linear | MLXLoRALinear = nn.Linear(4, 4, bias=False)
-            self.k_proj: nn.Linear | MLXLoRALinear = nn.Linear(4, 4, bias=False)
-            self.v_proj: nn.Linear | MLXLoRALinear = nn.Linear(4, 4, bias=False)
+    def _build_toy_model() -> TypedMlxModuleProtocol:
+        """Construct nested MLX `Module` with `attn.{q,k,v}_proj` and `layers.0`.
 
-        def __call__(self, x: mx.array) -> mx.array:
-            """Compute sum of q, k, and v projections.
+        Returns:
+            Initialized `TypedMlxModuleProtocol` hierarchy.
+        """
+        attn = nn.Module()
+        attn["q_proj"] = nn.Linear(4, 4, bias=False)
+        attn["k_proj"] = nn.Linear(4, 4, bias=False)
+        attn["v_proj"] = nn.Linear(4, 4, bias=False)
+        root = nn.Module()
+        root["attn"] = attn
+        layers_list: list[TypedMlxCallableModuleProtocol | MlxCausalLMProtocol] = [nn.Linear(4, 4, bias=False)]
+        root["layers"] = layers_list
+        return root
 
-            Returns:
-                Summed projection output array.
-            """
-            return self.q_proj(x) + self.k_proj(x) + self.v_proj(x)
+    def _forward_proj(
+        proj: TypedMlxCallableModuleProtocol | MlxCausalLMProtocol | MLXLoRALinear,
+        inp: MlxArrayProtocol,
+    ) -> MlxArrayProtocol:
+        """Apply a single linear or LoRA projection to `inp`.
 
-    class ToyMLXModel(nn.Module):
-        """Toy MLX model with nested attention block and list of blocks."""
+        Returns:
+            Projected `MlxArrayProtocol`.
+        """
+        out = proj(inp)
+        assert isinstance(out, MlxArrayProtocol)
+        return out
 
-        def __init__(self) -> None:
-            """Initialize ToyMLXModel."""
-            super().__init__()
-            self.attn = ToyAttention()
-            self.layers: list[nn.Linear | MLXLoRALinear] = [nn.Linear(4, 4, bias=False)]
+    def _forward_toy(mod: TypedMlxModuleProtocol, inp: MlxArrayProtocol) -> MlxArrayProtocol:
+        """Compute `attn.q_proj(inp) + attn.k_proj(inp) + attn.v_proj(inp) + layers[0](inp)`.
 
-        def __call__(self, x: mx.array) -> mx.array:
-            """Run forward pass through attention and first layer.
+        Returns:
+            Combined output `MlxArrayProtocol`.
+        """
+        attn = mod["attn"]
+        assert isinstance(attn, TypedMlxModuleProtocol)
+        q_p = attn["q_proj"]
+        k_p = attn["k_proj"]
+        v_p = attn["v_proj"]
+        layers = mod["layers"]
+        assert isinstance(q_p, (TypedMlxCallableModuleProtocol, MLXLoRALinear))
+        assert isinstance(k_p, (TypedMlxCallableModuleProtocol, MLXLoRALinear))
+        assert isinstance(v_p, (TypedMlxCallableModuleProtocol, MLXLoRALinear))
+        assert isinstance(layers, list)
+        first_layer = layers[0]
+        assert isinstance(first_layer, (TypedMlxCallableModuleProtocol, MLXLoRALinear))
+        return (
+            _forward_proj(q_p, inp)
+            + _forward_proj(k_p, inp)
+            + _forward_proj(v_p, inp)
+            + _forward_proj(first_layer, inp)
+        )
 
-            Returns:
-                Combined output array.
-            """
-            return self.attn(x) + self.layers[0](x)
-
-    model = ToyMLXModel()
+    model = _build_toy_model()
     x = mx.ones((2, 4))
-    out_before = model(x)
+    out_before = _forward_toy(model, x)
 
     _, zero_count = inject_lora(model, target_modules=[])
     assert zero_count == 0
 
-    model, injected_count = inject_lora(
+    _, injected_count = inject_lora(
         model,
         target_modules=["q_proj", "v_proj", "layers.0"],
         lora_r=2,
@@ -246,18 +277,18 @@ def test_inject_lora_and_model_adapter_persistence(tmp_path: Path) -> None:
         lora_dropout=0.0,
     )
     assert injected_count == 3
-    assert isinstance(model.attn.q_proj, MLXLoRALinear)
-    assert isinstance(model.attn.v_proj, MLXLoRALinear)
-    assert isinstance(model.layers[0], MLXLoRALinear)
-    assert not isinstance(model.attn.k_proj, MLXLoRALinear)
+    attn_after = model["attn"]
+    layers_after = model["layers"]
+    assert isinstance(attn_after, TypedMlxModuleProtocol)
+    assert isinstance(layers_after, list)
+    q_proj_lora = attn_after["q_proj"]
+    assert isinstance(q_proj_lora, MLXLoRALinear)
+    assert isinstance(attn_after["v_proj"], MLXLoRALinear)
+    assert isinstance(layers_after[0], MLXLoRALinear)
+    assert not isinstance(attn_after["k_proj"], MLXLoRALinear)
 
     # Verify model.trainable_parameters() traverses into MLXLoRALinear and excludes frozen k_proj & base weights!
-    from collections.abc import Callable
-
-    import mlx.utils as mlx_utils
-
-    flatten_fn: Callable[..., list[tuple[str, mx.array]]] = vars(mlx_utils)["tree_flatten"]
-    flat_trainable = dict(flatten_fn(model.trainable_parameters()))
+    flat_trainable = dict(mlx_utils.tree_flatten(model.trainable_parameters()))
     assert set(flat_trainable.keys()) == {
         "attn.q_proj.lora_a",
         "attn.q_proj.lora_b",
@@ -267,11 +298,11 @@ def test_inject_lora_and_model_adapter_persistence(tmp_path: Path) -> None:
         "layers.0.lora_b",
     }
 
-    out_zero_b = model(x)
+    out_zero_b = _forward_toy(model, x)
     assert bool(mx.allclose(out_zero_b, out_before, rtol=1e-5, atol=1e-5).item())
 
-    model.attn.q_proj.lora_b = mx.ones((2, 4)) * 0.5
-    out_nonzero_b = model(x)
+    q_proj_lora.lora_b = mx.ones((2, 4)) * 0.5
+    out_nonzero_b = _forward_toy(model, x)
     assert not bool(mx.allclose(out_nonzero_b, out_before).item())
 
     save_dir = tmp_path / "adapters_out"
@@ -279,15 +310,15 @@ def test_inject_lora_and_model_adapter_persistence(tmp_path: Path) -> None:
     expected_file = save_dir / "adapter.safetensors"
     assert expected_file.exists()
 
-    model.attn.q_proj.lora_b = mx.zeros((2, 4))
+    q_proj_lora.lora_b = mx.zeros((2, 4))
     load_adapter_weights(model, expected_file)
-    assert isinstance(model.attn.q_proj.lora_b, mx.array)
-    assert_tensors_close(model.attn.q_proj.lora_b, mx.ones((2, 4)) * 0.5, backend="mlx")
+    assert isinstance(q_proj_lora.lora_b, MlxArrayProtocol)
+    assert_tensors_close(q_proj_lora.lora_b, mx.ones((2, 4)) * 0.5, backend="mlx")
 
     with pytest.raises(FileNotFoundError):
         load_adapter_weights(model, tmp_path / "nonexistent.safetensors")
 
-    model2 = ToyMLXModel()
+    model2 = _build_toy_model()
     out_dir2 = tmp_path / "apply_out"
     with patch("gemma_4_sql.backends.mlx.peft.load", return_value=(model2, None)):
         res = apply_lora("test-mlx", ["q_proj"], lora_r=2, model=model2, output_dir=str(out_dir2))
@@ -298,10 +329,10 @@ def test_inject_lora_and_model_adapter_persistence(tmp_path: Path) -> None:
 
 def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Test fallback paths in inject_lora, load_adapter_weights, and missing dependency errors without MagicMock."""
-    import mlx.core as mx
-    from mlx import nn
-
     import gemma_4_sql.backends.mlx.peft as peft_module
+
+    mx = get_typed_mx()
+    nn = get_typed_mlx_nn()
 
     class FallbackLoadModel:
         """Model stub without LoRA children that records `.update(weights)`."""
@@ -310,7 +341,7 @@ def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, t
             """Initialize FallbackLoadModel."""
             self.updated_weights: Mapping[str, peft_module.MlxArrayProtocol] | None = None
 
-        def named_modules(self) -> list[tuple[str, nn.Linear]]:
+        def named_modules(self) -> list[tuple[str, TypedMlxLinearProtocol]]:
             """Return empty modules list."""
             return []
 
@@ -322,8 +353,6 @@ def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, t
             """
             self.updated_weights = weights
             return self
-
-    from tests.utils.tensor_helpers import mx_save_safetensors
 
     fb_file = tmp_path / "fb.safetensors"
     mx_save_safetensors(fb_file, {"k": mx.ones((1,))})
@@ -357,7 +386,7 @@ def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, t
     class ListModel(list[peft_module.MlxPEFTTarget]):
         """List-based model container supporting named_modules."""
 
-        def named_modules(self) -> list[tuple[str, nn.Linear]]:
+        def named_modules(self) -> list[tuple[str, TypedMlxLinearProtocol]]:
             """Return top-level and dotted module names."""
             return [("0", lin), ("1.child", lin)]
 
@@ -368,7 +397,7 @@ def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, t
 
     toy_mod = nn.Linear(4, 4)
 
-    def _load_toy(_name: str) -> tuple[nn.Linear, None]:
+    def _load_toy(_name: str) -> tuple[TypedMlxLinearProtocol, None]:
         """Return `(toy_mod, None)`."""
         return (toy_mod, None)
 
@@ -412,40 +441,23 @@ def test_mlx_peft_edge_cases_and_missing_deps(monkeypatch: pytest.MonkeyPatch, t
 
 def test_mlx_peft_sdk_integration_and_standalone_save(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Verify SDK apply_peft with real MLX nn.Module and standalone MLXLoRALinear adapter persistence."""
-    import mlx.core as mx
-    from mlx import nn
-
     import gemma_4_sql.backends.mlx.peft as peft_module
     from gemma_4_sql.backends.mlx.peft import MLXLoRALinear, load_adapter_weights, save_adapter_weights
     from gemma_4_sql.sdk.peft import apply_peft
 
-    class _RealMlxBlock(nn.Module):
-        """Real MLX module block with `q_proj` and `v_proj` Linear layers."""
+    mx = get_typed_mx()
+    nn = get_typed_mlx_nn()
 
-        def __init__(self) -> None:
-            """Initialize `q_proj` and `v_proj`."""
-            super().__init__()
-            self.q_proj: nn.Linear | MLXLoRALinear = nn.Linear(8, 8)
-            self.v_proj: nn.Linear | MLXLoRALinear = nn.Linear(8, 8)
+    block = nn.Sequential(nn.Linear(8, 8), nn.Linear(8, 8))
 
-        def __call__(self, x: mx.array) -> mx.array:
-            """Compute sum of `q_proj` and `v_proj`.
-
-            Returns:
-                Summed `q_proj` and `v_proj` output array.
-            """
-            return self.q_proj(x) + self.v_proj(x)
-
-    block = _RealMlxBlock()
-
-    def _load_block(_name: str) -> tuple[_RealMlxBlock, None]:
+    def _load_block(_name: str) -> tuple[TypedMlxSequentialProtocol, None]:
         """Return `(block, None)`."""
         return (block, None)
 
     monkeypatch.setattr(peft_module, "load", _load_block)
     res = apply_peft(
         model_name="gemma-4-mlx",
-        target_modules=["q_proj", "v_proj"],
+        target_modules=["layers.0", "layers.1"],
         lora_r=4,
         lora_alpha=8,
         lora_dropout=0.0,
@@ -453,16 +465,17 @@ def test_mlx_peft_sdk_integration_and_standalone_save(monkeypatch: pytest.Monkey
     )
     assert res["backend"] == "mlx"
     assert res.get("injected_modules") == 2
-    assert isinstance(block.q_proj, MLXLoRALinear)
-    assert isinstance(block.v_proj, MLXLoRALinear)
+    first_lora = block.layers[0]
+    assert isinstance(first_lora, MLXLoRALinear)
+    assert isinstance(block.layers[1], MLXLoRALinear)
     out = block(mx.ones((1, 3, 8)))
     assert tuple(out.shape) == (1, 3, 8)
 
     standalone_file = tmp_path / "standalone_lora.safetensors"
-    block.q_proj.lora_b = mx.ones((4, 8)) * 0.75
-    save_adapter_weights(block.q_proj, standalone_file)
+    first_lora.lora_b = mx.ones((4, 8)) * 0.75
+    save_adapter_weights(first_lora, standalone_file)
     assert standalone_file.exists()
-    block.q_proj.lora_b = mx.zeros((4, 8))
-    load_adapter_weights(block.q_proj, standalone_file)
-    assert isinstance(block.q_proj.lora_b, mx.array)
-    assert_tensors_close(block.q_proj.lora_b, mx.ones((4, 8)) * 0.75, backend="mlx")
+    first_lora.lora_b = mx.zeros((4, 8))
+    load_adapter_weights(first_lora, standalone_file)
+    assert isinstance(first_lora.lora_b, MlxArrayProtocol)
+    assert_tensors_close(first_lora.lora_b, mx.ones((4, 8)) * 0.75, backend="mlx")

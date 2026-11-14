@@ -253,10 +253,12 @@ def test_type_hints_dataclasses_and_defaults() -> None:
             """Freeze parameters."""
 
     unhashable_mlx = _UnhashableMlxModel()
+    live_unhashable = _UnhashableMlxModel()
     assert unhashable_mlx() == 1.0
     assert unhashable_mlx.parameters() == {}
     unhashable_mlx.update({})
     unhashable_mlx.freeze()
+    register_quantized_artifact(live_unhashable, method="int8", scales={"l0": 0.5})
     register_quantized_artifact(unhashable_mlx, method="int4", scales={"l0": 0.25})
     register_quantized_artifact(unhashable_mlx, method="awq", scales={"l0": 0.125})
     other_unhashable = _UnhashableMlxModel()
@@ -264,8 +266,10 @@ def test_type_hints_dataclasses_and_defaults() -> None:
     fetched_mlx = get_quantized_artifact(unhashable_mlx)
     assert fetched_mlx is not None
     assert fetched_mlx.method == "awq"
+    del fetched_mlx
     del unhashable_mlx
     gc.collect()
+    assert get_quantized_artifact(live_unhashable) is not None
 
     class _SlottedUnhashableMlxModel(list[int]):
         """Unhashable non-weakrefable `MlxCausalLMProtocol` double (`list` with `__slots__ = ()`)."""

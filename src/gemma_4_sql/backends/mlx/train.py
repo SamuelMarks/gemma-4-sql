@@ -26,13 +26,42 @@ from gemma_4_sql.type_hints import (
     TrainResultDict,
 )
 
-type MlxGradTree = Mapping[str, "MlxArrayProtocol | MlxGradTree"]
+type MlxGradNode = MlxArrayProtocol | MlxGradTree | list[MlxGradNode]
+type MlxGradTree = Mapping[str, MlxGradNode]
+type MlxGradInputNode = (
+    MlxArrayProtocol | TensorProtocol | JSONValue | Mapping[str, MlxGradInputNode] | Sequence[MlxGradInputNode]
+)
+
+
+def _to_mlx_grad_list(
+    seq: Sequence[StepResult | MlxGradNode | MlxGradInputNode],
+) -> list[MlxGradNode]:
+    """Recursively normalize a sequence of submodule gradient mappings or arrays.
+
+    Args:
+        seq: Sequence of gradient trees or array leaves (e.g., `model.layers` gradients).
+
+    Returns:
+        List of normalized `MlxGradNode` elements.
+
+    """
+    items: list[MlxGradNode] = []
+    for elem in seq:
+        if isinstance(elem, MlxArrayProtocol):
+            items.append(elem)
+        elif isinstance(elem, Sequence) and not isinstance(elem, (str, bytes)):
+            items.append(_to_mlx_grad_list(elem))
+        else:
+            sub = _to_mlx_grad_tree(elem)
+            if sub is not None:
+                items.append(sub)
+    return items
 
 
 def _to_mlx_grad_tree(
-    node: StepResult | MlxGradTree | Mapping[str, TensorProtocol] | JSONValue,
-) -> dict[str, MlxArrayProtocol | MlxGradTree] | None:
-    """Recursively extract `MlxArrayProtocol` leaves and nested submodule dictionaries from a gradient tree.
+    node: StepResult | MlxGradNode | MlxGradInputNode,
+) -> dict[str, MlxGradNode] | None:
+    """Recursively extract `MlxArrayProtocol` leaves and nested submodule trees from a gradient tree.
 
     Args:
         node: Raw gradient mapping or leaf returned by `mlx.nn.value_and_grad`.
@@ -46,10 +75,12 @@ def _to_mlx_grad_tree(
         (MlxArrayProtocol, TensorProtocol, ScalarItemExtractorProtocol, SupportsFloat, Sequence),
     ) or not isinstance(node, Mapping):
         return None
-    out: dict[str, MlxArrayProtocol | MlxGradTree] = {}
+    out: dict[str, MlxGradNode] = {}
     for k, v in node.items():
         if isinstance(v, MlxArrayProtocol):
             out[str(k)] = v
+        elif isinstance(v, Sequence) and not isinstance(v, (str, bytes)):
+            out[str(k)] = _to_mlx_grad_list(v)
         else:
             sub = _to_mlx_grad_tree(v)
             if sub is not None:

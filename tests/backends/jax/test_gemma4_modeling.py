@@ -373,3 +373,14 @@ def test_gemma4_multimodal_audio_only(tiny_multimodal_config: ModelConfig) -> No
         audio_token_mask=audio_token_mask,
     )
     assert logits.shape == (1, 3, 10)
+
+
+def test_gemma4_untied_word_embeddings(tiny_config: ModelConfig) -> None:
+    """Verify Gemma4ForCausalLM preserves independent lm_head weights when tie_word_embeddings is False."""
+    from dataclasses import replace
+
+    untied_cfg = replace(tiny_config, tie_word_embeddings=False)
+    model = Gemma4ForCausalLM(untied_cfg, rngs=nnx.Rngs(0))
+    assert not bool(jnp.allclose(model.lm_head.kernel.value, model.model.embed_tokens.embedding.value.T))
+    logits = model(jnp.array([[1, 2]]), jnp.array([[0, 1]]))
+    assert logits.shape == (1, 2, untied_cfg.vocab_size)

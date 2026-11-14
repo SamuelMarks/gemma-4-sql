@@ -37,6 +37,177 @@ from gemma_4_sql.type_hints import (
 
 logger = logging.getLogger(__name__)
 
+
+@runtime_checkable
+class _WeightLayerProtocol(Protocol):
+    """Protocol for an MLX layer exposing a `.weight` tensor."""
+
+    @property
+    def weight(self) -> MlxArrayProtocol:
+        """Provide the 2D weight tensor."""
+        ...
+
+
+@runtime_checkable
+class _CallableWeightLayerProtocol(_WeightLayerProtocol, Protocol):
+    """Protocol for a callable MLX weight layer (such as `Embedding` or `Linear`)."""
+
+    def __call__(self, x: MlxArrayProtocol, /) -> MlxArrayProtocol:
+        """Apply layer forward projection or lookup to `x`.
+
+        Args:
+            x: Input token ID or activation array.
+
+        Returns:
+            Output activation array.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _MlxNativeLinearProtocol(_CallableWeightLayerProtocol, Protocol):
+    """Protocol for `mlx.nn.Linear` supporting construction and item assignment."""
+
+    def __init__(self, input_dims: int, output_dims: int, bias: bool = True) -> None:
+        """Initialize an MLX `Linear` projection layer.
+
+        Args:
+            input_dims: Input feature dimension.
+            output_dims: Output feature dimension.
+            bias: Whether to include an additive bias parameter.
+
+        """
+        ...
+
+    def __setitem__(self, key: str, value: MlxArrayProtocol, /) -> None:
+        """Assign parameter tensor `value` at `key`."""
+        ...
+
+
+@runtime_checkable
+class _MlxQuantizedTensorHolderProtocol(Protocol):
+    """Protocol for a populated `mlx.nn.QuantizedLinear` exposing packed weight, scale, and bias tensors."""
+
+    @property
+    def weight(self) -> MlxArrayProtocol:
+        """Provide packed quantized weight buffer."""
+        ...
+
+    @property
+    def scales(self) -> MlxArrayProtocol:
+        """Provide group quantization scales."""
+        ...
+
+    @property
+    def biases(self) -> MlxArrayProtocol:
+        """Provide group quantization zero-point biases."""
+        ...
+
+    @property
+    def bias(self) -> MlxArrayProtocol:
+        """Provide additive linear output bias."""
+        ...
+
+    def __contains__(self, key: str, /) -> bool:
+        """Return `True` if parameter `key` exists in this module."""
+        ...
+
+
+@runtime_checkable
+class _MlxNativeQuantizedLinearProtocol(Protocol):
+    """Protocol for `mlx.nn.QuantizedLinear` methods invoked on native `MLXAWQLinear` instances."""
+
+    def __init__(
+        self,
+        input_dims: int,
+        output_dims: int,
+        bias: bool = True,
+        group_size: int = 64,
+        bits: int = 4,
+    ) -> None:
+        """Initialize an MLX `QuantizedLinear` layer.
+
+        Args:
+            input_dims: Input feature dimension.
+            output_dims: Output feature dimension.
+            bias: Whether to allocate an additive bias vector.
+            group_size: Quantization block size.
+            bits: Bit width per quantized weight.
+
+        """
+        ...
+
+    @classmethod
+    def from_linear(
+        cls,
+        linear_layer: _MlxNativeLinearProtocol,
+        group_size: int = 64,
+        bits: int = 4,
+    ) -> _MlxQuantizedTensorHolderProtocol:
+        """Quantize an existing `Linear` layer into a populated `QuantizedLinear` instance.
+
+        Args:
+            linear_layer: Source unquantized `Linear` layer.
+            group_size: Quantization block size.
+            bits: Bit width per quantized weight.
+
+        Returns:
+            Quantized `_MlxQuantizedTensorHolderProtocol` instance.
+
+        """
+        ...
+
+    def __contains__(self, key: str, /) -> bool:
+        """Return `True` if parameter `key` exists in this module."""
+        ...
+
+    def __setitem__(self, key: str, value: MlxArrayProtocol, /) -> None:
+        """Store parameter array `value` under `key`."""
+        ...
+
+    def freeze(self) -> Self | None:
+        """Freeze module parameters.
+
+        Returns:
+            Optional self reference or `None`.
+
+        """
+        ...
+
+    def __call__(self, x: MlxArrayProtocol, /) -> MlxArrayProtocol:
+        """Execute packed quantized matrix multiplication on `x`.
+
+        Args:
+            x: Input activation array.
+
+        Returns:
+            Projected output activation array.
+
+        """
+        ...
+
+
+@runtime_checkable
+class _MlxNativeAWQNNProtocol(Protocol):
+    """Protocol for `mlx.nn` exposing `Embedding`, `Linear`, and `QuantizedLinear` classes."""
+
+    @property
+    def Embedding(self) -> type[_CallableWeightLayerProtocol]:
+        """Provide `mlx.nn.Embedding` class."""
+        ...
+
+    @property
+    def Linear(self) -> type[_MlxNativeLinearProtocol]:
+        """Provide `mlx.nn.Linear` class."""
+        ...
+
+    @property
+    def QuantizedLinear(self) -> type[_MlxNativeQuantizedLinearProtocol]:
+        """Provide `mlx.nn.QuantizedLinear` class."""
+        ...
+
+
 _NATIVE_AWQ_CLS_CACHE: list[type[MLXAWQLinear]] = []
 
 
@@ -49,13 +220,14 @@ def _get_native_mlx_awq_cls() -> type[MLXAWQLinear] | None:
     """
     if _NATIVE_AWQ_CLS_CACHE:
         return _NATIVE_AWQ_CLS_CACHE[0]
-    try:
-        from mlx import nn as _real_nn
-    except ImportError:
+    real_nn = optional_import("mlx.nn", _MlxNativeAWQNNProtocol)
+    if real_nn is None:
         return None
+    lin_cls: type[_MlxNativeLinearProtocol] = real_nn.Linear
+    q_cls: type[_MlxNativeQuantizedLinearProtocol] = real_nn.QuantizedLinear
 
-    class _NativeMLXAWQLinear(MLXAWQLinear, _real_nn.QuantizedLinear):
-        """Concrete `MLXAWQLinear` bound to `mlx.nn.QuantizedLinear` for 4-bit Metal inference."""
+    class _NativeMLXAWQLinearMixin(MLXAWQLinear):
+        """Concrete `MLXAWQLinear` mixin bound to `mlx.nn.QuantizedLinear` for 4-bit Metal inference."""
 
         def __init__(
             self,
@@ -66,16 +238,17 @@ def _get_native_mlx_awq_cls() -> type[MLXAWQLinear] | None:
             bits: int = 4,
         ) -> None:
             """Quantize `linear` scaled by `awq_scales` into a 4-bit `QuantizedLinear` subclass."""
+            assert isinstance(self, _MlxNativeQuantizedLinearProtocol)
             out_dims, in_dims = int(linear.weight.shape[0]), int(linear.weight.shape[1])
             has_bias = isinstance(linear, Mapping) and "bias" in linear
             eff_group = group_size if in_dims >= group_size and in_dims % group_size == 0 else min(group_size, in_dims)
-            scaled_lin = _real_nn.Linear(in_dims, out_dims, bias=has_bias)
+            scaled_lin = lin_cls(in_dims, out_dims, bias=has_bias)
             assert mlx is not None
             scaled_lin["weight"] = mlx.array(linear.weight * awq_scales[None, :])
             if has_bias and isinstance(linear, Mapping):
                 scaled_lin["bias"] = linear["bias"]
-            q_base = _real_nn.QuantizedLinear.from_linear(scaled_lin, group_size=eff_group, bits=bits)
-            _real_nn.QuantizedLinear.__init__(self, in_dims, out_dims, bias=has_bias, group_size=eff_group, bits=bits)
+            q_base = q_cls.from_linear(scaled_lin, group_size=eff_group, bits=bits)
+            q_cls.__init__(self, in_dims, out_dims, bias=has_bias, group_size=eff_group, bits=bits)
             self["weight"] = q_base.weight
             self["scales"] = q_base.scales
             self["biases"] = q_base.biases
@@ -95,24 +268,15 @@ def _get_native_mlx_awq_cls() -> type[MLXAWQLinear] | None:
 
             """
             assert mlx is not None
+            assert isinstance(self, _MlxNativeQuantizedLinearProtocol)
             scaled_x = mlx.array(x / self.awq_scales)
-            q_call: Callable[[MLXAWQLinear, MlxArrayProtocol], MlxArrayProtocol] = vars(_real_nn.QuantizedLinear)[
-                "__call__"
-            ]
-            return q_call(self, scaled_x)
+            return q_cls.__call__(self, scaled_x)
 
-    _NATIVE_AWQ_CLS_CACHE.append(_NativeMLXAWQLinear)
-    return _NativeMLXAWQLinear
-
-
-@runtime_checkable
-class _WeightLayerProtocol(Protocol):
-    """Protocol for an MLX layer exposing a `.weight` tensor."""
-
-    @property
-    def weight(self) -> MlxArrayProtocol:
-        """Provide the 2D weight tensor."""
-        ...
+    empty_ns: dict[str, Callable[..., None]] = {}
+    native_cls: type = type("_NativeMLXAWQLinear", (_NativeMLXAWQLinearMixin, q_cls), empty_ns)
+    assert issubclass(native_cls, MLXAWQLinear)
+    _NATIVE_AWQ_CLS_CACHE.append(native_cls)
+    return native_cls
 
 
 @runtime_checkable
@@ -510,11 +674,12 @@ def _collect_embedding_activations(
     """
     if mlx is None or not calib_data or not isinstance(model, _NamedModulesModelProtocol):
         return None
-    import mlx.nn as _mlx_nn
+    mlx_nn_mod = optional_import("mlx.nn", _MlxNativeAWQNNProtocol)
+    assert mlx_nn_mod is not None
 
     tokenizer = SQLTokenizer()
     for _name, submod in model.named_modules():
-        if isinstance(submod, _mlx_nn.Embedding) and int(submod.weight.shape[1]) == in_dim:
+        if isinstance(submod, mlx_nn_mod.Embedding) and int(submod.weight.shape[1]) == in_dim:
             vocab_limit = max(1, int(submod.weight.shape[0]))
             token_rows: list[int] = []
             for prompt in calib_data:
@@ -668,7 +833,8 @@ def quantize_model(
         _ = _extract_first_2d_weight(resolved_model)
 
         if method == "awq":
-            import mlx.nn as _real_nn
+            real_nn = optional_import("mlx.nn", _MlxNativeAWQNNProtocol)
+            assert real_nn is not None
 
             logger.info("Applying activation-aware calibration (AWQ) to MLX model %s", model_name)
             scales_map: dict[str, float] = {}
@@ -681,7 +847,7 @@ def quantize_model(
                 first_scales: MlxArrayProtocol = mlx.array(calibrate_awq_scales(w_arr, calib_acts), dtype=mlx.float32)
                 mean_sc = mlx.mean(first_scales).item()
                 scales_map[f"layer_{idx}"] = float(mean_sc.real) if isinstance(mean_sc, complex) else float(mean_sc)
-                if path and isinstance(layer, _real_nn.Linear):
+                if path and isinstance(layer, real_nn.Linear):
                     awq_mod = MLXAWQLinear(layer, first_scales, group_size=group_size, bits=4)
                     _replace_submodule_at_path(resolved_model, path, awq_mod)
             register_quantized_artifact(resolved_model, method="awq", scales=scales_map)
